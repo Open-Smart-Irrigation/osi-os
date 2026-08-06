@@ -23,13 +23,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "barley, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.barley_winter",
@@ -52,13 +52,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "barley, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.beet_fodder",
@@ -81,13 +81,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "beet, fodder"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.beet_sugar",
@@ -110,13 +110,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "beet, sugar"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.faba_bean_spring",
@@ -139,13 +139,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "faba bean, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.faba_bean_winter",
@@ -168,13 +168,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "faba bean, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.ley_temporary",
@@ -197,13 +197,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "ley, temporary"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.maize_grain",
@@ -226,13 +226,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "maize, grain"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.maize_silage",
@@ -255,13 +255,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "maize, silage"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.oat_spring",
@@ -284,13 +284,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "oat, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.oat_winter",
@@ -313,13 +313,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "oat, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.pea_spring",
@@ -342,13 +342,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "pea, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.pea_winter",
@@ -371,13 +371,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "pea, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.potato",
@@ -400,13 +400,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "potato"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.rapeseed_spring",
@@ -429,13 +429,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "rapeseed, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.rapeseed_winter",
@@ -458,13 +458,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "rapeseed, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.rye_spring",
@@ -487,13 +487,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "rye, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.rye_winter",
@@ -516,13 +516,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "rye, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.sorghum",
@@ -545,13 +545,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "sorghum"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.soybean",
@@ -574,13 +574,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "soybean"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.sunflower",
@@ -603,13 +603,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "sunflower"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.triticale_spring",
@@ -632,13 +632,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "triticale, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.triticale_winter",
@@ -661,13 +661,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "triticale, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.wheat_durum",
@@ -690,13 +690,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "wheat, durum"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.wheat_spring",
@@ -719,13 +719,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "wheat, spring"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.crop.wheat_winter",
@@ -748,13 +748,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "wheat, winter"
       },
       "constraints": {
         "source": "SoilManageR management-data template v2.6"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.bedder",
@@ -777,7 +777,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Bedder"
       },
@@ -788,7 +787,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.beet_lifter",
@@ -811,7 +811,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Beet Lifter"
       },
@@ -822,7 +821,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.biofertilizer",
@@ -845,7 +845,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Biofertilizer"
       },
@@ -856,7 +855,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.broadcast_seeder",
@@ -879,7 +879,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Broadcast Seeder"
       },
@@ -890,7 +889,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.burning",
@@ -913,7 +913,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Burning"
       },
@@ -924,7 +923,8 @@
         "sources": [
           "Mohler et al. (2021)."
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.classic_drill",
@@ -947,7 +947,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Classic Drill"
       },
@@ -958,7 +957,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.classic_single_grain",
@@ -981,7 +981,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Classic Single Grain"
       },
@@ -992,7 +991,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.combine_harvester",
@@ -1015,7 +1015,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Combine Harvester"
       },
@@ -1026,7 +1025,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.compost_broadcast",
@@ -1049,7 +1049,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Compost Broadcast"
       },
@@ -1060,7 +1059,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.deep_tiller",
@@ -1083,7 +1083,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Deep Tiller"
       },
@@ -1094,7 +1093,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.direct_drill",
@@ -1117,7 +1117,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Direct Drill"
       },
@@ -1128,7 +1127,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.direct_single_grain",
@@ -1151,7 +1151,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Direct Single Grain"
       },
@@ -1162,7 +1161,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.disease_biocontrol",
@@ -1185,7 +1185,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Disease Biocontrol"
       },
@@ -1196,7 +1195,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.disk_harrow",
@@ -1219,7 +1219,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Disk Harrow"
       },
@@ -1231,7 +1230,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.electric",
@@ -1254,7 +1254,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Electric"
       },
@@ -1265,7 +1264,8 @@
         "sources": [
           "Mohler et al. (2021)."
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.fine_cultivator",
@@ -1288,7 +1288,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Fine Cultivator"
       },
@@ -1299,7 +1298,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.fine_cultivator_sweeps",
@@ -1322,7 +1322,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Fine Cultivator Sweeps"
       },
@@ -1333,7 +1332,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.finger_hoe",
@@ -1356,7 +1356,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Finger Hoe"
       },
@@ -1367,7 +1366,8 @@
         "sources": [
           "Mohler et al. (2021)."
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.frost_kill_cover_crop",
@@ -1390,7 +1390,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Frost Kill Cover Crop"
       },
@@ -1401,7 +1400,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.grassland_reseeder",
@@ -1424,7 +1424,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Grassland Reseeder"
       },
@@ -1435,7 +1434,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.heavy_duty_cultivator",
@@ -1458,7 +1458,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Heavy Duty Cultivator"
       },
@@ -1470,7 +1469,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.heavy_duty_cultivator_sweeps",
@@ -1493,7 +1493,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Heavy Duty Cultivator Sweeps"
       },
@@ -1505,7 +1504,8 @@
           "Custom",
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.knife_roller",
@@ -1528,7 +1528,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Knife Roller"
       },
@@ -1539,7 +1538,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liming",
@@ -1562,7 +1562,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liming"
       },
@@ -1573,7 +1572,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liquid_fertigation",
@@ -1596,7 +1596,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liquid Fertigation"
       },
@@ -1607,7 +1606,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liquid_injection",
@@ -1630,7 +1630,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liquid Injection"
       },
@@ -1641,7 +1640,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liquid_organic_broadcast",
@@ -1664,7 +1664,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liquid Organic Broadcast"
       },
@@ -1675,7 +1674,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liquid_organic_draghose",
@@ -1698,7 +1698,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liquid Organic Draghose"
       },
@@ -1709,7 +1708,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liquid_organic_injection",
@@ -1732,7 +1732,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liquid Organic Injection"
       },
@@ -1743,7 +1742,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liquid_organic_trailingshoe",
@@ -1766,7 +1766,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liquid Organic Trailingshoe"
       },
@@ -1777,7 +1776,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.liquid_spraying",
@@ -1800,7 +1800,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Liquid Spraying"
       },
@@ -1811,7 +1810,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.maize_chopper",
@@ -1834,7 +1834,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Maize Chopper"
       },
@@ -1845,7 +1844,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.manual",
@@ -1868,7 +1868,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Manual"
       },
@@ -1879,7 +1878,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.manure_broadcast",
@@ -1902,7 +1902,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Manure Broadcast"
       },
@@ -1913,7 +1912,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.mower",
@@ -1936,7 +1936,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Mower"
       },
@@ -1948,7 +1947,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.mulching",
@@ -1971,7 +1971,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Mulching"
       },
@@ -1982,7 +1981,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.note",
@@ -2005,7 +2005,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Note"
       },
@@ -2016,7 +2015,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.other_mechanical_weeder",
@@ -2039,14 +2039,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Other Mechanical Weeder"
       },
       "constraints": {
         "descriptions": [],
         "sources": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.other_organic_solid_broadcast",
@@ -2069,7 +2069,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Other Organic Solid Broadcast"
       },
@@ -2080,7 +2079,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.paraplough",
@@ -2103,7 +2103,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Paraplough"
       },
@@ -2114,7 +2113,8 @@
         "sources": [
           "NRCS (2017)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.pest_biocontrol",
@@ -2137,7 +2137,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Pest Biocontrol"
       },
@@ -2148,7 +2147,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.plough",
@@ -2171,7 +2171,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Plough"
       },
@@ -2182,7 +2181,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.plough_with_packer",
@@ -2205,7 +2205,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Plough With Packer"
       },
@@ -2216,7 +2215,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.potato_harvester",
@@ -2239,7 +2239,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Potato Harvester"
       },
@@ -2250,7 +2249,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.potato_planter",
@@ -2273,7 +2273,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Potato Planter"
       },
@@ -2284,7 +2283,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.ring_cutter",
@@ -2307,7 +2307,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Ring Cutter"
       },
@@ -2318,7 +2317,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.rodent_control",
@@ -2341,7 +2341,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Rodent Control"
       },
@@ -2352,7 +2351,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.roller",
@@ -2375,7 +2375,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Roller"
       },
@@ -2389,7 +2388,8 @@
           "Custom",
           "NRCS (2017)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.rotary_harrow",
@@ -2412,7 +2412,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Rotary Harrow"
       },
@@ -2423,7 +2422,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.rotary_hoe",
@@ -2446,7 +2446,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Rotary Hoe"
       },
@@ -2457,7 +2456,8 @@
         "sources": [
           "Mohler et al. (2021)."
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.rotary_weeder",
@@ -2480,7 +2480,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Rotary Weeder"
       },
@@ -2491,7 +2490,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.round_baler",
@@ -2514,7 +2514,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Round Baler"
       },
@@ -2525,7 +2524,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.sampling_plants",
@@ -2548,7 +2548,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sampling Plants"
       },
@@ -2559,7 +2558,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.sampling_soil",
@@ -2582,7 +2582,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sampling Soil"
       },
@@ -2593,7 +2592,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.seed_coating",
@@ -2616,7 +2616,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Seed Coating"
       },
@@ -2628,7 +2627,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.seedbed_combination",
@@ -2651,14 +2651,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Seedbed Combination"
       },
       "constraints": {
         "descriptions": [],
         "sources": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.self_loading_wagon",
@@ -2681,7 +2681,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Self Loading Wagon"
       },
@@ -2692,7 +2691,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.separator",
@@ -2715,7 +2715,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Separator"
       },
@@ -2726,7 +2725,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.short_disk_harrow",
@@ -2749,7 +2749,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Short Disk Harrow"
       },
@@ -2760,7 +2759,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.skim_plough",
@@ -2783,7 +2783,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Skim Plough"
       },
@@ -2794,7 +2793,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.slug_control",
@@ -2817,7 +2817,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Slug Control"
       },
@@ -2828,7 +2827,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.solid_band",
@@ -2851,7 +2851,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Solid Band"
       },
@@ -2862,7 +2861,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.solid_broadcast",
@@ -2885,7 +2885,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Solid Broadcast"
       },
@@ -2896,7 +2895,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.solid_undersown_placement",
@@ -2919,7 +2919,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Solid Undersown Placement"
       },
@@ -2930,7 +2929,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.spade_roller_harrow",
@@ -2953,7 +2953,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Spade Roller Harrow"
       },
@@ -2964,7 +2963,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.spading_machine",
@@ -2987,7 +2987,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Spading Machine"
       },
@@ -2998,7 +2997,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.sprayer",
@@ -3021,7 +3021,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sprayer"
       },
@@ -3034,7 +3033,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.sprayer_band",
@@ -3057,7 +3057,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sprayer Band"
       },
@@ -3068,7 +3067,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.sprayer_broadcast",
@@ -3091,7 +3091,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sprayer Broadcast"
       },
@@ -3102,7 +3101,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.sprayer_spot",
@@ -3125,7 +3125,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sprayer Spot"
       },
@@ -3136,7 +3135,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.sprinkler_irrigation",
@@ -3159,7 +3159,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sprinkler Irrigation"
       },
@@ -3170,7 +3169,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.square_baler",
@@ -3193,7 +3193,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Square Baler"
       },
@@ -3204,7 +3203,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.star_hoe",
@@ -3227,7 +3227,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Star Hoe"
       },
@@ -3238,7 +3237,8 @@
         "sources": [
           "Mohler et al. (2021)."
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.straw_harrow",
@@ -3261,7 +3261,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Straw Harrow"
       },
@@ -3272,7 +3271,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.strip_tiller",
@@ -3295,7 +3295,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Strip Tiller"
       },
@@ -3307,7 +3306,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.subsoiler",
@@ -3330,7 +3330,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Subsoiler"
       },
@@ -3341,7 +3340,8 @@
         "sources": [
           "NRCS (2017)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.tiller",
@@ -3364,7 +3364,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Tiller"
       },
@@ -3375,7 +3374,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.tine_hoe",
@@ -3398,7 +3398,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Tine Hoe"
       },
@@ -3409,7 +3408,8 @@
         "sources": [
           "Mohler et al. (2021)."
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.tine_rotor",
@@ -3432,7 +3432,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Tine Rotor"
       },
@@ -3443,7 +3442,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.tine_weeder",
@@ -3466,7 +3466,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Tine Weeder"
       },
@@ -3477,7 +3476,8 @@
         "sources": [
           "KTBL (2020)"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.trickle_irrigation",
@@ -3500,7 +3500,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Trickle Irrigation"
       },
@@ -3511,7 +3510,8 @@
         "sources": [
           "AGROVOC"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.device.weed_biocontrol",
@@ -3534,7 +3534,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Weed Biocontrol"
       },
@@ -3545,7 +3544,8 @@
         "sources": [
           "Custom"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.biocontrol",
@@ -3568,7 +3568,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Biocontrol"
       },
@@ -3576,7 +3575,8 @@
         "description": "Biological control: The use of biological agents (e.g. insects, micro-organisms and/or microbial metabolites) for the control of mites, pests, plant pathogens and spoilage organisms.",
         "source": "AGROVOC",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.cleaning_cut",
@@ -3599,7 +3599,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Cleaning Cut"
       },
@@ -3607,7 +3606,8 @@
         "description": "Cutting of grasses and other crops for aesthetic reasons",
         "source": "Custom",
         "source_category": "harvest"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.fungicide",
@@ -3630,7 +3630,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Fungicide"
       },
@@ -3638,7 +3637,8 @@
         "description": "The application of chemicals aimed at killing fungi",
         "source": "Blanchy et al. (2023)",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.growth_regulator",
@@ -3661,7 +3661,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Growth Regulator"
       },
@@ -3669,7 +3668,8 @@
         "description": "The application of chemicals aimed at reducing vegative growth of crops",
         "source": "Custom",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.harvest_cover_crop",
@@ -3692,7 +3692,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Harvest Cover Crop"
       },
@@ -3700,7 +3699,8 @@
         "description": "Harvest operation of the cover crop, leads to killing of the cover crop and removal of the aboveground biomass",
         "source": "Custom",
         "source_category": "harvest"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.harvest_main_crop",
@@ -3723,7 +3723,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Harvest Main Crop"
       },
@@ -3731,7 +3730,8 @@
         "description": "Harvest operation of the main crop",
         "source": "Custom",
         "source_category": "harvest"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.hay_removal",
@@ -3754,7 +3754,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Hay Removal"
       },
@@ -3762,7 +3761,8 @@
         "description": "Removing dried grasses (but may include legumes and herbs) that have been cut, to preserve as fodder",
         "source": "AGROVOC",
         "source_category": "harvest"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.insecticide",
@@ -3785,7 +3785,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Insecticide"
       },
@@ -3793,7 +3792,8 @@
         "description": "The application of chemicals aimed at killing insects",
         "source": "Blanchy et al. (2023)",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.mineral_fertilization",
@@ -3816,7 +3816,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Mineral Fertilization"
       },
@@ -3824,7 +3823,8 @@
         "description": "Inorganic fertilizer: a nutrient-rich fertilizer produced industrially by chemical processes, mineral extraction or by mechanical grinding.",
         "source": "AGROVOC",
         "source_category": "fertilizer_application"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.note",
@@ -3847,7 +3847,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Note"
       },
@@ -3855,7 +3854,8 @@
         "description": "",
         "source": "",
         "source_category": "other"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.organic_fertilization",
@@ -3878,7 +3878,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Organic Fertilization"
       },
@@ -3886,7 +3885,8 @@
         "description": "Organic fertilizer: a carbon-rich fertilizer derived from organic materials, including treated or untreated livestock manures, compost, vermicompost, sewage sludge and other organic materials or mixed materials used to supply nutrients to soils.",
         "source": "AGROVOC",
         "source_category": "fertilizer_application"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.other_fertilization",
@@ -3909,7 +3909,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Other Fertilization"
       },
@@ -3917,7 +3916,8 @@
         "description": "Other soil amendments that are applied in the intention to provide nutrient to crops or to increase soil fertility",
         "source": "AGROVOC",
         "source_category": "fertilizer_application"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.pest_control",
@@ -3940,7 +3940,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Pest Control"
       },
@@ -3948,7 +3947,8 @@
         "description": "",
         "source": "",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.primary_tillage",
@@ -3971,7 +3971,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Primary Tillage"
       },
@@ -3979,7 +3978,8 @@
         "description": "Primary tillage is a loosening, mixing or inverting form of cultivation with a cultivation depth between 15 cm and 35 cm. Primary tillage takes place prior to seedbed preparation and sowing.",
         "source": "KTBL (2020)",
         "source_category": "tillage"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.sampling",
@@ -4002,7 +4002,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sampling"
       },
@@ -4010,7 +4009,8 @@
         "description": "",
         "source": "",
         "source_category": "other"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.seedbed_preparation",
@@ -4033,7 +4033,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Seedbed Preparation"
       },
@@ -4041,7 +4040,8 @@
         "description": "Seedbed preparation or secondary tillage is limited to an operation depth of 5-10 cm. The seed horizon\nis crumbled finely, loosened and reconsolidated to ensure optimal seed germination.",
         "source": "KTBL (2020)",
         "source_category": "tillage"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.sowing_cover_crop",
@@ -4064,7 +4064,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sowing Cover Crop"
       },
@@ -4072,7 +4071,8 @@
         "description": "Sowing is the defined placement of seed at an optimal depth for the type of cover crop.",
         "source": "KTBL (2020)",
         "source_category": "sowing"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.sowing_main_crop",
@@ -4095,7 +4095,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sowing Main Crop"
       },
@@ -4103,7 +4102,8 @@
         "description": "Sowing is the defined placement of seed at an optimal depth for the type of main crop.",
         "source": "KTBL (2020)",
         "source_category": "sowing"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.straw_removal",
@@ -4126,7 +4126,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Straw Removal"
       },
@@ -4134,7 +4133,8 @@
         "description": "Removing straw and other crop residues from the field",
         "source": "Custom",
         "source_category": "harvest"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.stubble_cultivation",
@@ -4157,7 +4157,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Stubble Cultivation"
       },
@@ -4165,7 +4164,8 @@
         "description": "Stubble cultivation is only a shallow cultivation method to loosen, mix or invert the soil after harvesting to promote the emergence of volunteer grain and weed seeds, with a cultivation depth of up to 15 cm. It is assumed that the implements are used as intended. Within the non-inversion method, all further operations with an operation depth of more than 10 cm represent primary tillage.",
         "source": "KTBL (2020)",
         "source_category": "tillage"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.total_herbicide",
@@ -4188,7 +4188,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Total Herbicide"
       },
@@ -4196,7 +4195,8 @@
         "description": "",
         "source": "",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.watering",
@@ -4219,7 +4219,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Watering"
       },
@@ -4227,7 +4226,8 @@
         "description": "Irrigation is the process of applying controlled amounts of water to plants at needed intervals",
         "source": "AGROVOC",
         "source_category": "irrigation"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.weed_herbicide",
@@ -4250,7 +4250,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Weed Herbicide"
       },
@@ -4258,7 +4257,8 @@
         "description": "The application of chemicals aimed at killing weeds",
         "source": "Blanchy et al. (2023)",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.weed_mechanical",
@@ -4281,7 +4281,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Weed Mechanical"
       },
@@ -4289,7 +4288,8 @@
         "description": "Application of mechanical weeding operations to reduce weed preasure.",
         "source": "Custom",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "agroscope.operation.weed_other",
@@ -4312,7 +4312,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Weed Other"
       },
@@ -4320,7 +4319,8 @@
         "description": "Application of weeding operations other then chemical and mechanical to reduce weed preasure.",
         "source": "Custom",
         "source_category": "crop_protection"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.actuation_expectation_id",
@@ -4343,7 +4343,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Actuation expectation"
       },
@@ -4353,7 +4352,8 @@
           "table": "valve_actuation_expectations",
           "column": "expectation_id"
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.c_content",
@@ -4376,13 +4376,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Carbon content"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.cc_product",
@@ -4405,13 +4405,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Product carbon concentration"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.cc_residue",
@@ -4434,13 +4434,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Residue carbon concentration"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.combination_group",
@@ -4463,14 +4463,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Combination group"
       },
       "constraints": {
         "min": 1,
         "step": 1
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.crop_product",
@@ -4493,13 +4493,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Exported crop product"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.crop_residue",
@@ -4522,13 +4522,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Crop residue"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.device",
@@ -4551,11 +4551,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Device / method"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.dmc_mass_fraction",
@@ -4578,13 +4578,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Dry matter per fresh mass"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.dmc_mass_volume",
@@ -4607,13 +4607,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Dry matter per product volume"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.n_content",
@@ -4636,13 +4636,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Nitrogen content"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.agroscope.operation",
@@ -4665,11 +4665,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Operation"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.air_temperature",
@@ -4692,14 +4692,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Air temperature"
       },
       "constraints": {
         "min": -50,
         "max": 60
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.amount_biological_count_area",
@@ -4722,13 +4722,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Biological-agent count per area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.amount_count_area",
@@ -4751,13 +4751,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Plant count per area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.amount_duration_area",
@@ -4780,13 +4780,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Labour duration per area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.amount_mass_area_product",
@@ -4809,13 +4809,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Product mass per area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.amount_nutrient_rate",
@@ -4838,7 +4838,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Nutrient rate"
       },
@@ -4848,7 +4847,8 @@
         "requires_explicit_unit": true,
         "semantic_discriminator": "unit_code",
         "allow_default_unit": false
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.amount_operation_depth",
@@ -4871,14 +4871,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Operation depth"
       },
       "constraints": {
         "min": 0,
         "max": 200
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.amount_volume_area_product",
@@ -4901,13 +4901,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Product volume per area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.block_bed_row",
@@ -4930,13 +4930,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Block / bed / row"
       },
       "constraints": {
         "maxlength": 160
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.cover_type",
@@ -4959,11 +4959,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Cover type"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.crop",
@@ -4986,11 +4986,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Crop"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.denominator",
@@ -5013,11 +5013,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Application denominator"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.drainage_volume",
@@ -5040,13 +5040,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Drainage volume"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.duration_minutes",
@@ -5069,13 +5069,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Duration"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.ec",
@@ -5098,13 +5098,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Electrical conductivity"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.equipment",
@@ -5127,13 +5127,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Equipment"
       },
       "constraints": {
         "maxlength": 300
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.experimental_unit",
@@ -5156,13 +5156,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Experimental unit"
       },
       "constraints": {
         "maxlength": 160
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.growth_stage_bbch",
@@ -5185,7 +5185,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Growth stage (BBCH)"
       },
@@ -5193,7 +5192,8 @@
         "min": 0,
         "max": 99,
         "step": 1
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.harvest_area",
@@ -5216,13 +5216,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Harvest area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.harvest_yield_area",
@@ -5245,13 +5245,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Harvest yield per area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.interval_minutes",
@@ -5274,13 +5274,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Measurement interval"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.irrigation_amount_kind",
@@ -5303,11 +5303,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Irrigation amount kind"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.irrigation_depth",
@@ -5330,13 +5330,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Irrigation depth"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.irrigation_volume_area",
@@ -5359,13 +5359,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Irrigation volume per area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.machine",
@@ -5388,13 +5388,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Machine"
       },
       "constraints": {
         "maxlength": 500
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.mass_end",
@@ -5417,13 +5417,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "End mass"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.mass_method",
@@ -5446,11 +5446,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Mass method"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.mass_start",
@@ -5473,13 +5473,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Start mass"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.measurement_source",
@@ -5502,11 +5502,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Measurement source"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.method",
@@ -5529,13 +5529,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Method"
       },
       "constraints": {
         "maxlength": 300
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.observation_text",
@@ -5558,13 +5558,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Observation"
       },
       "constraints": {
         "maxlength": 4000
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.operator",
@@ -5587,13 +5587,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Operator"
       },
       "constraints": {
         "maxlength": 160
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.per_plant_volume",
@@ -5616,13 +5616,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Volume per plant"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.ph",
@@ -5645,14 +5645,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "pH"
       },
       "constraints": {
         "min": 0,
         "max": 14
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.plant_area",
@@ -5675,13 +5675,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Plant area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.product",
@@ -5704,14 +5704,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Unregistered product"
       },
       "constraints": {
         "maxlength": 500,
         "unregistered_compatibility": true
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.product_uuid",
@@ -5734,7 +5734,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Registered product"
       },
@@ -5744,7 +5743,8 @@
           "table": "journal_products",
           "column": "product_uuid"
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.rain_input",
@@ -5767,13 +5767,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Rain input"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.recirculation",
@@ -5796,11 +5796,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Recirculation"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.rel_humidity",
@@ -5823,14 +5823,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Relative humidity"
       },
       "constraints": {
         "min": 0,
         "max": 100
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.replicate",
@@ -5853,13 +5853,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Replicate"
       },
       "constraints": {
         "maxlength": 80
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.root_zone_system",
@@ -5882,11 +5882,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Root-zone system"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.structure_compartment",
@@ -5909,13 +5909,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Structure / compartment"
       },
       "constraints": {
         "maxlength": 160
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.surface_area",
@@ -5938,13 +5938,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Surface area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.tare_mass",
@@ -5967,13 +5967,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Tare mass"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.target",
@@ -5996,13 +5996,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Target"
       },
       "constraints": {
         "maxlength": 300
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.treated_area",
@@ -6025,13 +6025,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Treated area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.treatment",
@@ -6054,13 +6054,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Treatment"
       },
       "constraints": {
         "maxlength": 160
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.variety",
@@ -6083,14 +6083,14 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Variety"
       },
       "constraints": {
         "maxlength": 120,
         "autocomplete": "variety_by_crop"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.waiting_period_days",
@@ -6113,13 +6113,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Waiting period"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.water_input",
@@ -6142,13 +6142,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Water input"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.wetted_area",
@@ -6171,13 +6171,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Wetted area"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "attr.wind_direction",
@@ -6200,11 +6200,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Wind direction"
       },
-      "constraints": {}
+      "constraints": {},
+      "catalog_errors": []
     },
     {
       "code": "attr.wind_speed",
@@ -6227,13 +6227,13 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Wind speed"
       },
       "constraints": {
         "min": 0
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "choice.cover.bare",
@@ -6256,11 +6256,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Bare soil"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.cover.crop",
@@ -6283,11 +6283,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Crop cover"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.cover.mulch",
@@ -6310,11 +6310,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Mulch"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.broccoli",
@@ -6337,11 +6337,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Broccoli"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.cabbage",
@@ -6364,11 +6364,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Cabbage"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.carrot",
@@ -6391,11 +6391,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Carrot"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.cauliflower",
@@ -6418,11 +6418,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Cauliflower"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.celeriac",
@@ -6445,11 +6445,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Celeriac"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.courgette",
@@ -6472,11 +6472,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Courgette / zucchini"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.fallow",
@@ -6499,11 +6499,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Fallow"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.fennel",
@@ -6526,11 +6526,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Fennel"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.field_vegetable",
@@ -6553,11 +6553,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Field vegetable"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.garden_pea",
@@ -6580,11 +6580,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Garden pea"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.green_bean",
@@ -6607,11 +6607,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Green bean"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.green_manure_cover",
@@ -6634,11 +6634,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Green manure / cover crop"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.leek",
@@ -6661,11 +6661,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Leek"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.lettuce",
@@ -6688,11 +6688,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Lettuce"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.onion",
@@ -6715,11 +6715,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Onion"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.other",
@@ -6742,11 +6742,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Other"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.permanent_grassland",
@@ -6769,11 +6769,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Permanent grassland"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.pumpkin_squash",
@@ -6796,11 +6796,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Pumpkin / squash"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.spinach",
@@ -6823,11 +6823,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Spinach"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.sweetcorn",
@@ -6850,11 +6850,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sweetcorn"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.crop.table_beet",
@@ -6877,11 +6877,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Table beet"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.denominator.area",
@@ -6904,11 +6904,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Per area"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.denominator.plant",
@@ -6931,11 +6931,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Per plant"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.denominator.row",
@@ -6958,11 +6958,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Per row length"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.irrigation_amount.commanded",
@@ -6985,11 +6985,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Commanded"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.irrigation_amount.estimated",
@@ -7012,11 +7012,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Estimated"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.irrigation_amount.measured",
@@ -7039,11 +7039,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Measured"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.mass_method.direct",
@@ -7066,11 +7066,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Direct weighing"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.mass_method.load_cell",
@@ -7093,11 +7093,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Load cell"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.measurement.controller",
@@ -7120,11 +7120,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Controller"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.measurement.manual",
@@ -7147,11 +7147,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Manual"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.measurement.sensor",
@@ -7174,11 +7174,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sensor"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.root_zone.container",
@@ -7201,11 +7201,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Container"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.root_zone.hydroponic",
@@ -7228,11 +7228,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Hydroponic"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.root_zone.soil",
@@ -7255,11 +7255,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Soil"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.root_zone.substrate",
@@ -7282,11 +7282,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Substrate"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.e",
@@ -7309,11 +7309,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "East"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.n",
@@ -7336,11 +7336,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "North"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.ne",
@@ -7363,11 +7363,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Northeast"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.nw",
@@ -7390,11 +7390,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Northwest"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.s",
@@ -7417,11 +7417,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "South"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.se",
@@ -7444,11 +7444,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Southeast"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.sw",
@@ -7471,11 +7471,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Southwest"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "choice.wind.w",
@@ -7498,11 +7498,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "West"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "crop_care",
@@ -7525,11 +7525,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Crop care"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "equipment_maintenance",
@@ -7552,11 +7552,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Equipment maintenance"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "fertigation",
@@ -7579,11 +7579,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Fertigation"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "fertilization",
@@ -7606,11 +7606,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Fertilization"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "general_observation",
@@ -7633,11 +7633,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "General observation"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "harvest",
@@ -7660,11 +7660,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Harvest"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "irrigation",
@@ -7687,11 +7687,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Irrigation"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "mowing",
@@ -7714,11 +7714,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Mowing"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "pest_disease_observation",
@@ -7741,11 +7741,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Pest / disease observation"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "plant_protection_application",
@@ -7768,11 +7768,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Plant protection"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "planting_transplanting",
@@ -7795,11 +7795,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Planting / transplanting"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "pruning",
@@ -7822,11 +7822,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Pruning"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "sampling",
@@ -7849,11 +7849,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Sampling"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "seeding",
@@ -7876,11 +7876,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Seeding"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "tillage_soil_work",
@@ -7903,11 +7903,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Tillage / soil work"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     },
     {
       "code": "unit.bbch_stage",
@@ -7930,7 +7930,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "BBCH"
       },
@@ -7941,7 +7940,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.biological_count_per_ha",
@@ -7964,7 +7964,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "unit/ha"
       },
@@ -7975,7 +7974,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.cm_operation_depth",
@@ -7998,7 +7998,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "cm"
       },
@@ -8009,7 +8008,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.count_integer",
@@ -8032,7 +8032,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "count"
       },
@@ -8043,7 +8042,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.day_duration",
@@ -8066,7 +8066,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "days"
       },
@@ -8077,7 +8076,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.deg_c",
@@ -8100,7 +8100,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "°C"
       },
@@ -8111,7 +8110,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.ds_per_m",
@@ -8134,7 +8134,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "dS/m"
       },
@@ -8145,7 +8144,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.g_c_per_kg_dm",
@@ -8168,7 +8168,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "g C/kg DM"
       },
@@ -8179,7 +8178,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.g_n_per_kg_dm",
@@ -8202,7 +8202,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "g N/kg DM"
       },
@@ -8213,7 +8212,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.g_per_ha_product",
@@ -8236,7 +8236,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "g/ha"
       },
@@ -8247,7 +8246,8 @@
           "scale": 0.001,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.h_per_ha_labor",
@@ -8270,7 +8270,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "hours/ha"
       },
@@ -8281,7 +8280,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.ha_area",
@@ -8304,7 +8304,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "ha"
       },
@@ -8315,7 +8314,8 @@
           "scale": 10000,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.hour_duration",
@@ -8338,7 +8338,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "h"
       },
@@ -8349,7 +8348,8 @@
           "scale": 60,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_b_per_ha_nutrient",
@@ -8372,7 +8372,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg B/ha"
       },
@@ -8384,7 +8383,8 @@
           "offset": 0
         },
         "nutrient": "B"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_ca_per_ha_nutrient",
@@ -8407,7 +8407,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg Ca/ha"
       },
@@ -8419,7 +8418,8 @@
           "offset": 0
         },
         "nutrient": "Ca"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_cao_per_ha_nutrient",
@@ -8442,7 +8442,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg CaO/ha"
       },
@@ -8454,7 +8453,8 @@
           "offset": 0
         },
         "nutrient": "CaO"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_k2o_per_ha_nutrient",
@@ -8477,7 +8477,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg K₂O/ha"
       },
@@ -8489,7 +8488,8 @@
           "offset": 0
         },
         "nutrient": "K2O"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_mass",
@@ -8512,7 +8512,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg"
       },
@@ -8523,7 +8522,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_mg_per_ha_nutrient",
@@ -8546,7 +8546,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg Mg/ha"
       },
@@ -8558,7 +8557,8 @@
           "offset": 0
         },
         "nutrient": "Mg"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_mn_per_ha_nutrient",
@@ -8581,7 +8581,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg Mn/ha"
       },
@@ -8593,7 +8592,8 @@
           "offset": 0
         },
         "nutrient": "Mn"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_n_per_ha_nutrient",
@@ -8616,7 +8616,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg N/ha"
       },
@@ -8628,7 +8627,8 @@
           "offset": 0
         },
         "nutrient": "N"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_na_per_ha_nutrient",
@@ -8651,7 +8651,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg Na/ha"
       },
@@ -8663,7 +8662,8 @@
           "offset": 0
         },
         "nutrient": "Na"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_p2o5_per_ha_nutrient",
@@ -8686,7 +8686,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg P₂O₅/ha"
       },
@@ -8698,7 +8697,8 @@
           "offset": 0
         },
         "nutrient": "P2O5"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_per_ha_fresh_product",
@@ -8721,7 +8721,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg/ha"
       },
@@ -8732,7 +8731,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_per_ha_product",
@@ -8755,7 +8755,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg/ha"
       },
@@ -8766,7 +8765,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_per_m3_dry_matter",
@@ -8789,7 +8789,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg/m³"
       },
@@ -8800,7 +8799,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_per_t_dry_matter",
@@ -8823,7 +8823,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg/t"
       },
@@ -8834,7 +8833,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.kg_s_per_ha_nutrient",
@@ -8857,7 +8857,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "kg S/ha"
       },
@@ -8869,7 +8868,8 @@
           "offset": 0
         },
         "nutrient": "S"
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.l_per_ha_product",
@@ -8892,7 +8892,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "L/ha"
       },
@@ -8903,7 +8902,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.l_per_plant_water",
@@ -8926,7 +8926,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "L/plant"
       },
@@ -8937,7 +8936,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.l_water",
@@ -8960,7 +8960,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "L"
       },
@@ -8971,7 +8970,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.m_per_s",
@@ -8994,7 +8994,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "m/s"
       },
@@ -9005,7 +9004,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.m2_area",
@@ -9028,7 +9028,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "m²"
       },
@@ -9039,7 +9038,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.m3_per_ha_product",
@@ -9062,7 +9062,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "m³/ha"
       },
@@ -9073,7 +9072,8 @@
           "scale": 1000,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.m3_per_ha_water",
@@ -9096,7 +9096,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "m³/ha"
       },
@@ -9107,7 +9106,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.min_duration",
@@ -9130,7 +9130,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "min"
       },
@@ -9141,7 +9140,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.mm_water",
@@ -9164,7 +9164,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "mm"
       },
@@ -9175,7 +9174,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.percent",
@@ -9198,7 +9198,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "%"
       },
@@ -9209,7 +9208,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.ph",
@@ -9232,7 +9232,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "pH"
       },
@@ -9243,7 +9242,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.plants_per_ha",
@@ -9266,7 +9266,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "plants/ha"
       },
@@ -9277,7 +9276,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.t_per_ha_dm",
@@ -9300,7 +9300,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "t DM/ha"
       },
@@ -9311,7 +9310,8 @@
           "scale": 1,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.t_per_ha_fresh_product",
@@ -9334,7 +9334,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "t/ha"
       },
@@ -9345,7 +9344,8 @@
           "scale": 1000,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "unit.t_per_ha_product",
@@ -9368,7 +9368,6 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "t/ha"
       },
@@ -9379,7 +9378,8 @@
           "scale": 1000,
           "offset": 0
         }
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "weed_control_nonchemical",
@@ -9402,11 +9402,11 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
       "labels": {
         "en": "Non-chemical weed control"
       },
-      "constraints": null
+      "constraints": null,
+      "catalog_errors": []
     }
   ],
   "templates": [
@@ -9414,7 +9414,6 @@
       "code": "farmer_quick",
       "version": 1,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Quick"
       },
@@ -9444,13 +9443,13 @@
           "attr.equipment",
           "attr.method"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "farmer_quick",
       "version": 2,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Quick"
       },
@@ -9488,13 +9487,13 @@
           "attr.equipment",
           "attr.method"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "farmer_quick",
       "version": 3,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Quick"
       },
@@ -9600,13 +9599,13 @@
           "attr.equipment",
           "attr.method"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "farmer_quick",
       "version": 6,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Quick"
       },
@@ -9717,13 +9716,13 @@
           "attr.equipment",
           "attr.method"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "farmer_quick",
       "version": 9,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Quick"
       },
@@ -9830,13 +9829,13 @@
         "carry_forward": [
           "attr.operator"
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "full_record",
       "version": 1,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Full record"
       },
@@ -9992,13 +9991,13 @@
           }
         ],
         "certified_compliance_profile": null
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "full_record",
       "version": 5,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Full record"
       },
@@ -10287,13 +10286,13 @@
           }
         ],
         "certified_compliance_profile": null
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "full_record",
       "version": 6,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Full record"
       },
@@ -10615,13 +10614,13 @@
           }
         ],
         "certified_compliance_profile": null
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "full_record",
       "version": 7,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Full record"
       },
@@ -10943,13 +10942,13 @@
           }
         ],
         "certified_compliance_profile": null
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "full_record",
       "version": 8,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Full record"
       },
@@ -11264,13 +11263,13 @@
           }
         ],
         "certified_compliance_profile": null
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "full_record",
       "version": 9,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Full record"
       },
@@ -11579,13 +11578,13 @@
           }
         ],
         "certified_compliance_profile": null
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "full_record",
       "version": 10,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Full record"
       },
@@ -12422,13 +12421,13 @@
           }
         ],
         "certified_compliance_profile": null
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "research_observation",
       "version": 1,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Research"
       },
@@ -12459,7 +12458,8 @@
         ],
         "require_explicit_choices": true,
         "show_standard_mappings": true
-      }
+      },
+      "catalog_errors": []
     }
   ],
   "layouts": [
@@ -12467,7 +12467,6 @@
       "code": "agroscope_open_field",
       "version": 1,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Agroscope open field"
       },
@@ -14186,13 +14185,13 @@
             }
           }
         ]
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "greenhouse",
       "version": 1,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Greenhouse"
       },
@@ -14235,13 +14234,13 @@
           ]
         },
         "option_dependencies": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "greenhouse",
       "version": 3,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Greenhouse"
       },
@@ -14291,13 +14290,13 @@
           ]
         },
         "option_dependencies": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "lysimeter",
       "version": 1,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Lysimeter"
       },
@@ -14340,13 +14339,13 @@
           "attr.mass_method"
         ],
         "option_dependencies": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "lysimeter",
       "version": 3,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Lysimeter"
       },
@@ -14397,13 +14396,13 @@
           "attr.mass_method"
         ],
         "option_dependencies": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "open_field",
       "version": 1,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Open field"
       },
@@ -14443,13 +14442,13 @@
           "row"
         ],
         "option_dependencies": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "open_field",
       "version": 3,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Open field"
       },
@@ -14495,13 +14494,13 @@
           "row"
         ],
         "option_dependencies": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "open_field",
       "version": 8,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Open field"
       },
@@ -14546,13 +14545,13 @@
           "row"
         ],
         "option_dependencies": []
-      }
+      },
+      "catalog_errors": []
     },
     {
       "code": "open_field",
       "version": 9,
       "active": 1,
-      "catalog_errors": [],
       "labels": {
         "en": "Open field"
       },
@@ -15114,7 +15113,8 @@
             }
           }
         ]
-      }
+      },
+      "catalog_errors": []
     }
   ],
   "products": [
@@ -15129,8 +15129,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "1cc24052-87fd-559f-8047-3fec479019db",
@@ -15143,8 +15143,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "27ba3e6a-c256-559b-83fa-384c23b98257",
@@ -15157,8 +15157,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "2bcfa3a1-eabf-5f66-b3f1-9f6d7d390d04",
@@ -15171,8 +15171,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "3c6f7f4d-58d0-59c5-90c9-2de704b0ed8a",
@@ -15185,8 +15185,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "4d19b32d-8bd6-5846-8893-065f099aaccc",
@@ -15199,8 +15199,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "8ec58fdd-8f76-5d07-8d97-d895f00107cd",
@@ -15213,8 +15213,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "9dbaff6c-200f-503c-85ce-541b2d1f17ca",
@@ -15227,8 +15227,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "d6c3bd6e-a957-5925-9cd9-ae0738bc91af",
@@ -15241,8 +15241,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     },
     {
       "product_uuid": "f710d50c-a3b5-5e9d-b345-6f61120a5c8e",
@@ -15255,8 +15255,8 @@
       "sync_version": 0,
       "created_at": "2026-07-12T00:00:00.000Z",
       "deleted_at": null,
-      "catalog_errors": [],
-      "composition": {}
+      "composition": {},
+      "catalog_errors": []
     }
   ],
   "mappings": [

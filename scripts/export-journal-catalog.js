@@ -60,6 +60,10 @@ function safeJson(raw, fallback, field, errors) {
 // Note the two-stage shape the edge has: parse*Row derives catalog_errors from
 // safeJson, then catalogDto re-derives `constraints` with parsedJson(..., null),
 // so a NULL constraints_json emits `null` (not `{}`) and contributes no error.
+// Key order matters too: parse*Row's Object.assign appends its derived keys
+// (labels/definition/composition, then catalog_errors) after the DB columns,
+// and catalogDto only overwrites their values in place — so each dto* below
+// must list those derived keys in that same order for byte-identical rows.
 function vocabDto(row) {
   const errors = [];
   safeJson(row.labels_json, {}, 'labels_json', errors);
@@ -67,9 +71,9 @@ function vocabDto(row) {
     safeJson(row.constraints_json, {}, 'constraints_json', errors);
   }
   const out = Object.assign({}, row, {
-    catalog_errors: errors,
     labels: parsedJson(row.labels_json, {}),
     constraints: parsedJson(row.constraints_json, null),
+    catalog_errors: errors,
   });
   delete out.labels_json;
   delete out.constraints_json;
@@ -81,9 +85,9 @@ function definitionDto(row) {
   safeJson(row.labels_json, {}, 'labels_json', errors);
   safeJson(row.definition_json, {}, 'definition_json', errors);
   const out = Object.assign({}, row, {
-    catalog_errors: errors,
     labels: parsedJson(row.labels_json, {}),
     definition: parsedJson(row.definition_json, {}),
+    catalog_errors: errors,
   });
   delete out.labels_json;
   delete out.definition_json;
@@ -94,8 +98,8 @@ function productDto(row) {
   const errors = [];
   safeJson(row.composition_json, {}, 'composition_json', errors);
   const out = Object.assign({}, row, {
-    catalog_errors: errors,
     composition: parsedJson(row.composition_json, {}),
+    catalog_errors: errors,
   });
   delete out.composition_json;
   return out;
