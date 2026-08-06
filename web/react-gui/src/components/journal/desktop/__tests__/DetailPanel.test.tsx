@@ -623,7 +623,16 @@ describe('DetailPanel — void', () => {
     expect(screen.queryByText('dep-2')).not.toBeInTheDocument();
     expect(retry).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'capture.cycle.voidDependentsConfirm' }));
+    // Regression guard: the confirm-cascade-void button must not regress to
+    // `bg-[var(--error-bg)] text-white` (1.22:1 in light theme -- an
+    // effectively invisible label). It should use the liquid-red button
+    // treatment instead.
+    const confirmButton = screen.getByRole('button', { name: 'capture.cycle.voidDependentsConfirm' });
+    expect(confirmButton.className).toContain('btn-liquid-red');
+    expect(confirmButton.className).not.toContain('bg-[var(--error-bg)]');
+    expect(confirmButton.className).not.toMatch(/\btext-white\b/);
+
+    fireEvent.click(confirmButton);
 
     await waitFor(() => expect(mocks.voidEntry).toHaveBeenNthCalledWith(2, 'entry-1', 'Wrong crop entered', 2, true));
     await waitFor(() => expect(retry).toHaveBeenCalled());
