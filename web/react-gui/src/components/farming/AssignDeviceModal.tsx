@@ -89,7 +89,7 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
                 value={selectedDeveui}
                 onChange={(e) => setSelectedDeveui(e.target.value)}
                 required
-                className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+                className="w-full px-4 py-4 touch-target bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               >
                 <option value="">{t('assignModal.selectPlaceholder')}</option>
                 {availableDevices.map((device) => (

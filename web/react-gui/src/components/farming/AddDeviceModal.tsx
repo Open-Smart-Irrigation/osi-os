@@ -107,7 +107,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value as DeviceType)}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+              className="w-full px-4 py-4 touch-target bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             >
               {catalog.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -129,7 +129,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               onChange={(e) => setName(e.target.value)}
               required
               placeholder={t('addModal.deviceNamePlaceholder')}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+              className="w-full px-4 py-4 touch-target bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             />
           </div>
 
@@ -146,7 +146,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               required
               maxLength={16}
               placeholder={t('addModal.deveuiPlaceholder')}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+              className="w-full px-4 py-4 touch-target bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             />
             <p className="text-[var(--text-tertiary)] text-sm mt-1">
               {t('addModal.deveuiHint')}
@@ -165,7 +165,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               onChange={(e) => setAppkey(e.target.value.toUpperCase())}
               maxLength={32}
               placeholder={t('addModal.appkeyPlaceholder', 'AABBCCDDEEFF00112233445566778899')}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+              className="w-full px-4 py-4 touch-target bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             />
             <p className="text-[var(--text-tertiary)] text-sm mt-1">
               {t('addModal.appkeyHint', '32 hex characters printed on the device label')}

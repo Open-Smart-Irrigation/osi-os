@@ -319,7 +319,7 @@ export const AccountLink: React.FC = () => {
                           type="text"
                           value={status.serverUsername || ''}
                           disabled
-                          className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text-secondary)]"
+                          className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text-secondary)]"
                         />
                       </div>
                       <div>
@@ -331,7 +331,7 @@ export const AccountLink: React.FC = () => {
                           value={reauthPassword}
                           onChange={e => setReauthPassword(e.target.value)}
                           required
-                          className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                          className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                         />
                       </div>
                       <div className="flex gap-3">
@@ -423,7 +423,7 @@ export const AccountLink: React.FC = () => {
                       value={serverUrl}
                       onChange={e => setServerUrl(e.target.value)}
                       required
-                      className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                      className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                     />
                   </div>
 
@@ -462,7 +462,7 @@ export const AccountLink: React.FC = () => {
                       value={username}
                       onChange={e => setUsername(e.target.value)}
                       required
-                      className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                      className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                     />
                   </div>
 
@@ -476,7 +476,7 @@ export const AccountLink: React.FC = () => {
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                         required
-                        className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                        className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                       />
                     </div>
                   )}
@@ -490,7 +490,7 @@ export const AccountLink: React.FC = () => {
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       required
-                      className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                      className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                     />
                   </div>
 
