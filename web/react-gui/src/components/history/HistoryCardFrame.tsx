@@ -172,7 +172,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
                 }}
                 className={`rounded-md border px-3 py-2 text-sm font-semibold transition-colors ${
                   selectedView === view
-                    ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                    ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                     : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                 }`}
               >

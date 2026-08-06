@@ -212,7 +212,7 @@ const ConfigPanel: React.FC<{
           type="button"
           onClick={applyInterval}
           disabled={busy !== null}
-          className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy === 'interval' ? t('kiwiSensor.applyingInterval') : t('kiwiSensor.applyInterval')}
         </button>
@@ -369,7 +369,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
             onClick={() => setShowConfig(v => !v)}
             className={`p-1.5 rounded-md transition-colors ${
               showConfig
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             }`}
             title={t('kiwiSensor.settings')}

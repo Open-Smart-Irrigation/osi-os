@@ -431,7 +431,7 @@ export const HistoryDashboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={featureFlags.retry}
-                  className="mt-3 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-white hover:bg-[var(--primary-hover)]"
+                  className="mt-3 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-[var(--on-primary)] hover:bg-[var(--primary-hover)]"
                 >
                   {tc('retry')}
                 </button>
@@ -474,7 +474,7 @@ export const HistoryDashboard: React.FC = () => {
             <button
               type="button"
               onClick={refreshCards}
-              className="mt-3 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-white hover:bg-[var(--primary-hover)]"
+              className="mt-3 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-[var(--on-primary)] hover:bg-[var(--primary-hover)]"
             >
               {t('history.shell.retryCards')}
             </button>

@@ -45,7 +45,7 @@ const REQUEST_IMPACTS = ['cant_work', 'workaround', 'annoying', 'idea'] as const
 
 function selectedClasses(selected: boolean): string {
   return selected
-    ? 'bg-[var(--primary)] text-white'
+    ? 'bg-[var(--primary)] text-[var(--on-primary)]'
     : 'text-[var(--text)] hover:bg-[var(--secondary-bg)]';
 }
 
@@ -567,7 +567,7 @@ export function SettingsPage() {
               <button
                 type="submit"
                 disabled={!canSubmitRequest}
-                className="min-h-11 rounded-lg bg-[var(--primary)] px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="min-h-11 rounded-lg bg-[var(--primary)] px-5 py-3 text-sm font-bold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {requestSubmitting ? t('requestSubmitting') : t('requestSubmit')}
               </button>

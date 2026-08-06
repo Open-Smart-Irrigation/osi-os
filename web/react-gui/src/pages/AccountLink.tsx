@@ -231,7 +231,7 @@ export const AccountLink: React.FC = () => {
                   <button
                     onClick={handleForceSync}
                     disabled={forcingSync}
-                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-5 py-3 rounded-lg transition-colors disabled:opacity-50"
+                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold px-5 py-3 rounded-lg transition-colors disabled:opacity-50"
                   >
                     {forcingSync ? t('sync.running') : t('sync.button')}
                   </button>
@@ -338,7 +338,7 @@ export const AccountLink: React.FC = () => {
                         <button
                           type="submit"
                           disabled={reauthSubmitting}
-                          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-4 py-3 rounded-lg transition-colors disabled:opacity-50"
+                          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold px-4 py-3 rounded-lg transition-colors disabled:opacity-50"
                         >
                           {reauthSubmitting ? t('reauth.running') : t('reauth.submit')}
                         </button>
@@ -400,7 +400,7 @@ export const AccountLink: React.FC = () => {
                     <button
                       onClick={handleProceed}
                       disabled={submitting}
-                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
+                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
                     >
                       {submitting ? t('form.submitting') : t('warning.proceed')}
                     </button>
@@ -496,7 +496,7 @@ export const AccountLink: React.FC = () => {
 
                   <button
                     type="submit"
-                    className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-xl py-4 rounded-lg transition-colors shadow-lg"
+                    className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold text-xl py-4 rounded-lg transition-colors shadow-lg"
                   >
                     {t('form.submit')}
                   </button>

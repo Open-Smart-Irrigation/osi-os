@@ -93,7 +93,7 @@ export function HarvestGroupNudge({ groups, onResolve, errors }: HarvestGroupNud
                     aria-label={actionLabel}
                     disabled={isPending}
                     onClick={() => { void resolve(group); }}
-                    className={`min-h-[56px] rounded-xl bg-[var(--primary)] px-4 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+                    className={`min-h-[56px] rounded-xl bg-[var(--primary)] px-4 font-bold text-[var(--on-primary)] disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
                   >
                     {isPending
                       ? t('group.resolving', { defaultValue: 'Resolving…' })

@@ -287,7 +287,7 @@ const HistoryDetailError: React.FC<{
       <p className="mt-2 text-sm text-[var(--text-tertiary)]">{body}</p>
       <Link
         to="/history"
-        className="mt-5 inline-flex rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-white"
+        className="mt-5 inline-flex rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-[var(--on-primary)]"
       >
         {backLabel}
       </Link>

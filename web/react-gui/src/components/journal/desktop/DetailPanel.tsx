@@ -712,7 +712,7 @@ function VoidForm({ aggregate, plots, model, locale, onCancel, onVoided }: VoidF
         <button
           type="submit"
           disabled={submitting}
-          className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white"
+          className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-[var(--on-primary)]"
         >
           {submitting ? t('workspace.detail.void.saving') : t('workspace.detail.void.submit')}
         </button>
@@ -873,7 +873,7 @@ function EntryCorrectionForm({
         <button
           type="submit"
           disabled={submitting}
-          className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white"
+          className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-[var(--on-primary)]"
         >
           {submitting ? t('workspace.detail.correction.saving') : t('workspace.detail.correction.save')}
         </button>
@@ -1091,7 +1091,7 @@ function EntryCopyForm({
             type="button"
             disabled={submitting}
             onClick={saveSeparately}
-            className="rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-[var(--on-primary)]"
           >
             {t('workspace.detail.copy.saveSeparately')}
           </button>
@@ -1109,7 +1109,7 @@ function EntryCopyForm({
         <button
           type="submit"
           disabled={submitting}
-          className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white"
+          className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-[var(--on-primary)]"
         >
           {submitting ? t('workspace.detail.copy.saving') : t('workspace.detail.copy.save')}
         </button>

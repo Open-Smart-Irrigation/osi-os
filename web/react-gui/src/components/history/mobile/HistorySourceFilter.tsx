@@ -55,7 +55,7 @@ export const HistorySourceFilter: React.FC<HistorySourceFilterProps> = ({
         onClick={() => onSourceChange(null)}
         className={`min-h-10 whitespace-nowrap rounded-md border px-3 text-sm font-bold ${
           selectedSourceKey === null
-            ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+            ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
             : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]'
         }`}
       >
@@ -71,7 +71,7 @@ export const HistorySourceFilter: React.FC<HistorySourceFilterProps> = ({
             onClick={() => onSourceChange(sourceKey)}
             className={`min-h-10 whitespace-nowrap rounded-md border px-3 text-sm font-bold ${
               selectedSourceKey === sourceKey
-                ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]'
             }`}
           >

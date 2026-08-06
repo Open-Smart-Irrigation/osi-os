@@ -415,7 +415,7 @@ const ConfigPanel: React.FC<{
             type="button"
             onClick={applyTimedAction}
             disabled={busyAction !== null}
-            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyAction === 'timed'
               ? t('stregaValve.applyingTimedAction', { defaultValue: 'Queueing timed action...' })
@@ -466,7 +466,7 @@ const ConfigPanel: React.FC<{
             type="button"
             onClick={applyInterval}
             disabled={busyAction !== null}
-            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyAction === 'interval'
               ? t('stregaValve.applyingInterval', { defaultValue: 'Applying interval...' })
@@ -570,7 +570,7 @@ const ConfigPanel: React.FC<{
               type="button"
               onClick={applyPartialOpening}
               disabled={busyAction !== null}
-              className="w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busyAction === 'partial'
                 ? t('stregaValve.applyingPartial', { defaultValue: 'Queueing partial move...' })
@@ -715,7 +715,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
             onClick={() => setShowConfig(v => !v)}
             className={`p-1.5 rounded-md transition-colors ${
               showConfig
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             }`}
             title={t('stregaValve.settings')}
@@ -833,7 +833,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           <button
             onClick={handleOpen}
             disabled={loading !== null}
-            className="mt-1 w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
+            className="mt-1 w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-[var(--on-primary)] font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
           >
             {loading === 'OPEN' ? (
               <>

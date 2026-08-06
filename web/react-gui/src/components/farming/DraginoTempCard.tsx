@@ -176,7 +176,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
             title={showConfig ? 'Close device settings' : 'Device settings'}
             className={`p-1.5 rounded-md transition-colors ${
               showConfig
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             } ${FOCUS_VISIBLE_RING}`}
           >

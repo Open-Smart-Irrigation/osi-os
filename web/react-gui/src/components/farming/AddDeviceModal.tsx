@@ -184,7 +184,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+              className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-[var(--on-primary)] font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
               {loading ? t('addModal.adding') : t('addModal.submit')}
             </button>

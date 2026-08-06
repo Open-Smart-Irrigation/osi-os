@@ -42,7 +42,7 @@ export const HistoryViewModeSegmentedControl: React.FC<HistoryViewModeSegmentedC
             onClick={() => onViewChange(view)}
             className={`min-h-11 flex-1 whitespace-nowrap border-r border-[var(--border)] px-3 text-sm font-bold last:border-r-0 ${
               isActive
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'bg-transparent text-[var(--text)]'
             }`}
           >

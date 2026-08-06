@@ -2476,7 +2476,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
                 <button
                   type="button"
                   onClick={onRetryCatalog}
-                  className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`}
+                  className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-[var(--on-primary)] ${FOCUS_RING}`}
                 >
                   {t('error.retry')}
                 </button>
@@ -2810,8 +2810,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return (
       <>
         {batchError && <p role="alert" className="mb-4 text-sm font-semibold text-[var(--error-text)]">{batchError}</p>}
-        {duplicateCandidates.length > 0 && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('batch.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{t('batch.duplicateBody')}</p><ul className="space-y-3 text-sm text-[var(--text)]">{duplicateCandidateGroups.map((group) => <li key={group.key}><h3 className="font-bold">{group.label}</h3><ul className="ml-4 list-disc space-y-1">{group.candidates.map((candidate) => <li key={candidate.entry_uuid}><span>{occurrenceLabel(candidate.occurred_start, timezone, locale)} · {duplicateActivity(candidate)}</span>{' '}<span className="text-xs text-[var(--text-secondary)]">#{shortEntryId(candidate.entry_uuid)}</span></li>)}</ul></li>)}</ul><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={acknowledgeBatchDuplicates}>{t('batch.duplicateAcknowledge')}</button></section>}
-        {duplicateCandidate && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('capture.confirm.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{occurrenceLabel(duplicateCandidate.occurred_start, timezone, locale)} · {duplicateActivityLabel}</p>{duplicateCandidate.values.length > 0 && <ul className="space-y-1 text-sm text-[var(--text)]">{duplicateCandidate.values.map((value, index) => { const label = duplicateValueLabel(value, model, locale); return label ? <li key={`${value.attribute_code}:${value.group_index ?? index}`}>{label}</li> : null; })}</ul>}<div className="flex flex-wrap gap-2"><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`} onClick={() => { if (!saving && !finalReceipt) onOpenExisting(duplicateCandidate.entry_uuid); }}>{t('capture.confirm.openExisting')}</button><button type="button" className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={saveSeparately} disabled={saving || Boolean(finalReceipt)}>{t('capture.confirm.saveSeparately')}</button></div>{duplicateWarningShown && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.confirm.duplicateBody')}</p>}</section>}
+        {duplicateCandidates.length > 0 && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('batch.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{t('batch.duplicateBody')}</p><ul className="space-y-3 text-sm text-[var(--text)]">{duplicateCandidateGroups.map((group) => <li key={group.key}><h3 className="font-bold">{group.label}</h3><ul className="ml-4 list-disc space-y-1">{group.candidates.map((candidate) => <li key={candidate.entry_uuid}><span>{occurrenceLabel(candidate.occurred_start, timezone, locale)} · {duplicateActivity(candidate)}</span>{' '}<span className="text-xs text-[var(--text-secondary)]">#{shortEntryId(candidate.entry_uuid)}</span></li>)}</ul></li>)}</ul><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-[var(--on-primary)] ${FOCUS_RING}`} onClick={acknowledgeBatchDuplicates}>{t('batch.duplicateAcknowledge')}</button></section>}
+        {duplicateCandidate && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('capture.confirm.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{occurrenceLabel(duplicateCandidate.occurred_start, timezone, locale)} · {duplicateActivityLabel}</p>{duplicateCandidate.values.length > 0 && <ul className="space-y-1 text-sm text-[var(--text)]">{duplicateCandidate.values.map((value, index) => { const label = duplicateValueLabel(value, model, locale); return label ? <li key={`${value.attribute_code}:${value.group_index ?? index}`}>{label}</li> : null; })}</ul>}<div className="flex flex-wrap gap-2"><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`} onClick={() => { if (!saving && !finalReceipt) onOpenExisting(duplicateCandidate.entry_uuid); }}>{t('capture.confirm.openExisting')}</button><button type="button" className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-[var(--on-primary)] ${FOCUS_RING}`} onClick={saveSeparately} disabled={saving || Boolean(finalReceipt)}>{t('capture.confirm.saveSeparately')}</button></div>{duplicateWarningShown && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.confirm.duplicateBody')}</p>}</section>}
         {/* Review fix: the plot-scoped crop-cycle overlap fetch (effect above)
             is asynchronous and, for a multi-plot batch, `next()` advances
             details -> confirm synchronously with no in-flight gate on it —
@@ -2834,7 +2834,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               <button
                 type="button"
                 onClick={() => setCycleAction('new')}
-                className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`}
+                className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-[var(--on-primary)] ${FOCUS_RING}`}
               >
                 {t('capture.cycle.startNewCycle')}
               </button>
@@ -2859,7 +2859,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             <button
               type="button"
               onClick={() => setTransitionSheetOpen(true)}
-              className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`}
+              className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-[var(--on-primary)] ${FOCUS_RING}`}
             >
               {t('capture.transition.reviewAction')}
             </button>
@@ -2882,7 +2882,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             errors={groupResolutionErrors}
           />
         )}
-        <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={interactionLocked} onClick={() => { if (interactionLocked) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || interactionLocked} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
+        <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={interactionLocked} onClick={() => { if (interactionLocked) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || interactionLocked} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-[var(--on-primary)] disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
         {!duplicateCandidate && duplicateCandidates.length === 0 && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={saveStateStatus} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={async () => { await retry(); }} />}
       </div>
       {transitionSheetOpen && pendingTransitionItems.length > 0 && (

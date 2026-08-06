@@ -4,7 +4,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'liquid' | 'liquid-red';
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold rounded-lg transition-colors ' +
+    'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold rounded-lg transition-colors ' +
     'disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed',
   secondary:
     'bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold rounded-lg transition-colors',

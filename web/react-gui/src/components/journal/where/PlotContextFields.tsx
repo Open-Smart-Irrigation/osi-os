@@ -138,7 +138,7 @@ export function PlotContextFields({
                       aria-pressed={current === option}
                       onClick={() => setValue(code, option)}
                       className={`min-h-12 flex-1 px-4 py-2 text-sm font-bold transition-colors ${
-                        current === option ? 'bg-[var(--primary)] text-white' : 'bg-[var(--surface)] text-[var(--text)]'
+                        current === option ? 'bg-[var(--primary)] text-[var(--on-primary)]' : 'bg-[var(--surface)] text-[var(--text)]'
                       } ${FOCUS_RING}`}
                     >
                       {t(option ? 'capture.form.booleanYes' : 'capture.form.booleanNo')}

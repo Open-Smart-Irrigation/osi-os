@@ -15,6 +15,7 @@
   --focus: #2563EB;
   --primary: #2563EB;
   --primary-hover: #1D4ED8;
+  --on-primary: #FFFFFF;
   --secondary-bg: #E2E8F0;
   --header-bg: #FFFFFF;
   --header-text: #040404;
@@ -65,6 +66,7 @@ html[data-theme='dark'] {
   --focus: #2DD4BF;
   --primary: #2DD4BF;
   --primary-hover: #14B8A6;
+  --on-primary: #04100E;
   --secondary-bg: #26322E;
   --header-bg: #171D1B;
   --header-text: #F4F7F5;

@@ -177,7 +177,7 @@ export function StationGrid({
             </div>
             <button
               type="submit"
-              className={`rounded-xl bg-[var(--primary)] px-4 py-2 font-bold text-white hover:opacity-90 ${TOUCH_CONTROL} ${FOCUS_RING}`}
+              className={`rounded-xl bg-[var(--primary)] px-4 py-2 font-bold text-[var(--on-primary)] hover:opacity-90 ${TOUCH_CONTROL} ${FOCUS_RING}`}
             >
               {t('where.applyRange', { defaultValue: 'Apply range' })}
             </button>

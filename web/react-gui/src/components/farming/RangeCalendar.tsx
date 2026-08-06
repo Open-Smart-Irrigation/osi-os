@@ -89,7 +89,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({ value, onChange, t
               onDoubleClick={() => onChange(applyDayDoubleClick(value, day.date))}
               className={[
                 'aspect-square rounded-md text-xs font-medium transition-colors',
-                endpoint ? 'bg-[var(--primary)] text-white' : '',
+                endpoint ? 'bg-[var(--primary)] text-[var(--on-primary)]' : '',
                 !endpoint && inRange ? 'bg-[var(--secondary-bg)] text-[var(--text)]' : '',
                 !endpoint && !inRange ? 'text-[var(--text)]' : '',
                 disabled ? 'cursor-not-allowed opacity-30' : 'hover:bg-[var(--secondary-bg)]',

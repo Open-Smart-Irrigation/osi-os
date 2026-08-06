@@ -249,7 +249,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                   onClick={() => onCardSelect(card)}
                   className={`w-full rounded-md px-3 py-2 text-left text-sm font-medium transition-colors ${
                     isSelected
-                      ? 'bg-[var(--primary)] text-white'
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                       : 'text-[var(--text)] hover:bg-[var(--border)] hover:text-[var(--text)]'
                   }`}
                 >
@@ -281,7 +281,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                     onClick={() => setSelectedSourceKey(source.key)}
                     className={`px-2 py-1 text-xs font-semibold transition-colors ${
                       selectedSourceKey === source.key
-                        ? 'bg-[var(--primary)] text-white'
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                         : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                     }`}
                   >
@@ -305,7 +305,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                   onClick={() => setMode(m)}
                   className={`px-3 py-1 text-xs font-semibold capitalize transition-colors ${
                     mode === m
-                      ? 'bg-[var(--primary)] text-white'
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                       : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                   }`}
                 >
@@ -332,7 +332,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                     onClick={() => setSelectedView(view)}
                     className={`px-2 py-1 text-xs font-semibold transition-colors ${
                       selectedViewForCard === view
-                        ? 'bg-[var(--primary)] text-white'
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                         : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                     }`}
                   >
@@ -349,7 +349,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                 onClick={() => handlePreset(key)}
                 className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${
                   activePreset === key
-                    ? 'bg-[var(--primary)] text-white'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                     : 'border border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                 }`}
               >

@@ -228,7 +228,7 @@ export function InheritedCropBanner({
                 <button
                   type="submit"
                   disabled={submitting || draftCrop.trim() === ''}
-                  className={`flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+                  className={`flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-[var(--on-primary)] disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
                 >
                   {submitting ? t('capture.cycle.correctSaving') : t('capture.cycle.correctSave')}
                 </button>

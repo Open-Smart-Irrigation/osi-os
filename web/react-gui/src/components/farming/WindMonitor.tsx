@@ -252,7 +252,7 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
               onClick={() => setHours(window.hours)}
               className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
                 hours === window.hours
-                  ? 'bg-[var(--primary)] text-white'
+                  ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >

@@ -218,7 +218,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
           <button
             onClick={handleScheduleSave}
             disabled={schedSaving || !sched}
-            className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-50 text-[var(--on-primary)] text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
           >
             {schedSaving ? 'Saving…' : 'Save parameters'}
           </button>
@@ -313,7 +313,7 @@ const AnalysisTab: React.FC<{
             <button
               onClick={handleTimezoneSave}
               disabled={tzSaving}
-              className="text-xs bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-50 text-white font-semibold px-2.5 py-1 rounded-lg transition-colors shrink-0"
+              className="text-xs bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-50 text-[var(--on-primary)] font-semibold px-2.5 py-1 rounded-lg transition-colors shrink-0"
             >
               {tzSaving ? '…' : 'Save'}
             </button>

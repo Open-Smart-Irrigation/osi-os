@@ -264,7 +264,7 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, produ
           type="button"
           disabled={!valid || completing}
           onClick={() => void handleComplete()}
-          className={`min-h-9 rounded-lg bg-[var(--primary)] px-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+          className={`min-h-9 rounded-lg bg-[var(--primary)] px-3 text-sm font-bold text-[var(--on-primary)] disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
         >
           {completing ? t('drafts.completing') : t('drafts.complete')}
         </button>

@@ -139,7 +139,7 @@ export function SeedingCropFields({
               onClick={() => onCycleActionChange('continue')}
               className={`rounded-xl border px-4 py-2 font-bold ${TOUCH_CONTROL} ${FOCUS_RING} ${
                 cycleAction === 'continue'
-                  ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                  ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)]'
               }`}
             >
@@ -151,7 +151,7 @@ export function SeedingCropFields({
               onClick={() => onCycleActionChange('new')}
               className={`rounded-xl border px-4 py-2 font-bold ${TOUCH_CONTROL} ${FOCUS_RING} ${
                 cycleAction === 'new'
-                  ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                  ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)]'
               }`}
             >

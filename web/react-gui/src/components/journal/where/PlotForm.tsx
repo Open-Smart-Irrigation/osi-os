@@ -476,7 +476,7 @@ function PlotFormState({
         <button type="button" onClick={onCancel} disabled={submitting} className={`flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2 font-bold text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60 ${TOUCH_CONTROL} ${FOCUS_RING}`}>
           {t('plot.cancel', { defaultValue: 'Cancel' })}
         </button>
-        <button type="submit" disabled={submitting || committed} className={`flex-1 rounded-xl bg-[var(--primary)] px-4 py-2 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60 ${TOUCH_CONTROL} ${FOCUS_RING}`}>
+        <button type="submit" disabled={submitting || committed} className={`flex-1 rounded-xl bg-[var(--primary)] px-4 py-2 font-bold text-[var(--on-primary)] disabled:cursor-not-allowed disabled:opacity-60 ${TOUCH_CONTROL} ${FOCUS_RING}`}>
           {submitting
             ? t('plot.loading', { defaultValue: 'Saving…' })
             : t('plot.save', { defaultValue: 'Save' })}

@@ -476,7 +476,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                   type="button"
                   onClick={() => void applyMode()}
                   disabled={busy !== null}
-                  className={`mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_VISIBLE_RING}`}
+                  className={`mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_VISIBLE_RING}`}
                 >
                   {busy === 'mode' ? 'Applying mode…' : 'Apply mode'}
                 </button>

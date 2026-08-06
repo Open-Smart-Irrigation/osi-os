@@ -135,7 +135,7 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
                   onClick={() => onWorkspaceLayoutChange('single')}
                   className={`rounded-md border px-3 py-2 text-sm font-semibold ${
                     workspace.layout === 'single'
-                      ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                      ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                       : 'border-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
                   }`}
                 >
@@ -147,7 +147,7 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
                   onClick={() => onWorkspaceLayoutChange('stacked')}
                   className={`rounded-md border px-3 py-2 text-sm font-semibold ${
                     workspace.layout === 'stacked'
-                      ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                      ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                       : 'border-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
                   }`}
                 >

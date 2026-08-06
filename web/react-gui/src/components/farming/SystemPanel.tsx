@@ -189,7 +189,7 @@ export const SystemPanel: React.FC = () => {
                       disabled={fanBusy}
                       className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
                         fanSpeed === p.speed
-                          ? 'bg-[var(--primary)] text-white'
+                          ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                           : 'bg-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
                       }`}
                     >

@@ -46,7 +46,7 @@ export const HistoryRangeSegmentedControl: React.FC<HistoryRangeSegmentedControl
             }}
             className={`min-h-11 border-r border-[var(--border)] px-2 text-sm font-bold last:border-r-0 ${
               isActive
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'bg-transparent text-[var(--text)]'
             } disabled:cursor-not-allowed disabled:text-[var(--text-tertiary)] disabled:opacity-45`}
           >
