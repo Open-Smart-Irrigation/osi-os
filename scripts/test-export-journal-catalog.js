@@ -83,6 +83,51 @@ assert.deepEqual(
   'products must be ordered by product_uuid.localeCompare'
 );
 
+// Key order must match a live gateway's two-stage catalogDto shape (S3 T2b):
+// catalog.js's parse*Row appends its derived keys after the raw DB columns,
+// and api.js's catalogDto only overwrites their values in place — it never
+// re-inserts them — so a gateway response and this artifact must list every
+// row's keys in the identical order, not just the same key set, for the
+// README's "same order" claim to be true. Pin the full array (not just the
+// tail) so a future DB column reorder cannot slip through unnoticed, and
+// check every row (not just row 0) so a heterogeneous row cannot sneak in.
+const EXPECTED_VOCAB_KEYS = [
+  'code', 'kind', 'parent_code', 'value_type', 'quantity_kind', 'basis',
+  'default_unit_code', 'icon_key', 'agrovoc_uri', 'icasa_code', 'adapt_code',
+  'scope', 'owner_user_uuid', 'gateway_device_eui', 'custom_field_uuid',
+  'active', 'sort_order', 'sync_version', 'created_at', 'deleted_at',
+  'labels', 'constraints', 'catalog_errors',
+];
+const EXPECTED_DEFINITION_KEYS = [
+  'code', 'version', 'active', 'labels', 'definition', 'catalog_errors',
+];
+const EXPECTED_PRODUCT_KEYS = [
+  'product_uuid', 'scope', 'owner_user_uuid', 'gateway_device_eui', 'name',
+  'kind', 'active', 'sync_version', 'created_at', 'deleted_at',
+  'composition', 'catalog_errors',
+];
+const EXPECTED_MAPPING_KEYS = [
+  'term_code', 'scheme_uri', 'scheme_version', 'mapping_role', 'external_id',
+  'external_parent_id', 'mapping_relation', 'source_uri', 'active',
+];
+
+function assertUniformKeyOrder(rows, expectedKeys, label) {
+  assert.ok(rows.length > 0, `${label}: no rows to check`);
+  rows.forEach((row, index) => {
+    assert.deepStrictEqual(
+      Object.keys(row),
+      expectedKeys,
+      `${label}[${index}] key order does not match the gateway's catalogDto shape`
+    );
+  });
+}
+
+assertUniformKeyOrder(artifact.vocab, EXPECTED_VOCAB_KEYS, 'vocab');
+assertUniformKeyOrder(artifact.templates, EXPECTED_DEFINITION_KEYS, 'templates');
+assertUniformKeyOrder(artifact.layouts, EXPECTED_DEFINITION_KEYS, 'layouts');
+assertUniformKeyOrder(artifact.products, EXPECTED_PRODUCT_KEYS, 'products');
+assertUniformKeyOrder(artifact.mappings, EXPECTED_MAPPING_KEYS, 'mappings');
+
 // catalog_errors is DERIVED, not hardcoded: a row whose *_json column does not
 // parse to a plain object records the offending column name, exactly as
 // catalog.js safeJson does. The shipped DB is clean, so every list is empty —

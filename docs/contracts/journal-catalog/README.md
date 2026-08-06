@@ -1,7 +1,8 @@
 # Journal catalog contract artifact
 
 `journal-catalog.json` is generated; never hand-edit it. It holds the same rows,
-in the same DTO shape and the same order, that the edge serves at
+in the same DTO shape and the same order — including each row's JSON key
+order — that the edge serves at
 `GET /api/journal/catalog?include=definitions` — for the global (non-principal)
 rows only: `scope='core'` vocab and their mappings, every template and layout
 version, and `scope='core'` products, stamped with the `journal_catalog_state`
