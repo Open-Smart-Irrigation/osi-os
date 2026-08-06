@@ -9,9 +9,9 @@ interface InterpretationListProps {
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 
 function toneForSeverity(severity: HistoryInterpretation['severity']): string {
-  if (severity === 'warning') return 'border-amber-300 bg-amber-50 text-amber-950';
-  if (severity === 'critical') return 'border-red-300 bg-red-50 text-red-950';
-  if (severity === 'success') return 'border-emerald-300 bg-emerald-50 text-emerald-950';
+  if (severity === 'warning') return 'border-[var(--cal-warn-border)] bg-[var(--cal-warn-bg)] text-[var(--cal-warn-text)]';
+  if (severity === 'critical') return 'border-[var(--cal-bad-border)] bg-[var(--cal-bad-bg)] text-[var(--cal-bad-text)]';
+  if (severity === 'success') return 'border-[var(--cal-good-border)] bg-[var(--cal-good-bg)] text-[var(--cal-good-text)]';
   return 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)]';
 }
 
