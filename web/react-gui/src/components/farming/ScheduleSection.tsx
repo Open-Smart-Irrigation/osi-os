@@ -68,7 +68,7 @@ const TypeTab: React.FC<{ active: boolean; onClick: () => void; children: React.
     onClick={onClick}
     className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
       active
-        ? 'bg-[var(--primary)] border-[var(--primary)] text-white'
+        ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--on-primary)]'
         : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text)]'
     }`}
   >
@@ -393,7 +393,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   type="button"
                   disabled={!canSave || saving}
                   onClick={saveSchedule}
-                  className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
+                  className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] text-[var(--on-primary)] font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
                 >
                   {saving ? t('schedule.saving') : t('schedule.saveSchedule')}
                 </button>

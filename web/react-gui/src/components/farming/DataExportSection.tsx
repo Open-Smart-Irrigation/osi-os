@@ -97,7 +97,7 @@ export const DataExportSection: React.FC<DataExportSectionProps> = ({
           type="button"
           disabled={!canDownload}
           onClick={() => void handleDownload()}
-          className="self-end rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="self-end rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--on-primary)] disabled:opacity-50"
         >
           {downloading ? t('zone.export.downloading') : t('zone.export.download')}
         </button>

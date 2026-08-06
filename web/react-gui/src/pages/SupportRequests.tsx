@@ -484,7 +484,7 @@ export const SupportRequests: React.FC = () => {
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="rounded-lg bg-[var(--primary)] px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-[var(--primary)] px-5 py-3 text-sm font-bold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {submitting ? t('form.submitting') : t('form.submit')}
               </button>

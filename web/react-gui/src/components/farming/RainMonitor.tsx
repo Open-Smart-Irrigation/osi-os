@@ -184,7 +184,7 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
               onClick={() => setWindowIndex(index)}
               className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
                 windowIndex === index
-                  ? 'bg-[var(--primary)] text-white'
+                  ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >

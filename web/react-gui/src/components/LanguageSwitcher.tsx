@@ -56,7 +56,7 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ triggerClass
               onClick={() => select(lang.code)}
               className={`w-full px-4 py-2 text-left text-sm transition-colors ${
                 lang.code === current.code
-                  ? 'bg-[var(--primary)] font-semibold text-white'
+                  ? 'bg-[var(--primary)] font-semibold text-[var(--on-primary)]'
                   : 'text-[var(--text)] hover:bg-[var(--card)]'
               }`}
             >

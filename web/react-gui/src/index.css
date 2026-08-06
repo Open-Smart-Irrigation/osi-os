@@ -15,7 +15,6 @@
      values so the vendored primitives (Button/FormField) resolve correctly.
      Remove once tokens.css gains matching definitions. */
   --field-border: #78899F;
-  --on-primary: #FFFFFF;
   --info-bg: #DBEAFE;
   --info-text: #1E40AF;
   --info-border: #3B82F6;
@@ -26,7 +25,6 @@ html[data-theme='dark'] {
   --header-text: #F8FFFC;
   --header-subtext: #B7E4DA;
   --field-border: #66766F;
-  --on-primary: #04100E;
   --info-bg: #172B48;
   --info-text: #BFDBFE;
   --info-border: #60A5FA;
