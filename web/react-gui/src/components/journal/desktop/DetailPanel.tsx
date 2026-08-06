@@ -40,6 +40,7 @@ import type {
 import { EntryForm, validateEntryForm } from '../capture/EntryForm';
 import { formatOccurredDate } from '../JournalEntryRow';
 import { statusBadgeClass } from '../statusBadgeClass';
+import { Button } from '../../../ui-core';
 
 export interface DetailPanelProps {
   catalog: JournalCatalog;
@@ -687,14 +688,15 @@ function VoidForm({ aggregate, plots, model, locale, onCancel, onVoided }: VoidF
             >
               {t('capture.cycle.voidDependentsCancel')}
             </button>
-            <button
+            <Button
               type="button"
+              variant="liquid-red"
               disabled={submitting}
               onClick={() => { void confirmCascade(); }}
-              className="flex-1 rounded-lg bg-[var(--error-bg)] px-3 py-2 font-bold text-white"
+              className="flex-1 px-3 py-2"
             >
               {t('capture.cycle.voidDependentsConfirm')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
