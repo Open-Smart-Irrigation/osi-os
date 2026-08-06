@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 /** Verbatim input treatment from the edge modals (CreateZoneModal / AddDeviceModal). */
 export const INPUT_CLASS =
-  'w-full px-4 py-4 touch-target bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg ' +
+  'w-full px-4 py-4 touch-target bg-[var(--card)] border-2 border-[var(--field-border)] rounded-lg text-[var(--text)] text-lg ' +
   'placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]';
 
 export interface FormFieldProps {
