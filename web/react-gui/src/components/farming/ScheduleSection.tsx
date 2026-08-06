@@ -332,7 +332,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
               className={`px-3 py-1 rounded-lg text-sm font-bold border-2 transition-colors ${
                 enabled
                   ? 'bg-[var(--toggle-on)] border-[var(--toggle-on)] text-white'
-                  : 'bg-[var(--toggle-off)] border-[var(--toggle-off)] text-[var(--text-secondary)]'
+                  : 'bg-[var(--toggle-off)] border-[var(--field-border)] text-[var(--text-secondary)]'
               }`}
             >
               {enabled ? t('schedule.on') : t('schedule.off')}
