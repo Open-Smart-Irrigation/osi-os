@@ -142,8 +142,8 @@ function buildIrrigationMetric(
 }
 
 const STATUS_STYLES: Record<IrrigationActuationStatus, { bg: string; fg: string; border: string }> = {
-  PENDING_OPEN: { bg: 'bg-[var(--warning-soft, #fef3c7)]', fg: 'text-[var(--warning-text, #92400e)]', border: 'border-[var(--warning, #f59e0b)]' },
-  RUNNING:      { bg: 'bg-[var(--info-soft, #dbeafe)]',    fg: 'text-[var(--info-text, #1e40af)]',    border: 'border-[var(--info, #3b82f6)]' },
+  PENDING_OPEN: { bg: 'bg-[var(--warn-bg)]', fg: 'text-[var(--warn-text)]', border: 'border-[var(--warn-border)]' },
+  RUNNING:      { bg: 'bg-[var(--info-bg)]', fg: 'text-[var(--info-text)]', border: 'border-[var(--info-border)]' },
   COMPLETED:    { bg: 'bg-[var(--success-soft, #dcfce7)]', fg: 'text-[var(--success-text, #166534)]', border: 'border-[var(--success, #16a34a)]' },
   CANCELLED:    { bg: 'bg-[var(--card)]',                  fg: 'text-[var(--text-tertiary)]',         border: 'border-[var(--border)]' },
   COMMAND_FAILED:{bg: 'bg-[var(--error-soft, #fee2e2)]',   fg: 'text-[var(--error-text, #991b1b)]',   border: 'border-[var(--error, #dc2626)]' },
