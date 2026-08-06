@@ -17,13 +17,13 @@
     "credentialPath": "/run/osi-image-builder/proxy-credential",
     "operationAllowedHosts": {
       "frontend-install": ["registry.npmjs.org"],
-      "build-image": [
+       "build-image": [
         "busybox.net", "cdn.kernel.org", "codeload.github.com", "crates.io",
         "download.savannah.gnu.org", "downloads.openwrt.org", "ftp.gnu.org",
-        "git.kernel.org", "git.openwrt.org", "github.com", "mirror2.openwrt.org",
-        "nodejs.org", "objects.githubusercontent.com", "raw.githubusercontent.com",
-        "registry.npmjs.org", "sources.cdn.openwrt.org", "static.crates.io",
-        "static.rust-lang.org", "www.kernel.org"
+        "ftpmirror.gnu.org", "git.kernel.org", "git.openwrt.org", "github.com",
+        "mirror2.openwrt.org", "nodejs.org", "objects.githubusercontent.com",
+        "raw.githubusercontent.com", "registry.npmjs.org", "sources.cdn.openwrt.org",
+        "static.crates.io", "static.rust-lang.org", "www.kernel.org"
       ]
     }
   },

@@ -494,4 +494,33 @@ describe('dependency egress Docker boundary', () => {
 
     expect(() => parseDependencyEgressNetwork(persisted)).toThrow(/TLS|leaf|CA|path|identity/iu);
   });
+
+  it('does not crash the proxy server on a client socket error', { timeout: 10_000 }, async () => {
+    const net = createRequire(import.meta.url)('node:net');
+    const proxyModule = createRequire(import.meta.url)('../../builder/operations/osi-dependency-egress-proxy.cjs');
+    let fatal = false;
+    const server = proxyModule.createDependencyProxyServer({
+      credential: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      allowedHosts: new Set([]),
+      lookup: vi.fn(async (host) => (host === 'osi-egress-proxy'
+        ? [{ address: '127.0.0.1', family: 4 }]
+        : [{ address: '93.184.216.34', family: 4 }])),
+      tls: { caCertificate: '', certificates: [] },
+      authorize: vi.fn(async () => { throw new Error('denied'); }),
+      verifyTls: vi.fn(),
+      trackTerminatedConnection: vi.fn(),
+    });
+    const port = await new Promise<number>((resolve) => {
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as { port: number }).port));
+    });
+    // Connect, send CONNECT, immediately destroy — triggers the defect's ECONNRESET
+    const sock = net.createConnection({ host: '127.0.0.1', port });
+    await new Promise<void>((resolve) => sock.on('connect', () => {
+      sock.write('CONNECT denied.example:443 HTTP/1.1\r\nHost: denied.example:443\r\nProxy-Authorization: Basic b3NpOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQ==\r\n\r\n');
+      sock.destroy();
+      // Give the server a tick to process the destroyed socket
+      setImmediate(() => { expect(fatal).toBe(false); resolve(); });
+    }));
+    server.close();
+  });
 });

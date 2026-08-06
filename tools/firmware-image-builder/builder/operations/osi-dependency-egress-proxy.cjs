@@ -670,6 +670,7 @@ function createDependencyProxyServer(options) {
     const chunks = [];
     let size = 0;
     let finished = false;
+    client.on('error', () => { finished = true; client.destroy(); });
     const reject = () => {
       if (finished) return;
       finished = true;
@@ -702,12 +703,12 @@ function createDependencyProxyServer(options) {
         if (finished) return;
         finished = true;
         client.removeListener('data', inspect);
+        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
         attachTerminatedTls({ ...options, authorize, trackTerminatedConnection }, client, hello, selected.host);
       } catch {
         reject();
       }
     };
-    client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
     client.setTimeout(DEPENDENCY_PROXY_LIMITS.tlsClientHelloTimeoutMs, reject);
     client.on('data', inspect);
     if (head.length > 0) void inspect(head);
@@ -809,6 +810,7 @@ async function runServer() {
   const bindAddresses = await dnsLookup('osi-egress-proxy', { all: true, verbatim: true });
   if (bindAddresses.length !== 1 || isIP(bindAddresses[0].address) === 0) deny('internal proxy bind identity is ambiguous');
   const server = createDependencyProxyServer({ credential, allowedHosts, lookup: runtimeLookup, tls: { caCertificate: await readFile(caCertificatePath, 'utf8'), certificates } });
+  process.on('uncaughtException', (error) => { process.stderr.write(`egress proxy fatal: ${error && error.message ? error.message : String(error)}\n`); process.exitCode = 1; setImmediate(() => process.exit(1)); });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen({ host: bindAddresses[0].address, port: 3128, exclusive: true }, resolve);
