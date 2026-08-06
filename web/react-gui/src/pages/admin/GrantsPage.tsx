@@ -72,7 +72,7 @@ export function GrantsPage() {
   const visibleGrants = grants.filter((grant) => grant.user_uuid === selectedUser);
 
   return (
-    <main className="min-h-screen bg-[var(--background)] p-4 text-[var(--text)] sm:p-8">
+    <main className="min-h-screen bg-[var(--bg)] p-4 text-[var(--text)] sm:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div><p className="text-sm text-[var(--text-secondary)]">Administration</p><h1 className="text-3xl font-bold">Access grants</h1></div>
