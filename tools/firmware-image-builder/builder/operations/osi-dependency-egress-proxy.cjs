@@ -808,9 +808,21 @@ async function runServer() {
     return [host, { cert: await readFile(`${tlsDirectory}/${name}.pem`, 'utf8'), key: await readFile(`${tlsDirectory}/${name}.key`, 'utf8') }];
   })));
   const server = createDependencyProxyServer({ credential, allowedHosts, lookup: runtimeLookup, tls: { caCertificate: await readFile(caCertificatePath, 'utf8'), certificates } });
+  let bindHost;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const addresses = await dnsLookup('osi-egress-proxy', { all: true, verbatim: true });
+      if (addresses.length >= 1 && isIP(addresses[0].address) !== 0) {
+        bindHost = addresses[0].address;
+        break;
+      }
+    } catch (e) { /* DNS may not be ready yet */ }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!bindHost) deny('internal proxy bind identity is ambiguous');
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen({ host: '0.0.0.0', port: 3128, exclusive: true }, resolve);
+    server.listen({ host: bindHost, port: 3128, exclusive: true }, resolve);
   });
 }
 
