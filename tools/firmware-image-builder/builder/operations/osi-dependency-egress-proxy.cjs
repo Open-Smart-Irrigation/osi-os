@@ -751,7 +751,7 @@ async function proxyStatus(host, credential) {
       host,
       port: 3128,
       method: 'GET',
-      path: 'http://osi-proxy.invalid/ready',
+      path: '/ready',
       headers: credential === null ? {} : { 'proxy-authorization': proxyAuthorization(credential) },
       timeout: 2_000,
     }, (response) => {
