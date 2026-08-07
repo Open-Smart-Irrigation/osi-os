@@ -157,6 +157,14 @@ down where the next person will trip.
   match count, where `-c` overrides `-o` and silently counts *lines*. Both exited 0.
   Before trusting a check, make it fail on purpose: run it against a known-bad input
   and confirm it goes red. If it cannot be made to fail, it is not a check.
+- **A contrast ratio must be same-theme, and measured against the surface the thing
+  actually renders on.** Both halves have been got wrong here, in one ruling: a
+  *light* token hex was measured against the *dark* card (giving a token's opposite
+  a fabricated 5.34 and its correct answer a fabricated 1.02), and the element turned
+  out to render on `--surface`, not `--card`, because nobody walked the parent chain.
+  A cross-theme figure is not an inaccurate number, it is a meaningless one — and it
+  reads as authoritative. Read the token's value for the theme you are measuring, and
+  `grep` the ancestors for the background that is really behind the pixel.
 - **Stacked PRs:** merge the base *without* deleting its branch (GitHub auto-CLOSES
   children on base-branch deletion and they cannot be reopened) → rebase the child
   `--onto origin/main <old-base-sha>` → force-push → retarget → merge child → then
