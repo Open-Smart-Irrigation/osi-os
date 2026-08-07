@@ -150,6 +150,13 @@ down where the next person will trip.
 - **Never assert success on text you didn't produce.** Check exit codes directly;
   in pipelines the last command wins. In fish, `$status`; in scripts, `set -eu` and
   explicit `ls-remote --exit-code`-style confirmation for remote effects.
+- **A verification command that can pass without examining anything is worse than
+  none** — it manufactures confidence and survives review. Two in one slice: a
+  "no mutating handlers changed" proof used bare `git diff` with no rev-range, which
+  post-commit inspects zero lines and always passes; and `grep -coE` was used for a
+  match count, where `-c` overrides `-o` and silently counts *lines*. Both exited 0.
+  Before trusting a check, make it fail on purpose: run it against a known-bad input
+  and confirm it goes red. If it cannot be made to fail, it is not a check.
 - **Stacked PRs:** merge the base *without* deleting its branch (GitHub auto-CLOSES
   children on base-branch deletion and they cannot be reopened) → rebase the child
   `--onto origin/main <old-base-sha>` → force-push → retarget → merge child → then
