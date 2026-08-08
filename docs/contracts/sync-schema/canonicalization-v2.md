@@ -4,9 +4,10 @@ V2 is a separate contract. It does not alter the V1 sync-event or command
 canonicalization rules and does not authorize a V2 producer or issuer.
 
 Canonical bytes are compact UTF-8 JSON. Object property names are sorted in
-ascending Unicode code-point order recursively; array order is preserved. JSON
-numbers use their shortest non-exponent decimal representation, `-0` becomes
-`0`, and non-finite values are invalid.
+ascending UTF-16 code-unit order recursively, matching ECMAScript default sort
+and Java `String.compareTo`; array order is preserved. Numbers use fixed-point
+decimal notation with no exponent, `-0` becomes `0`, and non-finite values are
+invalid.
 
 `mutation_uuid`, `workspace_uuid`, resource UUIDs, result UUIDs, and UUIDs in
 the V2 entry payload are lowercase hyphenated UUIDs. `recorded_at` and
