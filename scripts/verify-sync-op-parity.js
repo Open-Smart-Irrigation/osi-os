@@ -107,6 +107,21 @@ const JS_MODULE_OWNED_EVENT_OPS = new Set([
   // osi-valve-control/runtime.test.js and cancel.test.js. cloud full-parity Task P4-E1.
   'VALVE_ACTUATION_ARCHIVED',
 ]);
+const V2_CONTRACT_FILES = [
+  'journal-v2.schema.json',
+  'journal-v2-golden.json',
+  'canonicalization-v2.md',
+];
+
+function verifyV2ContractFiles(root = REPO_ROOT) {
+  const directory = path.join(root, 'docs/contracts/sync-schema');
+  for (const name of V2_CONTRACT_FILES) {
+    const file = path.join(directory, name);
+    if (!fs.existsSync(file) || fs.statSync(file).size === 0) {
+      throw new Error(`missing or empty V2 contract file: ${name}`);
+    }
+  }
+}
 
 function readUtf8(file) {
   return fs.readFileSync(file, 'utf8');
@@ -1473,6 +1488,7 @@ function checkSyncOpParity(options = {}) {
 }
 
 function main() {
+  verifyV2ContractFiles();
   const serverSource = process.argv[2]
     ? (path.isAbsolute(process.argv[2]) ? process.argv[2] : path.resolve(process.cwd(), process.argv[2]))
     : resolveDefaultServerSource(REPO_ROOT);
@@ -1504,4 +1520,5 @@ module.exports = {
   extractSqlOps,
   payloadHasTopLevelContractVersion,
   resolveDefaultServerSource,
+  verifyV2ContractFiles,
 };
