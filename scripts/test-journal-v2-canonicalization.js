@@ -27,16 +27,17 @@ for (const [kind, hash] of [
   assert.ok(Array.isArray(vectors) && vectors.length > 0, `${kind} envelope vectors must exist`);
   for (const vector of vectors) {
     const { payload_sha256: _payloadSha256, ...hashInput } = vector.input;
-    assert.equal(canonicalizer.canonicalize(hashInput), vector.canonical_hash_input, `${vector.name} bytes`);
+    const declaredHashInput = kind === 'mutation' ? hashInput : vector.input.payload;
+    assert.equal(canonicalizer.canonicalize(declaredHashInput), vector.canonical_hash_input, `${vector.name} bytes`);
     assert.equal(hash(vector.input), vector.payload_sha256, `${vector.name} hash`);
   }
 }
 
 for (const vector of golden.rejection_vectors) {
   const validate = vector.target === 'mutation'
-    ? () => canonicalizer.hashMutation(vector.input)
+    ? () => canonicalizer.validateMutation(vector.input)
     : vector.target === 'replication'
-      ? () => canonicalizer.hashReplication(vector.input)
+      ? () => canonicalizer.validateReplication(vector.input)
       : () => canonicalizer.validateReplicationBatch(vector.input);
   assert.throws(validate, new RegExp(vector.error), vector.name);
 }

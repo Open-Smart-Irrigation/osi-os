@@ -7,7 +7,10 @@ Canonical bytes are compact UTF-8 JSON. Object property names are sorted in
 ascending UTF-16 code-unit order recursively, matching ECMAScript default sort
 and Java `String.compareTo`; array order is preserved. Numbers use fixed-point
 decimal notation with no exponent, `-0` becomes `0`, and non-finite values are
-invalid.
+invalid. JSON integer fields are bounded to the interoperable safe range
+`-9007199254740991` through `9007199254740991`; fields with stricter
+nonnegative or positive bounds retain those bounds. Replication sequence is the
+existing decimal string bounded by signed `BIGINT`.
 
 `mutation_uuid`, `workspace_uuid`, resource UUIDs, result UUIDs, and UUIDs in
 the V2 entry payload are lowercase hyphenated UUIDs. `recorded_at` and
@@ -17,18 +20,20 @@ hex characters.
 
 For a mutation, `payload_sha256` is SHA-256 of the canonical bytes of the
 envelope with `payload_sha256` omitted. For replication, it is SHA-256 of the
-canonical bytes of the envelope with `payload_sha256` omitted. The hash input
-never contains blob bytes, credentials, local paths, object-store keys, or
-transport URLs. Domain URI strings such as `scheme_uri` remain metadata, not a
-transfer mechanism. The digest is lower-hex.
+canonical bytes of `envelope.payload` only. Sequence, workspace, kind, and
+delivery timestamps are not part of a replication digest. The hash input never
+contains blob bytes, credentials, local paths, object-store keys, or transport
+URLs. Domain URI strings such as `scheme_uri` remain metadata, not a transfer
+mechanism. The digest is lower-hex.
 
 Schema validation and semantic validation are both required before a V2
-envelope is accepted. The companion validators enforce identity equality,
-next-version arithmetic, entry and mapping order, value-status consistency,
-barrier-set ordering and hashing, plot projection equality, signed `BIGINT`
-sequence bounds, and numerically ascending replication batches. Draft-07
-cannot express those relationships without duplicating values outside their
-canonical fields.
+envelope is accepted. After structural and cross-field validation, the
+companion validator recomputes the declared digest and rejects a mismatch.
+Other semantic checks enforce identity equality, next-version arithmetic,
+entry and mapping order, value-status consistency, barrier-set ordering and
+hashing, plot projection equality, signed `BIGINT` sequence bounds, and
+numerically ascending replication batches. Draft-07 cannot express those
+relationships without duplicating values outside their canonical fields.
 
 `journal-v2-golden.json` contains four vector groups. `vectors` fixes generic
 canonical JSON behavior. `mutation_vectors` and `replication_vectors` contain
