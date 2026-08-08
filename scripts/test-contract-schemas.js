@@ -1028,10 +1028,12 @@ reportCheck(
 
 // Contract resources must match edge runtime device and schedule enums.
 const resourcesSchema = loadSchema('resources.schema.json');
+const journalV2Schema = loadSchema('journal-v2.schema.json');
 for (const [name, schema] of [
     ['commands.schema.json', cmdSchema],
     ['events.schema.json', eventsSchema],
     ['resources.schema.json', resourcesSchema],
+    ['journal-v2.schema.json', journalV2Schema],
 ]) {
     const errors = schemaStructureErrors(schema);
     reportCheck(
@@ -1040,6 +1042,12 @@ for (const [name, schema] of [
         `${name} schema structure is invalid: ${errors.join('; ')}`
     );
 }
+reportCheck(
+    journalV2Schema.title === 'Field Journal V2 Replication Contract' &&
+    Array.isArray(journalV2Schema.oneOf) && journalV2Schema.oneOf.length === 3,
+    'journal-v2 schema is a separate three-envelope contract',
+    'journal-v2 schema must expose exactly mutation, replication, and result envelopes'
+);
 const deviceTypes = resourcesSchema.definitions.Device.properties.type_id.enum || [];
 for (const type of ['TEKTELIC_CLOVER', 'SENSECAP_S2120']) {
     if (!deviceTypes.includes(type)) {
@@ -2689,3 +2697,5 @@ for (const command of [
 
 if (!ok) process.exit(1);
 console.log('PASS: contract schema checks pass');
+
+module.exports = { contractValidationErrors, schemaStructureErrors };

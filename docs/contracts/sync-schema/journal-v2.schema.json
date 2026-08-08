@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://contracts.opensmartirrigation.org/sync-schema/journal-v2.schema.json",
+  "title": "Field Journal V2 Replication Contract",
+  "description": "Schema acceptance only. V2 neither enables an edge producer nor a cloud issuer.",
+  "oneOf": [
+    { "$ref": "#/definitions/mutationEnvelope" },
+    { "$ref": "#/definitions/replicationEnvelope" },
+    { "$ref": "#/definitions/mutationResult" }
+  ],
+  "definitions": {
+    "canonicalUuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "canonicalTimestamp": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$", "format": "date-time" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "gatewayEui": { "type": "string", "pattern": "^[0-9A-F]{16}$" },
+    "baseVersion": { "type": "integer", "minimum": 0 },
+    "fullEntryCandidate": {
+      "type": "object",
+      "required": ["entry"],
+      "additionalProperties": false,
+      "properties": { "entry": { "$ref": "#/definitions/v2Entry" } }
+    },
+    "v2Entry": {
+      "description": "Versioned canonical entry payload. Its fields remain extensible only through a future V2 entry-definition revision.",
+      "type": "object",
+      "required": ["entry_uuid"],
+      "additionalProperties": true,
+      "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" } }
+    },
+    "tombstoneCandidate": {
+      "type": "object",
+      "required": ["deleted_at", "void_reason"],
+      "additionalProperties": false,
+      "properties": {
+        "deleted_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "void_reason": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "referenceCandidate": {
+      "type": "object",
+      "required": ["entry"],
+      "additionalProperties": false,
+      "properties": { "entry": { "$ref": "#/definitions/v2Entry" } }
+    },
+    "commonMutation": {
+      "type": "object",
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "additionalProperties": false,
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "type": "string" },
+        "resource": { "type": "object" },
+        "candidate": { "type": "object" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "type": "string", "enum": ["cloud-ui", "edge-ui", "edge-worker"] },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "entryCreate": {
+      "allOf": [
+        { "$ref": "#/definitions/commonMutation" },
+        { "properties": {
+          "operation": { "const": "ENTRY_CREATE" },
+          "resource": { "type": "object", "required": ["entry_uuid", "base_version"], "additionalProperties": false, "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "const": 0 } } },
+          "candidate": { "$ref": "#/definitions/fullEntryCandidate" },
+          "origin": { "enum": ["cloud-ui", "edge-ui"] }
+        } }
+      ]
+    },
+    "entryCorrect": {
+      "allOf": [
+        { "$ref": "#/definitions/commonMutation" },
+        { "properties": {
+          "operation": { "const": "ENTRY_CORRECT" },
+          "resource": { "type": "object", "required": ["entry_uuid", "base_version"], "additionalProperties": false, "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "type": "integer", "minimum": 1 } } },
+          "candidate": { "$ref": "#/definitions/fullEntryCandidate" },
+          "origin": { "enum": ["cloud-ui", "edge-ui"] }
+        } }
+      ]
+    },
+    "entryVoid": {
+      "allOf": [
+        { "$ref": "#/definitions/commonMutation" },
+        { "properties": {
+          "operation": { "const": "ENTRY_VOID" },
+          "resource": { "type": "object", "required": ["entry_uuid", "base_version"], "additionalProperties": false, "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "type": "integer", "minimum": 1 } } },
+          "candidate": { "$ref": "#/definitions/tombstoneCandidate" },
+          "origin": { "enum": ["cloud-ui", "edge-ui"] }
+        } }
+      ]
+    },
+    "productUpsert": {
+      "allOf": [
+        { "$ref": "#/definitions/commonMutation" },
+        { "properties": {
+          "operation": { "const": "PRODUCT_UPSERT" },
+          "resource": { "type": "object", "required": ["product_uuid", "base_version"], "additionalProperties": false, "properties": { "product_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "$ref": "#/definitions/baseVersion" } } },
+          "candidate": { "$ref": "#/definitions/referenceCandidate" }
+        } }
+      ]
+    },
+    "customVocabUpsert": {
+      "allOf": [
+        { "$ref": "#/definitions/commonMutation" },
+        { "properties": {
+          "operation": { "const": "CUSTOM_VOCAB_UPSERT" },
+          "resource": { "type": "object", "required": ["vocabulary_uuid", "base_version"], "additionalProperties": false, "properties": { "vocabulary_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "$ref": "#/definitions/baseVersion" } } },
+          "candidate": { "$ref": "#/definitions/referenceCandidate" }
+        } }
+      ]
+    },
+    "gatewayOnly": {
+      "allOf": [
+        { "$ref": "#/definitions/commonMutation" },
+        { "properties": {
+          "operation": { "enum": ["PLOT_SNAPSHOT", "CUTOVER_BARRIER_RECEIPT"] },
+          "resource": { "type": "object", "required": ["gateway_device_eui", "base_version"], "additionalProperties": false, "properties": { "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" }, "base_version": { "const": 0 } } },
+          "candidate": { "$ref": "#/definitions/referenceCandidate" },
+          "origin": { "const": "edge-worker" }
+        } }
+      ]
+    },
+    "mutationEnvelope": { "oneOf": [
+      { "$ref": "#/definitions/entryCreate" }, { "$ref": "#/definitions/entryCorrect" }, { "$ref": "#/definitions/entryVoid" }, { "$ref": "#/definitions/productUpsert" }, { "$ref": "#/definitions/customVocabUpsert" }, { "$ref": "#/definitions/gatewayOnly" }
+    ] },
+    "attachmentDescriptor": {
+      "type": "object", "required": ["attachment_uuid", "sha256", "byte_length", "media_type"], "additionalProperties": false,
+      "properties": { "attachment_uuid": { "$ref": "#/definitions/canonicalUuid" }, "sha256": { "$ref": "#/definitions/sha256" }, "byte_length": { "type": "integer", "minimum": 0 }, "media_type": { "type": "string", "minLength": 1 } }
+    },
+    "replicationEnvelope": {
+      "type": "object", "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"], "additionalProperties": false,
+      "properties": {
+        "sequence": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "type": "string", "enum": ["ENTRY_HEAD", "ENTRY_CONFLICT", "PLOT_SNAPSHOT", "REFERENCE_DATA", "CROP_CYCLE_PROJECTION", "ATTACHMENT_DESCRIPTOR", "AUTHORITY_STATE"] },
+        "payload": { "type": "object" }, "payload_sha256": { "$ref": "#/definitions/sha256" }, "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      },
+      "allOf": [{ "if": { "properties": { "kind": { "const": "ATTACHMENT_DESCRIPTOR" } } }, "then": { "properties": { "payload": { "$ref": "#/definitions/attachmentDescriptor" } } } }]
+    },
+    "entryMutationResult": { "type": "object", "required": ["kind", "mutation_uuid", "entry_head_uuid", "entry_revision_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "ENTRY_MUTATION_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "entry_head_uuid": { "$ref": "#/definitions/canonicalUuid" }, "entry_revision_uuid": { "$ref": "#/definitions/canonicalUuid" }, "conflict_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
+    "referenceMutationResult": { "type": "object", "required": ["kind", "mutation_uuid", "resource_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "REFERENCE_MUTATION_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "resource_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
+    "plotSnapshotResult": { "type": "object", "required": ["kind", "mutation_uuid", "snapshot_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "PLOT_SNAPSHOT_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "snapshot_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
+    "cutoverBarrierReceiptResult": { "type": "object", "required": ["kind", "mutation_uuid", "receipt_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "CUTOVER_BARRIER_RECEIPT_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "receipt_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
+    "mutationResult": { "oneOf": [ { "$ref": "#/definitions/entryMutationResult" }, { "$ref": "#/definitions/referenceMutationResult" }, { "$ref": "#/definitions/plotSnapshotResult" }, { "$ref": "#/definitions/cutoverBarrierReceiptResult" } ] }
+  }
+}

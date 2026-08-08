@@ -76,6 +76,21 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // flows.json. The server must still handle it and the schema must declare it.
   'WORK_REQUEST_SUBMITTED',
 ]);
+const V2_CONTRACT_FILES = [
+  'journal-v2.schema.json',
+  'journal-v2-golden.json',
+  'canonicalization-v2.md',
+];
+
+function verifyV2ContractFiles(root = REPO_ROOT) {
+  const directory = path.join(root, 'docs/contracts/sync-schema');
+  for (const name of V2_CONTRACT_FILES) {
+    const file = path.join(directory, name);
+    if (!fs.existsSync(file) || fs.statSync(file).size === 0) {
+      throw new Error(`missing or empty V2 contract file: ${name}`);
+    }
+  }
+}
 
 function readUtf8(file) {
   return fs.readFileSync(file, 'utf8');
@@ -1464,6 +1479,7 @@ function checkSyncOpParity(options = {}) {
 }
 
 function main() {
+  verifyV2ContractFiles();
   let serverSource;
   if (process.argv[2]) {
     serverSource = path.isAbsolute(process.argv[2])
@@ -1519,4 +1535,5 @@ module.exports = {
   resolveDefaultServerSource,
   worktreeMatchedServerSourceCandidates,
   resolveServerSourceWithProvenance,
+  verifyV2ContractFiles,
 };

@@ -1,0 +1,23 @@
+{
+  "format": 2,
+  "vectors": [
+    {
+      "name": "sorted UUID",
+      "input": { "z": 1, "a": "D4FE4B8F-2C58-4D1C-A8C3-9DCE37E6EC90" },
+      "canonical_json": "{\"a\":\"d4fe4b8f-2c58-4d1c-a8c3-9dce37e6ec90\",\"z\":1}",
+      "sha256": "87acb60f51e4e45e41f1db1b6a9dcf44c136f7e1deab296396585b30f8c4ee60"
+    },
+    {
+      "name": "UTC timestamp and EUI",
+      "input": { "recorded_at": "2026-08-08T12:11:12.123456+02:00", "gateway_device_eui": "0016c001f11715e2" },
+      "canonical_json": "{\"gateway_device_eui\":\"0016C001F11715E2\",\"recorded_at\":\"2026-08-08T10:11:12.123Z\"}",
+      "sha256": "3406fb707086a3d114f420e99b63598c29b501983a7f3d1510f9ced14d49ce4e"
+    },
+    {
+      "name": "nested keys and negative zero",
+      "input": { "n": 0, "items": [{ "b": 2, "a": 1 }, null] },
+      "canonical_json": "{\"items\":[{\"a\":1,\"b\":2},null],\"n\":0}",
+      "sha256": "381ae063b5b7e13758802ce901bf49241c49d8464696570fdbdb894e55641c75"
+    }
+  ]
+}
