@@ -18,6 +18,12 @@
       "input": { "n": 0, "items": [{ "b": 2, "a": 1 }, null] },
       "canonical_json": "{\"items\":[{\"a\":1,\"b\":2},null],\"n\":0}",
       "sha256": "381ae063b5b7e13758802ce901bf49241c49d8464696570fdbdb894e55641c75"
+    },
+    {
+      "name": "fixed decimals and UTF-16 supplementary boundary",
+      "input": { "small": 0.0000001, "large": 1000000000000000000000, "negativeZero": 0, "\uE000": 2, "𐀀": 1 },
+      "canonical_json": "{\"large\":1000000000000000000000,\"negativeZero\":0,\"small\":0.0000001,\"𐀀\":1,\"\":2}",
+      "sha256": "e532fc9ea85f4ee07c7c3efb0edca8fff3243bb9f4ba661bff89d23a936ede50"
     }
   ]
 }

@@ -16,25 +16,35 @@ function normalizeString(value) {
   return value;
 }
 
-function normalize(value) {
-  if (value === null || typeof value === 'boolean') return value;
-  if (typeof value === 'string') return normalizeString(value);
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new TypeError('canonical JSON forbids non-finite numbers');
-    return Object.is(value, -0) ? 0 : value;
-  }
-  if (Array.isArray(value)) return value.map(normalize);
-  if (!value || typeof value !== 'object') throw new TypeError(`canonical JSON cannot encode ${typeof value}`);
-  const result = {};
-  for (const key of Object.keys(value).sort()) {
-    if (value[key] === undefined) throw new TypeError(`canonical JSON forbids undefined at ${key}`);
-    result[key] = normalize(value[key]);
-  }
-  return result;
+function fixedNumber(value) {
+  if (!Number.isFinite(value)) throw new TypeError('canonical JSON forbids non-finite numbers');
+  if (Object.is(value, -0) || value === 0) return '0';
+  const text = String(value);
+  if (!/[eE]/.test(text)) return text;
+  const [coefficient, exponentText] = text.toLowerCase().split('e');
+  const negative = coefficient.startsWith('-');
+  const unsigned = negative ? coefficient.slice(1) : coefficient;
+  const digits = unsigned.replace('.', '');
+  const fraction = unsigned.includes('.') ? unsigned.length - unsigned.indexOf('.') - 1 : 0;
+  const power = Number(exponentText) - fraction;
+  let fixed;
+  if (power >= 0) fixed = digits + '0'.repeat(power);
+  else if (digits.length + power > 0) fixed = digits.slice(0, digits.length + power) + '.' + digits.slice(digits.length + power);
+  else fixed = '0.' + '0'.repeat(-(digits.length + power)) + digits;
+  return (negative ? '-' : '') + fixed.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
 }
 
 function canonicalize(value) {
-  return JSON.stringify(normalize(value));
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return fixedNumber(value);
+  if (typeof value === 'string') return JSON.stringify(normalizeString(value));
+  if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']';
+  if (!value || typeof value !== 'object') throw new TypeError(`canonical JSON cannot encode ${typeof value}`);
+  return '{' + Object.keys(value).sort().map((key) => {
+    if (value[key] === undefined) throw new TypeError(`canonical JSON forbids undefined at ${key}`);
+    return JSON.stringify(key) + ':' + canonicalize(value[key]);
+  }).join(',') + '}';
 }
 
 function sha256(value) {
