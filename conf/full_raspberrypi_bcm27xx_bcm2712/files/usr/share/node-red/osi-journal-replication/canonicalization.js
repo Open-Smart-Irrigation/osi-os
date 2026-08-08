@@ -10,6 +10,7 @@ const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const CANONICAL_EUI = /^[0-9A-F]{16}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_SEQUENCE = 9223372036854775807n;
+const MAX_SAFE_INTEGER = 9007199254740991;
 const USER_ORIGINS = new Set(['cloud-ui', 'edge-ui']);
 const FORBIDDEN_TRANSPORT_FIELDS = new Set([
   'blob', 'blob_bytes', 'blob_uuid', 'object_key', 'object_store_path', 'object_store_url',
@@ -84,10 +85,19 @@ function assertNoTransportFields(value, path) {
 }
 
 function assertPayloadHash(value) {
-  if (value.payload_sha256 !== undefined &&
-      (typeof value.payload_sha256 !== 'string' || !SHA256.test(value.payload_sha256))) {
+  if (typeof value.payload_sha256 !== 'string' || !SHA256.test(value.payload_sha256)) {
     fail('payload_sha256 must be 64 lowercase hex characters');
   }
+}
+
+function assertInteger(value, minimum, maximum, message) {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    fail(message + '; expected a safe integer');
+  }
+}
+
+function assertDeclaredHash(envelope, actual) {
+  if (envelope.payload_sha256 !== actual) fail('payload_sha256 mismatch');
 }
 
 function assertUuid(value, field) {
@@ -121,6 +131,7 @@ function assertEntryValues(entry) {
     'entry.values'
   );
   for (const value of entry.values) {
+    assertInteger(value.group_index, 0, MAX_SAFE_INTEGER, 'entry value group_index must be nonnegative');
     const observed = value.value_status === 'observed';
     const hasNumber = typeof value.value_num === 'number' && Number.isFinite(value.value_num);
     const hasText = typeof value.value_text === 'string';
@@ -134,11 +145,18 @@ function assertEntryValues(entry) {
 function assertEntry(entry) {
   object(entry, 'entry');
   assertUuid(entry.entry_uuid, 'entry.entry_uuid');
+  assertInteger(entry.template_version, 1, MAX_SAFE_INTEGER, 'entry template_version must be positive');
+  assertInteger(entry.layout_version, 1, MAX_SAFE_INTEGER, 'entry layout_version must be positive');
+  assertInteger(entry.catalog_version, 1, MAX_SAFE_INTEGER, 'entry catalog_version must be positive');
+  assertInteger(entry.occurred_utc_offset_minutes, -840, 840, 'entry occurred_utc_offset_minutes is out of range');
+  assertInteger(entry.sync_version, 0, MAX_SAFE_INTEGER, 'entry sync_version must be nonnegative');
   assertEntryValues(entry);
 }
 
 function assertProduct(product, resource) {
   object(product, 'product');
+  assertInteger(product.active, 0, 1, 'product active must be zero or one');
+  assertInteger(product.sync_version, 1, MAX_SAFE_INTEGER, 'product sync_version must be positive');
   if (resource && product.product_uuid !== resource.product_uuid) fail('product resource identity mismatch');
   if (resource && product.sync_version !== resource.base_version + 1) fail('product sync_version must equal base_version + 1');
 }
@@ -149,24 +167,32 @@ function mappingKey(mapping) {
 
 function assertCustomVocabulary(vocab, resource) {
   object(vocab, 'custom_vocab');
+  assertInteger(vocab.active, 0, 1, 'custom vocabulary active must be zero or one');
+  assertInteger(vocab.sort_order, -MAX_SAFE_INTEGER, MAX_SAFE_INTEGER, 'custom vocabulary sort_order is out of range');
+  assertInteger(vocab.sync_version, 1, MAX_SAFE_INTEGER, 'custom vocabulary sync_version must be positive');
   if (resource && vocab.custom_field_uuid !== resource.custom_field_uuid) fail('custom vocabulary resource identity mismatch');
   if (vocab.code !== 'custom.' + vocab.custom_field_uuid) fail('custom vocabulary code must derive from custom_field_uuid');
   if (resource && vocab.sync_version !== resource.base_version + 1) fail('custom vocabulary sync_version must equal base_version + 1');
   if (!Array.isArray(vocab.mappings)) fail('custom vocabulary mappings must be an array');
   assertSortedUnique(vocab.mappings, mappingKey, 'custom vocabulary mappings');
   for (const mapping of vocab.mappings) {
+    assertInteger(mapping.active, 0, 1, 'custom vocabulary mapping active must be zero or one');
     if (mapping.term_code !== vocab.code) fail('custom vocabulary mapping term_code mismatch');
   }
 }
 
 function assertPlot(plot, resource) {
   object(plot, 'plot');
+  assertInteger(plot.active, 0, 1, 'plot active must be zero or one');
+  assertInteger(plot.sync_version, 0, MAX_SAFE_INTEGER, 'plot sync_version must be nonnegative');
+  const settings = object(plot.settings, 'plot settings');
+  assertInteger(settings.sync_version, 0, MAX_SAFE_INTEGER, 'plot settings sync_version must be nonnegative');
   if (resource && plot.plot_uuid !== resource.plot_uuid) fail('plot resource identity mismatch');
   if (resource && plot.gateway_device_eui !== resource.gateway_device_eui) fail('plot gateway identity mismatch');
   if (resource && plot.sync_version !== resource.projection_version) fail('plot projection_version mismatch');
 }
 
-function validateMutation(envelope) {
+function validateMutationStructure(envelope) {
   object(envelope, 'mutation envelope');
   assertNoTransportFields(envelope, '$');
   assertPayloadHash(envelope);
@@ -180,8 +206,9 @@ function validateMutation(envelope) {
     case 'ENTRY_CORRECT': {
       assertUuid(resource.entry_uuid, 'resource.entry_uuid');
       if (envelope.operation === 'ENTRY_CREATE' && resource.base_version !== 0) fail('ENTRY_CREATE base_version must be zero');
-      if (envelope.operation === 'ENTRY_CORRECT' &&
-          (!Number.isInteger(resource.base_version) || resource.base_version < 1)) fail('ENTRY_CORRECT base_version must be positive');
+      if (envelope.operation === 'ENTRY_CORRECT') {
+        assertInteger(resource.base_version, 1, MAX_SAFE_INTEGER, 'ENTRY_CORRECT base_version must be positive');
+      }
       if (!USER_ORIGINS.has(envelope.origin)) fail('entry mutation origin must be cloud-ui or edge-ui');
       const entry = object(candidate.entry, 'candidate.entry');
       assertEntry(entry);
@@ -195,25 +222,25 @@ function validateMutation(envelope) {
     }
     case 'ENTRY_VOID':
       assertUuid(resource.entry_uuid, 'resource.entry_uuid');
-      if (!Number.isInteger(resource.base_version) || resource.base_version < 1) fail('ENTRY_VOID base_version must be positive');
+      assertInteger(resource.base_version, 1, MAX_SAFE_INTEGER, 'ENTRY_VOID base_version must be positive');
       if (!USER_ORIGINS.has(envelope.origin)) fail('entry mutation origin must be cloud-ui or edge-ui');
       break;
     case 'PRODUCT_UPSERT':
       assertUuid(resource.product_uuid, 'resource.product_uuid');
-      if (!Number.isInteger(resource.base_version) || resource.base_version < 0) fail('product base_version must be nonnegative');
+      assertInteger(resource.base_version, 0, MAX_SAFE_INTEGER, 'product base_version must be nonnegative');
       if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
       assertProduct(candidate.product, resource);
       break;
     case 'CUSTOM_VOCAB_UPSERT':
       assertUuid(resource.custom_field_uuid, 'resource.custom_field_uuid');
-      if (!Number.isInteger(resource.base_version) || resource.base_version < 0) fail('custom vocabulary base_version must be nonnegative');
+      assertInteger(resource.base_version, 0, MAX_SAFE_INTEGER, 'custom vocabulary base_version must be nonnegative');
       if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
       assertCustomVocabulary(candidate.custom_vocab, resource);
       break;
     case 'PLOT_SNAPSHOT':
       assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
       assertUuid(resource.plot_uuid, 'resource.plot_uuid');
-      if (!Number.isInteger(resource.projection_version) || resource.projection_version < 1) fail('plot projection_version must be positive');
+      assertInteger(resource.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
       if (envelope.origin !== 'edge-worker') fail('plot snapshot origin must be edge-worker');
       assertPlot(candidate.plot, resource);
       break;
@@ -240,6 +267,7 @@ function assertSequence(sequence) {
 
 function assertCropCycle(cycle) {
   object(cycle, 'crop cycle projection');
+  assertInteger(cycle.sync_version, 0, MAX_SAFE_INTEGER, 'crop cycle sync_version must be nonnegative');
   if (!Array.isArray(cycle.plots)) fail('crop cycle plots must be an array');
   assertSortedUnique(cycle.plots, (plot) => plot.plot_uuid, 'crop cycle plots');
   for (const plot of cycle.plots) {
@@ -253,7 +281,7 @@ function assertCropCycle(cycle) {
   }
 }
 
-function validateReplication(envelope) {
+function validateReplicationStructure(envelope) {
   object(envelope, 'replication envelope');
   assertNoTransportFields(envelope, '$');
   assertPayloadHash(envelope);
@@ -269,6 +297,8 @@ function validateReplication(envelope) {
     case 'ENTRY_CONFLICT':
       assertEntry(payload.current_entry);
       assertEntry(payload.candidate_entry);
+      assertInteger(payload.base_version, 1, MAX_SAFE_INTEGER, 'conflict base_version must be positive');
+      assertInteger(payload.current_version, 1, MAX_SAFE_INTEGER, 'conflict current_version must be positive');
       if (payload.current_entry.entry_uuid !== payload.entry_head_uuid ||
           payload.candidate_entry.entry_uuid !== payload.entry_head_uuid) fail('entry conflict identity mismatch');
       if (payload.current_entry.sync_version !== payload.current_version) fail('current conflict version mismatch');
@@ -276,6 +306,7 @@ function validateReplication(envelope) {
       if (payload.current_version <= payload.base_version) fail('conflict current_version must exceed base_version');
       break;
     case 'PLOT_SNAPSHOT':
+      assertInteger(payload.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
       assertPlot(payload.plot, {
         plot_uuid: payload.plot.plot_uuid,
         gateway_device_eui: payload.gateway_device_eui,
@@ -291,6 +322,9 @@ function validateReplication(envelope) {
       assertCropCycle(payload);
       break;
     case 'ATTACHMENT_DESCRIPTOR':
+      assertInteger(payload.size_bytes, 0, MAX_SAFE_INTEGER, 'attachment size_bytes must be nonnegative');
+      assertInteger(payload.sync_version, 0, MAX_SAFE_INTEGER, 'attachment sync_version must be nonnegative');
+      break;
     case 'AUTHORITY_STATE':
       break;
     default:
@@ -314,11 +348,35 @@ function validateReplicationBatch(envelopes) {
   return true;
 }
 
-function hashEnvelope(envelope, validate) {
-  object(envelope, 'envelope');
-  validate(envelope);
+function mutationHash(envelope) {
   const { payload_sha256, ...hashInput } = envelope;
   return sha256(hashInput);
+}
+
+function replicationHash(envelope) {
+  return sha256(envelope.payload);
+}
+
+function validateMutation(envelope) {
+  validateMutationStructure(envelope);
+  assertDeclaredHash(envelope, mutationHash(envelope));
+  return true;
+}
+
+function validateReplication(envelope) {
+  validateReplicationStructure(envelope);
+  assertDeclaredHash(envelope, replicationHash(envelope));
+  return true;
+}
+
+function hashMutation(envelope) {
+  validateMutationStructure(envelope);
+  return mutationHash(envelope);
+}
+
+function hashReplication(envelope) {
+  validateReplicationStructure(envelope);
+  return replicationHash(envelope);
 }
 
 module.exports = {
@@ -327,6 +385,6 @@ module.exports = {
   validateMutation,
   validateReplication,
   validateReplicationBatch,
-  hashMutation: (envelope) => hashEnvelope(envelope, validateMutation),
-  hashReplication: (envelope) => hashEnvelope(envelope, validateReplication),
+  hashMutation,
+  hashReplication,
 };

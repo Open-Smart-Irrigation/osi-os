@@ -49,9 +49,9 @@
     },
     "nullableString": { "type": ["string", "null"] },
     "nullableNumber": { "type": ["number", "null"] },
-    "binaryFlag": { "type": "integer", "enum": [0, 1] },
-    "baseVersion": { "type": "integer", "minimum": 0 },
-    "positiveVersion": { "type": "integer", "minimum": 1 },
+    "binaryFlag": { "type": "integer", "minimum": 0, "maximum": 1, "enum": [0, 1] },
+    "baseVersion": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "positiveVersion": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
     "sequence": {
       "type": "string",
       "pattern": "^[1-9][0-9]{0,18}$"
@@ -73,7 +73,7 @@
       ],
       "properties": {
         "attribute_code": { "type": "string", "minLength": 1 },
-        "group_index": { "type": "integer", "minimum": 0 },
+        "group_index": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "value_status": {
           "type": "string",
           "enum": ["observed", "not_observed", "not_applicable", "below_detection"]
@@ -150,7 +150,7 @@
         "void_reason": { "type": ["string", "null"], "maxLength": 4000 },
         "note": { "type": ["string", "null"], "maxLength": 4000 },
         "context_json": { "$ref": "#/definitions/nullableString" },
-        "sync_version": { "type": "integer", "minimum": 0 },
+        "sync_version": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
         "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
         "updated_at": { "$ref": "#/definitions/canonicalTimestamp" },
@@ -288,7 +288,7 @@
         "gateway_device_eui": { "$ref": "#/definitions/nullableGatewayEui" },
         "custom_field_uuid": { "$ref": "#/definitions/canonicalUuid" },
         "active": { "$ref": "#/definitions/binaryFlag" },
-        "sort_order": { "type": "integer" },
+        "sort_order": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
         "sync_version": { "$ref": "#/definitions/positiveVersion" },
         "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
         "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
@@ -321,7 +321,7 @@
         "layout_code": { "type": "string", "minLength": 1 },
         "updated_at": { "$ref": "#/definitions/canonicalTimestamp" },
         "updated_by_principal_uuid": { "$ref": "#/definitions/canonicalUuid" },
-        "sync_version": { "type": "integer", "minimum": 0 },
+        "sync_version": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "context_json": { "$ref": "#/definitions/nullableString" }
       }
     },
@@ -343,7 +343,7 @@
         "crop_hint": { "$ref": "#/definitions/nullableString" },
         "area_m2": { "type": ["number", "null"], "minimum": 0 },
         "active": { "$ref": "#/definitions/binaryFlag" },
-        "sync_version": { "type": "integer", "minimum": 0 },
+        "sync_version": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "owner_user_uuid": { "$ref": "#/definitions/canonicalUuid" },
         "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
         "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
@@ -595,7 +595,7 @@
         "starts_on": { "$ref": "#/definitions/localDate" },
         "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
         "created_by_principal_uuid": { "$ref": "#/definitions/canonicalUuid" },
-        "sync_version": { "type": "integer", "minimum": 0 },
+        "sync_version": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
         "updated_at": { "$ref": "#/definitions/canonicalTimestamp" },
         "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
@@ -622,7 +622,7 @@
         "parent_disposition": { "type": "string", "enum": ["canonical", "conflict"] },
         "original_filename": { "$ref": "#/definitions/nullableString" },
         "mime": { "type": "string", "minLength": 1 },
-        "size_bytes": { "type": "integer", "minimum": 0 },
+        "size_bytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "sha256": { "$ref": "#/definitions/sha256" },
         "state": {
           "type": "string",
@@ -632,7 +632,7 @@
           ]
         },
         "captured_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
-        "sync_version": { "type": "integer", "minimum": 0 },
+        "sync_version": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
         "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" }
       }
