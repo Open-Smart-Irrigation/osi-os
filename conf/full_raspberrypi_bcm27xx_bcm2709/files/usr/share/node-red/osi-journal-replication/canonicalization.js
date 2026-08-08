@@ -5,6 +5,17 @@ const crypto = require('node:crypto');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
 const EUI = /^[0-9a-f]{16}$/i;
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const CANONICAL_EUI = /^[0-9A-F]{16}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const MAX_SEQUENCE = 9223372036854775807n;
+const USER_ORIGINS = new Set(['cloud-ui', 'edge-ui']);
+const FORBIDDEN_TRANSPORT_FIELDS = new Set([
+  'blob', 'blob_bytes', 'blob_uuid', 'object_key', 'object_store_path', 'object_store_url',
+  'remote_object_key', 'local_path', 'local_relpath', 'credential', 'credentials',
+  'access_key', 'secret_key', 'signed_url', 'download_url', 'upload_url', 'url',
+]);
 
 function normalizeString(value) {
   if (UUID.test(value)) return value.toLowerCase();
@@ -51,10 +62,271 @@ function sha256(value) {
   return crypto.createHash('sha256').update(canonicalize(value), 'utf8').digest('hex');
 }
 
-function hashEnvelope(envelope) {
-  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) throw new TypeError('envelope must be an object');
+function fail(message) {
+  throw new TypeError('journal V2 semantic validation: ' + message);
+}
+
+function object(value, field) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(field + ' must be an object');
+  return value;
+}
+
+function assertNoTransportFields(value, path) {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoTransportFields(item, `${path}[${index}]`));
+    return;
+  }
+  for (const [key, member] of Object.entries(value)) {
+    if (FORBIDDEN_TRANSPORT_FIELDS.has(key)) fail(`${path}.${key} is forbidden transport data`);
+    assertNoTransportFields(member, `${path}.${key}`);
+  }
+}
+
+function assertPayloadHash(value) {
+  if (value.payload_sha256 !== undefined &&
+      (typeof value.payload_sha256 !== 'string' || !SHA256.test(value.payload_sha256))) {
+    fail('payload_sha256 must be 64 lowercase hex characters');
+  }
+}
+
+function assertUuid(value, field) {
+  if (typeof value !== 'string' || !CANONICAL_UUID.test(value)) fail(field + ' must be a canonical UUID');
+}
+
+function assertTimestamp(value, field) {
+  if (typeof value !== 'string' || !CANONICAL_TIMESTAMP.test(value) || !Number.isFinite(Date.parse(value))) {
+    fail(field + ' must be a canonical UTC timestamp');
+  }
+}
+
+function assertEui(value, field) {
+  if (typeof value !== 'string' || !CANONICAL_EUI.test(value)) fail(field + ' must be an uppercase EUI64');
+}
+
+function assertSortedUnique(items, key, field) {
+  let previous = null;
+  for (const item of items) {
+    const current = key(item);
+    if (previous !== null && previous >= current) fail(field + ' must be sorted and unique');
+    previous = current;
+  }
+}
+
+function assertEntryValues(entry) {
+  if (!Array.isArray(entry.values)) fail('entry.values must be an array');
+  assertSortedUnique(
+    entry.values,
+    (value) => String(value.group_index).padStart(20, '0') + '\u0000' + value.attribute_code,
+    'entry.values'
+  );
+  for (const value of entry.values) {
+    const observed = value.value_status === 'observed';
+    const hasNumber = typeof value.value_num === 'number' && Number.isFinite(value.value_num);
+    const hasText = typeof value.value_text === 'string';
+    if (observed && hasNumber === hasText) fail('observed entry value must contain exactly one numeric or text value');
+    if (!observed && (value.value_num !== null || value.value_text !== null)) {
+      fail('non-observed entry value must contain null values');
+    }
+  }
+}
+
+function assertEntry(entry) {
+  object(entry, 'entry');
+  assertUuid(entry.entry_uuid, 'entry.entry_uuid');
+  assertEntryValues(entry);
+}
+
+function assertProduct(product, resource) {
+  object(product, 'product');
+  if (resource && product.product_uuid !== resource.product_uuid) fail('product resource identity mismatch');
+  if (resource && product.sync_version !== resource.base_version + 1) fail('product sync_version must equal base_version + 1');
+}
+
+function mappingKey(mapping) {
+  return mapping.scheme_uri + '\u0000' + mapping.mapping_role + '\u0000' + mapping.external_id;
+}
+
+function assertCustomVocabulary(vocab, resource) {
+  object(vocab, 'custom_vocab');
+  if (resource && vocab.custom_field_uuid !== resource.custom_field_uuid) fail('custom vocabulary resource identity mismatch');
+  if (vocab.code !== 'custom.' + vocab.custom_field_uuid) fail('custom vocabulary code must derive from custom_field_uuid');
+  if (resource && vocab.sync_version !== resource.base_version + 1) fail('custom vocabulary sync_version must equal base_version + 1');
+  if (!Array.isArray(vocab.mappings)) fail('custom vocabulary mappings must be an array');
+  assertSortedUnique(vocab.mappings, mappingKey, 'custom vocabulary mappings');
+  for (const mapping of vocab.mappings) {
+    if (mapping.term_code !== vocab.code) fail('custom vocabulary mapping term_code mismatch');
+  }
+}
+
+function assertPlot(plot, resource) {
+  object(plot, 'plot');
+  if (resource && plot.plot_uuid !== resource.plot_uuid) fail('plot resource identity mismatch');
+  if (resource && plot.gateway_device_eui !== resource.gateway_device_eui) fail('plot gateway identity mismatch');
+  if (resource && plot.sync_version !== resource.projection_version) fail('plot projection_version mismatch');
+}
+
+function validateMutation(envelope) {
+  object(envelope, 'mutation envelope');
+  assertNoTransportFields(envelope, '$');
+  assertPayloadHash(envelope);
+  assertUuid(envelope.mutation_uuid, 'mutation_uuid');
+  assertUuid(envelope.workspace_uuid, 'workspace_uuid');
+  assertTimestamp(envelope.recorded_at, 'recorded_at');
+  const resource = object(envelope.resource, 'resource');
+  const candidate = object(envelope.candidate, 'candidate');
+  switch (envelope.operation) {
+    case 'ENTRY_CREATE':
+    case 'ENTRY_CORRECT': {
+      assertUuid(resource.entry_uuid, 'resource.entry_uuid');
+      if (envelope.operation === 'ENTRY_CREATE' && resource.base_version !== 0) fail('ENTRY_CREATE base_version must be zero');
+      if (envelope.operation === 'ENTRY_CORRECT' &&
+          (!Number.isInteger(resource.base_version) || resource.base_version < 1)) fail('ENTRY_CORRECT base_version must be positive');
+      if (!USER_ORIGINS.has(envelope.origin)) fail('entry mutation origin must be cloud-ui or edge-ui');
+      const entry = object(candidate.entry, 'candidate.entry');
+      assertEntry(entry);
+      if (entry.entry_uuid !== resource.entry_uuid) fail('entry resource identity mismatch');
+      if (entry.origin !== envelope.origin) fail('entry origin must match the envelope');
+      if (entry.recorded_at !== envelope.recorded_at) fail('entry recorded_at must match the envelope');
+      if (entry.status !== 'final') fail('create and correction candidates must be final');
+      const expected = envelope.operation === 'ENTRY_CREATE' ? 1 : resource.base_version + 1;
+      if (entry.sync_version !== expected) fail('entry sync_version must be the next version');
+      break;
+    }
+    case 'ENTRY_VOID':
+      assertUuid(resource.entry_uuid, 'resource.entry_uuid');
+      if (!Number.isInteger(resource.base_version) || resource.base_version < 1) fail('ENTRY_VOID base_version must be positive');
+      if (!USER_ORIGINS.has(envelope.origin)) fail('entry mutation origin must be cloud-ui or edge-ui');
+      break;
+    case 'PRODUCT_UPSERT':
+      assertUuid(resource.product_uuid, 'resource.product_uuid');
+      if (!Number.isInteger(resource.base_version) || resource.base_version < 0) fail('product base_version must be nonnegative');
+      if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
+      assertProduct(candidate.product, resource);
+      break;
+    case 'CUSTOM_VOCAB_UPSERT':
+      assertUuid(resource.custom_field_uuid, 'resource.custom_field_uuid');
+      if (!Number.isInteger(resource.base_version) || resource.base_version < 0) fail('custom vocabulary base_version must be nonnegative');
+      if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
+      assertCustomVocabulary(candidate.custom_vocab, resource);
+      break;
+    case 'PLOT_SNAPSHOT':
+      assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
+      assertUuid(resource.plot_uuid, 'resource.plot_uuid');
+      if (!Number.isInteger(resource.projection_version) || resource.projection_version < 1) fail('plot projection_version must be positive');
+      if (envelope.origin !== 'edge-worker') fail('plot snapshot origin must be edge-worker');
+      assertPlot(candidate.plot, resource);
+      break;
+    case 'CUTOVER_BARRIER_RECEIPT': {
+      assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
+      assertUuid(resource.barrier_uuid, 'resource.barrier_uuid');
+      if (envelope.origin !== 'edge-worker') fail('cutover receipt origin must be edge-worker');
+      const pending = candidate.exact_pending_v1_event_uuids_sorted;
+      if (!Array.isArray(pending)) fail('pending V1 UUID set must be an array');
+      assertSortedUnique(pending, (uuid) => uuid, 'pending V1 UUID set');
+      if (candidate.pending_set_sha256 !== sha256(pending)) fail('pending_set_sha256 mismatch');
+      break;
+    }
+    default:
+      fail('unknown mutation operation');
+  }
+  return true;
+}
+
+function assertSequence(sequence) {
+  if (typeof sequence !== 'string' || !/^[1-9][0-9]*$/.test(sequence)) fail('sequence must be a positive decimal string');
+  if (BigInt(sequence) > MAX_SEQUENCE) fail('sequence exceeds signed BIGINT');
+}
+
+function assertCropCycle(cycle) {
+  object(cycle, 'crop cycle projection');
+  if (!Array.isArray(cycle.plots)) fail('crop cycle plots must be an array');
+  assertSortedUnique(cycle.plots, (plot) => plot.plot_uuid, 'crop cycle plots');
+  for (const plot of cycle.plots) {
+    if (plot.cycle_uuid !== cycle.cycle_uuid) fail('crop cycle plot identity mismatch');
+    const open = plot.ends_on === null;
+    const allCloseFieldsNull = plot.closed_by_entry_uuid === null && plot.close_reason === null;
+    const allCloseFieldsPopulated = plot.closed_by_entry_uuid !== null && plot.close_reason !== null;
+    if ((open && !allCloseFieldsNull) || (!open && !allCloseFieldsPopulated)) {
+      fail('crop cycle close fields must be all null or all populated');
+    }
+  }
+}
+
+function validateReplication(envelope) {
+  object(envelope, 'replication envelope');
+  assertNoTransportFields(envelope, '$');
+  assertPayloadHash(envelope);
+  assertSequence(envelope.sequence);
+  assertUuid(envelope.workspace_uuid, 'workspace_uuid');
+  assertTimestamp(envelope.recorded_at, 'recorded_at');
+  const payload = object(envelope.payload, 'payload');
+  switch (envelope.kind) {
+    case 'ENTRY_HEAD':
+      assertEntry(payload.entry);
+      if (payload.entry_head_uuid !== payload.entry.entry_uuid) fail('entry head identity mismatch');
+      break;
+    case 'ENTRY_CONFLICT':
+      assertEntry(payload.current_entry);
+      assertEntry(payload.candidate_entry);
+      if (payload.current_entry.entry_uuid !== payload.entry_head_uuid ||
+          payload.candidate_entry.entry_uuid !== payload.entry_head_uuid) fail('entry conflict identity mismatch');
+      if (payload.current_entry.sync_version !== payload.current_version) fail('current conflict version mismatch');
+      if (payload.candidate_entry.sync_version !== payload.base_version + 1) fail('candidate conflict version mismatch');
+      if (payload.current_version <= payload.base_version) fail('conflict current_version must exceed base_version');
+      break;
+    case 'PLOT_SNAPSHOT':
+      assertPlot(payload.plot, {
+        plot_uuid: payload.plot.plot_uuid,
+        gateway_device_eui: payload.gateway_device_eui,
+        projection_version: payload.projection_version,
+      });
+      break;
+    case 'REFERENCE_DATA':
+      if (payload.product) assertProduct(payload.product);
+      else if (payload.custom_vocab) assertCustomVocabulary(payload.custom_vocab);
+      else fail('reference payload must contain product or custom_vocab');
+      break;
+    case 'CROP_CYCLE_PROJECTION':
+      assertCropCycle(payload);
+      break;
+    case 'ATTACHMENT_DESCRIPTOR':
+    case 'AUTHORITY_STATE':
+      break;
+    default:
+      fail('unknown replication kind');
+  }
+  return true;
+}
+
+function validateReplicationBatch(envelopes) {
+  if (!Array.isArray(envelopes)) fail('replication batch must be an array');
+  let previous = null;
+  let workspace = null;
+  for (const envelope of envelopes) {
+    validateReplication(envelope);
+    if (workspace !== null && workspace !== envelope.workspace_uuid) fail('replication batch must contain one workspace');
+    workspace = envelope.workspace_uuid;
+    const sequence = BigInt(envelope.sequence);
+    if (previous !== null && sequence <= previous) fail('replication sequences must be numerically ascending');
+    previous = sequence;
+  }
+  return true;
+}
+
+function hashEnvelope(envelope, validate) {
+  object(envelope, 'envelope');
+  validate(envelope);
   const { payload_sha256, ...hashInput } = envelope;
   return sha256(hashInput);
 }
 
-module.exports = { canonicalize, sha256, hashMutation: hashEnvelope, hashReplication: hashEnvelope };
+module.exports = {
+  canonicalize,
+  sha256,
+  validateMutation,
+  validateReplication,
+  validateReplicationBatch,
+  hashMutation: (envelope) => hashEnvelope(envelope, validateMutation),
+  hashReplication: (envelope) => hashEnvelope(envelope, validateReplication),
+};

@@ -9,139 +9,828 @@
     { "$ref": "#/definitions/mutationResult" }
   ],
   "definitions": {
-    "canonicalUuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
-    "canonicalTimestamp": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$", "format": "date-time" },
-    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "gatewayEui": { "type": "string", "pattern": "^[0-9A-F]{16}$" },
+    "canonicalUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "nullableCanonicalUuid": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "canonicalTimestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "format": "date-time"
+    },
+    "nullableCanonicalTimestamp": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "format": "date-time"
+    },
+    "localDate": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "nullableLocalDate": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gatewayEui": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{16}$"
+    },
+    "nullableGatewayEui": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9A-F]{16}$"
+    },
+    "nullableString": { "type": ["string", "null"] },
+    "nullableNumber": { "type": ["number", "null"] },
+    "binaryFlag": { "type": "integer", "enum": [0, 1] },
     "baseVersion": { "type": "integer", "minimum": 0 },
-    "fullEntryCandidate": {
+    "positiveVersion": { "type": "integer", "minimum": 1 },
+    "sequence": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,18}$"
+    },
+    "origin": {
+      "type": "string",
+      "enum": ["cloud-ui", "edge-ui", "edge-worker"]
+    },
+    "userOrigin": {
+      "type": "string",
+      "enum": ["cloud-ui", "edge-ui"]
+    },
+    "entryValue": {
       "type": "object",
-      "required": ["entry"],
       "additionalProperties": false,
-      "properties": { "entry": { "$ref": "#/definitions/v2Entry" } }
+      "required": [
+        "attribute_code", "group_index", "value_status", "value_num", "value_text",
+        "unit_code", "entered_value_num", "entered_unit_code"
+      ],
+      "properties": {
+        "attribute_code": { "type": "string", "minLength": 1 },
+        "group_index": { "type": "integer", "minimum": 0 },
+        "value_status": {
+          "type": "string",
+          "enum": ["observed", "not_observed", "not_applicable", "below_detection"]
+        },
+        "value_num": { "$ref": "#/definitions/nullableNumber" },
+        "value_text": { "type": ["string", "null"], "maxLength": 4096 },
+        "unit_code": { "$ref": "#/definitions/nullableString" },
+        "entered_value_num": { "$ref": "#/definitions/nullableNumber" },
+        "entered_unit_code": { "$ref": "#/definitions/nullableString" }
+      },
+      "oneOf": [
+        {
+          "properties": { "value_status": { "const": "observed" } },
+          "oneOf": [
+            { "properties": { "value_num": { "type": "number" }, "value_text": { "type": "null" } } },
+            { "properties": { "value_num": { "type": "null" }, "value_text": { "type": "string" } } }
+          ]
+        },
+        {
+          "properties": {
+            "value_status": { "enum": ["not_observed", "not_applicable", "below_detection"] },
+            "value_num": { "const": null },
+            "value_text": { "const": null }
+          }
+        }
+      ]
     },
     "v2Entry": {
-      "description": "Versioned canonical entry payload. Its fields remain extensible only through a future V2 entry-definition revision.",
       "type": "object",
-      "required": ["entry_uuid"],
-      "additionalProperties": true,
-      "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" } }
-    },
-    "tombstoneCandidate": {
-      "type": "object",
-      "required": ["deleted_at", "void_reason"],
       "additionalProperties": false,
+      "required": [
+        "contract_version", "entry_uuid", "owner_user_uuid", "author_principal_uuid", "author_label",
+        "plot_uuid", "zone_uuid", "device_eui", "season_uuid", "season_crop", "season_variety",
+        "campaign_uuid", "protocol_code", "protocol_version", "observation_unit_code", "pass_uuid",
+        "batch_uuid", "activity_code", "template_code", "template_version", "layout_code",
+        "layout_version", "catalog_version", "occurred_start", "occurred_end", "occurred_timezone",
+        "occurred_utc_offset_minutes", "recorded_at", "origin", "status", "voided_at",
+        "voided_by_principal_uuid", "void_reason", "note", "context_json", "sync_version",
+        "gateway_device_eui", "created_at", "updated_at", "deleted_at", "values"
+      ],
       "properties": {
-        "deleted_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "contract_version": { "const": 2 },
+        "entry_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "owner_user_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "author_principal_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "author_label": { "type": ["string", "null"], "maxLength": 120 },
+        "plot_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "zone_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "device_eui": { "$ref": "#/definitions/nullableGatewayEui" },
+        "season_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "season_crop": { "$ref": "#/definitions/nullableString" },
+        "season_variety": { "$ref": "#/definitions/nullableString" },
+        "campaign_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "protocol_code": { "$ref": "#/definitions/nullableString" },
+        "protocol_version": { "$ref": "#/definitions/nullableString" },
+        "observation_unit_code": { "$ref": "#/definitions/nullableString" },
+        "pass_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "batch_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "activity_code": { "type": "string", "minLength": 1 },
+        "template_code": { "type": "string", "minLength": 1 },
+        "template_version": { "$ref": "#/definitions/positiveVersion" },
+        "layout_code": { "type": "string", "minLength": 1 },
+        "layout_version": { "$ref": "#/definitions/positiveVersion" },
+        "catalog_version": { "$ref": "#/definitions/positiveVersion" },
+        "occurred_start": { "$ref": "#/definitions/canonicalTimestamp" },
+        "occurred_end": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "occurred_timezone": { "type": "string", "minLength": 1 },
+        "occurred_utc_offset_minutes": { "type": "integer", "minimum": -840, "maximum": 840 },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "origin": { "$ref": "#/definitions/userOrigin" },
+        "status": { "type": "string", "enum": ["draft", "final", "voided"] },
+        "voided_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "voided_by_principal_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "void_reason": { "type": ["string", "null"], "maxLength": 4000 },
+        "note": { "type": ["string", "null"], "maxLength": 4000 },
+        "context_json": { "$ref": "#/definitions/nullableString" },
+        "sync_version": { "type": "integer", "minimum": 0 },
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "updated_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "values": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/definitions/entryValue" }
+        }
+      }
+    },
+    "entryResourceCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_uuid", "base_version"],
+      "properties": {
+        "entry_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "base_version": { "const": 0 }
+      }
+    },
+    "entryResourceExisting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_uuid", "base_version"],
+      "properties": {
+        "entry_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "base_version": { "$ref": "#/definitions/positiveVersion" }
+      }
+    },
+    "entryCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry"],
+      "properties": { "entry": { "$ref": "#/definitions/v2Entry" } }
+    },
+    "voidCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "voided_at", "voided_by_principal_uuid", "void_reason"],
+      "properties": {
+        "status": { "const": "voided" },
+        "voided_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "voided_by_principal_uuid": { "$ref": "#/definitions/canonicalUuid" },
         "void_reason": { "type": "string", "minLength": 1, "maxLength": 4000 }
       }
     },
-    "referenceCandidate": {
+    "farmProduct": {
       "type": "object",
-      "required": ["entry"],
       "additionalProperties": false,
-      "properties": { "entry": { "$ref": "#/definitions/v2Entry" } }
+      "required": [
+        "contract_version", "product_uuid", "scope", "owner_user_uuid", "gateway_device_eui",
+        "name", "kind", "composition_json", "active", "sync_version", "created_at", "deleted_at"
+      ],
+      "properties": {
+        "contract_version": { "const": 2 },
+        "product_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "scope": { "const": "farm" },
+        "owner_user_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "gateway_device_eui": { "$ref": "#/definitions/nullableGatewayEui" },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": ["mineral", "organic_amendment", "plant_protection", "other"]
+        },
+        "composition_json": { "type": "string", "minLength": 2 },
+        "active": { "$ref": "#/definitions/binaryFlag" },
+        "sync_version": { "$ref": "#/definitions/positiveVersion" },
+        "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" }
+      }
     },
-    "commonMutation": {
+    "productResource": {
       "type": "object",
-      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
       "additionalProperties": false,
+      "required": ["product_uuid", "base_version"],
+      "properties": {
+        "product_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "base_version": { "$ref": "#/definitions/baseVersion" }
+      }
+    },
+    "productCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product"],
+      "properties": { "product": { "$ref": "#/definitions/farmProduct" } }
+    },
+    "vocabMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "term_code", "scheme_uri", "scheme_version", "mapping_role", "external_id",
+        "external_parent_id", "mapping_relation", "source_uri", "active"
+      ],
+      "properties": {
+        "term_code": { "type": "string", "minLength": 1 },
+        "scheme_uri": { "type": "string", "minLength": 1 },
+        "scheme_version": { "type": "string", "minLength": 1 },
+        "mapping_role": {
+          "type": "string",
+          "enum": ["concept", "variable", "coded_value", "operation_type", "data_type_definition", "unit_of_measure"]
+        },
+        "external_id": { "type": "string", "minLength": 1 },
+        "external_parent_id": { "$ref": "#/definitions/nullableString" },
+        "mapping_relation": { "type": "string", "enum": ["exact", "close", "broad", "narrow", "related"] },
+        "source_uri": { "$ref": "#/definitions/nullableString" },
+        "active": { "$ref": "#/definitions/binaryFlag" }
+      }
+    },
+    "customVocabulary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version", "code", "kind", "parent_code", "value_type", "quantity_kind", "basis",
+        "default_unit_code", "labels_json", "icon_key", "constraints_json", "agrovoc_uri", "icasa_code",
+        "adapt_code", "scope", "owner_user_uuid", "gateway_device_eui", "custom_field_uuid", "active",
+        "sort_order", "sync_version", "created_at", "deleted_at", "mappings"
+      ],
+      "properties": {
+        "contract_version": { "const": 2 },
+        "code": { "type": "string", "pattern": "^custom\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "kind": { "type": "string", "enum": ["activity", "attribute", "unit", "choice"] },
+        "parent_code": { "$ref": "#/definitions/nullableString" },
+        "value_type": { "type": ["string", "null"], "enum": ["number", "text", "choice", "date", "boolean", null] },
+        "quantity_kind": { "$ref": "#/definitions/nullableString" },
+        "basis": { "$ref": "#/definitions/nullableString" },
+        "default_unit_code": { "$ref": "#/definitions/nullableString" },
+        "labels_json": { "type": "string", "minLength": 2 },
+        "icon_key": { "$ref": "#/definitions/nullableString" },
+        "constraints_json": { "$ref": "#/definitions/nullableString" },
+        "agrovoc_uri": { "$ref": "#/definitions/nullableString" },
+        "icasa_code": { "$ref": "#/definitions/nullableString" },
+        "adapt_code": { "$ref": "#/definitions/nullableString" },
+        "scope": { "const": "custom" },
+        "owner_user_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "gateway_device_eui": { "$ref": "#/definitions/nullableGatewayEui" },
+        "custom_field_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "active": { "$ref": "#/definitions/binaryFlag" },
+        "sort_order": { "type": "integer" },
+        "sync_version": { "$ref": "#/definitions/positiveVersion" },
+        "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "mappings": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/vocabMapping" }
+        }
+      }
+    },
+    "customVocabularyResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["custom_field_uuid", "base_version"],
+      "properties": {
+        "custom_field_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "base_version": { "$ref": "#/definitions/baseVersion" }
+      }
+    },
+    "customVocabularyCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["custom_vocab"],
+      "properties": { "custom_vocab": { "$ref": "#/definitions/customVocabulary" } }
+    },
+    "plotSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layout_code", "updated_at", "updated_by_principal_uuid", "sync_version", "context_json"],
+      "properties": {
+        "layout_code": { "type": "string", "minLength": 1 },
+        "updated_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "updated_by_principal_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "sync_version": { "type": "integer", "minimum": 0 },
+        "context_json": { "$ref": "#/definitions/nullableString" }
+      }
+    },
+    "plotSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version", "plot_uuid", "plot_code", "name", "zone_uuid", "station_code", "crop_hint",
+        "area_m2", "active", "sync_version", "owner_user_uuid", "gateway_device_eui", "created_at",
+        "updated_at", "deleted_at", "settings"
+      ],
+      "properties": {
+        "contract_version": { "const": 2 },
+        "plot_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "plot_code": { "type": "string", "minLength": 1 },
+        "name": { "$ref": "#/definitions/nullableString" },
+        "zone_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "station_code": { "$ref": "#/definitions/nullableString" },
+        "crop_hint": { "$ref": "#/definitions/nullableString" },
+        "area_m2": { "type": ["number", "null"], "minimum": 0 },
+        "active": { "$ref": "#/definitions/binaryFlag" },
+        "sync_version": { "type": "integer", "minimum": 0 },
+        "owner_user_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "updated_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "settings": { "$ref": "#/definitions/plotSettings" }
+      }
+    },
+    "plotResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateway_device_eui", "plot_uuid", "projection_version"],
+      "properties": {
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "plot_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "projection_version": { "$ref": "#/definitions/positiveVersion" }
+      }
+    },
+    "plotCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plot"],
+      "properties": { "plot": { "$ref": "#/definitions/plotSnapshot" } }
+    },
+    "cutoverResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateway_device_eui", "barrier_uuid"],
+      "properties": {
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "barrier_uuid": { "$ref": "#/definitions/canonicalUuid" }
+      }
+    },
+    "cutoverBarrierReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exact_pending_v1_event_uuids_sorted", "pending_set_sha256", "source_head_manifest_sha256"],
+      "properties": {
+        "exact_pending_v1_event_uuids_sorted": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/canonicalUuid" }
+        },
+        "pending_set_sha256": { "$ref": "#/definitions/sha256" },
+        "source_head_manifest_sha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "entryCreateMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
       "properties": {
         "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
         "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
-        "operation": { "type": "string" },
-        "resource": { "type": "object" },
-        "candidate": { "type": "object" },
+        "operation": { "const": "ENTRY_CREATE" },
+        "resource": { "$ref": "#/definitions/entryResourceCreate" },
+        "candidate": { "$ref": "#/definitions/entryCandidate" },
         "payload_sha256": { "$ref": "#/definitions/sha256" },
-        "origin": { "type": "string", "enum": ["cloud-ui", "edge-ui", "edge-worker"] },
+        "origin": { "$ref": "#/definitions/userOrigin" },
         "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
       }
     },
-    "entryCreate": {
-      "allOf": [
-        { "$ref": "#/definitions/commonMutation" },
-        { "properties": {
-          "operation": { "const": "ENTRY_CREATE" },
-          "resource": { "type": "object", "required": ["entry_uuid", "base_version"], "additionalProperties": false, "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "const": 0 } } },
-          "candidate": { "$ref": "#/definitions/fullEntryCandidate" },
-          "origin": { "enum": ["cloud-ui", "edge-ui"] }
-        } }
+    "entryCorrectMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "const": "ENTRY_CORRECT" },
+        "resource": { "$ref": "#/definitions/entryResourceExisting" },
+        "candidate": { "$ref": "#/definitions/entryCandidate" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "$ref": "#/definitions/userOrigin" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "entryVoidMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "const": "ENTRY_VOID" },
+        "resource": { "$ref": "#/definitions/entryResourceExisting" },
+        "candidate": { "$ref": "#/definitions/voidCandidate" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "$ref": "#/definitions/userOrigin" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "productUpsertMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "const": "PRODUCT_UPSERT" },
+        "resource": { "$ref": "#/definitions/productResource" },
+        "candidate": { "$ref": "#/definitions/productCandidate" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "$ref": "#/definitions/userOrigin" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "customVocabUpsertMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "const": "CUSTOM_VOCAB_UPSERT" },
+        "resource": { "$ref": "#/definitions/customVocabularyResource" },
+        "candidate": { "$ref": "#/definitions/customVocabularyCandidate" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "$ref": "#/definitions/userOrigin" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "plotSnapshotMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "const": "PLOT_SNAPSHOT" },
+        "resource": { "$ref": "#/definitions/plotResource" },
+        "candidate": { "$ref": "#/definitions/plotCandidate" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "const": "edge-worker" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "cutoverBarrierReceiptMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "const": "CUTOVER_BARRIER_RECEIPT" },
+        "resource": { "$ref": "#/definitions/cutoverResource" },
+        "candidate": { "$ref": "#/definitions/cutoverBarrierReceipt" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "const": "edge-worker" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "mutationEnvelope": {
+      "oneOf": [
+        { "$ref": "#/definitions/entryCreateMutation" },
+        { "$ref": "#/definitions/entryCorrectMutation" },
+        { "$ref": "#/definitions/entryVoidMutation" },
+        { "$ref": "#/definitions/productUpsertMutation" },
+        { "$ref": "#/definitions/customVocabUpsertMutation" },
+        { "$ref": "#/definitions/plotSnapshotMutation" },
+        { "$ref": "#/definitions/cutoverBarrierReceiptMutation" }
       ]
     },
-    "entryCorrect": {
-      "allOf": [
-        { "$ref": "#/definitions/commonMutation" },
-        { "properties": {
-          "operation": { "const": "ENTRY_CORRECT" },
-          "resource": { "type": "object", "required": ["entry_uuid", "base_version"], "additionalProperties": false, "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "type": "integer", "minimum": 1 } } },
-          "candidate": { "$ref": "#/definitions/fullEntryCandidate" },
-          "origin": { "enum": ["cloud-ui", "edge-ui"] }
-        } }
+    "entryHeadPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_head_uuid", "entry_revision_uuid", "entry"],
+      "properties": {
+        "entry_head_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "entry_revision_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "entry": { "$ref": "#/definitions/v2Entry" }
+      }
+    },
+    "entryConflictPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conflict_uuid", "entry_head_uuid", "current_revision_uuid", "candidate_revision_uuid",
+        "base_version", "current_version", "reason", "disposition", "current_entry", "candidate_entry"
+      ],
+      "properties": {
+        "conflict_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "entry_head_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "current_revision_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "candidate_revision_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "base_version": { "$ref": "#/definitions/positiveVersion" },
+        "current_version": { "$ref": "#/definitions/positiveVersion" },
+        "reason": { "const": "base-version-mismatch" },
+        "disposition": { "type": "string", "enum": ["needs-review", "dismissed"] },
+        "current_entry": { "$ref": "#/definitions/v2Entry" },
+        "candidate_entry": { "$ref": "#/definitions/v2Entry" }
+      }
+    },
+    "plotSnapshotPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_uuid", "gateway_device_eui", "projection_version", "plot"],
+      "properties": {
+        "snapshot_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "projection_version": { "$ref": "#/definitions/positiveVersion" },
+        "plot": { "$ref": "#/definitions/plotSnapshot" }
+      }
+    },
+    "productReferencePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product"],
+      "properties": { "product": { "$ref": "#/definitions/farmProduct" } }
+    },
+    "customVocabularyReferencePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["custom_vocab"],
+      "properties": { "custom_vocab": { "$ref": "#/definitions/customVocabulary" } }
+    },
+    "referenceDataPayload": {
+      "oneOf": [
+        { "$ref": "#/definitions/productReferencePayload" },
+        { "$ref": "#/definitions/customVocabularyReferencePayload" }
       ]
     },
-    "entryVoid": {
-      "allOf": [
-        { "$ref": "#/definitions/commonMutation" },
-        { "properties": {
-          "operation": { "const": "ENTRY_VOID" },
-          "resource": { "type": "object", "required": ["entry_uuid", "base_version"], "additionalProperties": false, "properties": { "entry_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "type": "integer", "minimum": 1 } } },
-          "candidate": { "$ref": "#/definitions/tombstoneCandidate" },
-          "origin": { "enum": ["cloud-ui", "edge-ui"] }
-        } }
-      ]
+    "cropCyclePlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cycle_uuid", "plot_uuid", "ends_on", "closed_by_entry_uuid", "close_reason"],
+      "properties": {
+        "cycle_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "plot_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "ends_on": { "$ref": "#/definitions/nullableLocalDate" },
+        "closed_by_entry_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "close_reason": { "type": ["string", "null"], "enum": ["harvest", "reseed", "manual", null] }
+      }
     },
-    "productUpsert": {
-      "allOf": [
-        { "$ref": "#/definitions/commonMutation" },
-        { "properties": {
-          "operation": { "const": "PRODUCT_UPSERT" },
-          "resource": { "type": "object", "required": ["product_uuid", "base_version"], "additionalProperties": false, "properties": { "product_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "$ref": "#/definitions/baseVersion" } } },
-          "candidate": { "$ref": "#/definitions/referenceCandidate" }
-        } }
-      ]
+    "cropCycleProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cycle_uuid", "crop_code", "variety", "group_uuid", "opened_by_entry_uuid", "starts_on",
+        "gateway_device_eui", "created_by_principal_uuid", "sync_version", "created_at", "updated_at",
+        "deleted_at", "plots"
+      ],
+      "properties": {
+        "cycle_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "crop_code": { "type": "string", "minLength": 1 },
+        "variety": { "$ref": "#/definitions/nullableString" },
+        "group_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "opened_by_entry_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "starts_on": { "$ref": "#/definitions/localDate" },
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "created_by_principal_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "sync_version": { "type": "integer", "minimum": 0 },
+        "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "updated_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "plots": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/cropCyclePlot" }
+        }
+      }
     },
-    "customVocabUpsert": {
-      "allOf": [
-        { "$ref": "#/definitions/commonMutation" },
-        { "properties": {
-          "operation": { "const": "CUSTOM_VOCAB_UPSERT" },
-          "resource": { "type": "object", "required": ["vocabulary_uuid", "base_version"], "additionalProperties": false, "properties": { "vocabulary_uuid": { "$ref": "#/definitions/canonicalUuid" }, "base_version": { "$ref": "#/definitions/baseVersion" } } },
-          "candidate": { "$ref": "#/definitions/referenceCandidate" }
-        } }
-      ]
-    },
-    "gatewayOnly": {
-      "allOf": [
-        { "$ref": "#/definitions/commonMutation" },
-        { "properties": {
-          "operation": { "enum": ["PLOT_SNAPSHOT", "CUTOVER_BARRIER_RECEIPT"] },
-          "resource": { "type": "object", "required": ["gateway_device_eui", "base_version"], "additionalProperties": false, "properties": { "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" }, "base_version": { "const": 0 } } },
-          "candidate": { "$ref": "#/definitions/referenceCandidate" },
-          "origin": { "const": "edge-worker" }
-        } }
-      ]
-    },
-    "mutationEnvelope": { "oneOf": [
-      { "$ref": "#/definitions/entryCreate" }, { "$ref": "#/definitions/entryCorrect" }, { "$ref": "#/definitions/entryVoid" }, { "$ref": "#/definitions/productUpsert" }, { "$ref": "#/definitions/customVocabUpsert" }, { "$ref": "#/definitions/gatewayOnly" }
-    ] },
     "attachmentDescriptor": {
-      "type": "object", "required": ["attachment_uuid", "sha256", "byte_length", "media_type"], "additionalProperties": false,
-      "properties": { "attachment_uuid": { "$ref": "#/definitions/canonicalUuid" }, "sha256": { "$ref": "#/definitions/sha256" }, "byte_length": { "type": "integer", "minimum": 0 }, "media_type": { "type": "string", "minLength": 1 } }
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attachment_uuid", "entry_uuid", "entry_revision_uuid", "content_role", "parent_disposition",
+        "original_filename", "mime", "size_bytes", "sha256", "state", "captured_at", "sync_version",
+        "created_at", "deleted_at"
+      ],
+      "properties": {
+        "attachment_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "entry_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "entry_revision_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "content_role": { "const": "photo" },
+        "parent_disposition": { "type": "string", "enum": ["canonical", "conflict"] },
+        "original_filename": { "$ref": "#/definitions/nullableString" },
+        "mime": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/definitions/sha256" },
+        "state": {
+          "type": "string",
+          "enum": [
+            "local_only", "uploading", "verified", "download_queued", "downloading",
+            "failed_retryable", "failed_terminal", "missing_legacy", "unreadable", "evicted_verified"
+          ]
+        },
+        "captured_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "sync_version": { "type": "integer", "minimum": 0 },
+        "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" }
+      }
+    },
+    "cutoverState": {
+      "type": "string",
+      "enum": [
+        "PREPARE_REQUESTED", "COMMANDS_FENCED", "BARRIER_RECORDED", "LEGACY_DRAINED",
+        "RECONCILED", "ACTIVATED", "BLOCKED", "ABORTED"
+      ]
+    },
+    "authorityState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition_uuid", "gateway_device_eui", "from_state", "target_state", "barrier_uuid", "reason"],
+      "properties": {
+        "transition_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "gateway_device_eui": { "$ref": "#/definitions/nullableGatewayEui" },
+        "from_state": {
+          "type": ["string", "null"],
+          "enum": [
+            "PREPARE_REQUESTED", "COMMANDS_FENCED", "BARRIER_RECORDED", "LEGACY_DRAINED",
+            "RECONCILED", "ACTIVATED", "BLOCKED", "ABORTED", null
+          ]
+        },
+        "target_state": { "$ref": "#/definitions/cutoverState" },
+        "barrier_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "reason": { "$ref": "#/definitions/nullableString" }
+      }
+    },
+    "entryHeadReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "ENTRY_HEAD" },
+        "payload": { "$ref": "#/definitions/entryHeadPayload" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "entryConflictReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "ENTRY_CONFLICT" },
+        "payload": { "$ref": "#/definitions/entryConflictPayload" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "plotSnapshotReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "PLOT_SNAPSHOT" },
+        "payload": { "$ref": "#/definitions/plotSnapshotPayload" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "referenceDataReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "REFERENCE_DATA" },
+        "payload": { "$ref": "#/definitions/referenceDataPayload" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "cropCycleProjectionReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "CROP_CYCLE_PROJECTION" },
+        "payload": { "$ref": "#/definitions/cropCycleProjection" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "attachmentDescriptorReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "ATTACHMENT_DESCRIPTOR" },
+        "payload": { "$ref": "#/definitions/attachmentDescriptor" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
+    "authorityStateReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "AUTHORITY_STATE" },
+        "payload": { "$ref": "#/definitions/authorityState" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
     },
     "replicationEnvelope": {
-      "type": "object", "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"], "additionalProperties": false,
-      "properties": {
-        "sequence": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
-        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
-        "kind": { "type": "string", "enum": ["ENTRY_HEAD", "ENTRY_CONFLICT", "PLOT_SNAPSHOT", "REFERENCE_DATA", "CROP_CYCLE_PROJECTION", "ATTACHMENT_DESCRIPTOR", "AUTHORITY_STATE"] },
-        "payload": { "type": "object" }, "payload_sha256": { "$ref": "#/definitions/sha256" }, "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
-      },
-      "allOf": [{ "if": { "properties": { "kind": { "const": "ATTACHMENT_DESCRIPTOR" } } }, "then": { "properties": { "payload": { "$ref": "#/definitions/attachmentDescriptor" } } } }]
+      "oneOf": [
+        { "$ref": "#/definitions/entryHeadReplication" },
+        { "$ref": "#/definitions/entryConflictReplication" },
+        { "$ref": "#/definitions/plotSnapshotReplication" },
+        { "$ref": "#/definitions/referenceDataReplication" },
+        { "$ref": "#/definitions/cropCycleProjectionReplication" },
+        { "$ref": "#/definitions/attachmentDescriptorReplication" },
+        { "$ref": "#/definitions/authorityStateReplication" }
+      ]
     },
-    "entryMutationResult": { "type": "object", "required": ["kind", "mutation_uuid", "entry_head_uuid", "entry_revision_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "ENTRY_MUTATION_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "entry_head_uuid": { "$ref": "#/definitions/canonicalUuid" }, "entry_revision_uuid": { "$ref": "#/definitions/canonicalUuid" }, "conflict_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
-    "referenceMutationResult": { "type": "object", "required": ["kind", "mutation_uuid", "resource_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "REFERENCE_MUTATION_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "resource_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
-    "plotSnapshotResult": { "type": "object", "required": ["kind", "mutation_uuid", "snapshot_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "PLOT_SNAPSHOT_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "snapshot_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
-    "cutoverBarrierReceiptResult": { "type": "object", "required": ["kind", "mutation_uuid", "receipt_uuid"], "additionalProperties": false, "properties": { "kind": { "const": "CUTOVER_BARRIER_RECEIPT_RESULT" }, "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" }, "receipt_uuid": { "$ref": "#/definitions/canonicalUuid" } } },
-    "mutationResult": { "oneOf": [ { "$ref": "#/definitions/entryMutationResult" }, { "$ref": "#/definitions/referenceMutationResult" }, { "$ref": "#/definitions/plotSnapshotResult" }, { "$ref": "#/definitions/cutoverBarrierReceiptResult" } ] }
+    "mutationOutcome": {
+      "type": "string",
+      "enum": ["applied", "already-applied", "conflict"]
+    },
+    "entryHeadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_uuid", "version"],
+      "properties": {
+        "entry_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "version": { "$ref": "#/definitions/positiveVersion" }
+      }
+    },
+    "entryMutationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mutation_uuid", "outcome", "head", "revision_uuid", "conflict_uuid"],
+      "properties": {
+        "kind": { "const": "ENTRY_MUTATION_RESULT" },
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "outcome": { "$ref": "#/definitions/mutationOutcome" },
+        "head": { "$ref": "#/definitions/entryHeadResult" },
+        "revision_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "conflict_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" }
+      }
+    },
+    "referenceMutationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mutation_uuid", "outcome", "resource_uuid"],
+      "properties": {
+        "kind": { "const": "REFERENCE_MUTATION_RESULT" },
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "outcome": { "$ref": "#/definitions/mutationOutcome" },
+        "resource_uuid": { "$ref": "#/definitions/canonicalUuid" }
+      }
+    },
+    "plotSnapshotResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mutation_uuid", "outcome", "projection_version"],
+      "properties": {
+        "kind": { "const": "PLOT_SNAPSHOT_RESULT" },
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "outcome": { "$ref": "#/definitions/mutationOutcome" },
+        "projection_version": { "$ref": "#/definitions/positiveVersion" }
+      }
+    },
+    "cutoverBarrierReceiptResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mutation_uuid", "outcome", "barrier_uuid"],
+      "properties": {
+        "kind": { "const": "CUTOVER_BARRIER_RECEIPT_RESULT" },
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "outcome": { "$ref": "#/definitions/mutationOutcome" },
+        "barrier_uuid": { "$ref": "#/definitions/canonicalUuid" }
+      }
+    },
+    "mutationResult": {
+      "oneOf": [
+        { "$ref": "#/definitions/entryMutationResult" },
+        { "$ref": "#/definitions/referenceMutationResult" },
+        { "$ref": "#/definitions/plotSnapshotResult" },
+        { "$ref": "#/definitions/cutoverBarrierReceiptResult" }
+      ]
+    }
   }
 }
