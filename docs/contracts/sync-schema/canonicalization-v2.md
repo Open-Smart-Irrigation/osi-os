@@ -18,4 +18,21 @@ hex characters.
 For a mutation, `payload_sha256` is SHA-256 of the canonical bytes of the
 envelope with `payload_sha256` omitted. For replication, it is SHA-256 of the
 canonical bytes of the envelope with `payload_sha256` omitted. The hash input
-never contains blob bytes or an object-store URL. The digest is lower-hex.
+never contains blob bytes, credentials, local paths, object-store keys, or
+transport URLs. Domain URI strings such as `scheme_uri` remain metadata, not a
+transfer mechanism. The digest is lower-hex.
+
+Schema validation and semantic validation are both required before a V2
+envelope is accepted. The companion validators enforce identity equality,
+next-version arithmetic, entry and mapping order, value-status consistency,
+barrier-set ordering and hashing, plot projection equality, signed `BIGINT`
+sequence bounds, and numerically ascending replication batches. Draft-07
+cannot express those relationships without duplicating values outside their
+canonical fields.
+
+`journal-v2-golden.json` contains four vector groups. `vectors` fixes generic
+canonical JSON behavior. `mutation_vectors` and `replication_vectors` contain
+complete envelopes plus their canonical hash input and digest.
+`rejection_vectors` is shared by Node, Java, and TypeScript and exercises both
+structural and cross-field rejection. A runtime must pass every group before a
+V2 producer or consumer can use it.
