@@ -145,6 +145,11 @@ function assertEntryValues(entry) {
 function assertEntry(entry) {
   object(entry, 'entry');
   assertUuid(entry.entry_uuid, 'entry.entry_uuid');
+  if (entry.gateway_device_eui !== null) {
+    assertEui(entry.gateway_device_eui, 'entry.gateway_device_eui');
+  } else if (entry.plot_uuid !== null) {
+    fail('a zero-gateway entry must not invent a plot');
+  }
   assertInteger(entry.template_version, 1, MAX_SAFE_INTEGER, 'entry template_version must be positive');
   assertInteger(entry.layout_version, 1, MAX_SAFE_INTEGER, 'entry layout_version must be positive');
   assertInteger(entry.catalog_version, 1, MAX_SAFE_INTEGER, 'entry catalog_version must be positive');
@@ -297,7 +302,7 @@ function validateReplicationStructure(envelope) {
     case 'ENTRY_CONFLICT':
       assertEntry(payload.current_entry);
       assertEntry(payload.candidate_entry);
-      assertInteger(payload.base_version, 1, MAX_SAFE_INTEGER, 'conflict base_version must be positive');
+      assertInteger(payload.base_version, 0, MAX_SAFE_INTEGER, 'conflict base_version must be nonnegative');
       assertInteger(payload.current_version, 1, MAX_SAFE_INTEGER, 'conflict current_version must be positive');
       if (payload.current_entry.entry_uuid !== payload.entry_head_uuid ||
           payload.candidate_entry.entry_uuid !== payload.entry_head_uuid) fail('entry conflict identity mismatch');
