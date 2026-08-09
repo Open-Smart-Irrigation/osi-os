@@ -18,6 +18,7 @@ const NAME_TO_PATH = {
   'osi-command-ledger': 'osi-command-ledger',
   'zone-commands': 'osi-zone-commands',
   'osi-journal': 'osi-journal',
+  'journal-replication': 'osi-journal-replication',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'device-writer': 'osi-device-writer',

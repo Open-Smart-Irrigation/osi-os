@@ -28,6 +28,15 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   // duplicate the new schema behavior.
   'trg_sentek_device_outbox_payload_ai',
   'trg_sentek_data_outbox_payload_ai',
+  // 0043__journal_v2_media.sql (journal v2 replication, renumbered from AgroLink
+  // 0044) guards journal attachment provenance. These are NOT sync_outbox emitters
+  // -- they are integrity guards -- but this verifier compares the whole seed trigger
+  // set against sync-init-fn, so migration-delivered triggers must be listed here or
+  // the boot node would be required to grow them. Seed DB + deploy-time migration
+  // runner delivery, not the frozen sync-init-fn boot DDL.
+  'trg_journal_attachment_source_immutable_bu',
+  'trg_journal_attachment_edge_parent_bi',
+  'trg_journal_attachment_edge_parent_bu',
 ]);
 
 function q(db, sql) {

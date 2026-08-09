@@ -1070,4 +1070,5 @@ module.exports = {
   upsertPlotGroup: journalApi.upsertPlotGroup,
   verifyBearer: journalApi.verifyBearer,
   voidEntry: journalApi.voidEntry,
+  journalReplication: require('../osi-journal-replication'),
 };
