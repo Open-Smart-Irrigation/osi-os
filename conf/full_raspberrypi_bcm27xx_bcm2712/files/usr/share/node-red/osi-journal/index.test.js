@@ -25,6 +25,7 @@ const {
   loadCurrentAggregate,
   saveEntry,
   upsertPlot,
+  upsertPlotGroup,
   validateEntry,
   void_,
 } = require('./index');
@@ -408,6 +409,130 @@ test('saveEntry batch retry returns original receipts without entry or outbox wr
   assert.deepEqual(retry.entries, first.entries);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entriesBeforeRetry);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxBeforeRetry);
+});
+
+test('saveEntry batch retry returns the original V2 mutation receipts after the barrier', async () => {
+  const db = createJournalDb('batch-retry-v2-receipt');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const members = [
+    { plot_uuid: '11110000-0000-4000-8000-000000000011', entry_uuid: '22220000-0000-4000-8000-000000000011' },
+    { plot_uuid: '11110000-0000-4000-8000-000000000012', entry_uuid: '22220000-0000-4000-8000-000000000012' },
+  ];
+  for (const [index, member] of members.entries()) {
+    await upsertPlot(db, {
+      plot_uuid: member.plot_uuid,
+      base_sync_version: 0,
+      plot_code: 'retry-v2-' + index,
+      name: 'Retry V2 ' + index,
+      zone_uuid: null,
+      station_code: null,
+      crop_hint: 'barley',
+      area_m2: 100,
+      active: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+    }, principal);
+  }
+  db.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BARRIER_RECORDED\',?)'
+  ).run(
+    '20000000-0000-4000-8000-000000000011',
+    JOURNAL_TEST_GATEWAY_EUI,
+    '2026-08-08T10:11:12.123Z'
+  );
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    members,
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-19T08:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 12,
+      unit_code: 'unit.mm_water',
+      value_status: 'observed',
+    }],
+  };
+
+  const first = await saveEntry(db, batch, principal, { mode: 'create' });
+  assert.ok(first.entries.every(function(entry) {
+    return entry.outbox_event_uuid === null && typeof entry.mutation_uuid === 'string';
+  }));
+  const mutationsBeforeRetry = db.prepare(
+    'SELECT COUNT(*) AS n FROM journal_edge_mutations'
+  ).get().n;
+  const retry = await saveEntry(db, batch, principal, { mode: 'create' });
+
+  assert.deepEqual(retry, first);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_edge_mutations').get().n,
+    mutationsBeforeRetry);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, 2,
+    'only the two pre-barrier plot events remain in V1');
+});
+
+test('post-barrier plot snapshots use V2 while plot groups preserve V1 compatibility', async () => {
+  const db = createJournalDb('post-barrier-plot-group');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const workspaceUuid = '20000000-0000-4000-8000-000000000012';
+  const plotUuid = '11110000-0000-4000-8000-000000000013';
+  db.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BARRIER_RECORDED\',?)'
+  ).run(workspaceUuid, JOURNAL_TEST_GATEWAY_EUI, '2026-08-08T10:11:12.123Z');
+
+  const plot = await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'post-barrier-plot',
+    name: 'Post-barrier plot',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  assert.equal(plot.outbox_event_uuid, null);
+  assert.equal(typeof plot.mutation_uuid, 'string');
+  const plotMutation = db.prepare(
+    'SELECT operation,payload_json FROM journal_edge_mutations WHERE mutation_uuid=?'
+  ).get(plot.mutation_uuid);
+  assert.equal(plotMutation.operation, 'PLOT_SNAPSHOT');
+  assert.deepEqual(
+    Object.keys(JSON.parse(plotMutation.payload_json).candidate.plot).sort(),
+    [
+      'active', 'area_m2', 'contract_version', 'created_at', 'crop_hint', 'deleted_at',
+      'gateway_device_eui', 'name', 'owner_user_uuid', 'plot_code', 'plot_uuid', 'settings',
+      'station_code', 'sync_version', 'updated_at', 'zone_uuid',
+    ].sort()
+  );
+
+  const group = await upsertPlotGroup(db, {
+    group_uuid: '33330000-0000-4000-8000-000000000013',
+    base_sync_version: 0,
+    label: 'Post-barrier group',
+    resolved: false,
+    members: [plotUuid],
+  }, principal);
+  assert.equal(typeof group.outbox_event_uuid, 'string');
+  assert.equal(group.mutation_uuid, undefined);
+  assert.equal(db.prepare(
+    "SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='JOURNAL_PLOT_GROUP'"
+  ).get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_edge_mutations').get().n, 1);
 });
 
 test('saveEntry rejects changed content for the same batch member UUID without writes', async () => {

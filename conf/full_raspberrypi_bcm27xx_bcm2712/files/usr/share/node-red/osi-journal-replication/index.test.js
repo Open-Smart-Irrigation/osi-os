@@ -100,6 +100,47 @@ test('barrier-recorded authority queues one V2 mutation and emits no V1 event', 
   assert.equal(JSON.parse(row.payload_json).candidate.custom_vocab.contract_version, 2);
 });
 
+test('blocked authority remains on the V1 path until a barrier is recorded', async (t) => {
+  const { database, db } = fixture(t);
+  const workspaceUuid = '20000000-0000-4000-8000-000000000002';
+  const gatewayDeviceEui = '0016C001F11715E2';
+  database.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BLOCKED\',?)'
+  ).run(workspaceUuid, gatewayDeviceEui, '2026-08-08T10:11:12.123Z');
+
+  const result = await lifecycle.emitJournalOutbox(
+    db, customSource(gatewayDeviceEui), 'JOURNAL_VOCAB_UPSERTED'
+  );
+  assert.equal(result.replication_mode, 'v1');
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM sync_outbox').get().count, 1);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_edge_mutations').get().count, 0);
+});
+
+test('blocked authority stays on V2 when its barrier was already recorded', async (t) => {
+  const { database, db } = fixture(t);
+  const workspaceUuid = '20000000-0000-4000-8000-000000000004';
+  const gatewayDeviceEui = '0016C001F11715E2';
+  database.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,barrier_uuid,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BLOCKED\',?,?)'
+  ).run(
+    workspaceUuid,
+    gatewayDeviceEui,
+    '90000000-0000-4000-8000-000000000004',
+    '2026-08-08T10:11:12.123Z'
+  );
+
+  const result = await lifecycle.emitJournalOutbox(
+    db, customSource(gatewayDeviceEui), 'JOURNAL_VOCAB_UPSERTED'
+  );
+  assert.equal(result.replication_mode, 'v2');
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM sync_outbox').get().count, 0);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_edge_mutations').get().count, 1);
+});
+
 test('barrier-recorded local entry queues a validated V2 create without a V1 event', async (t) => {
   const { database, db } = fixture(t);
   const workspaceUuid = '20000000-0000-4000-8000-000000000001';
@@ -143,4 +184,46 @@ test('barrier-recorded local entry queues a validated V2 create without a V1 eve
   assert.equal(row.operation, 'ENTRY_CREATE');
   assert.equal(payload.candidate.entry.contract_version, 2);
   assert.equal(payload.candidate.entry.gateway_device_eui, gatewayDeviceEui);
+});
+
+test('barrier-recorded correction preserves a cloud-origin entry origin in V2', async (t) => {
+  const { database, db } = fixture(t);
+  const workspaceUuid = '20000000-0000-4000-8000-000000000003';
+  const gatewayDeviceEui = '0016C001F11715E2';
+  const sourceEntry = JSON.parse(JSON.stringify(golden.mutation_vectors.find(function(vector) {
+    return vector.input.operation === 'ENTRY_CORRECT';
+  }).input.candidate.entry));
+  sourceEntry.gateway_device_eui = gatewayDeviceEui;
+  delete sourceEntry.contract_version;
+  delete sourceEntry.values;
+  sourceEntry.user_id = 1;
+  sourceEntry.plot_uuid = null;
+  sourceEntry.zone_id = null;
+  database.prepare(
+    'INSERT INTO users(id,username,password_hash,created_at,user_uuid) VALUES(1,?,?,?,?)'
+  ).run('cloud-origin-operator', 'test-only', sourceEntry.created_at, sourceEntry.owner_user_uuid);
+  const availableColumns = new Set(database.prepare('PRAGMA table_info(journal_entries)').all()
+    .map(function(column) { return column.name; }));
+  const columns = Object.keys(sourceEntry).filter(function(column) {
+    return availableColumns.has(column);
+  });
+  database.prepare(
+    'INSERT INTO journal_entries(' + columns.join(',') + ') VALUES(' +
+      columns.map(function() { return '?'; }).join(',') + ')'
+  ).run(...columns.map(function(column) { return sourceEntry[column]; }));
+  database.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BARRIER_RECORDED\',?)'
+  ).run(workspaceUuid, gatewayDeviceEui, sourceEntry.updated_at);
+
+  const result = await lifecycle.emitJournalOutbox(
+    db, sourceEntry.entry_uuid, 'JOURNAL_ENTRY_UPSERTED'
+  );
+  const payload = JSON.parse(database.prepare(
+    'SELECT payload_json FROM journal_edge_mutations WHERE mutation_uuid=?'
+  ).get(result.mutation_uuid).payload_json);
+  assert.equal(payload.operation, 'ENTRY_CORRECT');
+  assert.equal(payload.origin, 'cloud-ui');
+  assert.equal(payload.candidate.entry.origin, 'cloud-ui');
 });

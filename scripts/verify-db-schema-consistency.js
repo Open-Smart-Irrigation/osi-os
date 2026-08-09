@@ -1145,6 +1145,14 @@ const requiredTriggerSqlFragments = {
     "new.op = 'device_data_appended'",
     "'soil_vic_10', dd.soil_vic_10",
     'order by dd.id desc',
+  trg_journal_attachment_edge_binding_immutable_bu: [
+    'before update of workspace_uuid,entry_uuid,entry_revision_uuid,parent_mutation_uuid,parent_disposition,cloud_registration_state',
+    "old.source='edge'",
+    "old.cloud_registration_state <> 'not_registered'",
+    'old.workspace_uuid is not new.workspace_uuid',
+    "new.cloud_registration_state='not_registered'",
+    'journal attachment binding is immutable',
+  ],
   trg_journal_attachment_source_immutable_bu: [
     'before update of source on journal_attachment_replicas',
     'old.source <> new.source',

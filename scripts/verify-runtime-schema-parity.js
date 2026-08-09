@@ -37,6 +37,7 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   'trg_journal_attachment_source_immutable_bu',
   'trg_journal_attachment_edge_parent_bi',
   'trg_journal_attachment_edge_parent_bu',
+  'trg_journal_attachment_edge_binding_immutable_bu',
 ]);
 
 function q(db, sql) {
