@@ -664,6 +664,71 @@ const schemaContract = {
     'catalog_hash',
     'updated_at',
   ],
+  journal_authority_state: [
+    'workspace_uuid', 'gateway_device_eui', 'authority_state', 'state',
+    'transition_uuid', 'barrier_uuid', 'reason', 'updated_at',
+  ],
+  journal_edge_mutations: [
+    'mutation_uuid', 'workspace_uuid', 'operation', 'resource_uuid', 'base_version',
+    'payload_json', 'payload_sha256', 'status', 'outcome_json', 'result_revision_uuid',
+    'conflict_uuid', 'attempts', 'next_attempt_at', 'last_error', 'recorded_at',
+    'created_at', 'updated_at', 'completed_at',
+  ],
+  journal_replication_cursor: [
+    'workspace_uuid', 'sequence', 'payload_sha256', 'updated_at',
+  ],
+  journal_replication_applied: [
+    'workspace_uuid', 'sequence', 'kind', 'payload_sha256', 'recorded_at', 'applied_at',
+  ],
+  journal_gateway_v2_capability: [
+    'gateway_device_eui', 'contract_version', 'offered_fingerprint', 'accepted_fingerprint',
+    'capability_state', 'updated_at',
+  ],
+  journal_migration_ledger: [
+    'workspace_uuid', 'resource_type', 'resource_uuid', 'source_sync_version',
+    'source_payload_sha256', 'mutation_uuid', 'status', 'updated_at',
+  ],
+  journal_v2_entry_heads: [
+    'workspace_uuid', 'entry_uuid', 'revision_uuid', 'sync_version', 'payload_json',
+    'payload_sha256', 'recorded_at',
+  ],
+  journal_v2_entry_values: [
+    'workspace_uuid', 'entry_uuid', 'attribute_code', 'group_index', 'value_json',
+  ],
+  journal_v2_entry_conflicts: [
+    'workspace_uuid', 'conflict_uuid', 'entry_uuid', 'current_revision_uuid',
+    'candidate_revision_uuid', 'base_version', 'current_version', 'disposition', 'reason',
+    'payload_json', 'recorded_at',
+  ],
+  journal_v2_reference_data: [
+    'workspace_uuid', 'resource_type', 'resource_uuid', 'sync_version', 'payload_json',
+    'recorded_at',
+  ],
+  journal_v2_plot_snapshots: [
+    'workspace_uuid', 'plot_uuid', 'snapshot_uuid', 'gateway_device_eui',
+    'projection_version', 'payload_json', 'recorded_at',
+  ],
+  journal_v2_crop_cycles: [
+    'workspace_uuid', 'cycle_uuid', 'sync_version', 'payload_json', 'recorded_at',
+  ],
+  journal_v2_crop_cycle_plots: [
+    'workspace_uuid', 'cycle_uuid', 'plot_uuid', 'payload_json',
+  ],
+  journal_attachment_replicas: [
+    'attachment_uuid', 'workspace_uuid', 'entry_uuid', 'entry_revision_uuid',
+    'parent_mutation_uuid', 'source', 'content_role', 'parent_disposition',
+    'original_filename', 'mime', 'size_bytes', 'sha256', 'sync_version',
+    'descriptor_state', 'replica_status', 'cloud_registration_state', 'verified_sha256',
+    'verified_at', 'received_bytes', 'received_ranges_json', 'next_retry_at', 'pinned',
+    'last_error', 'captured_at', 'created_at', 'updated_at', 'deleted_at',
+  ],
+  journal_media_files: [
+    'media_uuid', 'attachment_uuid', 'workspace_uuid', 'parent_mutation_uuid',
+    'parent_revision_uuid', 'local_path', 'partial_path', 'sha256', 'size_bytes',
+    'received_bytes', 'received_ranges_json', 'replica_status', 'cloud_replica_status',
+    'cloud_verified_sha256', 'cloud_verified_at', 'next_retry_at', 'pinned',
+    'conflict_bound', 'last_error', 'last_accessed_at', 'created_at', 'updated_at',
+  ],
   dendrometer_daily: [
     'id',
     'deveui',
@@ -859,6 +924,21 @@ const requiredIndexes = {
   journal_crop_cycle_plots: [
     'idx_ccp_plot_open',
   ],
+  journal_edge_mutations: [
+    'idx_journal_edge_mutations_pending',
+    'idx_journal_edge_mutations_workspace_resource',
+  ],
+  journal_v2_entry_conflicts: [
+    'idx_journal_v2_conflicts_entry',
+  ],
+  journal_attachment_replicas: [
+    'idx_journal_attachment_replicas_retry',
+    'idx_journal_attachment_replicas_parent',
+  ],
+  journal_media_files: [
+    'idx_journal_media_files_eviction',
+    'idx_journal_media_files_parent_mutation',
+  ],
   user_zone_assignments: [
     'uq_user_zone_active',
     'idx_user_zone_by_zone',
@@ -1020,6 +1100,26 @@ const requiredIndexSqlFragments = {
 };
 
 const requiredTriggerSqlFragments = {
+  trg_journal_attachment_source_immutable_bu: [
+    'before update of source on journal_attachment_replicas',
+    'old.source <> new.source',
+    'journal attachment source is immutable',
+  ],
+  trg_journal_attachment_edge_parent_bi: [
+    "new.source='edge'",
+    "new.cloud_registration_state <> 'not_registered'",
+    'm.resource_uuid=new.entry_uuid',
+    'm.result_revision_uuid=new.entry_revision_uuid',
+    "m.status in ('applied','already-applied') and new.parent_disposition='canonical'",
+    "m.status='conflict' and new.parent_disposition='conflict'",
+    'journal attachment parent outcome is not bound',
+  ],
+  trg_journal_attachment_edge_parent_bu: [
+    'before update of cloud_registration_state,entry_revision_uuid,parent_mutation_uuid, workspace_uuid,entry_uuid,source,parent_disposition',
+    "new.source='edge'",
+    'm.resource_uuid=new.entry_uuid',
+    'm.result_revision_uuid=new.entry_revision_uuid',
+  ],
   trg_sync_zones_outbox_ai: [
     "where peer_node = 'cloud' and linked = 1",
     "new.zone_uuid is not null",

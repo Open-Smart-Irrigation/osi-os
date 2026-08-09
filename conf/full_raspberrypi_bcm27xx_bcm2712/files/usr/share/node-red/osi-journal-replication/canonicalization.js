@@ -12,6 +12,24 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_SEQUENCE = 9223372036854775807n;
 const MAX_SAFE_INTEGER = 9007199254740991;
 const USER_ORIGINS = new Set(['cloud-ui', 'edge-ui']);
+const CUTOVER_STATES = new Set([
+  'PREPARE_REQUESTED', 'COMMANDS_FENCED', 'BARRIER_RECORDED', 'LEGACY_DRAINED',
+  'RECONCILED', 'ACTIVATED', 'BLOCKED', 'ABORTED',
+]);
+const ATTACHMENT_STATES = new Set([
+  'local_only', 'uploading', 'verified', 'download_queued', 'downloading',
+  'failed_retryable', 'failed_terminal', 'missing_legacy', 'unreadable', 'evicted_verified',
+]);
+const ENTRY_KEYS = [
+  'contract_version', 'entry_uuid', 'owner_user_uuid', 'author_principal_uuid', 'author_label',
+  'plot_uuid', 'zone_uuid', 'device_eui', 'season_uuid', 'season_crop', 'season_variety',
+  'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code', 'pass_uuid',
+  'batch_uuid', 'activity_code', 'template_code', 'template_version', 'layout_code',
+  'layout_version', 'catalog_version', 'occurred_start', 'occurred_end', 'occurred_timezone',
+  'occurred_utc_offset_minutes', 'recorded_at', 'origin', 'status', 'voided_at',
+  'voided_by_principal_uuid', 'void_reason', 'note', 'context_json', 'sync_version',
+  'gateway_device_eui', 'created_at', 'updated_at', 'deleted_at', 'values',
+];
 const FORBIDDEN_TRANSPORT_FIELDS = new Set([
   'blob', 'blob_bytes', 'blob_uuid', 'object_key', 'object_store_path', 'object_store_url',
   'remote_object_key', 'local_path', 'local_relpath', 'credential', 'credentials',
@@ -72,6 +90,14 @@ function object(value, field) {
   return value;
 }
 
+function assertExactKeys(value, expected, field) {
+  const actual = Object.keys(object(value, field)).sort();
+  const wanted = expected.slice().sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    fail(field + ' has an unexpected shape');
+  }
+}
+
 function assertNoTransportFields(value, path) {
   if (!value || typeof value !== 'object') return;
   if (Array.isArray(value)) {
@@ -104,14 +130,30 @@ function assertUuid(value, field) {
   if (typeof value !== 'string' || !CANONICAL_UUID.test(value)) fail(field + ' must be a canonical UUID');
 }
 
+function assertNullableUuid(value, field) {
+  if (value !== null) assertUuid(value, field);
+}
+
 function assertTimestamp(value, field) {
   if (typeof value !== 'string' || !CANONICAL_TIMESTAMP.test(value) || !Number.isFinite(Date.parse(value))) {
     fail(field + ' must be a canonical UTC timestamp');
   }
 }
 
+function assertNullableTimestamp(value, field) {
+  if (value !== null) assertTimestamp(value, field);
+}
+
 function assertEui(value, field) {
   if (typeof value !== 'string' || !CANONICAL_EUI.test(value)) fail(field + ' must be an uppercase EUI64');
+}
+
+function assertNullableEui(value, field) {
+  if (value !== null) assertEui(value, field);
+}
+
+function assertSha256Value(value, field) {
+  if (typeof value !== 'string' || !SHA256.test(value)) fail(field + ' must be a lowercase SHA-256');
 }
 
 function assertSortedUnique(items, key, field) {
@@ -131,6 +173,10 @@ function assertEntryValues(entry) {
     'entry.values'
   );
   for (const value of entry.values) {
+    assertExactKeys(value, [
+      'attribute_code', 'group_index', 'value_status', 'value_num', 'value_text', 'unit_code',
+      'entered_value_num', 'entered_unit_code',
+    ], 'entry value');
     assertInteger(value.group_index, 0, MAX_SAFE_INTEGER, 'entry value group_index must be nonnegative');
     const observed = value.value_status === 'observed';
     const hasNumber = typeof value.value_num === 'number' && Number.isFinite(value.value_num);
@@ -144,7 +190,15 @@ function assertEntryValues(entry) {
 
 function assertEntry(entry) {
   object(entry, 'entry');
+  assertExactKeys(entry, ENTRY_KEYS, 'entry');
   assertUuid(entry.entry_uuid, 'entry.entry_uuid');
+  assertUuid(entry.owner_user_uuid, 'entry.owner_user_uuid');
+  assertUuid(entry.author_principal_uuid, 'entry.author_principal_uuid');
+  for (const field of [
+    'plot_uuid', 'zone_uuid', 'season_uuid', 'campaign_uuid', 'pass_uuid', 'batch_uuid',
+    'voided_by_principal_uuid',
+  ]) assertNullableUuid(entry[field], 'entry.' + field);
+  assertNullableEui(entry.device_eui, 'entry.device_eui');
   if (entry.gateway_device_eui !== null) {
     assertEui(entry.gateway_device_eui, 'entry.gateway_device_eui');
   } else if (entry.plot_uuid !== null) {
@@ -155,11 +209,27 @@ function assertEntry(entry) {
   assertInteger(entry.catalog_version, 1, MAX_SAFE_INTEGER, 'entry catalog_version must be positive');
   assertInteger(entry.occurred_utc_offset_minutes, -840, 840, 'entry occurred_utc_offset_minutes is out of range');
   assertInteger(entry.sync_version, 0, MAX_SAFE_INTEGER, 'entry sync_version must be nonnegative');
+  assertTimestamp(entry.occurred_start, 'entry.occurred_start');
+  assertNullableTimestamp(entry.occurred_end, 'entry.occurred_end');
+  assertTimestamp(entry.recorded_at, 'entry.recorded_at');
+  assertNullableTimestamp(entry.voided_at, 'entry.voided_at');
+  assertTimestamp(entry.created_at, 'entry.created_at');
+  assertTimestamp(entry.updated_at, 'entry.updated_at');
+  assertNullableTimestamp(entry.deleted_at, 'entry.deleted_at');
   assertEntryValues(entry);
 }
 
 function assertProduct(product, resource) {
   object(product, 'product');
+  assertExactKeys(product, [
+    'contract_version', 'product_uuid', 'scope', 'owner_user_uuid', 'gateway_device_eui', 'name',
+    'kind', 'composition_json', 'active', 'sync_version', 'created_at', 'deleted_at',
+  ], 'product');
+  assertUuid(product.product_uuid, 'product.product_uuid');
+  assertUuid(product.owner_user_uuid, 'product.owner_user_uuid');
+  assertEui(product.gateway_device_eui, 'product.gateway_device_eui');
+  assertTimestamp(product.created_at, 'product.created_at');
+  assertNullableTimestamp(product.deleted_at, 'product.deleted_at');
   assertInteger(product.active, 0, 1, 'product active must be zero or one');
   assertInteger(product.sync_version, 1, MAX_SAFE_INTEGER, 'product sync_version must be positive');
   if (resource && product.product_uuid !== resource.product_uuid) fail('product resource identity mismatch');
@@ -172,6 +242,17 @@ function mappingKey(mapping) {
 
 function assertCustomVocabulary(vocab, resource) {
   object(vocab, 'custom_vocab');
+  assertExactKeys(vocab, [
+    'contract_version', 'code', 'kind', 'parent_code', 'value_type', 'quantity_kind', 'basis',
+    'default_unit_code', 'labels_json', 'icon_key', 'constraints_json', 'agrovoc_uri', 'icasa_code',
+    'adapt_code', 'scope', 'owner_user_uuid', 'gateway_device_eui', 'custom_field_uuid', 'active',
+    'sort_order', 'sync_version', 'created_at', 'deleted_at', 'mappings',
+  ], 'custom_vocab');
+  assertUuid(vocab.custom_field_uuid, 'custom_vocab.custom_field_uuid');
+  assertUuid(vocab.owner_user_uuid, 'custom_vocab.owner_user_uuid');
+  assertEui(vocab.gateway_device_eui, 'custom_vocab.gateway_device_eui');
+  assertTimestamp(vocab.created_at, 'custom_vocab.created_at');
+  assertNullableTimestamp(vocab.deleted_at, 'custom_vocab.deleted_at');
   assertInteger(vocab.active, 0, 1, 'custom vocabulary active must be zero or one');
   assertInteger(vocab.sort_order, -MAX_SAFE_INTEGER, MAX_SAFE_INTEGER, 'custom vocabulary sort_order is out of range');
   assertInteger(vocab.sync_version, 1, MAX_SAFE_INTEGER, 'custom vocabulary sync_version must be positive');
@@ -181,6 +262,10 @@ function assertCustomVocabulary(vocab, resource) {
   if (!Array.isArray(vocab.mappings)) fail('custom vocabulary mappings must be an array');
   assertSortedUnique(vocab.mappings, mappingKey, 'custom vocabulary mappings');
   for (const mapping of vocab.mappings) {
+    assertExactKeys(mapping, [
+      'term_code', 'scheme_uri', 'scheme_version', 'mapping_role', 'external_id',
+      'external_parent_id', 'mapping_relation', 'source_uri', 'active',
+    ], 'custom vocabulary mapping');
     assertInteger(mapping.active, 0, 1, 'custom vocabulary mapping active must be zero or one');
     if (mapping.term_code !== vocab.code) fail('custom vocabulary mapping term_code mismatch');
   }
@@ -188,9 +273,26 @@ function assertCustomVocabulary(vocab, resource) {
 
 function assertPlot(plot, resource) {
   object(plot, 'plot');
+  assertExactKeys(plot, [
+    'contract_version', 'plot_uuid', 'plot_code', 'name', 'zone_uuid', 'station_code', 'crop_hint',
+    'area_m2', 'active', 'sync_version', 'owner_user_uuid', 'gateway_device_eui', 'created_at',
+    'updated_at', 'deleted_at', 'settings',
+  ], 'plot');
+  assertUuid(plot.plot_uuid, 'plot.plot_uuid');
+  assertEui(plot.gateway_device_eui, 'plot.gateway_device_eui');
+  assertUuid(plot.owner_user_uuid, 'plot.owner_user_uuid');
+  assertNullableUuid(plot.zone_uuid, 'plot.zone_uuid');
+  assertTimestamp(plot.created_at, 'plot.created_at');
+  assertTimestamp(plot.updated_at, 'plot.updated_at');
+  assertNullableTimestamp(plot.deleted_at, 'plot.deleted_at');
   assertInteger(plot.active, 0, 1, 'plot active must be zero or one');
   assertInteger(plot.sync_version, 0, MAX_SAFE_INTEGER, 'plot sync_version must be nonnegative');
   const settings = object(plot.settings, 'plot settings');
+  assertExactKeys(settings, [
+    'layout_code', 'updated_at', 'updated_by_principal_uuid', 'sync_version', 'context_json',
+  ], 'plot settings');
+  assertTimestamp(settings.updated_at, 'plot settings updated_at');
+  assertUuid(settings.updated_by_principal_uuid, 'plot settings updated_by_principal_uuid');
   assertInteger(settings.sync_version, 0, MAX_SAFE_INTEGER, 'plot settings sync_version must be nonnegative');
   if (resource && plot.plot_uuid !== resource.plot_uuid) fail('plot resource identity mismatch');
   if (resource && plot.gateway_device_eui !== resource.gateway_device_eui) fail('plot gateway identity mismatch');
@@ -199,6 +301,10 @@ function assertPlot(plot, resource) {
 
 function validateMutationStructure(envelope) {
   object(envelope, 'mutation envelope');
+  assertExactKeys(envelope, [
+    'mutation_uuid', 'workspace_uuid', 'operation', 'resource', 'candidate', 'payload_sha256',
+    'origin', 'recorded_at',
+  ], 'mutation envelope');
   assertNoTransportFields(envelope, '$');
   assertPayloadHash(envelope);
   assertUuid(envelope.mutation_uuid, 'mutation_uuid');
@@ -209,6 +315,8 @@ function validateMutationStructure(envelope) {
   switch (envelope.operation) {
     case 'ENTRY_CREATE':
     case 'ENTRY_CORRECT': {
+      assertExactKeys(resource, ['entry_uuid', 'base_version'], 'entry resource');
+      assertExactKeys(candidate, ['entry'], 'entry candidate');
       assertUuid(resource.entry_uuid, 'resource.entry_uuid');
       if (envelope.operation === 'ENTRY_CREATE' && resource.base_version !== 0) fail('ENTRY_CREATE base_version must be zero');
       if (envelope.operation === 'ENTRY_CORRECT') {
@@ -226,23 +334,38 @@ function validateMutationStructure(envelope) {
       break;
     }
     case 'ENTRY_VOID':
+      assertExactKeys(resource, ['entry_uuid', 'base_version'], 'entry void resource');
+      assertExactKeys(candidate, [
+        'status', 'voided_at', 'voided_by_principal_uuid', 'void_reason',
+      ], 'entry void candidate');
       assertUuid(resource.entry_uuid, 'resource.entry_uuid');
       assertInteger(resource.base_version, 1, MAX_SAFE_INTEGER, 'ENTRY_VOID base_version must be positive');
       if (!USER_ORIGINS.has(envelope.origin)) fail('entry mutation origin must be cloud-ui or edge-ui');
+      if (candidate.status !== 'voided') fail('entry void candidate status must be voided');
+      assertTimestamp(candidate.voided_at, 'entry void candidate voided_at');
+      assertUuid(candidate.voided_by_principal_uuid, 'entry void candidate principal UUID');
       break;
     case 'PRODUCT_UPSERT':
       assertUuid(resource.product_uuid, 'resource.product_uuid');
+      assertExactKeys(resource, ['product_uuid', 'base_version'], 'product resource');
+      assertExactKeys(candidate, ['product'], 'product candidate');
       assertInteger(resource.base_version, 0, MAX_SAFE_INTEGER, 'product base_version must be nonnegative');
       if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
       assertProduct(candidate.product, resource);
       break;
     case 'CUSTOM_VOCAB_UPSERT':
+      assertExactKeys(resource, ['custom_field_uuid', 'base_version'], 'custom vocabulary resource');
+      assertExactKeys(candidate, ['custom_vocab'], 'custom vocabulary candidate');
       assertUuid(resource.custom_field_uuid, 'resource.custom_field_uuid');
       assertInteger(resource.base_version, 0, MAX_SAFE_INTEGER, 'custom vocabulary base_version must be nonnegative');
       if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
       assertCustomVocabulary(candidate.custom_vocab, resource);
       break;
     case 'PLOT_SNAPSHOT':
+      assertExactKeys(resource, [
+        'gateway_device_eui', 'plot_uuid', 'projection_version',
+      ], 'plot resource');
+      assertExactKeys(candidate, ['plot'], 'plot candidate');
       assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
       assertUuid(resource.plot_uuid, 'resource.plot_uuid');
       assertInteger(resource.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
@@ -250,13 +373,19 @@ function validateMutationStructure(envelope) {
       assertPlot(candidate.plot, resource);
       break;
     case 'CUTOVER_BARRIER_RECEIPT': {
+      assertExactKeys(resource, ['gateway_device_eui', 'barrier_uuid'], 'cutover resource');
+      assertExactKeys(candidate, [
+        'exact_pending_v1_event_uuids_sorted', 'pending_set_sha256', 'source_head_manifest_sha256',
+      ], 'cutover receipt candidate');
       assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
       assertUuid(resource.barrier_uuid, 'resource.barrier_uuid');
       if (envelope.origin !== 'edge-worker') fail('cutover receipt origin must be edge-worker');
       const pending = candidate.exact_pending_v1_event_uuids_sorted;
       if (!Array.isArray(pending)) fail('pending V1 UUID set must be an array');
       assertSortedUnique(pending, (uuid) => uuid, 'pending V1 UUID set');
+      for (const uuid of pending) assertUuid(uuid, 'pending V1 event UUID');
       if (candidate.pending_set_sha256 !== sha256(pending)) fail('pending_set_sha256 mismatch');
+      assertSha256Value(candidate.source_head_manifest_sha256, 'source_head_manifest_sha256');
       break;
     }
     default:
@@ -272,10 +401,29 @@ function assertSequence(sequence) {
 
 function assertCropCycle(cycle) {
   object(cycle, 'crop cycle projection');
+  assertExactKeys(cycle, [
+    'cycle_uuid', 'crop_code', 'variety', 'group_uuid', 'opened_by_entry_uuid', 'starts_on',
+    'gateway_device_eui', 'created_by_principal_uuid', 'sync_version', 'created_at', 'updated_at',
+    'deleted_at', 'plots',
+  ], 'crop cycle projection');
+  assertUuid(cycle.cycle_uuid, 'crop cycle cycle_uuid');
+  assertNullableUuid(cycle.group_uuid, 'crop cycle group_uuid');
+  assertUuid(cycle.opened_by_entry_uuid, 'crop cycle opened_by_entry_uuid');
+  assertEui(cycle.gateway_device_eui, 'crop cycle gateway_device_eui');
+  assertUuid(cycle.created_by_principal_uuid, 'crop cycle created_by_principal_uuid');
+  assertTimestamp(cycle.created_at, 'crop cycle created_at');
+  assertTimestamp(cycle.updated_at, 'crop cycle updated_at');
+  assertNullableTimestamp(cycle.deleted_at, 'crop cycle deleted_at');
   assertInteger(cycle.sync_version, 0, MAX_SAFE_INTEGER, 'crop cycle sync_version must be nonnegative');
   if (!Array.isArray(cycle.plots)) fail('crop cycle plots must be an array');
   assertSortedUnique(cycle.plots, (plot) => plot.plot_uuid, 'crop cycle plots');
   for (const plot of cycle.plots) {
+    assertExactKeys(plot, [
+      'cycle_uuid', 'plot_uuid', 'ends_on', 'closed_by_entry_uuid', 'close_reason',
+    ], 'crop cycle plot');
+    assertUuid(plot.cycle_uuid, 'crop cycle plot cycle_uuid');
+    assertUuid(plot.plot_uuid, 'crop cycle plot plot_uuid');
+    assertNullableUuid(plot.closed_by_entry_uuid, 'crop cycle plot closed_by_entry_uuid');
     if (plot.cycle_uuid !== cycle.cycle_uuid) fail('crop cycle plot identity mismatch');
     const open = plot.ends_on === null;
     const allCloseFieldsNull = plot.closed_by_entry_uuid === null && plot.close_reason === null;
@@ -288,6 +436,9 @@ function assertCropCycle(cycle) {
 
 function validateReplicationStructure(envelope) {
   object(envelope, 'replication envelope');
+  assertExactKeys(envelope, [
+    'sequence', 'workspace_uuid', 'kind', 'payload', 'payload_sha256', 'recorded_at',
+  ], 'replication envelope');
   assertNoTransportFields(envelope, '$');
   assertPayloadHash(envelope);
   assertSequence(envelope.sequence);
@@ -296,10 +447,23 @@ function validateReplicationStructure(envelope) {
   const payload = object(envelope.payload, 'payload');
   switch (envelope.kind) {
     case 'ENTRY_HEAD':
+      assertExactKeys(payload, ['entry_head_uuid', 'entry_revision_uuid', 'entry'], 'entry head payload');
+      assertUuid(payload.entry_head_uuid, 'entry_head_uuid');
+      assertUuid(payload.entry_revision_uuid, 'entry_revision_uuid');
       assertEntry(payload.entry);
       if (payload.entry_head_uuid !== payload.entry.entry_uuid) fail('entry head identity mismatch');
       break;
     case 'ENTRY_CONFLICT':
+      assertExactKeys(payload, [
+        'conflict_uuid', 'entry_head_uuid', 'current_revision_uuid', 'candidate_revision_uuid',
+        'base_version', 'current_version', 'reason', 'disposition', 'current_entry', 'candidate_entry',
+      ], 'entry conflict payload');
+      assertUuid(payload.conflict_uuid, 'conflict_uuid');
+      assertUuid(payload.entry_head_uuid, 'entry_head_uuid');
+      assertUuid(payload.current_revision_uuid, 'current_revision_uuid');
+      assertUuid(payload.candidate_revision_uuid, 'candidate_revision_uuid');
+      if (payload.reason !== 'base-version-mismatch') fail('entry conflict reason is invalid');
+      if (!['needs-review', 'dismissed'].includes(payload.disposition)) fail('entry conflict disposition is invalid');
       assertEntry(payload.current_entry);
       assertEntry(payload.candidate_entry);
       assertInteger(payload.base_version, 0, MAX_SAFE_INTEGER, 'conflict base_version must be nonnegative');
@@ -311,6 +475,11 @@ function validateReplicationStructure(envelope) {
       if (payload.current_version <= payload.base_version) fail('conflict current_version must exceed base_version');
       break;
     case 'PLOT_SNAPSHOT':
+      assertExactKeys(payload, [
+        'snapshot_uuid', 'gateway_device_eui', 'projection_version', 'plot',
+      ], 'plot snapshot payload');
+      assertUuid(payload.snapshot_uuid, 'snapshot_uuid');
+      assertEui(payload.gateway_device_eui, 'gateway_device_eui');
       assertInteger(payload.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
       assertPlot(payload.plot, {
         plot_uuid: payload.plot.plot_uuid,
@@ -319,18 +488,46 @@ function validateReplicationStructure(envelope) {
       });
       break;
     case 'REFERENCE_DATA':
-      if (payload.product) assertProduct(payload.product);
-      else if (payload.custom_vocab) assertCustomVocabulary(payload.custom_vocab);
+      if (Object.keys(payload).length !== 1) fail('reference payload must contain exactly one union member');
+      if (Object.prototype.hasOwnProperty.call(payload, 'product')) assertProduct(payload.product);
+      else if (Object.prototype.hasOwnProperty.call(payload, 'custom_vocab')) assertCustomVocabulary(payload.custom_vocab);
       else fail('reference payload must contain product or custom_vocab');
       break;
     case 'CROP_CYCLE_PROJECTION':
       assertCropCycle(payload);
       break;
     case 'ATTACHMENT_DESCRIPTOR':
+      assertExactKeys(payload, [
+        'attachment_uuid', 'entry_uuid', 'entry_revision_uuid', 'content_role', 'parent_disposition',
+        'original_filename', 'mime', 'size_bytes', 'sha256', 'state', 'captured_at', 'sync_version',
+        'created_at', 'deleted_at',
+      ], 'attachment descriptor payload');
+      assertUuid(payload.attachment_uuid, 'attachment_uuid');
+      assertUuid(payload.entry_uuid, 'entry_uuid');
+      assertUuid(payload.entry_revision_uuid, 'entry_revision_uuid');
+      if (payload.content_role !== 'photo') fail('attachment content_role must be photo');
+      if (!['canonical', 'conflict'].includes(payload.parent_disposition)) {
+        fail('attachment parent_disposition is invalid');
+      }
+      assertSha256Value(payload.sha256, 'attachment sha256');
+      if (!ATTACHMENT_STATES.has(payload.state)) fail('attachment state is invalid');
+      assertNullableTimestamp(payload.captured_at, 'attachment captured_at');
+      assertTimestamp(payload.created_at, 'attachment created_at');
+      assertNullableTimestamp(payload.deleted_at, 'attachment deleted_at');
       assertInteger(payload.size_bytes, 0, MAX_SAFE_INTEGER, 'attachment size_bytes must be nonnegative');
       assertInteger(payload.sync_version, 0, MAX_SAFE_INTEGER, 'attachment sync_version must be nonnegative');
       break;
     case 'AUTHORITY_STATE':
+      assertExactKeys(payload, [
+        'transition_uuid', 'gateway_device_eui', 'from_state', 'target_state', 'barrier_uuid', 'reason',
+      ], 'authority state payload');
+      assertUuid(payload.transition_uuid, 'authority transition_uuid');
+      assertNullableEui(payload.gateway_device_eui, 'authority gateway_device_eui');
+      if (payload.from_state !== null && !CUTOVER_STATES.has(payload.from_state)) {
+        fail('authority from_state is invalid');
+      }
+      if (!CUTOVER_STATES.has(payload.target_state)) fail('authority target_state is invalid');
+      assertNullableUuid(payload.barrier_uuid, 'authority barrier_uuid');
       break;
     default:
       fail('unknown replication kind');

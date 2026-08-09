@@ -24,14 +24,21 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
     'agroscope-uplink-transform',
     'dendro-analytics',
+    'device-commands',
     'device-writer',
     'history-router',
     'history-sync',
+    'installation',
+    'irrigation-config-commands',
+    'journal-replication',
     'lsn50-normalize',
     'osi-command-ledger',
     'osi-db-helper',
     'osi-journal',
+    'scope',
+    'scoped-access-commands',
     'uc512-normalize',
+    'zone-commands',
     'zone-env',
   ]);
   assert.equal(osiLib.NAME_TO_PATH['history-sync'], 'osi-history-sync-helper');
@@ -45,6 +52,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['osi-db-helper'], 'osi-db-helper');
   assert.equal(osiLib.NAME_TO_PATH['osi-command-ledger'], 'osi-command-ledger');
   assert.equal(osiLib.NAME_TO_PATH['osi-journal'], 'osi-journal');
+  assert.equal(osiLib.NAME_TO_PATH['journal-replication'], 'osi-journal-replication');
 });
 
 test('unknown name returns a typed failure, never throws', () => {
@@ -71,6 +79,7 @@ test('journal flow helpers load from OSI_LIB_BASE and cache successful modules',
   for (const [name, directory] of [
     ['osi-db-helper', 'osi-db-helper'],
     ['osi-command-ledger', 'osi-command-ledger'],
+    ['journal-replication', 'osi-journal-replication'],
   ]) {
     const helperDirectory = path.join(FIXTURE_BASE, directory);
     const helperPath = path.join(helperDirectory, 'index.js');

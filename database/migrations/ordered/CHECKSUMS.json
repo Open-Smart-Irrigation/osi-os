@@ -40,5 +40,7 @@
   "0039__weather_station_zone_backfill.sql": "aaa3ce9af69a24068180ab2a5749ebec2c0fb99f2962062493c07ebb7a8bf5af",
   "0040__durable_history_batch.sql": "020c37d9ad563d970bd43c40f7dc760590e28c320a03f8a502381b88d8b18cad",
   "0041__installation_identity.sql": "3cb46273464d3057163f60d5709ae39bcc33bd4ca12f91681a535fad0e631a98",
-  "0042__installation_identity_backfill.sql": "0714d087204d6ea6e779ca65f615612814191c706ccfa5e1ef01d57472e27822"
+  "0042__installation_identity_backfill.sql": "0714d087204d6ea6e779ca65f615612814191c706ccfa5e1ef01d57472e27822",
+  "0043__journal_v2_replication.sql": "563a4da98b9f1f9dde7c6d36896615f77e20505619cedda6b2d3dfccae678e81",
+  "0044__journal_v2_media.sql": "f6d30c0df4d9676a152f028c030002d06e7d74abf0eeae62c9784af8aba3b8b9"
 }

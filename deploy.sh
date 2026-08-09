@@ -705,6 +705,18 @@ fetch_required "osi-journal commands.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/commands.js" \
     "/srv/node-red/osi-journal/commands.js"
 
+fetch_required "osi-journal-replication package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/package.json" \
+    "/srv/node-red/osi-journal-replication/package.json"
+
+fetch_required "osi-journal-replication index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/index.js" \
+    "/srv/node-red/osi-journal-replication/index.js"
+
+fetch_required "osi-journal-replication canonicalization.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.js" \
+    "/srv/node-red/osi-journal-replication/canonicalization.js"
+
 fetch_required "osi-command-ledger package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json" \
     "/srv/node-red/osi-command-ledger/package.json"

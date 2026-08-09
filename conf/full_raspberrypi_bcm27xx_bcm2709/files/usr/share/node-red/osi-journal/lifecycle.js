@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 const { aggregateHash, buildAggregate } = require('./aggregate');
 const { buildContext } = require('./context');
 const { validateEntry } = require('./index');
+const journalReplication = require('../osi-journal-replication');
+const journalV2Canonicalizer = require('../osi-journal-replication/canonicalization');
 
 const ENTRY_COLUMNS = [
   'entry_uuid',
@@ -1552,6 +1554,93 @@ async function runAfterValuesHook(principal, details) {
   }
 }
 
+const POST_BARRIER_STATES = new Set([
+  'BARRIER_RECORDED', 'LEGACY_DRAINED', 'RECONCILED', 'ACTIVATED', 'BLOCKED',
+]);
+
+async function journalAuthority(tx, gatewayDeviceEui) {
+  const rows = await tx.all(
+    'SELECT workspace_uuid,authority_state,state FROM journal_authority_state ' +
+      'WHERE gateway_device_eui=? ORDER BY workspace_uuid',
+    [gatewayDeviceEui]
+  );
+  if (rows.length > 1) {
+    throw lifecycleError('journal_authority_ambiguous', 'Gateway belongs to multiple journal workspaces');
+  }
+  if (!rows.length) return { mode: 'legacy', workspace_uuid: null };
+  const row = rows[0];
+  const v2 = row.authority_state === 'cloud_primary' || POST_BARRIER_STATES.has(row.state);
+  return { mode: v2 ? 'v2' : 'legacy', workspace_uuid: row.workspace_uuid };
+}
+
+function v2EntryMutation(aggregate, operation, mutationUuid, workspaceUuid) {
+  const entry = Object.assign({}, aggregate, { contract_version: 2 });
+  let candidate;
+  let recordedAt;
+  if (operation === 'ENTRY_VOID') {
+    candidate = {
+      status: 'voided',
+      voided_at: entry.voided_at,
+      voided_by_principal_uuid: entry.voided_by_principal_uuid,
+      void_reason: entry.void_reason,
+    };
+    recordedAt = entry.voided_at;
+  } else {
+    candidate = { entry };
+    recordedAt = entry.recorded_at;
+  }
+  return {
+    mutation_uuid: mutationUuid,
+    workspace_uuid: workspaceUuid,
+    operation,
+    resource: {
+      entry_uuid: entry.entry_uuid,
+      base_version: Math.max(0, Number(entry.sync_version) - 1),
+    },
+    candidate,
+    origin: 'edge-ui',
+    recorded_at: recordedAt,
+  };
+}
+
+function v2ReferenceMutation(source, mutationUuid, workspaceUuid) {
+  const custom = source.aggregate_type === 'JOURNAL_VOCAB';
+  const value = Object.assign({}, source.aggregate, { contract_version: 2 });
+  if (custom) {
+    value.mappings = value.mappings.map(function(mapping) {
+      return Object.assign({ term_code: value.code }, mapping);
+    });
+  }
+  return {
+    mutation_uuid: mutationUuid,
+    workspace_uuid: workspaceUuid,
+    operation: custom ? 'CUSTOM_VOCAB_UPSERT' : 'PRODUCT_UPSERT',
+    resource: custom
+      ? { custom_field_uuid: value.custom_field_uuid, base_version: Math.max(0, value.sync_version - 1) }
+      : { product_uuid: value.product_uuid, base_version: Math.max(0, value.sync_version - 1) },
+    candidate: custom ? { custom_vocab: value } : { product: value },
+    origin: 'edge-ui',
+    recorded_at: source.occurred_at,
+  };
+}
+
+function v2MutationFor(source, entry, op, mutationUuid, workspaceUuid) {
+  if (entry) {
+    return v2EntryMutation(
+      source.aggregate,
+      op === 'JOURNAL_ENTRY_VOIDED'
+        ? 'ENTRY_VOID'
+        : Number(entry.sync_version) === 1 ? 'ENTRY_CREATE' : 'ENTRY_CORRECT',
+      mutationUuid,
+      workspaceUuid
+    );
+  }
+  if (!['JOURNAL_VOCAB', 'JOURNAL_PRODUCT'].includes(source.aggregate_type)) {
+    throw lifecycleError('journal_v2_unsupported_resource', 'Journal V2 cannot queue this resource type');
+  }
+  return v2ReferenceMutation(source, mutationUuid, workspaceUuid);
+}
+
 async function emitJournalOutbox(tx, source, op) {
   let aggregate;
   let aggregateType;
@@ -1585,6 +1674,29 @@ async function emitJournalOutbox(tx, source, op) {
     gatewayDeviceEui = source.gateway_device_eui;
   }
   const eventUuid = source && source.event_uuid ? source.event_uuid : crypto.randomUUID();
+  const authority = await journalAuthority(tx, gatewayDeviceEui);
+  if (authority.mode === 'v2') {
+    const mutationSource = entry
+      ? { aggregate }
+      : source;
+    const mutation = v2MutationFor(
+      mutationSource,
+      entry,
+      op,
+      eventUuid,
+      authority.workspace_uuid
+    );
+    mutation.payload_sha256 = '0'.repeat(64);
+    mutation.payload_sha256 = journalV2Canonicalizer.hashMutation(mutation);
+    await journalReplication.enqueueMutation(tx, mutation);
+    return {
+      aggregate,
+      entry,
+      event_uuid: eventUuid,
+      mutation_uuid: eventUuid,
+      replication_mode: 'v2',
+    };
+  }
   await tx.run(
     'INSERT INTO sync_outbox (' +
       'event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui' +
@@ -1600,7 +1712,13 @@ async function emitJournalOutbox(tx, source, op) {
       gatewayDeviceEui,
     ]
   );
-  return { aggregate, entry, event_uuid: eventUuid };
+  return { aggregate, entry, event_uuid: eventUuid, mutation_uuid: null, replication_mode: 'v1' };
+}
+
+function journalReceipt(emission) {
+  return emission.replication_mode === 'v2'
+    ? { outbox_event_uuid: null, mutation_uuid: emission.mutation_uuid }
+    : { outbox_event_uuid: emission.event_uuid };
 }
 
 function safeDuplicateCandidate(candidate) {
@@ -1959,11 +2077,10 @@ async function replaceExistingWithFinal(
   };
   assertCommandJournalEntryEffectKey(principal, terminal);
   await recordTerminalCommand(tx, principal, terminal);
-  return {
+  return Object.assign({
     entry_uuid: existing.entry_uuid,
-    outbox_event_uuid: emission.event_uuid,
     sync_version: nextVersion,
-  };
+  }, journalReceipt(emission));
 }
 
 async function correctFinalInTransaction(tx, catalog, input, principal, entryIndex, existing) {
@@ -2237,11 +2354,10 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   };
   assertCommandJournalEntryEffectKey(principal, terminal);
   await recordTerminalCommand(tx, principal, terminal);
-  return {
+  return Object.assign({
     entry_uuid: row.entry_uuid,
-    outbox_event_uuid: emission.event_uuid,
     sync_version: finalSyncVersion,
-  };
+  }, journalReceipt(emission));
 }
 
 async function saveDraft(db, catalog, input, principal) {
@@ -2518,11 +2634,10 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
     };
     assertCommandJournalEntryEffectKey(principal, terminal);
     await recordTerminalCommand(tx, principal, terminal);
-    return {
+    return Object.assign({
       entry_uuid: entryUuid,
-      outbox_event_uuid: emission.event_uuid,
       sync_version: nextVersion,
-    };
+    }, journalReceipt(emission));
   });
 }
 

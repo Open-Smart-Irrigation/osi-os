@@ -1883,7 +1883,12 @@ async function upsertCustomVocab(db, input, principal, pathUuid) {
       gateway_device_eui: principal.gateway_device_eui,
       sync_version: nextVersion,
     });
-    return { custom_vocab: aggregate, outbox_event_uuid: emission.event_uuid, created: creating };
+    return Object.assign({
+      custom_vocab: aggregate,
+      created: creating,
+    }, emission.replication_mode === 'v2'
+      ? { outbox_event_uuid: null, mutation_uuid: emission.mutation_uuid }
+      : { outbox_event_uuid: emission.event_uuid });
   });
 }
 
