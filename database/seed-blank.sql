@@ -570,6 +570,22 @@ WHEN OLD.source <> NEW.source
 BEGIN
   SELECT RAISE(ABORT,'journal attachment source is immutable');
 END;
+CREATE TRIGGER trg_journal_attachment_edge_binding_immutable_bu
+BEFORE UPDATE OF workspace_uuid,entry_uuid,entry_revision_uuid,parent_mutation_uuid,
+  parent_disposition,cloud_registration_state
+ON journal_attachment_replicas
+FOR EACH ROW
+WHEN OLD.source='edge' AND OLD.cloud_registration_state <> 'not_registered' AND (
+  OLD.workspace_uuid IS NOT NEW.workspace_uuid
+  OR OLD.entry_uuid IS NOT NEW.entry_uuid
+  OR OLD.entry_revision_uuid IS NOT NEW.entry_revision_uuid
+  OR OLD.parent_mutation_uuid IS NOT NEW.parent_mutation_uuid
+  OR OLD.parent_disposition IS NOT NEW.parent_disposition
+  OR NEW.cloud_registration_state='not_registered'
+)
+BEGIN
+  SELECT RAISE(ABORT,'journal attachment binding is immutable');
+END;
 CREATE TRIGGER trg_journal_attachment_edge_parent_bi
 BEFORE INSERT ON journal_attachment_replicas
 FOR EACH ROW

@@ -1555,12 +1555,12 @@ async function runAfterValuesHook(principal, details) {
 }
 
 const POST_BARRIER_STATES = new Set([
-  'BARRIER_RECORDED', 'LEGACY_DRAINED', 'RECONCILED', 'ACTIVATED', 'BLOCKED',
+  'BARRIER_RECORDED', 'LEGACY_DRAINED', 'RECONCILED', 'ACTIVATED',
 ]);
 
 async function journalAuthority(tx, gatewayDeviceEui) {
   const rows = await tx.all(
-    'SELECT workspace_uuid,authority_state,state FROM journal_authority_state ' +
+    'SELECT workspace_uuid,authority_state,state,barrier_uuid FROM journal_authority_state ' +
       'WHERE gateway_device_eui=? ORDER BY workspace_uuid',
     [gatewayDeviceEui]
   );
@@ -1569,12 +1569,17 @@ async function journalAuthority(tx, gatewayDeviceEui) {
   }
   if (!rows.length) return { mode: 'legacy', workspace_uuid: null };
   const row = rows[0];
-  const v2 = row.authority_state === 'cloud_primary' || POST_BARRIER_STATES.has(row.state);
+  const blockedAfterBarrier = row.state === 'BLOCKED' && row.barrier_uuid != null;
+  const v2 = row.authority_state === 'cloud_primary' || POST_BARRIER_STATES.has(row.state) ||
+    blockedAfterBarrier;
   return { mode: v2 ? 'v2' : 'legacy', workspace_uuid: row.workspace_uuid };
 }
 
 function v2EntryMutation(aggregate, operation, mutationUuid, workspaceUuid) {
   const entry = Object.assign({}, aggregate, { contract_version: 2 });
+  if (!['cloud-ui', 'edge-ui'].includes(entry.origin)) {
+    throw lifecycleError('invalid_journal_origin', 'Journal V2 entry origin is invalid');
+  }
   let candidate;
   let recordedAt;
   if (operation === 'ENTRY_VOID') {
@@ -1598,8 +1603,49 @@ function v2EntryMutation(aggregate, operation, mutationUuid, workspaceUuid) {
       base_version: Math.max(0, Number(entry.sync_version) - 1),
     },
     candidate,
-    origin: 'edge-ui',
+    origin: entry.origin,
     recorded_at: recordedAt,
+  };
+}
+
+function v2PlotMutation(source, mutationUuid, workspaceUuid) {
+  const aggregate = source.aggregate;
+  const plot = {
+    contract_version: 2,
+    plot_uuid: aggregate.plot_uuid,
+    plot_code: aggregate.plot_code,
+    name: aggregate.name,
+    zone_uuid: aggregate.zone_uuid,
+    station_code: aggregate.station_code,
+    crop_hint: aggregate.crop_hint,
+    area_m2: aggregate.area_m2,
+    active: aggregate.active,
+    sync_version: aggregate.sync_version,
+    owner_user_uuid: aggregate.owner_user_uuid,
+    gateway_device_eui: aggregate.gateway_device_eui,
+    created_at: aggregate.created_at,
+    updated_at: aggregate.updated_at,
+    deleted_at: aggregate.deleted_at,
+    settings: {
+      layout_code: aggregate.settings.layout_code,
+      updated_at: aggregate.settings.updated_at,
+      updated_by_principal_uuid: aggregate.settings.updated_by_principal_uuid,
+      sync_version: aggregate.settings.sync_version,
+      context_json: aggregate.settings.context_json,
+    },
+  };
+  return {
+    mutation_uuid: mutationUuid,
+    workspace_uuid: workspaceUuid,
+    operation: 'PLOT_SNAPSHOT',
+    resource: {
+      gateway_device_eui: plot.gateway_device_eui,
+      plot_uuid: plot.plot_uuid,
+      projection_version: plot.sync_version,
+    },
+    candidate: { plot },
+    origin: 'edge-worker',
+    recorded_at: source.occurred_at,
   };
 }
 
@@ -1634,6 +1680,9 @@ function v2MutationFor(source, entry, op, mutationUuid, workspaceUuid) {
       mutationUuid,
       workspaceUuid
     );
+  }
+  if (source.aggregate_type === 'JOURNAL_PLOT') {
+    return v2PlotMutation(source, mutationUuid, workspaceUuid);
   }
   if (!['JOURNAL_VOCAB', 'JOURNAL_PRODUCT'].includes(source.aggregate_type)) {
     throw lifecycleError('journal_v2_unsupported_resource', 'Journal V2 cannot queue this resource type');
@@ -1675,7 +1724,10 @@ async function emitJournalOutbox(tx, source, op) {
   }
   const eventUuid = source && source.event_uuid ? source.event_uuid : crypto.randomUUID();
   const authority = await journalAuthority(tx, gatewayDeviceEui);
-  if (authority.mode === 'v2') {
+  // The V2 union has no plot-group mutation. Preserve that existing V1 route
+  // until the paired contract defines an authoritative group representation.
+  const v2Compatible = aggregateType !== 'JOURNAL_PLOT_GROUP';
+  if (authority.mode === 'v2' && v2Compatible) {
     const mutationSource = entry
       ? { aggregate }
       : source;
@@ -1780,6 +1832,33 @@ function batchMemberEventUuid(input, member) {
 }
 
 async function persistedEntryReceipt(tx, entry, expectedEventUuid) {
+  const mutation = expectedEventUuid
+    ? await tx.get(
+      'SELECT mutation_uuid,operation,resource_uuid,payload_json FROM journal_edge_mutations ' +
+        'WHERE mutation_uuid=?',
+      [expectedEventUuid]
+    )
+    : null;
+  if (mutation) {
+    let payload;
+    try {
+      payload = JSON.parse(mutation.payload_json);
+    } catch (_error) {
+      throw idempotencyConflict('A persisted journal entry has an invalid mutation receipt');
+    }
+    const candidateEntry = payload && payload.candidate && payload.candidate.entry;
+    if (mutation.operation !== 'ENTRY_CREATE' || mutation.resource_uuid !== entry.entry_uuid ||
+        !candidateEntry || candidateEntry.entry_uuid !== entry.entry_uuid ||
+        Number(candidateEntry.sync_version) !== Number(entry.sync_version)) {
+      throw idempotencyConflict('A batch retry does not match the original write intent');
+    }
+    return {
+      entry_uuid: entry.entry_uuid,
+      outbox_event_uuid: null,
+      mutation_uuid: mutation.mutation_uuid,
+      sync_version: entry.sync_version,
+    };
+  }
   const receipt = await tx.get(
     "SELECT event_uuid FROM sync_outbox WHERE aggregate_type='JOURNAL_ENTRY' " +
       "AND aggregate_key=? AND op='JOURNAL_ENTRY_UPSERTED' AND sync_version=? " +

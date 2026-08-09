@@ -406,7 +406,7 @@ test('queued mutations and attachment result bindings survive process restarts',
       '30000000-0000-4000-8000-000000000099',
       'd0000000-0000-4000-8000-000000000088'
     ),
-    /source is immutable|parent outcome is not bound/i
+    /source is immutable|binding is immutable|parent outcome is not bound/i
   );
   database.close();
 
@@ -421,4 +421,111 @@ test('queued mutations and attachment result bindings survive process restarts',
   assert.equal(persisted.parent_revision_uuid, result.revision_uuid);
   assert.equal(persisted.entry_revision_uuid, result.revision_uuid);
   database.close();
+});
+
+test('registered edge attachment bindings cannot retarget to another valid outcome', async (t) => {
+  const { database } = fixture();
+  t.after(() => database.close());
+  const now = '2026-08-08T10:11:12.123Z';
+  function terminalMutation(values) {
+    database.prepare(
+      'INSERT INTO journal_edge_mutations(' +
+        'mutation_uuid,workspace_uuid,operation,resource_uuid,base_version,payload_json,' +
+        'payload_sha256,status,outcome_json,result_revision_uuid,conflict_uuid,recorded_at,' +
+        'created_at,updated_at,completed_at' +
+      ') VALUES(?,?,\'ENTRY_CREATE\',?,0,?,?,?,\'{}\',?,?,?,?,?,?)'
+    ).run(
+      values.mutation_uuid, values.workspace_uuid, values.entry_uuid, '{}', 'a'.repeat(64),
+      values.status, values.revision_uuid,
+      values.status === 'conflict' ? values.conflict_uuid : null,
+      now, now, now, now
+    );
+  }
+  const canonicalA = {
+    mutation_uuid: '10000000-0000-4000-8000-000000000091',
+    workspace_uuid: '20000000-0000-4000-8000-000000000091',
+    entry_uuid: '30000000-0000-4000-8000-000000000091',
+    revision_uuid: 'b0000000-0000-4000-8000-000000000091',
+    status: 'applied',
+  };
+  const canonicalB = {
+    mutation_uuid: '10000000-0000-4000-8000-000000000092',
+    workspace_uuid: '20000000-0000-4000-8000-000000000092',
+    entry_uuid: '30000000-0000-4000-8000-000000000092',
+    revision_uuid: 'b0000000-0000-4000-8000-000000000092',
+    status: 'already-applied',
+  };
+  terminalMutation(canonicalA);
+  terminalMutation(canonicalB);
+  database.prepare(
+    'INSERT INTO journal_attachment_replicas(' +
+      'attachment_uuid,workspace_uuid,entry_uuid,entry_revision_uuid,parent_mutation_uuid,source,' +
+      'content_role,parent_disposition,mime,size_bytes,sha256,sync_version,descriptor_state,' +
+      'replica_status,cloud_registration_state,created_at,updated_at' +
+    ') VALUES(?,?,?,?,?,\'edge\',\'original\',\'canonical\',\'image/jpeg\',1,?,1,\'active\',' +
+      '\'local_only\',\'registered\',?,?)'
+  ).run(
+    'd0000000-0000-4000-8000-000000000091', canonicalA.workspace_uuid,
+    canonicalA.entry_uuid, canonicalA.revision_uuid, canonicalA.mutation_uuid,
+    'a'.repeat(64), now, now
+  );
+
+  assert.throws(
+    () => database.prepare(
+      'UPDATE journal_attachment_replicas SET workspace_uuid=?,entry_uuid=?,' +
+        'entry_revision_uuid=?,parent_mutation_uuid=? WHERE attachment_uuid=?'
+    ).run(
+      canonicalB.workspace_uuid, canonicalB.entry_uuid, canonicalB.revision_uuid,
+      canonicalB.mutation_uuid, 'd0000000-0000-4000-8000-000000000091'
+    ),
+    /binding is immutable/i
+  );
+  assert.throws(
+    () => database.prepare(
+      "UPDATE journal_attachment_replicas SET cloud_registration_state='not_registered' " +
+        'WHERE attachment_uuid=?'
+    ).run('d0000000-0000-4000-8000-000000000091'),
+    /binding is immutable/i
+  );
+
+  const conflictA = {
+    mutation_uuid: '10000000-0000-4000-8000-000000000093',
+    workspace_uuid: '20000000-0000-4000-8000-000000000093',
+    entry_uuid: '30000000-0000-4000-8000-000000000093',
+    revision_uuid: 'b0000000-0000-4000-8000-000000000093',
+    conflict_uuid: 'c0000000-0000-4000-8000-000000000093',
+    status: 'conflict',
+  };
+  const conflictB = {
+    mutation_uuid: '10000000-0000-4000-8000-000000000094',
+    workspace_uuid: conflictA.workspace_uuid,
+    entry_uuid: conflictA.entry_uuid,
+    revision_uuid: 'b0000000-0000-4000-8000-000000000094',
+    conflict_uuid: 'c0000000-0000-4000-8000-000000000094',
+    status: 'conflict',
+  };
+  terminalMutation(conflictA);
+  terminalMutation(conflictB);
+  database.prepare(
+    'INSERT INTO journal_attachment_replicas(' +
+      'attachment_uuid,workspace_uuid,entry_uuid,entry_revision_uuid,parent_mutation_uuid,source,' +
+      'content_role,parent_disposition,mime,size_bytes,sha256,sync_version,descriptor_state,' +
+      'replica_status,cloud_registration_state,created_at,updated_at' +
+    ') VALUES(?,?,?,?,?,\'edge\',\'original\',\'conflict\',\'image/jpeg\',1,?,1,\'active\',' +
+      '\'local_only\',\'registered\',?,?)'
+  ).run(
+    'd0000000-0000-4000-8000-000000000093', conflictA.workspace_uuid,
+    conflictA.entry_uuid, conflictA.revision_uuid, conflictA.mutation_uuid,
+    'a'.repeat(64), now, now
+  );
+  assert.throws(
+    () => database.prepare(
+      'UPDATE journal_attachment_replicas SET entry_revision_uuid=?,parent_mutation_uuid=? ' +
+        'WHERE attachment_uuid=?'
+    ).run(
+      conflictB.revision_uuid, conflictB.mutation_uuid,
+      'd0000000-0000-4000-8000-000000000093'
+    ),
+    /binding is immutable/i
+  );
 });

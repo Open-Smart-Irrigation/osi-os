@@ -74,6 +74,10 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
     'trg_journal_attachment_source_immutable_bu',
     '0044__journal_v2_media.sql',
   ],
+  [
+    'trg_journal_attachment_edge_binding_immutable_bu',
+    '0044__journal_v2_media.sql',
+  ],
 ]);
 
 function q(db, sql) {

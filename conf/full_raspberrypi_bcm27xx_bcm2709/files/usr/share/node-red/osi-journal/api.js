@@ -1152,11 +1152,12 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
     });
     const activeCropCycles = await activeCropCyclesForPlot(tx, plotUuid);
     const hasWeatherSource = await zoneHasWeatherSource(tx, row.zone_uuid, principal);
-    return {
+    return Object.assign({
       plot: plotAggregate(row, settings, activeCropCycles, hasWeatherSource),
-      outbox_event_uuid: emission.event_uuid,
       created: creating,
-    };
+    }, emission.replication_mode === 'v2'
+      ? { outbox_event_uuid: null, mutation_uuid: emission.mutation_uuid }
+      : { outbox_event_uuid: emission.event_uuid });
   });
 }
 
