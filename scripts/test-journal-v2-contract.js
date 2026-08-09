@@ -52,7 +52,13 @@ for (const name of [
   assert.equal(schema.definitions[name].additionalProperties, false, `${name} must be closed`);
 }
 
-assert.equal(golden.mutation_vectors.length, 7, 'one full positive vector per mutation variant');
+const cloudOnly = golden.mutation_vectors.find(
+  (vector) => vector.name === 'ENTRY_CREATE cloud-only zero-gateway full envelope'
+);
+assert.ok(cloudOnly, 'a positive zero-gateway ENTRY_CREATE vector is required');
+assert.equal(cloudOnly.input.candidate.entry.gateway_device_eui, null, 'cloud-only gateway must be null');
+assert.equal(cloudOnly.input.candidate.entry.plot_uuid, null, 'cloud-only plot must be null');
+assert.ok(golden.mutation_vectors.length >= 7, 'every mutation variant needs a full positive vector');
 for (const vector of golden.mutation_vectors) {
   assert.deepEqual(schemaErrors(vector.input), [], `${vector.name} must satisfy the schema`);
   assert.doesNotThrow(() => canonicalizer.validateMutation(vector.input), `${vector.name} semantic validation`);

@@ -49,7 +49,7 @@
   ],
   "mutation_vectors": [
     {
-      "name": "ENTRY_CREATE full envelope",
+      "name": "ENTRY_CREATE cloud-only zero-gateway full envelope",
       "input": {
         "mutation_uuid": "10000000-0000-4000-8000-000000000001",
         "workspace_uuid": "20000000-0000-4000-8000-000000000001",
@@ -65,7 +65,7 @@
             "owner_user_uuid": "40000000-0000-4000-8000-000000000001",
             "author_principal_uuid": "50000000-0000-4000-8000-000000000001",
             "author_label": "Field operator",
-            "plot_uuid": "60000000-0000-4000-8000-000000000001",
+            "plot_uuid": null,
             "zone_uuid": null,
             "device_eui": null,
             "season_uuid": null,
@@ -96,7 +96,7 @@
             "note": "Irrigation completed",
             "context_json": null,
             "sync_version": 1,
-            "gateway_device_eui": "0016C001F11715E2",
+            "gateway_device_eui": null,
             "created_at": "2026-08-08T09:00:00.000Z",
             "updated_at": "2026-08-08T10:11:12.123Z",
             "deleted_at": null,
@@ -126,10 +126,10 @@
         },
         "origin": "cloud-ui",
         "recorded_at": "2026-08-08T10:11:12.123Z",
-        "payload_sha256": "a54b0061c753519fff6527a0827dbe3c44865cd00e6a0b84c5a8a425c895f34b"
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406"
       },
-      "canonical_hash_input": "{\"candidate\":{\"entry\":{\"activity_code\":\"irrigation\",\"author_label\":\"Field operator\",\"author_principal_uuid\":\"50000000-0000-4000-8000-000000000001\",\"batch_uuid\":null,\"campaign_uuid\":null,\"catalog_version\":10,\"context_json\":null,\"contract_version\":2,\"created_at\":\"2026-08-08T09:00:00.000Z\",\"deleted_at\":null,\"device_eui\":null,\"entry_uuid\":\"30000000-0000-4000-8000-000000000001\",\"gateway_device_eui\":\"0016C001F11715E2\",\"layout_code\":\"default\",\"layout_version\":1,\"note\":\"Irrigation completed\",\"observation_unit_code\":null,\"occurred_end\":null,\"occurred_start\":\"2026-08-08T10:11:12.123Z\",\"occurred_timezone\":\"Europe/Zurich\",\"occurred_utc_offset_minutes\":120,\"origin\":\"cloud-ui\",\"owner_user_uuid\":\"40000000-0000-4000-8000-000000000001\",\"pass_uuid\":null,\"plot_uuid\":\"60000000-0000-4000-8000-000000000001\",\"protocol_code\":null,\"protocol_version\":null,\"recorded_at\":\"2026-08-08T10:11:12.123Z\",\"season_crop\":null,\"season_uuid\":null,\"season_variety\":null,\"status\":\"final\",\"sync_version\":1,\"template_code\":\"irrigation.default\",\"template_version\":1,\"updated_at\":\"2026-08-08T10:11:12.123Z\",\"values\":[{\"attribute_code\":\"attr.note\",\"entered_unit_code\":null,\"entered_value_num\":null,\"group_index\":0,\"unit_code\":null,\"value_num\":null,\"value_status\":\"observed\",\"value_text\":\"north block\"},{\"attribute_code\":\"attr.water.amount\",\"entered_unit_code\":\"unit.mm\",\"entered_value_num\":12.5,\"group_index\":1,\"unit_code\":\"unit.mm\",\"value_num\":12.5,\"value_status\":\"observed\",\"value_text\":null}],\"void_reason\":null,\"voided_at\":null,\"voided_by_principal_uuid\":null,\"zone_uuid\":null}},\"mutation_uuid\":\"10000000-0000-4000-8000-000000000001\",\"operation\":\"ENTRY_CREATE\",\"origin\":\"cloud-ui\",\"recorded_at\":\"2026-08-08T10:11:12.123Z\",\"resource\":{\"base_version\":0,\"entry_uuid\":\"30000000-0000-4000-8000-000000000001\"},\"workspace_uuid\":\"20000000-0000-4000-8000-000000000001\"}",
-      "payload_sha256": "a54b0061c753519fff6527a0827dbe3c44865cd00e6a0b84c5a8a425c895f34b"
+      "canonical_hash_input": "{\"candidate\":{\"entry\":{\"activity_code\":\"irrigation\",\"author_label\":\"Field operator\",\"author_principal_uuid\":\"50000000-0000-4000-8000-000000000001\",\"batch_uuid\":null,\"campaign_uuid\":null,\"catalog_version\":10,\"context_json\":null,\"contract_version\":2,\"created_at\":\"2026-08-08T09:00:00.000Z\",\"deleted_at\":null,\"device_eui\":null,\"entry_uuid\":\"30000000-0000-4000-8000-000000000001\",\"gateway_device_eui\":null,\"layout_code\":\"default\",\"layout_version\":1,\"note\":\"Irrigation completed\",\"observation_unit_code\":null,\"occurred_end\":null,\"occurred_start\":\"2026-08-08T10:11:12.123Z\",\"occurred_timezone\":\"Europe/Zurich\",\"occurred_utc_offset_minutes\":120,\"origin\":\"cloud-ui\",\"owner_user_uuid\":\"40000000-0000-4000-8000-000000000001\",\"pass_uuid\":null,\"plot_uuid\":null,\"protocol_code\":null,\"protocol_version\":null,\"recorded_at\":\"2026-08-08T10:11:12.123Z\",\"season_crop\":null,\"season_uuid\":null,\"season_variety\":null,\"status\":\"final\",\"sync_version\":1,\"template_code\":\"irrigation.default\",\"template_version\":1,\"updated_at\":\"2026-08-08T10:11:12.123Z\",\"values\":[{\"attribute_code\":\"attr.note\",\"entered_unit_code\":null,\"entered_value_num\":null,\"group_index\":0,\"unit_code\":null,\"value_num\":null,\"value_status\":\"observed\",\"value_text\":\"north block\"},{\"attribute_code\":\"attr.water.amount\",\"entered_unit_code\":\"unit.mm\",\"entered_value_num\":12.5,\"group_index\":1,\"unit_code\":\"unit.mm\",\"value_num\":12.5,\"value_status\":\"observed\",\"value_text\":null}],\"void_reason\":null,\"voided_at\":null,\"voided_by_principal_uuid\":null,\"zone_uuid\":null}},\"mutation_uuid\":\"10000000-0000-4000-8000-000000000001\",\"operation\":\"ENTRY_CREATE\",\"origin\":\"cloud-ui\",\"recorded_at\":\"2026-08-08T10:11:12.123Z\",\"resource\":{\"base_version\":0,\"entry_uuid\":\"30000000-0000-4000-8000-000000000001\"},\"workspace_uuid\":\"20000000-0000-4000-8000-000000000001\"}",
+      "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406"
     },
     {
       "name": "ENTRY_CORRECT full envelope",
