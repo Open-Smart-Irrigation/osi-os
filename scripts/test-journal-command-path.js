@@ -2619,3 +2619,31 @@ test('entry duplicate acknowledgement is canonical top-level command control and
     db.close();
   }
 });
+
+test('legacy authority keeps V1 journal commands working and the V2 worker never issues them', async () => {
+  const db = fixtureDb('legacy-v1-worker-isolation');
+  try {
+    const result = await journal.applyJournalCommand(
+      db,
+      commandEnvelope({ commandId: 730 }),
+      { gateway_device_eui: GATEWAY_EUI },
+    );
+    assert.equal(result.ack.result, 'APPLIED');
+    assert.equal((await db.get(
+      "SELECT COUNT(*) AS count FROM sync_outbox WHERE aggregate_type='JOURNAL_ENTRY'",
+      [],
+    )).count, 1);
+    assert.equal((await db.get(
+      'SELECT COUNT(*) AS count FROM journal_edge_mutations',
+      [],
+    )).count, 0);
+
+    const worker = SHIPPED_FLOWS.find(
+      (node) => node.id === 'journal-v2-replication-worker',
+    );
+    assert.ok(worker);
+    assert.doesNotMatch(worker.func, /pending-commands|UPSERT_JOURNAL_ENTRY|VOID_JOURNAL_ENTRY/);
+  } finally {
+    db.close();
+  }
+});

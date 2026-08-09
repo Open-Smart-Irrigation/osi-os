@@ -100,6 +100,64 @@ function assertWires(nodeId, expectedWires, label) {
     console.log(`OK  ${label}`);
 }
 
+// === Journal V2 independent replication worker ===
+
+const journalV2Tick = byId['journal-v2-replication-tick'];
+const journalV2Worker = byId['journal-v2-replication-worker'];
+const journalV2Success = byId['journal-v2-replication-success-status'];
+const journalV2Catch = byId['journal-v2-replication-error-catch'];
+const journalV2Error = byId['journal-v2-replication-error-status'];
+const journalV2Objects = flows.filter((node) =>
+    node.id === 'journal-v2-replication-tab' || node.z === 'journal-v2-replication-tab'
+);
+if (journalV2Objects.length !== 6) {
+    failures.push(`journal v2 worker: expected one tab plus five nodes, got ${journalV2Objects.length}`);
+}
+if (!journalV2Tick || journalV2Tick.type !== 'inject' || journalV2Tick.repeat !== '30' ||
+    journalV2Tick.name !== 'Journal V2 replication tick' ||
+    JSON.stringify(journalV2Tick.wires) !== JSON.stringify([['journal-v2-replication-worker']])) {
+    failures.push('journal v2 worker: requires exactly one independent 30-second inject');
+}
+if (!journalV2Worker || journalV2Worker.type !== 'function' || journalV2Worker.func.length > 4096 ||
+    JSON.stringify(journalV2Worker.wires) !==
+      JSON.stringify([['journal-v2-replication-success-status']])) {
+    failures.push('journal v2 worker: function must be bounded and wire only to its success status');
+} else {
+    for (const binding of [
+        ['osiLib', 'osi-lib'], ['osiDb', 'osi-db-helper'], ['osiCloudHttp', 'osi-cloud-http'],
+    ]) {
+        if (!hasLib(journalV2Worker, binding[0], binding[1])) {
+            failures.push(`journal v2 worker: missing ${binding[0]}=${binding[1]} library`);
+        }
+    }
+    for (const required of [
+        "osiLib.require('journal-replication')", 'osiCloudHttp.requestJsonIpv4',
+        'new osiDb.Database', 'osi-identity-restart.json', 'fs.readFileSync',
+        'finally', '.close(', 'node.warn(', 'node.error(',
+    ]) requireFuncIncludes(journalV2Worker, required, `journal v2 worker: missing ${required}`);
+    if (/pending-commands|mqtt|heartbeat|sync-init-fn/i.test(journalV2Worker.func)) {
+        failures.push('journal v2 worker: must not couple to commands, MQTT, heartbeat, or boot schema');
+    }
+}
+if (!journalV2Success || JSON.stringify(journalV2Success.wires) !== JSON.stringify([[]])) {
+    failures.push('journal v2 worker: missing isolated success status path');
+}
+if (!journalV2Catch || JSON.stringify(journalV2Catch.scope) !==
+    JSON.stringify(['journal-v2-replication-worker']) || JSON.stringify(journalV2Catch.wires) !==
+    JSON.stringify([['journal-v2-replication-error-status']])) {
+    failures.push('journal v2 worker: catch must scope only the worker and wire to visible error status');
+}
+if (!journalV2Error || !/node\.warn/.test(journalV2Error.func || '') ||
+    JSON.stringify(journalV2Error.wires) !== JSON.stringify([[]])) {
+    failures.push('journal v2 worker: visible error status path is missing');
+}
+for (const node of journalV2Objects) {
+    const targets = (node.wires || []).flat();
+    if (targets.includes('sync-init-fn') || targets.includes('062a0f9bf66d9789')) {
+        failures.push(`journal v2 worker: ${node.id} enters a frozen/shared cluster`);
+    }
+}
+
 // === Field Journal Task 10 routes ===
 
 const journalRoutes = [

@@ -110,11 +110,15 @@ run_communication_preflight() {
         mkdir -p conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share
         mkdir -p conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share
         mkdir -p conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share
+        mkdir -p conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults
+        mkdir -p conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults
         mkdir -p feeds/chirpstack-openwrt-feed/apps/node-red/files
         mkdir -p scripts
         fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json"
         fetch "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json" "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json"
         fetch "conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json" "conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json"
+        fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config" "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config"
+        fetch "conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/96_osi_server_config" "conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/96_osi_server_config"
         fetch "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"
         fetch "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js"
         fetch "scripts/chirpstack-bootstrap.js" "scripts/chirpstack-bootstrap.js"
@@ -124,6 +128,8 @@ run_communication_preflight() {
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
             conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json \
             conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config \
+            conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/96_osi_server_config \
             feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init \
             feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js \
             scripts/chirpstack-bootstrap.js \
@@ -133,6 +139,18 @@ run_communication_preflight() {
         done
         REPO_ROOT="$preflight_dir" node "$preflight_dir/scripts/verify-communication-contract.js"
     )
+    echo "OK"
+}
+
+ensure_journal_media_defaults() {
+    echo "--- Journal media configuration ---"
+    uci -q get osi-server.cloud.journal_photo_cache_bytes >/dev/null 2>&1 || \
+        uci set osi-server.cloud.journal_photo_cache_bytes='4294967296'
+    uci -q get osi-server.cloud.journal_min_free_bytes >/dev/null 2>&1 || \
+        uci set osi-server.cloud.journal_min_free_bytes='4294967296'
+    uci -q get osi-server.cloud.journal_media_root >/dev/null 2>&1 || \
+        uci set osi-server.cloud.journal_media_root='/data/journal-media'
+    uci commit osi-server
     echo "OK"
 }
 
@@ -490,6 +508,7 @@ fetch_required "Node-RED init script" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
     "/etc/init.d/node-red"
 chmod 755 /etc/init.d/node-red
+ensure_journal_media_defaults
 
 fetch_required "Gateway identity helper" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \

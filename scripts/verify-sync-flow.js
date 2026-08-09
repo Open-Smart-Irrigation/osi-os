@@ -367,6 +367,12 @@ function runQuietNodeScript(scriptName, description) {
 
 runQuietNodeScript('osi-lib-binding-audit.test.js', 'osi-lib binding audit adversarial fixtures pass');
 runQuietNodeScript('migrate-flows-journal-generators.test.js', 'journal replay generators reject shape drift');
+runQuietNodeScript(
+  'migrate-flows-journal-v2-replication.test.js',
+  'journal v2 flow migration roundtrip and isolation guards pass'
+);
+runQuietNodeScript('test-journal-v2-config.js', 'journal v2 startup media configuration guards pass');
+runQuietNodeScript('test-journal-v2-worker.js', 'journal v2 durable worker behavior passes');
 
 function findNodeByName(name) {
   return flows.find((node) => node.name === name);

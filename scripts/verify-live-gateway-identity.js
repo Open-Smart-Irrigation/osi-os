@@ -294,7 +294,7 @@ const identityGateIds = [
   'sync-state-build',
   'al-link-build-req',
 ];
-const sentinelReaderIds = ['sys-stats-fn', ...identityGateIds];
+const sentinelReaderIds = ['sys-stats-fn', ...identityGateIds, 'journal-v2-replication-worker'];
 const syncBuilderIds = [
   'sync-bootstrap-build',
   'sync-outbox-build',

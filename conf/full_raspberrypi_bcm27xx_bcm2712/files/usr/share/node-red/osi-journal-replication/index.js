@@ -25,6 +25,21 @@ function assertSha256(value, field) {
   }
 }
 
+function assertGatewayEui(value, field) {
+  if (typeof value !== 'string' || !/^[0-9A-F]{16}$/.test(value) ||
+      value === '0101010101010101') {
+    throw error('invalid_gateway_eui', field + ' must be an uppercase EUI64');
+  }
+}
+
+function assertPositiveSafeInteger(value, field) {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) {
+    throw error('invalid_config', field + ' must be a positive safe integer');
+  }
+  return numeric;
+}
+
 function assertExactKeys(value, expected, field) {
   const actual = Object.keys(value).sort();
   const wanted = expected.slice().sort();
@@ -79,6 +94,50 @@ async function transaction(db, callback) {
 
 function now() {
   return new Date().toISOString();
+}
+
+function resolveMediaRoot(fsApi, configuredRoot) {
+  const pathApi = require('node:path');
+  if (!fsApi || typeof configuredRoot !== 'string' || !configuredRoot ||
+      !pathApi.isAbsolute(configuredRoot)) {
+    throw error('invalid_media_root', 'Journal media root must be an absolute configured directory');
+  }
+  const normalized = pathApi.resolve(configuredRoot);
+  if (normalized !== configuredRoot) {
+    throw error('invalid_media_root', 'Journal media root must be the canonical configured directory');
+  }
+  let facts;
+  try { facts = fsApi.lstatSync(configuredRoot); } catch (cause) {
+    throw error('invalid_media_root', 'Journal media root configured directory is unavailable');
+  }
+  if (facts.isSymbolicLink()) {
+    throw error('invalid_media_root', 'Journal media root must not be a symlink');
+  }
+  if (!facts.isDirectory()) {
+    throw error('invalid_media_root', 'Journal media root must be a directory');
+  }
+  const canonical = fsApi.realpathSync(configuredRoot);
+  if (canonical !== configuredRoot) {
+    throw error('invalid_media_root', 'Journal media root must be the canonical configured directory');
+  }
+  return canonical;
+}
+
+function mediaPaths(fsApi, configuredRoot, mediaUuid) {
+  assertUuid(mediaUuid, 'media_uuid');
+  const root = resolveMediaRoot(fsApi, configuredRoot);
+  const pathApi = require('node:path');
+  return {
+    final_path: pathApi.join(root, mediaUuid + '.bin'),
+    partial_path: pathApi.join(root, mediaUuid + '.part'),
+  };
+}
+
+function rejectSymlink(fsApi, filePath) {
+  if (!fsApi.existsSync(filePath)) return;
+  if (fsApi.lstatSync(filePath).isSymbolicLink()) {
+    throw error('invalid_media_path', 'Journal media path must not be a symlink');
+  }
 }
 
 function resourceIdentity(mutation) {
@@ -560,15 +619,19 @@ function fsyncPath(fsApi, filePath, directory) {
 
 async function publishDownloadedMedia(db, fsApi, input) {
   assertUuid(input && input.media_uuid, 'media_uuid');
-  if (!input || typeof input.partial_path !== 'string' || !input.partial_path) {
-    throw error('invalid_path', 'A partial media path is required');
-  }
+  const generated = mediaPaths(fsApi, input && input.media_root, input.media_uuid);
   return transaction(db, async function(tx) {
     const row = await get(tx, 'SELECT * FROM journal_media_files WHERE media_uuid=?', [input.media_uuid]);
     if (!row) throw error('not_found', 'Journal media row was not found');
-    const recoveringPublishedFile = !fsApi.existsSync(input.partial_path) &&
-      fsApi.existsSync(row.local_path);
-    const verifiedPath = recoveringPublishedFile ? row.local_path : input.partial_path;
+    if (row.local_path !== generated.final_path ||
+        (row.partial_path !== null && row.partial_path !== generated.partial_path)) {
+      throw error('invalid_media_path', 'Journal media path provenance is outside the configured media root');
+    }
+    rejectSymlink(fsApi, generated.partial_path);
+    rejectSymlink(fsApi, generated.final_path);
+    const recoveringPublishedFile = !fsApi.existsSync(generated.partial_path) &&
+      fsApi.existsSync(generated.final_path);
+    const verifiedPath = recoveringPublishedFile ? generated.final_path : generated.partial_path;
     if (!fsApi.existsSync(verifiedPath)) {
       throw error('incomplete_download', 'Neither partial nor published media bytes are available');
     }
@@ -579,8 +642,8 @@ async function publishDownloadedMedia(db, fsApi, input) {
     const digest = fileSha256(fsApi, verifiedPath);
     if (digest !== row.sha256) throw error('hash_mismatch', 'Downloaded media SHA-256 mismatch');
     fsyncPath(fsApi, verifiedPath, false);
-    if (!recoveringPublishedFile) fsApi.renameSync(input.partial_path, row.local_path);
-    fsyncPath(fsApi, require('node:path').dirname(row.local_path), true);
+    if (!recoveringPublishedFile) fsApi.renameSync(generated.partial_path, generated.final_path);
+    fsyncPath(fsApi, resolveMediaRoot(fsApi, input.media_root), true);
     await run(
       tx,
       'UPDATE journal_media_files SET replica_status=\'verified\',received_bytes=size_bytes,' +
@@ -591,10 +654,241 @@ async function publishDownloadedMedia(db, fsApi, input) {
   });
 }
 
+function normalizeServerUrl(value) {
+  const raw = String(value || '').trim().replace(/\/+$/, '');
+  let parsed;
+  try { parsed = new URL(raw); } catch (cause) {
+    throw error('invalid_config', 'Journal cloud server URL is invalid');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password ||
+      parsed.search || parsed.hash || parsed.pathname !== '/') {
+    throw error('invalid_config', 'Journal cloud server URL must be an HTTP(S) origin');
+  }
+  return parsed.origin;
+}
+
+function validateWorkerConfig(config, fsApi) {
+  const value = config || {};
+  assertGatewayEui(value.gateway_device_eui, 'gateway_device_eui');
+  assertSha256(value.schema_fingerprint, 'schema_fingerprint');
+  if (typeof value.sync_token !== 'string' || !value.sync_token.trim()) {
+    throw error('invalid_config', 'Journal sync token is required');
+  }
+  if (typeof value.release_id !== 'string' || !value.release_id.trim() ||
+      value.release_id.length > 120) {
+    throw error('invalid_config', 'Journal release_id must contain 1 to 120 characters');
+  }
+  return {
+    gateway_device_eui: value.gateway_device_eui,
+    server_url: normalizeServerUrl(value.server_url),
+    sync_token: value.sync_token.trim(),
+    release_id: value.release_id.trim(),
+    schema_fingerprint: value.schema_fingerprint,
+    photo_cache_bytes: assertPositiveSafeInteger(value.photo_cache_bytes, 'photo_cache_bytes'),
+    min_free_bytes: assertPositiveSafeInteger(value.min_free_bytes, 'min_free_bytes'),
+    media_root: resolveMediaRoot(fsApi, value.media_root),
+  };
+}
+
+function transient(message) {
+  const value = error('transient_cloud_failure', message);
+  value.retryable = true;
+  return value;
+}
+
+async function cloudRequest(httpApi, request, acceptedStatuses) {
+  let response;
+  try { response = await httpApi.requestJsonIpv4(request); } catch (cause) {
+    const failure = transient('Journal cloud request failed: ' + String(cause && cause.message || cause));
+    failure.cause = cause;
+    throw failure;
+  }
+  if (!response || !acceptedStatuses.includes(Number(response.statusCode))) {
+    const status = Number(response && response.statusCode || 0);
+    if (status === 0 || status === 429 || status >= 500) {
+      throw transient('Journal cloud request returned HTTP ' + status);
+    }
+    throw error('cloud_protocol_failure', 'Journal cloud request returned HTTP ' + status);
+  }
+  return response.payload;
+}
+
+function gatewayEndpoint(config, suffix) {
+  return config.server_url + '/api/v2/journal/gateways/' +
+    encodeURIComponent(config.gateway_device_eui) + suffix;
+}
+
+function authHeaders(config) {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: 'Bearer ' + config.sync_token,
+  };
+}
+
+async function persistCapability(db, config, capability) {
+  if (!capability || typeof capability !== 'object' || Array.isArray(capability) ||
+      capability.gateway_eui !== config.gateway_device_eui ||
+      capability.release_id !== config.release_id ||
+      typeof capability.schema_accepted !== 'boolean' ||
+      typeof capability.edge_producer_ready !== 'boolean' ||
+      typeof capability.cloud_issuer_enabled !== 'boolean' ||
+      typeof capability.prepare_ready !== 'boolean') {
+    throw error('invalid_capability', 'Journal cloud capability response is malformed');
+  }
+  assertSha256(capability.schema_fingerprint, 'capability.schema_fingerprint');
+  const accepted = capability.schema_accepted && capability.edge_producer_ready &&
+    capability.schema_fingerprint === config.schema_fingerprint;
+  await run(
+    db,
+    'INSERT INTO journal_gateway_v2_capability(' +
+      'gateway_device_eui,offered_fingerprint,accepted_fingerprint,capability_state,updated_at' +
+    ') VALUES(?,?,?,?,?) ON CONFLICT(gateway_device_eui) DO UPDATE SET ' +
+      'offered_fingerprint=excluded.offered_fingerprint,' +
+      'accepted_fingerprint=excluded.accepted_fingerprint,' +
+      'capability_state=excluded.capability_state,updated_at=excluded.updated_at',
+    [
+      config.gateway_device_eui, config.schema_fingerprint,
+      accepted ? config.schema_fingerprint : null, accepted ? 'accepted' : 'rejected', now(),
+    ]
+  );
+  return Object.assign({}, capability, { locally_accepted: accepted });
+}
+
+async function oneCursor(db) {
+  const rows = await all(
+    db,
+    'SELECT workspace_uuid,sequence FROM journal_replication_cursor ORDER BY workspace_uuid LIMIT 2',
+    []
+  );
+  if (rows.length > 1) {
+    throw error('ambiguous_workspace', 'Journal V2 worker has more than one local workspace cursor');
+  }
+  return rows.length === 1 ? rows[0] : null;
+}
+
+async function acknowledgeCursor(httpApi, config, sequence) {
+  const ack = await cloudRequest(httpApi, {
+    method: 'POST',
+    url: gatewayEndpoint(config, '/replication/ack'),
+    headers: authHeaders(config),
+    payload: { committed_sequence: sequence },
+    timeoutMs: 30000,
+  }, [200]);
+  if (!ack || ack.committed_sequence !== sequence) {
+    throw error('invalid_replication_ack', 'Journal replication ACK response is malformed');
+  }
+}
+
+async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
+  const config = validateWorkerConfig(inputConfig, fsApi);
+  const capabilityPayload = await cloudRequest(httpApi, {
+    method: 'POST',
+    url: gatewayEndpoint(config, '/capabilities'),
+    headers: authHeaders(config),
+    payload: {
+      release_id: config.release_id,
+      schema_fingerprint: config.schema_fingerprint,
+      schema_accepted: true,
+      edge_producer_ready: true,
+      advertised_at: now(),
+    },
+    timeoutMs: 30000,
+  }, [200]);
+  const capability = await persistCapability(db, config, capabilityPayload);
+
+  let sentMutations = 0;
+  let envelopes = [];
+  let committedSequence = null;
+  let appliedEnvelopes = 0;
+  if (capability.locally_accepted) {
+    const queued = await nextMutations(db, 10);
+    for (const mutation of queued) {
+      if (mutation.operation === 'CUTOVER_BARRIER_RECEIPT' &&
+          (!capability.prepare_ready || !capability.cloud_issuer_enabled)) break;
+      const outcome = await cloudRequest(httpApi, {
+        method: 'POST',
+        url: gatewayEndpoint(config, '/mutations'),
+        headers: authHeaders(config),
+        payload: mutation,
+        timeoutMs: 30000,
+      }, [200, 201, 409]);
+      await recordOutcome(db, mutation.mutation_uuid, outcome);
+      if (mutation.operation.startsWith('ENTRY_')) {
+        await bindPendingAttachments(db, mutation.mutation_uuid, outcome);
+      }
+      sentMutations += 1;
+    }
+
+    const cursor = await oneCursor(db);
+    if (cursor) await acknowledgeCursor(httpApi, config, cursor.sequence);
+    const after = cursor ? cursor.sequence : '0';
+    envelopes = await cloudRequest(httpApi, {
+      method: 'GET',
+      url: gatewayEndpoint(config, '/replication?after=' + encodeURIComponent(after) + '&limit=100'),
+      headers: authHeaders(config),
+      timeoutMs: 30000,
+    }, [200]);
+    if (!Array.isArray(envelopes)) {
+      throw error('invalid_replication_page', 'Journal replication page must be an array');
+    }
+    for (const envelope of envelopes) {
+      canonicalizer.validateReplication(envelope);
+      if (envelope.kind === 'AUTHORITY_STATE' && !capability.cloud_issuer_enabled) break;
+      await applyEnvelope(db, envelope);
+      committedSequence = envelope.sequence;
+      appliedEnvelopes += 1;
+    }
+    if (committedSequence !== null) {
+      await acknowledgeCursor(httpApi, config, committedSequence);
+    }
+  }
+
+  const cache = await enforcePhotoCache(db, fsApi, {
+    max_bytes: config.photo_cache_bytes,
+    min_free_bytes: config.min_free_bytes,
+    cache_root: config.media_root,
+  });
+  return {
+    capability_state: capability.locally_accepted ? 'accepted' : 'rejected',
+    sent_mutations: sentMutations,
+    applied_envelopes: appliedEnvelopes,
+    committed_sequence: committedSequence,
+    photo_transfers: 0,
+    evicted_media: cache.evicted_media_uuids.length,
+  };
+}
+
 function freeBytes(fsApi, filePath) {
-  if (typeof fsApi.statfsSync !== 'function') return Number.POSITIVE_INFINITY;
-  const facts = fsApi.statfsSync(filePath);
-  return Number(facts.bavail) * Number(facts.bsize);
+  if (!fsApi || typeof fsApi.statfsSync !== 'function') {
+    const failure = error('media_statfs_failed', 'Journal media free-space facts are unavailable');
+    failure.retryable = true;
+    throw failure;
+  }
+  let facts;
+  try { facts = fsApi.statfsSync(filePath); } catch (cause) {
+    const failure = error(
+      'media_statfs_failed',
+      'Journal media free-space check failed: ' + String(cause && cause.message || cause)
+    );
+    failure.retryable = true;
+    throw failure;
+  }
+  const available = Number(facts.bavail) * Number(facts.bsize);
+  if (!Number.isFinite(available) || available < 0) {
+    const failure = error('media_statfs_failed', 'Journal media free-space facts are invalid');
+    failure.retryable = true;
+    throw failure;
+  }
+  return available;
+}
+
+function existingFileBytes(fsApi, filePath) {
+  if (!filePath || !fsApi.existsSync(filePath)) return 0;
+  const facts = fsApi.statSync(filePath);
+  if (!facts.isFile() || !Number.isSafeInteger(facts.size) || facts.size < 0) {
+    throw error('invalid_media_path', 'Journal media path must be a regular file with a safe size');
+  }
+  return facts.size;
 }
 
 function cacheEligible(row, parent, replicaStatus) {
@@ -618,22 +912,28 @@ async function enforcePhotoCache(db, fsApi, policy) {
       'ON q.mutation_uuid=m.parent_mutation_uuid ORDER BY m.last_accessed_at,m.media_uuid',
     []
   );
-  const countedMedia = new Set();
-  let totalBytes = rows.reduce(function(sum, row) {
-    try {
-      if (!fsApi.existsSync(row.local_path)) return sum;
-      countedMedia.add(row.media_uuid);
-      return sum + Number(row.size_bytes);
-    } catch (_) { return sum; }
-  }, 0);
-  const configuredRoot = policy && typeof policy.cache_root === 'string' && policy.cache_root
-    ? policy.cache_root
-    : null;
-  const existingRow = rows.find(function(row) { return countedMedia.has(row.media_uuid); });
-  const cacheRoot = configuredRoot || (existingRow
-    ? require('node:path').dirname(existingRow.local_path)
-    : process.cwd());
+  const cacheRoot = resolveMediaRoot(fsApi, policy && policy.cache_root);
+  for (const row of rows) {
+    const generated = mediaPaths(fsApi, cacheRoot, row.media_uuid);
+    if (row.local_path !== generated.final_path ||
+        (row.partial_path !== null && row.partial_path !== generated.partial_path)) {
+      throw error('invalid_media_path', 'Journal media path provenance is outside the configured media root');
+    }
+    rejectSymlink(fsApi, row.local_path);
+    if (row.partial_path) rejectSymlink(fsApi, row.partial_path);
+  }
+  const retainedByMedia = new Map();
+  let totalBytes = 0;
+  for (const row of rows) {
+    const paths = Array.from(new Set([row.local_path, row.partial_path].filter(Boolean)));
+    const retained = paths.reduce(function(sum, filePath) {
+      return sum + existingFileBytes(fsApi, filePath);
+    }, 0);
+    retainedByMedia.set(row.media_uuid, retained);
+    totalBytes += retained;
+  }
   const evicted = [];
+  let free = freeBytes(fsApi, cacheRoot);
   for (const row of rows) {
     if (row.replica_status === 'evicted_verified') {
       const current = await get(db, 'SELECT * FROM journal_media_files WHERE media_uuid=?', [row.media_uuid]);
@@ -643,13 +943,17 @@ async function enforcePhotoCache(db, fsApi, policy) {
         : null;
       if (cacheEligible(current, currentParent, 'evicted_verified') &&
           fsApi.existsSync(current.local_path)) {
+        const removedBytes = existingFileBytes(fsApi, current.local_path);
         fsApi.unlinkSync(current.local_path);
-        if (countedMedia.delete(current.media_uuid)) totalBytes -= Number(current.size_bytes);
+        totalBytes -= removedBytes;
+        retainedByMedia.set(
+          current.media_uuid,
+          Math.max(0, Number(retainedByMedia.get(current.media_uuid) || 0) - removedBytes)
+        );
+        free = freeBytes(fsApi, cacheRoot);
       }
       continue;
     }
-    let free = Number.POSITIVE_INFINITY;
-    try { free = freeBytes(fsApi, cacheRoot); } catch (_) { free = Number.POSITIVE_INFINITY; }
     if (totalBytes <= maxBytes && free >= minFreeBytes) break;
     const parent = row.parent_mutation_uuid
       ? await get(db, 'SELECT status FROM journal_edge_mutations WHERE mutation_uuid=?', [row.parent_mutation_uuid])
@@ -673,10 +977,16 @@ async function enforcePhotoCache(db, fsApi, policy) {
       markedEvicted = true;
     });
     if (markedEvicted) {
-      if (fsApi.existsSync(row.local_path)) fsApi.unlinkSync(row.local_path);
-      if (countedMedia.delete(row.media_uuid)) {
-        totalBytes -= Number(row.size_bytes);
+      const removedBytes = existingFileBytes(fsApi, row.local_path);
+      if (removedBytes > 0) {
+        fsApi.unlinkSync(row.local_path);
+        totalBytes -= removedBytes;
+        retainedByMedia.set(
+          row.media_uuid,
+          Math.max(0, Number(retainedByMedia.get(row.media_uuid) || 0) - removedBytes)
+        );
         evicted.push(row.media_uuid);
+        free = freeBytes(fsApi, cacheRoot);
       }
     }
   }
@@ -688,7 +998,10 @@ module.exports = {
   bindPendingAttachments,
   enforcePhotoCache,
   enqueueMutation,
+  mediaPaths,
   nextMutations,
   publishDownloadedMedia,
   recordOutcome,
+  resolveMediaRoot,
+  runReplicationTick,
 };

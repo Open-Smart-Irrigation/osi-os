@@ -12,6 +12,10 @@ const platformFlowPaths = [
   'conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json'
 ];
 const nodeRedInitPath = 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init';
+const journalConfigPaths = [
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config',
+  'conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/96_osi_server_config'
+];
 const nodeRedSettingsPath = 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js';
 const chirpstackBootstrapPath = 'scripts/chirpstack-bootstrap.js';
 const diagnosticPath = 'scripts/diagnose-pi-communication.sh';
@@ -91,6 +95,37 @@ expectIncludes(nodeRedInitPath, nodeRedInit, 'resolve_chirpstack_value()', 'reso
 expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester"', 'exports the field tester application ID');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701', 'exports the RAK10701 profile variable');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701"', 'exports the resolved RAK10701 profile ID');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'validate_journal_media_settings()', 'validates journal media settings before startup');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'Number.isSafeInteger', 'rejects unsafe journal byte limits');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'realpath "$configured_root"', 'resolves the exact journal media root');
+expectIncludes(nodeRedInitPath, nodeRedInit, '[ ! -L "$configured_root" ]', 'rejects a symlink journal media root');
+for (const variable of [
+  'JOURNAL_PHOTO_CACHE_BYTES="$journal_photo_cache_bytes"',
+  'JOURNAL_MIN_FREE_BYTES="$journal_min_free_bytes"',
+  'JOURNAL_MEDIA_ROOT="$journal_media_root"'
+]) {
+  expectIncludes(nodeRedInitPath, nodeRedInit, variable, 'exports validated journal media configuration');
+}
+
+for (const configPath of journalConfigPaths) {
+  const config = read(configPath);
+  const values = Object.fromEntries(Array.from(config.matchAll(
+    /^\s*(?:uci )?set osi-server\.cloud\.(journal_photo_cache_bytes|journal_min_free_bytes|journal_media_root)=(.*)$/gm
+  )).map((match) => {
+    const raw = match[2].trim();
+    const unquoted = (/^(['"]).*\1$/.test(raw)) ? raw.slice(1, -1) : raw;
+    return [match[1], unquoted];
+  }));
+  for (const key of ['journal_photo_cache_bytes', 'journal_min_free_bytes']) {
+    const value = values[key];
+    if (!/^[0-9]+$/.test(value || '') || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) {
+      fail(`${configPath}: ${key} must be a positive safe integer`);
+    }
+  }
+  if (values.journal_media_root !== '/data/journal-media') {
+    fail(`${configPath}: journal_media_root must default to /data/journal-media`);
+  }
+}
 
 const nodeRedSettings = read(nodeRedSettingsPath);
 expectIncludes(nodeRedSettingsPath, nodeRedSettings, "const chirpstackEnvPath = '/srv/node-red/.chirpstack.env';", 'has a checked-in ChirpStack env compatibility loader');

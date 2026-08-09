@@ -38,6 +38,17 @@ set osi-server.cloud.openagri_weather_forecast_cache_minutes=120
 commit osi-server
 EOF
 
+# journal-v2-media-defaults begin
+# Preserve operator sizing and root overrides when this provisioning step is rerun.
+uci -q get osi-server.cloud.journal_photo_cache_bytes >/dev/null 2>&1 || \
+  uci set osi-server.cloud.journal_photo_cache_bytes='4294967296'
+uci -q get osi-server.cloud.journal_min_free_bytes >/dev/null 2>&1 || \
+  uci set osi-server.cloud.journal_min_free_bytes='4294967296'
+uci -q get osi-server.cloud.journal_media_root >/dev/null 2>&1 || \
+  uci set osi-server.cloud.journal_media_root='/data/journal-media'
+uci commit osi-server
+# journal-v2-media-defaults end
+
 # lsn50-writer-disable-default begin
 # LSN50 writer runtime recovery kill switch (Train A, 2026-07-15 plan Task 3):
 # absent-only default outside the unconditional batch above. A rerun of this

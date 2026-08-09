@@ -61,6 +61,52 @@ resolve_chirpstack_value() {
     return 0
 }
 
+validate_journal_media_settings() {
+    local photo_cache_bytes="$1"
+    local min_free_bytes="$2"
+    local configured_root="$3"
+    local normalized_root
+    local canonical_root
+    local configured_parent
+    local configured_name
+    local canonical_parent
+    local generated_root
+
+    node -e '
+const values = process.argv.slice(1);
+if (values.length !== 2 || values.some((value) => !/^[0-9]+$/.test(value) ||
+    !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) process.exit(1);
+' "$photo_cache_bytes" "$min_free_bytes" >/dev/null 2>&1 || return 1
+
+    case "$configured_root" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    normalized_root="$(node -e "process.stdout.write(require('path').resolve(process.argv[1]))" "$configured_root" 2>/dev/null)" || return 1
+    [ "$normalized_root" = "$configured_root" ] || return 1
+    [ ! -L "$configured_root" ] || return 1
+    if [ ! -e "$configured_root" ]; then
+        configured_parent="${configured_root%/*}"
+        configured_name="${configured_root##*/}"
+        [ -n "$configured_parent" ] || configured_parent="/"
+        [ -n "$configured_name" ] || return 1
+        canonical_parent="$(realpath "$configured_parent" 2>/dev/null)" || return 1
+        [ "$canonical_parent" = "$configured_parent" ] || return 1
+        if [ "$canonical_parent" = "/" ]; then
+            generated_root="/$configured_name"
+        else
+            generated_root="$canonical_parent/$configured_name"
+        fi
+        [ "$generated_root" = "$configured_root" ] || return 1
+        mkdir "$configured_root" || return 1
+    fi
+    [ -d "$configured_root" ] || return 1
+    [ ! -L "$configured_root" ] || return 1
+    canonical_root="$(realpath "$configured_root" 2>/dev/null)" || return 1
+    [ "$canonical_root" = "$configured_root" ] || return 1
+    printf '%s\n' "$canonical_root"
+}
+
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
 
@@ -82,6 +128,15 @@ start_service() {
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
     local scoped_access_enabled=$(uci -q get osi-server.cloud.scoped_access_enabled 2>/dev/null || echo "0")
+    local journal_photo_cache_bytes=$(uci -q get osi-server.cloud.journal_photo_cache_bytes 2>/dev/null || echo "4294967296")
+    local journal_min_free_bytes=$(uci -q get osi-server.cloud.journal_min_free_bytes 2>/dev/null || echo "4294967296")
+    local journal_media_root=$(uci -q get osi-server.cloud.journal_media_root 2>/dev/null || echo "/data/journal-media")
+    local journal_media_root_canonical
+    journal_media_root_canonical="$(validate_journal_media_settings "$journal_photo_cache_bytes" "$journal_min_free_bytes" "$journal_media_root")" || {
+        logger -t node-red.init "invalid journal media limits or root; refusing Node-RED startup"
+        return 1
+    }
+    journal_media_root="$journal_media_root_canonical"
     local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.7.0")
     local openagri_weather_url=$(uci -q get osi-server.cloud.openagri_weather_url 2>/dev/null || echo "")
     local openagri_weather_username=$(uci -q get osi-server.cloud.openagri_weather_username 2>/dev/null || echo "")
@@ -252,6 +307,9 @@ NODE
         OSI_SERVER_HOST="$server_host" \
         ALLOW_PRIVATE_SERVER_URLS="$allow_private_server_urls" \
         OSI_SCOPED_ACCESS="$scoped_access_enabled" \
+        JOURNAL_PHOTO_CACHE_BYTES="$journal_photo_cache_bytes" \
+        JOURNAL_MIN_FREE_BYTES="$journal_min_free_bytes" \
+        JOURNAL_MEDIA_ROOT="$journal_media_root" \
         FIRMWARE_VERSION="$fw_version" \
         OPENAGRI_WEATHER_URL="$openagri_weather_url" \
         OPENAGRI_WEATHER_USERNAME="$openagri_weather_username" \

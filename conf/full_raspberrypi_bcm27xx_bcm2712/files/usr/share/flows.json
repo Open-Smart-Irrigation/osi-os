@@ -12869,5 +12869,124 @@
         "analysis-api-router-fn"
       ]
     ]
+  },
+  {
+    "id": "journal-v2-replication-tab",
+    "type": "tab",
+    "label": "Journal V2 Replication",
+    "disabled": false,
+    "info": "",
+    "env": []
+  },
+  {
+    "id": "journal-v2-replication-tick",
+    "type": "inject",
+    "z": "journal-v2-replication-tab",
+    "name": "Journal V2 replication tick",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 15,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 120,
+    "wires": [
+      [
+        "journal-v2-replication-worker"
+      ]
+    ]
+  },
+  {
+    "id": "journal-v2-replication-worker",
+    "type": "function",
+    "z": "journal-v2-replication-tab",
+    "name": "Journal V2 replication worker",
+    "func": "return (async () => {\nconst helperLoad = osiLib.require('journal-replication');\nif (!helperLoad.ok) {\n  node.error('Journal V2 replication helper unavailable: ' + helperLoad.error, msg);\n  return null;\n}\nconst replication = helperLoad.value;\nconst fs = global.get('fs');\nif (!fs) {\n  node.error('Journal V2 replication fs global is unavailable', msg);\n  return null;\n}\nconst identityStatePath = '/var/run/osi-identity-restart.json';\nlet identityBlock = null;\ntry {\n  if (fs.existsSync(identityStatePath)) {\n    JSON.parse(fs.readFileSync(identityStatePath, 'utf8'));\n    identityBlock = 'gateway identity restart is pending';\n  }\n} catch (cause) {\n  identityBlock = 'gateway identity restart state is unreadable: ' +\n    String(cause && cause.message ? cause.message : cause);\n}\nif (identityBlock) {\n  node.warn('Journal V2 replication blocked: ' + identityBlock);\n  return null;\n}\nconst db = new osiDb.Database('/data/db/farming.db');\nconst q = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (cause, rows) => cause ? reject(cause) : resolve(rows || [])));\nconst close = () => new Promise((resolve) => db.close((cause) => {\n  if (cause) node.warn('Journal V2 replication DB close failed: ' + String(cause.message || cause));\n  resolve();\n}));\ntry {\n  const gatewayDeviceEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const linked = await q(\"SELECT server_url,server_sync_token FROM users WHERE auth_mode='server' AND server_url IS NOT NULL AND server_sync_token IS NOT NULL ORDER BY server_linked_at DESC,id DESC LIMIT 1\", []);\n  if (linked.length !== 1 || !gatewayDeviceEui) {\n    node.warn('Journal V2 replication waiting for a linked cloud account and stable gateway identity');\n    return null;\n  }\n  const result = await replication.runReplicationTick(db, {\n    requestJsonIpv4: osiCloudHttp.requestJsonIpv4\n  }, fs, {\n    gateway_device_eui: gatewayDeviceEui,\n    server_url: linked[0].server_url,\n    sync_token: linked[0].server_sync_token,\n    release_id: String(env.get('FIRMWARE_VERSION') || 'unknown'),\n    schema_fingerprint: 'a2a455a7ab2279dd51b66390173bcede6e3460c0785208d9ffbc1b737ce79092',\n    photo_cache_bytes: env.get('JOURNAL_PHOTO_CACHE_BYTES'),\n    min_free_bytes: env.get('JOURNAL_MIN_FREE_BYTES'),\n    media_root: env.get('JOURNAL_MEDIA_ROOT')\n  });\n  msg.payload = result;\n  return msg;\n} catch (cause) {\n  const detail = String(cause && cause.message ? cause.message : cause);\n  if (cause && cause.retryable) {\n    node.warn('Journal V2 replication transient retry: ' + detail);\n    return null;\n  }\n  node.error('Journal V2 replication rejected malformed authority or envelope data: ' + detail, msg);\n  return null;\n} finally {\n  await close();\n}\n})();",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiCloudHttp",
+        "module": "osi-cloud-http"
+      }
+    ],
+    "x": 440,
+    "y": 120,
+    "wires": [
+      [
+        "journal-v2-replication-success-status"
+      ]
+    ]
+  },
+  {
+    "id": "journal-v2-replication-success-status",
+    "type": "function",
+    "z": "journal-v2-replication-tab",
+    "name": "Journal V2 replication success",
+    "func": "node.status({fill:'green',shape:'dot',text:'replication committed'});\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 730,
+    "y": 120,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "journal-v2-replication-error-catch",
+    "type": "catch",
+    "z": "journal-v2-replication-tab",
+    "name": "Journal V2 replication errors",
+    "scope": [
+      "journal-v2-replication-worker"
+    ],
+    "uncaught": false,
+    "x": 190,
+    "y": 200,
+    "wires": [
+      [
+        "journal-v2-replication-error-status"
+      ]
+    ]
+  },
+  {
+    "id": "journal-v2-replication-error-status",
+    "type": "function",
+    "z": "journal-v2-replication-tab",
+    "name": "Journal V2 replication error status",
+    "func": "const detail = String(msg && msg.error && msg.error.message ? msg.error.message : 'replication failed');\nnode.status({fill:'red',shape:'ring',text:detail.slice(0,48)});\nnode.warn('Journal V2 replication error path: ' + detail);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 200,
+    "wires": [
+      []
+    ]
   }
 ]
