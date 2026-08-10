@@ -16,7 +16,7 @@ export function Modal({ isOpen, title, onClose, closeLabel = 'Close', children }
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="bg-[var(--card)] rounded-2xl shadow-2xl border-2 border-[var(--border)] max-w-lg w-full p-8"
+        className="bg-[var(--card)] rounded-2xl shadow-2xl border-2 border-[var(--border)] max-w-lg w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-8"
       >
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-3xl font-bold text-[var(--text)] high-contrast-text">{title}</h2>
