@@ -708,9 +708,17 @@ async function cloudRequest(httpApi, request, acceptedStatuses) {
     if (status === 0 || status === 429 || status >= 500) {
       throw transient('Journal cloud request returned HTTP ' + status);
     }
-    throw error('cloud_protocol_failure', 'Journal cloud request returned HTTP ' + status);
+    const failure = error('cloud_protocol_failure', 'Journal cloud request returned HTTP ' + status);
+    failure.status = status;
+    throw failure;
   }
   return response.payload;
+}
+
+function workspaceNotLinked(message) {
+  const value = error('workspace_not_linked', message);
+  value.retryable = true;
+  return value;
 }
 
 function gatewayEndpoint(config, suffix) {
@@ -802,19 +810,54 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     };
   }
   const config = validateWorkerConfig(inputConfig, fsApi);
-  const capabilityPayload = await cloudRequest(httpApi, {
-    method: 'POST',
-    url: gatewayEndpoint(config, '/capabilities'),
-    headers: authHeaders(config),
-    payload: {
-      release_id: config.release_id,
-      schema_fingerprint: config.schema_fingerprint,
-      schema_accepted: true,
-      edge_producer_ready: true,
-      advertised_at: now(),
-    },
-    timeoutMs: 30000,
-  }, [200]);
+  let capabilityPayload;
+  try {
+    capabilityPayload = await cloudRequest(httpApi, {
+      method: 'POST',
+      url: gatewayEndpoint(config, '/capabilities'),
+      headers: authHeaders(config),
+      payload: {
+        release_id: config.release_id,
+        schema_fingerprint: config.schema_fingerprint,
+        schema_accepted: true,
+        edge_producer_ready: true,
+        advertised_at: now(),
+      },
+      timeoutMs: 30000,
+    }, [200]);
+  } catch (cause) {
+    if (cause && cause.code === 'cloud_protocol_failure' && cause.status === 404) {
+      // The server 404s this endpoint (requireGateway -> activeWorkspaceForGateway)
+      // whenever no journal workspace is bound to this gateway yet. Until a
+      // cloud-side activation flow exists to create that binding, this is the
+      // routine, expected state for every gateway -- not a malformed request.
+      // journal_gateway_v2_capability only ever gains a row for this
+      // gateway_device_eui after a *successful* (200) capabilities response,
+      // so its absence is reliable local proof this gateway has never had a
+      // working link: treat that as a quiet, retryable skip so the tick keeps
+      // probing every cycle without logging an error or turning the node red,
+      // and picks the link up automatically the moment it exists server-side.
+      // If a row IS present, a link worked before and has since disappeared
+      // server-side -- a real anomaly, not a routine "not yet activated"
+      // state -- so that case stays a loud, non-retryable failure.
+      const previouslyLinked = await get(
+        db,
+        'SELECT 1 AS found FROM journal_gateway_v2_capability WHERE gateway_device_eui=?',
+        [config.gateway_device_eui],
+      );
+      if (!previouslyLinked) {
+        throw workspaceNotLinked(
+          'Journal cloud workspace is not yet linked for this gateway (HTTP 404); ' +
+            'waiting for cloud-side activation',
+        );
+      }
+      throw error(
+        'workspace_link_lost',
+        'Journal cloud workspace for this gateway was previously linked but is now missing (HTTP 404)',
+      );
+    }
+    throw cause;
+  }
   const capability = await persistCapability(db, config, capabilityPayload);
 
   let sentMutations = 0;

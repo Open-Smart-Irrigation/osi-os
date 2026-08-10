@@ -494,3 +494,62 @@ test('JOURNAL_REPLICATION_DISABLE unset or any value other than the literal "1" 
   await replication.runReplicationTick(facade(database), http, fs, config());
   assert.ok(calls.length > 1);
 });
+
+test('a 404 from /capabilities before any local link has ever existed is a quiet, retryable "not linked" skip', async (t) => {
+  const { database } = fixture(t, 'capabilities-404-never-linked');
+  t.after(() => database.close());
+  const calls = [];
+  const http = fakeHttp(database, [
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => ({ statusCode: 404, payload: { error: 'gateway_workspace_not_found' } }),
+    },
+  ], calls);
+
+  let caught = null;
+  try {
+    await replication.runReplicationTick(facade(database), http, fs, config());
+    assert.fail('expected runReplicationTick to reject');
+  } catch (cause) {
+    caught = cause;
+  }
+  assert.equal(caught.code, 'workspace_not_linked');
+  assert.equal(caught.retryable, true);
+  // Only the one capabilities probe happened -- no mutation/replication calls
+  // were attempted, and nothing was persisted for the never-linked case.
+  assert.equal(calls.length, 1);
+  assert.equal(
+    database.prepare('SELECT COUNT(*) AS count FROM journal_gateway_v2_capability').get().count,
+    0,
+  );
+});
+
+test('a 404 from /capabilities after a prior successful link is a loud, non-retryable failure', async (t) => {
+  const { database } = fixture(t, 'capabilities-404-link-lost');
+  t.after(() => database.close());
+  // journal_gateway_v2_capability only ever gains a row for this
+  // gateway_device_eui after a *successful* (200) capabilities response, so
+  // seeding it here simulates "this gateway had a working link before".
+  database.prepare(
+    'INSERT INTO journal_gateway_v2_capability(' +
+      'gateway_device_eui,offered_fingerprint,accepted_fingerprint,capability_state,updated_at' +
+    ') VALUES(?,?,?,?,?)',
+  ).run(GATEWAY, SCHEMA_FINGERPRINT, SCHEMA_FINGERPRINT, 'accepted', '2026-08-01T00:00:00.000Z');
+  const calls = [];
+  const http = fakeHttp(database, [
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => ({ statusCode: 404, payload: { error: 'gateway_workspace_not_found' } }),
+    },
+  ], calls);
+
+  let caught = null;
+  try {
+    await replication.runReplicationTick(facade(database), http, fs, config());
+    assert.fail('expected runReplicationTick to reject');
+  } catch (cause) {
+    caught = cause;
+  }
+  assert.equal(caught.code, 'workspace_link_lost');
+  assert.equal(Boolean(caught.retryable), false);
+});
