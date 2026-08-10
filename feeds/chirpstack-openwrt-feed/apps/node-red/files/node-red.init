@@ -61,17 +61,23 @@ resolve_chirpstack_value() {
     return 0
 }
 
-# Exit codes are a deliberate reason-class contract for callers (see
-# start_service below): 0 = ok; every nonzero value names *why* the
-# configured journal media root was rejected, so the caller can log a
-# specific, actionable reason instead of a generic "invalid" message.
+# Exit codes are an internal reason-class signal for this file's own
+# start_service()/journal_media_invalid_reason() below -- nothing outside
+# node-red.init reads them and no test pins the numbering itself (only the
+# code-to-token mapping, in scripts/test-journal-v2-init-startup.js), so
+# this is not an external ABI and renumbering only requires updating
+# journal_media_invalid_reason() and that test. 0 = ok; every nonzero value
+# names *why* the configured journal media root was rejected, so the caller
+# can log a specific, actionable reason instead of a generic "invalid"
+# message.
 #   2 = byte limits invalid (cache/reserve not a positive safe integer)
 #   3 = root is not an absolute path
 #   4 = root is not an exact canonical spelling (resolve/parent/name mismatch)
-#   5 = root (or an ancestor spelling of it) is a symlink
-#   6 = parent directory could not be resolved (realpath failure)
+#   5 = root itself (its final path component, not an ancestor) is a symlink
+#   6 = parent directory could not be resolved (realpath failure on the parent)
 #   7 = root could not be created (mkdir failure, e.g. read-only/full parent)
 #   8 = root exists but is not a directory
+#   9 = root itself could not be resolved (realpath failure on the root)
 validate_journal_media_settings() {
     local photo_cache_bytes="$1"
     local min_free_bytes="$2"
@@ -113,7 +119,7 @@ if (values.length !== 2 || values.some((value) => !/^[0-9]+$/.test(value) ||
     fi
     [ -d "$configured_root" ] || return 8
     [ ! -L "$configured_root" ] || return 5
-    canonical_root="$(realpath "$configured_root" 2>/dev/null)" || return 6
+    canonical_root="$(realpath "$configured_root" 2>/dev/null)" || return 9
     [ "$canonical_root" = "$configured_root" ] || return 4
     printf '%s\n' "$canonical_root"
 }
@@ -129,6 +135,7 @@ journal_media_invalid_reason() {
         6) echo "root_parent_unresolvable" ;;
         7) echo "root_uncreatable" ;;
         8) echo "root_not_a_directory" ;;
+        9) echo "root_unresolvable" ;;
         *) echo "root_invalid" ;;
     esac
 }
