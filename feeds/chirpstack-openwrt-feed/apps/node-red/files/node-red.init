@@ -61,6 +61,17 @@ resolve_chirpstack_value() {
     return 0
 }
 
+# Exit codes are a deliberate reason-class contract for callers (see
+# start_service below): 0 = ok; every nonzero value names *why* the
+# configured journal media root was rejected, so the caller can log a
+# specific, actionable reason instead of a generic "invalid" message.
+#   2 = byte limits invalid (cache/reserve not a positive safe integer)
+#   3 = root is not an absolute path
+#   4 = root is not an exact canonical spelling (resolve/parent/name mismatch)
+#   5 = root (or an ancestor spelling of it) is a symlink
+#   6 = parent directory could not be resolved (realpath failure)
+#   7 = root could not be created (mkdir failure, e.g. read-only/full parent)
+#   8 = root exists but is not a directory
 validate_journal_media_settings() {
     local photo_cache_bytes="$1"
     local min_free_bytes="$2"
@@ -76,35 +87,50 @@ validate_journal_media_settings() {
 const values = process.argv.slice(1);
 if (values.length !== 2 || values.some((value) => !/^[0-9]+$/.test(value) ||
     !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) process.exit(1);
-' "$photo_cache_bytes" "$min_free_bytes" >/dev/null 2>&1 || return 1
+' "$photo_cache_bytes" "$min_free_bytes" >/dev/null 2>&1 || return 2
 
     case "$configured_root" in
         /*) ;;
-        *) return 1 ;;
+        *) return 3 ;;
     esac
-    normalized_root="$(node -e "process.stdout.write(require('path').resolve(process.argv[1]))" "$configured_root" 2>/dev/null)" || return 1
-    [ "$normalized_root" = "$configured_root" ] || return 1
-    [ ! -L "$configured_root" ] || return 1
+    normalized_root="$(node -e "process.stdout.write(require('path').resolve(process.argv[1]))" "$configured_root" 2>/dev/null)" || return 4
+    [ "$normalized_root" = "$configured_root" ] || return 4
+    [ ! -L "$configured_root" ] || return 5
     if [ ! -e "$configured_root" ]; then
         configured_parent="${configured_root%/*}"
         configured_name="${configured_root##*/}"
         [ -n "$configured_parent" ] || configured_parent="/"
-        [ -n "$configured_name" ] || return 1
-        canonical_parent="$(realpath "$configured_parent" 2>/dev/null)" || return 1
-        [ "$canonical_parent" = "$configured_parent" ] || return 1
+        [ -n "$configured_name" ] || return 4
+        canonical_parent="$(realpath "$configured_parent" 2>/dev/null)" || return 6
+        [ "$canonical_parent" = "$configured_parent" ] || return 4
         if [ "$canonical_parent" = "/" ]; then
             generated_root="/$configured_name"
         else
             generated_root="$canonical_parent/$configured_name"
         fi
-        [ "$generated_root" = "$configured_root" ] || return 1
-        mkdir "$configured_root" || return 1
+        [ "$generated_root" = "$configured_root" ] || return 4
+        mkdir "$configured_root" || return 7
     fi
-    [ -d "$configured_root" ] || return 1
-    [ ! -L "$configured_root" ] || return 1
-    canonical_root="$(realpath "$configured_root" 2>/dev/null)" || return 1
-    [ "$canonical_root" = "$configured_root" ] || return 1
+    [ -d "$configured_root" ] || return 8
+    [ ! -L "$configured_root" ] || return 5
+    canonical_root="$(realpath "$configured_root" 2>/dev/null)" || return 6
+    [ "$canonical_root" = "$configured_root" ] || return 4
     printf '%s\n' "$canonical_root"
+}
+
+# Maps a validate_journal_media_settings() exit code to a short, stable
+# reason-class token for the operator-facing log line. Never returns empty.
+journal_media_invalid_reason() {
+    case "$1" in
+        2) echo "byte_limits_invalid" ;;
+        3) echo "root_not_absolute" ;;
+        4) echo "root_not_canonical" ;;
+        5) echo "root_is_symlink" ;;
+        6) echo "root_parent_unresolvable" ;;
+        7) echo "root_uncreatable" ;;
+        8) echo "root_not_a_directory" ;;
+        *) echo "root_invalid" ;;
+    esac
 }
 
 start_service() {
@@ -132,11 +158,23 @@ start_service() {
     local journal_min_free_bytes=$(uci -q get osi-server.cloud.journal_min_free_bytes 2>/dev/null || echo "4294967296")
     local journal_media_root=$(uci -q get osi-server.cloud.journal_media_root 2>/dev/null || echo "/data/journal-media")
     local journal_media_root_canonical
-    journal_media_root_canonical="$(validate_journal_media_settings "$journal_photo_cache_bytes" "$journal_min_free_bytes" "$journal_media_root")" || {
-        logger -t node-red.init "invalid journal media limits or root; refusing Node-RED startup"
-        return 1
-    }
-    journal_media_root="$journal_media_root_canonical"
+    local journal_media_status
+    local journal_replication_disable="0"
+    journal_media_root_canonical="$(validate_journal_media_settings "$journal_photo_cache_bytes" "$journal_min_free_bytes" "$journal_media_root")"
+    journal_media_status=$?
+    if [ "$journal_media_status" -eq 0 ]; then
+        journal_media_root="$journal_media_root_canonical"
+    else
+        # The journal feature fails closed (disabled), but Node-RED itself
+        # must stay up: irrigation, telemetry and the GUI must not go down
+        # because of a dormant, opt-in journal feature. Do not `return 1`
+        # here. Do not export the unvalidated/bogus configured root either --
+        # a downstream consumer must never see a value that failed
+        # validation, even with the worker disabled as a second guard.
+        logger -t node-red.init "journal media root '$journal_media_root' failed validation (reason=$(journal_media_invalid_reason "$journal_media_status")); disabling journal replication worker, Node-RED will still start"
+        journal_replication_disable="1"
+        journal_media_root=""
+    fi
     local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.7.0")
     local openagri_weather_url=$(uci -q get osi-server.cloud.openagri_weather_url 2>/dev/null || echo "")
     local openagri_weather_username=$(uci -q get osi-server.cloud.openagri_weather_username 2>/dev/null || echo "")
@@ -310,6 +348,7 @@ NODE
         JOURNAL_PHOTO_CACHE_BYTES="$journal_photo_cache_bytes" \
         JOURNAL_MIN_FREE_BYTES="$journal_min_free_bytes" \
         JOURNAL_MEDIA_ROOT="$journal_media_root" \
+        JOURNAL_REPLICATION_DISABLE="$journal_replication_disable" \
         FIRMWARE_VERSION="$fw_version" \
         OPENAGRI_WEATHER_URL="$openagri_weather_url" \
         OPENAGRI_WEATHER_USERNAME="$openagri_weather_username" \

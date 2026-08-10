@@ -437,3 +437,60 @@ test('a lost ACK is retried from the durable cursor when the next page is empty'
   assert.equal(ackCount, 2);
   assert.equal(serverAck, '1');
 });
+
+test('JOURNAL_REPLICATION_DISABLE=1 makes the tick a quiet no-op before any validation or cloud call, even with a bogus media root', async (t) => {
+  const { database } = fixture(t, 'runtime-disabled');
+  t.after(() => database.close());
+  const previous = process.env.JOURNAL_REPLICATION_DISABLE;
+  process.env.JOURNAL_REPLICATION_DISABLE = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.JOURNAL_REPLICATION_DISABLE;
+    else process.env.JOURNAL_REPLICATION_DISABLE = previous;
+  });
+  const calls = [];
+  const http = fakeHttp(database, [], calls);
+
+  // media_root is empty (what node-red.init exports on validation failure)
+  // and would throw inside validateWorkerConfig()/resolveMediaRoot() if the
+  // disable flag were not honored first.
+  const result = await replication.runReplicationTick(facade(database), http, fs, config({ media_root: '' }));
+
+  assert.deepEqual(result, {
+    capability_state: 'disabled',
+    sent_mutations: 0,
+    applied_envelopes: 0,
+    committed_sequence: null,
+    photo_transfers: 0,
+    evicted_media: 0,
+  });
+  assert.equal(calls.length, 0);
+});
+
+test('JOURNAL_REPLICATION_DISABLE unset or any value other than the literal "1" runs the tick normally', async (t) => {
+  const { database } = fixture(t, 'runtime-not-disabled');
+  t.after(() => database.close());
+  const previous = process.env.JOURNAL_REPLICATION_DISABLE;
+  t.after(() => {
+    if (previous === undefined) delete process.env.JOURNAL_REPLICATION_DISABLE;
+    else process.env.JOURNAL_REPLICATION_DISABLE = previous;
+  });
+  const calls = [];
+  const http = fakeHttp(database, [
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => ({ statusCode: 200, payload: acceptedCapability() }),
+    },
+    {
+      match: (request) => request.url.includes('/replication?'),
+      respond: () => ({ statusCode: 200, payload: [] }),
+    },
+  ], calls);
+
+  delete process.env.JOURNAL_REPLICATION_DISABLE;
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.ok(calls.length > 0);
+
+  process.env.JOURNAL_REPLICATION_DISABLE = '0';
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.ok(calls.length > 1);
+});
