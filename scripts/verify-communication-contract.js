@@ -97,7 +97,7 @@ expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701', 'exp
 expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701"', 'exports the resolved RAK10701 profile ID');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'validate_journal_media_settings()', 'validates journal media settings (failure disables the journal replication worker, not Node-RED startup)');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'Number.isSafeInteger', 'rejects unsafe journal byte limits');
-expectIncludes(nodeRedInitPath, nodeRedInit, 'realpath "$configured_root"', 'resolves the exact journal media root');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'readlink -f "$configured_root"', 'resolves the exact journal media root (readlink -f: this platform\'s busybox ships FEATURE_READLINK_FOLLOW but not the separate realpath applet)');
 expectIncludes(nodeRedInitPath, nodeRedInit, '[ ! -L "$configured_root" ]', 'rejects a symlink journal media root');
 for (const variable of [
   'JOURNAL_PHOTO_CACHE_BYTES="$journal_photo_cache_bytes"',
