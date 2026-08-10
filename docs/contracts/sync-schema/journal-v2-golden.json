@@ -406,6 +406,29 @@
       },
       "canonical_hash_input": "{\"candidate\":{\"exact_pending_v1_event_uuids_sorted\":[\"a0000000-0000-4000-8000-000000000001\",\"a0000000-0000-4000-8000-000000000002\"],\"pending_set_sha256\":\"2ad8f0b7ca37ffd752ade6e262d351af337a8f8f9edc97dd57e8e70159a5baad\",\"source_head_manifest_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"mutation_uuid\":\"10000000-0000-4000-8000-000000000007\",\"operation\":\"CUTOVER_BARRIER_RECEIPT\",\"origin\":\"edge-worker\",\"recorded_at\":\"2026-08-08T10:11:12.123Z\",\"resource\":{\"barrier_uuid\":\"90000000-0000-4000-8000-000000000001\",\"gateway_device_eui\":\"0016C001F11715E2\"},\"workspace_uuid\":\"20000000-0000-4000-8000-000000000001\"}",
       "payload_sha256": "cc395682d37cd4c4005ca0f58242b1a7ffd6fd1e6cc274c723a7d388841d93ed"
+    },
+    {
+      "name": "ENTRY_VOID full envelope with leap-second-shaped free-text void_reason",
+      "input": {
+        "mutation_uuid": "10000000-0000-4000-8000-000000000008",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000001",
+        "operation": "ENTRY_VOID",
+        "resource": {
+          "entry_uuid": "30000000-0000-4000-8000-000000000001",
+          "base_version": 2
+        },
+        "candidate": {
+          "status": "voided",
+          "voided_at": "2026-08-08T10:11:12.123Z",
+          "voided_by_principal_uuid": "50000000-0000-4000-8000-000000000001",
+          "void_reason": "2024-06-30T23:59:60Z"
+        },
+        "origin": "edge-ui",
+        "recorded_at": "2026-08-08T10:11:12.123Z",
+        "payload_sha256": "b74d29554cbe3e1284cd1aabc5dc59e65dd7658e0aada413c14c168ee6cf555b"
+      },
+      "canonical_hash_input": "{\"candidate\":{\"status\":\"voided\",\"void_reason\":\"2024-06-30T23:59:60Z\",\"voided_at\":\"2026-08-08T10:11:12.123Z\",\"voided_by_principal_uuid\":\"50000000-0000-4000-8000-000000000001\"},\"mutation_uuid\":\"10000000-0000-4000-8000-000000000008\",\"operation\":\"ENTRY_VOID\",\"origin\":\"edge-ui\",\"recorded_at\":\"2026-08-08T10:11:12.123Z\",\"resource\":{\"base_version\":2,\"entry_uuid\":\"30000000-0000-4000-8000-000000000001\"},\"workspace_uuid\":\"20000000-0000-4000-8000-000000000001\"}",
+      "payload_sha256": "b74d29554cbe3e1284cd1aabc5dc59e65dd7658e0aada413c14c168ee6cf555b"
     }
   ],
   "replication_vectors": [
