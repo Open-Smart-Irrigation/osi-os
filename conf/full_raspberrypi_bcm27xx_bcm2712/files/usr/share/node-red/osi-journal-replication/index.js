@@ -779,7 +779,28 @@ async function acknowledgeCursor(httpApi, config, sequence) {
   }
 }
 
+function replicationDisabledByRuntime() {
+  return String(process.env.JOURNAL_REPLICATION_DISABLE || '') === '1';
+}
+
 async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
+  // node-red.init sets JOURNAL_REPLICATION_DISABLE=1 whenever it could not
+  // validate/create the configured journal media root (e.g. a leftover
+  // symlink, a read-only or full parent). That failure must never stop
+  // Node-RED from starting, so the init keeps starting the service and
+  // instead disables this worker at the source. Honor that here, before
+  // validateWorkerConfig() touches media_root or the byte limits, so this
+  // quietly skips the tick every time instead of throwing every tick.
+  if (replicationDisabledByRuntime()) {
+    return {
+      capability_state: 'disabled',
+      sent_mutations: 0,
+      applied_envelopes: 0,
+      committed_sequence: null,
+      photo_transfers: 0,
+      evicted_media: 0,
+    };
+  }
   const config = validateWorkerConfig(inputConfig, fsApi);
   const capabilityPayload = await cloudRequest(httpApi, {
     method: 'POST',
