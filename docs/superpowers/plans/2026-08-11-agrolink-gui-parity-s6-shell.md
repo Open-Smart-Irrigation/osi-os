@@ -117,7 +117,7 @@ Each states an ambiguity in the S6 brief or the spec and its resolution, with th
 
   So a push to `feat/journal-cloud-primary` fires **neither**, and if one ever did fire it would compare the cloud's vendored `ui-core` against osi-os `AgroLink` — which is already stale: `git diff --stat origin/AgroLink..HEAD -- web/react-gui/src/ui-core/` shows `Modal.tsx` and `__tests__/feedback.test.tsx` already changed by commit `68e4af3c` ("fix(ui-core): make Modal scrollable and viewport-bounded"). **T2 changes `Modal.tsx` again, deepening a divergence the gate cannot see.** Resolution: (a) the local verifier, run in both directions with explicit env vars, is the gate for S6 and T11 pastes its output; (b) the pinned-ref problem is **ledgered, not fixed** — repointing a CI ref used by three gates across two repos is a release-engineering decision with a blast radius beyond a GUI slice, and it becomes urgent only when this branch is proposed for merge. T10 records it as the first ledger item so it cannot be discovered by surprise at merge time.
 
-**3. "The cloud is a star topology and all 13 other routed pages are cul-de-sacs with nothing but a back-to-dashboard link" — the diagnosis is right, the second half is wrong, and the correction does not weaken the case.** `App.tsx` registers 16 routes: `/login`, `/register`, 14 authenticated pages, and a `*` catch-all redirecting to `/dashboard`. So "Dashboard + 13 others" is exactly right. But **5 of the 13 do link a sibling**: `/journal` → `/account` (`JournalPage.tsx:588`), `/settings` → `/support-requests` (`SettingsPage.tsx:267-272`), `/admin/users` → `/admin/devices` (`AdminUsers.tsx:88-90`), `/admin/devices` → `/admin/users` (`AdminDevices.tsx:86-88`), `/admin/work-requests` → `/admin/devices` (`AdminWorkRequests.tsx:116-118`). The other 8 link only `/dashboard`. **Why this does not soften the finding:** those 5 links are *lateral within an area* (admin↔admin, settings→support) — not one of them reaches a **parity surface**. There is no path from `/journal` to `/history`, from `/history` to `/analysis`, or from any of the three back to each other without going through `/dashboard`. The defect is the absence of **primary navigation**, and the accurate statement of it is: *the four parity surfaces (`/dashboard`, `/history`, `/analysis`, `/journal`) form a star centred on `/dashboard`, and three routes have no in-app link at all.* T3 fixes the star; T5 fixes the three. Use this wording, not "13 cul-de-sacs".
+**3. "The cloud is a star topology and all 13 other routed pages are cul-de-sacs with nothing but a back-to-dashboard link" — the diagnosis is right, the second half is wrong, and the correction does not weaken the case.** `App.tsx` registers **17** routes (`grep -c 'path=' src/App.tsx` → 17): `/login`, `/register`, 14 authenticated pages, and a `*` catch-all redirecting to `/dashboard`. So "Dashboard + 13 others" is exactly right. But **5 of the 13 do link a sibling**: `/journal` → `/account` (`JournalPage.tsx:588`), `/settings` → `/support-requests` (`SettingsPage.tsx:267-272`), `/admin/users` → `/admin/devices` (`AdminUsers.tsx:88-90`), `/admin/devices` → `/admin/users` (`AdminDevices.tsx:86-88`), `/admin/work-requests` → `/admin/devices` (`AdminWorkRequests.tsx:116-118`). The other 8 link only `/dashboard`. **Why this does not soften the finding:** those 5 links are *lateral within an area* (admin↔admin, settings→support) — not one of them reaches a **parity surface**. There is no path from `/journal` to `/history`, from `/history` to `/analysis`, or from any of the three back to each other without going through `/dashboard`. The defect is the absence of **primary navigation**, and the accurate statement of it is: *the four parity surfaces (`/dashboard`, `/history`, `/analysis`, `/journal`) form a star centred on `/dashboard`, and three routes have no in-app link at all.* T3 fixes the star; T5 fixes the three. Use this wording, not "13 cul-de-sacs".
 
 **4. There is no shared app shell in the cloud, so mounting the tab bar is a four-page change — and that matches the edge, which does the same thing.** Verified: no `Layout`/`AppShell`/`PageLayout` wraps routed pages; `App.tsx:32-148` puts each page directly inside `PrivateRoute`/`AdminRoute` with no chrome slot. Every page renders its own `<header>` inline. Only `Dashboard` delegates, to `DashboardHeader`, which no other page reuses. The edge is structurally identical: `AppHeader` is mounted **per page** at `FarmingDashboard.tsx:153` (via `DashboardHeader`), `HistoryDashboard.tsx:413`, `JournalPage.tsx:237` and `CrossZoneAnalysisPage.tsx:173`. **Resolution: port the edge's structure exactly — a cloud `components/AppHeader.tsx` owning crown + glass chrome + tabs + Settings + Account, and rewrite `components/DashboardHeader.tsx` into a thin wrapper that passes the Add/Admin menus into `AppHeader`'s `actions` slot**, which is precisely what edge `DashboardHeader.tsx:33-53` does. Rejected alternative: introduce a routed layout element (`<Route element={<Shell/>}>` with `<Outlet/>`). It is the better React idiom and it is **rejected for this slice**: it would restructure all 14 routes in a slice whose reviewable claim is "navigation now exists", it has no edge counterpart so it would create a *new* structural divergence while closing a visual one, and D7's freedom is at page-composition level, not router level. Ledger it as a follow-up if a fifth parity page ever appears.
 
@@ -136,7 +136,7 @@ Each states an ambiguity in the S6 brief or the spec and its resolution, with th
   - inline `canWrite\s*&&`: **exactly 17** — `components/farming/IrrigationZoneCard.tsx:208,240,375,408,570,586,595,602`; `components/journal/desktop/JournalWorkspace.tsx:375`; `components/journal/desktop/DetailPanel.tsx:432`; `pages/FarmingDashboard.tsx:152,186,355,361`; `pages/JournalPage.tsx:237`; `pages/HistoryDashboard.tsx:413`; `pages/CrossZoneAnalysisPage.tsx:173`.
   - **Total 18.** All 18 are the brief's category (a): hide with no explanation (return `null`, omit the element, or hold a modal's `isOpen` false).
   - **Not counted by the brief and worth more than a footnote:** 10 further sites pass `readOnly={!canWrite}` into a card or form (`IrrigationZoneCard.tsx`, `FarmingDashboard.tsx`), which *disables* controls with no explanatory text — a user sees a greyed control and is told nothing. Plus `DashboardHeader.tsx:41` hides the whole Add menu via `canWrite ? (…) : undefined`, which is functionally a 19th hide but is not an inline `&&`.
-  - **`canWrite` and `showSettings`/`showAdmin` overlap:** four of the 17 (`JournalPage.tsx:237`, `HistoryDashboard.tsx:413`, `CrossZoneAnalysisPage.tsx:173`, and `FarmingDashboard.tsx:152`'s sibling) are the Settings/Admin gate reading 8 describes, so **T7 and T8 must not both claim them.** T7 owns the Settings gate; T8 owns the remaining page-content hides.
+  - **`canWrite` and `showSettings`/`showAdmin` overlap, and the arithmetic here is exact because T8's drift detector depends on it:** **three** of the 17 are `showSettings={canWrite && !scopeLoading}` (`JournalPage.tsx:237`, `HistoryDashboard.tsx:413`, `CrossZoneAnalysisPage.tsx:173`) and those are the only three T7 deletes, so **T7 and T8 must not both claim them.** T7 owns the Settings gate; T8 owns the remaining page-content hides — **14** of them, not 13. Two near-misses that must not be miscounted into the three: `DashboardHeader.tsx:39` is `showSettings={canWrite}` with **no `&&`**, so T7 deletes it but it was never one of the 17; and `FarmingDashboard.tsx:152` is `canWrite={canWrite && !scopeLoading}` — a prop pass that feeds the Add-menu gating (`DashboardHeader.tsx:41` `actions={canWrite ? … }`) and **survives T7 untouched**.
   - **Zero explanations confirmed.** `grep -rniE "read.?only access|view.?only|you (do not|don't) have (permission|write|edit)"` over edge `src` (non-test) and `public/locales/en/*.json` returns **no hits**. `ScopeStatusBanner` only surfaces `scope.loadError` on an API failure, which is a different thing.
 
 **8. Maintainer decision 4's file:line is wrong, the language-switcher premise is wrong, and the conclusion is still correct — which is why T7 survives.** The brief cites "`AppHeader.tsx:54` `showSettings=canWrite`". `AppHeader.tsx:54` is `showSettings = true,` — a **default parameter**, the opposite of a gate. The real gates are four call sites: `components/DashboardHeader.tsx:39` (`showSettings={canWrite}`) and `pages/{JournalPage.tsx:237,HistoryDashboard.tsx:413,CrossZoneAnalysisPage.tsx:173}` (`showSettings={canWrite && !scopeLoading}`). `WritableOnly.tsx` redirects at **line 9** (`if (!canWrite) return <Navigate to="/" replace />;`, with `if (loading) return null;` at `:8`), not line 10, and it wraps **exactly one route**: `App.tsx:69`, `/settings`. And the language switcher is **not** only in Settings — `LanguageSwitcher` is mounted in **4** places: `pages/SettingsPage.tsx:371`, `pages/Login.tsx:113`, `pages/Register.tsx:64`, `components/history/mobile/HistoryMobileHeader.tsx:39`.
@@ -146,7 +146,7 @@ Each states an ambiguity in the S6 brief or the spec and its resolution, with th
   - **"`btn-liquid` is defined 23 times."** The literal substring occurs 23 times in `primitives.css`, but `btn-liquid` is a **prefix of `btn-liquid-red`**, so the count conflates two distinct classes across selector lists, `::after`, `:hover`, `:active`, `:disabled` and two accessibility fallback blocks (`prefers-reduced-transparency`, `prefers-reduced-motion`). It is not one class defined 23 times.
   - **"used only 4 times."** The 4 literal occurrences outside `primitives.css` are: `ui-core/Button.tsx:11-12` (the variant→class map itself, i.e. the *definition* of the consumer API) and two test assertions. The real application call sites go through `<Button variant="liquid-red">` — **3 of them**, all `liquid-red` (`DetailPanel.tsx:334`, `EntryAttachmentsPanel.tsx:344,355`). **`variant="liquid"`, the plain glass variant T3 and T4 need, has ZERO consumers in the cloud today** — which is a stronger version of the brief's point, not a weaker one.
   - **"`--brand-red` is defined and used ZERO times."** It is defined at `tokens.css:24` (light) and `:126` (dark) as `#E30613`, and it **is used** — `primitives.css:153` (`background: var(--brand-red)` in the `.btn-liquid-red` reduced-transparency fallback), `:165` (`box-shadow: inset 0 0 0 1px var(--brand-red)` in the `.glass-tab[aria-current='page']` fallback) and `tailwind-preset.js:33` (`'brand-red': 'var(--brand-red)'`). Five occurrences, all inside `ui-core/`. The accurate claim: **used only inside ui-core's own fallback CSS and preset, never referenced by app page or component code on either side.**
-  - **A real finding the brief missed:** the active tab's Agroscope-red specular ring is **hardcoded** — `primitives.css:136-137` uses `rgba(227, 6, 19, 0.35)` and `rgba(227, 6, 19, 0.18)` literally, where `#E30613` *is* `--brand-red`. So the one place the brand red is visible in normal rendering does not go through the token, while the fallback nobody sees does. S6 does **not** fix it: `primitives.css` is byte-mirrored and a token substitution there changes the edge's rendered chrome, so it needs the same ratification a token change needs, for zero user-visible gain. Ledgered in T10.
+  - **A real finding the brief missed:** the active tab's Agroscope-red specular ring is **hardcoded** — `primitives.css:138-139` uses `rgba(227, 6, 19, 0.35)` and `rgba(227, 6, 19, 0.18)` literally, where `#E30613` *is* `--brand-red`. So the one place the brand red is visible in normal rendering does not go through the token, while the fallback nobody sees does. S6 does **not** fix it: `primitives.css` is byte-mirrored and a token substitution there changes the edge's rendered chrome, so it needs the same ratification a token change needs, for zero user-visible gain. Ledgered in T10.
 
 **10. The `--danger-fg` nudge fixes a pairing that does not occur in the product, and there is a real 3.25:1 defect two lines away. The token does not change.** Measured: light `--danger-fg` `#DC2626` on light `--bg` `#F4F6F8` = **4.458** — so the brief's 4.46 is exactly right. But the constraint that matters is *the surface the element actually renders on*, and a parent-chain walk of **all 9** live `text-[var(--danger-fg)]` sites on the edge (the cloud has **zero** live ones — its 3 grep hits are two test assertions and a comment) puts every one of them on `--card` `#FFFFFF` = **4.829, which passes**:
   - `components/farming/SystemPanel.tsx:236` sets `bg-[var(--card)]` on the very element carrying the text; single mount, `pages/FarmingDashboard.tsx:342`.
@@ -156,7 +156,7 @@ Each states an ambiguity in the S6 brief or the spec and its resolution, with th
 
 **11. What the logged-in cloud app is missing is the brand MARK, not the brand WORD — and porting the edge's mark puts two different Agroscope marks in one session, which needs a ruling.** The brief warns that "a prior claim that the cloud contains zero AgroLink references was false"; it is false, and generously so. Already shipping **inside the logged-in cloud app**: `DashboardHeader.tsx:31`'s `<h1>{t('title')}</h1>` resolves to the literal `"AgroLink"` from `public/locales/*/dashboard.json`; `HistoryDashboard.tsx:148` renders `AgroLink` as an eyebrow; `JournalPage.tsx:504` renders `AgroLink · {t('eyebrow')}`; `Account.tsx:181` names it in body copy; `devices.json:45`'s `cloudLocalHint` names it; `GatewayContext.tsx:6` keys localStorage `'agrolink.active-gateway.v1.'`; and **`tests/agrolinkBranding.test.ts` already asserts a set of these**. What does **not** ship post-login is any image or SVG mark — `DashboardHeader.tsx` and `Dashboard.tsx` contain zero `<img>` and zero inline SVG. The Agroscope Swiss-cross (`src/assets/agroscope/swiss-cross.jpg`) appears only on `Login.tsx:38-40`.
   The edge's module is **not** a generic "crown/branding module": `src/branding/agrolink.ts` resolves the licensed **Agroscope Balken** partner lockup, in 4 locale variants (`balken-horizontal-{en,de,fr,it}.png`, 19–24 KB each; `de/fr/it` matched by prefix, everything else including `es`/`pt`/`lg` falling back to `en` via `resolveAgroscopeAssetLocale:52-58`), rendered as `<img className="balken-crown">` at `AppHeader.tsx:83`. `.balken-crown` is **pixel-tuned CSS in `src/index.css:29-101`** — not in `ui-core`, so not vendor-gated — with a `margin-left: max(16px, calc(50% - 784px))` rule that hard-codes the edge's `max-w-[1600px]` content column, a `.login-scene` variant, and a `<640px` override. `.font-brand` (`index.css:103`) asks for Noto Sans. The cloud's `src/index.css` is **16 lines** and has none of it, has no `src/branding/`, and ships only `swiss-cross.jpg`. `AGROSCOPE_ASSETS` also carries 4 `logo-*-hoch.png` (60–70 KB) that **nothing consumes** on the edge (`grep '\.logoHoch\b'` → definition only).
-  **Two real problems, so T6 opens with a ratification gate rather than an implementer's guess.** (i) **D6 tension:** the spec excludes the cloud login from visual parity and keeps its Swiss-cross badge; porting the Balken makes the logged-in app show a *different* Agroscope mark from the login screen the user just left, so "match the promise the login screen makes" cuts against the port. (ii) The cloud content column is `max-w-7xl` (`DashboardHeader.tsx:28`), not `max-w-[1600px]`, so the edge's alignment arithmetic is **wrong by construction** in the cloud and must be re-derived, not copied. **Recommended default, for the maintainer to accept or overturn:** port the Balken crown (decision 2 says the cloud follows the edge's corporate design, and the Balken *is* the corporate mark), copy only the 4 `balken-horizontal-*.png`, skip `logoHoch` entirely, re-derive the margin for the cloud's own column, and route the two-mark question to the designer review. T6 must not begin until this is answered.
+  **Two real problems, one of them since answered.** (i) **D6 tension:** the spec excludes the cloud login from visual parity and keeps its Swiss-cross badge; porting the Balken makes the logged-in app show a *different* Agroscope mark from the login screen the user just left, so "match the promise the login screen makes" cuts against the port. **The product owner ruled on this before execution: "copy the edge" — the Balken is ported, the login badge is left alone.** That was this reading's recommended default, so T6 Step 0(i) is a record, not a gate. (ii) The cloud content column is `max-w-7xl` (`DashboardHeader.tsx:28`), not `max-w-[1600px]`, so the edge's alignment arithmetic is **wrong by construction** in the cloud and must be re-derived, not copied — that half is still work, because nobody can answer arithmetic for the implementer. **So T6's shape:** port the Balken crown, copy only the 4 `balken-horizontal-*.png`, skip `logoHoch` entirely, re-derive the margin for the cloud's own column, confirm the licensed-asset copy in one sentence of the report, and route the two-mark *relationship* to the designer review (which happens alongside T6, not before it).
 
 **12. `glass-tabs`/`glass-tab` really does ship unused in the cloud and really is consumed by the edge — the one claim in the CSS group that is exactly right.** Zero consumers in cloud `frontend/src` outside `primitives.css`; consumed by edge `AppHeader.tsx:93` (`"glass-tabs inline-flex gap-1 p-1"`) and `:99` (`` `glass-tab px-5 py-2 text-[15px] font-semibold …` ``). One imprecision: the cited range `primitives.css:107-163` undershoots — `.glass-tabs` is `:107-116`, `.glass-tab` `:117-143`, and the `.glass-tab[aria-current='page']` reduced-transparency fallback runs to **`:166`**. The styling hook for the active pill is the attribute selector `.glass-tab[aria-current='page']` (`:134`), which means **`aria-current` is not decoration here — it is what draws the active state.** A port that sets a class instead of `aria-current` renders no active tab at all. T3's test asserts `aria-current` for that reason, not only for accessibility.
 
@@ -177,7 +177,7 @@ Each states an ambiguity in the S6 brief or the spec and its resolution, with th
 
 **18. The two reachability holes, stated exactly, because both are asymmetric and neither is a simple missing link.** The brief says `/analysis` is "desktop-and-flag-only with no mobile redirect gate" and `/history/zones/:id` is "mobile-only", concluding "desktop users have no path to zone history cards at all". All of that is confirmed, with one precision that changes what T5 must build:
   - **The gate is on the LINK, never on the ROUTE.** `PrivateRoute` checks only `isAuthenticated`. `CrossZoneAnalysisPage.tsx` contains zero references to `useFeatureFlags`, `historyUxEnabled`, `isDesktopBrowser` or `Navigate`. The desktop+flag condition lives at `Dashboard.tsx:40` (`const showDesktopData = flags.historyUxEnabled && isDesktopBrowser();`) and only decides whether `DashboardHeader.tsx:55-62` renders the `/analysis` link. So a mobile user who types the URL gets the full desktop page. The edge, by contrast, gates the **route**: `pages/AnalysisRoute.tsx:10-12` is `if (!isDesktopBrowser()) { return <Navigate to="/history" replace />; }`. T5 ports the route gate.
-  - **`/history/zones/:zoneId`'s only in-app link is mobile-gated:** `components/farming/IrrigationZoneCard.tsx:261-267`, `{!isDesktopBrowser() && flags.historyUxEnabled && (<Link to={`/history/zones/${zone.id}`}>…`. Nothing else links it, including `HistoryDashboard` itself. So desktop has no path — confirmed.
+  - **`/history/zones/:zoneId`'s only in-app link is mobile-gated:** `components/farming/IrrigationZoneCard.tsx:261-267`, `{!isDesktopBrowser() && flags.historyUxEnabled && (<Link to={`/history/zones/${zone.id}`}>…`. Nothing else links it, including `HistoryDashboard` itself. So desktop has no path — confirmed. **T5 removes both conditions, not just the device one:** T3 Step 0 establishes that `historyUxEnabled` is hardcoded `true` server-side and can only read `false` when the features endpoint errors, so the flag condition does not express an operator preference — it deletes the link in the failure mode.
   - **`isDesktopBrowser` fails OPEN to desktop.** The edge helper (`src/utils/isDesktopBrowser.ts`) tests `navigator.userAgentData.mobile`, falls back to a UA regex, and returns `true` when detection is impossible. So an undetectable client is treated as desktop and, once T5 lands the route gate, keeps `/analysis` rather than being bounced to `/history`. That is the safer failure for this pair and is called out so a reviewer does not read it as a fail-open bug.
 
 ---
@@ -228,8 +228,9 @@ Measured at edge `d2851111` / cloud `d091af2f`. **Re-measure rather than re-quot
 | Kind | Count | Sites | Task |
 |---|---|---|---|
 | `<CanWrite>` wrapper | 1 | `pages/JournalPage.tsx:332-341` | T8 |
-| inline `canWrite &&`, Settings/Admin gate | 4 | `DashboardHeader.tsx:39`-adjacent + `pages/{JournalPage.tsx:237,HistoryDashboard.tsx:413,CrossZoneAnalysisPage.tsx:173}` | **T7** |
-| inline `canWrite &&`, page content | 13 | `IrrigationZoneCard.tsx:208,240,375,408,570,586,595,602`; `JournalWorkspace.tsx:375`; `DetailPanel.tsx:432`; `FarmingDashboard.tsx:152,186,355,361` (minus the one Settings-gate site) | T8 |
+| inline `canWrite &&`, Settings gate | 3 | `pages/{JournalPage.tsx:237,HistoryDashboard.tsx:413,CrossZoneAnalysisPage.tsx:173}` — all three `showSettings={canWrite && !scopeLoading}` | **T7** |
+| inline `canWrite &&`, page content | **14** | `IrrigationZoneCard.tsx:208,240,375,408,570,586,595,602`; `JournalWorkspace.tsx:375`; `DetailPanel.tsx:432`; `FarmingDashboard.tsx:152,186,355,361` | T8 |
+| `showSettings={canWrite}`, **no `&&`** | 1 | `DashboardHeader.tsx:39` — T7 deletes it, but it is **not** one of the 17 and must not be subtracted from T8's count | T7 |
 | `readOnly={!canWrite}` disable-without-explanation | 10 | `IrrigationZoneCard.tsx`, `FarmingDashboard.tsx` | T8 covers by page-level notice; individual controls unchanged |
 | explanations of any kind | **0** | — | T8 |
 
@@ -242,7 +243,7 @@ Measured at edge `d2851111` / cloud `d091af2f`. **Re-measure rather than re-quot
 | `docs/superpowers/plans/agrolink-gui-parity-matrix.md` (journal rows + journal ledger bullets) | osi-os | T1 |
 | `web/react-gui/src/ui-core/{Modal.tsx,tokens.css}`, `web/react-gui/src/ui-core/__tests__/feedback.test.tsx`, `web/react-gui/tests/uiCoreTokens.test.ts`, `web/react-gui/tests/dangerFgPairing.test.ts` (new), `web/react-gui/src/components/farming/SystemPanel.tsx` | osi-os (canonical) | T2 |
 | `frontend/src/ui-core/{Modal.tsx,tokens.css}` (re-vendored), `frontend/src/ui-core/__tests__/feedback.test.tsx` (re-vendored), `frontend/tests/dangerFgPairing.test.ts` (new) | osi-server | T2 |
-| `frontend/src/components/AppHeader.tsx` (new), `frontend/src/components/DashboardHeader.tsx` (rewritten as a wrapper), `frontend/src/pages/{Dashboard,HistoryDashboard,CrossZoneAnalysisPage,JournalPage}.tsx`, 7× `public/locales/*/dashboard.json`, `frontend/tests/dashboardLocales.test.ts` (new), `frontend/src/components/__tests__/AppHeader.test.tsx` (new) | osi-server | T3 |
+| `frontend/src/components/AppHeader.tsx` (new), `frontend/src/components/DashboardHeader.tsx` (rewritten as a wrapper), `frontend/src/pages/{Dashboard,HistoryDashboard,CrossZoneAnalysisPage,JournalPage}.tsx` (`Dashboard.tsx` is edited too — it passes `showDesktopData`, which T3 removes from `DashboardHeaderProps`, so `tsc` forces it), 7× `public/locales/*/dashboard.json`, `frontend/tests/dashboardLocales.test.ts` (new), `frontend/src/components/__tests__/AppHeader.test.tsx` (new) | osi-server | T3 |
 | `frontend/src/components/DashboardHeader.tsx`, `frontend/src/pages/admin/{AdminUsers,AdminDevices,AdminWorkRequests,AdminPrediction}.tsx`, `frontend/src/pages/GatewayAccessAdminPage.tsx`, `frontend/tests/chromeTokens.test.ts` (new) | osi-server | T4 |
 | `frontend/src/App.tsx`, `frontend/src/pages/AnalysisRoute.tsx` (new), `frontend/src/components/DashboardHeader.tsx`, `frontend/src/components/farming/{IrrigationZoneCard,deviceRegistry}.tsx` (+ the device card that owns the link), 7× `dashboard.json`/`devices.json`, `frontend/src/pages/__tests__/`, `frontend/tests/routeReachability.test.ts` (new) | osi-server | T5 |
 | `frontend/src/branding/agrolink.ts` (new), `frontend/src/assets/agroscope/balken-horizontal-{en,de,fr,it}.png` (new), `frontend/src/assets/agroscope/README.md`, `frontend/src/index.css`, `frontend/src/components/AppHeader.tsx`, `frontend/tests/agrolinkBranding.test.ts` | osi-server | T6 |
@@ -345,11 +346,13 @@ it('dims with a translucent scrim so the dialog does not erase its context', () 
   const scrim = container.querySelector('.fixed.inset-0');
   assert.ok(scrim, 'the overlay element must exist');
   // v3.4 cannot alpha-modify a var() colour, so the translucency must be a
-  // color-mix, not `bg-[var(--overlay)]/60` — which compiles to zero CSS.
-  expect(scrim!.className).toContain('color-mix(in_srgb,var(--overlay)_60%,transparent)');
+  // color-mix, not `bg-[var(--overlay)]/70` — which compiles to zero CSS.
+  expect(scrim!.className).toContain('color-mix(in_srgb,var(--overlay)_70%,transparent)');
   expect(scrim!.className).not.toContain('bg-[var(--overlay)]');
 });
 ```
+
+**A stronger verification pattern already exists on the cloud side — read it before writing (a).** `frontend/tests/modalBackdropDims.test.ts` compiles the real `ui-core/tailwind-preset.js` through PostCSS/Tailwind and asserts that each of three backdrop class strings produces an actual `background-color: color-mix(in srgb, var(--overlay) 70%, transparent)` declaration — it proves the utility **compiles**, which the `toContain` assertion above cannot. Its three sites (`GatewayCard.tsx:254`, `IrrigationZoneCard.tsx:509`, `PredictionConfigModal.tsx:204`) are the `--overlay` 70% precedent this step aligns to, so that file is *also* the evidence that 70% is already a shipped, guarded number here. Reuse its compile-through-PostCSS shape if you want a real proof rather than a string match; **do not edit `modalBackdropDims.test.ts` itself** — it is not in this task's file list and touching it would show up as a scope breach in T11 Step 6.
 
 **(b)** Append to `web/react-gui/tests/uiCoreTokens.test.ts` (its path constant is `tokensPath`, lowercase — confirm by reading the file, do not assume `TOKENS_PATH`):
 
@@ -363,7 +366,17 @@ test('both theme blocks declare color-scheme so native date pickers match the th
 });
 ```
 
-**(c)** Create `web/react-gui/tests/dangerFgPairing.test.ts`. This is the guard, and it is the one that must be proven to fail on real code:
+**(c)** Create `web/react-gui/tests/dangerFgPairing.test.ts`. This is the guard, and it is the one that must be proven to fail on real code.
+
+**The guard has to be variant-aware, and that is not a refinement — a naive version flags this task's own fix.** Step 3(c) corrects `SystemPanel.tsx:236` by swapping *both* the background and the text inside the same `hover:` variant (`hover:bg-[var(--error-bg)] hover:text-[var(--error-text)]`). A guard that asks only "does this class string contain a forbidden `bg-[var(…)]` **and** `text-[var(--danger-fg)]`" matches `bg-\[var\(--error-bg\)\]` inside `hover:bg-[var(--error-bg)]`, cannot see that the same variant also swapped the text, and so reports the *corrected* line as an offender. A guard with a known false positive on the very line it was written for gets disabled or worked around, so it is built variant-aware from the start:
+
+1. Split the class string on whitespace into tokens.
+2. For each token, separate any variant prefix from the utility, splitting on `:` **only where the colon occurs before the first `[`** — arbitrary values like `bg-[color-mix(in_srgb,var(--overlay)_70%,transparent)]` must not be torn apart. No prefix means the base variant.
+3. Group the tokens by variant.
+4. For each variant *p*, compute the **effective** background (*p*'s own `bg-` if it has one, else the base variant's) and the **effective** text colour (*p*'s own `text-` if it has one, else the base variant's).
+5. Flag only a variant whose effective background is in `FORBIDDEN_BG` **and** whose effective text is `--danger-fg`.
+
+The rejected alternative was `hover:opacity-90`, the idiom the edge's existing `tests/errorButtonHover.test.ts` already sanctions for destructive-button hovers. It is rejected here because it fades the whole row including its borders — a different visual result that would need its own measurement — not because it is unsupported.
 
 ```ts
 import test from 'node:test';
@@ -376,13 +389,17 @@ import path from 'node:path';
 //   --bg      #F4F6F8  4.458
 //   --surface #E8EDF2  4.100
 //   --error-bg #FEE2E2 3.953
-//   --border  #CBD5E1  3.253   <- SystemPanel's hover state
+//   --border  #CBD5E1  3.253   <- SystemPanel's hover state before S6 T2
 // All four clear 3:1, so --danger-fg stays legal as a BORDER on all of them
 // (that is exactly how Banner.tsx:7 and Chip.tsx:9 use it). This guard fences
-// the text case: a class string may not put text-[var(--danger-fg)] and a
-// background of one of those four tokens on the same element, in any state
-// variant (hover:, focus:, active:, dark:, group-hover: …).
+// the text case, PER VARIANT: a state variant may not end up with an effective
+// background from that list while its effective text colour is --danger-fg.
+// Per-variant is the whole point — `hover:bg-[var(--error-bg)]` paired with
+// `hover:text-[var(--error-text)]` is CORRECT and must not be flagged, while
+// `hover:bg-[var(--error-bg)]` on its own inherits the base --danger-fg text
+// and must be.
 const FORBIDDEN_BG = ['--bg', '--surface', '--error-bg', '--border'];
+const DANGER = '--danger-fg';
 const srcRoot = path.resolve(import.meta.dirname, '../src');
 
 function files(dir: string): string[] {
@@ -402,16 +419,91 @@ function classStrings(source: string): string[] {
     .filter((s) => s.includes('-[var(--'));
 }
 
+/**
+ * Split `hover:text-[var(--x)]` into { variant: 'hover', utility:
+ * 'text-[var(--x)]' }. Only a colon BEFORE the first `[` separates a variant,
+ * so arbitrary values keep their own colons: `bg-[color-mix(in_srgb,…)]` and
+ * `text-[var(--x)]` stay whole. Stacked variants (`dark:hover:…`) come back as
+ * one composite variant key, which is what we want — `dark:hover` is its own
+ * rendering state and must be resolved as one.
+ */
+function splitVariant(token: string): { variant: string; utility: string } {
+  const bracket = token.indexOf('[');
+  const limit = bracket === -1 ? token.length : bracket;
+  const lastColon = token.lastIndexOf(':', limit - 1);
+  if (lastColon === -1) return { variant: '', utility: token };
+  return { variant: token.slice(0, lastColon), utility: token.slice(lastColon + 1) };
+}
+
+const tokenOf = (utility: string, prefix: 'bg' | 'text'): string | undefined =>
+  new RegExp(`^${prefix}-\\[var\\((--[a-z-]+)\\)\\]$`).exec(utility)?.[1];
+
+/** Variants of `cls` whose EFFECTIVE bg/text pair fails. Empty means legal. */
+function failingVariants(cls: string): string[] {
+  const byVariant = new Map<string, { bg?: string; text?: string }>();
+  for (const token of cls.split(/\s+/).filter(Boolean)) {
+    const { variant, utility } = splitVariant(token);
+    const bg = tokenOf(utility, 'bg');
+    const text = tokenOf(utility, 'text');
+    if (!bg && !text) continue;
+    const entry = byVariant.get(variant) ?? {};
+    if (bg) entry.bg = bg;
+    if (text) entry.text = text;
+    byVariant.set(variant, entry);
+  }
+  const base = byVariant.get('') ?? {};
+  const failing: string[] = [];
+  for (const [variant, entry] of byVariant) {
+    const bg = entry.bg ?? base.bg;
+    const text = entry.text ?? base.text;
+    if (bg && text === DANGER && FORBIDDEN_BG.includes(bg)) failing.push(variant || 'base');
+  }
+  return failing;
+}
+
 test('no element pairs text-[var(--danger-fg)] with a background it fails AA on', () => {
+  // Table cases first, so the resolver itself is proven in both directions
+  // before it is pointed at the tree. Without these the guard could be
+  // silently over- or under-matching and still report zero offenders.
+  // Kept as assertions inside this one test() — NOT extra test() calls — so
+  // the suite delta stays +1 per repo and T11's arithmetic holds.
+  assert.deepEqual(
+    failingVariants('bg-[var(--card)] hover:bg-[var(--border)] text-[var(--danger-fg)]'),
+    ['hover'],
+    'a hover bg swap that leaves the base danger text in place must be flagged',
+  );
+  assert.deepEqual(
+    failingVariants(
+      'bg-[var(--card)] hover:bg-[var(--error-bg)] text-[var(--danger-fg)] hover:text-[var(--error-text)]',
+    ),
+    [],
+    'swapping bg AND text in the same variant is the correct fix and must NOT be flagged',
+  );
+  assert.deepEqual(
+    failingVariants('bg-[var(--surface)] text-[var(--danger-fg)]'),
+    ['base'],
+    'a base-variant failing pair must be flagged',
+  );
+  assert.deepEqual(
+    failingVariants('border border-[var(--border)] text-[var(--danger-fg)]'),
+    [],
+    'a border token is not a background — --danger-fg clears 3:1 on all four',
+  );
+  assert.deepEqual(
+    failingVariants(
+      'bg-[color-mix(in_srgb,var(--overlay)_70%,transparent)] text-[var(--danger-fg)]',
+    ),
+    [],
+    'an arbitrary value containing colons must not be split into a bogus variant',
+  );
+
   const offenders: string[] = [];
   for (const file of files(srcRoot)) {
     const source = fs.readFileSync(file, 'utf8');
     for (const cls of classStrings(source)) {
-      if (!cls.includes('text-[var(--danger-fg)]')) continue;
-      for (const bg of FORBIDDEN_BG) {
-        if (new RegExp(`bg-\\[var\\(${bg}\\)\\]`).test(cls)) {
-          offenders.push(`${path.relative(srcRoot, file)}: text-[var(--danger-fg)] + bg-[var(${bg})]`);
-        }
+      if (!cls.includes(`text-[var(${DANGER})]`)) continue;
+      for (const variant of failingVariants(cls)) {
+        offenders.push(`${path.relative(srcRoot, file)}: ${variant} variant pairs text-[var(${DANGER})] with a failing background`);
       }
     }
   }
@@ -428,7 +520,7 @@ npx vitest run src/ui-core/__tests__/feedback.test.tsx
 ```
 Expected, precisely:
 - `uiCoreTokens.test.ts` — the new `color-scheme` test FAILS on the light assertion (`color-scheme` appears nowhere in either repo; the only matches for the string anywhere are `matchMedia('(prefers-color-scheme: dark)')` in `utils/displayPreferences.ts` and `main.jsx`, which are JS media queries, not the CSS property). Every pre-existing test in the file PASSES.
-- `dangerFgPairing.test.ts` — FAILS with **exactly one** offender: `components/farming/SystemPanel.tsx: text-[var(--danger-fg)] + bg-[var(--border)]`. **If it reports zero, the guard is vacuous — stop and fix the extractor before continuing.** If it reports more than one, the extra sites are real findings: report them and fix them in this task.
+- `dangerFgPairing.test.ts` — the five table assertions PASS (they are pure-function cases and do not depend on the tree), then the tree scan FAILS with **exactly one** offender: `components/farming/SystemPanel.tsx: hover variant …`. The current class string at `:236` is `bg-[var(--card)] hover:bg-[var(--border)] text-[var(--danger-fg)] …` with **no `hover:text-`**, so the `hover` variant's effective text falls back to the base `--danger-fg` over `--border` — 3.253, the real defect. **If it reports zero, the guard is vacuous — stop and fix the extractor before continuing.** If it reports more than one, the extra sites are real findings: report them and fix them in this task. The 8 `DetailPanel.tsx` sites (`:460,651,656,661,855,860,1057,1082`) must **not** appear: verified, none of their class strings carries a `bg-` utility at all (`:460` has `border-[var(--border)]`, which is a border, not a background; the other seven are bare `<p>` text classes), so they have no effective background and are correctly unflagged.
 - `feedback.test.tsx` — the new scrim test FAILS on `toContain('color-mix…')`.
 
 - [ ] **Step 3: Make the three changes**
@@ -436,10 +528,10 @@ Expected, precisely:
 **(a)** `web/react-gui/src/ui-core/Modal.tsx:14` — replace the opaque scrim. `--overlay` is a solid hex (`#334155` light, `#050807` dark), so `bg-[var(--overlay)]` erases the page behind every dialog:
 
 ```tsx
-    <div className="fixed inset-0 bg-[color-mix(in_srgb,var(--overlay)_60%,transparent)] flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-[color-mix(in_srgb,var(--overlay)_70%,transparent)] flex items-center justify-center z-50 p-4">
 ```
 
-60% is chosen to sit close to the `bg-black/50` the hand-rolled scrims in both repos already use (edge `ZoneConfigModal.tsx:267`, `DraginoSettingsModal.tsx:375`, `JournalWorkspace.tsx:178`, `LayoutTransitionReviewSheet.tsx:85`; cloud `AssignDeviceModal.tsx:54`, `ClaimGatewayModal.tsx:45`, `DownlinkConfirmModal.tsx:25`, `ZoneConfigModal.tsx:397`) while keeping `--overlay`'s theme-awareness, which `black/50` does not have. **Underscores, not spaces**, inside the arbitrary value — Tailwind converts `_` to a space, and a literal space would break the class. `color-mix(in_srgb,…)` is already proven in this codebase at 15+ cloud call sites and 4 edge ones, so this is not a new mechanism.
+**70%, not 60%, and the reason is that 70% is already the shipped number for this exact mechanism.** Cloud `frontend/tests/modalBackdropDims.test.ts` compile-tests three backdrops (`GatewayCard.tsx:254`, `IrrigationZoneCard.tsx:509`, `PredictionConfigModal.tsx:204`) that already use `bg-[color-mix(in_srgb,var(--overlay)_70%,transparent)]` — same token, same `color-mix` mechanism, and already fenced by a guard. Those are the only **token-based, theme-aware** scrims in either repo. The eight hand-rolled `bg-black/50` scrims (edge `ZoneConfigModal.tsx:267`, `DraginoSettingsModal.tsx:375`, `JournalWorkspace.tsx:178`, `LayoutTransitionReviewSheet.tsx:85`; cloud `AssignDeviceModal.tsx:54`, `ClaimGatewayModal.tsx:45`, `DownlinkConfirmModal.tsx:25`, `ZoneConfigModal.tsx:397`) are the legacy theme-blind sites this primitive exists to replace, so they are not the number to converge on. Picking 70% means every scrim in the program lands on one value; picking 60% would leave three already-guarded ones disagreeing with the primitive. `--overlay`'s theme-awareness is what `black/50` lacks and is the reason for the token in the first place. **Underscores, not spaces**, inside the arbitrary value — Tailwind converts `_` to a space, and a literal space would break the class. `color-mix(in_srgb,…)` is already proven in this codebase at 15+ cloud call sites and 4 edge ones, so this is not a new mechanism.
 
 **(b)** `web/react-gui/src/ui-core/tokens.css` — add one declaration to each theme block. Put it as the **first** declaration in each block, with this comment:
 
@@ -469,11 +561,17 @@ cd /home/phil/Repos/osi-os/.worktrees/agrolink-parity-orchestrator-prep/web/reac
 npx tsx --test tests/uiCoreTokens.test.ts tests/dangerFgPairing.test.ts
 npx vitest run src/ui-core/__tests__/feedback.test.tsx
 ```
-Expected: all PASS.
+Expected: all PASS — and specifically, `dangerFgPairing` goes green **because the guard is variant-aware**, not because the offender was removed. Step 3(c)'s corrected class string still contains `bg-[var(--error-bg)]` (inside `hover:`) and still contains `text-[var(--danger-fg)]` (in the base variant); a naive substring guard would report it as an offender and this step's "all PASS" would be false. What makes it legal is that the `hover` variant supplies its own `hover:text-[var(--error-text)]`, so that variant's effective pair is `--error-text` on `--error-bg` = 8.20. **Say this in the report**, because "the guard I wrote does not flag the fix I wrote" is a claim a reviewer should see reasoning for, and Step 5's first mutation is its proof.
 
 - [ ] **Step 5: Mutation-test the guard — a check that has never failed is not a check**
 
-Insert `bg-[var(--surface)]` into the `SystemPanel` class string alongside the danger text, re-run `dangerFgPairing.test.ts`, confirm it goes red naming that file, revert, confirm green. Paste both outputs. Do the same for the `color-scheme` test by temporarily deleting the dark declaration.
+Three mutations, in this order. Paste the red and green output for each.
+
+1. **Delete only `hover:text-[var(--error-text)]`** from the corrected `SystemPanel.tsx:236` class string, leaving `hover:bg-[var(--error-bg)]` in place. `dangerFgPairing` must go **red naming the `hover` variant of `SystemPanel.tsx`** — the `hover` bg is forbidden and its text now falls back to the base `--danger-fg`. Restore, confirm green. **This is the mutation that matters:** it is red iff the guard resolves variants, and green iff the guard also honours a same-variant text swap, so one revert cycle proves both directions of the behaviour Step 4 depends on.
+2. **Add `bg-[var(--surface)]`** to one of the `DetailPanel.tsx` danger-text `<p>` class strings. Must go red naming that file's `base` variant. Revert, confirm green.
+3. The five table assertions in the test are themselves the false-positive proof and run on every invocation — if any of them is deleted to make a run pass, that is a process failure, not a fix.
+
+Then do the same revert cycle for the `color-scheme` test by temporarily deleting the dark declaration.
 
 - [ ] **Step 6: Re-vendor to osi-server in this same task, and verify both directions**
 
@@ -506,7 +604,7 @@ cd /home/phil/Repos/osi-server/.worktrees/agrolink/frontend
 npx tsx --test tests/dangerFgPairing.test.ts
 npm run test:unit && npm run build
 ```
-Expected: the cloud guard PASSES with **zero** offenders on the first run — the cloud has no live `text-[var(--danger-fg)]` site (its 3 grep hits are two test assertions in `components/journal/workspace/__tests__/DetailPanel.test.tsx:536,559` and a comment at `DetailPanel.tsx:325`). A guard that passes vacuously on this side is acceptable **only because it was proven red on the edge in Step 2** — say so explicitly in the report rather than presenting a green run as evidence.
+Expected: the cloud guard PASSES with **zero** offenders from the tree scan on the first run — the cloud has no live `text-[var(--danger-fg)]` site (its 3 grep hits are two test assertions in `components/journal/workspace/__tests__/DetailPanel.test.tsx:536,559` and a comment at `DetailPanel.tsx:325`). The **tree scan** is therefore vacuous on this side, and that is acceptable only because it was proven red on the edge in Step 2 — say so explicitly rather than presenting a green run as evidence. The five table assertions are **not** vacuous anywhere: they exercise the resolver directly and would fail in either repo if the variant logic broke, which is the one part of this guard that is genuinely tested on the cloud side.
 
 Watch for the scrim change in the cloud Vitest run: any snapshot or class assertion that hardcoded `bg-[var(--overlay)]` will now fail. That is a **correct** failure; update the assertion, do not revert the scrim.
 
@@ -523,7 +621,7 @@ git add frontend/src/ui-core frontend/tests/dangerFgPairing.test.ts
 git commit -m "chore(ui-core): re-vendor translucent scrim + color-scheme, add --danger-fg pairing guard"
 ```
 
-**Expected suite delta: edge node-runner +2** (1 `color-scheme`, 1 `dangerFgPairing`), **edge Vitest +1** (the scrim test), **cloud node-runner +1** (`dangerFgPairing`), **cloud Vitest +0 net** — the re-vendored `feedback.test.tsx` adds the same scrim test to the cloud, so **cloud Vitest +1**. Restated for T11: edge 117→119 node / 1690→1691 Vitest; cloud 110→111 node / 697→698 Vitest.
+**Expected suite delta: edge node-runner +2** (1 `color-scheme`, 1 `dangerFgPairing`), **edge Vitest +1** (the scrim test), **cloud node-runner +1** (`dangerFgPairing`), **cloud Vitest +1** — the re-vendored `feedback.test.tsx` adds the same scrim test to the cloud. Restated for T11: edge 117→119 node / 1690→1691 Vitest; cloud 110→111 node / 697→698 Vitest. Note `dangerFgPairing.test.ts` is **one** `test()` in each repo even though it carries five table assertions plus the tree scan — the assertions are inside the test, not subtests, which is why the delta is +1 and not +6.
 
 ---
 
@@ -537,31 +635,33 @@ Scope A, and the reason this slice exists. Readings 3, 4, 12, 13. **Consume the 
 - Create: `frontend/tests/dashboardLocales.test.ts`
 - Rewrite: `frontend/src/components/DashboardHeader.tsx` (into a thin `AppHeader` wrapper)
 - Modify: `frontend/src/pages/{HistoryDashboard,CrossZoneAnalysisPage,JournalPage}.tsx` (mount `AppHeader`)
+- Modify: `frontend/src/pages/Dashboard.tsx` — **not optional.** Step 5 drops `showDesktopData` from `DashboardHeaderProps`, and `Dashboard.tsx:170` passes it (computed at `:40`), so `tsc` in `npm run build` forces this edit. The plan-level file map already lists it; it is named here so a scope audit does not read the edit as a breach.
 - Modify: 7× `frontend/public/locales/*/dashboard.json`
 
 **Interfaces:**
 - Produces: `export const AppHeader: React.FC<AppHeaderProps>` and `export { LIQUID_BUTTON, LIQUID_MENU_TRIGGER }` from `frontend/src/components/AppHeader.tsx`. `AppHeaderProps` = `{ title: string; activeTab?: 'zones' | 'data' | 'journal'; onLogout: () => void; actions?: React.ReactNode; showSettings?: boolean; }`. **T4 consumes `LIQUID_MENU_TRIGGER`** for the Admin and Account triggers. **T6 adds the crown to this file.** **T5 adds the `/admin/prediction` entry to the Admin menu that this task moves into the `actions` slot.**
 - Consumes: nothing from T1/T2.
 
-- [ ] **Step 0: Settle the `historyUxEnabled` question with the maintainer before writing code**
+- [ ] **Step 0: RESOLVED — `historyUxEnabled` is hardcoded `true` server-side, so option 1 stands and there is nothing to ask**
 
-**This is a blocking gate and it is not a formality — get it wrong and the maintainer opens the app after S6 and still sees two tabs.** `useFeatureFlags` (`frontend/src/history/useFeatureFlags.ts`) declares `defaultHistoryFeatureFlags.historyUxEnabled = false` and normalises with `features?.historyUxEnabled === true`, i.e. it **fails closed**. Today that flag decides whether the `/analysis` link renders at all (`Dashboard.tsx:40` → `DashboardHeader.tsx:55-62`). The edge's Data tab has **no** flag on it (`AppHeader.tsx:61` is device detection only).
+**This was written as a blocking gate on a false premise, and the premise has been corrected. Do not stall here.** The gate assumed `historyUxEnabled` is operator-controlled and defaults to `false`. It is neither:
 
-Present these three options and stop until answered:
+- `backend/src/main/java/org/osi/server/config/SystemFeatureController.java:24-32` returns `new SystemFeatureFlags(true, true, true, false, false, journalV2CloudIssuerEnabled)`. `historyUxEnabled` is the **first positional field** of the record (`:35-41`) and it is a **hardcoded `true`**. The only `@Value`-driven flag in the six is `journal.v2.cloud-issuer-enabled` (`:19`).
+- The `false` this step originally cited is the **frontend fallback**, not the server's answer: `frontend/src/history/useFeatureFlags.ts:13` sets `defaultHistoryFeatureFlags.historyUxEnabled = false`, and `:41` returns those defaults **only when SWR reports `error`**. So `flags.historyUxEnabled` is `false` in exactly one situation: `/api/v1/system/features` failed.
 
-1. **Data tab always rendered, target by device only** (`isDesktopBrowser() ? '/analysis' : '/history'`) — exact edge parity. Risk: with the flag off, the tab leads to a surface someone deliberately disabled.
-2. **Data tab rendered only when `historyUxEnabled`** — a 2-tab bar when the flag is off. Consistent with D4's "never a broken page", but primary navigation that vanishes under a server flag is a weaker version of the defect S6 exists to fix.
-3. **Data tab always rendered, but targets `/history` when the flag is off** — always reachable, degrades to the simpler surface.
+**Recorded resolution: option 1 — the Data tab is always rendered and targets by device only** (`isDesktopBrowser() ? '/analysis' : '/history'`), exact edge parity, which was already this step's recommended default. Options 2 and 3 were premised on an operator being able to switch the surface off; nobody can, short of the endpoint breaking. Build option 1 and move on.
 
-**Also report the flag's live value on `agro-link.ch` before recommending**, because it decides what the maintainer will actually see:
+**Still do the `curl`, but for a different reason** — it is evidence about *what the maintainer currently sees*, not about this branch's behaviour, because `agro-link.ch` is deployed from the older `AgroLink` branch:
 ```bash
 curl -s https://agro-link.ch/api/v1/system/features | head -c 400
 ```
-If the endpoint needs auth, say so and get the value from the maintainer rather than guessing. **Recommended default: option 1**, on the ground that the flag was built to gate an unfinished *history UX*, not to gate navigation, and both `/history` and `/analysis` are routed and rendering today with no flag check on the route. But **if the live flag is `false`, option 1 means the Data tab points at a surface the operator switched off** — which is a product question, not an implementer's. Do not proceed on a guess.
+If the endpoint needs auth, say so and move on; it does not gate the build. Report the value alongside the note that the deployed instance is not this branch.
+
+**The real hazard here is a navigation one and it is worth stating in the report:** because the flag is only ever `false` when the features endpoint errors, any navigation still conditioned on it disappears precisely in the failure mode — a fail-closed *link*, which is not the same thing as fail-closed *authority*. That is why T5 Step 3 drops the flag condition from the zone-history link rather than keeping it.
 
 - [ ] **Step 1: Write the failing component test**
 
-Create `frontend/src/components/__tests__/AppHeader.test.tsx`. Mock `isDesktopBrowser` so both branches are exercised — the desktop/mobile split is the one behaviour a reviewer cannot eyeball:
+Create `frontend/src/components/__tests__/AppHeader.test.tsx`. Mock `isDesktopBrowser` so both branches are exercised — the desktop/mobile split is the one behaviour a reviewer cannot eyeball. **Also mock `react-i18next` with a key→string map, following the existing `src/components/__tests__/DashboardHeader.test.tsx:9-33`** (read it and reuse its shape; it also mocks `LanguageSwitcher`). The map must include `tabs.ariaLabel`, because Step 4's `<nav>` label is a translated string, not a literal — see Step 3.
 
 ```tsx
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -583,10 +683,16 @@ function renderAt(path: string, activeTab?: 'zones' | 'data' | 'journal') {
 describe('AppHeader', () => {
   beforeEach(() => vi.mocked(isDesktopBrowser).mockReturnValue(true));
 
-  it('renders the three primary tabs inside a nav landmark', () => {
+  // The landmark's accessible name comes from t('tabs.ariaLabel') — a
+  // translated key, not a literal, because the global constraint forbids a new
+  // untranslated string in a component S6 writes. Query the resolved value the
+  // i18n mock returns, and assert it is not the raw key, or a missing
+  // translation would sail through as a passing test.
+  it('renders the three primary tabs inside a named nav landmark', () => {
     renderAt('/dashboard', 'zones');
-    const nav = screen.getByRole('navigation', { name: /primary/i });
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
     expect(nav).toBeTruthy();
+    expect(nav.getAttribute('aria-label')).not.toBe('tabs.ariaLabel');
     expect(nav.querySelectorAll('a').length).toBe(3);
   });
 
@@ -645,12 +751,16 @@ Expected: FAIL at import — `Failed to resolve import "../AppHeader"`. Not an a
 
 Reading 13: `dashboard.json` has **no** cross-locale key test — `settingsLocales.test.ts` checks a single sentinel key in it. So the keys and their guard land together, or the global 7-locale constraint is unenforceable exactly where this task writes.
 
-Add a `tabs` object to all 7 `frontend/public/locales/<locale>/dashboard.json`, matching the edge's key shape (`tabs.zones`/`tabs.data`/`tabs.journal`) so the two GUIs stay diffable. **Read the edge's own values first and reuse them verbatim where the locale exists** — they are already human-reviewed:
+Add a `tabs` object to all 7 `frontend/public/locales/<locale>/dashboard.json`, matching the edge's key shape (`tabs.zones`/`tabs.data`/`tabs.journal`) so the two GUIs stay diffable, **plus a fourth key `tabs.ariaLabel` that the edge does not have.** Read the edge's own values first and reuse them verbatim for the three it does have — they are already human-reviewed:
 ```bash
 for l in en de-CH fr it es pt lg; do echo "== $l"; \
   python3 -c "import json,sys;d=json.load(open('/home/phil/Repos/osi-os/.worktrees/agrolink-parity-orchestrator-prep/web/react-gui/public/locales/$l/dashboard.json'));print(d.get('tabs'))"; done
 ```
-Use exactly what that prints. **Do not invent translations the edge already has.** If a locale's `tabs` is missing on the edge, report it — that is an edge defect this task surfaces, not something to paper over. For any value you must originate, `lg` is Luganda and gates Uganda: mark it a machine draft pending the human-native gate, and use a **straight** apostrophe (every other `lg` string does; S3 shipped exactly one curly-apostrophe violation).
+Use exactly what that prints (measured at planning time, `en` = `{"zones": "Zones", "data": "Data", "journal": "Journal"}`). **Do not invent translations the edge already has.** If a locale's `tabs` is missing on the edge, report it — that is an edge defect this task surfaces, not something to paper over.
+
+**`tabs.ariaLabel` is the one value this task must originate, and it must be translated rather than ledgered.** Step 4's `<nav>` needs an accessible name; the edge hardcodes the English literal `"Primary"` at `AppHeader.tsx:92`, and copying it would put a **new untranslated literal into a component S6 writes**, which the global constraints forbid and which this plan already refuses to do for the edge's two admin labels. So: `tabs.ariaLabel` = `"Primary"` in `en` (the edge's own wording, so the two headers stay diffable — screen readers append the landmark role, so "Primary" reads as "Primary navigation"), with proper `de-CH`/`fr`/`it`/`es`/`pt` translations. It lands inside the `tabs` object, so T3's new `dashboardLocales.test.ts` deep-equality guard covers it automatically — **no exception is ledgered for it.**
+
+For any value you must originate, `lg` is Luganda and gates Uganda: mark it a machine draft pending the human-native gate, and use a **straight** apostrophe (every other `lg` string does; S3 shipped exactly one curly-apostrophe violation).
 
 Then delete the now-dead `data` and `journal` top-level keys — but only after proving they are dead:
 ```bash
@@ -692,10 +802,10 @@ test('every dashboard.json value is a non-empty string', () => {
   }
 });
 
-test('the three primary tab labels exist in all 7 locales', () => {
+test('the three tab labels and the nav landmark label exist in all 7 locales', () => {
   for (const locale of LOCALES) {
     const d = load(locale);
-    for (const key of ['zones', 'data', 'journal']) {
+    for (const key of ['zones', 'data', 'journal', 'ariaLabel']) {
       assert.equal(typeof d.tabs?.[key], 'string', `tabs.${key} missing in ${locale}`);
       assert.ok(d.tabs[key].length > 0, `tabs.${key} empty in ${locale}`);
     }
@@ -796,8 +906,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           {/* Primary navigation on its own floating glass pill. The active
               lozenge is drawn by primitives.css:134's
               .glass-tab[aria-current='page'] selector — aria-current is the
-              styling hook here, not just an a11y attribute. */}
-          <nav aria-label="Primary">
+              styling hook here, not just an a11y attribute.
+              The landmark label goes through i18n: the edge hardcodes the
+              English "Primary" (AppHeader.tsx:92) and copying that would add a
+              new untranslated literal, which S6's constraints forbid. */}
+          <nav aria-label={t('tabs.ariaLabel')}>
             <div className="glass-tabs inline-flex gap-1 p-1">
               {tabs.map((tab) => (
                 <Link
@@ -1123,6 +1236,16 @@ import path from 'node:path';
 // proves a path STRING appears outside the router, not that the link is
 // reachable in the rendered UI. That is still enough to catch a route added
 // with no entry point at all, which is the defect that actually happened.
+//
+// The needle MUST be delimiter-anchored. A bare `corpus.includes('/history')`
+// is satisfied by 54 import specifiers in this tree (`from
+// '../../history/types'`, `from '../../history/useFeatureFlags'`, …), and
+// `/journal` (131) and `/analysis` (46) collide with their directory names the
+// same way, so an unanchored guard is GREEN at baseline for every route S6
+// exists to fix — it can never fail. Requiring a string/template-literal
+// delimiter on each side removes the collision: measured at planning time,
+// anchored `/history` has ZERO matches outside App.tsx and the __tests__ this
+// walker skips, while `/journal` and `/analysis` each have one real link.
 const srcRoot = path.resolve(import.meta.dirname, '../src');
 
 // Routes exempt from needing an in-app link, each with its reason.
@@ -1148,16 +1271,34 @@ test('App.tsx still registers the routes this guard was written against', () => 
   assert.ok(routes.length >= 14, `expected >= 14 routes, found ${routes.length}`);
 });
 
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A literal route is linked as a whole string: `to="/history"`,
+ * `` navigate(`/history?tab=x`) ``. So require a quote/backtick before it and a
+ * quote/backtick or `?` after it — that rejects `'../../history/types'`, whose
+ * `/history` is followed by `/`.
+ *
+ * A parameterised route is linked via a template literal that STARTS with the
+ * static prefix: `` `/history/zones/${zone.id}` ``. So require the delimiter
+ * before the prefix only — an import specifier can never match, because the
+ * character immediately before its `/devices/` is never a quote.
+ */
+function needleFor(route: string): RegExp {
+  if (route.includes('/:')) {
+    return new RegExp(`["'\`]${escape(route.slice(0, route.indexOf('/:')))}/`);
+  }
+  return new RegExp(`["'\`]${escape(route)}["'\`?]`);
+}
+
 test('every authenticated route is named as a navigation target outside App.tsx', () => {
   const others = files(srcRoot).filter((f) => f !== appTsx);
   const corpus = others.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
   const orphans: string[] = [];
   for (const route of routes) {
     if (EXEMPT.has(route)) continue;
-    // A parameterised route is linked via a template literal, so match its
-    // static prefix: /devices/:deviceEui -> /devices/
-    const needle = route.includes('/:') ? `${route.slice(0, route.indexOf('/:'))}/` : route;
-    if (!corpus.includes(needle)) orphans.push(`${route} (searched for "${needle}")`);
+    const needle = needleFor(route);
+    if (!needle.test(corpus)) orphans.push(`${route} (searched for ${needle})`);
   }
   assert.deepEqual(orphans, []);
 });
@@ -1168,39 +1309,53 @@ Run it:
 cd /home/phil/Repos/osi-server/.worktrees/agrolink/frontend
 npx tsx --test tests/routeReachability.test.ts
 ```
-Expected: the first test PASSES; the second FAILS naming **`/history`** and, if T3 has not yet landed, nothing else — because `/history` is the only route whose literal string appears nowhere outside `App.tsx`. **`/devices/:deviceEui` will PASS spuriously** via the `"/devices/"` prefix if any unrelated string contains it — check by hand whether the match is a real link or a coincidence, and if it is a coincidence, report that the guard is weaker than it looks rather than treating green as proof. `/admin/prediction` will PASS because `PredictionCard.tsx:542-549` genuinely links it. **State in the report exactly which routes the guard proves and which it merely fails to disprove** — this is a crude guard by design and must not be oversold.
+Expected, and **T3 has already landed** — it precedes T5 in plan order, so there is no "if T3 has not yet landed" branch to reason about:
+
+- the first test PASSES (17 routes today, `>= 14` asserted);
+- the second **FAILS naming exactly `/devices/:deviceEui`**, and nothing else. That is the whole point: T3's `AppHeader` introduced quoted literals `'/dashboard'`, `'/analysis'`, `'/history'` and `'/journal'`, so the tab routes are green on arrival; `/history/zones/:zoneId` is green via `` IrrigationZoneCard.tsx `to={`/history/zones/${zone.id}`}` ``; `/admin/prediction` is green because `PredictionCard.tsx:542-549` links `` `/admin/prediction?zoneId=…` `` (this is why `?` is in the closing character class); and `/account`, `/settings`, `/support-requests`, `/gateway-access`, `/admin/users`, `/admin/devices`, `/admin/work-requests` are green via the Account and Admin menus. `/devices/:deviceEui` is the one route with no quoted `'/devices/'` anywhere outside `App.tsx` — Step 4 fixes it.
+- **If the second test passes on the first run, the anchoring is broken — stop and fix it.** An unanchored `corpus.includes()` version of this guard is green at baseline for every route in the file (54 `/history` import specifiers alone), which makes it worthless.
+
+**State in the report exactly which routes the guard proves and which it merely fails to disprove.** The anchoring removes the directory-name collisions, but the guard still proves only that a path *string* appears in a source file — not that the link renders, not that the user can see it. It is crude by design and must not be oversold.
 
 - [ ] **Step 2: `/analysis` — move the gate from the link to the route**
 
 Create `frontend/src/pages/AnalysisRoute.tsx`, mirroring edge `pages/AnalysisRoute.tsx:10-12`:
 
+This is the edge's actual file, read at planning time — the `lazy()` and the `Suspense` live **inside** `AnalysisRoute.tsx`, which is exactly what preserves the code-split. A snippet with a static `import { CrossZoneAnalysisPage } from './CrossZoneAnalysisPage'` would embody the very defect the paragraph below warns about, so it is not offered here:
+
 ```tsx
+import { lazy, Suspense } from 'react';
 import { Navigate } from 'react-router-dom';
-import { CrossZoneAnalysisPage } from './CrossZoneAnalysisPage';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 
-/**
- * Desktop-only gate for the cross-zone analysis workspace, mirroring the
- * edge's AnalysisRoute. Before S6 the cloud gated only the *link*
- * (Dashboard.tsx computed `showDesktopData` and DashboardHeader decided
- * whether to render it), so a phone that typed the URL got the full desktop
- * workspace. `isDesktopBrowser()` fails OPEN to desktop when detection is
- * impossible, which is the safer failure for this pair: an undetectable
- * client keeps the richer surface rather than being bounced.
- */
-export const AnalysisRoute = () => {
-  if (!isDesktopBrowser()) return <Navigate to="/history" replace />;
-  return <CrossZoneAnalysisPage />;
-};
+const CrossZoneAnalysisPage = lazy(() =>
+  import('./CrossZoneAnalysisPage').then((module) => ({ default: module.CrossZoneAnalysisPage })),
+);
+
+export function AnalysisRoute() {
+  if (!isDesktopBrowser()) {
+    return <Navigate to="/history" replace />;
+  }
+
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[var(--text-secondary)]">Loading analysis...</div>}>
+      <CrossZoneAnalysisPage />
+    </Suspense>
+  );
+}
 ```
 
-**Read the real edge file first and match it**, including whether it preserves the lazy import. `App.tsx:13-15` lazy-loads `CrossZoneAnalysisPage` specifically to keep ECharts out of the main bundle (`// Lazy-loaded so ECharts is code-split into an /analysis-only chunk`). **A static import in `AnalysisRoute.tsx` would silently undo that code-split** — so keep the `lazy()` and put `AnalysisRoute` around it, or move the `lazy()` inside `AnalysisRoute.tsx`. Verify with the build output: compare `npm run build`'s chunk list before and after and confirm the ECharts chunk is still separate. **State the before/after chunk names and sizes in the report.** This is the highest-risk line in T5 and it is invisible to every test in the repo.
+Add the doc comment the cloud needs and the edge does not: *desktop-only gate for the cross-zone analysis workspace; before S6 the cloud gated only the **link** (`Dashboard.tsx` computed `showDesktopData` and `DashboardHeader` decided whether to render it), so a phone that typed the URL got the full desktop workspace. `isDesktopBrowser()` fails OPEN to desktop when detection is impossible, which is the safer failure for this pair: an undetectable client keeps the richer surface rather than being bounced.*
+
+**Re-read the edge file before copying** — the block above expires like every other citation here. `App.tsx:12-15` currently lazy-loads `CrossZoneAnalysisPage` to keep ECharts out of the main bundle (`// Lazy-loaded so ECharts is code-split into an /analysis-only chunk`); moving the `lazy()` into `AnalysisRoute.tsx` as the edge does keeps that, and the now-dead `lazy()` call **and its `lazy` import** must come out of `App.tsx` with it. Note `App.tsx:31,149` already wraps the whole `<Routes>` in `<Suspense fallback={null}>`, so that `Suspense` import stays and the inner one in `AnalysisRoute` is an upgrade to the fallback, not a requirement — keep it anyway, for edge parity and because `null` is a blank screen. **A static import in `AnalysisRoute.tsx` would silently undo the code-split.** Verify with the build output: compare `npm run build`'s chunk list before and after and confirm the ECharts chunk is still separate. **State the before/after chunk names and sizes in the report.** This is the highest-risk line in T5 and it is invisible to every test in the repo.
 
 Then point `App.tsx`'s `/analysis` route at `AnalysisRoute` instead of `CrossZoneAnalysisPage`.
 
 - [ ] **Step 3: `/history/zones/:zoneId` — give desktop a path**
 
-`IrrigationZoneCard.tsx:261-267` renders the zone-history link only when `!isDesktopBrowser() && flags.historyUxEnabled`. Desktop therefore has no path at all (reading 18). **Remove the `!isDesktopBrowser()` condition**, keeping the flag condition, so the link renders on both. Re-derive the line numbers first.
+`IrrigationZoneCard.tsx:261-267` renders the zone-history link only when `!isDesktopBrowser() && flags.historyUxEnabled`. Desktop therefore has no path at all (reading 18). **Remove both conditions** so the link renders unconditionally. Re-derive the line numbers first.
+
+**Why the flag condition goes too, which is a change from this plan's first draft.** T3 Step 0 establishes that `historyUxEnabled` is a hardcoded `true` on the server (`SystemFeatureController.java:24-32`) and that `flags.historyUxEnabled` can only be `false` when `/api/v1/system/features` **errors** (`useFeatureFlags.ts:13,41`). Keeping the condition therefore does not gate an operator preference — it deletes a navigation link precisely in the failure mode where a user most needs the rest of the app to keep working. That is a fail-closed *link*, not a fail-closed *authority*, and D5 is about authority. Dropping it is also consistent with T3's option 1, which puts no flag on the Data tab. If `flags` becomes unused in the file after this, remove the `useFeatureFlags` import; `IrrigationZoneCard` reads other flags too, so check rather than assume.
 
 **Do not** additionally build a desktop zone-history *card* surface — that is S4b's drill-down, explicitly out of scope. This step makes an existing route reachable; it does not add depth.
 
@@ -1267,20 +1422,18 @@ Scope D. Reading 11. **What the logged-in cloud app lacks is the brand *mark*, n
 - Consumes: T3's `AppHeader.tsx`.
 - Produces: `resolveAgroscopeAssetLocale(language?: string | null): AgroscopeAssetLocale` and `resolveAgroscopeAssets(language?: string | null): AgroscopeBrandAssets` where `AgroscopeAssetLocale = 'en' | 'de' | 'fr' | 'it'` and `AgroscopeBrandAssets = { locale: AgroscopeAssetLocale; balkenHorizontal: string }`. **Note the return type deliberately omits `logoHoch`** — see Step 2.
 
-- [ ] **Step 0: Blocking ratification gate — two marks, and an alignment constant that is wrong by construction**
+- [ ] **Step 0: The two-marks question is RESOLVED — "copy the edge". The alignment constant still has to be derived**
 
-Do not write code until both are answered.
+**(i) Two Agroscope marks in one session — answered by the product owner: copy the edge.** That is option 1 below and it was this step's recommended default, so **there is nothing to ask and nothing to wait for.** The port goes ahead: the Balken in the logged-in app, the Swiss-cross badge left alone on login. The context that made it a question is kept because the report should name the tradeoff that was accepted, not because it is still open — spec **D6** excludes the cloud login from visual parity and keeps its compact badge (`src/assets/agroscope/swiss-cross.jpg`, `Login.tsx:38-40`) because "the compact badge reads better than the edge login's letterhead treatment", so a user now sees a badge on login and a Balken bar immediately after. Both are official Agroscope assets, and decision 2 says the cloud follows the edge's corporate design.
 
-**(i) Two Agroscope marks in one session.** Spec **D6** excludes the cloud login from visual parity and keeps its compact Swiss-cross badge (`src/assets/agroscope/swiss-cross.jpg`, rendered at `Login.tsx:38-40`) because "the compact badge reads better than the edge login's letterhead treatment". The edge's in-app mark is the **Agroscope Balken** horizontal lockup. So porting the Balken means a user sees a Swiss-cross badge on login and a Balken bar immediately after — two different Agroscope marks, one session. The brief's rationale ("so the logged-in app matches the promise the login screen makes") therefore **argues against** the port as literally specified, because the cloud login's promise is the badge.
+The options as they were put, for the record:
+1. **Port the Balken crown** — **chosen.** Route the login/app mark *relationship* to the designer review (that review still happens; it is not a gate on this task).
+2. Use the existing Swiss-cross badge in the header — internally cohesive with the cloud's own login, no new assets, but deviates from the edge under D7. Not chosen.
+3. Both, treating the transition as intended letterhead-vs-favicon usage. Not chosen as a separate outcome; it is what option 1 produces.
 
-Present these options:
-1. **Port the Balken crown** (recommended default): decision 2 says the cloud follows the edge's corporate design and the Balken *is* the corporate lockup; the two marks are both official Agroscope assets, not a clash of brands. Route the login/app mark relationship to the designer review.
-2. **Use the existing Swiss-cross badge in the header** — internally cohesive with the cloud's own login, no new assets, but deviates from the edge under D7.
-3. **Both**: Balken in the app, badge on login, and accept the transition as intended letterhead-vs-favicon usage.
+**The licensed-asset copy needs one confirming sentence in the task report, not a fresh question.** `src/assets/agroscope/README.md` states the assets come from an official Agroscope branding package and says *"Do not replace these with approximated logos or hand-drawn bars"* — copying the official files honours that, and "copy the edge" covers it. State in the report that you copied the four official PNGs unmodified and vendored no approximation, and name the edge commit they came from.
 
-**(ii) The alignment arithmetic does not transfer.** Edge `index.css:29-35` sets `.balken-crown { margin-left: max(16px, calc(50% - 784px)); }`, where **784 = 800 − 16** is derived from the edge's `max-w-[1600px]` content column. The cloud's column is **`max-w-7xl` (1280px)** — `DashboardHeader.tsx:28` before T3, and T3's `AppHeader` keeps `max-w-7xl`. So the edge constant is wrong here and the correct value is `max(16px, calc(50% - 624px))` (640 − 16). **Do not copy 784.** Confirm `max-w-7xl` is still what T3 shipped and derive the number from that, showing the arithmetic.
-
-Also confirm with the maintainer that copying the licensed PNGs into a second repo is intended. `src/assets/agroscope/README.md` states these come from an official Agroscope branding package and says *"Do not replace these with approximated logos or hand-drawn bars"* — copying the official files honours that, but it is a licensed partner mark being added to another repository and is the maintainer's call, not an implementer's.
+**(ii) The alignment arithmetic does not transfer, and this one is derivation, not ratification — nobody can answer it for you.** Edge `index.css:29-35` sets `.balken-crown { margin-left: max(16px, calc(50% - 784px)); }`, where **784 = 800 − 16** is derived from the edge's `max-w-[1600px]` content column. The cloud's column is **`max-w-7xl` (1280px)** — `DashboardHeader.tsx:28` before T3, and T3's `AppHeader` keeps `max-w-7xl`. So the edge constant is wrong here and the correct value is `max(16px, calc(50% - 624px))` (640 − 16). **Do not copy 784.** Confirm `max-w-7xl` is still what T3 shipped and derive the number from that, showing the arithmetic.
 
 - [ ] **Step 1: Copy the four assets and only those four**
 
@@ -1494,18 +1647,35 @@ const read = (rel: string) => fs.readFileSync(path.join(srcRoot, rel), 'utf8');
 // theme and units controls are per-user display preferences and the only
 // in-app language switcher an authenticated desktop viewer can reach; Luganda
 // is behind them and Luganda gates Uganda.
-test('the /settings route is not wrapped in WritableOnly', () => {
+//
+// These two tests assert on the WHOLE of App.tsx, not on a sliced route block.
+// A slice is not available: edge App.tsx contains ZERO `</Route>` occurrences
+// — every route is self-closing `<Route … />`, including /settings (line 69,
+// `<WritableOnly><SettingsPage /></WritableOnly>`) and /support-requests (57).
+// `</Routes>` does not contain the substring `</Route>` either. So
+// `indexOf('</Route>')` returns -1, `slice(0, -1 + 8)` is the first SEVEN
+// characters, and a block-slicing version of these tests passes today with the
+// read-only wall fully intact. Whole-file assertions are also strictly
+// stronger here: WritableOnly wrapped exactly one route, so "App.tsx does not
+// mention it" is the complete statement of the fix. Each test also asserts its
+// route is still REGISTERED, so neither can be satisfied by deleting a route.
+test('App.tsx no longer references WritableOnly anywhere, and /settings is still routed', () => {
   const app = read('App.tsx');
-  const settingsRoute = app.slice(app.indexOf('path="/settings"'));
-  const block = settingsRoute.slice(0, settingsRoute.indexOf('</Route>') + 8);
-  assert.ok(!block.includes('WritableOnly'), 'Settings must be reachable by read-only users');
+  assert.ok(app.includes('path="/settings"'), '/settings must still be registered');
+  assert.ok(
+    !app.includes('WritableOnly'),
+    'Settings must be reachable by read-only users — no WritableOnly reference may remain in App.tsx',
+  );
 });
 
-test('/support-requests no longer redirects into the Settings wall', () => {
+test('the WritableOnly import is gone from App.tsx, and /support-requests is still routed', () => {
   const app = read('App.tsx');
-  const route = app.slice(app.indexOf('path="/support-requests"'));
-  const block = route.slice(0, route.indexOf('</Route>') + 8);
-  assert.ok(!block.includes('WritableOnly'), 'support must be reachable by read-only users');
+  assert.ok(app.includes('path="/support-requests"'), '/support-requests must still be registered');
+  assert.doesNotMatch(
+    app,
+    /^\s*import\s.*WritableOnly.*$/m,
+    'the WritableOnly import must be removed, not left dangling',
+  );
 });
 
 // The header must not hide Settings from non-writers any more.
@@ -1544,7 +1714,9 @@ Run both, confirm they fail:
 cd /home/phil/Repos/osi-os/.worktrees/agrolink-parity-orchestrator-prep/web/react-gui
 npx tsx --test tests/settingsReadSafe.test.ts tests/readOnlyNoticeLocales.test.ts
 ```
-Expected: `settingsReadSafe` fails on all four tests (`WritableOnly` present, the redirect present, four `showSettings={canWrite…}` offenders, no `canWrite` in `SettingsPage.tsx`); `readOnlyNoticeLocales` fails on `readOnly.farm missing in en`.
+Expected: `settingsReadSafe` fails on **all four** tests — test 1 because `App.tsx:69` still wraps `SettingsPage` in `WritableOnly`, test 2 because `App.tsx:18` still imports it, test 3 with **four** `showSettings={canWrite…}` offenders (`DashboardHeader.tsx:39` plus the three pages), test 4 because `SettingsPage.tsx` contains no `canWrite`. `readOnlyNoticeLocales` fails on `readOnly.farm missing in en`.
+
+**Verify the four-red claim by running it before touching anything.** Tests 3 and 4 were confirmed red at planning time. Tests 1 and 2 are the rewritten pair — the block-slicing versions this plan originally carried were **green at baseline** (see the comment in the snippet), which is exactly the failure mode this step exists to catch. If either passes on the first run, the test is wrong, not the code.
 
 - [ ] **Step 3: Open the route, and decide `WritableOnly`'s fate explicitly**
 
@@ -1566,6 +1738,8 @@ In `App.tsx`, unwrap `/settings`:
 3. Keep it and use it on a *sub-section* — **rejected**: it redirects, and redirecting away from part of a page is not a thing.
 
 Recommended: **delete it**, and record the deletion in T10's ledger so the next author does not reinvent it. Check for tests referencing it first (`grep -rn WritableOnly web/react-gui/`).
+
+**Whichever option you pick, `App.tsx` must end up with no `WritableOnly` element and no `WritableOnly` import** — that is what Step 2's tests 1 and 2 assert, and they hold under option 1 and option 2 alike, because they are about `App.tsx`, not about whether the component file exists. Under option 2 you must also delete the import, or test 2 stays red on a dangling import for a component nothing uses.
 
 For `/support-requests`: it currently redirects to `/settings` because the support form lives **inside** `SettingsPage.tsx` (~471-587). Once `/settings` is open, the redirect already achieves decision 4's requirement, so **the minimal correct fix is to leave the redirect in place** and let it now land somewhere reachable. **Do that**, and note the finding it exposes: `web/react-gui/src/pages/SupportRequests.tsx` (556 lines) **exists and is routed nowhere** — dead code since the form was folded into Settings. Do **not** wire it up in this task (that is a feature decision about which support surface is canonical); ledger it in T10.
 
@@ -1644,7 +1818,7 @@ npm run test:unit:tsx-runner && npm run test:unit:vitest && npm run build
 ```
 Expected: both new files PASS; existing suites green. **Any existing test that asserted Settings is hidden from non-writers will now fail — that is a correct failure recording the old behaviour, and it must be updated to assert the new behaviour, not deleted.** Name each one in the report.
 
-Mutation-test `settingsReadSafe`: re-wrap `/settings` in `WritableOnly`, confirm red, revert. Then re-add `showSettings={canWrite}` to one page, confirm red naming that page, revert.
+Mutation-test `settingsReadSafe`: re-wrap `/settings` in `WritableOnly` (which also restores the import), confirm **tests 1 and 2 both go red**, revert. Then re-add `showSettings={canWrite}` to one page, confirm test 3 goes red naming that page, revert. Paste each red run. Note that the mutation must produce red for the *stated reason* — if test 1 goes red but test 2 stays green, the import was left behind and the mutation was incomplete.
 
 - [ ] **Step 8: Commit**
 
@@ -1681,13 +1855,13 @@ grep -rn 'canWrite\s*&&' . | grep -v __tests__
 grep -rn '<CanWrite' . | grep -v __tests__
 grep -rn 'readOnly={!canWrite}' . | grep -v __tests__
 ```
-Expected at `d2851111`: 17 inline, 1 `<CanWrite>`, 10 `readOnly={!canWrite}`. **T7 removed four of the 17** (the `showSettings` sites), so expect **13** inline now. **If the numbers differ, report them** — they are this task's drift detector and the plan's figures expire.
+Expected at `d2851111`: 17 inline, 1 `<CanWrite>`, 10 `readOnly={!canWrite}`. **T7 removed exactly three of the 17**, so expect **14** inline now. The three are the `showSettings={canWrite && !scopeLoading}` sites at `pages/{JournalPage.tsx:237,HistoryDashboard.tsx:413,CrossZoneAnalysisPage.tsx:173}`. **T7 removes a fourth `showSettings` prop that was never one of the 17** — `DashboardHeader.tsx:39` is `showSettings={canWrite}`, with no `&&`, so it never matched `canWrite\s*&&` and must not be subtracted here. And **`FarmingDashboard.tsx:152` survives T7 untouched**: it is `canWrite={canWrite && !scopeLoading}`, a prop pass that feeds the Add-menu gating at `DashboardHeader.tsx:41`, not a Settings gate. 17 − 3 = **14**. **If the numbers differ, report them** — they are this task's drift detector and the plan's figures expire.
 
 Then map each surviving site to the page that owns it:
 
 | Page | Hidden/disabled controls it owns | Notice |
 |---|---|---|
-| `pages/FarmingDashboard.tsx` | `:186,355,361` + all of `IrrigationZoneCard.tsx`'s 8 inline sites and its 10 `readOnly` disables (the card is rendered by this page) | **1** `<ReadOnlyNotice scope="farm" />` |
+| `pages/FarmingDashboard.tsx` | `:152` (the `canWrite` prop pass that makes `DashboardHeader.tsx:41` hide the whole Add menu), `:186,355,361`, + all of `IrrigationZoneCard.tsx`'s 8 inline sites and its 10 `readOnly` disables (the card is rendered by this page) | **1** `<ReadOnlyNotice scope="farm" />` |
 | `pages/JournalPage.tsx` | the `<CanWrite>` at `:332-341`, plus `JournalWorkspace.tsx:375` and `DetailPanel.tsx:432` beneath it | **1** `<ReadOnlyNotice scope="farm" />` |
 | `pages/HistoryDashboard.tsx` | no write controls beyond the removed `showSettings` — **verify** | **0 if it has none** |
 
@@ -1738,7 +1912,7 @@ Place it where a user reads it before reaching for a control — directly beneat
 {!writable && <ReadOnlyNotice scope="farm" />}
 ```
 
-**Do not touch any of the 13 inline `canWrite &&` sites, the `<CanWrite>` wrapper, or the 10 `readOnly` disables.** They keep hiding and disabling exactly as they do now. The change is that the user is now told why, once. Adding a second notice next to any individual control is a scope breach and a reviewer must reject it.
+**Do not touch any of the 14 surviving inline `canWrite &&` sites, the `<CanWrite>` wrapper, or the 10 `readOnly` disables.** They keep hiding and disabling exactly as they do now. The change is that the user is now told why, once. Adding a second notice next to any individual control is a scope breach and a reviewer must reject it.
 
 - [ ] **Step 4: Confirm decision 3(a) is untouched**
 
@@ -1878,23 +2052,24 @@ Append `### S6 additions (the app shell, 2026-08-11)` with every item below, **i
 
 1. **The cloud's `backend-ci.yml` pins `ref: AgroLink` for three gates while work happens on `feat/journal-cloud-primary`, and `ui-core` has already moved past that ref.** `backend-ci.yml:20,34` check out osi-os at `AgroLink` for the sync-contract, ui-core and journal-catalog vendor gates; the workflow triggers only on `main`/`master`, and the edge's `ui-core.yml` triggers only on `AgroLink` — so **neither gate runs on this branch at all**. Meanwhile edge `ui-core` diverged from `AgroLink` at commit `68e4af3c` and again in S6 T2. Consequence: the moment this branch is proposed for merge, the ui-core vendor gate compares the cloud's copy against a stale canonical and fails. **Not fixed in S6** — repointing a ref used by three gates across two repos is a release-engineering decision with a blast radius beyond a GUI slice. Record the fix shape: either advance `AgroLink` to the reviewed head, or parameterise the ref. **S6's only vendor evidence is the local both-directions verifier run in T2 and T11.**
 2. **Maintainer decision 6 was already fully implemented before S6 started and no task touched it.** `BannerTone` and `ChipTone` both already carry `info` (`Banner.tsx:3`, `Chip.tsx:3`); `--info-bg/-text/-border` exist in both themes; every cloud loading state already maps to `info`; commit **`1364b891`** ("fix(ui-core): add info tone, stop spending warn on loading states", 2026-08-06) did the tone *and* the call-site migration together. On the edge there is nothing to migrate: **one** `<Banner>` mount in the whole GUI (`ScopeStatusBanner.tsx:12`, `tone="error"`), **zero** `<Chip>` mounts, **zero** `tone="warn"`. The S3 ledger's note that `warn` is "forced by the closed 8-primitive `BannerTone` set (no `'info'`)" is **stale and must not be re-quoted.** The two unions are separate types, not one shared union.
-3. **`--danger-fg` was NOT changed, and the reason is a measurement.** Light `#DC2626` on `--bg` is **4.458** — but a parent-chain walk of all **9** live `text-[var(--danger-fg)]` sites (edge; the cloud has zero live ones) puts every one on `--card` `#FFFFFF` = **4.829, passing**. `SystemPanel.tsx:236` sets the background on the text's own element; the 8 `DetailPanel.tsx` sites sit inside the `bg-[var(--card)]` `<aside>` at `:330` through transparent `<form>`s. Darkening a byte-mirrored token would move a production farm GUI to fix a pairing that does not occur. **What T2 fixed instead:** `SystemPanel.tsx:236`'s hover state swapped its own background to `--border` `#CBD5E1` while keeping the danger text — **3.253**, a real failing state of a real control. Reference figures, all failing 4.5:1 as text and all clearing 3:1 as a border: on `--bg` 4.458, `--surface` 4.100, `--error-bg` 3.953, `--border` 3.253. Fenced by `dangerFgPairing.test.ts` in both repos — **which is non-vacuous on the edge (proven red on `SystemPanel`) and vacuous on the cloud**, recorded so a future green run there is not read as evidence.
+3. **`--danger-fg` was NOT changed, and the reason is a measurement.** Light `#DC2626` on `--bg` is **4.458** — but a parent-chain walk of all **9** live `text-[var(--danger-fg)]` sites (edge; the cloud has zero live ones) puts every one on `--card` `#FFFFFF` = **4.829, passing**. `SystemPanel.tsx:236` sets the background on the text's own element; the 8 `DetailPanel.tsx` sites sit inside the `bg-[var(--card)]` `<aside>` at `:330` through transparent `<form>`s. Darkening a byte-mirrored token would move a production farm GUI to fix a pairing that does not occur. **What T2 fixed instead:** `SystemPanel.tsx:236`'s hover state swapped its own background to `--border` `#CBD5E1` while keeping the danger text — **3.253**, a real failing state of a real control. Reference figures, all failing 4.5:1 as text and all clearing 3:1 as a border: on `--bg` 4.458, `--surface` 4.100, `--error-bg` 3.953, `--border` 3.253. Fenced by `dangerFgPairing.test.ts` in both repos — **whose tree scan is non-vacuous on the edge (proven red on `SystemPanel`) and vacuous on the cloud**, recorded so a future green run there is not read as evidence. **The guard is variant-aware and had to be:** it groups a class string's utilities by variant and resolves each variant's effective bg/text pair against the base, because T2's own fix puts `hover:bg-[var(--error-bg)]` and `hover:text-[var(--error-text)]` in the same variant and a substring guard would have flagged the corrected line. Five table assertions inside the test pin that behaviour in both directions, so the variant logic cannot silently rot into an always-green matcher.
 4. **The Agroscope Balken alignment constant does not transfer between the two apps.** Edge `index.css:29-35` uses `margin-left: max(16px, calc(50% - 784px))`, derived from its `max-w-[1600px]` column. The cloud's column is `max-w-7xl` (1280px), so the correct constant is **624**. Copying 784 misaligns the mark by 160px. Also: the cloud now has **two** Agroscope marks in one session — the Swiss-cross badge on login (kept by D6) and the Balken in the app — routed to the designer review. And `logo-*-hoch.png` (4 files, ~250 KB) is **unused on the edge too** and was deliberately not vendored.
 5. **`.font-brand` names 'Noto Sans' and neither repo bundles it** (whatever T6 Step 3 found, recorded here). If it resolves only when the font happens to be installed, the rule is decorative on most machines — a real finding about the edge, inherited by the cloud.
 6. **Only ONE external theme migration exists, not two.** `theme/deepseek-migration` = `d646fc89`, 48 files, 365 insertions / 365 deletions. `theme/kimi-migration` = `74f40662`, which is deepseek's **parent**, with zero unique commits and an empty diff against `origin/AgroLink` — a label on the baseline. Whoever takes the theme-blind component sweep (~400 hardcoded palette instances, still out of scope) has **one** prior attempt to review and should not hunt for a second.
 7. **The three guard tests scan the whole `src` tree, not `src/pages`.** `noInertTokenAlpha`, `errorTokenMisuse` and `pageShellTokens` all resolve their root to `../src` and recurse; `pageShellTokens`'s root variable is *named* `pagesRoot` and the name is a lie. **The S3 ledger's "scans only `src/pages`, so every component escapes it entirely" is wrong** and is corrected here. The still-open widening item is about **regex strength** (uppercase/digit token names, `outline-`/`accent-`/`divide-`, multi-line template literals), not scope.
 7b. **`chromeTokens.test.ts`, a guard S6 itself introduced, does not fence `white`/`black`.** Its `PALETTE` regex requires a numeric shade, so `bg-white` and `text-black` pass. That is **deliberate**: T6's Balken crown wrapper needs a raw `bg-white` because the asset's gradient tail terminates in pure `#FFFFFF` and a token background would seam against it in the dark theme. Recorded because a guard's blind spots must be written down where the guard is described, not discovered later by someone who assumes it is total. Whoever takes the theme-blind component sweep should decide then whether a widened regex plus a one-entry allowlist is worth it across a bigger surface; across these seven chrome files it would fire on exactly one deliberate case.
 
-8. **`routeReachability.test.ts` is a deliberately crude guard and must not be oversold.** It proves a route's path *string* appears somewhere outside `App.tsx`; it cannot prove the link renders, is reachable, or is not behind a permission the user lacks. Parameterised routes are matched on their static prefix, so `/devices/:deviceEui` can pass on an unrelated substring. Record which routes T5 proved by hand versus which the guard merely failed to disprove.
+8. **`routeReachability.test.ts` is a deliberately crude guard and must not be oversold — and its first draft could not fail at all.** It proves a route's path *string* appears somewhere outside `App.tsx`; it cannot prove the link renders, is reachable, or is not behind a permission the user lacks. **The near-miss worth recording:** the drafted version used `corpus.includes(route)`, which is satisfied by import specifiers — 54 files import from `'…/history/…'`, 131 from `'…/journal/…'`, 46 from `'…/analysis/…'`, and `'/devices/'` appears in `services/api.ts` and `services/websocket.ts` — so it was **green at baseline for every route S6 exists to fix**, before T3 and before any fix. The shipped version anchors each needle to a string/template-literal delimiter (`/["'\`]\/history["'\`?]/`, and a literal-start match for parameterised prefixes), which removes the directory-name collisions and made it correctly red on `/devices/:deviceEui` at T5 Step 1. Record which routes T5 proved by hand versus which the guard merely failed to disprove.
 9. **`/admin/prediction` and `/admin/work-requests` are `<AdminRoute>` while `/admin/users` and `/admin/devices` are `<AdminRoute superAdminOnly>`, but the Admin menu renders only for `isSuperAdmin`** — so a plain admin can reach two of the four by URL and by `PredictionCard.tsx:542-549`'s link, and sees no menu. T5 deliberately did not change this: who sees the Admin menu is an authorization-surface question, not a navigation fix.
 10. **The edge's `pages/SupportRequests.tsx` (556 lines) is routed nowhere** — `/support-requests` redirects to `/settings`, where the support form actually lives (`SettingsPage.tsx` ~471-587). Dead page since the fold. T7 made the redirect land somewhere reachable and deliberately did not pick a canonical support surface.
 11. **`WritableOnly` had exactly one consumer and T7 removed it** — record whether the component was deleted or kept as unreferenced code, so the next author does not reinvent it.
-12. **The edge's `AppHeader.tsx:137-138` ships two hardcoded English admin labels** (`'Manage users'`, `'Access grants'`) in a 7-locale product. S6 did not fix them and **did not copy them into the cloud's port**. Untranslated literal, edge-only, unassigned.
-13. **The active tab's Agroscope-red specular ring is hardcoded, not tokenised.** `primitives.css:136-137` uses `rgba(227, 6, 19, 0.35)` and `rgba(227, 6, 19, 0.18)` where `#E30613` *is* `--brand-red` — so the one place the brand red is visible in normal rendering bypasses the token, while the reduced-transparency fallback nobody sees (`:153,165`) uses it. Not fixed: `primitives.css` is byte-mirrored and a substitution there changes the edge's rendered chrome, needing ratification for zero visible gain.
+12. **The edge's `AppHeader.tsx` ships three hardcoded English literals** in a 7-locale product: the two admin labels at `:137-138` (`'Manage users'`, `'Access grants'`) and the primary-nav landmark label `aria-label="Primary"` at `:92`. S6 did not fix any of them on the edge and **did not copy any of them into the cloud's port** — T3's cloud `<nav>` uses a translated `dashboard:tabs.ariaLabel` key instead, covered by the new `dashboardLocales` deep-equality guard, so the cloud carries **no** exception here. Untranslated literals, edge-only, unassigned.
+13. **The active tab's Agroscope-red specular ring is hardcoded, not tokenised.** `primitives.css:138-139` uses `rgba(227, 6, 19, 0.35)` and `rgba(227, 6, 19, 0.18)` where `#E30613` *is* `--brand-red` — so the one place the brand red is visible in normal rendering bypasses the token, while the reduced-transparency fallback nobody sees (`:153,165`) uses it. Not fixed: `primitives.css` is byte-mirrored and a substitution there changes the edge's rendered chrome, needing ratification for zero visible gain.
 14. **`--brand-red` is used only inside `ui-core`'s own fallback CSS and preset, never by app page or component code on either side** — 5 occurrences each. The S6 brief's "defined and used ZERO times" is wrong; the accurate framing is this one.
 15. **T9's scope was set by investigation, not by the brief.** Record what T9 Step 1 found, which subset the maintainer agreed to, and — if T9 closed as not-applicable — that reading 6 is why. **The brief's "the edge has zero 'not available' states and therefore violates its own spec" is wrong:** `AnalysisSeriesTray.tsx:55-56,135` plus `common.json:44` and `journal.json:324` already ship such states. What is genuinely cloud-shaped is the "on **this gateway**" framing, because a gateway GUI never asks a remote gateway what it supports.
 16. **The cloud has no shared app shell.** `AppHeader` is mounted per page on both sides. A routed layout element (`<Route element={<Shell/>}><Outlet/>`) is the better React idiom and was **rejected for S6** (reading 4): it would restructure all 14 routes in a slice whose reviewable claim is "navigation now exists", and it has no edge counterpart, so it would open a new structural divergence while closing a visual one. Revisit if a fifth parity page appears.
-17. **The `historyUxEnabled` flag defaults to `false` and fails closed**, and it decided whether the Data tab renders at all. Record T3 Step 0's ruling and the flag's live value on `agro-link.ch`, because that value determines what the maintainer actually sees after S6.
+17. **`historyUxEnabled` is a hardcoded `true` on the server, and the only `false` it can produce is an endpoint failure — so anything gated on it is a fail-closed NAVIGATION hazard, not a fail-closed authority.** `SystemFeatureController.java:24-32` returns `new SystemFeatureFlags(true, true, true, false, false, journalV2CloudIssuerEnabled)`; `historyUxEnabled` is the first positional field of the record (`:35-41`) and is not configurable. The `false` an earlier draft of this plan cited is the **frontend fallback**: `useFeatureFlags.ts:13` declares it in `defaultHistoryFeatureFlags`, and `:41` returns those defaults **only on SWR `error`**. Consequence, and the reason it is ledgered: a link conditioned on this flag vanishes exactly when `/api/v1/system/features` is broken, which is the moment a user most needs the rest of the app to keep working. T3 Step 0's resolution is option 1 (no flag on the Data tab) and T5 Step 3 dropped the flag condition from the zone-history link for the same reason. Also record the flag's live value on `agro-link.ch` **with the caveat that the deployed instance runs the older `AgroLink` branch**, so it is evidence about what the maintainer currently sees, not about this branch.
+17b. **`SystemFeatureFlags` is a six-boolean positional record and is constructed positionally, so a reordering would silently swap flags.** `SystemFeatureController.java:24-32` passes `true, true, true, false, false, journalV2CloudIssuerEnabled` with no field names at the call site; the record's declaration (`:35-41`) is the only thing that says which `true` is `historyUxEnabled`. Add a field there, or move one, and every caller and every JSON consumer silently re-binds. **Not fixed: the backend is out of S6's scope in every task** (T11 Step 1 asserts zero `backend/` changes). Ledger only. Fix shape when someone does own it: named construction or a builder, plus a test that pins the JSON field order.
 18. **The journal V1/V2 fork, from T1** — a pointer to the corrected rows, so the ledger and the rows do not disagree.
 19. **The walkthrough-evidence caveat still stands**, reproduced verbatim: until the double-downlink defect and the MQTT-broker hardcode are both fixed and deployed, any `agrolink-test-01` walkthrough shows distorted online/telemetry state and doubled config downlinks, and evidence gathered before those fixes does not establish parity for the affected rows.
 
@@ -1964,22 +2139,32 @@ npx tsx --test tests/dangerFgPairing.test.ts tests/dashboardLocales.test.ts \
                 tests/noInertTokenAlpha.test.ts tests/errorTokenMisuse.test.ts tests/pageShellTokens.test.ts
 cd /home/phil/Repos/osi-os/.worktrees/agrolink-parity-orchestrator-prep/web/react-gui
 npx tsx --test tests/dangerFgPairing.test.ts tests/settingsReadSafe.test.ts \
-                tests/readOnlyNoticeLocales.test.ts tests/capabilityStateLocales.test.ts \
-                tests/uiCoreTokens.test.ts tests/noInertTokenAlpha.test.ts tests/errorTokenMisuse.test.ts
+                tests/readOnlyNoticeLocales.test.ts tests/uiCoreTokens.test.ts \
+                tests/noInertTokenAlpha.test.ts tests/errorTokenMisuse.test.ts \
+                tests/pageShellTokens.test.ts
+
+# T9 is explicitly allowed to close as not-applicable (its Step 1), in which
+# case capabilityStateLocales.test.ts does not exist and naming it makes
+# `tsx --test` error out on a missing path — which would read as a failure of
+# the whole sweep. So run it CONDITIONALLY, and report which branch you took.
+[ -f tests/capabilityStateLocales.test.ts ] \
+  && npx tsx --test tests/capabilityStateLocales.test.ts \
+  || echo "capabilityStateLocales.test.ts absent — expected iff T9 closed as not-applicable; confirm against T9's record"
 ```
+`tests/pageShellTokens.test.ts` is added to the edge list because it exists on **both** sides and the cloud half of this step already runs it — omitting the edge one was an asymmetry, not a decision.
 
 Then confirm each task performed its mutation test and **paste the red output**, not a claim that it happened. The six new guards and their required red proof:
 
 | Guard | Repo | Mutation that must produce red |
 |---|---|---|
-| `dangerFgPairing` | edge | `bg-[var(--surface)]` added beside the danger text in `SystemPanel.tsx` |
-| `dangerFgPairing` | cloud | **vacuous by construction** — zero live sites. Its red proof is the edge run; say so |
+| `dangerFgPairing` | edge | `hover:text-[var(--error-text)]` deleted from the corrected `SystemPanel.tsx:236`, leaving `hover:bg-[var(--error-bg)]` — must go red naming the **`hover` variant**. Plus `bg-[var(--surface)]` added to a `DetailPanel.tsx` danger-text `<p>` — red on the **`base`** variant |
+| `dangerFgPairing` | cloud | **tree scan vacuous by construction** — zero live sites; its red proof is the edge run, say so. The five table assertions are **not** vacuous and run here too |
 | `dashboardLocales` | cloud | `tabs.data` deleted from `fr/dashboard.json` |
 | `chromeTokens` | cloud | `bg-purple-600` restored in `AdminUsers.tsx` |
-| `routeReachability` | cloud | a throwaway `<Route path="/zzz">` added to `App.tsx` |
-| `settingsReadSafe` | edge | `/settings` re-wrapped in `WritableOnly`; and `showSettings={canWrite}` restored on one page |
+| `routeReachability` | cloud | a throwaway `<Route path="/zzz">` added to `App.tsx`. **Also confirm it was red on `/devices/:deviceEui` at T5 Step 1** — an unanchored needle makes this guard green at baseline for every real route, so the `/zzz` mutation alone does not prove it works |
+| `settingsReadSafe` | edge | `/settings` re-wrapped in `WritableOnly`, restoring the import — **tests 1 and 2 must BOTH go red**. Plus `showSettings={canWrite}` restored on one page → test 3 red |
 | `readOnlyNoticeLocales` | edge | `readOnly.farm` deleted from one locale |
-| `capabilityStateLocales` | edge | one key deleted from `it/devices.json` |
+| `capabilityStateLocales` | edge | one key deleted from `it/devices.json` — **only if T9 shipped**; if T9 closed as not-applicable, record that instead of a mutation |
 | `uiCoreTokens` (`color-scheme`) | edge | the dark declaration deleted |
 
 **A guard that has never been seen to fail is not a guard.**
@@ -2034,7 +2219,8 @@ Confirm both remotes advanced. **Do not expect a CI run to gate anything** — r
 - [ ] **Step 8: Write the report**
 
 Root cause per fix, deliberate tradeoffs, every measured number, and the full list of items ledgered rather than fixed. Include, explicitly:
-- the four blocking gates and how each was answered — T3 Step 0 (`historyUxEnabled` and the flag's live value) and T6 Step 0 (two marks, the 624 constant, the licensed-asset copy);
+- the gates and how each was closed. **Two were answered before execution started and must not be re-opened:** T3 Step 0 (`historyUxEnabled` — the premise was wrong, the flag is a hardcoded `true`, so option 1 stands) and T6 Step 0(i) (two marks — the product owner said "copy the edge", i.e. option 1). What remains is **derivation and investigation, not ratification:** T6 Step 0(ii)'s 624 constant (show the arithmetic), T6's one confirming sentence about the licensed-asset copy, and T9 Step 1's candidate-site table, which is the only genuine open question left and may legitimately close T9 as not-applicable. Report the `agro-link.ch` flag value with its caveat: the deployed instance runs the older `AgroLink` branch, so it says what the maintainer currently sees, not what this branch does;
+- **the three blocking defects this plan carried before revision, because they are the reusable lesson:** a guard whose own task's fix trips it (`dangerFgPairing`, fixed by making it variant-aware), a guard born green and blind to the exact routes the slice exists to fix (`routeReachability`, fixed by anchoring the needle to a string delimiter), and two tests that passed at baseline because they sliced on a `</Route>` that does not exist in a self-closing-route file (`settingsReadSafe` 1-2, replaced with whole-file assertions). All three shared one shape: **a check that could not fail, presented as a check that had.**;
 - **every claim in the S6 brief that turned out to be wrong**, with the evidence, so the next brief is written from corrected facts (readings 3, 5, 6, 7, 8, 9, 10, 16, 17 are the starting list — add any the tasks found);
 - what S6 does **not** close: the CI-ref pin, the theme-blind component sweep, the six history visualizations, `lg` human-native translation, S5, and S4b.
 
