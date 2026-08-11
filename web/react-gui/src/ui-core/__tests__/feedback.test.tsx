@@ -46,6 +46,18 @@ describe('Modal', () => {
     const save = screen.getByRole('button', { name: 'Save' });
     expect(dialog.contains(save)).toBe(true);
   });
+  it('dims with a translucent scrim so the dialog does not erase its context', () => {
+    const { container } = render(
+      <Modal isOpen title="T" onClose={() => {}}>body</Modal>,
+    );
+    const scrim = container.querySelector('.fixed.inset-0');
+    expect(scrim).toBeTruthy();
+    // v3.4 cannot alpha-modify a var() colour, so the translucency must be a
+    // color-mix, not a slash-opacity suffix on bg-[var(--overlay)] — that
+    // compiles to zero CSS (the exact pattern noInertTokenAlpha.test.ts guards).
+    expect(scrim!.className).toContain('color-mix(in_srgb,var(--overlay)_70%,transparent)');
+    expect(scrim!.className).not.toContain('bg-[var(--overlay)]');
+  });
 });
 
 describe('Banner', () => {
