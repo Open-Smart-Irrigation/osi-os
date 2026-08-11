@@ -4,6 +4,12 @@
 
 /* Light, high-contrast theme for field readability */
 :root {
+  /* Tell the UA which theme its own widgets should render in. Without this,
+     every native date/time picker paints its glyphs dark-on-dark over a token
+     surface in the dark theme — 23 inputs across the two GUIs (edge 7, cloud
+     16). This is a UA-widget hint, not a colour: it changes no token value and
+     no rendered class, so the edge's own light rendering is untouched. */
+  color-scheme: light;
   --bg: #F4F6F8;
   --surface: #E8EDF2;
   --card: #FFFFFF;
@@ -106,6 +112,12 @@
 }
 
 html[data-theme='dark'] {
+  /* Tell the UA which theme its own widgets should render in. Without this,
+     every native date/time picker paints its glyphs dark-on-dark over a token
+     surface in the dark theme — 23 inputs across the two GUIs (edge 7, cloud
+     16). This is a UA-widget hint, not a colour: it changes no token value and
+     no rendered class, so the edge's own light rendering is untouched. */
+  color-scheme: dark;
   --bg: #101413;
   --surface: #171D1B;
   --card: #202623;

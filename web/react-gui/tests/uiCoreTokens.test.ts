@@ -155,3 +155,11 @@ test('light --cal values are oklch() literals, dark values are hex', () => {
     }
   }
 });
+
+test('both theme blocks declare color-scheme so native date pickers match the theme', () => {
+  const css = fs.readFileSync(tokensPath, 'utf8');
+  const split = css.indexOf("html[data-theme='dark']");
+  assert.ok(split > 0, 'the dark block must exist');
+  assert.match(css.slice(0, split), /color-scheme:\s*light;/);
+  assert.match(css.slice(split), /color-scheme:\s*dark;/);
+});

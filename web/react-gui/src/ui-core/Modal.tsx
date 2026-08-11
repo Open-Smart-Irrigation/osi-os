@@ -11,7 +11,7 @@ export interface ModalProps {
 export function Modal({ isOpen, title, onClose, closeLabel = 'Close', children }: ModalProps) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-[color-mix(in_srgb,var(--overlay)_70%,transparent)] flex items-center justify-center z-50 p-4">
       <div
         role="dialog"
         aria-modal="true"
