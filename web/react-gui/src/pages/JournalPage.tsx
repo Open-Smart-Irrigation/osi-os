@@ -234,7 +234,6 @@ export const JournalPage: React.FC = () => {
         activeTab="journal"
         username={username}
         onLogout={logout}
-        showSettings={canWrite && !scopeLoading}
         showAdmin={isAdmin && isScoped && !scopeLoading}
       />
 

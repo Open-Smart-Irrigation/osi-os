@@ -7,6 +7,10 @@
   "scope": {
     "loadError": "Não foi possível carregar as permissões."
   },
+  "readOnly": {
+    "farm": "Tem acesso apenas de leitura a esta quinta. Pode ver tudo aqui; as alterações são feitas pelo proprietário da quinta.",
+    "section": "Estas definições são geridas pelo proprietário da quinta. As suas próprias preferências de visualização acima podem ser alteradas por si."
+  },
   "analysis": {
     "title": "Análise de dados",
     "axis": {

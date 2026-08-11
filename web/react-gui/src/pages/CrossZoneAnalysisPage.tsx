@@ -56,7 +56,7 @@ function exportGranularity(applied: string | undefined): HistoryExportGranularit
 export function CrossZoneAnalysisPage() {
   const { t } = useTranslation();
   const { username, logout } = useAuth();
-  const { canWrite, isAdmin, isScoped, loading: scopeLoading } = useScope();
+  const { isAdmin, isScoped, loading: scopeLoading } = useScope();
   const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
@@ -170,7 +170,6 @@ export function CrossZoneAnalysisPage() {
           activeTab="data"
           username={username}
           onLogout={logout}
-          showSettings={canWrite && !scopeLoading}
           showAdmin={isAdmin && isScoped && !scopeLoading}
         />
       </div>

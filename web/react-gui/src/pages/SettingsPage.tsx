@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
+import { useScope } from '../contexts/ScopeContext';
 import { getApiErrorMessage, irrigationZonesAPI, supportRequestsAPI } from '../services/api';
 import type {
   SupportRequestArea,
@@ -196,6 +198,10 @@ function FieldLabel({
 
 export function SettingsPage() {
   const { t } = useTranslation('settings');
+  const { loading: scopeLoading, canWrite } = useScope();
+  // Fail closed while scope is loading (D5): a viewer is not assumed writable
+  // just because the permission check hasn't resolved yet.
+  const writable = canWrite && !scopeLoading;
   const preferences = useDisplayPreferences();
   const [moduleNotice, setModuleNotice] = useState<string | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
@@ -272,6 +278,12 @@ export function SettingsPage() {
     writeModules({ ...preferences.modules, [key]: enabled });
   };
   const updateScheduler = async (enabled: boolean) => {
+    // Authorization gate: a disabled attribute on the control is a UI
+    // affordance, not authorization. This check is the actual gate — it
+    // must sit in the same function that performs the mutating API call
+    // below, not merely somewhere in this file (maintainer decision 4 / D5).
+    // Fail closed while scope is still loading, per D5.
+    if (!canWrite || scopeLoading) return;
     setModuleNotice(null);
     setModuleError(null);
     if (enabled) {
@@ -420,13 +432,14 @@ export function SettingsPage() {
             <ModuleRow
               label={t('irrigationSchedule')}
               enabled={preferences.modules.schedulerUi}
-              disabled={schedulerBusy}
+              disabled={schedulerBusy || !writable}
               onChange={(enabled) => {
                 void updateScheduler(enabled);
               }}
               onLabel={t('on')}
               offLabel={t('off')}
             />
+            {!writable && <ReadOnlyNotice scope="section" />}
             <ModuleRow
               label={t('environmentCard')}
               enabled={preferences.modules.environment}

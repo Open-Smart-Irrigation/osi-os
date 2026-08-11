@@ -7,6 +7,10 @@
   "scope": {
     "loadError": "Permissions could not be loaded."
   },
+  "readOnly": {
+    "farm": "You have read-only access to this farm. You can view everything here; changes are made by the farm owner.",
+    "section": "These settings are managed by the farm owner. Your own display preferences above are yours to change."
+  },
   "analysis": {
     "title": "Data analysis",
     "axis": {

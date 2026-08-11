@@ -36,7 +36,6 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
       activeTab="zones"
       username={username}
       onLogout={onLogout}
-      showSettings={canWrite}
       showAdmin={showAdmin}
       actions={canWrite ? (
         <HeaderMenu

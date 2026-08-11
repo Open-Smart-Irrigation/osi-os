@@ -7,6 +7,10 @@
   "scope": {
     "loadError": "Les autorisations n’ont pas pu être chargées."
   },
+  "readOnly": {
+    "farm": "Vous avez un accès en lecture seule à cette ferme. Vous pouvez tout consulter ici ; les modifications sont effectuées par le propriétaire de la ferme.",
+    "section": "Ces réglages sont gérés par le propriétaire de la ferme. Vos propres préférences d’affichage ci-dessus restent modifiables par vous."
+  },
   "analysis": {
     "title": "Analyse des données",
     "axis": {

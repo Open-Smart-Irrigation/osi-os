@@ -7,6 +7,10 @@
   "scope": {
     "loadError": "No se pudieron cargar los permisos."
   },
+  "readOnly": {
+    "farm": "Tienes acceso de solo lectura a esta finca. Puedes ver todo aquí; los cambios los realiza el propietario de la finca.",
+    "section": "Estos ajustes los gestiona el propietario de la finca. Tus propias preferencias de visualización de arriba puedes cambiarlas tú."
+  },
   "analysis": {
     "title": "Análisis de datos",
     "axis": {

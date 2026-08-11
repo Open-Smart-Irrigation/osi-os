@@ -7,6 +7,10 @@
   "scope": {
     "loadError": "Non è stato possibile caricare le autorizzazioni."
   },
+  "readOnly": {
+    "farm": "Hai accesso in sola lettura a questa azienda. Puoi visualizzare tutto qui; le modifiche sono effettuate dal proprietario dell’azienda.",
+    "section": "Queste impostazioni sono gestite dal proprietario dell’azienda. Le tue preferenze di visualizzazione qui sopra restano modificabili da te."
+  },
   "analysis": {
     "title": "Analisi dei dati",
     "axis": {

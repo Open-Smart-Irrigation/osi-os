@@ -7,6 +7,10 @@
   "scope": {
     "loadError": "Permissions could not be loaded."
   },
+  "readOnly": {
+    "farm": "Olina okukozesa kwa kusoma kwokka ku nnimiro eno. Osobola okulaba byonna wano; enkyukakyuka zikolebwa nannyini nnimiro.",
+    "section": "Ebiteekateeka bino bifugibwa nannyini nnimiro. Ebyo by'osaanidde okulaba ebyo waggulu bisobola okukyusibwa gwe wekka."
+  },
   "analysis": {
     "title": "Okwekenneenya kwa data",
     "axis": {

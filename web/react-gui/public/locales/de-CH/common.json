@@ -7,6 +7,10 @@
   "scope": {
     "loadError": "Berechtigungen konnten nicht geladen werden."
   },
+  "readOnly": {
+    "farm": "Sie haben nur Lesezugriff auf diesen Betrieb. Sie können hier alles einsehen; Änderungen werden vom Betriebsinhaber vorgenommen.",
+    "section": "Diese Einstellungen werden vom Betriebsinhaber verwaltet. Ihre eigenen Anzeigeeinstellungen oben können Sie selbst ändern."
+  },
   "analysis": {
     "title": "Datenanalyse",
     "axis": {

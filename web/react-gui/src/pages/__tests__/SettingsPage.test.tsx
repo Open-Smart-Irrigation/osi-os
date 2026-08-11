@@ -13,6 +13,33 @@ const apiMocks = vi.hoisted(() => ({
   createSupportRequest: vi.fn(),
 }));
 
+// Maintainer decision 4 (S6): SettingsPage now gates its one mutating control
+// (the irrigation-schedule module toggle) on useScope()'s canWrite, fail-closed
+// per D5. Without this mock, useScope() falls back to the module's CLOSED_SCOPE
+// default (canWrite: false) because these tests render SettingsPage without a
+// ScopeProvider, which would silently turn every scheduler-mutation test below
+// into an assertion that the (now-correct) authorization gate blocks the call —
+// not what those tests are about. A writable scope is the pre-existing implicit
+// assumption this suite made before Settings had any scope awareness at all.
+const scopeMocks = vi.hoisted(() => ({
+  scopeState: {
+    loading: false,
+    isScoped: false,
+    role: 'admin' as const,
+    canWrite: true,
+    isAdmin: false,
+    isZoneVisible: vi.fn(() => true),
+    isPlotVisible: vi.fn(() => true),
+    profile: null,
+    error: null,
+    retry: vi.fn(),
+  },
+}));
+
+vi.mock('../../contexts/ScopeContext', () => ({
+  useScope: () => scopeMocks.scopeState,
+}));
+
 vi.mock('../../services/api', () => ({
   irrigationZonesAPI: {
     disableAllSchedules: apiMocks.disableAllSchedules,
