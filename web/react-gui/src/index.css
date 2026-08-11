@@ -24,6 +24,9 @@
   --success-bg: #DCFCE7;
   --success-text: #14532D;
   --success-border: #16A34A;
+  --info-bg: #DBEAFE;
+  --info-text: #1E40AF;
+  --info-border: #3B82F6;
   --warn-bg: #FEF3C7;
   --warn-text: #92400E;
   --warn-border: #F59E0B;
@@ -62,6 +65,9 @@ html[data-theme='dark'] {
   --success-bg: #123326;
   --success-text: #BBF7D0;
   --success-border: #22C55E;
+  --info-bg: #172B48;
+  --info-text: #BFDBFE;
+  --info-border: #60A5FA;
   --warn-bg: #3A2B0B;
   --warn-text: #FDE68A;
   --warn-border: #F59E0B;
