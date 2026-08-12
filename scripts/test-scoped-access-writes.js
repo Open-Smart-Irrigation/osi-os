@@ -1214,17 +1214,25 @@ test('W4: a foreign existing device is hidden before claim or reassignment', asy
       env: ENV,
       db,
     });
-    assert.equal(assignment.result[1].statusCode, 404);
-    assert.deepEqual(assignment.result[1].payload, { message: 'Device not found' });
+    assert.equal(assignment.result[1].statusCode, 409);
+    assert.equal(assignment.result[1].payload.current_zone_id, 1);
+    assert.equal(assignment.result[1].payload.current_zone_name, 'Z One');
   } finally {
     db.close();
   }
 });
 
-test('W4: assignment and removal fresh-check both the device and zone', async () => {
+test('P7: assignment only takes unassigned devices and names the conflict', async () => {
   const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, sync_version, created_at, updated_at
+    ) VALUES
+      ('UNASSIGNED1', 'Fresh LSN50', 'DRAGINO_LSN50', 1, NULL, 0, '2026-01-01', '2026-01-01');
+  `);
   try {
-    const assigned = await executeFunction(loadNode('scoped-device-assign-router'), {
+    // DENDRO1 already lives in zone 1: assigning it to zone 2 is a 409, not a move.
+    const conflict = await executeFunction(loadNode('scoped-device-assign-router'), {
       msg: scopedRequest(
         2,
         'res1',
@@ -1235,35 +1243,132 @@ test('W4: assignment and removal fresh-check both the device and zone', async ()
       env: ENV,
       db,
     });
-    assert.equal(assigned.result[1].statusCode, 200);
-    assert.equal(assigned.result[1].payload.sync_version, 2);
+    assert.equal(conflict.result[1].statusCode, 409);
+    assert.equal(conflict.result[1].payload.current_zone_id, 1);
+    assert.equal(conflict.result[1].payload.current_zone_name, 'Z One');
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
         .irrigation_zone_id,
+      1,
+      'a conflicting assign must not move the device'
+    );
+
+    // An unassigned device assigns cleanly and bumps sync_version (P11).
+    scopeHelper._resetForTests();
+    const assigned = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/2/devices/UNASSIGNED1',
+        { id: '2', deveui: 'UNASSIGNED1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(assigned.result[1].statusCode, 200);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='UNASSIGNED1'").get()
+        .irrigation_zone_id,
+      2
+    );
+    // The insert trigger normalizes a new row from 0 to 1; assignment bumps it again.
+    assert.equal(
+      db.prepare("SELECT sync_version FROM devices WHERE deveui='UNASSIGNED1'").get().sync_version,
       2
     );
 
+    // W4: unassign, then assign — the explicit move.
     scopeHelper._resetForTests();
     const removed = await executeFunction(loadNode('scoped-device-unassign-router'), {
       msg: scopedRequest(
         2,
         'res1',
         'DELETE',
+        '/api/irrigation-zones/1/devices/DENDRO1',
+        { id: '1', deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(removed.result[1].statusCode, 200);
+
+    scopeHelper._resetForTests();
+    const reassigned = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
         '/api/irrigation-zones/2/devices/DENDRO1',
         { id: '2', deveui: 'DENDRO1' }
       ),
       env: ENV,
       db,
     });
-    assert.equal(removed.result[1].statusCode, 200);
-    assert.equal(removed.result[1].payload.sync_version, 3);
+    assert.equal(reassigned.result[1].statusCode, 200);
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
         .irrigation_zone_id,
-      null
+      2
     );
   } finally {
     db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('P7: assignment keeps its role and target-zone write gates', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('UNASSIGNED1', 'Fresh LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+  `);
+  try {
+    const viewer = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/UNASSIGNED1',
+        { id: '1', deveui: 'UNASSIGNED1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result[1].statusCode, 403);
+
+    scopeHelper._resetForTests();
+    const foreignZone = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        1,
+        'admin1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/UNASSIGNED1',
+        { id: '1', deveui: 'UNASSIGNED1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreignZone.result[1].statusCode, 404, 'admin1 has no write scope on zone 1');
+
+    scopeHelper._resetForTests();
+    const missingDevice = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/NOPE',
+        { id: '1', deveui: 'NOPE' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(missingDevice.result[1].statusCode, 404);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
   }
 });
 
