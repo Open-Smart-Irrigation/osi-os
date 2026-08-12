@@ -33,6 +33,10 @@
       "delta": 4372,
       "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 10392 -> branch base a38c9db6 10392 -> HEAD 14764 = +4372, all +4372 of it this SDI-12 port. SDI-12 contribution: the device payload gains the SDI-12 probe/layout fields and the bounded recipe-deployment projection."
     },
+    "cs-reg-cloud-ack-fn": {
+      "delta": 377,
+      "reason": "Wave 3 scoped-access port, pick-list commit 55 (AgroLink 97b70ab12, 'resolve zoneUuid on the REGISTER_DEVICE command applier'): the REGISTER_DEVICE ack payload gains zoneAssignedId/zoneWarning so the cloud can tell an assigned device from one registered unassigned because its requested zone was unknown or deleted (P9). Re-measured directly in the port worktree with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1906 -> HEAD 2283 = +377, exact delta vs origin/main."
+    },
     "cs-reg-cloud-fn": {
       "delta": 2897,
       "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 11550 -> branch base a38c9db6 13887 -> HEAD 14447 = +2897, +2337 the pre-existing feat/valve-control baseline and +560 this SDI-12 port. SDI-12 contribution: DRAGINO_SDI12 joins the ChirpStack app/profile maps, chirpstack_app_id is persisted on register, and msg.deviceRegistration is staged so a cloud registration also auto-triggers identify. Supersedes the previous entry: STREGA Gen2 device profile Task 4: promotion-only valve_settings upsert on this independent registration path (+1260, superseding the removed dead placeholder block); R1 review fixes: MAJOR-2 -- since this cloud payload carries no generation field at all, query stored valve_settings.strega_generation inside the guarded REGISTER_DEVICE branch (via a new `all` helper reusing the branch's existing _db handle) and keep a stored GEN2 sticky, instead of hardcoding GEN1 unconditionally; MINOR a -- move the profile-selection block from above the REGISTER_DEVICE guard (where it was statically unreachable dead code) into the branch; MINOR b -- maintain updated_at on the valve_settings write (exact delta vs origin/main)"
@@ -355,8 +359,8 @@
     }
   },
   "total_allowance": {
-    "delta": 229897,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit W4-409, AgroLink c9a8458f1) 1302871 chars = 229897. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 231903,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 55(97b70ab12), AgroLink 97b70ab12) 1304877 chars = 231903. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {

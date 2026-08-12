@@ -3480,6 +3480,20 @@ if (!helperPath) {
   }
 }
 
+// cs-reg-cloud-fn (cloud-command registration) — W5/P9: resolves the
+// cloud-sent zoneUuid to an edge-local zone id and assigns it through a
+// row-wise precondition-guarded UPDATE so trg_sync_devices_outbox_au fires
+// and a replayed command can never pull a device out of a zone someone has
+// already assigned it to (P11/W4).
+expectIncludesById('cs-reg-cloud-fn', "SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1", 'resolves the cloud-sent zoneUuid to an edge-local zone id (W5/P9)');
+expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns through the row-wise precondition-guarded UPDATE (P11/W4)');
+expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true, zoneAssignedId: zoneId, zoneWarning: zoneWarning }), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
+
+// cs-reg-cloud-ack-fn (Build Special Command ACK) — forwards the P9 zone
+// resolution outcome on every REGISTER_DEVICE ack.
+expectIncludesById('cs-reg-cloud-ack-fn', 'payload.zoneAssignedId = ack.zoneAssignedId != null ? Number(ack.zoneAssignedId) : null;', 'forwards the P9 zone assignment outcome');
+expectIncludesById('cs-reg-cloud-ack-fn', 'payload.zoneWarning = ack.zoneWarning ? String(ack.zoneWarning) : null;', 'forwards the P9 zone resolution warning');
+
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function decodeUplink(input)', 'ships the STREGA ChirpStack decoder entry point');
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function Decode(fPort, bytes)', 'ships the vendor Gen1 STREGA decoder implementation');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'function decodeUplink(input)', 'ships the LSN50 ChirpStack decoder entry point');
