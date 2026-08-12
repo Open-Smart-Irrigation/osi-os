@@ -566,14 +566,14 @@ test('plot and group lists hide same-gateway resources owned by another user', a
   assert.deepEqual((await journal.listPlotGroups(db, principal())).plot_groups[0].members, [plotUuid]);
 });
 
-test('scoped journal reads use owned-plus-granted plots while flag-off stays owner-only', async () => {
+test('W2: scoped journal reads are account-wide while flag-off stays owner-only', async () => {
   const db = new TestDb('scoped-resource-lists');
   seedIdentity(db);
   const ownedPlotUuid = '22100000-0000-4000-8000-000000000001';
-  const grantedPlotUuid = '22100000-0000-4000-8000-000000000002';
+  const foreignPlotUuid = '22100000-0000-4000-8000-000000000002';
   const foreignGroupUuid = '22100000-0000-4000-8000-000000000003';
   const ownedEntryUuid = '22100000-0000-4000-8000-000000000004';
-  const grantedEntryUuid = '22100000-0000-4000-8000-000000000005';
+  const foreignEntryUuid = '22100000-0000-4000-8000-000000000005';
   const owner = principal();
   const other = principal({
     user_id: 2,
@@ -582,13 +582,13 @@ test('scoped journal reads use owned-plus-granted plots while flag-off stays own
     author_label: 'other-user',
   });
   await journal.upsertPlot(db, plotInput(ownedPlotUuid, 'scoped-owned'), owner);
-  await journal.upsertPlot(db, plotInput(grantedPlotUuid, 'scoped-granted'), other);
+  await journal.upsertPlot(db, plotInput(foreignPlotUuid, 'scoped-foreign'), other);
   await journal.upsertPlotGroup(db, {
     group_uuid: foreignGroupUuid,
     base_sync_version: 0,
-    label: 'Granted cohort',
+    label: 'Foreign cohort',
     resolved: false,
-    members: [grantedPlotUuid],
+    members: [foreignPlotUuid],
   }, other);
   await journal.saveEntry(
     db,
@@ -598,60 +598,51 @@ test('scoped journal reads use owned-plus-granted plots while flag-off stays own
   );
   await journal.saveEntry(
     db,
-    entryInput(grantedEntryUuid, grantedPlotUuid, '2026-07-13T09:00:00', { season_crop: 'barley' }),
+    entryInput(foreignEntryUuid, foreignPlotUuid, '2026-07-13T09:00:00', { season_crop: 'barley' }),
     other,
     { mode: 'create' }
   );
 
+  // Flag-off is unchanged: owner-only.
   const legacy = await journal.listPlots(db, owner);
   assert.deepEqual(legacy.plots.map((plot) => plot.plot_uuid), [ownedPlotUuid]);
+  assert.deepEqual(
+    (await journal.listEntries(db, { status: 'final' }, owner)).entries
+      .map((entry) => entry.entry_uuid),
+    [ownedEntryUuid]
+  );
 
+  // Scoped mode: account-wide, with no plot grant of any kind (W2).
   const scoped = Object.assign({}, owner, {
     scope: scopeHelper,
     scoped: true,
   });
   scopeHelper.invalidateScope(OWNER_UUID);
   assert.deepEqual(
-    (await journal.listPlots(db, scoped)).plots.map((plot) => plot.plot_uuid),
-    [ownedPlotUuid]
-  );
-
-  db.prepare(
-    'INSERT INTO user_plot_assignments ' +
-      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
-  ).run(
-    '22100000-0000-4000-8000-000000000006',
-    OWNER_UUID,
-    grantedPlotUuid,
-    GATEWAY_EUI,
-    '2026-07-13T00:00:00.000Z'
-  );
-  scopeHelper.invalidateScope(OWNER_UUID);
-
-  assert.deepEqual(
     (await journal.listPlots(db, scoped)).plots.map((plot) => plot.plot_uuid).sort(),
-    [grantedPlotUuid, ownedPlotUuid].sort()
+    [foreignPlotUuid, ownedPlotUuid].sort()
   );
   assert.deepEqual(
     (await journal.listEntries(db, { status: 'final' }, scoped)).entries
       .map((entry) => entry.entry_uuid).sort(),
-    [grantedEntryUuid, ownedEntryUuid].sort()
+    [foreignEntryUuid, ownedEntryUuid].sort()
   );
   assert.deepEqual(
     (await journal.listPlotGroups(db, scoped)).plot_groups
       .map((group) => group.group_uuid),
     [foreignGroupUuid]
   );
+  assert.deepEqual(
+    (await journal.listPlotGroups(db, scoped)).plot_groups[0].members,
+    [foreignPlotUuid]
+  );
 });
 
-test('E5: scoped journal entry list surfaces the owner\'s plot-less entries, not just plot_uuid IN (...)', async () => {
+test('W2: a plot-less entry is still listed in scoped mode', async () => {
   const db = new TestDb('scoped-plotless-entry');
   seedIdentity(db);
   const plotlessEntryUuid = '22120000-0000-4000-8000-000000000001';
   const owner = principal();
-  // Zone-only (no-plot) entry creation persists plot_uuid=NULL (lifecycle.js
-  // resolvePlotContext, plotUuid==null, no zone_uuid override -- see the "zone-only
-  // entry provisioning" tests below for the auto-provisioning path this is NOT).
   await journal.saveEntry(
     db,
     entryInput(plotlessEntryUuid, null, '2026-07-13T08:00:00', { season_crop: 'barley' }),
@@ -667,24 +658,19 @@ test('E5: scoped journal entry list surfaces the owner\'s plot-less entries, not
 
   const scoped = Object.assign({}, owner, { scope: scopeHelper, scoped: true });
   scopeHelper.invalidateScope(OWNER_UUID);
-  // The owner has no plot grants at all here -- before the fix, a bare
-  // `plot_uuid IN (...)` filter (or its `1=0` empty-set fallback) never matches NULL,
-  // so even the entry's own author/owner could not see it once scoped access was on.
   const entries = (await journal.listEntries(db, { status: 'final' }, scoped)).entries;
   assert.deepEqual(entries.map((entry) => entry.entry_uuid), [plotlessEntryUuid]);
 
-  // A foreign user, even with a real plot grant elsewhere, must not see it.
-  const other = principal({
+  // W2: a different account on the same gateway reads it too.
+  const other = Object.assign({}, principal({
     user_id: 2,
     owner_user_uuid: OTHER_OWNER_UUID,
     author_principal_uuid: OTHER_OWNER_UUID,
     author_label: 'other-user',
-    scope: scopeHelper,
-    scoped: true,
-  });
+  }), { scope: scopeHelper, scoped: true });
   scopeHelper.invalidateScope(OTHER_OWNER_UUID);
   const foreignEntries = (await journal.listEntries(db, { status: 'final' }, other)).entries;
-  assert.deepEqual(foreignEntries.map((entry) => entry.entry_uuid), []);
+  assert.deepEqual(foreignEntries.map((entry) => entry.entry_uuid), [plotlessEntryUuid]);
 });
 
 test('scoped journal writes allow plot grantees, preserve ownership, and revoke immediately', async () => {
