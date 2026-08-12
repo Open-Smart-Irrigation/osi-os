@@ -61,7 +61,7 @@ function placeholders(value: string): string[] {
 // reviewed leaf where it is a proper name, abbreviation, unit, or technical token.
 const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
   'de-CH': new Set([
-    'history.mobile.zoneLabel',
+    'history.nav.admin', 'history.mobile.zoneLabel',
     'history.rangeShort.12h', 'history.rangeShort.24h',
     'history.cardFrame.aggregationBadge',
     'history.dendroTimeline.series.dendrometer', 'history.environmentLineChart.series.wind',
@@ -79,7 +79,7 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.dendroLineChart.series.dendrometer',
   ]),
   es: new Set([
-    'history.desktop.inspectorTitle', 'history.detail.inspectorPlaceholder',
+    'history.nav.admin', 'history.desktop.inspectorTitle', 'history.detail.inspectorPlaceholder',
     'history.rangeShort.12h', 'history.rangeShort.24h',
     'history.rangeShort.7d', 'history.rangeShort.30d', 'history.dailyMinMax.axisLabel',
     'history.gatewayStatus.status.ok', 'history.gatewayStatus.metric.cpu',
@@ -91,6 +91,7 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.soilLineChart.series.sensor', 'history.inspector.title',
   ]),
   fr: new Set([
+    'history.nav.admin',
     'history.desktop.modeFocus', 'history.desktop.sourceSelectorLabel', 'history.mobile.zoneLabel',
     'history.overview.alert', 'history.rangeShort.12h', 'history.rangeShort.24h',
     'history.sidebar.zones', 'history.dailyMinMax.axisLabel', 'history.dailyMinMax.tooltipMin',
@@ -106,6 +107,7 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.inspector.date', 'history.inspector.source', 'history.sources.button',
   ]),
   it: new Set([
+    'history.nav.admin',
     'history.desktop.modeFocus', 'history.rangeShort.12h', 'history.rangeShort.24h',
     'history.dailyMinMax.axisLabel', 'history.dailyMinMax.tooltipMin', 'history.dailyMinMax.tooltipMax',
     'history.gatewayStatus.status.ok', 'history.gatewayStatus.status.online',
@@ -117,6 +119,7 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.inspector.timestamp',
   ]),
   lg: new Set([
+    'history.nav.admin',
     'history.rangeShort.12h', 'history.rangeShort.24h', 'history.rangeShort.7d',
     'history.rangeShort.30d', 'history.dendroTimeline.series.dendrometer',
     'history.dailyMinMax.axisLabel', 'history.gatewayStatus.metric.cpu',
@@ -126,6 +129,7 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.advanced.field.gatewayEui', 'history.dendroLineChart.series.dendrometer',
   ]),
   pt: new Set([
+    'history.nav.admin',
     'history.rangeShort.12h', 'history.rangeShort.24h', 'history.rangeShort.7d',
     'history.rangeShort.30d', 'history.dailyMinMax.axisLabel', 'history.gatewayStatus.status.ok',
     'history.gatewayStatus.status.online', 'history.gatewayStatus.status.offline',
@@ -140,11 +144,13 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
 describe('history locale value parity', () => {
   it('keeps all six locales translated except reviewed shared technical values', () => {
     const english = localeLeaves('en');
-    // 418, not the AgroLink source arc's 414: main carries four additional
+    // 419, not the AgroLink source arc's 414: main carries four additional
     // irrigationTimeline.eventLabel keys from the valve-control work
-    // (serviceAction, onValveSchedule, oneTime, unexplained). All four are
-    // already translated in every shipped locale, so only the count moves.
-    expect(Object.keys(english)).toHaveLength(418);
+    // (serviceAction, onValveSchedule, oneTime, unexplained), plus the
+    // history.nav.admin key added for the scoped-access admin nav entry
+    // point. All five are already translated in every shipped locale, so
+    // only the count moves.
+    expect(Object.keys(english)).toHaveLength(419);
 
     for (const locale of LOCALES) {
       const translated = localeLeaves(locale);

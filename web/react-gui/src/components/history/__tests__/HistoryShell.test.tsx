@@ -103,7 +103,7 @@ const { translateForTest, scopeState } = vi.hoisted(() => {
       loading: false,
       isScoped: false,
       role: 'admin',
-      isZoneVisible: vi.fn<(zoneUuid: string) => boolean>(() => true),
+      zoneWritable: vi.fn<(zoneUuid: string) => boolean>(() => true),
     },
   };
 });
@@ -217,7 +217,7 @@ describe('History shell', () => {
     scopeState.loading = false;
     scopeState.isScoped = false;
     scopeState.role = 'admin';
-    scopeState.isZoneVisible.mockReturnValue(true);
+    scopeState.zoneWritable.mockReturnValue(true);
     vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
       {
         id: 1,
@@ -335,55 +335,71 @@ describe('History shell', () => {
   });
 
   it.each([
-    ['researcher', true, false],
-    ['viewer', true, false],
-    ['admin', false, true],
-  ])(
-    'filters history zone selectors for a %s when scoped=%s',
-    async (role, isScoped, showsForeign) => {
-      vi.mocked(systemAPI.getFeatures).mockResolvedValue({
-        historyUxEnabled: true,
-        historyComparisonEnabled: false,
-        historyWorkspacesEnabled: false,
-        historyAdvancedOverlaysEnabled: false,
-        historyCloudAiEnabled: false,
-      });
-      scopeState.role = role;
-      scopeState.isScoped = isScoped;
-      scopeState.isZoneVisible.mockImplementation(
-        (zoneUuid: string) => !isScoped || zoneUuid === 'zone-north',
-      );
-      vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
-        {
-          id: 1,
-          name: 'North Block',
-          zone_uuid: 'zone-north',
-          device_count: 0,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          schedule: null,
-        },
-        {
-          id: 2,
-          name: 'South Block',
-          zone_uuid: 'zone-south',
-          device_count: 0,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          schedule: null,
-        },
-      ]);
+    ['researcher', true],
+    ['viewer', true],
+    ['admin', false],
+  ])('offers every history zone to a %s when scoped=%s', async (role, isScoped) => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: false,
+      historyWorkspacesEnabled: false,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    scopeState.role = role;
+    scopeState.isScoped = isScoped;
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
+      {
+        id: 1,
+        name: 'North Block',
+        zone_uuid: 'zone-north',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+      {
+        id: 2,
+        name: 'South Block',
+        zone_uuid: 'zone-south',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+    ]);
 
-      renderWithProviders(React.createElement(HistoryDashboard));
+    renderWithProviders(React.createElement(HistoryDashboard));
 
-      expect((await screen.findAllByText('North Block')).length).toBeGreaterThan(0);
-      if (showsForeign) {
-        expect((await screen.findAllByText('South Block')).length).toBeGreaterThan(0);
-      } else {
-        expect(screen.queryByText('South Block')).not.toBeInTheDocument();
-      }
-    },
-  );
+    await waitFor(() => expect(screen.getByText('North Block')).toBeInTheDocument());
+    expect(screen.getByText('South Block')).toBeInTheDocument();
+  });
+
+  it('renders the zone list even when the scope profile never resolves', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: false,
+      historyWorkspacesEnabled: false,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    scopeState.loading = true;
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
+      {
+        id: 1,
+        name: 'North Block',
+        zone_uuid: 'zone-north',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+    ]);
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    await waitFor(() => expect(screen.getByText('North Block')).toBeInTheDocument());
+  });
 
   it('keeps history unavailable and retryable when runtime feature flags fail', async () => {
     vi.mocked(systemAPI.getFeatures).mockRejectedValue(new Error('feature endpoint missing'));

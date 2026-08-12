@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Historial",
+      "admin": "Admin",
       "legacyDashboard": "Panel heredado",
       "logout": "Cerrar sesión"
     },

@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Cronologia",
+      "admin": "Admin",
       "legacyDashboard": "Dashboard legacy",
       "logout": "Esci"
     },
