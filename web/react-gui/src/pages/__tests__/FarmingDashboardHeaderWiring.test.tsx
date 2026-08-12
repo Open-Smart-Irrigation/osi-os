@@ -12,6 +12,7 @@ const { headerProps, logoutSpy, getDevices, getZones, scopeState } = vi.hoisted(
     onAddZone: () => void;
     onAddDevice: () => void;
     onLogout: () => void;
+    showAdmin?: boolean;
   }>,
   logoutSpy: vi.fn(),
   getDevices: vi.fn(),
@@ -21,7 +22,8 @@ const { headerProps, logoutSpy, getDevices, getZones, scopeState } = vi.hoisted(
     isScoped: true,
     role: 'researcher',
     canWrite: true,
-    isZoneVisible: vi.fn((zoneUuid: string) => zoneUuid === 'zone-visible'),
+    isAdmin: false,
+    zoneWritable: vi.fn(() => true),
   },
 }));
 
@@ -135,9 +137,8 @@ beforeEach(() => {
   scopeState.isScoped = true;
   scopeState.role = 'researcher';
   scopeState.canWrite = true;
-  scopeState.isZoneVisible.mockImplementation(
-    (zoneUuid: string) => zoneUuid === 'zone-visible',
-  );
+  scopeState.isAdmin = false;
+  scopeState.zoneWritable.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -163,49 +164,49 @@ describe('FarmingDashboard header wiring', () => {
   });
 
   it.each([
-    ['researcher', true, ['Visible zone']],
-    ['viewer', true, ['Visible zone']],
-    ['admin', false, ['Visible zone', 'Foreign zone']],
-  ])(
-    'renders only permitted zones for a %s when scoped=%s',
-    async (role, isScoped, expectedZones) => {
-      scopeState.role = role;
-      scopeState.isScoped = isScoped;
-      scopeState.isZoneVisible.mockImplementation(
-        (zoneUuid: string) => !isScoped || zoneUuid === 'zone-visible',
-      );
-      getZones.mockResolvedValue([
-        {
-          id: 1,
-          name: 'Visible zone',
-          zone_uuid: 'zone-visible',
-          device_count: 0,
-          created_at: '2026-01-01',
-          updated_at: '2026-01-01',
-          schedule: null,
-        },
-        {
-          id: 2,
-          name: 'Foreign zone',
-          zone_uuid: 'zone-foreign',
-          device_count: 0,
-          created_at: '2026-01-01',
-          updated_at: '2026-01-01',
-          schedule: null,
-        },
-      ]);
+    ['researcher', true],
+    ['viewer', true],
+    ['admin', false],
+  ])('renders every zone for a %s when scoped=%s', async (role, isScoped) => {
+    scopeState.role = role;
+    scopeState.isScoped = isScoped;
+    getZones.mockResolvedValue([
+      {
+        id: 1,
+        name: 'Owned zone',
+        zone_uuid: 'zone-visible',
+        device_count: 0,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+        schedule: null,
+      },
+      {
+        id: 2,
+        name: 'Colleague zone',
+        zone_uuid: 'zone-foreign',
+        device_count: 0,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+        schedule: null,
+      },
+    ]);
 
-      renderDashboard();
+    renderDashboard();
 
-      await waitFor(() => expect(screen.getByText('Visible zone')).toBeInTheDocument());
-      for (const zoneName of expectedZones) {
-        expect(screen.getByText(zoneName)).toBeInTheDocument();
-      }
-      if (!expectedZones.includes('Foreign zone')) {
-        expect(screen.queryByText('Foreign zone')).not.toBeInTheDocument();
-      }
-    },
-  );
+    await waitFor(() => expect(screen.getByText('Owned zone')).toBeInTheDocument());
+    expect(screen.getByText('Colleague zone')).toBeInTheDocument();
+  });
+
+  it('shows the admin menu for a scoped admin', async () => {
+    scopeState.role = 'admin';
+    scopeState.isAdmin = true;
+    scopeState.isScoped = true;
+
+    renderDashboard();
+
+    await screen.findByTestId('dashboard-header-marker');
+    expect(headerProps[headerProps.length - 1]?.showAdmin).toBe(true);
+  });
 });
 
 describe('FarmingDashboard empty-state canWrite guard', () => {
