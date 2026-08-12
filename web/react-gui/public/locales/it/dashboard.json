@@ -8,6 +8,11 @@
     "activity": "Registra attività"
   },
   "data": "Dati",
+  "admin": "Admin",
+  "adminMenu": {
+    "users": "Utenti",
+    "grants": "Autorizzazioni"
+  },
   "account": "Account",
   "accountMenu": {
     "osiServer": "OSI Server"

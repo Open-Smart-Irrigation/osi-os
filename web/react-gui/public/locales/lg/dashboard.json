@@ -8,6 +8,11 @@
     "activity": "Wandiika ky'okoze"
   },
   "data": "Data",
+  "admin": "Admin",
+  "adminMenu": {
+    "users": "Users",
+    "grants": "Grants"
+  },
   "account": "Akaawunti",
   "accountMenu": {
     "osiServer": "OSI Server"

@@ -10,6 +10,7 @@ interface DashboardHeaderProps {
   onAddDevice: () => void;
   onLogout: () => void;
   canWrite?: boolean;
+  showAdmin?: boolean;
 }
 
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
@@ -18,6 +19,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddDevice,
   onLogout,
   canWrite = true,
+  showAdmin = false,
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const navigate = useNavigate();
@@ -60,6 +62,18 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               >
                 {t('data')}
               </Link>
+            )}
+
+            {showAdmin && (
+              <HeaderMenu
+                label={t('admin')}
+                className="w-[calc(50%-4px)] sm:w-auto"
+                triggerClassName="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] text-lg px-6 py-3"
+                items={[
+                  { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
+                  { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
+                ]}
+              />
             )}
 
             <span className="hidden sm:block w-px self-stretch bg-[var(--border)]" aria-hidden="true" />

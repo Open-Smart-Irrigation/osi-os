@@ -8,6 +8,11 @@
     "activity": "Aktivität erfassen"
   },
   "data": "Daten",
+  "admin": "Admin",
+  "adminMenu": {
+    "users": "Benutzer",
+    "grants": "Berechtigungen"
+  },
   "account": "Konto",
   "accountMenu": {
     "osiServer": "OSI Server"

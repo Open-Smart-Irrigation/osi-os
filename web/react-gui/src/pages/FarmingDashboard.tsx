@@ -32,7 +32,7 @@ const valvesFetcher = () => valvesAPI.list();
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
-  const { canWrite, isScoped, isZoneVisible, loading: scopeLoading } = useScope();
+  const { canWrite, isAdmin, loading: scopeLoading } = useScope();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const { modules } = useDisplayPreferences();
@@ -100,17 +100,9 @@ export const FarmingDashboard: React.FC = () => {
     }
   );
 
-  const visibleZones = useMemo(
-    () => (zones ?? []).filter((zone) => {
-      const uuid = zone.zone_uuid ?? zone.zoneUuid;
-      return typeof uuid === 'string' ? isZoneVisible(uuid) : !isScoped;
-    }),
-    [isScoped, isZoneVisible, zones],
-  );
-  const visibleZoneIds = useMemo(
-    () => new Set(visibleZones.map((zone) => zone.id)),
-    [visibleZones],
-  );
+  // Write-only scoping (W1): enabled accounts read every zone and device.
+  // canWrite still gates mutation affordances below.
+  const allZones = useMemo(() => zones ?? [], [zones]);
 
   const handleUpdate = () => {
     mutateDevices();
@@ -132,23 +124,27 @@ export const FarmingDashboard: React.FC = () => {
       return { devicesByZone: new Map(), unassignedDevices: [] };
     }
 
+    const zoneIds = new Set(zones.map((zone) => zone.id));
     const byZone = new Map<number, Device[]>();
     const unassigned: Device[] = [];
 
     devices.forEach((device) => {
       const weatherDevice =
         device.type_id === 'SENSECAP_S2120' || device.type_id === 'AQUASCOPE_LORAIN';
-      if (device.irrigation_zone_id && visibleZoneIds.has(device.irrigation_zone_id)) {
+      // Weather stations render in their own multi-zone section even when they
+      // are zone-assigned -- that is the multi-zone table design, not a scope
+      // carve-out. The scope carve-out (visible-zone membership) is gone (W1).
+      if (device.irrigation_zone_id && zoneIds.has(device.irrigation_zone_id) && !weatherDevice) {
         const zoneDevices = byZone.get(device.irrigation_zone_id) || [];
         zoneDevices.push(device);
         byZone.set(device.irrigation_zone_id, zoneDevices);
-      } else if (!device.irrigation_zone_id || weatherDevice) {
+      } else {
         unassigned.push(device);
       }
     });
 
     return { devicesByZone: byZone, unassignedDevices: unassigned };
-  }, [devices, visibleZoneIds, zones]);
+  }, [devices, zones]);
 
   const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
@@ -158,8 +154,8 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedSdi12 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_SDI12');
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
-    () => new Map(visibleZones.map((zone) => [zone.id, zone.timezone])),
-    [visibleZones],
+    () => new Map(allZones.map((zone) => [zone.id, zone.timezone])),
+    [allZones],
   );
   // deviceEui is always uppercased by normaliseValveSummary; Device.deveui is always
   // uppercased by normaliseDevice — so a plain-string key match is safe.
@@ -177,7 +173,7 @@ export const FarmingDashboard: React.FC = () => {
     [devices],
   );
   const irrigationOutcomeZoneContexts = useMemo(
-    () => new Map<number, IrrigationOutcomeZoneContext>(visibleZones.map((zone) => [
+    () => new Map<number, IrrigationOutcomeZoneContext>(allZones.map((zone) => [
       zone.id,
       {
         timeZone: zone.timezone ?? null,
@@ -185,10 +181,10 @@ export const FarmingDashboard: React.FC = () => {
         irrigationEfficiencyPct: zone.irrigationEfficiencyPct ?? zone.irrigation_efficiency_pct ?? null,
       },
     ])),
-    [visibleZones],
+    [allZones],
   );
 
-  const isLoading = scopeLoading || (!devices && !devicesError && !zones && !zonesError);
+  const isLoading = !devices && !devicesError && !zones && !zonesError;
   const error = devicesError || zonesError;
 
   return (
@@ -199,6 +195,7 @@ export const FarmingDashboard: React.FC = () => {
         onAddDevice={() => setIsAddDeviceModalOpen(true)}
         onLogout={logout}
         canWrite={canWrite && !scopeLoading}
+        showAdmin={isAdmin && !scopeLoading}
       />
 
       {/* Main Content */}
@@ -226,46 +223,48 @@ export const FarmingDashboard: React.FC = () => {
         )}
 
         {/* Dashboard Content */}
-        {!scopeLoading && devices && zones && (
+        {devices && zones && (
           <>
             {/* Empty State */}
-            {devices.length === 0 && visibleZones.length === 0 && (
+            {devices.length === 0 && allZones.length === 0 && (
               <div className="text-center py-12 bg-[var(--surface)] rounded-xl border-2 border-[var(--border)]">
                 <p className="text-[var(--text)] text-2xl font-bold mb-4">{t('emptyState.title')}</p>
                 <p className="text-[var(--text-tertiary)] text-lg mb-6">
                   {t('emptyState.subtitle')}
                 </p>
-                <div className="flex gap-4 justify-center">
-                  <button
-                    onClick={() => setIsCreateZoneModalOpen(true)}
-                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
-                  >
-                    {t('emptyState.createZone')}
-                  </button>
-                  <button
-                    onClick={() => setIsAddDeviceModalOpen(true)}
-                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
-                  >
-                    {t('emptyState.addDevice')}
-                  </button>
-                </div>
+                {canWrite && (
+                  <div className="flex gap-4 justify-center">
+                    <button
+                      onClick={() => setIsCreateZoneModalOpen(true)}
+                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
+                    >
+                      {t('emptyState.createZone')}
+                    </button>
+                    <button
+                      onClick={() => setIsAddDeviceModalOpen(true)}
+                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
+                    >
+                      {t('emptyState.addDevice')}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Irrigation Zones Section */}
-            {visibleZones.length > 0 && (
+            {allZones.length > 0 && (
               <div className="mb-8">
                 <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">
                   {t('irrigationZones')}
                 </h2>
-                {visibleZones.map((zone) => (
+                {allZones.map((zone) => (
                   <IrrigationZoneCard
                     key={zone.id}
                     zone={zone}
                     devices={devicesByZone.get(zone.id) || []}
                     unassignedDevices={unassignedDevices}
                     onUpdate={handleUpdate}
-                    allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
+                    allZones={allZones.map((z) => ({ id: z.id, name: z.name }))}
                     irrigationActuations={irrigationActuations}
                     valvesByEui={valvesByEui}
                     canWrite={canWrite}
@@ -380,7 +379,7 @@ export const FarmingDashboard: React.FC = () => {
                           <SenseCapWeatherCard
                             key={device.deveui}
                             device={device}
-                            allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
+                            allZones={allZones.map((z) => ({ id: z.id, name: z.name }))}
                             onUpdate={handleUpdate}
                             readOnly={!canWrite}
                           />

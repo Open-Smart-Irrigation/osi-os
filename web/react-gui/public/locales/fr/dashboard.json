@@ -8,6 +8,11 @@
     "activity": "Consigner une activité"
   },
   "data": "Données",
+  "admin": "Admin",
+  "adminMenu": {
+    "users": "Utilisateurs",
+    "grants": "Autorisations"
+  },
   "account": "Compte",
   "accountMenu": {
     "osiServer": "OSI Server"
