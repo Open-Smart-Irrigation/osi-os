@@ -9,7 +9,7 @@ import { StregaValveCard } from './StregaValveCard';
 import { SenseCapWeatherCard } from './SenseCapWeatherCard';
 import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { ScheduleSection } from './ScheduleSection';
-import { AssignDeviceModal } from './AssignDeviceModal';
+import { ZoneDeviceModal } from './ZoneDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
@@ -581,11 +581,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       </>
       )} {/* end !zoneCollapsed */}
 
-      {/* Assign Device Modal */}
-      <AssignDeviceModal
+      {/* Zone device modal: assign an existing device or register a new one. */}
+      <ZoneDeviceModal
         isOpen={canWrite && showAssignModal}
         onClose={() => setShowAssignModal(false)}
-        onDeviceAssigned={onUpdate}
+        onChanged={onUpdate}
         zoneId={zone.id}
         zoneName={zone.name}
         availableDevices={unassignedDevices}
