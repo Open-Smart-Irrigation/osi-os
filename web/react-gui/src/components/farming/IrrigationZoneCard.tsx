@@ -9,7 +9,7 @@ import { StregaValveCard } from './StregaValveCard';
 import { SenseCapWeatherCard } from './SenseCapWeatherCard';
 import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { ScheduleSection } from './ScheduleSection';
-import { AssignDeviceModal } from './AssignDeviceModal';
+import { ZoneDeviceModal } from './ZoneDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
@@ -553,11 +553,16 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       </>
       )} {/* end !zoneCollapsed */}
 
-      {/* Assign Device Modal */}
-      <AssignDeviceModal
+      {/* Zone device modal: assign an existing device or register a new one. */}
+      {/* Cherry-pick note: fcf70de4 gated this on `canWrite`, which comes from the
+          write-only-scoping work on feat/journal-cloud-primary and is NOT on this branch.
+          Taking that gate verbatim would reference an undefined identifier, so the modal is
+          opened unconditionally here, matching this branch's existing behaviour. Restore the
+          gate when scoping lands. */}
+      <ZoneDeviceModal
         isOpen={showAssignModal}
         onClose={() => setShowAssignModal(false)}
-        onDeviceAssigned={onUpdate}
+        onChanged={onUpdate}
         zoneId={zone.id}
         zoneName={zone.name}
         availableDevices={unassignedDevices}

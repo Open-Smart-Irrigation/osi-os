@@ -23,6 +23,15 @@
     "pleaseSelect": "Londa ekyuma",
     "failed": "Okuwerekeza ekyuma kugaanye"
   },
+  "zoneDeviceModal": {
+    "title": "Yongerako ekyuma ku {{zoneName}}",
+    "tabAssign": "Gabira ekiriwo",
+    "tabRegister": "Ekyuma ekipya",
+    "assignConflict": "Ekyuma kino kati kiri mu kitundu \"{{zoneName}}\". Sooka okiggyemu eyo.",
+    "registerZoneNotice": "Ekyuma kino kijja kuwandiikibwa butereevu mu {{zoneName}}.",
+    "registerSubmit": "Wandiika mu kitundu",
+    "registering": "Kiwandiikibwa..."
+  },
   "createZoneModal": {
     "title": "Tondawo Ekifo ky'okusukkulirira",
     "zoneName": "Erinnya ly'ekifo",
