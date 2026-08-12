@@ -62,7 +62,21 @@ W3 creates unassigned devices, but `assertFreshDeviceAccess` still 404s on any d
 
 **Interfaces**
 - Consumes: `scope.assertEnabledAccount(db, userUuid, { scopedMode: true })` → resolves to a scope object, throws `{statusCode: 403}` for a disabled account.
-- Produces: `get-devices-query` emits `msg.topic` whose scoped `WHERE` clause is `d.deleted_at IS NULL` only (no user, zone or type predicate). `get-zones-query` emits `msg.payload` = every non-deleted zone row.
+- Produces: `get-devices-query` emits `msg.topic` whose scoped `WHERE` clause is `d.user_id IS NOT NULL AND d.deleted_at IS NULL` — no zone or device-type predicate. `get-zones-query` emits `msg.payload` = every non-deleted zone row.
+- **`d.user_id IS NOT NULL` is a lifecycle filter, not a scope filter.** `DELETE /api/devices/:deveui` is an *unclaim*, not a tombstone: it sets `user_id = NULL, irrigation_zone_id = NULL` and never touches `deleted_at` (see Task 16). Under flag-off, `d.user_id = ?` is what makes a deleted device leave the list. Drop it in scoped mode with nothing in its place and delete becomes a visual no-op — the unclaimed row sits in everyone's list forever. `IS NOT NULL` keeps the lifecycle semantics while carrying no per-user scope.
+
+**Devices-as-rows audit** — every other read this plan un-scopes, checked against the same hazard:
+
+| Surface | Enumerates devices? | Unclaimed row leaks? | Action |
+|---|---|---|---|
+| `get-devices-query` (Task 1) | yes — the list, and the unassigned bucket the frontend derives from it | **would**, hence this fix | `d.user_id IS NOT NULL` |
+| `get-zones-query` `device_count` (Task 1) | joins on `d.irrigation_zone_id = iz.id` | no — unclaim nulls `irrigation_zone_id`, so the row leaves every zone join | none |
+| `zone-env-fn` device rows (Task 2) | `WHERE d.irrigation_zone_id = <id>` | no — same reason | none |
+| `history-api-router` `getOwnedZoneContext` (Task 4) | `WHERE irrigation_zone_id = ?` | no — same reason | none |
+| `history-api-router` `getGatewayContext` (Task 4) | `WHERE gateway_device_eui = ? AND deleted_at IS NULL` — and unclaim **sets** `gateway_device_eui` to the local gateway | yes, but **pre-existing**: that branch already ran unfiltered for scoped GETs before this plan, and the route is admin-only (P2) | none — documented, out of scope |
+| `analysis-api-router` catalog (Task 5) | built per zone from `zoneUuids` | no — an unclaimed device has no zone | none |
+| device-detail reads, `s2120-zones-get-fn` (Task 3) | no — direct lookup by `deveui` | n/a — a direct lookup legitimately resolves an unclaimed device | none |
+| `fn_build_sensor_sql_params`, `get-actuations-query` (Task 5) | historical rows, not device enumeration | yes, by decision | see Task 5 |
 
 **Steps**
 
@@ -75,6 +89,16 @@ function seedUnassignedDevice(db) {
       deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
     ) VALUES
       ('UNASSIGNED1', 'Fresh LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+  `);
+}
+
+function seedUnclaimedDevice(db) {
+  // What DELETE /api/devices/:deveui leaves behind: user_id NULL, no tombstone.
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('UNCLAIMED1', 'Deleted LSN50', 'DRAGINO_LSN50', NULL, NULL, '2026-01-01', '2026-01-01');
   `);
 }
 
@@ -95,6 +119,30 @@ test('F1: every enabled role lists every zone and device on the gateway', async 
         `user ${userId} must see every device, including the unassigned bucket`
       );
     }
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F1: an unclaimed device is out of the account-wide list for everyone', async () => {
+  const db = seedScopedDb();
+  seedUnclaimedDevice(db);
+  try {
+    for (const userId of [1, 2, 3]) {
+      scopeHelper._resetForTests();
+      const deveuis = (await deviceList(db, userId)).map((row) => row.deveui);
+      assert.ok(
+        !deveuis.includes('UNCLAIMED1'),
+        `user ${userId} must not see an unclaimed device: delete unclaims rather than tombstoning, ` +
+        'so d.user_id IS NOT NULL is the lifecycle filter that makes deletion visible'
+      );
+      assert.ok(deveuis.includes('DENDRO1'), `user ${userId} must still see claimed devices`);
+    }
+    assert.ok(
+      db.prepare("SELECT deveui FROM devices WHERE deveui='UNCLAIMED1'").get(),
+      'the row itself must survive — this is a list filter, not a delete'
+    );
   } finally {
     db.close();
     scopeHelper._resetForTests();
@@ -149,7 +197,7 @@ test('P1: a disabled account is denied on both list reads', async () => {
   Also delete the now-obsolete test `'E4: a disabled account is denied before the weather-device OR-branch can be reached'` — the OR-branch it guards is being removed, and the new `P1` test above covers the same denial on both list nodes.
 
 - [ ] **Run to see it fail:** `node --test scripts/test-scoped-access-reads.js`
-  Expected failure: `F1: every enabled role lists every zone and device on the gateway` fails on the first assertion for user 1 (`['z-2'] !== ['z-1','z-2']`), and `P1: a disabled account is denied on both list reads` fails on `zones: a disabled account must be rejected` (today `get-zones-query` has no `assertEnabledAccount`, so `response.result[1]` is `null`).
+  Expected failure: `F1: every enabled role lists every zone and device on the gateway` fails on the first assertion for user 1 (`['z-2'] !== ['z-1','z-2']`), and `P1: a disabled account is denied on both list reads` fails on `zones: a disabled account must be rejected` (today `get-zones-query` has no `assertEnabledAccount`, so `response.result[1]` is `null`). `F1: an unclaimed device is out of the account-wide list for everyone` **passes on the base** — today's `iz.zone_uuid IN (...)` predicate excludes it incidentally. It is the guard that catches the `1 = 1` predicate this task would otherwise have shipped; keep it and watch it stay green.
 
 - [ ] **Load the osi-flows-json-editing skill**, then create `<scratchpad>/flows-edit-t1.js` with the mandatory roundtrip guard and this MUTATE section. Every later flows task reuses this skeleton verbatim and only swaps the MUTATE block.
 
@@ -218,7 +266,11 @@ replaceOnce(
       // without it a disabled account with an unexpired token would read the
       // gateway's entire device list.
       await scopeLoad.value.assertEnabledAccount(db, user && user.user_uuid, { scopedMode: true });
-      whereClause = '1 = 1';`
+      // d.user_id IS NOT NULL is a LIFECYCLE filter, not a scope filter: DELETE
+      // /api/devices unclaims (user_id = NULL) instead of tombstoning, so this
+      // clause is the only thing that makes a deleted device leave the list.
+      // Do NOT strip it as "leftover per-user scoping" in a later simplification.
+      whereClause = 'd.user_id IS NOT NULL';`
 );
 
 // 2. get-zones-query: account-wide zone list + the P1 check it never had.
@@ -969,6 +1021,14 @@ git commit -m "feat(scope): make history zone reads account-wide, keep gateway a
 - Consumes: `scope.assertEnabledAccount(db, userUuid, { scopedMode: true })`.
 - Produces: `fn_build_sensor_sql_params` emits `msg.topic` with no zone predicate and `msg.params` carrying only the from/to/deveui/zone query filters; `get-actuations-query` emits a `WHERE 1 = 1` scoped branch; `analysis-api-router-fn` keeps the local `scopeZoneUuids` variable but leaves it `null` (the helper treats `null` as "no zone filter"), so `buildAnalysisCatalog`/`resolveAnalysisSeries`/`listAnalysisViews` call sites are unchanged.
 
+**Decision: historical rows of an unclaimed device stay readable and exportable.** Task 1 adds `d.user_id IS NOT NULL` to the device *list* because delete unclaims rather than tombstones. That lifecycle filter is deliberately **not** mirrored onto the two historical surfaces here. Reasons, in order of weight:
+
+1. **`/download-sensordata` has no `user_id` filter today, in either mode.** Its base SQL is `FROM device_data dd LEFT JOIN devices d ON dd.deveui = d.deveui ... WHERE 1=1`; the only scoped addition is the zone predicate this task removes. Flag-off gateways — Silvan, kaba100, Uganda, i.e. production — already export unclaimed-device history, and the `LEFT JOIN` means rows survive even when the `devices` row is gone entirely. Adding a lifecycle filter here would be a *new* restriction on the production export, not a mirror of one.
+2. **The measurements are legitimate research data.** They were recorded while the device was claimed and installed in a zone. Unclaiming is a device-lifecycle act (hardware returned, EUI mistyped, sensor moved), not a retraction of the observations — and a research export whose value is completeness must not silently drop history when someone unclaims a probe.
+3. **Neither surface enumerates devices for the operator to act on.** The export is a CSV pull; recent actuations is a bounded, recency-capped event list. Neither offers a control that would 404 or misbehave on an unclaimed device, which is the failure mode `d.user_id IS NOT NULL` prevents on the list.
+
+`get-actuations-query` is the one asymmetry worth naming: its flag-off branch *does* carry `d.user_id = ?`, so scoped mode will surface actuations of an unclaimed valve that flag-off would hide. That is accepted under the same rule — the row is an accurate historical record of an irrigation event — and is pinned by a test below rather than left to be discovered.
+
 **Steps**
 
 - [ ] **Write the failing tests.** Replace `'F3: sensor export filters scoped rows and keeps flag-off behavior'`, `'F7: analysis channels include grants and exclude foreign zones'`, `'F7: analysis series cannot resolve a selector from a foreign zone'` and `'F7: recent actuations use owned-plus-granted zone visibility'` with:
@@ -1019,6 +1079,65 @@ test('F3: the sensor export is account-wide and keeps its flag-off behavior', as
     assert.deepEqual(output.params, []);
   } finally {
     unscopedDb.close();
+  }
+});
+
+test('W1: history of an unclaimed device stays exportable and stays in recent actuations', async () => {
+  // Deliberate asymmetry with the device LIST (Task 1), pinned so nobody
+  // "fixes" it later: unclaiming is a device-lifecycle act, not a retraction of
+  // the measurements taken while the device was installed. The export has never
+  // had a user_id filter in either mode; recent actuations gains one row that
+  // flag-off would have hidden.
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('UNCLAIMED1', 'Deleted valve', 'STREGA_VALVE', NULL, NULL, '2026-01-01', '2026-01-01');
+    INSERT INTO device_data(deveui, recorded_at, swt_1) VALUES
+      ('UNCLAIMED1', '2026-01-02T08:00:00.000Z', 33);
+    INSERT INTO valve_actuation_expectations (
+      expectation_id, device_eui, zone_id, command_id, commanded_at,
+      commanded_duration_seconds, expected_close_at, flow_rate_lpm,
+      estimated_gross_liters, volume_source, reconciliation_state
+    ) VALUES
+      ('e-unclaimed', 'UNCLAIMED1', NULL, 'c-unclaimed', '2026-01-02T08:00:00.000Z', 60,
+       '2026-01-02T08:01:00.000Z', 10, 10, 'calibrated', 'PENDING_OBSERVATION');
+  `);
+  try {
+    const exported = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+      msg: requestFor(3, 'view1'),
+      env: ENV,
+      db,
+    });
+    const output = exported.result && exported.result[0];
+    assert.doesNotMatch(
+      output.topic,
+      /d\.user_id/,
+      'the sensor export must not gain a lifecycle filter it never had'
+    );
+    const rows = db.prepare(output.topic).all(...output.params);
+    assert.ok(
+      rows.some((row) => row.deveui === 'UNCLAIMED1'),
+      "an unclaimed device's historical measurements stay exportable"
+    );
+
+    scopeHelper._resetForTests();
+    const actuations = await executeFunction(loadNode('get-actuations-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1, authUsername: 'admin1' },
+      env: ENV,
+      db,
+    });
+    const message = responseMessage(actuations.result);
+    const list = (message.payload && message.payload.actuations) || message.payload;
+    assert.ok(
+      list.some((row) => row.device_eui === 'UNCLAIMED1'),
+      "an unclaimed valve's actuation history stays visible (accepted asymmetry with flag-off)"
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
   }
 });
 
@@ -2510,6 +2629,7 @@ The zone card's two affordances collapse into one modal with an "Assign existing
 - Produces: `ZoneDeviceModal({ isOpen, onClose, onChanged, zoneId, zoneName, availableDevices }: ZoneDeviceModalProps)`.
 - Consumes: `irrigationZonesAPI.assignDevice(zoneId: number, deveui: string): Promise<void>` (unchanged; a 409 surfaces as `err.response.status === 409` with `err.response.data.current_zone_name`), and `devicesAPI.add(device: AddDeviceRequest): Promise<Device>` where `AddDeviceRequest` gains `zone_id?: number`.
 - Consumes: `{ Button, FormField, INPUT_CLASS, Modal } from '../../ui-core'` — `CreateZoneModal.tsx` is the exemplar.
+- **No unclaimed-device handling needed here.** The assign tab's `availableDevices` picker is `unassignedDevices`, derived by `FarmingDashboard` from the same `GET /api/devices` list, so it inherits Task 1's `d.user_id IS NOT NULL` lifecycle filter for free: a deleted (unclaimed) device never reaches the picker. Do not add a client-side `user_id` check — duplicating a server-side lifecycle rule in the UI is how the two drift.
 
 **Steps**
 
@@ -3285,6 +3405,52 @@ test('W10: a researcher can delete an unassigned device', async () => {
   }
 });
 
+test('W10: a deleted device leaves the account-wide device list', async () => {
+  // The point of the pairing: the row SURVIVES in the table (delete unclaims,
+  // it does not tombstone) but must LEAVE the list every account now shares.
+  // Without Task 1's d.user_id IS NOT NULL lifecycle filter, delete would be a
+  // visual no-op in scoped mode.
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const before = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1 },
+      env: ENV,
+      db,
+    });
+    assert.ok(
+      db.prepare(before.result[0].topic).all().some((row) => row.deveui === 'TYPO1'),
+      'test setup: an admin must see the device before it is deleted'
+    );
+
+    scopeHelper._resetForTests();
+    const deleted = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(deleted.result[1].statusCode, 200);
+
+    scopeHelper._resetForTests();
+    const after = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1 },
+      env: ENV,
+      db,
+    });
+    assert.ok(
+      !db.prepare(after.result[0].topic).all().some((row) => row.deveui === 'TYPO1'),
+      'a researcher deleting the device must remove it from the admin list too'
+    );
+    assert.ok(
+      db.prepare("SELECT deveui FROM devices WHERE deveui='TYPO1'").get(),
+      'and the row must still exist: this is an unclaim, not a hard delete'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
 test('W10: a viewer still cannot delete an unassigned device', async () => {
   const db = seedScopedDb();
   seedUnassignedDeleteTarget(db);
@@ -3346,7 +3512,9 @@ test('W10: the zone-assigned delete gate is unchanged', async () => {
   The pre-existing `'W4: device delete and weather-zone replacement enforce fresh scope'` test must keep passing untouched — its `foreignDelete` case is the same unchanged zone-assigned gate.
 
 - [ ] **Run to see it fail:** `node --test scripts/test-scoped-access-writes.js`
-  Expected failure: `W10: a researcher can delete an unassigned device` fails with `404 !== 200` — `assertFreshDeviceAccess` rejects `TYPO1` on its `!device.zone_uuid` branch.
+  Expected failure: `W10: a researcher can delete an unassigned device` fails with `404 !== 200` — `assertFreshDeviceAccess` rejects `TYPO1` on its `!device.zone_uuid` branch. `W10: a deleted device leaves the account-wide device list` fails on the same 404 at its delete step; once the carve-out lands, its final assertion is what proves Task 1's `d.user_id IS NOT NULL` lifecycle filter is actually doing its job end to end.
+
+- [ ] **Depends on Task 1.** This task's list assertions read `get-devices-query`, so run it after Task 1 has landed. If the two are executed out of order, `W10: a deleted device leaves the account-wide device list` fails on its last assertion with the unclaimed row still present — that is the missing lifecycle filter, not a bug in this task.
 
 - [ ] **Load the osi-flows-json-editing skill**, then run `<scratchpad>/flows-edit-t16.js` — same skeleton, this MUTATE section:
 
