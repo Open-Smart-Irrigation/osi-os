@@ -1069,10 +1069,11 @@ test('W3: researcher cannot delete a multi-holder zone; admin can', async () => 
   }
 });
 
-test('W4: scoped claims require an accessible target zone except for admins', async () => {
+test('W5: registration accepts an optional in-scope zone_id, unassigned for any writer', async () => {
   const db = seedScopedDb();
   try {
-    const researcherMissing = await executeFunction(loadNode('scoped-device-claim-router'), {
+    // W3: no zone_id is legal for every mutation-capable role, researcher included.
+    const researcherUnassigned = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
         deveui: 'NEW1',
         name: 'New sensor',
@@ -1081,46 +1082,105 @@ test('W4: scoped claims require an accessible target zone except for admins', as
       env: ENV,
       db,
     });
-    assert.equal(researcherMissing.result[1].statusCode, 400);
+    assert.ok(researcherUnassigned.result[0], 'a researcher may register without a zone (W3)');
+    assert.equal(researcherUnassigned.result[0]._deviceZoneId, null);
 
     scopeHelper._resetForTests();
-    const adminMissing = await executeFunction(loadNode('scoped-device-claim-router'), {
+    const adminUnassigned = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
-        deveui: 'NEW1',
+        deveui: 'NEW2',
         name: 'New sensor',
         type_id: 'DRAGINO_LSN50',
       }),
       env: ENV,
       db,
     });
-    assert.ok(adminMissing.result[0]);
-    assert.equal(adminMissing.result[0]._scopedTargetZoneId, null);
+    assert.equal(adminUnassigned.result[0]._deviceZoneId, null);
 
     scopeHelper._resetForTests();
-    const scoped = await executeFunction(loadNode('scoped-device-claim-router'), {
+    const inScope = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
-        deveui: 'NEW2',
+        deveui: 'NEW3',
         name: 'Scoped sensor',
         type_id: 'DRAGINO_LSN50',
-        irrigation_zone_id: 1,
+        zone_id: 1,
       }),
       env: ENV,
       db,
     });
-    assert.equal(scoped.result[0]._scopedTargetZoneId, 1);
+    assert.equal(inScope.result[0]._deviceZoneId, 1);
 
     scopeHelper._resetForTests();
-    const foreignZone = await executeFunction(loadNode('scoped-device-claim-router'), {
+    const outOfScope = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
-        deveui: 'NEW3',
+        deveui: 'NEW4',
         name: 'Foreign sensor',
         type_id: 'DRAGINO_LSN50',
-        irrigation_zone_id: 1,
+        zone_id: 1,
       }),
       env: ENV,
       db,
     });
-    assert.equal(foreignZone.result[1].statusCode, 404);
+    assert.equal(outOfScope.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const unknownZone = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW5',
+        name: 'Ghost zone',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 999,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(unknownZone.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const badZone = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW6',
+        name: 'Bad zone',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 'not-a-number',
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(badZone.result[1].statusCode, 400);
+
+    scopeHelper._resetForTests();
+    const viewer = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(3, 'view1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW7',
+        name: 'Viewer sensor',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 1,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result[1].statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('W5: flag-off registration ignores the scoped claim router', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW8',
+        name: 'Flag-off sensor',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 1,
+      }),
+      env: { AUTH_TOKEN_SECRET: ENV.AUTH_TOKEN_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.ok(response.result[0], 'flag-off must pass the message through untouched');
+    assert.equal(response.result[0]._deviceZoneId, undefined);
   } finally {
     db.close();
   }
@@ -1134,7 +1194,7 @@ test('W4: a foreign existing device is hidden before claim or reassignment', asy
         deveui: 'DENDRO1',
         name: 'Tree 1',
         type_id: 'DRAGINO_LSN50',
-        irrigation_zone_id: 2,
+        zone_id: 2,
       }),
       env: ENV,
       db,
