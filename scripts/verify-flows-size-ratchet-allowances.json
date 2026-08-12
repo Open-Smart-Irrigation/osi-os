@@ -355,8 +355,8 @@
     }
   },
   "total_allowance": {
-    "delta": 228842,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit W5-W3, AgroLink 9a3094a63) 1301816 chars = 228842. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 229897,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit W4-409, AgroLink c9a8458f1) 1302871 chars = 229897. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
@@ -412,8 +412,8 @@
       "reason": "Exact measured size after commit W5/W3 (adapted from AgroLink 9a3094a63, \"feat(scope): accept an explicit optional zone_id on device registration\"): zone_id becomes an explicit, optional integer irrigation_zones.id instead of required for non-admins; any mutation-capable role may register without one (device lands unassigned, visible account-wide per W1). Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length). Supersedes prior entry: Exact measured size after commit E6 (adapted from AgroLink 17462573a): Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles."
     },
     "scoped-device-assign-router": {
-      "max_chars": 3566,
-      "reason": "Exact measured size after commit E6 (adapted from AgroLink 17462573a): Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles."
+      "max_chars": 4621,
+      "reason": "Exact measured size after commit W4/409-conflict (adapted from AgroLink c9a8458f1, \"feat(scope): assign only unassigned devices and return a naming 409 on conflict\"): assigning a zone to an already-assigned device now returns 409 with current_zone_id/current_zone_name instead of silently moving it; the explicit unassign-then-assign path (W4) remains the way to move a device between zones. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length). Supersedes prior entry: Exact measured size after commit E6 (adapted from AgroLink 17462573a): Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles."
     },
     "scoped-device-unassign-router": {
       "max_chars": 3559,
