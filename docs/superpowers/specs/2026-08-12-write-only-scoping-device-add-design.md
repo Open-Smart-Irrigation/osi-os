@@ -19,7 +19,9 @@ Non-goals: the sync ownership-bootstrap gap (edge-introduced DEVICE/ZONE events 
 | W2 | The journal follows the same rule — no read-privacy exception | Every enabled account reads all journal entries, notes, photos, and exports on the hub. Chosen deliberately over per-researcher privacy |
 | W3 | Researchers may register devices without a target zone | The old R2 rule (researcher provisioning must terminate in scope) is dropped; unassigned devices land in the bucket everyone can see |
 | W4 | Assignment operates only on unassigned devices; moving a device is an explicit unassign, then assign | Assign returns 409 naming the current zone when the device is already assigned. No one silently pulls hardware out of a colleague's zone |
-| W5 | `POST /api/devices` takes an explicit optional `zone_id`, write-scope-checked | Replaces the implicit `_scopedTargetZoneId` auto-assign |
+| W5 | `POST /api/devices` takes an explicit optional `zone_id`, write-scope-checked | Replaces the implicit `_scopedTargetZoneId` auto-assign. The integer `zone_id` is edge-local API surface only; the cloud→edge `REGISTER_DEVICE` command carries `zoneUuid`, since the cloud cannot know edge-local integer ids and every existing zone command keys on `zoneUuid` |
+| W9 | Journal custom vocabulary stays owner-only on reads | Personal vocabulary is a per-user artifact like workspaces (P3), not shared research data; W2 covers entries, notes, photos, and exports |
+| W10 | Deleting an unassigned device is allowed for any write role | Without this, a mistyped registration is a zombie: visible and assignable but undeletable until someone assigns it to a zone. Other writes on unassigned devices (rename, config) stay blocked for now — widening them would touch the actuation dual-gate (P4) and needs its own work item |
 | W6 | History workspaces stay owner-only | Saved dashboards are personal artifacts, not zone data |
 | W7 | Admin-only infra surfaces keep their role gates, reads included | Downloads, sync state, system stats, gateway history, user and grant management |
 | W8 | Edge and cloud land together | The `/api/me` contract and read semantics change on both sides at once |
@@ -51,8 +53,8 @@ Each row looks like a read filter but is a different boundary. The implementatio
 | P5 | Unassigned-device reads | Dropping the `!device.zone_uuid → 404` branch must cover every device-detail read (sensor-history, dendro-daily, rain-history, today-liters, zone-assignments), or list-visible devices 404 on click |
 | P6 | Shared guard hubs | Write gates live in two hub nodes (23 device-config routes, 4 zone-config routes); edits target the hubs, and the sibling read nodes in the same tabs stay separate |
 | P7 | Assign precondition | `UPDATE devices SET irrigation_zone_id = ? … WHERE irrigation_zone_id IS NULL`; a lost race or an already-assigned device returns 409 with the current zone name |
-| P8 | Honest conflicts | With enumeration hiding gone, foreign-resource conflicts return 409/403 with real reasons, not 404 |
-| P9 | Cloud registration gate | Role/mutation-gated, not gateway `claimedBy`; `REGISTER_DEVICE` carries `zone_id` |
+| P8 | Honest conflicts | New paths (assign precondition, `zone_id` validation) return 409/403 with real reasons. Existing write gates keep their current 404 shape in this iteration — flipping them breaks six cloud mutation tests this design requires untouched; the full 404-to-403 sweep is a deferred follow-up |
+| P9 | Cloud registration gate | Role/mutation-gated, not gateway `claimedBy`; `REGISTER_DEVICE` carries `zoneUuid` (see W5), and the edge command applier resolves it and assigns on registration |
 | P10 | One cloud scope resolver | `GatewayScopeService` and `JdbcZoneGatewayAccess` collapse into one before read semantics change, so the rework edits one implementation |
 | P11 | Sync triggers | Assignment and registration keep flowing through row-wise `UPDATE devices` so `trg_sync_devices_outbox_au` fires; no bulk path that skips the `sync_version` bump |
 
