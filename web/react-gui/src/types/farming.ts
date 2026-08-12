@@ -167,6 +167,8 @@ export interface AddDeviceRequest {
   type_id: DeviceType;
   appkey?: string;
   strega_generation?: StregaGeneration;
+  /** Optional target zone (W5). Absent means the device lands unassigned. */
+  zone_id?: number;
 }
 
 export interface ValveActionRequest {

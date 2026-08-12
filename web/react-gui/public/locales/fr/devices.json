@@ -26,6 +26,15 @@
     "pleaseSelect": "Veuillez sélectionner un appareil",
     "failed": "Impossible d'assigner l'appareil"
   },
+  "zoneDeviceModal": {
+    "title": "Ajouter un appareil à {{zoneName}}",
+    "tabAssign": "Affecter un appareil existant",
+    "tabRegister": "Nouvel appareil",
+    "assignConflict": "Cet appareil se trouve maintenant dans la zone « {{zoneName}} ». Désaffectez-le d’abord de cette zone.",
+    "registerZoneNotice": "Cet appareil sera enregistré directement dans {{zoneName}}.",
+    "registerSubmit": "Enregistrer dans la zone",
+    "registering": "Enregistrement..."
+  },
   "createZoneModal": {
     "title": "Créer une zone d'irrigation",
     "zoneName": "Nom de la zone",
