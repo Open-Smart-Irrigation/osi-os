@@ -26,8 +26,22 @@
  *
  * Does NOT guarantee:
  *   - Correctness where a bare `/` is a division operator or a regex
- *     literal containing `//` or `/*` — this project's guards never scan
- *     files where that ambiguity arises, so it is not handled.
+ *     literal containing `//` or `/*`. A regex is not tracked as its own
+ *     construct, so a quote INSIDE one (`/("[^"]*"|'[^']*')/`) is read as
+ *     opening a string literal. Single- and double-quoted scans are bounded
+ *     at the newline below, which caps the damage to the rest of that line;
+ *     a stray backtick inside a regex is not bounded and can run to the next
+ *     backtick or EOF. An earlier revision of this docstring claimed "this
+ *     project's guards never scan files where that ambiguity arises" — that
+ *     was FALSE (`dangerFgPairing` walks the whole `src` tree, which holds
+ *     three such files) and a false claim in a guard's own description is
+ *     the exact failure mode this helper exists to end. Verified against the
+ *     TypeScript compiler's own comment ranges over all source files in both
+ *     repos: zero divergence.
+ *   - JSX text containing `//` or `/*` outside any string or expression —
+ *     `<p>a // b</p>` loses the rest of the line. This is a false-GREEN
+ *     direction for a guard that scans for a pattern later on that line, so
+ *     prefer not to write such text in a file a guard scans.
  *   - A `${...}` template-literal interpolation that itself contains a
  *     backtick, string, or comment is not specially tracked — the scanner
  *     treats the whole template literal as opaque text up to its closing
@@ -56,6 +70,16 @@ export function stripComments(source: string): string {
         }
         if (source[j] === quote) {
           j += 1;
+          break;
+        }
+        // A single- or double-quoted literal cannot span a newline, so an
+        // unclosed one is not a string at all — most often a quote inside a
+        // regex character class. Without this bound the scan runs to the next
+        // matching quote anywhere later in the file, swallowing hundreds of
+        // lines (and the comments in them) as string content. Treat the quote
+        // as a lone character and resume scanning after it.
+        if (quote !== '`' && source[j] === '\n') {
+          j = i + 1;
           break;
         }
         j += 1;
