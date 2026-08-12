@@ -216,63 +216,113 @@ async function deviceList(db, userId, env = ENV) {
   return output ? db.prepare(output.topic).all() : [];
 }
 
-test('F1: scoped lists use owned-plus-granted zones and keep weather shared', async () => {
+function seedUnassignedDevice(db) {
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('UNASSIGNED1', 'Fresh LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+  `);
+}
+
+function seedUnclaimedDevice(db) {
+  // What DELETE /api/devices/:deveui leaves behind: user_id NULL, no tombstone.
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('UNCLAIMED1', 'Deleted LSN50', 'DRAGINO_LSN50', NULL, NULL, '2026-01-01', '2026-01-01');
+  `);
+}
+
+test('F1: every enabled role lists every zone and device on the gateway', async () => {
   const db = seedScopedDb();
+  seedUnassignedDevice(db);
   try {
-    const zones = await zoneList(db, 2);
-    assert.deepEqual(zones.map((row) => row.zone_uuid).sort(), ['z-1', 'z-2']);
-    const devices = await deviceList(db, 2);
+    for (const userId of [1, 2, 3]) {
+      scopeHelper._resetForTests();
+      assert.deepEqual(
+        (await zoneList(db, userId)).map((row) => row.zone_uuid).sort(),
+        ['z-1', 'z-2'],
+        `user ${userId} must see every zone`
+      );
+      assert.deepEqual(
+        (await deviceList(db, userId)).map((row) => row.deveui).sort(),
+        ['DENDRO1', 'DENDRO2', 'UNASSIGNED1', 'VALVE1', 'WX1'],
+        `user ${userId} must see every device, including the unassigned bucket`
+      );
+    }
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F1: an unclaimed device is out of the account-wide list for everyone', async () => {
+  const db = seedScopedDb();
+  seedUnclaimedDevice(db);
+  try {
+    for (const userId of [1, 2, 3]) {
+      scopeHelper._resetForTests();
+      const deveuis = (await deviceList(db, userId)).map((row) => row.deveui);
+      assert.ok(
+        !deveuis.includes('UNCLAIMED1'),
+        `user ${userId} must not see an unclaimed device: delete unclaims rather than tombstoning, ` +
+        'so d.user_id IS NOT NULL is the lifecycle filter that makes deletion visible'
+      );
+      assert.ok(deveuis.includes('DENDRO1'), `user ${userId} must still see claimed devices`);
+    }
+    assert.ok(
+      db.prepare("SELECT deveui FROM devices WHERE deveui='UNCLAIMED1'").get(),
+      'the row itself must survive — this is a list filter, not a delete'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F1: flag-off list behavior remains owner-only', async () => {
+  const db = seedScopedDb();
+  const flagOff = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' };
+  try {
     assert.deepEqual(
-      devices.map((row) => row.deveui).sort(),
-      ['DENDRO1', 'DENDRO2', 'VALVE1', 'WX1']
+      (await zoneList(db, 2, flagOff)).map((row) => row.zone_uuid),
+      ['z-1']
+    );
+    assert.deepEqual(
+      (await deviceList(db, 2, flagOff)).map((row) => row.deveui).sort(),
+      ['DENDRO1', 'VALVE1']
     );
   } finally {
     db.close();
   }
 });
 
-test('F1: admin has no scope bypass and flag-off behavior remains owner-only', async () => {
-  const db = seedScopedDb();
-  try {
-    const adminZones = await zoneList(db, 1);
-    assert.deepEqual(adminZones.map((row) => row.zone_uuid), ['z-2']);
-    const unscopedZones = await zoneList(db, 2, {
-      AUTH_TOKEN_SECRET: AUTH_SECRET,
-      OSI_SCOPED_ACCESS: '0',
-    });
-    assert.deepEqual(unscopedZones.map((row) => row.zone_uuid), ['z-1']);
-  } finally {
-    db.close();
-  }
-});
-
-test('E4: a disabled account is denied before the weather-device OR-branch can be reached', async () => {
-  const db = seedScopedDb();
-  try {
-    // Before the fix, the weather-device OR-branch
-    // ("d.type_id IN ('SENSECAP_S2120','AQUASCOPE_LORAIN')") was unconditional: only the
-    // zone-membership half of the predicate collapsed to '0' for a disabled account, so a
-    // disabled account with an unexpired token could still list every weather station.
+test('P1: a disabled account is denied on both list reads', async () => {
+  for (const [label, nodeId, pick] of [
+    ['devices', 'get-devices-query', (result) => result[1]],
+    ['zones', 'get-zones-query', (result) => result[1]],
+  ]) {
+    const db = seedScopedDb();
     db.prepare(
       "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-res1'"
     ).run();
     scopeHelper._resetForTests();
-
-    const response = await executeFunction(loadNode('get-devices-query'), {
-      msg: { payload: [{ id: 2 }], authUserId: 2 },
-      env: ENV,
-      db,
-    });
-
-    assert.equal(response.result[0], null, 'a disabled account must not reach the success output');
-    const errorOutput = response.result[1];
-    assert.ok(errorOutput, 'a disabled account must be rejected, not silently served an empty-looking list');
-    assert.equal(errorOutput.statusCode, 403);
-  } finally {
-    db.close();
-    // u-res1 is reused by other tests in this file against fresh databases; leaving its
-    // disabled state cached here would leak into them.
-    scopeHelper._resetForTests();
+    try {
+      const response = await executeFunction(loadNode(nodeId), {
+        msg: { payload: [{ id: 2 }], authUserId: 2 },
+        env: ENV,
+        db,
+      });
+      const denied = pick(response.result);
+      assert.ok(denied, `${label}: a disabled account must be rejected, not served an empty list`);
+      assert.equal(denied.statusCode, 403, `${label}: disabled account must get 403`);
+      assert.equal(response.result[0], null, `${label}: no success output for a disabled account`);
+    } finally {
+      db.close();
+      scopeHelper._resetForTests();
+    }
   }
 });
 
