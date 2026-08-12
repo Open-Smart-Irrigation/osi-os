@@ -119,13 +119,17 @@ ${prelude}
   const body = msg.req && msg.req.body || msg.payload || {};
   const deveui = String(body.deveui || '').trim().toUpperCase();
   if (!deveui) throw Object.assign(new Error('Device EUI is required'), { statusCode: 400 });
-  const targetZoneId = Number(body.irrigation_zone_id);
-  if (!Number.isInteger(targetZoneId)) {
-    if (actorScope.role !== 'admin') {
-      throw Object.assign(new Error('irrigation_zone_id is required in scoped mode'), { statusCode: 400 });
-    }
-    msg._scopedTargetZoneId = null;
+  // W5: zone_id is an explicit, optional integer irrigation_zones.id. W3: any
+  // mutation-capable role may register without one; the device lands in the
+  // unassigned bucket that every account can now see.
+  const rawZoneId = body.zone_id;
+  if (rawZoneId === undefined || rawZoneId === null || rawZoneId === '') {
+    msg._deviceZoneId = null;
   } else {
+    const targetZoneId = Number(rawZoneId);
+    if (!Number.isInteger(targetZoneId)) {
+      throw Object.assign(new Error('zone_id must be an integer zone id'), { statusCode: 400 });
+    }
     const targetZoneUuid = await scope.resolveZoneUuidById(db, targetZoneId);
     if (!targetZoneUuid) throw Object.assign(new Error('zone not found'), { statusCode: 404 });
     await scope.assertFreshZoneAccess(
@@ -134,7 +138,7 @@ ${prelude}
       targetZoneUuid,
       { scopedMode: true }
     );
-    msg._scopedTargetZoneId = targetZoneId;
+    msg._deviceZoneId = targetZoneId;
   }
   const existing = await db.get(
     'SELECT d.deveui, iz.zone_uuid FROM devices d ' +
@@ -349,7 +353,7 @@ const insertNode = getNode('post-devices-insert');
 insertNode.func = insertNode.func
   .replace(
     `  sql = "UPDATE devices SET user_id = " + userId\n    + ", name = '"`,
-    `  sql = "UPDATE devices SET user_id = " + userId\n    + ", irrigation_zone_id = " + (Number.isInteger(msg._scopedTargetZoneId) ? msg._scopedTargetZoneId : 'NULL')\n    + ", name = '"`
+    `  sql = "UPDATE devices SET user_id = " + userId\n    + ", irrigation_zone_id = " + (Number.isInteger(msg._deviceZoneId) ? msg._deviceZoneId : 'NULL')\n    + ", name = '"`
   )
   .replace(
     `"INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,gateway_device_eui,sync_version,deleted_at,created_at,updated_at,claimed_at) VALUES ('"`,
@@ -357,9 +361,9 @@ insertNode.func = insertNode.func
   )
   .replace(
     `+ deveui.replace(/'/g, "''") + "','" + name.replace(/'/g, "''") + "','" + type_id + "'," + userId + ","\n    + valveStateExpr`,
-    `+ deveui.replace(/'/g, "''") + "','" + name.replace(/'/g, "''") + "','" + type_id + "'," + userId + ","\n    + (Number.isInteger(msg._scopedTargetZoneId) ? msg._scopedTargetZoneId : 'NULL') + ","\n    + valveStateExpr`
+    `+ deveui.replace(/'/g, "''") + "','" + name.replace(/'/g, "''") + "','" + type_id + "'," + userId + ","\n    + (Number.isInteger(msg._deviceZoneId) ? msg._deviceZoneId : 'NULL') + ","\n    + valveStateExpr`
   );
-if (!insertNode.func.includes('irrigation_zone_id = " + (Number.isInteger(msg._scopedTargetZoneId)')) {
+if (!insertNode.func.includes('irrigation_zone_id = " + (Number.isInteger(msg._deviceZoneId)')) {
   throw new Error('failed to patch existing-device claim zone assignment');
 }
 if (!insertNode.func.includes('user_id,irrigation_zone_id,current_state')) {
@@ -369,7 +373,7 @@ if (!insertNode.func.includes('user_id,irrigation_zone_id,current_state')) {
 const responseNode = getNode('post-devices-response');
 responseNode.func = responseNode.func.replace(
   '  irrigation_zone_id: null,',
-  '  irrigation_zone_id: Number.isInteger(msg._scopedTargetZoneId) ? msg._scopedTargetZoneId : null,'
+  '  irrigation_zone_id: Number.isInteger(msg._deviceZoneId) ? msg._deviceZoneId : null,'
 );
 
 const serialized = `${JSON.stringify(flows, null, 2)}\n`;
