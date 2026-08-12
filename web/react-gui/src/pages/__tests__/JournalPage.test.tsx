@@ -38,7 +38,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key === 'capture.save.finalSavedGateway' ? 'Saved on farm gateway' : key,
+    t: (key: string) => ({
+      'capture.save.finalSavedGateway': 'Saved on farm gateway',
+      'readOnly.farm': 'You have read-only access to this farm.',
+    }[key] ?? key),
     i18n: { language: 'en', resolvedLanguage: 'en' },
   }),
 }));
@@ -627,6 +630,30 @@ describe('JournalPage', () => {
 
     expect(screen.getByTestId('timeline')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'logActivity' })).not.toBeInTheDocument();
+  });
+
+  // Maintainer decision 3(c) (S6): the <CanWrite> wrapper around "Log activity"
+  // and the write controls beneath JournalWorkspace/DetailPanel hide silently;
+  // this notice is the ONE explanation for all of them on this page, mounted
+  // once beneath the header, not duplicated per hidden control.
+  it('explains read-only access exactly once for a viewer, not once per hidden control', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.role = 'viewer';
+    mocks.scopeState.canWrite = false;
+
+    renderPage();
+
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByText('You have read-only access to this farm.')).toBeInTheDocument();
+  });
+
+  it('shows no read-only notice for a writer', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.canWrite = true;
+
+    renderPage();
+
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
   });
 
   it.each([

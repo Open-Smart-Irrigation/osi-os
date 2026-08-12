@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
 import { useTranslation } from 'react-i18next';
 import { DashboardHeader } from '../components/DashboardHeader';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { KiwiSensorCard } from '../components/farming/KiwiSensorCard';
 import { StregaValveCard } from '../components/farming/StregaValveCard';
 import { DraginoTempCard } from '../components/farming/DraginoTempCard';
@@ -152,6 +153,12 @@ export const FarmingDashboard: React.FC = () => {
         canWrite={canWrite && !scopeLoading}
         showAdmin={isAdmin && isScoped && !scopeLoading}
       />
+
+      {/* Maintainer decision 3(c) (S6): one explanation per surface, not per
+          hidden control. The header's Add-menu gating above, the 8 inline
+          IrrigationZoneCard sites and its 10 readOnly disables all stay
+          untouched — this is the single notice that explains all of them. */}
+      {!(canWrite && !scopeLoading) && <ReadOnlyNotice scope="farm" />}
 
       {/* Main Content */}
       <main className="max-w-[1600px] mx-auto px-4 py-8">
