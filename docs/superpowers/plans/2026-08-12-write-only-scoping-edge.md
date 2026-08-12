@@ -8,6 +8,29 @@
 
 **Tech Stack:** Node-RED flows.json function nodes, osi-scope-helper / osi-journal local packages, Node.js node:test, React+TypeScript (web/react-gui), vitest + tsx --test.
 
+**Spec version:** implements [2026-08-12-write-only-scoping-device-add-design.md](../specs/2026-08-12-write-only-scoping-device-add-design.md) **v2** (commit `65aec22b`), edge half: §3, §5 (P1–P8, P11), §6, §7, §9 and the edge parts of §10. Tasks 15–16 land the v2 additions (W5 `zoneUuid` command contract, W10 unassigned-delete).
+
+## Task list
+
+| # | Task | Surface |
+|---|---|---|
+| 1 | Device and zone list reads go account-wide | flows.json, reads suite |
+| 2 | Zone-path reads go account-wide | flows.json, reads suite |
+| 3 | Device-detail reads go account-wide (P5) | flows.json, reads suite |
+| 4 | History router reads go account-wide, admin and workspace gates preserved | flows.json, reads suite, history contract |
+| 5 | Sensor export, recent actuations and analysis reads go account-wide | flows.json, reads suite, history contract |
+| 6 | Journal reads and exports go account-wide (W2) | osi-journal, journal suite, reads suite |
+| 7 | `POST /api/devices` takes an explicit optional `zone_id` (W3, W5) | flows.json, writes suite |
+| 8 | Assignment operates only on unassigned devices, 409 names the current zone (P7, P8, W4) | flows.json, writes suite |
+| 9 | `ScopeContext.zoneWritable` replaces the read-visibility helpers | web/react-gui |
+| 10 | FarmingDashboard renders every zone and device | web/react-gui |
+| 11 | JournalPage renders every plot and zone | web/react-gui |
+| 12 | HistoryDashboard renders every zone and stops gating the shell on scope | web/react-gui |
+| 13 | Two-tab zone device modal, on ui-core | web/react-gui |
+| 14 | Retire the read-filter API and re-point the structural ratchet | osi-scope-helper, verify-scoped-access |
+| 15 | `REGISTER_DEVICE` command applier accepts `zoneUuid` (P9 seam) | flows.json, harness, writes suite |
+| 16 | Unassigned-device delete carve-out (W10) | flows.json, writes suite |
+
 ## Global Constraints
 
 - **Flag-off behavior is unchanged.** Every node edited here already branches on `String(env.get('OSI_SCOPED_ACCESS') || '') === '1'`. The legacy `d.user_id = ?` / `iz.user_id = ?` / `owner_user_uuid = ? AND user_id = ?` filters stay exactly as they are on the `else` side. Silvan, kaba100 and Uganda run flag-off; agrolink-test-01 is the only scoped gateway.
@@ -15,15 +38,18 @@
 - **flows.json edits follow the `osi-flows-json-editing` skill.** Every executor **MUST load `.claude/skills/osi-flows-json-editing`** before touching `flows.json`. One-shot Node script in the scratchpad only — never an Edit-tool string replacement. Run the roundtrip guard before and after every mutation, write both profiles, and run `node scripts/verify-sync-flow.js` (it chains profile parity and must end `All parity checks passed.`) before every commit that touches `flows.json`.
 - **`assertEnabledAccount` survives on every read route (P1).** Removing a zone/device filter never means removing the disabled-account check. Where a route's only scope call was `assertDeviceAccess`/`assertZoneAccess` (which carried the disabled check implicitly), `assertEnabledAccount` replaces it explicitly. `get-zones-query` never had one and gains one.
 - **Do not touch the actuation path (P4).** `write-strega-expectation`'s dual `assertFreshDeviceAccess` + `canMutate` gate, the `_systemActuation` scheduler exemption, `scope_actor_required` in the cloud-relay apply nodes, `cancel-strega-actuation-fn`, `put-strega-timed-auth-fn`, `83bb4a452dd9ae37` and `70fcbea336401bd1` are out of scope. No consolidation, no shared-helper refactor that reaches them.
-- **Do not touch the shared write hubs (P6).** `scoped-device-config-guard` (23 routes) and `scoped-zone-config-guard` (4 routes) are unchanged, as are `scoped-device-delete-router`, `scoped-device-unassign-router`, `scoped-zone-create-router`, `scoped-zone-delete-router`, `scoped-weather-zone-assign-router`, `scoped-admin-account-router`, `settings-disable-schedules-fn` and every `authorizeAdminRead` guard.
+- **Do not touch the shared write hubs (P6).** `scoped-device-config-guard` (23 routes) and `scoped-zone-config-guard` (4 routes) are unchanged, as are `scoped-device-unassign-router`, `scoped-zone-create-router`, `scoped-zone-delete-router`, `scoped-weather-zone-assign-router`, `scoped-admin-account-router`, `settings-disable-schedules-fn` and every `authorizeAdminRead` guard. `scoped-device-delete-router` is touched by Task 16 **only** for the W10 unassigned carve-out; its role gate and its zone-assigned branch are unchanged.
 - **Workspaces stay owner-only (P3/W6).** `/api/history/workspaces*` keeps its unconditional `user_id = ?` on read and write.
+- **Journal custom vocabulary stays owner-only (W9).** `journal_vocab` reads already filter on `owner_user_uuid = ?` (osi-journal `api.js` ~line 1946). W2 covers entries, notes, photos and exports — **not** vocabulary. Task 6 must not widen it, and no later task may "finish the job" by removing that filter.
+- **Existing write gates keep their 404 shape (P8 v2).** Only genuinely new paths return honest 409/403: the Task 8 assign precondition and the Task 7 `zone_id` validation. Do not sweep existing `404 → 403` on other write guards — that breaks six cloud mutation tests this design requires untouched, and is a deferred follow-up.
 - **Sync triggers stay row-wise (P11).** Assignment and registration keep using single-row `UPDATE devices ... WHERE deveui = ?` / `INSERT INTO devices` so `trg_sync_devices_outbox_au` fires and `sync_version` bumps. No bulk `UPDATE ... WHERE irrigation_zone_id IN (...)` path.
+- **Every flows.json commit also edits the size-ratchet allowances.** `scripts/verify-flows-size-ratchet-allowances.json` holds an ABSOLUTE `max_chars` per function node and a per-profile `max_total`, and today **every ceiling equals the current size exactly — zero headroom** (`total 1278466 <= max_total 1278466`). Adding even a comment to a touched node fails `node scripts/verify-flows-size-ratchet.js`. Raising a ceiling is a deliberate, reviewed edit: measure with `scripts/flows-size-scan`, set the new `max_chars` and `max_total`, and append the reason to the existing `reason` strings. There is no autoregeneration path, and lowering a ceiling for a node that shrank is equally required — coverage is exact.
 - **Never run two frontend builds concurrently** — this workstation OOMs (swap is zram). Reviewers do not build. `cd web/react-gui && npm run test:unit` is the only frontend test command; never bare `npx vitest run` (it skips the `tsx --test` half).
 - **Each task commits separately**, with the failing test committed in the same commit as its fix (TDD order inside the task, one commit at the end).
 
 ## Known gap carried forward (not fixed here)
 
-W3 creates unassigned devices, but `assertFreshDeviceAccess` still 404s on any device with no `zone_uuid`. So in scoped mode an unassigned device can be listed, read and assigned — but not renamed, configured or deleted until it is assigned to a zone. Widening `assertFreshDeviceAccess` would silently widen the STREGA actuation dual-gate (P4), which this plan is forbidden to touch, so it is deliberately deferred to a follow-up. Do not "fix" it opportunistically inside these tasks.
+W3 creates unassigned devices, but `assertFreshDeviceAccess` still 404s on any device with no `zone_uuid`. Spec v2 carves out exactly one of the consequences: **delete** (W10, Task 16), because otherwise a mistyped registration is a zombie — visible, assignable, undeletable. The other writes on an unassigned device (rename, per-device config through the 23-route hub) stay blocked. Fixing those means widening `assertFreshDeviceAccess` itself, which the STREGA actuation dual-gate shares (P4), so it needs its own work item. Do not widen the helper inside any task here; Task 16's carve-out lives in the delete router's own logic.
 
 ---
 
@@ -261,12 +287,19 @@ console.log('Wrote canonical + mirror.');
 - [ ] **Run to see it pass:** `node --test scripts/test-scoped-access-reads.js`
   Expected: exit 0, no failing subtests.
 
-- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js`
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/verify-flows-size-ratchet.js`
   Expected: `Sync flow verification passed`, then `All parity checks passed.`, then `verify-flows-fn-parse: OK`, then `verify-scoped-access: OK (ratchet only; ...)`, exit 0.
 
 - [ ] **Commit:**
 ```bash
-git add scripts/test-scoped-access-reads.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
+git add scripts/test-scoped-access-reads.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
 git commit -m "feat(scope): make device and zone list reads account-wide"
 ```
 
@@ -429,11 +462,18 @@ replaceOnce(
 
 - [ ] **Run to see it pass:** `node --test scripts/test-scoped-access-reads.js` → exit 0.
 
-- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js` → all pass, ending `All parity checks passed.` and `verify-scoped-access: OK`.
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/verify-flows-size-ratchet.js` → all pass, ending `All parity checks passed.` and `verify-scoped-access: OK`.
 
 - [ ] **Commit:**
 ```bash
-git add scripts/test-scoped-access-reads.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
+git add scripts/test-scoped-access-reads.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
 git commit -m "feat(scope): make zone environment and recommendation reads account-wide"
 ```
 
@@ -662,11 +702,18 @@ replaceOnce(
 
 - [ ] **Run to see it pass:** `node --test scripts/test-scoped-access-reads.js` → exit 0.
 
-- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js` → all pass.
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/verify-flows-size-ratchet.js` → all pass.
 
 - [ ] **Commit:**
 ```bash
-git add scripts/test-scoped-access-reads.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
+git add scripts/test-scoped-access-reads.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
 git commit -m "feat(scope): make all device-detail reads account-wide, including unassigned devices"
 ```
 
@@ -894,11 +941,18 @@ node --test scripts/verify-history-api-contract.test.js
 ```
   Expected: all exit 0.
 
-- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js` → all pass.
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/verify-flows-size-ratchet.js` → all pass.
 
 - [ ] **Commit:**
 ```bash
-git add scripts/test-scoped-access-reads.js scripts/verify-history-api-contract.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
+git add scripts/test-scoped-access-reads.js scripts/verify-history-api-contract.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
 git commit -m "feat(scope): make history zone reads account-wide, keep gateway and workspace gates"
 ```
 
@@ -1144,11 +1198,18 @@ node --test scripts/verify-history-api-contract.test.js
 ```
   Expected: all exit 0.
 
-- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js` → all pass.
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/verify-flows-size-ratchet.js` → all pass.
 
 - [ ] **Commit:**
 ```bash
-git add scripts/test-scoped-access-reads.js scripts/verify-history-api-contract.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
+git add scripts/test-scoped-access-reads.js scripts/verify-history-api-contract.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
 git commit -m "feat(scope): make sensor export, actuations and analysis reads account-wide"
 ```
 
@@ -1455,6 +1516,7 @@ git commit -m "feat(scope): make journal entry, plot, group and export reads acc
 **Interfaces**
 - Consumes: request body `{ deveui, name, type_id, appkey, zone_id? }` where `zone_id` is an integer `irrigation_zones.id`.
 - Produces: `msg._deviceZoneId` — `number` when a zone was requested and authorized, `null` otherwise. Consumed only by `post-devices-insert`, which writes it into `devices.irrigation_zone_id`. The old `msg._scopedTargetZoneId` name is retired.
+- **Scope note:** the integer `zone_id` is edge-local HTTP API surface only (W5). The cloud→edge `REGISTER_DEVICE` command carries `zoneUuid` instead, because the cloud cannot know edge-local integer ids — Task 15 implements that separate applier. Do not add `zoneUuid` handling to this HTTP route, and do not add `zone_id` handling to the command path.
 - Errors: `400` for a non-integer `zone_id`, `404` for an unknown zone, `403` for a zone outside the caller's write scope or a non-mutating role.
 
 **Steps**
@@ -1651,11 +1713,18 @@ grep -rn "_scopedTargetZoneId" conf/ scripts/ web/ | grep -v node_modules
 ```
   Expected: no output.
 
-- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/test-flows-wiring.js` → all pass; the wiring guard ends `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed`.
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/test-flows-wiring.js && node scripts/verify-flows-size-ratchet.js` → all pass; the wiring guard ends `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed`.
 
 - [ ] **Commit:**
 ```bash
-git add scripts/test-scoped-access-writes.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
+git add scripts/test-scoped-access-writes.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
 git commit -m "feat(scope): accept an explicit optional zone_id on device registration"
 ```
 
@@ -1670,7 +1739,8 @@ git commit -m "feat(scope): accept an explicit optional zone_id on device regist
 **Interfaces**
 - Consumes: `PUT /api/irrigation-zones/:id/devices/:deveui`.
 - Produces: `200` with the existing payload on success; `409` with `{ message, current_zone_id, current_zone_name }` when the device is already assigned; `404` when the device does not exist or is deleted; `403` for a non-mutating role; `404` when the target zone is outside the caller's write scope (unchanged `assertFreshZoneAccess`).
-- Removed: `assertFreshDeviceAccess` on this route only. `DELETE …/devices/:deveui` (`scoped-device-unassign-router`) keeps both checks.
+- Removed: `assertFreshDeviceAccess` on this route only. `DELETE /api/irrigation-zones/:id/devices/:deveui` (`scoped-device-unassign-router`) keeps both checks.
+- **P8 v2 note:** the 409 here is a *new* path (the assign precondition), which P8 explicitly allows to return an honest conflict. This is not a licence to sweep other write gates from 404 to 403 — spec v2 requires those to keep their current shape.
 
 **Steps**
 
@@ -1902,11 +1972,18 @@ replaceOnce(
 
 - [ ] **Run to see it pass:** `node --test scripts/test-scoped-access-writes.js` → exit 0.
 
-- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/test-flows-wiring.js` → all pass.
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/test-flows-wiring.js && node scripts/verify-flows-size-ratchet.js` → all pass.
 
 - [ ] **Commit:**
 ```bash
-git add scripts/test-scoped-access-writes.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
+git add scripts/test-scoped-access-writes.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
 git commit -m "feat(scope): assign only unassigned devices and return a naming 409 on conflict"
 ```
 
@@ -2840,6 +2917,494 @@ git commit -m "refactor(scope): retire the read-filter API and ratchet against i
 
 ---
 
+## Task 15 — `REGISTER_DEVICE` command applier accepts `zoneUuid` (P9 seam)
+
+The cloud half re-gates registration on role + write scope and sends the target zone in the pending-command payload as **`zoneUuid`**, not an integer `zone_id` (W5: the cloud cannot know edge-local ids, and every existing zone command keys on `zoneUuid`). The edge applier resolves it and assigns on registration.
+
+**The path, traced:** `poll-pending-commands` → `934bf2bc19a8ce22` ("Route Command") → **output 4 → `cs-reg-cloud-fn` ("CS Register (cloud cmd)")** → `cs-reg-cloud-ack-fn` ("Build Special Command ACK") → `command-ack-queue-rest`. `cs-reg-cloud-fn` is the only REGISTER_DEVICE applier; it validates the payload, provisions in ChirpStack, then runs `INSERT OR IGNORE INTO devices (...)` with no `irrigation_zone_id` column at all. `scripts/test-scoped-access-command-path.js` covers the *scoped-access user/grant* commands, **not** REGISTER_DEVICE; the only existing REGISTER_DEVICE tests are the `flowTest` cases in `osi-chirpstack-helper/index.test.js`, which are `test.skip` unless `OSI_EXPECT_FLOW_RED=1` and use a fake db with no `get`. New behavior therefore goes in `scripts/test-scoped-access-writes.js`, on the real in-memory SQLite harness.
+
+**Authorization is unchanged.** No user-scope check applies here: this is a cloud-authorized command and the cloud validates write scope before issuing it. Do not add `verifyBearer`, `assertFreshRole` or any `assertFresh*` call to this node.
+
+**Files**
+- Modify: `scripts/lib/scoped-access-harness.js`
+- Modify: `scripts/test-scoped-access-writes.js`
+- Modify: `scripts/verify-sync-flow.js`
+- Modify: both `flows.json` profiles (nodes `cs-reg-cloud-fn`, `cs-reg-cloud-ack-fn`)
+
+**Interfaces**
+- Consumes: pending-command payload `{ commandType: 'REGISTER_DEVICE', params: { devEui, name, deviceType, appKey, cloudUserId?, zoneUuid? } }`. `params.zone_uuid` is accepted as a snake_case alias; an integer `zone_id` is **not** accepted on this path (Task 7 owns that, HTTP-only).
+- Produces: ACK extras `zoneAssignedId: number | null` and `zoneWarning: string | null`, surfaced by `cs-reg-cloud-ack-fn` into the `devices/<eui>/command_ack` MQTT payload only when set.
+- Produces: `executeFunction(node, { ..., libOverrides })` — harness option merging caller-supplied values over the built-in `providedLibs` map, so a flow node binding a lib the harness does not stock (here `chirpstack`) can be driven under test.
+
+**Steps**
+
+- [ ] **Extend the harness.** In `scripts/lib/scoped-access-harness.js`, add `libOverrides = {}` to the destructured `options` in `executeFunction` and merge it after the `providedLibs` literal:
+
+```js
+  Object.assign(providedLibs, libOverrides);
+```
+
+- [ ] **Write the failing tests.** Append to `scripts/test-scoped-access-writes.js`:
+
+```js
+const REGISTER_ENV = {
+  AUTH_TOKEN_SECRET: AUTH_SECRET,
+  OSI_SCOPED_ACCESS: '1',
+  DEVICE_EUI: '0016C001F1000001',
+  CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
+};
+
+const REGISTER_APPKEY = 'AABBCCDDEEFF00112233445566778899';
+
+function fakeChirpstackLib() {
+  return {
+    createProvisioningClientFromEnv: () => ({
+      ensureDeviceProvisioned: async (registration) => ({
+        devEui: registration.devEui,
+        deviceAction: 'created',
+        keysAction: 'created',
+        keysVerified: true,
+      }),
+      close: () => {},
+    }),
+  };
+}
+
+function registerCommand(devEui, extras = {}) {
+  return {
+    payload: {
+      commandType: 'REGISTER_DEVICE',
+      commandId: 'cmd-' + devEui,
+      params: Object.assign({
+        devEui,
+        name: 'Cloud sensor ' + devEui,
+        deviceType: 'DRAGINO_LSN50',
+        appKey: REGISTER_APPKEY,
+      }, extras),
+    },
+  };
+}
+
+async function applyRegister(db, devEui, extras) {
+  return executeFunction(loadNode('cs-reg-cloud-fn'), {
+    msg: registerCommand(devEui, extras),
+    env: REGISTER_ENV,
+    db,
+    libOverrides: { chirpstack: fakeChirpstackLib() },
+  });
+}
+
+test('P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registration', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegister(db, 'CLOUDREG1', { zoneUuid: 'z-1' });
+
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(ack.zoneAssignedId, 1);
+    assert.equal(ack.zoneWarning, null);
+
+    const row = db.prepare("SELECT irrigation_zone_id, sync_version FROM devices WHERE deveui='CLOUDREG1'").get();
+    assert.equal(row.irrigation_zone_id, 1, 'the device must land in the resolved zone');
+    assert.ok(Number(row.sync_version) >= 2, 'P11: the row-wise assignment UPDATE must bump sync_version');
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: an unknown or deleted zoneUuid registers unassigned with an ACK warning', async () => {
+  const db = seedScopedDb();
+  db.prepare("UPDATE irrigation_zones SET deleted_at = '2026-01-01T00:00:00.000Z' WHERE id = 2").run();
+  try {
+    const unknown = await applyRegister(db, 'CLOUDREG2', { zoneUuid: 'z-does-not-exist' });
+    assert.equal(unknown.result[0].specialAck.result, 'SUCCESS', 'an unknown zone must not fail the registration');
+    assert.equal(unknown.result[0].specialAck.zoneAssignedId, null);
+    assert.match(unknown.result[0].specialAck.zoneWarning, /z-does-not-exist/);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='CLOUDREG2'").get().irrigation_zone_id,
+      null
+    );
+
+    const deleted = await applyRegister(db, 'CLOUDREG3', { zoneUuid: 'z-2' });
+    assert.equal(deleted.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(deleted.result[0].specialAck.zoneAssignedId, null);
+    assert.match(deleted.result[0].specialAck.zoneWarning, /z-2/);
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: REGISTER_DEVICE without zoneUuid keeps registering unassigned', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegister(db, 'CLOUDREG4');
+    assert.equal(response.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(response.result[0].specialAck.zoneAssignedId, null);
+    assert.equal(response.result[0].specialAck.zoneWarning, null);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='CLOUDREG4'").get().irrigation_zone_id,
+      null
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W4: a REGISTER_DEVICE replay never pulls a device out of the zone it already sits in', async () => {
+  const db = seedScopedDb();
+  try {
+    // DENDRO1 already lives in zone 1; a replayed command naming zone 2 must not move it.
+    const response = await applyRegister(db, 'DENDRO1', { zoneUuid: 'z-2' });
+    assert.equal(response.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: the command ACK payload carries the zone warning to the cloud', async () => {
+  const db = seedScopedDb();
+  try {
+    const applied = await applyRegister(db, 'CLOUDREG5', { zoneUuid: 'z-nope' });
+    const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: applied.result[0],
+      env: REGISTER_ENV,
+      db,
+    });
+    const payload = JSON.parse(ackMessage.result.payload);
+    assert.equal(payload.commandType, 'REGISTER_DEVICE');
+    assert.equal(payload.result, 'SUCCESS');
+    assert.equal(payload.zoneAssignedId, null);
+    assert.match(payload.zoneWarning, /z-nope/);
+  } finally {
+    db.close();
+  }
+});
+```
+
+- [ ] **Run to see it fail:** `node --test scripts/test-scoped-access-writes.js`
+  Expected failure: `P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registration` fails with `Cannot read properties of undefined (reading 'zoneAssignedId')` if `libOverrides` was not wired, or — once it is — with `undefined !== 1` on `ack.zoneAssignedId`, and `null !== 1` on the device's `irrigation_zone_id`.
+
+- [ ] **Load the osi-flows-json-editing skill**, then run `<scratchpad>/flows-edit-t15.js` — same skeleton as Task 1, this MUTATE section:
+
+```js
+const reg = nodeById(flows, 'cs-reg-cloud-fn');
+
+// 1. Parameterised db helpers alongside the existing single-statement run().
+replaceOnce(
+  reg,
+  `const run = (statement) => new Promise((resolve, reject) => _db.run(statement, (error) => error ? reject(error) : resolve()));
+const close = () => new Promise((resolve) => _db.close(() => resolve()));`,
+  `const run = (statement) => new Promise((resolve, reject) => _db.run(statement, (error) => error ? reject(error) : resolve()));
+const runParams = (statement, bindings) => new Promise((resolve, reject) => _db.run(statement, bindings || [], (error) => error ? reject(error) : resolve()));
+const get = (statement, bindings) => new Promise((resolve, reject) => _db.get(statement, bindings || [], (error, row) => error ? reject(error) : resolve(row)));
+const close = () => new Promise((resolve) => _db.close(() => resolve()));`
+);
+
+// 2. Resolve zoneUuid -> irrigation_zones.id before building the insert.
+replaceOnce(
+  reg,
+  `  var userExpr = Number.isFinite(cloudUserId)`,
+  `  // W5/P9: the cloud sends zoneUuid, never an edge-local integer id. An unknown
+  // or deleted zone must not fail the whole registration -- the device registers
+  // unassigned and the ACK carries a warning the cloud can surface.
+  let zoneId = null;
+  let zoneWarning = null;
+  var requestedZoneUuid = String(params.zoneUuid || params.zone_uuid || '').trim();
+  if (requestedZoneUuid) {
+    var zoneRow = await get(
+      'SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1',
+      [requestedZoneUuid]
+    );
+    if (zoneRow && Number.isFinite(Number(zoneRow.id))) {
+      zoneId = Number(zoneRow.id);
+    } else {
+      zoneWarning = 'Unknown or deleted zoneUuid ' + requestedZoneUuid + '; device registered unassigned';
+      node.warn('CS Register (cloud cmd): ' + zoneWarning);
+    }
+  }
+
+  var userExpr = Number.isFinite(cloudUserId)`
+);
+
+// 3. Assign through a row-wise, precondition-guarded UPDATE (P11, W4).
+replaceOnce(
+  reg,
+  `  try {
+    await run(msg.topic);
+  } catch (dbError) {`,
+  `  try {
+    await run(msg.topic);
+    if (zoneId !== null) {
+      // P11: a row-wise UPDATE so trg_sync_devices_outbox_au fires and
+      // sync_version bumps. W4: the IS NULL guard means a replayed command can
+      // never pull a device out of a zone someone has already assigned it to.
+      await runParams(
+        'UPDATE devices SET irrigation_zone_id = ?, sync_version = COALESCE(sync_version, 0) + 1, ' +
+        'updated_at = ? WHERE deveui = ? AND deleted_at IS NULL AND irrigation_zone_id IS NULL',
+        [zoneId, now, devEui]
+      );
+    }
+  } catch (dbError) {`
+);
+
+// 4. Report the outcome on the success ACK.
+replaceOnce(
+  reg,
+  `  return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true }), null];`,
+  `  return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true, zoneAssignedId: zoneId, zoneWarning: zoneWarning }), null];`
+);
+
+// 5. Let the ACK builder forward the two new fields.
+replaceOnce(
+  nodeById(flows, 'cs-reg-cloud-ack-fn'),
+  `if (commandType === 'REGISTER_DEVICE') {
+  payload.deviceEui = String(ack.deviceEui || params.devEui || '').trim().toUpperCase() || null;
+  payload.provisionedInChirpStack = ack.provisionedInChirpStack === true;
+}`,
+  `if (commandType === 'REGISTER_DEVICE') {
+  payload.deviceEui = String(ack.deviceEui || params.devEui || '').trim().toUpperCase() || null;
+  payload.provisionedInChirpStack = ack.provisionedInChirpStack === true;
+  // P9: zone resolution outcome. Present on every REGISTER_DEVICE ACK so the
+  // cloud can tell "assigned" from "registered unassigned because the zone
+  // vanished" without inferring it from a missing field.
+  payload.zoneAssignedId = ack.zoneAssignedId != null ? Number(ack.zoneAssignedId) : null;
+  payload.zoneWarning = ack.zoneWarning ? String(ack.zoneWarning) : null;
+}`
+);
+```
+
+- [ ] **Update the pinned success-ACK contract.** `scripts/verify-sync-flow.js` line ~4221 pins the exact success-ACK line. This is an intended contract change (P9 adds two fields), so update the pin in the same commit rather than weakening it:
+
+```js
+expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true, zoneAssignedId: zoneId, zoneWarning: zoneWarning }), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
+```
+
+  and add, next to the neighbouring `expectIncludesById('cs-reg-cloud-fn', ...)` assertions:
+
+```js
+expectIncludesById('cs-reg-cloud-fn', "SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1", 'resolves the cloud-sent zoneUuid to an edge-local zone id (W5/P9)');
+expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns through the row-wise precondition-guarded UPDATE (P11/W4)');
+```
+
+- [ ] **Raise the size ceilings for `cs-reg-cloud-fn` and `cs-reg-cloud-ack-fn`.** Both grow here, and both sit at exactly their committed `max_chars` (11883 and 1888), with `total_allowance.max_total` at exactly the current total. Measure and edit `scripts/verify-flows-size-ratchet-allowances.json` in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of ['cs-reg-cloud-fn','cs-reg-cloud-ack-fn']) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Append the P9 reason to each node's `reason` and to `total_allowance.reason`.
+
+- [ ] **Run to see it pass:**
+```bash
+node --test scripts/test-scoped-access-writes.js
+node scripts/verify-sync-flow.js
+```
+  Expected: both exit 0; `verify-sync-flow.js` ends `All parity checks passed.`
+
+- [ ] **Run the rest of the flows gate:** `node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/test-flows-wiring.js && node scripts/verify-no-new-silent-catch.js && node scripts/verify-flows-size-ratchet.js` → all pass.
+
+  **Executor note:** `verify-scoped-access.js` only inspects `http in` chains, and this is an MQTT/poll-driven command path, so the ratchet has nothing to say about it — that is expected, not a gap.
+
+- [ ] **Commit** (the commit message must explain the pin change, per the flows-editing skill):
+```bash
+git add scripts/lib/scoped-access-harness.js scripts/test-scoped-access-writes.js scripts/verify-sync-flow.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
+git commit -m "feat(scope): resolve zoneUuid on the REGISTER_DEVICE command applier
+
+The cloud cannot know edge-local integer zone ids (W5), so the cloud-relayed
+registration command carries zoneUuid. cs-reg-cloud-fn resolves it, assigns
+through a row-wise precondition-guarded UPDATE (P11/W4), and reports the
+outcome on the ACK. The pinned success-ACK contract in verify-sync-flow.js is
+updated in the same commit because the ACK gained two P9 fields."
+```
+
+---
+
+## Task 16 — Unassigned-device delete carve-out (W10)
+
+`DELETE /api/devices/:deveui` (`scoped-device-delete-router`) calls `assertFreshDeviceAccess`, whose `!device.zone_uuid → 404` branch makes a mistyped registration undeletable: visible in the list, assignable to a zone, but never removable. W10 carves out exactly this route.
+
+**What the route actually does today** (preserve it exactly): it is an **unclaim**, not a tombstone —
+
+```sql
+UPDATE devices SET user_id = NULL, irrigation_zone_id = NULL, gateway_device_eui = ?,
+  sync_version = COALESCE(sync_version, 0) + 1, updated_at = ?
+WHERE deveui = ? AND deleted_at IS NULL
+```
+
+It never sets `deleted_at` and never issues a hard `DELETE`. That row-wise UPDATE is what fires `trg_sync_devices_outbox_au` (its WHEN clause lists `user_id` and `irrigation_zone_id` among the watched columns), so the cloud sees the unclaim. This task changes **only the guard in front of that statement** — the SQL, the response payload and the 404-on-zero-rows all stay byte-identical.
+
+**Files**
+- Modify: `scripts/test-scoped-access-writes.js`
+- Modify: both `flows.json` profiles (node `scoped-device-delete-router`)
+
+**Interfaces**
+- Consumes: `scope.verifyBearer`, `scope.assertFreshRole`, `scope.canMutate` (all already in the node, unchanged), and `scope.assertFreshDeviceAccess` — now called **only** when the target device has a zone.
+- Produces: `200` for any `canMutate` role deleting a device with `irrigation_zone_id IS NULL`; `403` for a viewer; `404` for a device that does not exist, is already deleted, or sits in a zone outside the caller's write scope.
+- **Not touched:** `assertFreshDeviceAccess` itself. The STREGA actuation dual-gate shares it (P4), so the carve-out lives in this router's own logic.
+
+**Steps**
+
+- [ ] **Write the failing tests.** Append to `scripts/test-scoped-access-writes.js`:
+
+```js
+function seedUnassignedDeleteTarget(db) {
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('TYPO1', 'Mistyped LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+  `);
+}
+
+test('W10: a researcher can delete an unassigned device', async () => {
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const response = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 200);
+
+    // The route unclaims; it must NOT hard-delete and must NOT tombstone.
+    const row = db.prepare("SELECT user_id, irrigation_zone_id, deleted_at, sync_version FROM devices WHERE deveui='TYPO1'").get();
+    assert.ok(row, 'the row must survive as an unclaimed device, not be hard-deleted');
+    assert.equal(row.user_id, null);
+    assert.equal(row.irrigation_zone_id, null);
+    assert.equal(row.deleted_at, null, 'this route unclaims; it does not tombstone');
+    assert.ok(Number(row.sync_version) >= 2, 'P11: the row-wise unclaim UPDATE must bump sync_version');
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: a viewer still cannot delete an unassigned device', async () => {
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const response = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(3, 'view1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 403);
+    assert.equal(
+      db.prepare("SELECT user_id FROM devices WHERE deveui='TYPO1'").get().user_id,
+      1,
+      'a denied delete must not unclaim the device'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: the zone-assigned delete gate is unchanged', async () => {
+  const db = seedScopedDb();
+  try {
+    // admin1 has no write scope on zone 1, where DENDRO1 lives.
+    const foreign = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(1, 'admin1', 'DELETE', '/api/devices/DENDRO1', { deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreign.result[1].statusCode, 404);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,
+      1
+    );
+
+    scopeHelper._resetForTests();
+    const missing = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/NOPE', { deveui: 'NOPE' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(missing.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const inScope = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/DENDRO1', { deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(inScope.result[1].statusCode, 200, 'an in-scope zone-assigned delete still works');
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+```
+
+  The pre-existing `'W4: device delete and weather-zone replacement enforce fresh scope'` test must keep passing untouched — its `foreignDelete` case is the same unchanged zone-assigned gate.
+
+- [ ] **Run to see it fail:** `node --test scripts/test-scoped-access-writes.js`
+  Expected failure: `W10: a researcher can delete an unassigned device` fails with `404 !== 200` — `assertFreshDeviceAccess` rejects `TYPO1` on its `!device.zone_uuid` branch.
+
+- [ ] **Load the osi-flows-json-editing skill**, then run `<scratchpad>/flows-edit-t16.js` — same skeleton, this MUTATE section:
+
+```js
+replaceOnce(
+  nodeById(flows, 'scoped-device-delete-router'),
+  `  await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+  const gatewayEui = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();`,
+  `  // W10: an unassigned device is deletable by any write role. Without this a
+  // mistyped registration is a zombie -- visible and assignable, but never
+  // removable, because assertFreshDeviceAccess 404s on a device with no zone.
+  // The helper itself is NOT widened: the STREGA actuation dual-gate shares it
+  // (P4), so the carve-out lives here, on this route only. A zone-assigned
+  // device keeps the unchanged zone write-scope check.
+  const target = await db.get(
+    'SELECT d.deveui, iz.zone_uuid FROM devices d ' +
+    'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL ' +
+    'WHERE d.deveui = ? AND d.deleted_at IS NULL',
+    [deveui]
+  );
+  if (!target) throw Object.assign(new Error('device not found'), { statusCode: 404 });
+  if (target.zone_uuid) {
+    await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+  }
+  const gatewayEui = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();`
+);
+```
+
+  **Executor note:** the role gate (`assertFreshRole` + `canMutate` → 403) already runs above this point, so the viewer case needs no new code. Do not reorder it — a viewer must be refused before any device lookup happens.
+
+- [ ] **Run to see it pass:** `node --test scripts/test-scoped-access-writes.js` → exit 0, including the untouched `W4: device delete and weather-zone replacement enforce fresh scope`.
+
+- [ ] **Raise the size ceilings for every node you touched.** `scripts/verify-flows-size-ratchet-allowances.json` pins an ABSOLUTE `max_chars` per node plus a per-profile `max_total`, and **every ceiling currently sits at exactly the committed size — there is zero headroom**, so any growth (a comment counts) fails the ratchet. Measure, then edit the allowances file in the same commit:
+
+```bash
+node -e "const {nodeSizes,totalChars}=require('./scripts/flows-size-scan');const fs=require('fs');const f=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json','utf8'));const m=nodeSizes(f);for(const id of TOUCHED_IDS) console.log(id, m.get(id).chars); console.log('total', totalChars(f));"
+```
+
+  Set each touched node’s `max_chars` to its measured value and append why to that node’s `reason`; set `total_allowance.max_total` to the measured total and append a matching note to its `reason`. A node that shrank gets its ceiling lowered too — coverage is exact and a stale high ceiling is unreviewed slack. Never regenerate the file wholesale; it is a reviewed artifact.
+- [ ] **Run the flows gate:** `node scripts/verify-sync-flow.js && node scripts/verify-flows-fn-parse.js && node scripts/verify-scoped-access.js && node scripts/test-flows-wiring.js && node scripts/verify-flows-size-ratchet.js` → all pass.
+
+- [ ] **Commit:**
+```bash
+git add scripts/test-scoped-access-writes.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json scripts/verify-flows-size-ratchet-allowances.json
+git commit -m "feat(scope): let any write role delete an unassigned device"
+```
+
+---
+
 ## Rollout notes (spec §10, edge half)
 
-The cloud half lands in its own plan and the two merge together (W8). Nothing in this plan changes flag-off behavior, so Silvan, kaba100 and Uganda are unaffected; agrolink-test-01 is the only scoped gateway and is the manual verification target. After the paired deploy, walk both GUIs with a granted researcher account and a viewer account: the device list including the unassigned bucket, both modal tabs (including a deliberate 409), a foreign zone's history, a journal entry authored by another account, and one denied write per role. The cloud-side vendored-contract CI has never run for AgroLink branches, so this walkthrough is the gate, not CI.
+The cloud half lands in its own plan and the two merge together (W8). Nothing in this plan changes flag-off behavior, so Silvan, kaba100 and Uganda are unaffected; agrolink-test-01 is the only scoped gateway and is the manual verification target. After the paired deploy, walk both GUIs with a granted researcher account and a viewer account:
+
+- the device list, including the unassigned bucket;
+- both modal tabs, including a deliberate 409 on a device that is already assigned;
+- a foreign zone's history and a journal entry authored by another account;
+- one denied write per role;
+- **cloud→edge registration into a zone** (Task 15): register a device from the cloud GUI with a target zone and confirm the edge row lands in that zone and the `command_ack` carries `zoneAssignedId`; then repeat against a zone deleted on the edge and confirm the device registers unassigned with a `zoneWarning` instead of a failed command;
+- **delete an unassigned device** (Task 16) as a researcher, and confirm a viewer cannot.
+
+The cloud-side vendored-contract CI has never run for AgroLink branches, so this walkthrough is the gate, not CI.
