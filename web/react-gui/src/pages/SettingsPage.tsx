@@ -555,7 +555,7 @@ export function SettingsPage() {
               onLabel={t('on')}
               offLabel={t('off')}
             />
-            {!writable && <ReadOnlyNotice scope="section" />}
+            {!scopeLoading && !canWrite && <ReadOnlyNotice scope="section" />}
             <ModuleRow
               label={t('valveControl')}
               enabled={preferences.modules.valveControl}
