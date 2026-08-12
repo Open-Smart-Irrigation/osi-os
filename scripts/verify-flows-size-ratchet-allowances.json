@@ -298,8 +298,8 @@
       "reason": "Wave 3 scoped-access port (AgroLink 46f1d0fc, feat(journal): apply union rule to reads, auto-merged cleanly): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1020 -> HEAD 1249 = +229. Journal HTTP requests now resolve an optional scope module (osiLib.require('scope'), gated on OSI_SCOPED_ACCESS) and pass it through to osiJournal.handleHttpRequest as scope/scopedMode, replacing the previous direct osiJournal-only dispatch."
     },
     "analysis-api-router-fn": {
-      "delta": 664,
-      "reason": "Wave 3 scoped-access port (AgroLink d49e1cd28, feat(api): scope shared analysis reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 7532 -> HEAD 8196 = +664. When OSI_SCOPED_ACCESS=1, resolves the caller's zone scope via osi-scope-helper (assertEnabledAccount + listScopeZoneUuids) and threads zoneUuids through to buildAnalysisCatalog/resolveAnalysisSeries/listAnalysisViews; adds osiLib to libs."
+      "delta": 1145,
+      "reason": "origin/main -> HEAD delta 1145. Wave 3 scoped-access port, commit W1-P1-analysis (adapted from AgroLink 3a416c3e6, \"feat(scope): make sensor export, actuations and analysis reads account-wide\"): analysis channels/series reads become account-wide, loading an explicit array of all non-deleted zone UUIDs instead of listScopeZoneUuids (owned-plus-granted); null stays reserved for the legacy owner-only flag-off path (osi-history-helper does not treat null as a wildcard). Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length). Supersedes prior entry: Wave 3 scoped-access port (AgroLink d49e1cd28, feat(api): scope shared analysis reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 7532 -> HEAD 8196 = +664. When OSI_SCOPED_ACCESS=1, resolves the caller's zone scope via osi-scope-helper (assertEnabledAccount + listScopeZoneUuids) and threads zoneUuids through to buildAnalysisCatalog/resolveAnalysisSeries/listAnalysisViews; adds osiLib to libs."
     },
     "83bb4a452dd9ae37": {
       "delta": 2423,
@@ -355,8 +355,8 @@
     }
   },
   "total_allowance": {
-    "delta": 228523,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit W1-P5, AgroLink 43cb2191b) 1301497 chars = 228523. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 228630,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit W1-P1-analysis, AgroLink 3a416c3e6) 1301604 chars = 228630. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
