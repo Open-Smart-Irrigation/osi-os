@@ -71,7 +71,7 @@ function mergeLiveWorkspaceViewport(
 
 export const HistoryDashboard: React.FC = () => {
   const { username, logout } = useAuth();
-  const { isAdmin, isScoped, isZoneVisible, loading: scopeLoading } = useScope();
+  const { isAdmin, loading: scopeLoading } = useScope();
   const { t } = useTranslation('history');
   const { t: tc } = useTranslation('common');
   const featureFlags = useFeatureFlags();
@@ -107,13 +107,8 @@ export const HistoryDashboard: React.FC = () => {
     },
   );
 
-  const availableZones = useMemo(
-    () => (zones ?? []).filter((zone) => {
-      const uuid = zone.zone_uuid ?? zone.zoneUuid;
-      return typeof uuid === 'string' ? isZoneVisible(uuid) : !isScoped;
-    }),
-    [isScoped, isZoneVisible, zones],
-  );
+  // Write-only scoping (W1): history reads are account-wide.
+  const availableZones = useMemo(() => zones ?? [], [zones]);
 
   useEffect(() => {
     if (
@@ -397,8 +392,7 @@ export const HistoryDashboard: React.FC = () => {
     }));
   };
 
-  const shellReady =
-    featureFlags.historyEnabled && !scopeLoading && availableZones.length > 0 && !zonesError;
+  const shellReady = featureFlags.historyEnabled && availableZones.length > 0 && !zonesError;
   const loadingMessage = featureFlags.historyEnabled && (scopeLoading || zonesLoading || cardsLoading)
     ? t('history.shell.loadingLocalCards')
     : null;
@@ -410,7 +404,7 @@ export const HistoryDashboard: React.FC = () => {
         activeTab="data"
         username={username}
         onLogout={logout}
-        showAdmin={isAdmin && isScoped && !scopeLoading}
+        showAdmin={isAdmin && !scopeLoading}
       />
 
       <main className="mx-auto max-w-[1600px] px-4 py-4 lg:py-8">
@@ -450,7 +444,7 @@ export const HistoryDashboard: React.FC = () => {
           </section>
         )}
 
-        {featureFlags.historyEnabled && !zonesError && availableZones.length === 0 && !zonesLoading && !scopeLoading && (
+        {featureFlags.historyEnabled && !zonesError && availableZones.length === 0 && !zonesLoading && (
           <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
             <h2 className="text-xl font-bold text-[var(--text)]">
               {t('history.shell.noZonesTitle')}
