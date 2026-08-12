@@ -5,10 +5,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   executeFunction,
+  facadeDb,
   loadNode,
   makeAuthHeader,
   seedScopedDb,
 } = require('./lib/scoped-access-harness');
+const journalApi = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal'
+);
 const scopeHelper = require(
   '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper'
 );
@@ -600,6 +604,38 @@ function seedAnalysisDevices(db) {
       ('A84041D000000002', 'Granted tree', 'DRAGINO_LSN50', 1, 2, 1, '2026-01-01', '2026-01-01');
   `);
 }
+
+test('W2: journal entries and plots are account-wide on the scoped-access matrix', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  const gatewayEui = '0016C001F1000001';
+  db.exec(`
+    UPDATE journal_plots SET gateway_device_eui = '${gatewayEui}';
+    INSERT INTO journal_plot_settings (plot_uuid, layout_code, context_json, updated_at, updated_by_principal_uuid, sync_version)
+      SELECT plot_uuid, 'default', '{}', '2026-01-01T00:00:00.000Z', owner_user_uuid, 1 FROM journal_plots;
+  `);
+  const viewerPrincipal = {
+    user_id: 3,
+    owner_user_uuid: 'u-view1',
+    author_principal_uuid: 'u-view1',
+    author_label: 'view1',
+    gateway_device_eui: gatewayEui,
+    origin: 'edge-ui',
+    scope: scopeHelper,
+    scoped: true,
+  };
+  try {
+    const { plots } = await journalApi.listPlots(facadeDb(db), viewerPrincipal);
+    assert.deepEqual(
+      plots.map((plot) => plot.plot_uuid).sort(),
+      ['p-1', 'p-2'],
+      'a viewer with no plot grant must read every plot on the gateway (W2)'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
 
 test('F4: history zone reads are account-wide for every enabled role', async () => {
   for (const [userId, username] of [[1, 'admin1'], [2, 'res1'], [3, 'view1']]) {

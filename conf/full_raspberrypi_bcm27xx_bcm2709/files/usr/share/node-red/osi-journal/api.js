@@ -499,24 +499,9 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   const params = readScope
     ? [principal.gateway_device_eui]
     : [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui];
-  if (readScope) {
-    // Entries created via the zone-only (no-plot) path (lifecycle.js resolvePlotContext,
-    // plotUuid == null) persist with a NULL plot_uuid. A `plot_uuid IN (...)` filter alone
-    // never matches NULL, so even the entry's own author/owner could not see it once
-    // scoped access was on -- mirror the cloud's JournalQueryService semantics
-    // (owner_user_uuid = ? OR plot_uuid IN (...)) with an explicit owner OR-branch.
-    const plotUuids = [...readScope.plotUuids];
-    if (!plotUuids.length) {
-      clauses.push('e.owner_user_uuid=?');
-      params.push(principal.owner_user_uuid);
-    } else {
-      clauses.push(
-        '(e.owner_user_uuid=? OR e.plot_uuid IN (' +
-          plotUuids.map(function() { return '?'; }).join(',') + '))'
-      );
-      params.push(principal.owner_user_uuid, ...plotUuids);
-    }
-  }
+  // Write-only scoping (W2): every enabled account on the gateway reads every
+  // journal entry, including plot-less (zone-only) entries. resolvedReadScope
+  // is retained for its disabled-account 403 (P1); its plotUuids are not read.
   if (filters.status !== 'all') {
     clauses.push('e.status=?');
     params.push(filters.status);
@@ -1368,17 +1353,15 @@ async function listPlotsLegacy(db, principal) {
 async function listPlots(db, principal) {
   const scope = await resolvedReadScope(db, principal);
   if (!scope) return listPlotsLegacy(db, principal);
-  const plotUuids = [...scope.plotUuids];
-  if (!plotUuids.length) return { plots: [] };
+  // Write-only scoping (W2): account-wide plot list.
   const rows = await dbAll(
     db,
     'SELECT p.*,s.layout_code,s.context_json,s.updated_at AS settings_updated_at,' +
       's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
     'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
-    'WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL AND p.plot_uuid IN (' +
-      plotUuids.map(function() { return '?'; }).join(',') + ') ' +
+    'WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
     'ORDER BY p.plot_code,p.plot_uuid',
-    [principal.gateway_device_eui, ...plotUuids]
+    [principal.gateway_device_eui]
   );
   return aggregatePlotRows(db, rows, principal);
 }
@@ -2156,20 +2139,12 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
 
 async function listPlotGroupsInSnapshot(db, principal) {
   const scope = await resolvedReadScope(db, principal);
-  const plotUuids = scope ? [...scope.plotUuids] : null;
   const rows = scope
     ? await dbAll(
       db,
-      'SELECT DISTINCT g.* FROM journal_plot_groups AS g ' +
-        'WHERE g.gateway_device_eui=? AND g.deleted_at IS NULL AND (' +
-          'g.owner_user_uuid=?' +
-          (plotUuids.length
-            ? ' OR EXISTS (SELECT 1 FROM journal_plot_group_members AS gm ' +
-                'WHERE gm.group_uuid=g.group_uuid AND gm.plot_uuid IN (' +
-                plotUuids.map(function() { return '?'; }).join(',') + '))'
-            : '') +
-        ') ORDER BY g.resolved_at IS NOT NULL,g.label,g.group_uuid',
-      [principal.gateway_device_eui, principal.owner_user_uuid, ...plotUuids]
+      'SELECT * FROM journal_plot_groups WHERE gateway_device_eui=? AND deleted_at IS NULL ' +
+        'ORDER BY resolved_at IS NOT NULL,label,group_uuid',
+      [principal.gateway_device_eui]
     )
     : await dbAll(
       db,
@@ -2180,24 +2155,17 @@ async function listPlotGroupsInSnapshot(db, principal) {
   if (!rows.length) return { plot_groups: [] };
   const ids = rows.map(function(row) { return row.group_uuid; });
   const memberships = scope
-    ? (plotUuids.length
-      ? await dbAll(
-        db,
-        'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
-          'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
-          'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
-          'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
-          'AND g.gateway_device_eui=? AND g.deleted_at IS NULL ' +
-          'AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
-          'AND m.plot_uuid IN (' + plotUuids.map(function() { return '?'; }).join(',') + ') ' +
-          'ORDER BY m.group_uuid,m.plot_uuid',
-        ids.concat([
-          principal.gateway_device_eui,
-          principal.gateway_device_eui,
-          ...plotUuids,
-        ])
-      )
-      : [])
+    ? await dbAll(
+      db,
+      'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
+        'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
+        'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+        'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
+        'AND g.gateway_device_eui=? AND g.deleted_at IS NULL ' +
+        'AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
+        'ORDER BY m.group_uuid,m.plot_uuid',
+      ids.concat([principal.gateway_device_eui, principal.gateway_device_eui])
+    )
     : await dbAll(
       db,
         'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
