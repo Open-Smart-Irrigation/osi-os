@@ -18,6 +18,8 @@ interface AppHeaderProps {
    * Settings and Account controls.
    */
   actions?: React.ReactNode;
+  /** Shows the Admin menu (Users / Grants) when the caller is a scoped admin. */
+  showAdmin?: boolean;
 }
 
 const HEADER_BUTTON =
@@ -38,6 +40,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   username,
   onLogout,
   actions,
+  showAdmin = false,
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const { pathname } = useLocation();
@@ -79,6 +82,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             {actions}
+
+            {showAdmin && (
+              <HeaderMenu
+                label={t('admin')}
+                className="w-[calc(50%-4px)] sm:w-auto"
+                triggerClassName="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] text-lg px-6 py-3"
+                items={[
+                  { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
+                  { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
+                ]}
+              />
+            )}
 
             <Link to="/settings" className={`w-[calc(50%-4px)] sm:w-auto ${HEADER_BUTTON}`}>
               {t('settings:entryPoint')}
