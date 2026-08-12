@@ -16,8 +16,11 @@ interface ScopeValue {
   role: ScopeProfile['role'];
   canWrite: boolean;
   isAdmin: boolean;
-  isZoneVisible: (zoneUuid: string) => boolean;
-  isPlotVisible: (plotUuid: string) => boolean;
+  /**
+   * Write-only scoping (W1): zone_uuids from /api/me is the caller's WRITE
+   * scope. Reads are account-wide, so there is no read-visibility predicate.
+   */
+  zoneWritable: (zoneUuid: string) => boolean;
   profile: ScopeProfile | null;
   error: string | null;
   retry: () => void;
@@ -29,8 +32,7 @@ const CLOSED_SCOPE: ScopeValue = {
   role: 'viewer',
   canWrite: false,
   isAdmin: false,
-  isZoneVisible: () => false,
-  isPlotVisible: () => false,
+  zoneWritable: () => false,
   profile: null,
   error: null,
   retry: () => {},
@@ -91,7 +93,6 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
     const isScoped = Boolean(profile?.features?.scoped_access);
     const role = profile?.role ?? 'viewer';
     const zoneUuids = profile?.zone_uuids ?? null;
-    const plotUuids = profile?.plot_uuids ?? null;
 
     return {
       loading,
@@ -99,10 +100,8 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
       role,
       canWrite: resolved && role !== 'viewer',
       isAdmin: resolved && role === 'admin',
-      isZoneVisible: (zoneUuid) =>
+      zoneWritable: (zoneUuid) =>
         resolved && (!isScoped || zoneUuids === null || zoneUuids.includes(zoneUuid)),
-      isPlotVisible: (plotUuid) =>
-        resolved && (!isScoped || plotUuids === null || plotUuids.includes(plotUuid)),
       profile,
       error,
       retry,

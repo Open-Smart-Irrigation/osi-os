@@ -7,8 +7,10 @@ interface CanWriteProps {
 }
 
 export function CanWrite({ zoneUuid, children }: CanWriteProps) {
-  const { loading, canWrite, isZoneVisible, isScoped } = useScope();
+  const { loading, canWrite, zoneWritable } = useScope();
   if (loading || !canWrite) return null;
-  if (isScoped && zoneUuid && !isZoneVisible(zoneUuid)) return null;
+  // Write-only scoping (W1): this is a WRITE-scope check, not a read-visibility
+  // check. zoneWritable already returns true when the flag is off.
+  if (zoneUuid && !zoneWritable(zoneUuid)) return null;
   return <>{children}</>;
 }
