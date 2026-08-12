@@ -2230,3 +2230,139 @@ test('P9: the command ACK payload carries the zone warning to the cloud', async 
     db.close();
   }
 });
+
+function seedUnassignedDeleteTarget(db) {
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('TYPO1', 'Mistyped LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+  `);
+}
+
+test('W10: a researcher can delete an unassigned device', async () => {
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const response = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 200);
+
+    // The route unclaims; it must NOT hard-delete and must NOT tombstone.
+    const row = db.prepare("SELECT user_id, irrigation_zone_id, deleted_at, sync_version FROM devices WHERE deveui='TYPO1'").get();
+    assert.ok(row, 'the row must survive as an unclaimed device, not be hard-deleted');
+    assert.equal(row.user_id, null);
+    assert.equal(row.irrigation_zone_id, null);
+    assert.equal(row.deleted_at, null, 'this route unclaims; it does not tombstone');
+    assert.ok(Number(row.sync_version) >= 2, 'P11: the row-wise unclaim UPDATE must bump sync_version');
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: a deleted device leaves the account-wide device list', async () => {
+  // The point of the pairing: the row SURVIVES in the table (delete unclaims,
+  // it does not tombstone) but must LEAVE the list every account now shares.
+  // Without Task 1's d.user_id IS NOT NULL lifecycle filter, delete would be a
+  // visual no-op in scoped mode.
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const before = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1 },
+      env: ENV,
+      db,
+    });
+    assert.ok(
+      db.prepare(before.result[0].topic).all().some((row) => row.deveui === 'TYPO1'),
+      'test setup: an admin must see the device before it is deleted'
+    );
+
+    scopeHelper._resetForTests();
+    const deleted = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(deleted.result[1].statusCode, 200);
+
+    scopeHelper._resetForTests();
+    const after = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1 },
+      env: ENV,
+      db,
+    });
+    assert.ok(
+      !db.prepare(after.result[0].topic).all().some((row) => row.deveui === 'TYPO1'),
+      'a researcher deleting the device must remove it from the admin list too'
+    );
+    assert.ok(
+      db.prepare("SELECT deveui FROM devices WHERE deveui='TYPO1'").get(),
+      'and the row must still exist: this is an unclaim, not a hard delete'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: a viewer still cannot delete an unassigned device', async () => {
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const response = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(3, 'view1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 403);
+    assert.equal(
+      db.prepare("SELECT user_id FROM devices WHERE deveui='TYPO1'").get().user_id,
+      1,
+      'a denied delete must not unclaim the device'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: the zone-assigned delete gate is unchanged', async () => {
+  const db = seedScopedDb();
+  try {
+    // admin1 has no write scope on zone 1, where DENDRO1 lives.
+    const foreign = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(1, 'admin1', 'DELETE', '/api/devices/DENDRO1', { deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreign.result[1].statusCode, 404);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,
+      1
+    );
+
+    scopeHelper._resetForTests();
+    const missing = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/NOPE', { deveui: 'NOPE' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(missing.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const inScope = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/DENDRO1', { deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(inScope.result[1].statusCode, 200, 'an in-scope zone-assigned delete still works');
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
