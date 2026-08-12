@@ -161,6 +161,56 @@ test('[reconcile] missing device: creates it, rereads exact assignment, creates 
   assert.equal(countCalls(client, 'updateKeys'), 0);
 });
 
+// ChirpStack >= 4.12 returns unset appKey/genAppKey as 32 zero hex chars
+// where older releases returned the empty string. Both encodings mean
+// "no key" and must verify identically.
+const ZERO_FILLED_UNSET_KEY = '00000000000000000000000000000000';
+
+test('[reconcile] missing device on a ChirpStack 4.12 store: zero-filled unset appKey/genAppKey still verifies', async () => {
+  const created = fakeDevice({ devEui: DEVEUI, name: 'Dendro 3', applicationId: APPLICATION_ID, deviceProfileId: PROFILE_ID, isDisabled: false });
+  const client = makeReconcileClient({
+    getDevice: sequence([null, created, created, created]),
+    createDevice: async () => {},
+    getKeys: sequence([null, fakeKeys({ nwkKey: NWK_KEY, appKey: ZERO_FILLED_UNSET_KEY, genAppKey: ZERO_FILLED_UNSET_KEY })]),
+    createKeys: async () => {},
+  });
+
+  const result = await client.ensureDeviceProvisioned(baseInput());
+
+  assert.equal(result.deviceAction, 'created');
+  assert.equal(result.keysAction, 'created');
+  assert.equal(result.keysVerified, true);
+  assert.equal(countCalls(client, 'deleteDevice'), 0);
+  assert.equal(countCalls(client, 'deleteKeys'), 0);
+});
+
+test('[reconcile] compensation fence on a ChirpStack 4.12 store: zero-filled unset keys still count as "ours", so rollback proceeds', async () => {
+  const created = fakeDevice({ devEui: DEVEUI, name: 'Dendro 3', applicationId: APPLICATION_ID, deviceProfileId: PROFILE_ID, isDisabled: false });
+  const client = makeReconcileClient({
+    // 1: initial miss, 2: post-create reread, 3: verify,
+    // 4: final verify fails with a transport error -> compensation,
+    // 5 (fence, via Promise.all with getKeys): still the desired device.
+    getDevice: sequence([null, created, created, fakeFailure('getDevice', 'UNAVAILABLE'), created]),
+    createDevice: async () => {},
+    deleteDevice: async () => {},
+    getKeys: sequence([null, fakeKeys({ nwkKey: NWK_KEY, appKey: ZERO_FILLED_UNSET_KEY, genAppKey: ZERO_FILLED_UNSET_KEY })]),
+    createKeys: async () => {},
+    deleteKeys: async () => {},
+  });
+
+  await assert.rejects(
+    client.ensureDeviceProvisioned(baseInput()),
+    (error) => {
+      assert.equal(error.step, 'getDevice');
+      assert.equal(error.code, 'UNAVAILABLE');
+      assert.notEqual(error.code, 'RECONCILIATION_REQUIRED', 'zero-filled unset keys are not foreign drift');
+      return true;
+    }
+  );
+  assert.equal(countCalls(client, 'deleteDevice'), 1, 'the fence must hold and roll the created device back');
+  assert.equal(countCalls(client, 'deleteKeys'), 1, 'the fence must hold and roll the created keys back');
+});
+
 test('[reconcile] exact existing device: no create/update, keys unchanged, reports unchanged', async () => {
   const existing = fakeDevice({ devEui: DEVEUI, name: 'Dendro 3', applicationId: APPLICATION_ID, deviceProfileId: PROFILE_ID, isDisabled: false });
   const client = makeReconcileClient({
