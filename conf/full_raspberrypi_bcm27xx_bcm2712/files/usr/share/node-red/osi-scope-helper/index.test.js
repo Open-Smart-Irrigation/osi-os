@@ -71,38 +71,29 @@ test('cache reuses scope until invalidated', async () => {
   assert.equal(reads, 2);
 });
 
-test('fresh zone assertion bypasses the read cache', async () => {
-  let grantReads = 0;
-  const db = fakeDb({
-    get: () => ({ id: 7, username: 'user', role: 'researcher', disabled_at: null }),
-    all: (sql) => {
-      if (sql.includes('user_zone_assignments')) {
-        grantReads += 1;
-        return [{ zone_uuid: 'z1' }];
-      }
-      return [];
-    },
-  });
-  await scope.resolveScope(db, 'u1', { scopedMode: true });
-  await scope.assertZoneAccess(db, 'u1', 'z1', { scopedMode: true });
-  assert.equal(grantReads, 1);
-  await scope.assertFreshZoneAccess(db, 'u1', 'z1', { scopedMode: true });
-  assert.equal(grantReads, 2);
-});
-
-test('resource and role denials carry stable HTTP status codes', async () => {
-  const db = fakeDb({
-    get: () => ({ id: 7, username: 'user', role: 'viewer', disabled_at: null }),
-    all: () => [],
-  });
-  await assert.rejects(
-    () => scope.assertZoneAccess(db, 'u1', 'z-foreign', { scopedMode: true }),
-    (error) => error.status === 404 && error.statusCode === 404
-  );
-  await assert.rejects(
-    () => scope.assertRole(db, 'u1', 'admin', { scopedMode: true }),
-    (error) => error.status === 403 && error.statusCode === 403
-  );
+test('the read-filter API is retired: write-only scoping exports no read predicate', () => {
+  for (const name of [
+    'assertZoneAccess',
+    'assertPlotAccess',
+    'assertDeviceAccess',
+    'listScopeZoneUuids',
+    'filterZoneUuids',
+  ]) {
+    assert.equal(scope[name], undefined, `${name} must not be exported (W1)`);
+  }
+  for (const name of [
+    'assertEnabledAccount',
+    'assertFreshZoneAccess',
+    'assertFreshPlotAccess',
+    'assertFreshDeviceAccess',
+    'assertFreshRole',
+    'assertRole',
+    'authorizeAdminRead',
+    'canMutate',
+    'resolveZoneUuidById',
+  ]) {
+    assert.equal(typeof scope[name], 'function', `${name} must survive`);
+  }
 });
 
 test('disabled account fails closed on fresh paths', async () => {
@@ -150,78 +141,6 @@ test('resolveZoneUuidById maps numeric id to uuid; null when missing', async () 
   assert.equal(await scope.resolveZoneUuidById(db, 3), 'z1');
   const missingDb = fakeDb({ get: () => undefined });
   assert.equal(await scope.resolveZoneUuidById(missingDb, 99), null);
-});
-
-test('assertDeviceAccess: weather-class passes any enabled user; zone device needs scope', async () => {
-  const makeDb = (device) => fakeDb({
-    get: (sql) => {
-      if (sql.includes('FROM devices')) return device;
-      if (sql.includes('FROM users')) {
-        return {
-          id: 7,
-          username: 'user',
-          role: 'researcher',
-          disabled_at: null,
-          user_uuid: 'u1',
-        };
-      }
-      return undefined;
-    },
-    all: () => [],
-  });
-  await scope.assertDeviceAccess(
-    makeDb({ deveui: 'W1', type_id: 'SENSECAP_S2120', zone_uuid: 'z-foreign' }),
-    'u1',
-    'W1',
-    { scopedMode: true }
-  );
-  await scope.assertDeviceAccess(
-    makeDb({ deveui: 'W2', type_id: 'AQUASCOPE_LORAIN', zone_uuid: null }),
-    'u1',
-    'W2',
-    { scopedMode: true }
-  );
-  await assert.rejects(
-    () => scope.assertDeviceAccess(
-      makeDb({ deveui: 'D1', type_id: 'DRAGINO_LSN50', zone_uuid: 'z-foreign' }),
-      'u1',
-      'D1',
-      { scopedMode: true }
-    ),
-    (error) => error.status === 404
-  );
-});
-
-test('assertDeviceAccess: unknown device is 404, not 403', async () => {
-  const db = fakeDb({ get: () => undefined });
-  await assert.rejects(
-    () => scope.assertDeviceAccess(db, 'u1', 'NOPE', { scopedMode: true }),
-    (error) => error.status === 404
-  );
-});
-
-test('listScopeZoneUuids: wildcard returns null (no filter), scoped returns array', async () => {
-  const unscopedDb = fakeDb({});
-  assert.equal(
-    await scope.listScopeZoneUuids(unscopedDb, 'u1', { scopedMode: false }),
-    null
-  );
-  const scopedDb = fakeDb({
-    get: () => ({
-      id: 7,
-      username: 'user',
-      role: 'researcher',
-      disabled_at: null,
-      user_uuid: 'u1',
-    }),
-    all: (sql) => sql.includes('user_zone_assignments')
-      ? [{ zone_uuid: 'z1' }]
-      : [{ zone_uuid: 'z0' }],
-  });
-  assert.deepEqual(
-    (await scope.listScopeZoneUuids(scopedDb, 'u1', { scopedMode: true })).sort(),
-    ['z0', 'z1']
-  );
 });
 
 test('verifyBearer accepts the edge two-part HMAC token and rejects forged tokens', () => {
