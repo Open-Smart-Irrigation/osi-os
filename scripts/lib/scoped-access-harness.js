@@ -141,6 +141,7 @@ async function executeFunction(node, options) {
     globals = {},
     db,
     osiLibModules = {},
+    libOverrides = {},
   } = options;
   const errors = [];
   const warnings = [];
@@ -191,6 +192,7 @@ async function executeFunction(node, options) {
     osiHistory: require(path.join(NODE_RED_MODULES, 'osi-history-helper', 'index.js')),
     HR: require(path.join(NODE_RED_MODULES, 'osi-history-router', 'index.js')),
   };
+  Object.assign(providedLibs, libOverrides);
   const names = Object.keys(sandbox);
   const values = Object.values(sandbox);
   for (const lib of node.libs || []) {

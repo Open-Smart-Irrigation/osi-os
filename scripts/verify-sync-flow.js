@@ -4218,13 +4218,17 @@ expectExcludesById('cs-reg-cloud-fn', 'grpcStatus', 'the retired numeric grpcSta
 expectExcludesById('cs-reg-cloud-fn', 'error.details', 'the retired error.details field');
 expectIncludesById('cs-reg-cloud-fn', "typeof provisioned.compensate === 'function'", 'uses guarded helper compensation after any post-provisioning local save failure');
 expectIncludesById('cs-reg-cloud-fn', 'const code = error.code || null;', 'reads the new normalized error.code instead of numeric grpcStatus');
-expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true }), null];", 'preserves the exact success ACK shape (commit/ACK path unchanged)');
+expectIncludesById('cs-reg-cloud-fn', "SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1", 'resolves the cloud-sent zoneUuid to an edge-local zone id (W5/P9)');
+expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns through the row-wise precondition-guarded UPDATE (P11/W4)');
+expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true, zoneAssignedId: zoneId, zoneWarning: zoneWarning }), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
 expectIncludesById('cs-reg-cloud-fn', '} finally {\n  if (client) {\n    try {\n      client.close();\n    } catch (_) {\n      node.warn(\'CS Register (cloud cmd): ChirpStack client close threw unexpectedly\');\n    }\n  }\n  try { await close(); } catch (_) {}\n}\n})();', 'closes the ChirpStack client and the local DB in a single finally on every REGISTER_DEVICE path, surfacing an unexpected close() throw via node.warn');
 
 // cs-reg-cloud-ack-fn (Build Special Command ACK) — grpcStatus -> error.code,
 // nine-field lease-token-bound cloud ACK contract otherwise byte-stable.
 expectIncludesById('cs-reg-cloud-ack-fn', 'if (ack.code) payload.code = String(ack.code);', 'forwards the normalized error.code instead of the retired grpcStatus');
 expectExcludesById('cs-reg-cloud-ack-fn', 'grpcStatus', 'the retired grpcStatus field');
+expectIncludesById('cs-reg-cloud-ack-fn', 'payload.zoneAssignedId = ack.zoneAssignedId != null ? Number(ack.zoneAssignedId) : null;', 'forwards the P9 zone assignment outcome');
+expectIncludesById('cs-reg-cloud-ack-fn', 'payload.zoneWarning = ack.zoneWarning ? String(ack.zoneWarning) : null;', 'forwards the P9 zone resolution warning');
 
 // post-devices-response (Format Response) — forwards the reconciliation
 // result opaquely; never hardcodes the retired deviceCreated field.

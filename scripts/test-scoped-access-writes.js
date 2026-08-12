@@ -2093,3 +2093,140 @@ test('E6: an unrecognized role fails closed on every mutation gate while reads s
     db.close();
   }
 });
+
+const REGISTER_ENV = {
+  AUTH_TOKEN_SECRET: AUTH_SECRET,
+  OSI_SCOPED_ACCESS: '1',
+  DEVICE_EUI: '0016C001F1000001',
+  CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
+};
+
+const REGISTER_APPKEY = 'AABBCCDDEEFF00112233445566778899';
+
+function fakeChirpstackLib() {
+  return {
+    createProvisioningClientFromEnv: () => ({
+      ensureDeviceProvisioned: async (registration) => ({
+        devEui: registration.devEui,
+        deviceAction: 'created',
+        keysAction: 'created',
+        keysVerified: true,
+      }),
+      close: () => {},
+    }),
+  };
+}
+
+function registerCommand(devEui, extras = {}) {
+  return {
+    payload: {
+      commandType: 'REGISTER_DEVICE',
+      commandId: 'cmd-' + devEui,
+      params: Object.assign({
+        devEui,
+        name: 'Cloud sensor ' + devEui,
+        deviceType: 'DRAGINO_LSN50',
+        appKey: REGISTER_APPKEY,
+      }, extras),
+    },
+  };
+}
+
+async function applyRegister(db, devEui, extras) {
+  return executeFunction(loadNode('cs-reg-cloud-fn'), {
+    msg: registerCommand(devEui, extras),
+    env: REGISTER_ENV,
+    db,
+    libOverrides: { chirpstack: fakeChirpstackLib() },
+  });
+}
+
+test('P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registration', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegister(db, 'CLOUDREG1', { zoneUuid: 'z-1' });
+
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(ack.zoneAssignedId, 1);
+    assert.equal(ack.zoneWarning, null);
+
+    const row = db.prepare("SELECT irrigation_zone_id, sync_version FROM devices WHERE deveui='CLOUDREG1'").get();
+    assert.equal(row.irrigation_zone_id, 1, 'the device must land in the resolved zone');
+    assert.ok(Number(row.sync_version) >= 2, 'P11: the row-wise assignment UPDATE must bump sync_version');
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: an unknown or deleted zoneUuid registers unassigned with an ACK warning', async () => {
+  const db = seedScopedDb();
+  db.prepare("UPDATE irrigation_zones SET deleted_at = '2026-01-01T00:00:00.000Z' WHERE id = 2").run();
+  try {
+    const unknown = await applyRegister(db, 'CLOUDREG2', { zoneUuid: 'z-does-not-exist' });
+    assert.equal(unknown.result[0].specialAck.result, 'SUCCESS', 'an unknown zone must not fail the registration');
+    assert.equal(unknown.result[0].specialAck.zoneAssignedId, null);
+    assert.match(unknown.result[0].specialAck.zoneWarning, /z-does-not-exist/);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='CLOUDREG2'").get().irrigation_zone_id,
+      null,
+    );
+
+    const deleted = await applyRegister(db, 'CLOUDREG3', { zoneUuid: 'z-2' });
+    assert.equal(deleted.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(deleted.result[0].specialAck.zoneAssignedId, null);
+    assert.match(deleted.result[0].specialAck.zoneWarning, /z-2/);
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: REGISTER_DEVICE without zoneUuid keeps registering unassigned', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegister(db, 'CLOUDREG4');
+    assert.equal(response.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(response.result[0].specialAck.zoneAssignedId, null);
+    assert.equal(response.result[0].specialAck.zoneWarning, null);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='CLOUDREG4'").get().irrigation_zone_id,
+      null,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W4: a REGISTER_DEVICE replay never pulls a device out of the zone it already sits in', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegister(db, 'DENDRO1', { zoneUuid: 'z-2' });
+    assert.equal(response.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,
+      1,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: the command ACK payload carries the zone warning to the cloud', async () => {
+  const db = seedScopedDb();
+  try {
+    const applied = await applyRegister(db, 'CLOUDREG5', { zoneUuid: 'z-nope' });
+    const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: applied.result[0],
+      env: REGISTER_ENV,
+      db,
+    });
+    const payload = JSON.parse(ackMessage.result.payload);
+    assert.equal(payload.commandType, 'REGISTER_DEVICE');
+    assert.equal(payload.result, 'SUCCESS');
+    assert.equal(payload.zoneAssignedId, null);
+    assert.match(payload.zoneWarning, /z-nope/);
+  } finally {
+    db.close();
+  }
+});
