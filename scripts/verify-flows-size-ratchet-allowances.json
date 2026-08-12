@@ -154,8 +154,8 @@
       "reason": "Device API auth/status repair plus AgroLink Phase B /api/me auth-source registration (+17)."
     },
     "dendro-raw-fn": {
-      "max_chars": 6365,
-      "reason": "AgroLink Phase B scoped raw dendrometer reads; immutable token subjects resolve the scope user by id plus username and reject a missing subject before device authorization (+146)."
+      "max_chars": 6515,
+      "reason": "AgroLink Phase B scoped raw dendrometer reads; immutable token subjects resolve the scope user by id plus username and reject a missing subject before device authorization (+146); write-only scoping Task 3 replaces device authorization with the enabled-account gate (+150)."
     },
     "auth-register-func": {
       "max_chars": 895,
@@ -454,8 +454,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "dendro-history-fn": {
-      "max_chars": 5844,
-      "reason": "AgroLink Phase B scoped dendrometer history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
+      "max_chars": 5988,
+      "reason": "AgroLink Phase B scoped dendrometer history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146); write-only scoping Task 3 replaces device authorization with the enabled-account gate (+144)."
     },
     "dendro-history-format": {
       "max_chars": 520,
@@ -486,16 +486,16 @@
       "reason": "Temperature enable response includes the persisted sync_version returned by the update (+137)."
     },
     "sensor-history-fn": {
-      "max_chars": 5992,
-      "reason": "AgroLink Phase B scoped sensor history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
+      "max_chars": 6136,
+      "reason": "AgroLink Phase B scoped sensor history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146); write-only scoping Task 3 replaces device authorization with the enabled-account gate (+144)."
     },
     "sensor-history-format": {
       "max_chars": 161,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "rain-history-fn": {
-      "max_chars": 6001,
-      "reason": "AgroLink Phase B scoped rain history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
+      "max_chars": 6145,
+      "reason": "AgroLink Phase B scoped rain history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146); write-only scoping Task 3 replaces device authorization with the enabled-account gate (+144)."
     },
     "sys-reboot-fn": {
       "max_chars": 3117,
@@ -558,8 +558,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "dendro-daily-fn": {
-      "max_chars": 6307,
-      "reason": "AgroLink Phase B scoped daily dendrometer reads; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
+      "max_chars": 6457,
+      "reason": "AgroLink Phase B scoped daily dendrometer reads; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146); write-only scoping Task 3 replaces device authorization with the enabled-account gate (+150)."
     },
     "dendro-zone-rec-fn": {
       "max_chars": 5666,
@@ -794,8 +794,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "s2120-zones-get-fn": {
-      "max_chars": 4307,
-      "reason": "AgroLink Phase B: shared-weather zone-assignment reads and visible catches (+927)."
+      "max_chars": 4378,
+      "reason": "AgroLink Phase B: shared-weather zone-assignment reads and visible catches (+927); write-only scoping Task 3 uses the enabled-account gate for account-wide device reads (+71)."
     },
     "s2120-zones-put-auth-fn": {
       "max_chars": 5321,
@@ -886,8 +886,8 @@
       "reason": "AgroLink Phase C fresh device authorization before queue flush, with granted access and viewer rejection. AgroLink review E6: replaced the actorScope.role==='viewer' denylist with an explicit scope.canMutate() allowlist so an unrecognized/corrupted role fails closed instead of being treated as write-capable (+15)."
     },
     "strega-today-liters-fn": {
-      "max_chars": 4669,
-      "reason": "AgroLink Phase B scoped today-liters read; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+141)."
+      "max_chars": 4813,
+      "reason": "AgroLink Phase B scoped today-liters read; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+141); write-only scoping Task 3 replaces device authorization with the enabled-account gate (+144)."
     },
     "a8267d5391e7bad0": {
       "max_chars": 1050,
@@ -1095,7 +1095,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1279068,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411); AgroLink review R2 (post-E3-review) adds the scheduler's message-level system-actuation marker and its edge-side exemption (+1041 write-strega-expectation, +48 scheduler); AgroLink review R4 (post-E3-review) queues a terminal scope_denied ack when an actor is present but denied (+1682); AgroLink review X1 (post-R4-review) rethrows non-statusCode scope-helper errors instead of acking them as denials (+692); AgroLink review X2 (post-R-wave-review) closes the GUI STREGA advanced chain's actuation gap: scope+actor gate in put-strega-timed-auth-fn (+2690) and actor propagation onto every actuatorMsg in put-strega-advanced-authorize-fn (+630); Task 6 adds the isolated bounded Journal V2 replication worker and its success/error status paths (+2536), then adds the identity-transition fail-closed check (+513); write-only scoping Task 1 updates list-read node ceilings and total embedded flow size (+327); Task 2 makes zone environment and recommendation reads account-wide (+275 total)."
+    "max_total": 1280015,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411); AgroLink review R2 (post-E3-review) adds the scheduler's message-level system-actuation marker and its edge-side exemption (+1041 write-strega-expectation, +48 scheduler); AgroLink review R4 (post-E3-review) queues a terminal scope_denied ack when an actor is present but denied (+1682); AgroLink review X1 (post-R4-review) rethrows non-statusCode scope-helper errors instead of acking them as denials (+692); AgroLink review X2 (post-R-wave-review) closes the GUI STREGA advanced chain's actuation gap: scope+actor gate in put-strega-timed-auth-fn (+2690) and actor propagation onto every actuatorMsg in put-strega-advanced-authorize-fn (+630); Task 6 adds the isolated bounded Journal V2 replication worker and its success/error status paths (+2536), then adds the identity-transition fail-closed check (+513); write-only scoping Task 1 updates list-read node ceilings and total embedded flow size (+327); Task 2 makes zone environment and recommendation reads account-wide (+275 total); Task 3 changes all seven device-detail reads to the enabled-account gate (+947 total)."
   }
 }

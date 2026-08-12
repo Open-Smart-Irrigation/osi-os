@@ -339,55 +339,125 @@ test('P1: a disabled account is denied on both list reads', async () => {
   }
 });
 
-test('F3: device reads allow grants and shared weather, and hide foreign devices', async () => {
-  const grantedDb = seedScopedDb();
-  try {
-    const granted = await executeFunction(loadNode('dendro-daily-fn'), {
-      msg: requestFor(2, 'res1', { deveui: 'DENDRO2' }),
-      env: ENV,
-      db: grantedDb,
-    });
-    assert.equal(granted.result && granted.result.statusCode, 200);
-  } finally {
-    grantedDb.close();
-  }
-
-  const foreignDb = seedScopedDb();
-  try {
-    const foreign = await executeFunction(loadNode('dendro-daily-fn'), {
-      msg: requestFor(3, 'view1', { deveui: 'DENDRO2' }),
-      env: ENV,
-      db: foreignDb,
-    });
-    assert.equal(foreign.result && foreign.result.statusCode, 404);
-  } finally {
-    foreignDb.close();
-  }
-
-  const weatherDb = seedScopedDb();
-  try {
-    const weather = await executeFunction(loadNode('s2120-zones-get-fn'), {
-      msg: requestFor(3, 'view1', { deveui: 'WX1' }),
-      env: ENV,
-      db: weatherDb,
-    });
-    assert.equal(weather.result && weather.result.statusCode, 200);
-  } finally {
-    weatherDb.close();
+test('F3: every device-detail read is account-wide for every enabled role', async () => {
+  const cases = [
+    ['dendro daily', 'dendro-daily-fn', { deveui: 'DENDRO2' }],
+    ['dendro raw', 'dendro-raw-fn', { deveui: 'DENDRO2' }],
+    ['dendro history', 'dendro-history-fn', { deveui: 'DENDRO2' }],
+    ['rain history', 'rain-history-fn', { deveui: 'DENDRO2' }],
+    ['sensor history', 'sensor-history-fn', { deveui: 'DENDRO2' }],
+    ['today liters', 'strega-today-liters-fn', { deveui: 'VALVE1' }],
+    ['zone assignments', 's2120-zones-get-fn', { deveui: 'WX1' }],
+  ];
+  for (const [label, nodeId, params] of cases) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    try {
+      const msg = requestFor(3, 'view1', params);
+      if (nodeId === 'sensor-history-fn') msg.req.query.field = 'swt_1';
+      const response = await executeFunction(loadNode(nodeId), {
+        msg,
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        responseMessage(response.result).statusCode,
+        200,
+        `${label}: a viewer must read a device outside its write scope`
+      );
+    } finally {
+      db.close();
+    }
   }
 });
 
-test('F3: scoped today-liters hides a foreign valve', async () => {
+test('P5: an unassigned device is readable, not a 404', async () => {
+  for (const [label, nodeId] of [
+    ['sensor history', 'sensor-history-fn'],
+    ['dendro daily', 'dendro-daily-fn'],
+    ['rain history', 'rain-history-fn'],
+  ]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    db.exec(`
+      INSERT INTO devices (
+        deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+      ) VALUES
+        ('UNASSIGNED1', 'Fresh LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+    `);
+    try {
+      const msg = requestFor(2, 'res1', { deveui: 'UNASSIGNED1' });
+      if (nodeId === 'sensor-history-fn') msg.req.query.field = 'swt_1';
+      const response = await executeFunction(loadNode(nodeId), {
+        msg,
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        responseMessage(response.result).statusCode,
+        200,
+        `${label}: a device with no zone must not 404 (P5)`
+      );
+    } finally {
+      db.close();
+    }
+  }
+  scopeHelper._resetForTests();
+});
+
+test('P1: device-detail reads still refuse a request with no bearer token', async () => {
   const db = seedScopedDb();
   try {
-    const response = await executeFunction(loadNode('strega-today-liters-fn'), {
-      msg: requestFor(1, 'admin1', { deveui: 'VALVE1' }),
-      env: ENV,
-      db,
-    });
-    assert.equal(response.result && response.result.statusCode, 404);
+    for (const [label, nodeId, params] of [
+      ['sensor history', 'sensor-history-fn', { deveui: 'DENDRO1' }],
+      ['dendro daily', 'dendro-daily-fn', { deveui: 'DENDRO1' }],
+      ['today liters', 'strega-today-liters-fn', { deveui: 'VALVE1' }],
+      ['zone assignments', 's2120-zones-get-fn', { deveui: 'WX1' }],
+    ]) {
+      const response = await executeFunction(loadNode(nodeId), {
+        msg: { req: { headers: {}, params, query: {} } },
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        responseMessage(response.result).statusCode,
+        401,
+        `${label}: an unauthenticated read must still be 401`
+      );
+    }
   } finally {
     db.close();
+  }
+});
+
+test('P1: device-detail reads still refuse a disabled account', async () => {
+  const db = seedScopedDb();
+  db.prepare(
+    "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'"
+  ).run();
+  scopeHelper._resetForTests();
+  try {
+    for (const [label, nodeId, params] of [
+      ['sensor history', 'sensor-history-fn', { deveui: 'DENDRO1' }],
+      ['today liters', 'strega-today-liters-fn', { deveui: 'VALVE1' }],
+      ['zone assignments', 's2120-zones-get-fn', { deveui: 'WX1' }],
+    ]) {
+      const msg = requestFor(3, 'view1', params);
+      if (nodeId === 'sensor-history-fn') msg.req.query.field = 'swt_1';
+      const response = await executeFunction(loadNode(nodeId), {
+        msg,
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        responseMessage(response.result).statusCode,
+        403,
+        `${label}: a disabled account must be refused`
+      );
+    }
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
   }
 });
 
