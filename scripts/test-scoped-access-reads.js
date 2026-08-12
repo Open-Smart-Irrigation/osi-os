@@ -525,45 +525,31 @@ function seedAnalysisDevices(db) {
   `);
 }
 
-test('F4: history zone reads allow owned and granted zones but hide foreign zones', async () => {
-  const ownDb = seedScopedDb();
-  try {
-    const own = await executeFunction(loadNode('history-api-router-fn'), {
-      msg: historyRequest(2, 'res1', 'GET', '/api/history/zones/1/cards', { zoneId: '1' }),
-      env: ENV,
-      db: ownDb,
-    });
-    assert.equal(own.result && own.result.statusCode, 200);
-  } finally {
-    ownDb.close();
+test('F4: history zone reads are account-wide for every enabled role', async () => {
+  for (const [userId, username] of [[1, 'admin1'], [2, 'res1'], [3, 'view1']]) {
+    for (const zoneId of ['1', '2']) {
+      scopeHelper._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const response = await executeFunction(loadNode('history-api-router-fn'), {
+          msg: historyRequest(userId, username, 'GET', `/api/history/zones/${zoneId}/cards`, { zoneId }),
+          env: ENV,
+          db,
+        });
+        assert.equal(
+          response.result && response.result.statusCode,
+          200,
+          `${username} must read zone ${zoneId} history`
+        );
+      } finally {
+        db.close();
+      }
+    }
   }
-
-  const grantedDb = seedScopedDb();
-  try {
-    const granted = await executeFunction(loadNode('history-api-router-fn'), {
-      msg: historyRequest(2, 'res1', 'GET', '/api/history/zones/2/cards', { zoneId: '2' }),
-      env: ENV,
-      db: grantedDb,
-    });
-    assert.equal(granted.result && granted.result.statusCode, 200);
-  } finally {
-    grantedDb.close();
-  }
-
-  const foreignDb = seedScopedDb();
-  try {
-    const foreign = await executeFunction(loadNode('history-api-router-fn'), {
-      msg: historyRequest(3, 'view1', 'GET', '/api/history/zones/2/cards', { zoneId: '2' }),
-      env: ENV,
-      db: foreignDb,
-    });
-    assert.equal(foreign.result && foreign.result.statusCode, 404);
-  } finally {
-    foreignDb.close();
-  }
+  scopeHelper._resetForTests();
 });
 
-test('F4: account-wide history export contains only visible zones', async () => {
+test('F4: the account-wide export covers every zone on the gateway', async () => {
   scopeHelper._resetForTests();
   const db = seedScopedDb();
   db.exec(`
@@ -592,10 +578,45 @@ test('F4: account-wide history export contains only visible zones', async () => 
 
     assert.equal(response.result && response.result.statusCode, 200);
     assert.match(response.result.payload, /Z One/);
-    assert.doesNotMatch(response.result.payload, /Z Two/);
+    assert.match(response.result.payload, /Z Two/);
   } finally {
     db.close();
   }
+});
+
+test('P1: history routes refuse a disabled account, reads and preference writes alike', async () => {
+  for (const [label, msgFactory] of [
+    ['zone cards', () => historyRequest(3, 'view1', 'GET', '/api/history/zones/1/cards', { zoneId: '1' })],
+    ['card opened', () => historyRequest(
+      3,
+      'view1',
+      'POST',
+      '/api/history/zones/1/cards/some-card/opened',
+      { zoneId: '1', cardId: 'some-card' },
+      {}
+    )],
+  ]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    db.prepare(
+      "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'"
+    ).run();
+    try {
+      const response = await executeFunction(loadNode('history-api-router-fn'), {
+        msg: msgFactory(),
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        response.result && response.result.statusCode,
+        403,
+        `${label}: a disabled account must be refused`
+      );
+    } finally {
+      db.close();
+    }
+  }
+  scopeHelper._resetForTests();
 });
 
 test('F4b: gateway history is admin-only while scoped access is enabled', async () => {

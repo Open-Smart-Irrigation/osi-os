@@ -201,7 +201,8 @@ function verifyHistoryRouterImplementation(flows, failures, extractedModuleSourc
   assertContains(failures, adapterSource, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
   assertContains(failures, adapterSource, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
   assertContains(failures, adapterSource, 'osiHistory.buildAllZonesExportCsv', 'helper-owned account-wide CSV export');
-  assertContains(failures, adapterSource, 'listScopeZoneUuids', 'account-wide CSV export zone-scope resolver');
+  assertContains(failures, adapterSource, "assertRole(db, user.user_uuid, 'admin', { scopedMode: true })", 'gateway history stays admin-only (P2)');
+  assertContains(failures, adapterSource, 'SELECT id FROM irrigation_zones WHERE deleted_at IS NULL ORDER BY id ASC', 'account-wide CSV export covers every gateway zone (W1)');
   assertContains(failures, adapterSource, "query.scope !== 'allZones'", 'account-wide CSV export scope validation');
   assertContains(failures, adapterSource, 'channels', 'zone CSV export forwards channels query param');
   assertContains(failures, adapterSource, 'site:', 'zone CSV export forwards gateway site id');
