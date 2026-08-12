@@ -29,6 +29,7 @@ export const ReadOnlyNotice: React.FC<ReadOnlyNoticeProps> = ({ scope, className
   return (
     <div
       role="status"
+      aria-live="polite"
       className={`rounded-lg border border-[var(--info-border)] bg-[var(--info-bg)] px-4 py-3 text-sm text-[var(--info-text)]${className ? ` ${className}` : ''}`}
     >
       {t(`readOnly.${scope}`)}

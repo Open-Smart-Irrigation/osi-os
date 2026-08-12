@@ -55,6 +55,7 @@ vi.mock('react-i18next', () => ({
         soilSensors: 'Soil Sensors',
         smartValves: 'Smart Valves',
         autoRefresh: 'Auto-refreshing',
+        'readOnly.farm': 'You have read-only access to this farm.',
       };
       return map[key] ?? key;
     },
@@ -208,5 +209,31 @@ describe('FarmingDashboard header wiring', () => {
 
     await screen.findByTestId('dashboard-header-marker');
     expect(headerProps[headerProps.length - 1]?.showAdmin).toBe(true);
+  });
+});
+
+// Maintainer decision 3(c) (S6): eighteen inline sites hid write controls with
+// no explanation. FarmingDashboard now mounts ReadOnlyNotice ONCE, beneath the
+// header, rather than explaining each of IrrigationZoneCard's hidden/disabled
+// controls individually — a second notice next to any control would be a
+// scope breach of this decision.
+describe('FarmingDashboard read-only notice (maintainer decision 3c)', () => {
+  it('explains read-only access exactly once for a viewer, not once per hidden control', async () => {
+    scopeState.canWrite = false;
+
+    renderDashboard();
+
+    expect(await screen.findByText('Welcome to your farm!')).toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByText('You have read-only access to this farm.')).toBeInTheDocument();
+  });
+
+  it('shows no read-only notice for a writer', async () => {
+    scopeState.canWrite = true;
+
+    renderDashboard();
+
+    expect(await screen.findByText('Welcome to your farm!')).toBeInTheDocument();
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
   });
 });
