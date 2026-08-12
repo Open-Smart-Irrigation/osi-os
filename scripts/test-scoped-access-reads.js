@@ -133,61 +133,74 @@ test('immutable token subject blocks username reuse in sensor export and history
   }
 });
 
-test('F2: a researcher can read a granted zone environment summary', async () => {
+test('F2: every enabled role reads any zone environment summary', async () => {
   const node = loadNode('zone-env-fn');
-  const db = seedScopedDb();
-  try {
-    const response = await executeFunction(node, {
-      msg: requestFor(2, 'res1', { zone_id: '2' }),
-      env: ENV,
-      db,
-    });
-    assert.equal(response.result && response.result.statusCode, 200);
-  } finally {
-    db.close();
+  for (const [userId, username] of [[1, 'admin1'], [2, 'res1'], [3, 'view1']]) {
+    for (const zoneId of ['1', '2']) {
+      scopeHelper._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const response = await executeFunction(node, {
+          msg: requestFor(userId, username, { zone_id: zoneId }),
+          env: ENV,
+          db,
+        });
+        assert.equal(
+          response.result && response.result.statusCode,
+          200,
+          `${username} must read zone ${zoneId}`
+        );
+      } finally {
+        db.close();
+      }
+    }
   }
 });
 
-test('F2: a viewer receives 404 for a foreign zone environment summary', async () => {
-  const node = loadNode('zone-env-fn');
+test('F2: recommendations are account-wide and a disabled account is refused', async () => {
+  const node = loadNode('dendro-zone-rec-fn');
   const db = seedScopedDb();
   try {
-    const response = await executeFunction(node, {
+    const viewer = await executeFunction(node, {
       msg: requestFor(3, 'view1', { zone_id: '2' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result && viewer.result.statusCode, 200);
+    assert.equal(viewer.result.payload.length, 1);
+  } finally {
+    db.close();
+  }
+
+  scopeHelper._resetForTests();
+  const disabledDb = seedScopedDb();
+  disabledDb.prepare(
+    "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'"
+  ).run();
+  try {
+    const disabled = await executeFunction(node, {
+      msg: requestFor(3, 'view1', { zone_id: '2' }),
+      env: ENV,
+      db: disabledDb,
+    });
+    assert.equal(disabled.result && disabled.result.statusCode, 403);
+  } finally {
+    disabledDb.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F2: a missing zone is still 404 for everyone', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('zone-env-fn'), {
+      msg: requestFor(1, 'admin1', { zone_id: '999' }),
       env: ENV,
       db,
     });
     assert.equal(response.result && response.result.statusCode, 404);
   } finally {
     db.close();
-  }
-});
-
-test('F2: recommendations honor granted-zone reads and hide foreign zones', async () => {
-  const node = loadNode('dendro-zone-rec-fn');
-  const grantedDb = seedScopedDb();
-  try {
-    const granted = await executeFunction(node, {
-      msg: requestFor(2, 'res1', { zone_id: '2' }),
-      env: ENV,
-      db: grantedDb,
-    });
-    assert.equal(granted.result && granted.result.statusCode, 200);
-    assert.equal(granted.result && granted.result.payload.length, 1);
-  } finally {
-    grantedDb.close();
-  }
-
-  const foreignDb = seedScopedDb();
-  try {
-    const foreign = await executeFunction(node, {
-      msg: requestFor(3, 'view1', { zone_id: '2' }),
-      env: ENV,
-      db: foreignDb,
-    });
-    assert.equal(foreign.result && foreign.result.statusCode, 404);
-  } finally {
-    foreignDb.close();
   }
 });
 
