@@ -461,7 +461,7 @@ test('P1: device-detail reads still refuse a disabled account', async () => {
   }
 });
 
-test('F3: sensor export filters scoped rows and keeps flag-off behavior', async () => {
+test('F3: the sensor export is account-wide and keeps its flag-off behavior', async () => {
   const scopedDb = seedScopedDb();
   try {
     const scoped = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
@@ -470,11 +470,28 @@ test('F3: sensor export filters scoped rows and keeps flag-off behavior', async 
       db: scopedDb,
     });
     const output = scoped.result && scoped.result[0];
-    assert.match(output.topic, /iz\.zone_uuid IN/);
-    assert.match(output.topic, /SENSECAP_S2120/);
-    assert.deepEqual(output.params, ['z-1']);
+    assert.doesNotMatch(output.topic, /iz\.zone_uuid IN/);
+    assert.doesNotMatch(output.topic, /SENSECAP_S2120/);
+    assert.deepEqual(output.params, []);
   } finally {
     scopedDb.close();
+  }
+
+  scopeHelper._resetForTests();
+  const disabledDb = seedScopedDb();
+  disabledDb.prepare(
+    "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'"
+  ).run();
+  try {
+    const disabled = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+      msg: requestFor(3, 'view1'),
+      env: ENV,
+      db: disabledDb,
+    });
+    assert.equal(disabled.result && disabled.result[1] && disabled.result[1].statusCode, 403);
+  } finally {
+    disabledDb.close();
+    scopeHelper._resetForTests();
   }
 
   const unscopedDb = seedScopedDb();
@@ -489,6 +506,65 @@ test('F3: sensor export filters scoped rows and keeps flag-off behavior', async 
     assert.deepEqual(output.params, []);
   } finally {
     unscopedDb.close();
+  }
+});
+
+test('W1: history of an unclaimed device stays exportable and stays in recent actuations', async () => {
+  // Deliberate asymmetry with the device LIST (Task 1), pinned so nobody
+  // "fixes" it later: unclaiming is a device-lifecycle act, not a retraction of
+  // the measurements taken while the device was installed. The export has never
+  // had a user_id filter in either mode; recent actuations gains one row that
+  // flag-off would have hidden.
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('UNCLAIMED1', 'Deleted valve', 'STREGA_VALVE', NULL, NULL, '2026-01-01', '2026-01-01');
+    INSERT INTO device_data(deveui, recorded_at, swt_1) VALUES
+      ('UNCLAIMED1', '2026-01-02T08:00:00.000Z', 33);
+    INSERT INTO valve_actuation_expectations (
+      expectation_id, device_eui, zone_id, command_id, commanded_at,
+      commanded_duration_seconds, expected_close_at, flow_rate_lpm,
+      estimated_gross_liters, volume_source, reconciliation_state, created_at
+    ) VALUES
+      ('e-unclaimed', 'UNCLAIMED1', NULL, 'c-unclaimed', '2026-01-02T08:00:00.000Z', 60,
+       '2026-01-02T08:01:00.000Z', 10, 10, 'calibrated', 'PENDING_OBSERVATION', '2026-01-02T08:00:00.000Z');
+  `);
+  try {
+    const exported = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+      msg: requestFor(3, 'view1'),
+      env: ENV,
+      db,
+    });
+    const output = exported.result && exported.result[0];
+    assert.doesNotMatch(
+      output.topic,
+      /d\.user_id/,
+      'the sensor export must not gain a lifecycle filter it never had'
+    );
+    const rows = db.prepare(output.topic).all(...output.params);
+    assert.ok(
+      rows.some((row) => row.deveui === 'UNCLAIMED1'),
+      "an unclaimed device's historical measurements stay exportable"
+    );
+
+    scopeHelper._resetForTests();
+    const actuations = await executeFunction(loadNode('get-actuations-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1, authUsername: 'admin1' },
+      env: ENV,
+      db,
+    });
+    const message = responseMessage(actuations.result);
+    const list = (message.payload && message.payload.actuations) || message.payload;
+    assert.ok(
+      list.some((row) => row.device_eui === 'UNCLAIMED1'),
+      "an unclaimed valve's actuation history stays visible (accepted asymmetry with flag-off)"
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
   }
 });
 
@@ -879,77 +955,106 @@ test('F7: catalog is available to every enabled authenticated role', async () =>
   }
 });
 
-test('F7: analysis channels include grants and exclude foreign zones', async () => {
+test('F7: scoped analysis catalog uses an explicit account-wide array', async () => {
   scopeHelper._resetForTests();
   const db = seedScopedDb();
-  seedAnalysisDevices(db);
   try {
-    const granted = await executeFunction(loadNode('analysis-api-router-fn'), {
-      msg: historyRequest(2, 'res1', 'GET', '/api/analysis/channels'),
-      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
-      db,
-    });
-    const grantedZoneIds = new Set(
-      (granted.result.payload.channels || []).map((channel) => channel.zoneId)
-    );
-    assert.ok(grantedZoneIds.has(2), 'granted zone appears in the analysis catalog');
-
-    scopeHelper._resetForTests();
-    const viewer = await executeFunction(loadNode('analysis-api-router-fn'), {
+    seedAnalysisDevices(db);
+    const response = await executeFunction(loadNode('analysis-api-router-fn'), {
       msg: historyRequest(3, 'view1', 'GET', '/api/analysis/channels'),
       env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
       db,
     });
-    const viewerZoneIds = new Set(
-      (viewer.result.payload.channels || []).map((channel) => channel.zoneId)
+    assert.equal(response.result && response.result.statusCode, 200);
+    const zoneIds = new Set(
+      (response.result.payload.channels || []).map((channel) => String(channel.zoneId ?? ''))
     );
-    assert.ok(!viewerZoneIds.has(2), 'foreign zone is absent from the analysis catalog');
+    assert.ok(zoneIds.has('1'), 'zone 1 channels must be present');
+    assert.ok(zoneIds.has('2'), 'zone 2 channels must be present for a viewer (W1)');
   } finally {
     db.close();
+    scopeHelper._resetForTests();
   }
 });
 
-test('F7: analysis series cannot resolve a selector from a foreign zone', async () => {
+test('P2: flag-off analysis catalog stays owner-only', async () => {
   scopeHelper._resetForTests();
   const db = seedScopedDb();
   seedAnalysisDevices(db);
   try {
-    const catalog = await executeFunction(loadNode('analysis-api-router-fn'), {
-      msg: historyRequest(2, 'res1', 'GET', '/api/analysis/channels'),
-      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
-      db,
-    });
-    const foreign = (catalog.result.payload.channels || []).find(
-      (channel) => channel.zoneId === 2
-    );
-    assert.ok(foreign, 'granted user fixture exposes a zone-two selector');
-
-    scopeHelper._resetForTests();
     const response = await executeFunction(loadNode('analysis-api-router-fn'), {
-      msg: historyRequest(
-        3,
-        'view1',
-        'POST',
-        '/api/analysis/series',
-        {},
-        {
-          selectors: [{ seriesId: foreign.seriesId }],
-          range: { from: '2026-01-01', to: '2026-01-03' },
-        }
-      ),
-      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      msg: historyRequest(2, 'res1', 'GET', '/api/analysis/channels'),
+      env: {
+        AUTH_TOKEN_SECRET: AUTH_SECRET,
+        OSI_SCOPED_ACCESS: '0',
+        DEVICE_EUI: 'A84041ABCDEF0002',
+      },
       db,
     });
-    assert.deepEqual(response.result.payload.series, []);
-    assert.deepEqual(response.result.payload.dropped, [
-      { seriesId: foreign.seriesId, reason: 'unknown' },
-    ]);
+    assert.equal(response.result && response.result.statusCode, 200);
+    const zoneIds = new Set(
+      (response.result.payload.channels || []).map((channel) => String(channel.zoneId ?? ''))
+    );
+    assert.ok(zoneIds.has('1'), 'flag-off owner still sees the owned zone');
+    assert.ok(!zoneIds.has('2'), 'flag-off analysis must not widen to a foreign zone');
   } finally {
     db.close();
+    scopeHelper._resetForTests();
   }
 });
 
-test('F7: analysis views remain per-user and drop foreign selectors', async () => {
+test('P1: analysis reads still refuse a disabled account', async () => {
+  const db = seedScopedDb();
+  db.prepare(
+    "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'"
+  ).run();
+  scopeHelper._resetForTests();
+  try {
+    const response = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(3, 'view1', 'GET', '/api/analysis/channels'),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 403);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F7: recent actuations are account-wide', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO valve_actuation_expectations (
+      expectation_id, device_eui, zone_id, command_id, commanded_at,
+      commanded_duration_seconds, expected_close_at, flow_rate_lpm,
+      estimated_gross_liters, volume_source, reconciliation_state, created_at
+    ) VALUES
+      ('e-1', 'VALVE1', 1, 'c-1', '2026-01-02T08:00:00.000Z', 60,
+       '2026-01-02T08:01:00.000Z', 10, 10, 'calibrated', 'PENDING_OBSERVATION', '2026-01-02T08:00:00.000Z');
+  `);
+  try {
+    const response = await executeFunction(loadNode('get-actuations-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1, authUsername: 'admin1' },
+      env: ENV,
+      db,
+    });
+    const message = responseMessage(response.result);
+    assert.equal(message.statusCode || 200, 200);
+    const actuations = (message.payload && message.payload.actuations) || message.payload;
+    assert.equal(
+      actuations.length,
+      1,
+      'admin1 owns no zone-1 device but must still see its actuation (W1)'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F7: analysis views remain per-user while selectors are account-wide', async () => {
   scopeHelper._resetForTests();
   const db = seedScopedDb();
   seedAnalysisDevices(db);
@@ -999,8 +1104,8 @@ test('F7: analysis views remain per-user and drop foreign selectors', async () =
     });
     assert.equal(response.result.payload.views.length, 1);
     assert.equal(response.result.payload.views[0].name, 'Viewer view');
-    assert.deepEqual(response.result.payload.views[0].selectors, []);
-    assert.deepEqual(response.result.payload.views[0].droppedSeriesIds, [foreign.seriesId]);
+    assert.deepEqual(response.result.payload.views[0].selectors, [{ seriesId: foreign.seriesId }]);
+    assert.deepEqual(response.result.payload.views[0].droppedSeriesIds, []);
   } finally {
     db.close();
   }
@@ -1041,35 +1146,6 @@ test('F7: analysis view deletion cannot cross user ownership', async () => {
     });
     assert.equal(own.result && own.result.statusCode, 204);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM analysis_views WHERE id = 2').get().count, 0);
-  } finally {
-    db.close();
-  }
-});
-
-test('F7: recent actuations use owned-plus-granted zone visibility', async () => {
-  scopeHelper._resetForTests();
-  const db = seedScopedDb();
-  db.exec(`
-    INSERT INTO valve_actuation_expectations (
-      expectation_id, device_eui, zone_id, commanded_at,
-      commanded_duration_seconds, expected_close_at, volume_source, created_at
-    ) VALUES
-      ('a-owned', 'VALVE1', 1, '2026-01-01', 60, '2026-01-01T00:01:00Z', 'unknown', '2026-01-01'),
-      ('a-granted', 'DENDRO2', 2, '2026-01-02', 60, '2026-01-02T00:01:00Z', 'unknown', '2026-01-02');
-  `);
-  try {
-    const response = await executeFunction(loadNode('get-actuations-query'), {
-      msg: {
-        payload: [{ id: 2 }],
-        authUsername: 'res1',
-      },
-      env: ENV,
-      db,
-    });
-    assert.deepEqual(
-      response.result[0].payload.map((row) => row.expectation_id).sort(),
-      ['a-granted', 'a-owned']
-    );
   } finally {
     db.close();
   }
