@@ -255,4 +255,17 @@ describe('FarmingDashboard read-only notice (maintainer decision 3c)', () => {
     expect(await screen.findByText('Welcome to your farm!')).toBeInTheDocument();
     expect(screen.queryAllByRole('status')).toHaveLength(0);
   });
+
+  // Regression for the false banner: loading=true + canWrite=false previously
+  // rendered "you have read-only access" before scope was even known. The
+  // banner is a factual claim, not a control, so it must wait for the truth.
+  it('shows no read-only notice while scope is still loading, even for a non-writer', async () => {
+    scopeState.loading = true;
+    scopeState.canWrite = false;
+
+    renderDashboard();
+
+    expect(await screen.findByTestId('dashboard-header-marker')).toBeInTheDocument();
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+  });
 });

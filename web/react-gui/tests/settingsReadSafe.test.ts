@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { stripComments } from './stripComments';
 
 const srcRoot = path.resolve(import.meta.dirname, '../src');
 const read = (rel: string) => fs.readFileSync(path.join(srcRoot, rel), 'utf8');
@@ -59,7 +60,12 @@ test('no caller passes a canWrite-derived showSettings', () => {
 
 // The one genuinely mutating control stays gated, inside the page.
 test('the irrigation-schedule module toggle is gated on canWrite', () => {
-  const page = read('pages/SettingsPage.tsx');
+  // Comments are not code: indexOf() takes the FIRST occurrence, and a doc
+  // comment mentioning either `disableAllSchedules` or `canWrite` ahead of
+  // the real call would move the search origin or satisfy the proximity
+  // check without a real guard existing. Stripped so both indexOf() and the
+  // proximity match() below only ever see real code.
+  const page = stripComments(read('pages/SettingsPage.tsx'));
   assert.ok(page.includes('canWrite'), 'SettingsPage must gate its one mutating control');
   const call = page.indexOf('disableAllSchedules');
   assert.ok(call > 0, 'disableAllSchedules must still exist');

@@ -55,10 +55,6 @@ export const JournalPage: React.FC = () => {
     canWrite,
     isAdmin,
   } = useScope();
-  // Fail closed while scope is loading (D5): a viewer is not assumed writable
-  // just because the permission check hasn't resolved yet (maintainer
-  // decision 3(c), S6) — one explanation per surface, not per hidden control.
-  const writable = canWrite && !scopeLoading;
   const isDesktop = isDesktopBrowser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -242,7 +238,7 @@ export const JournalPage: React.FC = () => {
         showAdmin={isAdmin && isScoped && !scopeLoading}
       />
 
-      {!writable && <ReadOnlyNotice scope="farm" />}
+      {!scopeLoading && !canWrite && <ReadOnlyNotice scope="farm" />}
 
       <main className={showWorkspace ? 'mx-auto max-w-[1600px]' : 'mx-auto max-w-3xl px-4 py-8'}>
         {scopeLoading || catalogState.loading ? (

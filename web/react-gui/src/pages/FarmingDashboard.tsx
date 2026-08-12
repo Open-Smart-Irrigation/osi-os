@@ -158,7 +158,7 @@ export const FarmingDashboard: React.FC = () => {
           hidden control. The header's Add-menu gating above, the 8 inline
           IrrigationZoneCard sites and its 10 readOnly disables all stay
           untouched — this is the single notice that explains all of them. */}
-      {!(canWrite && !scopeLoading) && <ReadOnlyNotice scope="farm" />}
+      {!scopeLoading && !canWrite && <ReadOnlyNotice scope="farm" />}
 
       {/* Main Content */}
       <main className="max-w-[1600px] mx-auto px-4 py-8">

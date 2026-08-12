@@ -656,6 +656,19 @@ describe('JournalPage', () => {
     expect(screen.queryAllByRole('status')).toHaveLength(0);
   });
 
+  // Regression for the false banner: loading=true + canWrite=false previously
+  // rendered "you have read-only access" before scope was even known. The
+  // banner is a factual claim, not a control, so it must wait for the truth.
+  it('shows no read-only notice while scope is still loading, even for a non-writer', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.loading = true;
+    mocks.scopeState.canWrite = false;
+
+    renderPage();
+
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+  });
+
   it.each([
     ['researcher', true, false],
     ['viewer', true, false],

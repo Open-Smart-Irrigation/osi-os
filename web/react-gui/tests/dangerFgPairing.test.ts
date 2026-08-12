@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { stripComments } from './stripComments';
 
 // --danger-fg (#DC2626 light) clears 4.5:1 only on --card (4.83). Measured
 // against every other surface it could land on it FAILS as body text:
@@ -118,7 +119,11 @@ test('no element pairs text-[var(--danger-fg)] with a background it fails AA on'
 
   const offenders: string[] = [];
   for (const file of files(srcRoot)) {
-    const source = fs.readFileSync(file, 'utf8');
+    // Comments are not code: classStrings() extracts every quoted/backticked
+    // literal, and a doc comment describing a class in backticks (or a
+    // commented-out JSX line) is quoted text too. Stripped here so a
+    // comment can never manufacture — or hide — an offender.
+    const source = stripComments(fs.readFileSync(file, 'utf8'));
     for (const cls of classStrings(source)) {
       if (!cls.includes(`text-[var(${DANGER})]`)) continue;
       for (const variant of failingVariants(cls)) {
