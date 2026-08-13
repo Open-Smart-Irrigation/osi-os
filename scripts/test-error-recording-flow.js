@@ -91,8 +91,12 @@ for (const relativePath of flowProfiles) {
       const catchNode = byId.get(catchId);
       assert.strictEqual(catchNode.wires.length, 1, `${catchId} should have exactly one wire group`);
       const targets = catchNode.wires[0];
-      assert.strictEqual(targets.length, 1, `${catchId} should wire to exactly one node`);
-      const [targetId] = targets;
+      const linkOutTargets = targets.filter((targetId) => {
+        const target = byId.get(targetId);
+        return target && target.type === 'link out' && target.links.includes(recordErrorLinkInId);
+      });
+      assert.strictEqual(linkOutTargets.length, 1, `${catchId} should select exactly one Record Error link-out target`);
+      const [targetId] = linkOutTargets;
       assert.notStrictEqual(targetId, 'record-error-fn', `${catchId} must not wire directly to record-error-fn (cross-tab)`);
 
       const linkOutNode = byId.get(targetId);
@@ -109,6 +113,20 @@ for (const relativePath of flowProfiles) {
         linkOutIdsFeedingLinkIn.has(linkOutNode.id),
         `${recordErrorLinkInId}.links must include ${linkOutNode.id}`,
       );
+
+      // X8 keeps the auth catch's same-tab HTTP 500 response branch alongside
+      // the shared Record Error link-out. Select the link-out above rather
+      // than rejecting the additional, valid response wire.
+      for (const auxiliaryId of targets.filter((id) => id !== targetId)) {
+        const auxiliaryNode = byId.get(auxiliaryId);
+        assert(auxiliaryNode, `${catchId} auxiliary target ${auxiliaryId} missing`);
+        const auxiliaryTargets = (auxiliaryNode.wires || []).flat();
+        assert(
+          auxiliaryNode.type === 'http response' ||
+            auxiliaryTargets.some((id) => byId.get(id)?.type === 'http response'),
+          `${catchId} auxiliary target ${auxiliaryId} must preserve an HTTP response path`,
+        );
+      }
     }
 
     // Programmatic id -> tab (z) map: assert zero cross-tab drawn wires from
