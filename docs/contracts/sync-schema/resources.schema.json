@@ -182,9 +182,11 @@
                     "type": "string",
                     "enum": [
                         "KIWI_SENSOR", "TEKTELIC_CLOVER", "DRAGINO_LSN50",
-                        "SENSECAP_S2120", "AQUASCOPE_LORAIN", "STREGA_VALVE"
+                        "SENSECAP_S2120", "AQUASCOPE_LORAIN", "STREGA_VALVE",
+                        "DRAGINO_SDI12"
                     ]
                 },
+                "sdi12_probe_profile": {"type": ["string", "null"]},
                 "claimed_user_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
                 "zone_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
                 "dendro_enabled": {"type": "integer", "enum": [0, 1]},
