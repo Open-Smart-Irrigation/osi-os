@@ -118,8 +118,13 @@ function physicalActionExpiry(envelope, type, runtime) {
     const text = String(value).trim();
     return { text, millis: Date.parse(text) };
   });
-  if (parsed.length === 0 ||
-      parsed.some(function(value) { return !Number.isFinite(value.millis); }) ||
+  if (parsed.length === 0) {
+    // No expiry anywhere means a legacy issuer, not a malformed command. The
+    // deployed cloud does not send expires_at, and fencing its commands NACKed
+    // every physical action permanently during a mixed-version rollout.
+    return null;
+  }
+  if (parsed.some(function(value) { return !Number.isFinite(value.millis); }) ||
       parsed.some(function(value) { return value.millis !== parsed[0].millis; })) {
     return {
       terminal: true,

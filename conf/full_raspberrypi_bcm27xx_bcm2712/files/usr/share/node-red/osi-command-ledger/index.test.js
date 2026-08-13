@@ -550,6 +550,33 @@ test('deduplicatePendingCommand keeps a future VALVE_COMMAND action eligible for
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
 });
 
+test('deduplicatePendingCommand dispatches a physical action with no expiry (legacy issuer)', async () => {
+  const db = new TestDb();
+  const result = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 728,
+      commandType: 'VALVE_COMMAND',
+      payload: {
+        effect_key:
+          'action:' + DEVICE_EUI +
+          ':valve_action:99999999-9999-4999-8999-999999999999',
+        deviceEui: DEVICE_EUI,
+      },
+    },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      command_type_recognized: true,
+      now: '2026-07-29T10:00:00.000Z',
+    }
+  );
+
+  assert.deepEqual(result, { handled: false });
+  assert.equal(result.ack, undefined);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
 test('deduplicatePendingCommand rejects malformed physical-action expiry without dispatch', async () => {
   const db = new TestDb();
   const result = await ledger.deduplicatePendingCommand(
