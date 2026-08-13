@@ -34,12 +34,12 @@
       "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 10392 -> branch base a38c9db6 10392 -> HEAD 14764 = +4372, all +4372 of it this SDI-12 port. SDI-12 contribution: the device payload gains the SDI-12 probe/layout fields and the bounded recipe-deployment projection."
     },
     "cs-reg-cloud-ack-fn": {
-      "delta": 650,
-      "reason": "Supersedes the prior entry (540). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+      "delta": 695,
+      "reason": "Supersedes the prior entry (650). Wave 3 scoped-access port, pick-list commit 70 (AgroLink f6b316266, \"fix(edge): harden scoped cloud device registration\"): cs-reg-cloud-fn now loads full existing-device state (type_id/irrigation_zone_id/deleted_at/gateway_device_eui/sync_version, dropping the deleted_at-IS-NULL filter) and fences a scoped claim on cross-owner ownership AND type mismatch (TYPE_CONFLICT) before falling through same-owner/unclaimed rows to an UPDATE-vs-INSERT-OR-IGNORE branch that revives/reclaims/reprovisions instead of an idempotent short-circuit; successState now conditionally reports ALREADY_REGISTERED only for a genuine same-owner replay; the catch block gates verificationRequired on scopedOn via a restructured failureExtras object. cs-reg-cloud-ack-fn forwards verificationRequired only when scopedOn. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
     },
     "cs-reg-cloud-fn": {
-      "delta": 3487,
-      "reason": "Supersedes the prior entry (3369). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+      "delta": 4548,
+      "reason": "Supersedes the prior entry (3487). Wave 3 scoped-access port, pick-list commit 70 (AgroLink f6b316266, \"fix(edge): harden scoped cloud device registration\"): cs-reg-cloud-fn now loads full existing-device state (type_id/irrigation_zone_id/deleted_at/gateway_device_eui/sync_version, dropping the deleted_at-IS-NULL filter) and fences a scoped claim on cross-owner ownership AND type mismatch (TYPE_CONFLICT) before falling through same-owner/unclaimed rows to an UPDATE-vs-INSERT-OR-IGNORE branch that revives/reclaims/reprovisions instead of an idempotent short-circuit; successState now conditionally reports ALREADY_REGISTERED only for a genuine same-owner replay; the catch block gates verificationRequired on scopedOn via a restructured failureExtras object. cs-reg-cloud-ack-fn forwards verificationRequired only when scopedOn. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
     },
     "post-devices-insert": {
       "delta": 1562,
@@ -471,8 +471,8 @@
     }
   },
   "total_allowance": {
-    "delta": 226760,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 65(d2e81bd6a), AgroLink d2e81bd6a) 1299734 chars = 226760. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 227866,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 70(f6b316266), AgroLink f6b316266) 1300840 chars = 227866. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
