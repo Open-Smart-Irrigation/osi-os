@@ -58,6 +58,13 @@ test('NULL is matched exactly, never by substring', () => {
   assert.ok(g.unknown.unparseable_sdi12);
 });
 
+test('empty FPort 2 data is no response without quarantine', () => {
+  const r = m.normalize({ BatV: 3.1, data_sum: '' }, { probeProfile: 'GENERIC_VWC' }, {});
+  assert.strictEqual(r.noResponse, true);
+  assert.deepStrictEqual(Object.keys(r.channels), ['bat_v']);
+  assert.deepStrictEqual(r.unknown, {});
+});
+
 test('unparseable non-NULL -> quarantine marker', () => {
   const r = m.normalize({ BatV: 3.1, data_sum: '0+30.5' }, { probeProfile: 'GENERIC_VWC' }, {});
   assert.deepStrictEqual(Object.keys(r.channels), ['bat_v']);
