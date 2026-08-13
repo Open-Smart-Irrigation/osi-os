@@ -656,6 +656,14 @@ class ChirpStackClient {
     if (!/^[0-9A-F]{32}$/.test(nwkKey)) {
       throw boundedError('validate', 'INVALID_ARGUMENT');
     }
+    if (nwkKey === UNSET_KEY_ZEROS) {
+      // ChirpStack 4.12+ reports an unset key as 32 zeros, and canonicalStoredKey
+      // maps an empty read-back to the same value. Accepting zeros as a REQUESTED
+      // key therefore "verifies" against a device that has no key at all: the ACK
+      // says SUCCESS and the device can never join. Reject at the boundary; do not
+      // relax the comparator, which needs that canonicalization to work.
+      throw boundedError('validate', 'INVALID_ARGUMENT');
+    }
 
     const ctx = {
       devEui,

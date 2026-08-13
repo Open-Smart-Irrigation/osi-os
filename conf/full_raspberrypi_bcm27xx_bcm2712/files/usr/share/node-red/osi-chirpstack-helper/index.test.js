@@ -184,6 +184,16 @@ test('[reconcile] missing device on a ChirpStack 4.12 store: zero-filled unset a
   assert.equal(countCalls(client, 'deleteKeys'), 0);
 });
 
+test('an all-zero requested AppKey is rejected at validation', async () => {
+  const client = makeReconcileClient();
+  await assert.rejects(
+    () => client.ensureDeviceProvisioned(baseInput({
+      appKey: ZERO_FILLED_UNSET_KEY,
+    })),
+    (error) => error.step === 'validate' && error.code === 'INVALID_ARGUMENT'
+  );
+});
+
 test('[reconcile] compensation fence on a ChirpStack 4.12 store: zero-filled unset keys still count as "ours", so rollback proceeds', async () => {
   const created = fakeDevice({ devEui: DEVEUI, name: 'Dendro 3', applicationId: APPLICATION_ID, deviceProfileId: PROFILE_ID, isDisabled: false });
   const client = makeReconcileClient({
