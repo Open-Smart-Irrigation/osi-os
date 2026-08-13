@@ -1,5 +1,6 @@
 // The specific supported hardware types
-export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512';
+export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512' | 'DRAGINO_SDI12';
+export type Sdi12ProbeStatus = 'pending_identify' | 'identified' | 'unmatched' | 'manual';
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
@@ -13,6 +14,9 @@ export interface Device {
   soilMoistureProbeDepthsConfigured?: boolean;
   soil_moisture_probe_depths_json?: Record<string, number> | null;
   soil_moisture_probe_depths_configured?: number | boolean | null;
+  sdi12_probe_profile?: string | null;
+  sdi12_probe_status?: Sdi12ProbeStatus | null;
+  sdi12_identity?: string | null;
 
   // Specific data payload matching Node-RED output
   latest_data: {
@@ -21,6 +25,30 @@ export interface Device {
     swt_1?: number | null;      // Canonical SWT channel 1 (kPa)
     swt_2?: number | null;      // Canonical SWT channel 2 (kPa)
     swt_3?: number | null;      // Canonical SWT channel 3 (kPa)
+    vwc_1?: number | null;
+    vwc_2?: number | null;
+    vwc_3?: number | null;
+    vwc_4?: number | null;
+    vwc_5?: number | null;
+    vwc_6?: number | null;
+    vwc_7?: number | null;
+    vwc_8?: number | null;
+    soil_temp_1?: number | null;
+    soil_temp_2?: number | null;
+    soil_temp_3?: number | null;
+    soil_temp_4?: number | null;
+    soil_temp_5?: number | null;
+    soil_temp_6?: number | null;
+    soil_temp_7?: number | null;
+    soil_temp_8?: number | null;
+    soil_ec_1?: number | null;
+    soil_ec_2?: number | null;
+    soil_ec_3?: number | null;
+    soil_ec_4?: number | null;
+    soil_ec_5?: number | null;
+    soil_ec_6?: number | null;
+    soil_ec_7?: number | null;
+    soil_ec_8?: number | null;
     light_lux?: number;         // Light intensity
     ambient_temperature?: number;
     relative_humidity?: number;
