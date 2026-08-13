@@ -1558,7 +1558,7 @@ git add -A && git commit -m "feat(sdi12): probe-profile listing + device config 
 - Consumes: device rows with `sdi12_probe_profile`, `sdi12_probe_status`, `soil_moisture_probe_depths_json`; latest `device_data` values under the 24 channel keys + `swt_1..3` + `bat_v`.
 - Produces: `<Sdi12SoilCard device={device} onOpenSettings={...} />` used by Task 14; `/api/devices` responses and the sensor CSV export actually carrying the 24 new fields.
 
-- [ ] **Step 1: Data plumbing — the values must reach the card and the export**
+- [x] **Step 1: Data plumbing — the values must reach the card and the export**
 
 Declaring manifest entries exposes nothing by itself; three enumerating
 surfaces need the 24 columns added explicitly:
@@ -1574,7 +1574,7 @@ surfaces need the 24 columns added explicitly:
    (`vwc_1?: number | null;` … `soil_ec_8?: number | null;`) next to the
    existing channel fields.
 
-- [ ] **Step 2: Types**
+- [x] **Step 2: Types**
 
 ```ts
 export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER'
@@ -1587,7 +1587,7 @@ export type Sdi12ProbeStatus = 'pending_identify' | 'identified' | 'unmatched' |
   sdi12_identity?: string | null;   // shown next to the manual picker when status is 'unmatched'
 ```
 
-- [ ] **Step 3: Failing card test**
+- [x] **Step 3: Failing card test**
 
 Before writing the card, read `KiwiSensorCard.tsx` fully — it is the template for depth-label lookup (`soil_moisture_probe_depths_json?.[channelKey]`, ~L44) and for how latest values reach the card. Read one existing card test in `components/farming/__tests__/` and mirror its render/mock setup. The test asserts:
 
@@ -1614,7 +1614,7 @@ it('shows pending state when unidentified', () => {
 
 Run: `cd web/react-gui && npx vitest run src/components/farming/__tests__/Sdi12SoilCard.test.tsx` — expect FAIL (module missing).
 
-- [ ] **Step 4: Implement the card**
+- [x] **Step 4: Implement the card**
 
 Structure (align imports/props with `KiwiSensorCard.tsx` — literal strings, no `useTranslation`, matching the existing device cards):
 
@@ -1624,7 +1624,7 @@ Structure (align imports/props with `KiwiSensorCard.tsx` — literal strings, no
 - Footer: `DeviceCardFooter` exactly as `DraginoTempCard.tsx` passes it (`batteryPercent`/`batteryVoltage`).
 - Settings gear opens `Sdi12SettingsModal` (Task 14) — render the button in this task, accept an `onOpenSettings` prop so this task tests independently.
 
-- [ ] **Step 5: Run tests + flows gates, commit**
+- [x] **Step 5: Run tests + flows gates, commit**
 
 ```bash
 cd web/react-gui && npx vitest run src/components/farming/__tests__/Sdi12SoilCard.test.tsx && cd ../..
