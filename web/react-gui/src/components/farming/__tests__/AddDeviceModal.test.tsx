@@ -203,12 +203,11 @@ describe('AddDeviceModal generation control', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    // Reopen while the catalog fetch fails entirely. loadCatalog()'s own reset of
-    // selectedType only runs inside `if (data.length > 0)`, and the whole call is wrapped in
-    // a catch that only console.errors -- so before this fix, a failed fetch left the
-    // previous session's STREGA_VALVE selection in place instead of the form's declared
-    // default. The un-refetched `catalog` state (still holding STREGA_VALVE as an option from
-    // the earlier successful load) proves this isn't just an empty-dropdown side effect.
+    // Reopen while the catalog fetch fails entirely. The fetch only sets selectedType inside
+    // `if (data.length > 0)` and its catch merely console.errors, so without an explicit
+    // up-front reset a failed fetch leaves the previous session's STREGA_VALVE selection in
+    // place. 8fc83874 clears catalog/selectedType before the fetch, which is what makes the
+    // failure fall through to the disabled-submit guard rather than to a stale pick.
     vi.mocked(devicesAPI.getCatalog).mockRejectedValueOnce(new Error('network down'));
     rerender(<AddDeviceModal isOpen={false} onClose={onClose} onDeviceAdded={vi.fn()} />);
     rerender(<AddDeviceModal isOpen={true} onClose={onClose} onDeviceAdded={vi.fn()} />);
@@ -216,5 +215,22 @@ describe('AddDeviceModal generation control', () => {
     await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalledTimes(2));
 
     expect(screen.queryByLabelText('Valve generation')).not.toBeInTheDocument();
+  });
+
+  it('blocks submission while the catalog is unavailable, rather than falling back to a type', async () => {
+    // 8fc83874: with catalog/selectedType cleared up front, a failed catalog fetch leaves
+    // nothing selected. Submit must be disabled -- the earlier shape defaulted selectedType to
+    // KIWI_SENSOR, so a failed fetch would happily register the device as a Kiwi sensor.
+    vi.mocked(devicesAPI.getCatalog).mockRejectedValueOnce(new Error('network down'));
+    render(<AddDeviceModal isOpen={true} onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalled());
+    fillRequiredFields();
+
+    const submit = screen.getByRole('button', { name: 'Add Device' });
+    expect(submit).toBeDisabled();
+
+    fireEvent.click(submit);
+    expect(devicesAPI.add).not.toHaveBeenCalled();
   });
 });

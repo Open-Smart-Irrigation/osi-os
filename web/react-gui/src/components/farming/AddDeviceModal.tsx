@@ -18,7 +18,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const [catalog, setCatalog] = useState<DeviceCatalogItem[]>([]);
-  const [selectedType, setSelectedType] = useState<DeviceType>('KIWI_SENSOR');
+  const [selectedType, setSelectedType] = useState<DeviceType | ''>('');
   const [name, setName] = useState('');
   const [deveui, setDeveui] = useState('');
   const [appkey, setAppkey] = useState('');
@@ -27,25 +27,23 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (isOpen) {
-      setName('');
-      setDeveui('');
-      setAppkey('');
-      setStregaGeneration('GEN1');
-      // Reset unconditionally here rather than relying on the catalog fetch: that fetch only
-      // sets selectedType inside `if (data.length > 0)` and its catch merely console.errors,
-      // so a failed or empty catalog fetch used to leave the previous session's selectedType
-      // (e.g. a stale STREGA_VALVE) selected on reopen instead of the form's declared default.
-      // fcf70de4 inlined the fetch and dropped this reset; keeping it, or the bug returns.
-      setSelectedType('KIWI_SENSOR');
-      setError('');
-      devicesAPI.getCatalog()
-        .then((data) => {
-          setCatalog(data);
-          if (data.length > 0) setSelectedType(data[0].id);
-        })
-        .catch((err) => console.error('Failed to load catalog:', err));
-    }
+    if (!isOpen) return;
+    setName('');
+    setDeveui('');
+    setAppkey('');
+    setStregaGeneration('GEN1');
+    setError('');
+    // Clearing catalog/selectedType up front (8fc83874) is what makes a failed or empty
+    // catalog fetch fall through to the "select a device type" guard below, instead of
+    // leaving the previous session's pick (e.g. a stale STREGA_VALVE) selected on reopen.
+    setCatalog([]);
+    setSelectedType('');
+    devicesAPI.getCatalog()
+      .then((data) => {
+        setCatalog(data);
+        if (data.length > 0) setSelectedType(data[0].id);
+      })
+      .catch((err) => console.error('Failed to load catalog:', err));
   }, [isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -61,19 +59,21 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
       return;
     }
 
+    if (catalog.length === 0 || !selectedType) {
+      setError(t('addModal.deviceTypeRequired', 'Select a device type'));
+      return;
+    }
+
     setLoading(true);
     try {
+      // The dropdown is the source of truth. The catalog effect already seeds
+      // selectedType with data[0].id when the modal opens, so there is nothing
+      // to re-fetch here -- and re-deriving from catalog[0] discarded the pick.
+      const typeId = selectedType;
       await devicesAPI.add({
         deveui,
         name,
-        // Must be the user's selection. fcf70de4 shipped
-        // `currentCatalog[0]?.id ?? selectedType`, which ignores the device-type dropdown
-        // entirely whenever the catalog is non-empty -- i.e. always -- and registers every
-        // device as the FIRST catalog entry. That bug is still live on
-        // feat/journal-cloud-primary and AgroLink; this branch keeps the pre-cherry-pick
-        // behaviour, which the 'includes strega_generation when submitting a STREGA valve'
-        // test pins.
-        type_id: selectedType,
+        type_id: typeId,
         appkey: appkey || undefined,
         ...(selectedType === 'STREGA_VALVE' ? { strega_generation: stregaGeneration } : {}),
       });
@@ -177,7 +177,11 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
           <Button variant="secondary" onClick={onClose} className="flex-1 text-lg py-4">
             {tc('cancel')}
           </Button>
-          <Button type="submit" disabled={loading} className="flex-1 text-lg py-4 shadow-lg">
+          <Button
+            type="submit"
+            disabled={loading || catalog.length === 0 || !selectedType}
+            className="flex-1 text-lg py-4 shadow-lg"
+          >
             {loading ? t('addModal.adding') : t('addModal.submit')}
           </Button>
         </div>
