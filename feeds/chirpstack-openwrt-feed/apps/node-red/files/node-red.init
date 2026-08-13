@@ -215,6 +215,7 @@ start_service() {
     local cs_app_actuators=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_actuators CHIRPSTACK_APP_ACTUATORS)
     local cs_app_field_tester=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_field_tester CHIRPSTACK_APP_FIELD_TESTER)
     local cs_profile_kiwi=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_kiwi CHIRPSTACK_PROFILE_KIWI)
+    local cs_profile_sdi12=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_sdi12 CHIRPSTACK_PROFILE_SDI12)
     local cs_profile_strega=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_strega CHIRPSTACK_PROFILE_STREGA)
     local cs_profile_lsn50=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_lsn50 CHIRPSTACK_PROFILE_LSN50)
     local cs_profile_clover=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_clover CHIRPSTACK_PROFILE_CLOVER)
@@ -387,6 +388,7 @@ NODE
         CHIRPSTACK_APP_ACTUATORS="$cs_app_actuators" \
         CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester" \
         CHIRPSTACK_PROFILE_KIWI="$cs_profile_kiwi" \
+        CHIRPSTACK_PROFILE_SDI12="$cs_profile_sdi12" \
         CHIRPSTACK_PROFILE_STREGA="$cs_profile_strega" \
         CHIRPSTACK_PROFILE_LSN50="$cs_profile_lsn50" \
         CHIRPSTACK_PROFILE_CLOVER="$cs_profile_clover" \
