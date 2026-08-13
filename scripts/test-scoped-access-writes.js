@@ -2342,8 +2342,41 @@ test('X5: re-registering an EUI the same account already owns is idempotent', as
     const ack = response.result[0].specialAck;
     assert.equal(ack.result, 'SUCCESS');
     assert.equal(ack.state, 'ALREADY_REGISTERED');
-    assert.equal(ack.provisionedInChirpStack, false);
-    assert.equal(response.provisionCalls, 0, 'idempotent registration must not reprovision');
+    assert.equal(ack.provisionedInChirpStack, true);
+    assert.equal(response.provisionCalls, 1, 'same-owner registration must reprovision to repair missing or zero keys');
+  } finally {
+    db.close();
+  }
+});
+
+test('R8: an unclaimed existing device is claimed, revived, provisioned, and assigned', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, sync_version,
+      deleted_at, created_at, updated_at
+    ) VALUES (
+      'UNCLAIMED1', 'Old sensor', 'DRAGINO_LSN50', NULL, NULL, 4,
+      '2026-08-01T00:00:00.000Z', '2026-01-01', '2026-08-01'
+    );
+  `);
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'UNCLAIMED1', {
+      cloudUserId: 2002,
+      zoneUuid: 'z-1',
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, deleted_at FROM devices WHERE deveui='UNCLAIMED1'"
+    ).get();
+
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(ack.provisionedInChirpStack, true);
+    assert.equal(response.provisionCalls, 1);
+    assert.equal(row.user_id, 2);
+    assert.equal(row.irrigation_zone_id, 1);
+    assert.equal(row.deleted_at, null);
   } finally {
     db.close();
   }
@@ -2386,6 +2419,10 @@ test('§10: the flag-off command ACK payload carries no zone keys', async () => 
     });
     const payload = JSON.parse(ackMessage.result.payload);
 
+    assert.equal(
+      ackMessage.result.payload,
+      '{"commandId":"cmd-FLAGOFF2","eventUuid":null,"aggregateType":null,"aggregateKey":"FLAGOFF2","result":"SUCCESS","state":"APPLIED","commandType":"REGISTER_DEVICE","appliedSyncVersion":null,"deviceEui":"FLAGOFF2","provisionedInChirpStack":true}'
+    );
     assert.equal(payload.commandType, 'REGISTER_DEVICE');
     assert.equal(payload.result, 'SUCCESS');
     assert.ok(!('zoneAssignedId' in payload), 'no zoneAssignedId on a flag-off ACK payload');
@@ -2415,6 +2452,33 @@ test('X9: a key-verification reconciliation flag survives the REGISTER_DEVICE AC
     });
     const payload = JSON.parse(response.result.payload);
     assert.equal(payload.verificationRequired, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('§10: flag-off REGISTER_DEVICE ACK bytes omit the scoped verificationRequired field', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: {
+        specialAck: {
+          commandId: 'cmd-flagoff-verify',
+          commandType: 'REGISTER_DEVICE',
+          result: 'FAILED',
+          state: 'FAILED',
+          verificationRequired: true,
+          error: 'key read-back did not match',
+        },
+        payload: {},
+      },
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+    });
+    assert.equal(
+      response.result.payload,
+      '{"commandId":"cmd-flagoff-verify","eventUuid":null,"aggregateType":null,"aggregateKey":null,"result":"FAILED","state":"FAILED","commandType":"REGISTER_DEVICE","appliedSyncVersion":null,"deviceEui":null,"provisionedInChirpStack":false,"error":"key read-back did not match"}'
+    );
   } finally {
     db.close();
   }
@@ -2499,6 +2563,7 @@ test('W4: a REGISTER_DEVICE replay never pulls a device out of the zone it alrea
     seedRegisterCloudUserIds(db);
     const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 2002, zoneUuid: 'z-2' });
     assert.equal(response.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(response.provisionCalls, 1, 'same-owner replay must reach ChirpStack re-provisioning');
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,
       1,
