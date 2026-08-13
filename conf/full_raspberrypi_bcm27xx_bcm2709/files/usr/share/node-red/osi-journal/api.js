@@ -660,7 +660,18 @@ async function assertZoneWrite(db, principal, zoneUuid) {
     zoneUuid,
     { scopedMode: true }
   );
-  return principal;
+  const owner = await dbGet(
+    db,
+    'SELECT z.user_id AS owner_user_id,u.user_uuid AS owner_user_uuid ' +
+      'FROM irrigation_zones AS z JOIN users AS u ON u.id=z.user_id ' +
+      'WHERE z.zone_uuid=? AND z.deleted_at IS NULL LIMIT 1',
+    [zoneUuid]
+  );
+  if (!owner) throw apiError(404, 'not_found', 'Zone was not found');
+  return Object.assign({}, principal, {
+    user_id: Number(owner.owner_user_id),
+    owner_user_uuid: owner.owner_user_uuid,
+  });
 }
 
 async function assertPlotWrite(db, principal, plotUuid) {
@@ -757,7 +768,7 @@ function exactBaseVersion(value, creating) {
 
 async function ownedZone(tx, zoneUuid, principal) {
   if (principal && principal.scoped) {
-    await assertZoneWrite(tx, principal, zoneUuid);
+    principal = await assertZoneWrite(tx, principal, zoneUuid);
     const scopedZone = await dbGet(
       tx,
       'SELECT z.id,z.name,z.zone_uuid,z.gateway_device_eui,z.user_id,u.user_uuid ' +
@@ -998,7 +1009,9 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
   if (inputUuid && inputUuid !== plotUuid) badRequest('path_body_mismatch', 'Path and body plot UUID differ');
   if (pathUuid) principal = await assertPlotWrite(db, principal, plotUuid);
   const requestedZoneUuid = canonicalUuid(input.zone_uuid, 'zone_uuid', false);
-  if (!pathUuid && requestedZoneUuid) await assertZoneWrite(db, principal, requestedZoneUuid);
+  if (!pathUuid && requestedZoneUuid) {
+    principal = await assertZoneWrite(db, principal, requestedZoneUuid);
+  }
   return writeTransaction(db, async function(tx) {
     const existing = await dbGet(
       tx,
@@ -1274,7 +1287,7 @@ async function saveEntry(db, input, principal, options) {
   } else if (plotUuid) {
     principal = await assertPlotWrite(db, principal, plotUuid);
   } else if (zoneUuid) {
-    await assertZoneWrite(db, principal, zoneUuid);
+    principal = await assertZoneWrite(db, principal, zoneUuid);
   }
   if (!plotUuid && zoneUuid) {
     plotUuid = await ensureZonePlot(db, zoneUuid, body, principal);
