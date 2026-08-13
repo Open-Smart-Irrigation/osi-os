@@ -2121,6 +2121,7 @@ const REGISTER_ENV = {
   OSI_SCOPED_ACCESS: '1',
   DEVICE_EUI: '0016C001F1000001',
   CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi',
   CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
 };
 
@@ -2344,6 +2345,67 @@ test('X5: re-registering an EUI the same account already owns is idempotent', as
     assert.equal(ack.state, 'ALREADY_REGISTERED');
     assert.equal(ack.provisionedInChirpStack, true);
     assert.equal(response.provisionCalls, 1, 'same-owner registration must reprovision to repair missing or zero keys');
+  } finally {
+    db.close();
+  }
+});
+
+test('N1: flag-off REGISTER_DEVICE still fences a cross-owner claim with the legacy FAILED ACK', async () => {
+  const db = seedScopedDb();
+  const tracker = { provisionCalls: 0 };
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('DENDRO1', { cloudUserId: 1001 }),
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'ALREADY_CLAIMED');
+    assert.equal(ack.state, 'FAILED');
+    assert.equal(tracker.provisionCalls, 0, 'flag-off cross-owner claims must not reach ChirpStack');
+    assert.equal(
+      db.prepare("SELECT user_id FROM devices WHERE deveui='DENDRO1'").get().user_id,
+      2,
+      'the original owner must remain unchanged'
+    );
+
+    const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: response.result[0],
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+    });
+    assert.equal(
+      ackMessage.result.payload,
+      '{"commandId":"cmd-DENDRO1","eventUuid":null,"aggregateType":null,"aggregateKey":"DENDRO1","result":"FAILED","state":"FAILED","commandType":"REGISTER_DEVICE","appliedSyncVersion":null,"deviceEui":"DENDRO1","provisionedInChirpStack":false,"error":"DevEUI DENDRO1 is already claimed on this gateway","step":"claim","code":"ALREADY_CLAIMED"}'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('N1: flag-off REGISTER_DEVICE still rejects a type conflict before provisioning', async () => {
+  const db = seedScopedDb();
+  const tracker = { provisionCalls: 0 };
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('DENDRO1', { cloudUserId: 2002, deviceType: 'KIWI_SENSOR' }),
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'TYPE_CONFLICT');
+    assert.equal(ack.state, 'FAILED');
+    assert.equal(tracker.provisionCalls, 0, 'type conflicts must be rejected before ChirpStack');
+    assert.equal(
+      db.prepare("SELECT type_id, user_id FROM devices WHERE deveui='DENDRO1'").get().type_id,
+      'DRAGINO_LSN50'
+    );
   } finally {
     db.close();
   }
