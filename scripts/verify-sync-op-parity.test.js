@@ -15,6 +15,8 @@ const {
   resolveDefaultServerSource,
   worktreeMatchedServerSourceCandidates,
   resolveServerSourceWithProvenance,
+  resolveServerGoldenFromSource,
+  compareSyncContractGolden,
 } = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -41,6 +43,30 @@ if (serverSourceResolution.matchedWorktree === false) {
 }
 const SERVER_SOURCE = serverSourceResolution.source;
 
+test('server golden path is derived from the resolved server source root', () => {
+  const sourceMarker = path.join(
+    'backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java'
+  );
+  const serverRoot = SERVER_SOURCE.slice(0, -sourceMarker.length);
+  assert.equal(
+    resolveServerGoldenFromSource(SERVER_SOURCE),
+    path.join(serverRoot, 'backend', 'src', 'test', 'resources', 'sync-contract', 'sync-contract-golden.json')
+  );
+});
+
+test('a resolved server golden path is an error when missing or different', () => {
+  const missing = path.join(os.tmpdir(), `missing-sync-contract-golden-${process.pid}.json`);
+  const missingResult = compareSyncContractGolden(ROOT, missing);
+  assert.equal(missingResult.ok, false);
+  assert.match(missingResult.message, /resolved osi-server.*missing/i);
+
+  const different = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sync-golden-diff-')), 'sync-contract-golden.json');
+  fs.writeFileSync(different, '{}');
+  const differentResult = compareSyncContractGolden(ROOT, different);
+  assert.equal(differentResult.ok, false);
+  assert.match(differentResult.message, /differs/);
+});
+
 function copyFixtureTree() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
   const schemaDir = path.join(tmp, 'docs/contracts/sync-schema');
@@ -59,6 +85,10 @@ function copyFixtureTree() {
   fs.copyFileSync(
     path.join(ROOT, 'docs/contracts/sync-schema/events.schema.json'),
     path.join(schemaDir, 'events.schema.json')
+  );
+  fs.copyFileSync(
+    path.join(ROOT, 'docs/contracts/sync-schema/sync-contract-golden.json'),
+    path.join(schemaDir, 'sync-contract-golden.json')
   );
   fs.copyFileSync(
     path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'),
@@ -186,6 +216,11 @@ function createStagedParityFixture(overrides) {
   const scopedSqlPath = path.join(tmp, 'scoped-access.sql');
   const serverSource = path.join(tmp, 'EdgeSyncService.java');
   fs.mkdirSync(moduleDir, { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'docs/contracts/sync-schema'), { recursive: true });
+  fs.copyFileSync(
+    path.join(ROOT, 'docs/contracts/sync-schema/sync-contract-golden.json'),
+    path.join(tmp, 'docs/contracts/sync-schema/sync-contract-golden.json')
+  );
   fs.writeFileSync(schemaPath, JSON.stringify({
     type: 'object',
     properties: {

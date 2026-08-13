@@ -136,4 +136,16 @@ jobs:
             echo "ChannelManifestTest.java + verify-channel-manifest-sync.js on a same-named osi-server branch."
             exit 1
           fi
+      - name: Cross-repo sync-contract golden byte-identity
+        run: |
+          set -euo pipefail
+          edge_golden="docs/contracts/sync-schema/sync-contract-golden.json"
+          server_golden="osi-server/backend/src/test/resources/sync-contract/sync-contract-golden.json"
+          test -s "$edge_golden" || { echo "::error::edge sync-contract golden is missing or empty."; exit 1; }
+          test -s "$server_golden" || { echo "::error::osi-server sync-contract golden is missing or empty."; exit 1; }
+          if ! cmp -s "$edge_golden" "$server_golden"; then
+            echo "::error::edge and osi-server sync-contract-golden.json differ."
+            exit 1
+          fi
+          echo "Edge/cloud sync-contract-golden.json is byte-identical."
       - run: node scripts/verify-command-safety.js

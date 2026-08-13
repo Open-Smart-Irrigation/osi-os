@@ -184,6 +184,16 @@ function resolveServerGolden(root = REPO_ROOT) {
   return fallbackServerGoldenCandidates(root).find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+function resolveServerGoldenFromSource(serverSource) {
+  const absoluteSource = path.resolve(serverSource);
+  const sourceSuffix = path.join(SERVER_RELATIVE_SOURCE);
+  if (!absoluteSource.endsWith(sourceSuffix)) {
+    throw new Error(`cannot derive osi-server root from EdgeSyncService.java path: ${serverSource}`);
+  }
+  const serverRoot = absoluteSource.slice(0, -sourceSuffix.length);
+  return path.join(serverRoot, SERVER_RELATIVE_GOLDEN);
+}
+
 function compareSyncContractGolden(root = REPO_ROOT, serverGoldenPath) {
   const edgeGoldenPath = path.join(root, EDGE_RELATIVE_GOLDEN);
   const serverPath = serverGoldenPath || resolveServerGolden(root);
@@ -191,6 +201,12 @@ function compareSyncContractGolden(root = REPO_ROOT, serverGoldenPath) {
     return { ok: false, message: `edge sync-contract-golden.json is missing at ${edgeGoldenPath}` };
   }
   if (!serverPath || !fs.existsSync(serverPath)) {
+    if (serverGoldenPath) {
+      return {
+        ok: false,
+        message: `resolved osi-server sync-contract-golden.json is missing at ${serverPath}`,
+      };
+    }
     return {
       ok: true,
       warning: 'cloud sync-contract-golden.json unavailable; optional byte comparison skipped',
@@ -1572,7 +1588,8 @@ function main() {
     }
     serverSource = resolution.source;
   }
-  const result = checkSyncOpParity({ serverSource });
+  const serverGoldenPath = resolveServerGoldenFromSource(serverSource);
+  const result = checkSyncOpParity({ serverSource, serverGoldenPath });
   console.log(result.message);
   if (!result.ok) {
     console.error('verify-sync-op-parity: FAIL');
@@ -1604,6 +1621,7 @@ module.exports = {
   worktreeMatchedServerSourceCandidates,
   resolveServerSourceWithProvenance,
   compareSyncContractGolden,
+  resolveServerGoldenFromSource,
   resolveServerGolden,
   verifyV2ContractFiles,
 };
