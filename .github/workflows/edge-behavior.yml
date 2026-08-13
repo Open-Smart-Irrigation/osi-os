@@ -48,6 +48,10 @@ jobs:
         run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/index.test.js
       - name: Scoped-access command package tests
         run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.test.js
+      - name: Scoped-access write suite (registration fences, zone guards)
+        run: node scripts/test-scoped-access-writes.js
+      - name: Scoped-access read suite (account-wide reads, preserved gates)
+        run: node scripts/test-scoped-access-reads.js
       - name: Flow wiring guards (STREGA + osiDb close + ChirpStack client close)
         run: node scripts/test-flows-wiring.js
       - name: OSI server UCI defaults (LSN50_WRITER_DISABLE + retention)
