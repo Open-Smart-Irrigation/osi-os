@@ -257,7 +257,7 @@ git add -A && git commit -m "feat(sdi12): dragino sdi-12 codec + verifier"
   - `getProfile(id) -> profile | null`
   - `worstCaseUplinkBytes(profile) -> number` (3 header bytes + 7 per value; budget-tested ≤ 51).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `index.test.js` (run with `node --test`; model the style of `osi-uc512-normalize`'s sibling tests):
 
@@ -369,7 +369,7 @@ test('listProfiles is GUI-serializable and slot-aware', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 ```bash
 cd conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize && node --test
@@ -377,7 +377,7 @@ cd conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-norm
 
 Expected: FAIL — `Cannot find module './index.js'`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `index.js`:
 
@@ -652,7 +652,7 @@ module.exports = {
 
 `package.json` (copy `osi-uc512-normalize/package.json` and change the name to `osi-sdi12-normalize`).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 ```bash
 cd conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize && node --test
@@ -660,7 +660,7 @@ cd conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-norm
 
 Expected: all tests PASS. (The 30.2 assertion holds: `10^2.48 / 10 = 30.199…` → 30.2 at 2 dp.)
 
-- [ ] **Step 5: Three-surface registration**
+- [x] **Step 5: Three-surface registration**
 
 Follow `scripts/verify-helper-registration.js`'s rules exactly; use `osi-uc512-normalize` as the reference for each surface:
 
@@ -669,7 +669,7 @@ Follow `scripts/verify-helper-registration.js`'s rules exactly; use `osi-uc512-n
 3. `conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/98_osi_node_red_seed`: add `osi-sdi12-normalize` to the module copy loop.
 4. `deploy.sh`: next to the LSN50 codec `fetch_required` lines (~583), add fetches for `codecs/dragino_sdi12_decoder.js` and the `osi-sdi12-normalize` module files, matching the existing style for `osi-uc512-normalize`.
 
-- [ ] **Step 6: Verify registration + parity, copy module to bcm2709, commit**
+- [x] **Step 6: Verify registration + parity, copy module to bcm2709, commit**
 
 ```bash
 cp -r conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize \
