@@ -111,8 +111,26 @@ vi.mock('../../components/farming/IrrigationOutcomesPanel', () => ({
   IrrigationOutcomesPanel: () => <div data-testid="irrigation-outcomes-panel" />,
 }));
 
+// The stub renders the devices prop so assertions about devicesByZone have
+// something to see. Mocking it away entirely is why the weather-station
+// regression shipped unnoticed.
 vi.mock('../../components/farming/IrrigationZoneCard', () => ({
-  IrrigationZoneCard: ({ zone }: { zone: { name: string } }) => <article>{zone.name}</article>,
+  IrrigationZoneCard: ({
+    zone,
+    devices,
+  }: {
+    zone: { id: number; name: string };
+    devices: Array<{ deveui: string; name: string }>;
+  }) => (
+    <article data-testid={`zone-card-${zone.id}`}>
+      {zone.name}
+      {devices.map((device) => (
+        <span key={device.deveui} data-testid={`zone-${zone.id}-device-${device.deveui}`}>
+          {device.name}
+        </span>
+      ))}
+    </article>
+  ),
 }));
 
 vi.mock('../../components/farming/SystemPanel', () => ({
@@ -206,6 +224,37 @@ describe('FarmingDashboard header wiring', () => {
 
     await screen.findByTestId('dashboard-header-marker');
     expect(headerProps[headerProps.length - 1]?.showAdmin).toBe(true);
+  });
+
+  it.each([
+    ['SENSECAP_S2120'],
+    ['AQUASCOPE_LORAIN'],
+  ])('keeps a zone-assigned %s on its zone card', async (typeId) => {
+    getZones.mockResolvedValue([
+      {
+        id: 1,
+        name: 'Owned zone',
+        zone_uuid: 'zone-visible',
+        device_count: 1,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+        schedule: null,
+      },
+    ]);
+    getDevices.mockResolvedValue([
+      {
+        deveui: 'WX00000000000001',
+        name: 'Field weather',
+        type_id: typeId,
+        irrigation_zone_id: 1,
+      },
+    ]);
+
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('zone-1-device-WX00000000000001')).toBeInTheDocument(),
+    );
   });
 });
 

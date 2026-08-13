@@ -97,12 +97,13 @@ export const FarmingDashboard: React.FC = () => {
     const unassigned: Device[] = [];
 
     devices.forEach((device) => {
-      const weatherDevice =
-        device.type_id === 'SENSECAP_S2120' || device.type_id === 'AQUASCOPE_LORAIN';
-      // Weather stations render in their own multi-zone section even when they
-      // are zone-assigned -- that is the multi-zone table design, not a scope
-      // carve-out. The scope carve-out (visible-zone membership) is gone (W1).
-      if (device.irrigation_zone_id && zoneIds.has(device.irrigation_zone_id) && !weatherDevice) {
+      // Write-only scoping (W1) removed the visible-zone term from this branch.
+      // The weather-station term went with it: it existed only to sweep weather
+      // stations out of zones the caller could not see. A zone-assigned weather
+      // station belongs on its zone card, where IrrigationZoneCard renders its
+      // own weather section; unassignedS2120/unassignedLoRain still cover the
+      // genuinely unassigned ones.
+      if (device.irrigation_zone_id && zoneIds.has(device.irrigation_zone_id)) {
         const zoneDevices = byZone.get(device.irrigation_zone_id) || [];
         zoneDevices.push(device);
         byZone.set(device.irrigation_zone_id, zoneDevices);
