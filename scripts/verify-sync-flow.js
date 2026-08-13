@@ -3282,7 +3282,7 @@ expectFileIncludes('WindMonitor.tsx', windMonitorSource, "sensorAPI.getHistory(d
 expectFileIncludes('wind.ts', windUtilsSource, 'export function formatWindDirection', 'ships shared wind-direction formatting helpers');
 expectFileIncludes('OnlineTab.tsx', onlineTabSource, 'toCompassDirection', 'reuses shared wind-direction helpers in the online environment tab');
 expectFileIncludes('WeatherTab.tsx', weatherTabSource, 'toCompassDirection', 'reuses shared wind-direction helpers in the weather forecast tab');
-expectExcludesById('merge-device-data', 'd.updated_at', 'updated_at fallback for last_seen in GET /api/devices');
+expectIncludesById('merge-device-data', 'updated_at: d.updated_at ?? null', 'returns device updated_at in GET /api/devices');
 expectIncludes('Auth + Query Gateway Location', 'gateway_locations', 'queries gateway GPS state from the local mirror table');
 expectIncludes('Format Gateway Location Response', "status: row.status || 'no_fix'", 'returns a no-fix fallback for linked gateways');
 expectIncludes('Route Command', "commandType === 'SET_LSN50_MODE'", 'routes SET_LSN50_MODE gateway commands');

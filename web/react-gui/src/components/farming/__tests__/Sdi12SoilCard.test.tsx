@@ -46,4 +46,12 @@ describe('Sdi12SoilCard', () => {
 
     expect(screen.getByText(/detecting probe|pending/i)).toBeInTheDocument();
   });
+
+  it('renders the status chip from the device status field', () => {
+    render(<Sdi12SoilCard device={makeDevice({
+      sdi12_probe_status: 'unmatched',
+    })} />);
+
+    expect(screen.getByText('unmatched')).toBeInTheDocument();
+  });
 });

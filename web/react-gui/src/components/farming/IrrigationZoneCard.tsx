@@ -530,6 +530,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                         <Sdi12SoilCard
                           device={device}
                           onOpenSettings={() => setSdi12SettingsDevice(device)}
+                          onRemove={() => handleRemoveDevice(device.deveui)}
                           readOnly={!canWrite}
                         />
                         {removingDevice === device.deveui && (
