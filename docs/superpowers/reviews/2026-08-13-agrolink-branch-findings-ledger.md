@@ -137,9 +137,18 @@ Remaining, none merge-gating:
 
 Deferred backlog unchanged: N5, R9–R14, plus N-C/N-E above.
 
-## Rollout law (from the sync-contract review, extended)
+## Rollout law (from the sync-contract review; branch-resident model)
 
-Cloud merges and deploys before any edge flows/firmware rollout — never the reverse. No
-firmware images until X1 lands. The §10 two-account walkthrough runs after the MG set is
-fixed on both sides. Deploy day itself is gated on D8 (gateway back online), then D2
-(mirrors verified populated) before anyone calls the deployment done.
+AgroLink is deliberately NOT merged to main: it lives on one branch per repo
+(`feat/journal-cloud-primary` in osi-os and osi-server), deployed from the branches —
+same convention as the AgroLink branding branch. Consequences: the branch-trigger CI
+added by X11/N-B is the ONLY automated gate this code ever gets (main-only workflows
+never see it), and "lockstep" means deployment ordering, not a merge.
+
+The law: the cloud branch deploys before any edge flows/firmware rollout — never the
+reverse. Push both branches to origin before deploying (the fix-wave commits are
+local-only until then). No firmware images until X1's provenance lands in the built
+image. The §10 two-account walkthrough runs before the edge rollout. Deploy day is gated
+on the N-A `cloud_user_id` pre-flight (all flag-off gateways), D8 (agrolink-test-01 back
+online), then D2 (mirrors verified populated) and the R12 NULL-EUI count before anyone
+calls the deployment done.
