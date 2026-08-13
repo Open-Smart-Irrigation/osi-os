@@ -116,6 +116,27 @@ without a rootfs).
 | N4 | SF | `verify-sync-op-parity.js` never passes `serverGoldenPath` through `main()`; golden byte-compare silently skips in CI and under the documented pinning env var — R5's gate is inert where it was added to gate | Derive golden from the resolved server-source root; error (not warn) when source resolved but golden absent; or a `sha256sum` step in `migrations.yml` |
 | N5 | FU | Replay clobbers local device renames (pushes stale name back); TYPE_CONFLICT precedes the ownership fence (cross-tenant type_id oracle); `cs-reg-cloud-fn` type maps lack `MILESIGHT_UC512` (cloud UC512 registration fails validation) | Bundle with cleanups |
 
+## Round 3 close-out (2026-08-13) — MERGE-READY
+
+Final review: all nine round-3 commits PASS with mutation evidence (20-probe matrix on
+`cs-reg-cloud-fn`, both modes; N2 probes A/B/C closed; N4 verified four ways incl.
+tampered-golden ERROR; cloud `f05b92be` = N3 + folded ArchUnit refreeze, 1402→1402).
+N-B (the writes suite was wired into no workflow — the reason both prior
+`cs-reg-cloud-fn` regressions slipped through CI) closed by `089d25ef`: writes + reads
+suites now run in `edge-behavior.yml`.
+
+Remaining, none merge-gating:
+
+| # | Sev | Item |
+|---|---|---|
+| N-A | Deploy gate + test | Flag-off unmapped principal now terminally fails REGISTER_DEVICE (was: claimed by user 1). Normally-linked gateways resolve via the `cloud_user_id` fallback, but that is an assumption about live DB state: **pre-flight `SELECT id, username, cloud_user_id FROM users` on Silvan, kaba100, Uganda before rolling edge flows**; add a flag-off UNKNOWN_PRINCIPAL test |
+| N-C | FU | `UNKNOWN_PRINCIPAL` collapsed to generic FAILED in the cloud ACK status service (reachable flag-off per N-A) |
+| N-D | FU | Confirms N5: type-conflict check precedes the ownership fence and leaks `type_id` cross-tenant |
+| N-E | FU | `zoneWarning` plumbed to the cloud frontend types but rendered nowhere |
+| N-F | Info | Flag-off never claims/revives unclaimed rows (byte-identical to pre-wave, §10 holds); R8 semantics are scoped-only by design |
+
+Deferred backlog unchanged: N5, R9–R14, plus N-C/N-E above.
+
 ## Rollout law (from the sync-contract review, extended)
 
 Cloud merges and deploys before any edge flows/firmware rollout — never the reverse. No
