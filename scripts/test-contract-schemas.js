@@ -1100,7 +1100,15 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([]);
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([
+            'USER_UPSERTED',
+            'USER_ZONE_ASSIGNMENT_UPSERTED',
+            'USER_ZONE_ASSIGNMENT_DELETED',
+            'USER_PLOT_ASSIGNMENT_UPSERTED',
+            'USER_PLOT_ASSIGNMENT_DELETED',
+            'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+            'WEATHER_STATION_ZONES_REPLACED',
+        ]);
     reportCheck(
         exactStaging,
         'staging manifest records activated device rollout',
