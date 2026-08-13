@@ -2181,8 +2181,9 @@ function registerCommand(devEui, extras = {}) {
       params: Object.assign({
         devEui,
         name: 'Cloud sensor ' + devEui,
-        deviceType: 'DRAGINO_LSN50',
-        appKey: REGISTER_APPKEY,
+      deviceType: 'DRAGINO_LSN50',
+      appKey: REGISTER_APPKEY,
+        userUuid: 'u-res1',
       }, extras),
     },
   };
@@ -2318,7 +2319,7 @@ test('X5: REGISTER_DEVICE refuses an EUI another account already claimed', async
   const db = seedScopedDb();
   try {
     seedRegisterCloudUserIds(db);
-    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 1001 });
+    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 1001, userUuid: 'u-admin' });
     const ack = response.result[0].specialAck;
 
     assert.equal(ack.result, 'FAILED');
@@ -2356,7 +2357,7 @@ test('N1: flag-off REGISTER_DEVICE still fences a cross-owner claim with the leg
   try {
     seedRegisterCloudUserIds(db);
     const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
-      msg: registerCommand('DENDRO1', { cloudUserId: 1001 }),
+      msg: registerCommand('DENDRO1', { cloudUserId: 1001, userUuid: 'u-admin' }),
       env: REGISTER_ENV_FLAG_OFF,
       db,
       libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
@@ -2406,6 +2407,92 @@ test('N1: flag-off REGISTER_DEVICE still rejects a type conflict before provisio
       db.prepare("SELECT type_id, user_id FROM devices WHERE deveui='DENDRO1'").get().type_id,
       'DRAGINO_LSN50'
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('N2: REGISTER_DEVICE resolves the claimant by userUuid before cloud_user_id', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES ('N2UUID1', 'UUID claim target', 'DRAGINO_LSN50', NULL, NULL, '2026-01-01', '2026-01-01');
+  `);
+  const tracker = { provisionCalls: 0 };
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('N2UUID1', { userUuid: 'u-res1', cloudUserId: 9999 }),
+      env: REGISTER_ENV,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, deleted_at FROM devices WHERE deveui='N2UUID1'"
+    ).get();
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(row.user_id, 2, 'the stable local user UUID must select user 2');
+    assert.equal(row.irrigation_zone_id, null);
+    assert.equal(row.deleted_at, null);
+    assert.equal(tracker.provisionCalls, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('N2: an unmapped principal fails without mutation or ChirpStack provisioning', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES ('N2UNKNOWN1', 'Unknown principal target', 'DRAGINO_LSN50', NULL, NULL, '2026-01-01', '2026-01-01');
+  `);
+  const tracker = { provisionCalls: 0 };
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('N2UNKNOWN1', { userUuid: 'u-not-local', cloudUserId: 9999 }),
+      env: REGISTER_ENV,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, deleted_at, sync_version FROM devices WHERE deveui='N2UNKNOWN1'"
+    ).get();
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'UNKNOWN_PRINCIPAL');
+    assert.equal(ack.state, 'FAILED');
+    assert.equal(row.user_id, null);
+    assert.equal(row.irrigation_zone_id, null);
+    assert.equal(row.deleted_at, null);
+    assert.equal(row.sync_version, 1);
+    assert.equal(tracker.provisionCalls, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('N2: an unmapped principal is not treated as the owner of user 1 device', async () => {
+  const db = seedScopedDb();
+  const tracker = { provisionCalls: 0 };
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('DENDRO2', { userUuid: 'u-not-local', cloudUserId: 9999 }),
+      env: REGISTER_ENV,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, sync_version FROM devices WHERE deveui='DENDRO2'"
+    ).get();
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'UNKNOWN_PRINCIPAL');
+    assert.equal(row.user_id, 1);
+    assert.equal(row.irrigation_zone_id, 2);
+    assert.equal(row.sync_version, 1);
+    assert.equal(tracker.provisionCalls, 0);
   } finally {
     db.close();
   }

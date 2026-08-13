@@ -62,6 +62,7 @@ test('applyScopedAccessCommand applies a valid UPSERT_SCOPED_USER and persists i
     });
     assert.equal(result.handled, true);
     assert.equal(result.ack.result, 'APPLIED');
+    assert.equal(db.native.prepare('SELECT user_uuid FROM users WHERE user_uuid=?').get(USER).user_uuid, USER);
     assert.equal(db.native.prepare('SELECT sync_version FROM users WHERE user_uuid=?').get(USER).sync_version, 1);
   } finally {
     db.native.close();
