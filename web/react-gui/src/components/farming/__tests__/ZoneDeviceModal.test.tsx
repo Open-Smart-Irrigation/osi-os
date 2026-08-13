@@ -28,8 +28,12 @@ const devices = [
 describe('ZoneDeviceModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Two entries, deliberately: with a single-item catalog `catalog[0].id` and
+    // the selected option are the same string, so the assertion below cannot
+    // tell "sent the selection" from "sent the first catalog row".
     vi.mocked(devicesAPI.getCatalog).mockResolvedValue([
       { id: 'DRAGINO_LSN50', name: 'Dragino LSN50' },
+      { id: 'STREGA_VALVE', name: 'Strega valve' },
     ] as never);
     vi.mocked(devicesAPI.add).mockResolvedValue({} as never);
     vi.mocked(irrigationZonesAPI.assignDevice).mockResolvedValue(undefined);
@@ -89,6 +93,9 @@ describe('ZoneDeviceModal', () => {
     const onChanged = renderModal();
 
     fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Dragino LSN50' })).toBeInTheDocument(),
+    );
     fireEvent.change(screen.getByLabelText('addModal.deviceName'), {
       target: { value: 'New tree' },
     });
@@ -112,6 +119,49 @@ describe('ZoneDeviceModal', () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it('blocks registration while the catalog is still loading', () => {
+    vi.mocked(devicesAPI.getCatalog).mockReturnValueOnce(new Promise(() => {}));
+    renderModal();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    fireEvent.change(screen.getByLabelText('addModal.deviceName'), {
+      target: { value: 'Early submit' },
+    });
+    fireEvent.change(screen.getByLabelText('addModal.deveui'), {
+      target: { value: 'BBBB000000000004' },
+    });
+    const submit = screen.getByRole('button', { name: 'zoneDeviceModal.registerSubmit' });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+
+    expect(devicesAPI.add).not.toHaveBeenCalled();
+  });
+
+  it('registers the device type the operator selected, not the first catalog row', async () => {
+    renderModal();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Strega valve' })).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText('addModal.deviceType'), {
+      target: { value: 'STREGA_VALVE' },
+    });
+    fireEvent.change(screen.getByLabelText('addModal.deviceName'), {
+      target: { value: 'North valve' },
+    });
+    fireEvent.change(screen.getByLabelText('addModal.deveui'), {
+      target: { value: 'BBBB000000000003' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'zoneDeviceModal.registerSubmit' }));
+
+    await waitFor(() =>
+      expect(devicesAPI.add).toHaveBeenCalledWith(
+        expect.objectContaining({ type_id: 'STREGA_VALVE' }),
+      ),
+    );
+  });
+
   it('surfaces a bounded ChirpStack error inside the modal', async () => {
     renderModal();
     vi.mocked(devicesAPI.add).mockRejectedValueOnce({
@@ -119,6 +169,9 @@ describe('ZoneDeviceModal', () => {
     });
 
     fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Dragino LSN50' })).toBeInTheDocument(),
+    );
     fireEvent.change(screen.getByLabelText('addModal.deviceName'), {
       target: { value: 'New tree' },
     });
