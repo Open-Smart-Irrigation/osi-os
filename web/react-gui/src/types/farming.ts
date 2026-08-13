@@ -9,6 +9,7 @@ export interface Device {
   deveui: string;       // Unique LoRaWAN ID
   name: string;         // User-given name (e.g., "North Field")
   type_id: DeviceType;
+  updated_at?: string | null;
   last_seen?: string | null;    // ISO Date string
   soilMoistureProbeDepths?: Record<string, number>;
   soilMoistureProbeDepthsConfigured?: boolean;
@@ -177,6 +178,16 @@ export interface AdminUser {
 export interface DeviceCatalogItem {
   id: DeviceType;
   name: string;
+}
+
+export interface Sdi12Profile {
+  id: string;
+  label: string;
+  provisional: boolean;
+  expectedValues?: number | null;
+  defaultDepthsCm: number[];
+  channels: string[];
+  depthSlots?: number[];
 }
 
 export interface LoginRequest {

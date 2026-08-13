@@ -15,6 +15,8 @@ import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
+import { Sdi12SoilCard } from '../components/farming/Sdi12SoilCard';
+import { Sdi12SettingsModal } from '../components/farming/Sdi12SettingsModal';
 import {
   IrrigationOutcomesPanel,
   type IrrigationOutcomeZoneContext,
@@ -34,6 +36,7 @@ export const FarmingDashboard: React.FC = () => {
   const { t: tc } = useTranslation('common');
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
+  const [sdi12SettingsDevice, setSdi12SettingsDevice] = useState<Device | null>(null);
 
   // Fetch devices with SWR - polls every 10 seconds
   const { data: devices, error: devicesError, mutate: mutateDevices } = useSWR<Device[]>(
@@ -123,6 +126,7 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedLSN50 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_LSN50');
   const unassignedS2120 = unassignedDevices.filter((d) => d.type_id === 'SENSECAP_S2120');
   const unassignedLoRain = unassignedDevices.filter((d) => d.type_id === 'AQUASCOPE_LORAIN');
+  const unassignedSdi12 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_SDI12');
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
     () => new Map(visibleZones.map((zone) => [zone.id, zone.timezone])),
@@ -296,6 +300,23 @@ export const FarmingDashboard: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Unassigned SDI-12 Soil Nodes */}
+                  {unassignedSdi12.length > 0 && (
+                    <div className="mt-6">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">SDI-12 Soil Nodes</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {unassignedSdi12.map((device) => (
+                          <Sdi12SoilCard
+                            key={device.deveui}
+                            device={device}
+                            onOpenSettings={() => setSdi12SettingsDevice(device)}
+                            readOnly={!canWrite}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Unassigned SenseCAP S2120 Weather Stations */}
                   {unassignedS2120.length > 0 && (
                     <div className="mt-6">
@@ -369,6 +390,14 @@ export const FarmingDashboard: React.FC = () => {
         onClose={() => setIsCreateZoneModalOpen(false)}
         onZoneCreated={handleZoneCreated}
       />
+
+      {sdi12SettingsDevice && (
+        <Sdi12SettingsModal
+          device={sdi12SettingsDevice}
+          onClose={() => setSdi12SettingsDevice(null)}
+          onUpdate={handleUpdate}
+        />
+      )}
     </div>
   );
 };

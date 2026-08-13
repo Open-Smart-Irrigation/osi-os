@@ -1650,7 +1650,7 @@ git add -A && git commit -m "feat(sdi12): device type, latest-data/export plumbi
 - Consumes: Task 12 endpoints; Task 13 card.
 - Produces: API helpers `fetchSdi12Profiles(): Promise<{profiles: Sdi12Profile[]}>`, `putSdi12Config(deveui, body): Promise<void>`, `postSdi12Identify(deveui): Promise<void>` in `services/api.ts` (follow the file's existing fetch-helper idiom).
 
-- [ ] **Step 1: Failing modal test**
+- [x] **Step 1: Failing modal test**
 
 ```tsx
 it('lists profiles from the API and saves profile + depths', async () => {
@@ -1666,21 +1666,21 @@ it('detect button posts identify', async () => {
 
 Write these as real tests using the mocking style of the existing modal tests in the same directory (read `DraginoSettingsModal` usage/tests first). Run to verify FAIL.
 
-- [ ] **Step 2: Implement modal + api helpers**
+- [x] **Step 2: Implement modal + api helpers**
 
 Modal contents: profile `<select>` (label + "(unverified)" suffix when `provisional`), a depths editor rendering **one numeric input per `depthSlot`** of the selected profile (pre-filled from `defaultDepthsCm` by slot position, overridden by existing stored depths; the endpoint fans each slot's value out to its channels), the stored `sdi12_identity` displayed when status is `unmatched` to assist the manual pick, a "Detect probe" button calling `postSdi12Identify` (showing pending age from `updated_at` while status is `pending_identify`), save calling `putSdi12Config`. Follow `DraginoSettingsModal.tsx` for modal chrome and error-text conventions (mind the `--error-text` readability rule from the journal work).
 
-- [ ] **Step 3: Dashboard + zone card wiring**
+- [x] **Step 3: Dashboard + zone card wiring**
 
 - `FarmingDashboard.tsx`: add `unassignedSdi12 = devices.filter(d => d.type_id === 'DRAGINO_SDI12' && !d.irrigation_zone_id)` beside the existing filters, and a render block titled `SDI-12 Soil Nodes` rendering `<Sdi12SoilCard>` per device, matching the LSN50 block at ~L261.
 - `IrrigationZoneCard.tsx`: add `sdi12Nodes` to the ~L129-133 filter group and a `<Sdi12SoilCard>` render section beside the existing per-type sections.
 - `channels/registry.ts`: in `cardChannelsForSource`, add a `DRAGINO_SDI12` branch returning the union of the device's populated soil channels (mirror how the `DRAGINO_LSN50` branch at ~L65 selects by flags — here select all `vwc_*`/`soil_temp_*`/`soil_ec_*`/`swt_*` soil channels).
 
-- [ ] **Step 4: History card eligibility (edge helpers)**
+- [x] **Step 4: History card eligibility (edge helpers)**
 
 In `osi-history-router/index.js` (~L245-259) and `osi-history-helper/index.js` (~L301-310): extend the soil-card eligibility so `type_id === 'DRAGINO_SDI12'` qualifies, alongside the existing KIWI/CLOVER/chameleon condition. Mirror both files to bcm2709.
 
-- [ ] **Step 5: Tests, gates, commit**
+- [x] **Step 5: Tests, gates, commit**
 
 ```bash
 cd web/react-gui && npx vitest run src/components/farming/__tests__/ src/channels/__tests__/ && npx tsc --noEmit -p . && cd ../..

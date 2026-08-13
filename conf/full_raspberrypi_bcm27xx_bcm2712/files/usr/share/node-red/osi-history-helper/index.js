@@ -338,7 +338,7 @@ function deviceBelongsToZone(device, zone) {
 
 function isSoilSource(device) {
   const type = String(device && device.type_id || '').toUpperCase();
-  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER'].includes(type)
+  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12'].includes(type)
     || Number(device && device.chameleon_enabled || 0) === 1
     || hasNumber(device, ['swt_1', 'swt_2', 'swt_3', 'swt_wm1', 'swt_wm2']);
 }

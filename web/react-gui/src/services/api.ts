@@ -43,6 +43,7 @@ import type {
   RegisterRequest,
   RegisterResponse,
   DeviceCatalogItem,
+  Sdi12Profile,
   AddDeviceRequest,
   ValveActionRequest,
   IrrigationZone,
@@ -300,6 +301,24 @@ export const devicesAPI = {
   remove: async (deveui: string): Promise<void> => {
     await api.delete(`/api/devices/${deveui}`);
   },
+};
+
+export interface Sdi12ConfigRequest {
+  probe_profile: string;
+  depths?: Record<string, number>;
+}
+
+export const fetchSdi12Profiles = async (): Promise<{ profiles: Sdi12Profile[] }> => {
+  const response = await api.get<{ profiles: Sdi12Profile[] }>('/api/sdi12/probe-profiles');
+  return response.data;
+};
+
+export const putSdi12Config = async (deveui: string, body: Sdi12ConfigRequest): Promise<void> => {
+  await api.put(`/api/devices/${encodeURIComponent(deveui)}/sdi12/config`, body);
+};
+
+export const postSdi12Identify = async (deveui: string): Promise<void> => {
+  await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/identify`);
 };
 
 type RawIrrigationZone = Omit<Partial<IrrigationZone>, 'schedule'> & {
