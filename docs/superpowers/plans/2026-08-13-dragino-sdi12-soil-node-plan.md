@@ -1259,7 +1259,7 @@ All SQL in this task runs through `osiDb` with bound `?` parameters
 legacy, not license). Function nodes here declare `libs: osiDb + osiLib`
 like the Task 9 write node.
 
-- [ ] **Step 1: Wire gate output 2 and add the identify handler (`sdi12-identify-fn`)**
+- [x] **Step 1: Wire gate output 2 and add the identify handler (`sdi12-identify-fn`)**
 
 Connect `sdi12-gate-fn` output 2 → `sdi12-identify-fn`:
 
@@ -1301,7 +1301,7 @@ return (async () => {
 })();
 ```
 
-- [ ] **Step 2: Shared identify trigger + endpoint**
+- [x] **Step 2: Shared identify trigger + endpoint**
 
 One trigger function node (`sdi12-identify-trigger-fn`) behind a link-in
 (`sdi12-identify-trigger-link-in`), so registration (Task 11) and the
@@ -1354,11 +1354,11 @@ return (async () => {
 verbatim, then link out to the shared trigger and format a 202 with
 `{ status: 'pending_identify' }` (or the trigger's error response).
 
-- [ ] **Step 3: Command-safety registry**
+- [x] **Step 3: Command-safety registry**
 
 Register the new downlink action in `cmd-type-registry` ("Command Type Registry", tab `sys-admin-tab`) following the LSN50 interval command's entry shape, then run `node scripts/verify-command-safety.js` — expect PASS.
 
-- [ ] **Step 4: Mirror, gates, commit**
+- [x] **Step 4: Mirror, gates, commit**
 
 Same gate block as Task 9 Step 6.
 

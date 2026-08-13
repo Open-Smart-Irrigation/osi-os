@@ -58,15 +58,15 @@
       "reason": "Versioned device and weather-station-zone applier validates protected command shape, dispatches through the device-command helper, invalidates scope after apply, and emits the durable terminal ACK."
     },
     "cmd-type-registry": {
-      "max_chars": 5696,
+      "max_chars": 5819,
       "reason": "1.C expanded the command-type registry; AgroLink Task 7 adds the six scoped user and assignment commands (+720)."
     },
     "reject-indefinite-open": {
-      "max_chars": 7416,
+      "max_chars": 7539,
       "reason": "1.C expanded COMMAND_TYPES_FALLBACK; sync-failclosed-20260719 adds durable permanent rejection; PR #149 routes terminal rejection ACKs directly to the durable queue; AgroLink Task 7 adds the six scoped user and assignment commands (+720)."
     },
     "write-strega-expectation": {
-      "max_chars": 19320,
+      "max_chars": 19443,
       "reason": "AgroLink Phase C reasserts fresh device scope at enqueue, fails closed, and records user originators; Task 7 adds the six scoped command fallback registrations (+720). AgroLink review E3 (Critical): PHYSICAL commands now require an actor when scoped -- an actor-less cloud command used to skip the scope check entirely and actuate anyway -- and the existing fresh-scope check now also denies non-mutating roles (canMutate), not just revoked grants (+1859). AgroLink review R3 (post-E3-review, Important): the scope/actor gate now runs ahead of duration parsing (it only needs deviceEui + commandType) and an invalid/missing duration now fails closed under scope instead of the legacy pass-through -- the old ordering let an actor-less, duration-less cloud VALVE_COMMAND (a real shape) return early and skip E3 entirely (+1602). AgroLink review R1 (Critical, post-E3-review): actorUuid also reads raw.actor_user_uuid/raw.actorUserUuid as defense in depth alongside Route Command's message-level copy (+411). AgroLink review R2 (Important, post-E3-review): exempts a genuine scheduler dispatch (strict msg._systemActuation === true, which cannot be smuggled in through an HTTP body or a cloud command payload) from the actor requirement, so scoped access no longer silently drops every automated irrigation decision (+1041). AgroLink review R4 (Important, post-E3-review): an actor present but denied (revoked grant or non-mutating role) now queues the same kind of terminal REJECTED_PERMANENT/scope_denied ack the actor-required branch does, instead of leaving the cloud command non-terminal for redelivery until expiry (+1682). AgroLink review X1 (post-R4-review): rethrows a scope-helper error with no .statusCode (a transient infra failure, not a deliberate scope decision) instead of queuing an irreversible REJECTED_PERMANENT for it (+692)."
     },
     "9b3afb405207302e": {
@@ -1070,8 +1070,32 @@
       "reason": "AgroLink Phase C atomically replaces shared-weather zone assignments after fresh device and target-zone checks. AgroLink review E1: the router's own transaction now also upserts weather_station_zone_state (insert at sync_version=0 on first assignment so the AI trigger bumps it to 1, else increment) so a scoped GUI edit actually publishes WEATHER_STATION_ZONES_REPLACED instead of leaving the cloud mirror stale and vulnerable to a later stale-base-version cloud replace silently discarding the edit (+1595). AgroLink review E6: replaced the actorScope.role==='viewer' denylist with an explicit scope.canMutate() allowlist so an unrecognized/corrupted role fails closed instead of being treated as write-capable (+5)."
     },
     "scoped-device-config-guard": {
-      "max_chars": 4249,
+      "max_chars": 4305,
       "reason": "AgroLink Phase C: fresh device-config scope checks across every maintained device configuration route. AgroLink review E6: replaced the actorScope.role==='viewer' denylist with an explicit scope.canMutate() allowlist so an unrecognized/corrupted role fails closed instead of being treated as write-capable (+5)."
+    },
+    "sdi12-identify-fn": {
+      "max_chars": 1407,
+      "reason": "Task 10 FPort 100 identity handler: bound pending-state transition with profile matching and guarded identified/unmatched outcomes."
+    },
+    "sdi12-identify-trigger-fn": {
+      "max_chars": 1395,
+      "reason": "Task 10 shared SDI-12 identify trigger: validates ChirpStack registration data, marks pending_identify with bound SQL, and builds the approved 0xA8 downlink."
+    },
+    "sdi12-identify-mqtt-adapter": {
+      "max_chars": 228,
+      "reason": "Task 10 maps the shared trigger downlink envelope to the standard MQTT-out message shape."
+    },
+    "sdi12-identify-action-fn": {
+      "max_chars": 5028,
+      "reason": "Task 10 identify endpoint action: bearer/ownership fallback plus bound DRAGINO_SDI12 lookup before invoking the shared trigger."
+    },
+    "sdi12-identify-http-success": {
+      "max_chars": 123,
+      "reason": "Task 10 formats the shared identify trigger's HTTP 202 pending response while remaining inert for registration invocations."
+    },
+    "sdi12-identify-http-error": {
+      "max_chars": 194,
+      "reason": "Task 10 routes shared identify trigger validation errors to HTTP callers and visibly warns for non-HTTP callers."
     },
     "scoped-zone-config-guard": {
       "max_chars": 3724,
@@ -1107,7 +1131,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1285427,
+    "max_total": 1294227,
     "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411); AgroLink review R2 (post-E3-review) adds the scheduler's message-level system-actuation marker and its edge-side exemption (+1041 write-strega-expectation, +48 scheduler); AgroLink review R4 (post-R4-review) queues a terminal scope_denied ack when an actor is present but denied (+1682); AgroLink review X1 (post-R4-review) rethrows non-statusCode scope-helper errors instead of acking them as denials (+692); AgroLink review X2 (post-R-wave-review) closes the GUI STREGA advanced chain's actuation gap: scope+actor gate in put-strega-timed-auth-fn (+2690) and actor propagation onto every actuatorMsg in put-strega-advanced-authorize-fn (+630); Task 6 adds the isolated bounded Journal V2 replication worker and its success/error status paths (+2536), then adds the identity-transition fail-closed check (+513); AgroLink SDI-12 schema slice adds sanctioned boot literals (+1010), and the SDI-12 ingest adds the explicit profile dispatcher, 24 soil telemetry fields, and three new function nodes (+5951)."
   }
 }
