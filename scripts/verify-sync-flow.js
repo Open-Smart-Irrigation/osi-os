@@ -1434,7 +1434,8 @@ expectIncludes('Clear linked account state', "flow.set('account_linked', false)"
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
-expectIncludes('Process Result', 'osi_auth_token_secret', 'uses a persisted local auth secret');
+expectIncludes('Process Result', "osiLib.require('scope')", 'loads the shared authentication secret helper');
+expectIncludes('Process Result', 'resolveAuthSecret', 'uses the shared persisted local auth secret implementation');
 expectIncludes('Process Result', "env.get('LINK_GATEWAY_DEVICE_EUI')", 'uses the linked gateway identity captured at account-link time');
 expectIncludes('Process Result', 'decodeGatewayDeviceEuiFromSyncToken', 'falls back to the gateway encoded into the sync token');
 expectIncludes('Process Result', "env.get('DEVICE_EUI')", 'uses canonical runtime gateway identity only as a last resort');

@@ -1317,6 +1317,28 @@ test('P7: assignment only takes unassigned devices and names the conflict', asyn
   }
 });
 
+test('E11: assigning an already assigned device to the same zone is accepted', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/DENDRO1',
+        { id: '1', deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 202);
+    assert.equal(response.result[1].payload.irrigation_zone_id, 1);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
 test('P7: assignment keeps its role and target-zone write gates', async () => {
   const db = seedScopedDb();
   db.exec(`
@@ -2371,6 +2393,48 @@ test('§10: the flag-off command ACK payload carries no zone keys', async () => 
   } finally {
     db.close();
   }
+});
+
+test('X9: a key-verification reconciliation flag survives the REGISTER_DEVICE ACK', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: {
+        specialAck: {
+          commandId: 'cmd-verify-keys',
+          commandType: 'REGISTER_DEVICE',
+          result: 'FAILED',
+          state: 'FAILED',
+          verificationRequired: true,
+          error: 'key read-back did not match',
+        },
+        payload: {},
+      },
+      env: REGISTER_ENV,
+      db,
+    });
+    const payload = JSON.parse(response.result.payload);
+    assert.equal(payload.verificationRequired, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('X9: CS Register compensation failure produces only the explicit HTTP response', () => {
+  const source = loadNode('cs-register-device-fn').func;
+  assert.doesNotMatch(
+    source,
+    /guarded ChirpStack compensation failed:[\s\S]*?, msg\)/,
+    'compensation logging must not route the request message into a second response'
+  );
+});
+
+test('X12: admin flow asserts that guarded SQL replacements changed their anchors', () => {
+  const source = loadNode('scoped-admin-account-router').func;
+  assert.match(source, /const roleGuardedSql = scope\.buildDeroleUserGuardedSql\(\)/);
+  assert.match(source, /if \(guardedSql === roleGuardedSql\)/);
+  assert.match(source, /const disableGuardedSql = scope\.buildDisableUserGuardedSql\(\)/);
+  assert.match(source, /if \(guardedSql === disableGuardedSql\)/);
 });
 
 test('P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registration', async () => {

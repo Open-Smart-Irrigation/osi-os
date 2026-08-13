@@ -311,7 +311,7 @@ const expectedNodeLibs = {
   'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }, { var: 'osiLib', module: 'osi-lib' }],
   'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
-  'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'al-link-restart-node-red': [],
   'al-unlink-restart-node-red': [],
@@ -337,7 +337,7 @@ const localRestartReader = [
   '}',
 ].join('\n');
 const protectedNodeHashes = {
-  'al-link-validate': 'c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7',
+  'al-link-validate': 'a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc',
   'sync-init-fn': '2ecba63b87c0389c9f1273267346101d861d5a076abe1410ec496111fe502263',
 };
 const migrationPreflightHashes = {
@@ -992,9 +992,9 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 164 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 164,
-    'silent-catch baseline records 164 for both maintained profiles',
-    'silent-catch baseline must be 164 for both maintained profiles after installation-recovery auth cleanup');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 89 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 89,
+    'silent-catch baseline records 89 for both maintained profiles',
+    'silent-catch baseline must be 89 for both maintained profiles after shared auth-secret cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'registration compensation now reports failures instead of swallowing them', 'records the PR #149 compensation cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase A', 'records the scoped-access auth cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase B shared reads', 'records the scoped-access shared-read cleanup');

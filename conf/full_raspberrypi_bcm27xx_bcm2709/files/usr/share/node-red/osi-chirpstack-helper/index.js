@@ -153,6 +153,7 @@ function toGrpcError(error, step) {
 function reconciliationRequiredError(step, resourceKind) {
   const error = boundedError(step, 'RECONCILIATION_REQUIRED');
   error.resourceKind = resourceKind;
+  if (resourceKind === 'keys') error.verificationRequired = true;
   return error;
 }
 

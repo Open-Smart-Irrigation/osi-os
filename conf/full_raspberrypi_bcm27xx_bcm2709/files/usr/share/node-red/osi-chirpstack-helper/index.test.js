@@ -493,6 +493,7 @@ for (const field of ['nwkKey', 'appKey', 'genAppKey']) {
         assert.equal(error.step, 'verifyKeys');
         assert.equal(error.code, 'RECONCILIATION_REQUIRED');
         assert.equal(error.resourceKind, 'keys');
+        assert.equal(error.verificationRequired, true);
         return true;
       }
     );
@@ -1249,6 +1250,10 @@ function makeFakeOsiDb(opts = {}) {
         all(sql, paramsOrCb, maybeCb) {
           const cb = typeof paramsOrCb === 'function' ? paramsOrCb : maybeCb;
           cb(null, []);
+        },
+        get(sql, paramsOrCb, maybeCb) {
+          const cb = typeof paramsOrCb === 'function' ? paramsOrCb : maybeCb;
+          cb(null, null);
         },
         close(cb) { if (cb) cb(); },
       };

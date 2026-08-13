@@ -161,6 +161,30 @@ test('verifyBearer accepts the edge two-part HMAC token and rejects forged token
   );
 });
 
+test('concurrent auth-secret resolution reuses the one persisted secret', async () => {
+  const files = new Map();
+  const fakeFs = {
+    readFileSync(path) {
+      if (!files.has(path)) {
+        const error = new Error('missing');
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return files.get(path);
+    },
+    writeFileSync(path, value) {
+      files.set(path, value);
+    },
+  };
+  const [first, second] = await Promise.all([
+    scope.resolveAuthSecret({ fs: fakeFs }),
+    scope.resolveAuthSecret({ fs: fakeFs }),
+  ]);
+  assert.equal(first, second);
+  assert.equal(files.size, 1);
+  assert.equal(files.values().next().value.trim(), first);
+});
+
 test('assertAuthenticatedRole binds token id and username before checking role', async () => {
   const db = fakeDb({
     get: (sql) => {
@@ -359,7 +383,29 @@ test('buildDisableUserGuardedSql protects only the last enabled admin', () => {
 test('buildDeroleUserGuardedSql protects the last enabled admin', () => {
   const sql = scope.buildDeroleUserGuardedSql();
   assert.match(sql, /^UPDATE users SET role = \?/);
+  assert.match(sql, /disabled_at IS NOT NULL/);
   assert.match(sql, /COUNT\(\*\).*role='admin'/);
+});
+
+test('admin guarded SQL exposes stable replacement anchors and deroles a disabled admin', () => {
+  const disableSql = scope.buildDisableUserGuardedSql();
+  const deroleSql = scope.buildDeroleUserGuardedSql();
+  assert.match(disableSql, /SET disabled_at =/);
+  assert.match(deroleSql, /SET role = \?/);
+
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE users (
+      user_uuid TEXT PRIMARY KEY,
+      role TEXT NOT NULL,
+      disabled_at TEXT
+    );
+    INSERT INTO users (user_uuid, role, disabled_at)
+    VALUES ('u-enabled','admin',NULL), ('u-disabled','admin','2026-01-01T00:00:00.000Z');
+  `);
+  assert.equal(db.prepare(deroleSql).run('researcher', 'u-disabled', 'researcher').changes, 1);
+  db.close();
 });
 
 test('canMutate is an allowlist: only admin/researcher, everything else (including a corrupted role) fails closed', () => {
