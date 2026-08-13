@@ -56,8 +56,25 @@ independent of the scoping work, **SF** = should-fix, **FU** = tracked follow-up
 | X11 | SF | CI: main-only triggers mean no branch gate ever ran. Add branch triggers for: provenance verifiers, `verify-sync-op-parity` (pinned pairing), `OSI_EXPECT_FLOW_RED=1` flow tests, the 10 unwired contract/command-path suites, journal-V2 suite. `osi-zone-commands` (802 lines) + `osi-scoped-access-commands` (479) have zero tests |
 | X12 | FU | `action:` effect keys inert on un-upgraded gateway ledgers; `effect-keys.md` replay rule understates implemented dedupe; journal-V2 docs claim producer-off while the tick runs (runtime-safe); guarded-SQL string surgery unpinned; derole guard over-strict with a disabled admin |
 
-## Rollout law (from the sync-contract review)
+## Deployment and live-state findings (maintainer sweep, 2026-08-13)
+
+State repairs and deploy-day gates, distinct from code fixes. Sources: live inspection of
+agrolink-test-01, kaba100, and the production cloud DB.
+
+| # | Sev | Finding | Fix shape |
+|---|---|---|---|
+| D1 | BR | Bootstrap whitelist (`8ac15856`, deployed) covers only DEVICE + the zone family: DENDRO, DENDRO_ROW, CHAMELEON, DEVICE_DATA*, and journal types still terminally reject when the cloud does not know the parent resource | Extend the absent-resource bootstrap whitelist to telemetry/journal types whose id carries the gateway EUI, with per-type review |
+| D2 | BR | **Deploy-day gate:** `gateway_user_mirrors` has ZERO rows on the live cloud (`last_acknowledged_at` NULL on both linked accounts). The widened read path throws without a mirror row (`GatewayScopeService.java:73`), so post-deploy every read 403s "Gateway membership is required" and the dashboard stays dead. Edge machinery exists (0033 USER triggers + 0034 backfill, gated on `scoped_access_emit.enabled`) but mirrors have never arrived | After lockstep deploy, verify mirrors populate for BOTH gateways; if not, touch edge `users` rows (or re-link) to fire the emit trigger; diagnose why USER events never arrived (check `scoped_access_emit.enabled` + `USER%` rows in each edge outbox) |
+| D3 | SF | 14,386 dead outbox rows on agrolink-test-01: terminal rejections never retry; sim devices whose DEVICE-create died pre-bootstrap-fix stay unregistered cloud-side, so their telemetry keeps rejecting and the pile grows while sim tabs run | State repair: re-enqueue/inject recipe (in [[sync-ownership-bootstrap-gap-2026-08-12]] memory) or re-register the sims; consider disabling sim tabs until then |
+| D4 | SF | kaba100 stores plaintext passwords for `Farmer` and `admin` (`test` is bcrypt). Flag-off gateway; untouched by the rework | Live repair: bcrypt-hash both rows; check Silvan/Uganda for the same |
+| D5 | SF | 0034 backfill promoted `MIN(id)` to admin: on kaba100 that is `Farmer` (id 1), enabled | Live data correction + a backfill guard for future gateways |
+| D6 | FU | kaba100: 381 historical rejections (222 stale_sync_version, 48 equal_version_payload_conflict, ~111 journal ownership_denied) — same classes as D1/D3 | Triage with the D3 replay recipe |
+| D7 | — | Agroscope banner on the cloud branch is deliberate (`f6bc5491`), non-issue | None |
+| D8 | — | agrolink-test-01 went offline mid-session (SSH/:1880 timeout, Tailscale relay "fra"); healthy an hour earlier — looks like site network/power, not the deploys. The emit-gate check (D2's edge half) is still unrun | Confirm the gateway returns before scheduling the lockstep deploy; run the emit-gate check first thing |
+
+## Rollout law (from the sync-contract review, extended)
 
 Cloud merges and deploys before any edge flows/firmware rollout — never the reverse. No
 firmware images until X1 lands. The §10 two-account walkthrough runs after the MG set is
-fixed on both sides.
+fixed on both sides. Deploy day itself is gated on D8 (gateway back online), then D2
+(mirrors verified populated) before anyone calls the deployment done.
