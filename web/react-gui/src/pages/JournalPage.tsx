@@ -125,7 +125,7 @@ export const JournalPage: React.FC = () => {
     return allZones.find((zone) => zoneUuid(zone) === initialPlot.zone_uuid);
   }, [allZones, initialPlot]);
   const captureReady = catalogState.available && !catalogState.error && !timelineReadError && !captureEnrichmentError &&
-    !scopeLoading && !plotState.loading && !groupState.loading &&
+    !plotState.loading && !groupState.loading &&
     Array.isArray(zonesState.data) && !zonesState.isLoading && !zonesState.error;
 
   React.useEffect(() => {
@@ -189,7 +189,7 @@ export const JournalPage: React.FC = () => {
   };
 
   const showCapture = captureOpen && captureReady && catalogState.catalog;
-  const reachedTimelineBranch = !scopeLoading && !catalogState.loading && !catalogState.unavailable && !catalogState.error &&
+  const reachedTimelineBranch = !catalogState.loading && !catalogState.unavailable && !catalogState.error &&
     !timelineReadError && !((captureRequested || captureOpen) && captureEnrichmentError) && !showCapture;
   const showWorkspace = isDesktop && reachedTimelineBranch;
 
@@ -228,7 +228,7 @@ export const JournalPage: React.FC = () => {
       {!scopeLoading && !canWrite && <ReadOnlyNotice scope="farm" />}
 
       <main className={showWorkspace ? 'mx-auto max-w-[1600px]' : 'mx-auto max-w-3xl px-4 py-8'}>
-        {scopeLoading || catalogState.loading ? (
+        {catalogState.loading ? (
           <p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>
         ) : catalogState.unavailable ? (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">

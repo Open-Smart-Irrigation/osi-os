@@ -667,6 +667,16 @@ describe('JournalPage', () => {
     expect(screen.queryAllByRole('status')).toHaveLength(0);
   });
 
+  it('renders the journal timeline even when the scope profile never resolves', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.loading = true;
+
+    renderPage();
+
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.queryByText('timeline.loading')).not.toBeInTheDocument();
+  });
+
   it.each([
     ['researcher', true],
     ['viewer', true],

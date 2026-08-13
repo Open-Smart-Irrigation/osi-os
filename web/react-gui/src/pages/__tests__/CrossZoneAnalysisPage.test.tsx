@@ -8,7 +8,20 @@ import type { AnalysisCatalogEntry, AnalysisCatalogResponse } from '../../analys
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 vi.mock('../../components/analysis/EChart', () => ({ EChart: () => <div data-testid="echart" /> }));
 const exportMenuProps = vi.fn();
+const appHeaderProps = vi.fn();
+const scopeState = {
+  isAdmin: true,
+  isScoped: false,
+  loading: false,
+};
 const saveViewMock = vi.fn();
+vi.mock('../../components/AppHeader', () => ({
+  AppHeader: (props: unknown) => {
+    appHeaderProps(props);
+    return <header data-testid="analysis-header" />;
+  },
+}));
+vi.mock('../../contexts/ScopeContext', () => ({ useScope: () => scopeState }));
 vi.mock('../../components/analysis/AnalysisExportMenu', () => ({
   AnalysisExportMenu: (props: {
     username?: string | null;
@@ -127,9 +140,19 @@ afterEach(() => {
   localStorage.clear();
   appliedAggregation = 'hourly';
   catalogState = loadedCatalogState();
+  scopeState.isAdmin = true;
+  scopeState.isScoped = false;
+  scopeState.loading = false;
 });
 
 describe('CrossZoneAnalysisPage', () => {
+  it('keeps the admin menu visible for an admin when scoped access is flag-off', () => {
+    catalogState = loadedCatalogState();
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    expect(appHeaderProps).toHaveBeenCalledWith(expect.objectContaining({ showAdmin: true }));
+  });
+
   it('uses theme variable surfaces for the analysis shell instead of hard-coded light classes', () => {
     catalogState = loadedCatalogState();
     const { container } = render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
