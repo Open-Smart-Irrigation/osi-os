@@ -1,9 +1,9 @@
 name: Field Journal Tests
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 jobs:
   field-journal:
     runs-on: ubuntu-latest
@@ -28,6 +28,21 @@ jobs:
         run: node scripts/test-journal-api.js
       - name: Command-path tests
         run: node scripts/test-journal-command-path.js
+      - name: Journal V2 contract and worker tests
+        run: |
+          node --test \
+            scripts/test-journal-v2-canonicalization.js \
+            scripts/test-journal-v2-config.js \
+            scripts/test-journal-v2-contract.js \
+            scripts/test-journal-v2-init-startup.js \
+            scripts/test-journal-v2-media.js \
+            scripts/test-journal-v2-replication.js \
+            scripts/test-journal-v2-worker.js
+      - name: Journal replication package tests
+        run: |
+          node --test \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/index.test.js
       - name: Sync contract registry and semantic bindings
         run: node scripts/verify-sync-contract.js
       - name: Contract schema edge cases

@@ -1,9 +1,9 @@
 name: Codec Verifiers
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 jobs:
   codecs:
     runs-on: ubuntu-latest

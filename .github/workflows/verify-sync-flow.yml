@@ -1,9 +1,9 @@
 name: Sync Flow Verifier
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 jobs:
   verify-sync-flow:
     runs-on: ubuntu-latest

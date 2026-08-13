@@ -1,9 +1,9 @@
 name: Edge behavior gates
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 jobs:
   edge-behavior:
     runs-on: ubuntu-latest
@@ -32,6 +32,22 @@ jobs:
         run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
       - name: ChirpStack helper module (bcm2709)
         run: node --test conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
+      - name: ChirpStack helper flow behavior (bcm2712)
+        env:
+          OSI_EXPECT_FLOW_RED: '1'
+        run: node --test --test-name-pattern='\[flow\]' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
+      - name: ChirpStack helper flow behavior (bcm2709)
+        env:
+          OSI_EXPECT_FLOW_RED: '1'
+        run: node --test --test-name-pattern='\[flow\]' conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
+      - name: Scope helper module tests (bcm2712)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.test.js
+      - name: Scope helper module tests (bcm2709)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper/index.test.js
+      - name: Zone command package tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/index.test.js
+      - name: Scoped-access command package tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.test.js
       - name: Flow wiring guards (STREGA + osiDb close + ChirpStack client close)
         run: node scripts/test-flows-wiring.js
       - name: OSI server UCI defaults (LSN50_WRITER_DISABLE + retention)

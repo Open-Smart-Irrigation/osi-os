@@ -1,9 +1,9 @@
 name: UI Core Vendor Parity
 on:
   push:
-    branches: [ AgroLink ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ AgroLink ]
+  workflow_dispatch:
 jobs:
   vendor-parity:
     runs-on: ubuntu-latest
