@@ -165,17 +165,10 @@ async function main() {
   const mirror = loadFlows(mirrorPath);
   assert.ok(canonical.raw.equals(mirror.raw), 'maintained flows must be byte-identical');
 
-  const bootstrapMigration = require('./migrate-flows-journal-bootstrap');
-  assert.ok(
-    canonical.raw.equals(bootstrapMigration.migrate(canonical.raw)),
-    'journal bootstrap migration must preserve the current fail-closed flow source'
-  );
-  const hardeningMigration = require('./harden-sync-outbox-json');
-  assert.ok(
-    canonical.raw.equals(hardeningMigration.migrate(canonical.raw)),
-    'sync outbox hardening must be a no-op on the installed source'
-  );
-
+  // The one-shot migration generators that produced this installed source
+  // have been retired. Keep this harness focused on the shipped contract;
+  // replaying historical activated-state hashes would make it reject later,
+  // intentional flow edits.
   const byId = new Map(canonical.flows.map((node) => [node.id, node]));
   for (const id of ['sync-bootstrap-build', 'sync-outbox-build', 'sync-force-build']) {
     const source = requiredNode(byId, id).func;
