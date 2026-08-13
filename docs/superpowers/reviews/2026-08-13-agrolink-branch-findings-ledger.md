@@ -96,6 +96,26 @@ Mutation tally: edge 21 mutants, 17 killed, 4 survivors (each a row below).
 | R13 | SF | CI residue: 42 script suites still unwired incl. every named command-path suite; `verify-sync-op-parity` pinned to a branch head not a sha (and cannot catch new-edge-vs-deployed-cloud); bcm2709 copies of new command tests never invoked; provenance workflow's second step deterministically red at test-concurrency ≥ 2; frontend `npm run test:unit` in no cloud workflow; new command-package tests cover 1 of 4 / 1 of 6 types (validateIdentity arms, `enabledAdminCount` at zero) | CI round 2 |
 | R14 | FU | Report corrections: cloud sweep is 1,608 passed not 1,609; ArchUnit red introduced by the wave, not pre-existing; anonymous skip = ClamAV EICAR IT; `d2e81bd6` commit message says "fail closed" where code deliberately falls back open (tested, but message misleads); E11 HistoryDashboard half has zero coverage; lg renders "hexadecimal" as base ten (feeds Uganda language gate) | Corrections + coverage |
 
+## Round 3 — round-2 review findings (2026-08-13)
+
+R1–R7 verified fixed (mutation-tested; caveats: R6's "text-only churn" wording — frozen
+cycles grew ~3 device→zone edges, no rule violation; R7 covers one of the two deleted
+owner filters; R5's cross-repo golden check is inert where it matters, see N4). **R8
+FAILED review.** X1 is confirmed fixed and closed. Of the six residual sweep reds: three
+are wave-caused harness stale-pins, all from `d2e81bd6` (fix = the R4 seam applied to the
+remaining harnesses + repointing two pins); two are baseline stale pins
+(`test-sync-outbox-json-guard` re-pin or retire generators; `verify-lsn50-chameleon-swt`
+stale since `50f38670`, delete or rewrite); one is environmental (built-image verifier
+without a rootfs).
+
+| # | Sev | Finding | Fix shape |
+|---|---|---|---|
+| N1 | MG | R8 moved the X5 cross-owner fence inside `scopedOn`: flag-off gateways (Silvan/kaba100/Uganda) lost it — cross-owner cloud REGISTER_DEVICE again rewrites live ChirpStack incl. root key, ACK SUCCESS (probe-proven both sides of `f6b31626`). E5 never required the trade: the legacy FAILED ACK shape already fits | Hoist the cross-owner fence + type-conflict check out of `scopedOn`; only `ALREADY_REGISTERED`, zone fields, `verificationRequired` stay gated |
+| N2 | MG | Claimant resolution `COALESCE((SELECT id FROM users WHERE cloud_user_id=?),1)` defaults to user 1 for EVERY scoped user (`UPSERT_SCOPED_USER` never writes `cloud_user_id`; cloud already sends `userUuid`, edge ignores it). Probes: researcher's device claimed by user 1; unmapped attacker treated as "same owner" → fence bypass = X5 takeover in scoped mode; two unmapped users mutually same-owner | Resolve by `user_uuid` first, then `cloud_user_id`; unknown principal → terminal `FAILED/UNKNOWN_PRINCIPAL`, never default to 1. Tests must not pre-seed the mapping |
+| N3 | SF | Cloud `DeviceService.registerDevice` unconditionally reassigns `claimedBy` on existing rows (201) while the edge NACKs → permanent ownership divergence; cloud has zero handling for the new ACK vocabulary (`zoneWarning` etc. inert, all collapsed to FAILED) | Cloud-side current-owner check before reassign; minimally surface `zoneWarning`/`ALREADY_CLAIMED` in `DeviceRegistrationSyncStatusService` |
+| N4 | SF | `verify-sync-op-parity.js` never passes `serverGoldenPath` through `main()`; golden byte-compare silently skips in CI and under the documented pinning env var — R5's gate is inert where it was added to gate | Derive golden from the resolved server-source root; error (not warn) when source resolved but golden absent; or a `sha256sum` step in `migrations.yml` |
+| N5 | FU | Replay clobbers local device renames (pushes stale name back); TYPE_CONFLICT precedes the ownership fence (cross-tenant type_id oracle); `cs-reg-cloud-fn` type maps lack `MILESIGHT_UC512` (cloud UC512 registration fails validation) | Bundle with cleanups |
+
 ## Rollout law (from the sync-contract review, extended)
 
 Cloud merges and deploys before any edge flows/firmware rollout — never the reverse. No
