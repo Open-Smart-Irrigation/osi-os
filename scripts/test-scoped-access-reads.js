@@ -299,6 +299,32 @@ test('F1: an unclaimed device is out of the account-wide list for everyone', asy
   }
 });
 
+test('F1: a cloud-assigned device with no local owner is visible', async () => {
+  const db = seedScopedDb();
+  // What the REGISTER_DEVICE applier leaves behind: INSERT OR IGNORE keeps an
+  // existing row's user_id, and a cloud-introduced row has none, while the
+  // zoneUuid resolution assigns it. user_id IS NOT NULL alone hides it.
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('CLOUDONLY1', 'Cloud LSN50', 'DRAGINO_LSN50', NULL, 1, '2026-01-01', '2026-01-01');
+  `);
+  try {
+    for (const userId of [1, 2, 3]) {
+      scopeHelper._resetForTests();
+      const deveuis = (await deviceList(db, userId)).map((row) => row.deveui);
+      assert.ok(
+        deveuis.includes('CLOUDONLY1'),
+        `user ${userId} must see a zone-assigned device the cloud introduced`
+      );
+    }
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
 test('F1: flag-off list behavior remains owner-only', async () => {
   const db = seedScopedDb();
   const flagOff = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' };
