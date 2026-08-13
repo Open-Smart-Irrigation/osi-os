@@ -15,8 +15,8 @@ R1–R8 were implemented as local commits. No push, deploy, live gateway, or pro
 | R3 | edge | `1e7f2fe5` | Pinned the seven staged cloud-deferred event operations exactly. Contract schema, sync-contract, and sync-op parity checks pass. |
 | R4 | edge | `f3128352` | Added `osiLib` seams to the history-vector and STREGA Gen1 harnesses, plus the async/database seam exposed by the STREGA run. Both verifiers exit 0. |
 | R5 | edge + cloud | `a79460f8` + `574567a3` | Copied the golden contract byte-for-byte and added an optional warning-only cross-check when the cloud checkout is unavailable. The paired check reports byte-identical copies. SHA-256: `f29f776ab8c5e39c49f720c5cb41998f2cbf5ed45a3eb2fa8a621029d702921a`. |
-| R6 | cloud | `1c12649c` | Deleted and recreated the ArchUnit store with both creation and update flags temporarily enabled, then restored both flags to `false`. The review found the identical 1,402-cycle set, zero added, zero removed, and constructor-signature text churn only. |
-| R7 | cloud | `33726f30` | Changed the zone fixture device claim to a non-owner user. The regression is now non-vacuous. |
+| R6 | cloud | `1c12649c` | Deleted and recreated the ArchUnit store with both creation and update flags temporarily enabled, then restored both flags to `false`. The review found the identical 1,402-cycle set with zero added or removed cycle violations; it also found about three new device-to-zone edges inside existing frozen cycles. The remaining churn was constructor-signature text churn. |
+| R7 | cloud | `33726f30` | Changed the zone fixture device claim to a non-owner user. The regression is now non-vacuous. The weather-station filter path still lacks a non-vacuous test and is deferred to R14. |
 | R8 | edge | `f6b31626` | Reworked scoped cloud registration for unclaimed, same-owner, and cross-owner existing devices; gated scoped ACK vocabulary; and pinned the W4 zone precondition behavior. |
 
 ## Mutation evidence
