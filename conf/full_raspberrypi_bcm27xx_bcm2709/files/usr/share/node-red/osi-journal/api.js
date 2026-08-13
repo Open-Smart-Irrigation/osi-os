@@ -1261,10 +1261,18 @@ async function saveEntry(db, input, principal, options) {
       principal,
       batchMembers.map(function(member) { return member.plot_uuid; })
     );
+  } else if (mode === 'update') {
+    // The entry's OWN plot is the authority on an update. Checking only the
+    // body-supplied plot let a revoked grantee overwrite an entry, and
+    // re-parent it, by naming a plot they still hold.
+    principal = await assertEntryWrite(db, principal, body.entry_uuid);
+    if (plotUuid) {
+      // A re-parent needs write scope on the destination too, and the
+      // destination owner is the principal the write is attributed to.
+      principal = await assertPlotWrite(db, principal, plotUuid);
+    }
   } else if (plotUuid) {
     principal = await assertPlotWrite(db, principal, plotUuid);
-  } else if (mode === 'update') {
-    principal = await assertEntryWrite(db, principal, body.entry_uuid);
   } else if (zoneUuid) {
     await assertZoneWrite(db, principal, zoneUuid);
   }
