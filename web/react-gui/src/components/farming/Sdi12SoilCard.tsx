@@ -7,6 +7,7 @@ import { formatSwtValue, kpaToPf } from '../../utils/swt';
 interface Sdi12SoilCardProps {
   device: Device;
   onOpenSettings?: () => void;
+  onRemove?: () => void;
   readOnly?: boolean;
 }
 
