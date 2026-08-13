@@ -338,7 +338,7 @@ const localRestartReader = [
 ].join('\n');
 const protectedNodeHashes = {
   'al-link-validate': 'c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7',
-  'sync-init-fn': '2ecba63b87c0389c9f1273267346101d861d5a076abe1410ec496111fe502263',
+  'sync-init-fn': '2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
