@@ -94,6 +94,7 @@
                 "SET_KIWI_INTERVAL",
                 "ENABLE_KIWI_TEMP_HUMIDITY",
                 "SET_CHAMELEON_CONFIG",
+                "SET_SDI12_IDENTIFY",
                 "REGISTER_DEVICE",
                 "REBOOT",
                 "REBOOT_DEVICE",

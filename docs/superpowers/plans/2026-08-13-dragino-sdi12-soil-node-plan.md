@@ -1359,6 +1359,26 @@ verbatim, then link out to the shared trigger and format a 202 with
 
 Register the new downlink action in `cmd-type-registry` ("Command Type Registry", tab `sys-admin-tab`) following the LSN50 interval command's entry shape, then run `node scripts/verify-command-safety.js` — expect PASS.
 
+- [x] **Step 3b (amendment, Task 18 halt): commands contract entry**
+
+Add `"SET_SDI12_IDENTIFY"` to the command-type enum in
+`docs/contracts/sync-schema/commands.schema.json`, next to the
+`SET_LSN50_*`/`SET_CHAMELEON_CONFIG` cluster (~L90-96) —
+`verify-sync-contract.js` cross-checks the flows `cmd-type-registry` against
+that enum and fails on drift in either direction; Step 3 registered the
+command without its contract half. The contract entry makes the command
+cloud-issuable later (AgroLink parity: remote identification via
+pending-commands) but nothing cloud-side consumes it yet; it rides the
+existing osi-server lockstep gate. Then:
+
+```bash
+node scripts/verify-command-safety.js
+node scripts/verify-sync-contract.js
+```
+
+Expected: both PASS. Commit:
+`fix(sdi12): SET_SDI12_IDENTIFY in the commands contract enum`.
+
 - [x] **Step 4: Mirror, gates, commit**
 
 Same gate block as Task 9 Step 6.
@@ -1854,7 +1874,9 @@ Each probe's correction is its own small commit: `fix(sdi12): <probe> profile fr
   does not merge before the paired osi-server branch is ready to
   pair-deploy. Server scope: `type_id` enum (`DeviceType.java`), channel
   manifest copies (per `docs/channel-manifest.md` sync procedure),
-  `sdi12_probe_profile` on the Device resource, telemetry/`DEVICE_DATA_APPENDED`
+  `sdi12_probe_profile` on the Device resource, the `SET_SDI12_IDENTIFY`
+  command type in the server's contract-schema copy (unused until the cloud
+  GUI grows a "detect probe" action), telemetry/`DEVICE_DATA_APPENDED`
   consumption of the 24 fields, history mapper
   (`DeviceDataHistoryMapper.java`), and the paired half of any
   bulk-history-hash extension (`osi-history-sync-helper` hashes a fixed
