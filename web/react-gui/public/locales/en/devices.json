@@ -2,6 +2,7 @@
   "addModal": {
     "title": "Add Device",
     "deviceType": "Device Type",
+    "deviceTypeRequired": "Select a device type",
     "deviceName": "Device Name",
     "deviceNamePlaceholder": "e.g., North Field, Main Valve",
     "deveui": "DevEUI",
@@ -11,6 +12,10 @@
     "generation": "Valve generation",
     "generationGen1": "Gen-1",
     "generationGen2": "Gen-2",
+    "appkeyInvalid": "AppKey must be exactly 32 hex characters",
+    "appkey": "AppKey",
+    "appkeyHint": "32 hex characters printed on the device label",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Adding...",
     "submit": "Add Device",
     "failed": "Failed to add device"

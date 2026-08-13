@@ -2,6 +2,7 @@
   "addModal": {
     "title": "Gerät hinzufügen",
     "deviceType": "Gerätetyp",
+    "deviceTypeRequired": "Wählen Sie einen Gerätetyp aus",
     "deviceName": "Gerätename",
     "deviceNamePlaceholder": "z.B. Nordfeld, Hauptventil",
     "deveui": "DevEUI",
@@ -11,6 +12,10 @@
     "generation": "Ventilgeneration",
     "generationGen1": "Gen-1",
     "generationGen2": "Gen-2",
+    "appkeyInvalid": "Der AppKey muss genau 32 Hexadezimalzeichen enthalten",
+    "appkey": "AppKey",
+    "appkeyHint": "32 Hexadezimalzeichen auf dem Geräteetikett",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Wird hinzugefügt...",
     "submit": "Gerät hinzufügen",
     "failed": "Gerät konnte nicht hinzugefügt werden"

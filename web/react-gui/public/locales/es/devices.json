@@ -2,6 +2,7 @@
   "addModal": {
     "title": "Añadir dispositivo",
     "deviceType": "Tipo de dispositivo",
+    "deviceTypeRequired": "Selecciona un tipo de dispositivo",
     "deviceName": "Nombre del dispositivo",
     "deviceNamePlaceholder": "ej. Campo Norte, Válvula principal",
     "deveui": "DevEUI",
@@ -11,6 +12,10 @@
     "generation": "Valve generation",
     "generationGen1": "Gen-1",
     "generationGen2": "Gen-2",
+    "appkeyInvalid": "La AppKey debe tener exactamente 32 caracteres hexadecimales",
+    "appkey": "AppKey",
+    "appkeyHint": "32 caracteres hexadecimales impresos en la etiqueta del dispositivo",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Añadiendo...",
     "submit": "Añadir dispositivo",
     "failed": "Error al añadir el dispositivo"

@@ -2,12 +2,17 @@
   "addModal": {
     "title": "Ajouter un appareil",
     "deviceType": "Type d'appareil",
+    "deviceTypeRequired": "Sélectionnez un type d'appareil",
     "deviceName": "Nom de l'appareil",
     "deviceNamePlaceholder": "ex. Champ Nord, Vanne principale",
     "deveui": "DevEUI",
     "deveuiPlaceholder": "16 caractères hexadécimaux",
     "deveuiHint": "Entrez exactement 16 caractères hexadécimaux (0-9, A-F)",
     "deveuiInvalid": "Le DevEUI doit contenir exactement 16 caractères hexadécimaux",
+    "appkeyInvalid": "L’AppKey doit contenir exactement 32 caractères hexadécimaux",
+    "appkey": "AppKey",
+    "appkeyHint": "32 caractères hexadécimaux imprimés sur l’étiquette de l’appareil",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Ajout en cours...",
     "submit": "Ajouter l'appareil",
     "failed": "Impossible d'ajouter l'appareil"

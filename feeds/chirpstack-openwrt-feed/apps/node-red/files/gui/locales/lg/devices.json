@@ -2,12 +2,17 @@
   "addModal": {
     "title": "Yongera Ekyuma",
     "deviceType": "Ekika ky'ekyuma",
+    "deviceTypeRequired": "Londako ekika ky'ekyuma",
     "deviceName": "Erinnya ly'ekyuma",
     "deviceNamePlaceholder": "eg. Olusozi olw'omugga, Zzimu enkulu",
     "deveui": "DevEUI",
     "deveuiPlaceholder": "Ebyagiro 16 eby'hexadecimal",
     "deveuiHint": "Yingiza ebyagiro 16 eby'hexadecimal (0-9, A-F)",
     "deveuiInvalid": "DevEUI eba n'ebyagiro 16 eby'hexadecimal",
+    "appkeyInvalid": "AppKey erina okubaamu ebyagiro 32 eby'hexadecimal",
+    "appkey": "AppKey",
+    "appkeyHint": "Ebyagiro 32 eby'hexadecimal ebiri ku kabonero k'ekyuma",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Tikuyongera...",
     "submit": "Yongera Ekyuma",
     "failed": "Okuyongera ekyuma kugaanye"
