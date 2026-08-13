@@ -983,7 +983,7 @@ git add -A && git commit -m "feat(sdi12): atomic schema slice - columns, type CH
 **Interfaces:**
 - Produces: `DRAGINO_SDI12` in the `Device.type_id` enum; `sdi12_probe_profile` property.
 
-- [ ] **Step 1: Edit the schema**
+- [x] **Step 1: Edit the schema**
 
 In the `Device` definition: append `"DRAGINO_SDI12"` to the `type_id` enum, and add alongside the `chameleon_enabled`-style properties:
 
@@ -993,7 +993,7 @@ In the `Device` definition: append `"DRAGINO_SDI12"` to the `type_id` enum, and 
 
 Match the surrounding property style exactly (read the neighbors first).
 
-- [ ] **Step 2: Run the contract gate and commit**
+- [x] **Step 2: Run the contract gate and commit**
 
 ```bash
 node scripts/verify-sync-contract.js
