@@ -1,0 +1,68 @@
+[
+  {
+    "name": "Tensiomark tension and temperature",
+    "fPort": 2,
+    "probeProfile": "TENSIOMARK",
+    "bytes": [12, 228, 1, 43, 50, 46, 52, 56, 43, 50, 49, 46, 53],
+    "expected": {
+      "swt_1": 30.2,
+      "soil_temp_1": 21.5,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "generic VWC three values",
+    "fPort": 2,
+    "probeProfile": "GENERIC_VWC",
+    "bytes": [12, 228, 1, 43, 51, 48, 46, 53, 43, 50, 56, 46, 49, 43, 50, 53, 46, 57],
+    "expected": {
+      "vwc_1": 30.5,
+      "vwc_2": 28.1,
+      "vwc_3": 25.9,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "generic VWC no response",
+    "fPort": 2,
+    "probeProfile": "GENERIC_VWC",
+    "bytes": [12, 228, 1, 78, 85, 76, 76],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [],
+    "expectedNoResponse": true
+  },
+  {
+    "name": "generic VWC address digit is unparseable",
+    "fPort": 2,
+    "probeProfile": "GENERIC_VWC",
+    "bytes": [12, 228, 1, 48, 43, 51, 48, 46, 53],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [
+      {
+        "channel": "unparseable_sdi12",
+        "reason": "unknown_channel"
+      }
+    ]
+  },
+  {
+    "name": "Tensiomark cardinality mismatch is atomic",
+    "fPort": 2,
+    "probeProfile": "TENSIOMARK",
+    "bytes": [12, 228, 1, 43, 50, 46, 52, 56, 43, 50, 49, 46, 53, 43, 57, 46, 57],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [
+      {
+        "channel": "sdi12_value_count",
+        "reason": "unknown_channel"
+      }
+    ]
+  }
+]

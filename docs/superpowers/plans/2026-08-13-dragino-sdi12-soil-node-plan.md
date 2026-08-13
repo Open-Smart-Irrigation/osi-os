@@ -1703,11 +1703,11 @@ Also run any pre-existing history tests that touch card eligibility: `npx vitest
 **Interfaces:**
 - Consumes: codec (Task 1), normalize (Task 2), schema slice (Task 4), manifest (Task 3).
 
-- [ ] **Step 1: Read the UC512 fixture and runner**
+- [x] **Step 1: Read the UC512 fixture and runner**
 
 Read `scripts/fixtures/device-integration/uc512/golden-vectors.json` and the uc512 block in `scripts/verify-device-integration.js`; mirror their exact structure for sdi12 (the runner drives codec → normalizer → `osi-device-writer` → in-memory DB seeded from seed-blank.sql). The sdi12 block must additionally pass `deviceConfig` (`{probeProfile}`) into `normalize` — extend the runner's normalize call for this device the same way the flow node does.
 
-- [ ] **Step 2: Vectors (frame bytes → expected row)**
+- [x] **Step 2: Vectors (frame bytes → expected row)**
 
 At minimum these four (battery bytes `0x0C 0xE4` = 3.300 V, payver `0x01`; ASCII shown as text — encode to bytes in the fixture format the runner expects):
 
@@ -1719,7 +1719,7 @@ At minimum these four (battery bytes `0x0C 0xE4` = 3.300 V, payver `0x01`; ASCII
 | 4 | `GENERIC_VWC` | `0+30.5` | `bat_v = 3.3` only, one `ingest_quarantine` row with reason `unknown_channel` and channel `unparseable_sdi12` |
 | 5 | `TENSIOMARK` | `+2.48+21.5+9.9` | `bat_v = 3.3` only (cardinality mismatch rejects atomically), one quarantine row with channel `sdi12_value_count` |
 
-- [ ] **Step 3: Run + commit**
+- [x] **Step 3: Run + commit**
 
 ```bash
 node scripts/verify-device-integration.js
