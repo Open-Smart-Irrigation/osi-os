@@ -4,6 +4,9 @@ on:
     branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
   workflow_dispatch:
+defaults:
+  run:
+    working-directory: web/react-gui
 jobs:
   typecheck:
     runs-on: ubuntu-latest
