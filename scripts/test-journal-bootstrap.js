@@ -10,6 +10,12 @@ const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROFILES = ['bcm2712', 'bcm2709'];
+const NODE_RED_ROOT = path.join(
+  ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red'
+);
+process.env.OSI_LIB_BASE = process.env.OSI_LIB_BASE || NODE_RED_ROOT;
+const REAL_OSI_LIB = require(path.join(NODE_RED_ROOT, 'osi-lib'));
 const GATEWAY_EUI = '0016C001F11715E2';
 const INSTALLATION_UUID = '50000000-0000-4000-8000-000000000001';
 const CATALOG_HASH = 'a'.repeat(64);
@@ -457,7 +463,7 @@ async function runHistoryCloseRoute(node, options) {
   };
   try {
     const execute = new Function(
-      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR',
+      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR', 'osiLib',
       node.func
     );
     const result = await execute({
@@ -468,7 +474,7 @@ async function runHistoryCloseRoute(node, options) {
         params: {},
         query: {},
       },
-    }, globalContext, context.env, context.node, context.osiDb, {}, crypto, historyRuntime);
+    }, globalContext, context.env, context.node, context.osiDb, {}, crypto, historyRuntime, REAL_OSI_LIB);
     return { result, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
@@ -656,9 +662,13 @@ for (const profile of PROFILES) {
     const flows = loadFlows(profile);
     const history = flows.find((node) => node.id === 'history-api-router-fn');
     assert.equal(history && history.name, 'History API Router');
-    assert.match(history.func, /\.code !== 'ENOENT'/, 'expected missing auth-secret files stay quiet');
+    const scopeHelperSource = fs.readFileSync(
+      path.join(NODE_RED_ROOT, 'osi-scope-helper/index.js'),
+      'utf8'
+    );
+    assert.match(scopeHelperSource, /error\.code !== 'ENOENT'/, 'expected missing auth-secret files stay quiet');
     const execute = new Function(
-      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR',
+      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR', 'osiLib',
       history.func
     );
     const msg = { req: { method: 'GET', path: '/api/system/features' } };
@@ -670,7 +680,8 @@ for (const profile of PROFILES) {
       { Database: class { constructor() { throw new Error('feature route opened DB'); } } },
       {},
       crypto,
-      {}
+      {},
+      REAL_OSI_LIB
     );
     assert.equal(result.statusCode, 200);
     assert.deepEqual(result.payload.features, {
@@ -690,7 +701,8 @@ for (const profile of PROFILES) {
       { Database: class { constructor() { throw new Error('feature route opened DB'); } } },
       {},
       crypto,
-      {}
+      {},
+      REAL_OSI_LIB
     );
     assert.equal(scopedResult.statusCode, 200);
     assert.equal(scopedResult.payload.features.scoped_access, true);

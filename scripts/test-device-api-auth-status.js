@@ -66,6 +66,12 @@ const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+const NODE_RED_ROOT = path.join(
+  REPO_ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red'
+);
+process.env.OSI_LIB_BASE = process.env.OSI_LIB_BASE || NODE_RED_ROOT;
+const osiLib = require(path.join(NODE_RED_ROOT, 'osi-lib'));
 const TAB_ID = 'device-api-tab';
 const HTTP500_ID = 'device-api-http500';
 const CATCH_ID = 'device-api-catch';
@@ -523,7 +529,7 @@ function executeFunction(node, msg, options = {}) {
   const warnings = options.warnings || [];
   const envValues = options.env || {};
   const globalValues = options.global || {};
-  const src = `(async function(msg, node, env, global, crypto, Buffer) {${node.func}\n})`;
+  const src = `(async function(msg, node, env, global, crypto, Buffer, osiLib) {${node.func}\n})`;
   const fn = new vm.Script(src, { filename: (node.id || 'node') + '.func.js' }).runInNewContext({
     console,
     Date,
@@ -539,7 +545,7 @@ function executeFunction(node, msg, options = {}) {
   };
   const envApi = { get: (key) => (Object.prototype.hasOwnProperty.call(envValues, key) ? envValues[key] : undefined) };
   const globalApi = { get: (key) => (Object.prototype.hasOwnProperty.call(globalValues, key) ? globalValues[key] : undefined) };
-  return fn(msg, nodeApi, envApi, globalApi, crypto, Buffer);
+  return fn(msg, nodeApi, envApi, globalApi, crypto, Buffer, osiLib);
 }
 
 function asCatchMessage(msg, error, sourceId) {
