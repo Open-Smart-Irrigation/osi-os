@@ -36,6 +36,10 @@ const helperPath = path.join(
   root,
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js'
 );
+const scopeHelperPath = path.join(
+  root,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js'
+);
 const bcryptjsPath = path.join(
   root,
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs'
@@ -43,6 +47,13 @@ const bcryptjsPath = path.join(
 
 const bcryptjs = require(bcryptjsPath);
 const cryptoModule = require('node:crypto');
+const scopeHelper = require(scopeHelperPath);
+const osiLib = {
+  require(name) {
+    if (name === 'scope') return { ok: true, value: scopeHelper };
+    return { ok: false, error: `unexpected helper ${name}` };
+  },
+};
 
 // Real users table shape, copied from database/seed-blank.sql so the test
 // exercises the actual production column set (SELECT * relies on it).
@@ -228,7 +239,7 @@ test('login credential isolation: attacker cannot ride a victim request\'s passw
     const resultNode = findNode(flows, 'auth-process-result');
     const flowStore = new Map();
     const dbScope = { osiDb: helper };
-    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule };
+    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule, osiLib };
 
     // Step 1: attacker's request starts first, with the right username but a
     // wrong guessed password. Its login-func write lands first.
@@ -296,7 +307,7 @@ test('register credential isolation: one request must not create an account unde
     const resultNode = findNode(flows, 'auth-process-result');
     const flowStore = new Map();
     const dbScope = { osiDb: helper };
-    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule };
+    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule, osiLib };
 
     // Step 1: Alice's register request lands first.
     const aliceAfterRegister = (
@@ -418,7 +429,7 @@ test('scoped-mode login rejects a disabled account before issuing a token; scope
     const queryNode = findNode(flows, 'auth-db-query');
     const resultNode = findNode(flows, 'auth-process-result');
     const dbScope = { osiDb: helper };
-    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule };
+    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule, osiLib };
 
     async function attemptLogin(env) {
       const flowStore = new Map();
@@ -462,4 +473,41 @@ test('scoped-mode login rejects a disabled account before issuing a token; scope
   } finally {
     cleanup();
   }
+});
+
+test('placeholder-EUI linked login resolves with the password-hash fallback instead of hanging', async () => {
+  const PASSWORD = 'LinkedUserPassword1';
+  const flows = readFlows();
+  const resultNode = findNode(flows, 'auth-process-result');
+  const user = {
+    id: 41,
+    username: 'edge-linked-placeholder',
+    server_username: 'linked-placeholder',
+    auth_mode: 'server',
+    server_password_hash: bcryptjs.hashSync(PASSWORD, 10),
+    server_offline_verifier: bcryptjs.hashSync('not-the-fallback-subject', 10),
+    server_offline_verifier_version: 1,
+    installation_uuid: '123e4567-e89b-42d3-a456-426614174000',
+  };
+  const msg = {
+    checkType: 'login',
+    payload: [user],
+    _authwork: { username: 'linked-placeholder', password: PASSWORD },
+  };
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('auth-process-result did not resolve within 250ms')), 250);
+  });
+
+  const result = await Promise.race([
+    executeFunctionNode(resultNode, msg, {
+      flowStore: new Map(),
+      env: Object.assign({}, AUTH_ENV, { DEVICE_EUI: '0101010101010101' }),
+      scope: { bcrypt: bcryptjs, crypto: cryptoModule, osiLib },
+    }),
+    timeout,
+  ]);
+  const [, response] = result;
+  assert.ok(response, 'linked login should produce an HTTP response');
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.payload && response.payload.token, 'fallback login should issue a token');
 });

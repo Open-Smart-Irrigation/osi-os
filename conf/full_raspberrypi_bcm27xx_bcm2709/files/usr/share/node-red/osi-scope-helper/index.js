@@ -296,6 +296,7 @@ function buildDisableUserGuardedSql() {
 function buildDeroleUserGuardedSql() {
   return 'UPDATE users SET role = ? WHERE user_uuid = ? ' +
     "AND (role != 'admin' OR ? = 'admin' OR " +
+    'disabled_at IS NOT NULL OR ' +
     "(SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1)";
 }
 
@@ -320,6 +321,7 @@ function _resetForTests() {
 
 module.exports = {
   isScopedMode,
+  resolveAuthSecret,
   verifyBearer,
   resolveScope,
   invalidateScope,

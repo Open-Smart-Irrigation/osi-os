@@ -34,12 +34,12 @@
       "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 10392 -> branch base a38c9db6 10392 -> HEAD 14764 = +4372, all +4372 of it this SDI-12 port. SDI-12 contribution: the device payload gains the SDI-12 probe/layout fields and the bounded recipe-deployment projection."
     },
     "cs-reg-cloud-ack-fn": {
-      "delta": 540,
-      "reason": "Supersedes the prior entry (377). Wave 3 scoped-access port, pick-list commit 59 (AgroLink cfeac77e2, \"fix(scope): gate the REGISTER_DEVICE zone seam on scoped mode\"): the zoneAssignedId/zoneWarning forwarding is now scoped-mode-only, guarded by Object.prototype.hasOwnProperty.call(ack, ...) instead of an unconditional assignment, so a flag-off gateway's ack (which never carries these keys) is forwarded byte-for-byte unchanged (+163, exact vs the prior entry). origin/main 1906 -> HEAD 2446 = 540, exact delta vs origin/main. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Prior provenance retained: pick-list commit 55 (AgroLink 97b70ab12) added zoneAssignedId/zoneWarning to the REGISTER_DEVICE ack payload (P9)."
+      "delta": 650,
+      "reason": "Supersedes the prior entry (540). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
     },
     "cs-reg-cloud-fn": {
-      "delta": 3369,
-      "reason": "Supersedes the prior entry (2897). Wave 3 scoped-access port, gap-fill commit 10a097e92 (\"fix(chirpstack): fence REGISTER_DEVICE on claimed EUI\", chronologically between pick-list positions 61 and 62, not in the original 73-commit pick list -- discovered because pick-list commit 63's own test additions assumed this claim-fence already existed): before provisioning, resolve the cloud user id and look up any existing device row by deveui; a different account's claim now fails closed with step:'claim'/code:'ALREADY_CLAIMED' BEFORE ChirpStack is touched (previously INSERT OR IGNORE silently no-opped locally while ChirpStack still rewrote the live device's root key -- the original owner's device stopped joining and the new account believed it owned the hardware); the same account re-registering is now an explicit idempotent short-circuit (state:'ALREADY_REGISTERED', provisionedInChirpStack:false) instead of a redundant reprovision (+472, exact vs the prior entry). origin/main 14447 -> HEAD 17816 = 3369, exact delta vs origin/main. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Prior provenance retained: SDI-12 port (DRAGINO_SDI12 app/profile maps, chirpstack_app_id persistence, msg.deviceRegistration staging) and the STREGA Gen2 promotion-only valve_settings upsert, both fully subsumed in the current node."
+      "delta": 3487,
+      "reason": "Supersedes the prior entry (3369). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
     },
     "post-devices-insert": {
       "delta": 1562,
@@ -230,8 +230,8 @@
       "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1773)"
     },
     "put-chameleon-enabled-auth-fn": {
-      "delta": 46,
-      "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud"
+      "delta": 175,
+      "reason": "Supersedes the prior entry (46). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
     },
     "dendro-ref-tree-fn": {
       "delta": 46,
@@ -350,17 +350,129 @@
       "reason": "Wave 3 scoped-access port (AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 6187 -> HEAD 6247 = +60. Same scoped-owner substitution as dendro-location-fn/zone-config-fn, applied at the owned-zone lookup."
     },
     "put-strega-timed-auth-fn": {
-      "delta": 2692,
-      "reason": "origin/main -> HEAD delta 2692. Wave 3 scoped-access port, commit X2 (adapted from AgroLink 0913a6902, \"fix(actuation): close the GUI STREGA advanced chain's scope gap\"): the GUI STREGA advanced chain (put-strega-timed-auth-fn -> put-strega-advanced-lookup -> put-strega-advanced-authorize-fn -> To Actuator) did bearer auth only, so a TIMED_ACTION OPEN physical command reached write-strega-expectation with no actor and was rejected while the HTTP response had already reported success. put-strega-timed-auth-fn now runs a fresh assertFreshDeviceAccess+canMutate check and sets msg.actor_user_uuid; put-strega-advanced-authorize-fn copies it onto every actuatorMsg it builds. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length)."
+      "delta": 2836,
+      "reason": "Supersedes the prior entry (2692). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
     },
     "put-strega-advanced-authorize-fn": {
       "delta": 630,
       "reason": "origin/main -> HEAD delta 630. Wave 3 scoped-access port, commit X2 (adapted from AgroLink 0913a6902, \"fix(actuation): close the GUI STREGA advanced chain's scope gap\"): the GUI STREGA advanced chain (put-strega-timed-auth-fn -> put-strega-advanced-lookup -> put-strega-advanced-authorize-fn -> To Actuator) did bearer auth only, so a TIMED_ACTION OPEN physical command reached write-strega-expectation with no actor and was rejected while the HTTP response had already reported success. put-strega-timed-auth-fn now runs a fresh assertFreshDeviceAccess+canMutate check and sets msg.actor_user_uuid; put-strega-advanced-authorize-fn copies it onto every actuatorMsg it builds. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length)."
+    },
+    "get-devices-auth": {
+      "delta": 97,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "delete-device-auth": {
+      "delta": 109,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "get-zones-auth": {
+      "delta": 85,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "delete-zone-auth": {
+      "delta": 97,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "assign-device-auth": {
+      "delta": 109,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "unassign-device-auth": {
+      "delta": 121,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-dendro-auth-fn": {
+      "delta": 109,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-temp-auth-fn": {
+      "delta": 97,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-lsn50-mode-auth-fn": {
+      "delta": 133,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-lsn50-interval-auth-fn": {
+      "delta": 156,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-kiwi-interval-auth-fn": {
+      "delta": 150,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "post-kiwi-enable-auth-fn": {
+      "delta": 145,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-strega-interval-auth-fn": {
+      "delta": 162,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-lsn50-interrupt-auth-fn": {
+      "delta": 163,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-lsn50-5v-auth-fn": {
+      "delta": 121,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-strega-model-auth-fn": {
+      "delta": 144,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-strega-magnet-auth-fn": {
+      "delta": 150,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-strega-partial-auth-fn": {
+      "delta": 156,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-strega-flush-auth-fn": {
+      "delta": 144,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-rain-gauge-auth-fn": {
+      "delta": 133,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-flow-meter-auth-fn": {
+      "delta": 133,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "s2120-zones-put-auth-fn": {
+      "delta": 480,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-soil-depth-fn": {
+      "delta": 103,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "put-dendro-config-auth-fn": {
+      "delta": 151,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "post-dendro-baseline-reset-auth-fn": {
+      "delta": 205,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "44e7d74ff3668e01": {
+      "delta": 97,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "8b93fa005d78e25f": {
+      "delta": 97,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
+    },
+    "get-actuations-auth": {
+      "delta": 115,
+      "reason": "Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main."
     }
   },
   "total_allowance": {
-    "delta": 236397,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 63(7ddbe5dd4), AgroLink 7ddbe5dd4) 1309371 chars = 236397. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 226760,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 65(d2e81bd6a), AgroLink d2e81bd6a) 1299734 chars = 226760. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
@@ -404,8 +516,8 @@
       "reason": "Exact measured size after commit E6 (adapted from AgroLink 17462573a): Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Supersedes prior entry: Wave 3 scoped-access port (AgroLink 1659881d, feat(api): fresh scope checks on device config writes): new function node measured at exactly 4244 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. A single shared multi-output router (23 legitimate device-config routes + 1 error output) gating every PUT/POST /api/devices/:deveui/... config write behind one bearer-verify + role/device-access assertion when OSI_SCOPED_ACCESS=1; the routeTable itself accounts for a large share of the size. Ported as-is rather than re-architected mid-port. This node's routeTable/wires are extended later in this same port slice with the two SDI-12 recipe routes AgroLink predates (guard reconciliation, binding note 4)."
     },
     "scoped-admin-account-router": {
-      "max_chars": 10117,
-      "reason": "Exact measured size after commit E7 (adapted from AgroLink 75e4eaee1, \"fix(scope): correct grant-POST operator precedence and 400-vs-404\"): fixes operator precedence in the grant-POST zone/plot uuid ternary (String(isZoneGrant ? body.zone_uuid : body.plot_uuid || '') applied the || fallback only to the plot branch) and adds an explicit 400 for a missing uuid instead of conflating it with the 404 resource-not-found case. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Supersedes prior entry: Wave 3 scoped-access port (AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)): new function node measured at exactly 9517 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. A single shared router dispatching all 9 admin account/grant management routes (list/create/password-reset/role/disabled users, zone/plot grant create+delete), each requiring an admin-role assertion via osi-scope-helper plus its own request-shape validation and DB statements. Ported as-is rather than re-architected mid-port."
+      "max_chars": 10508,
+      "reason": "Supersedes the prior ceiling (10117). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main. Also hardens the guarded derole/disable SQL anchor comparisons (buildDeroleUserGuardedSql/buildDisableUserGuardedSql) per X12."
     },
     "scoped-zone-create-router": {
       "max_chars": 3962,
@@ -416,8 +528,8 @@
       "reason": "Supersedes the prior entry (3704). Wave 3 scoped-access port, pick-list commit 63 (AgroLink 7ddbe5dd4, \"fix(zones): preserve device assignments during scoped registration\"): a re-post naming a DIFFERENT zone than the device's current one now returns 409 with current_zone_id/current_zone_name instead of silently moving it, matching the assign-router's own 409-on-conflict contract, so a re-post can only ever preserve or leave-unassigned an existing zone, never reassign it implicitly (+650, exact vs the prior entry). Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length). Prior provenance retained: commit W5/W3 (adapted from AgroLink 9a3094a63) made zone_id an explicit optional integer id; commit E6 (adapted from AgroLink 17462573a) replaced the viewer-denylist with a canMutate() allowlist."
     },
     "scoped-device-assign-router": {
-      "max_chars": 4804,
-      "reason": "Supersedes the prior entry (4621). Wave 3 scoped-access port, pick-list commit 63 (AgroLink 7ddbe5dd4, \"fix(zones): preserve device assignments during scoped registration\"): the 409-conflict path now also detects and reports current_zone_deleted (whether the device's current zone was itself soft-deleted), so a client can tell \"already assigned to a live zone\" from \"already assigned to a zone that no longer exists\" (+183, exact vs the prior entry). Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length). Prior provenance retained: commit W4/409-conflict (adapted from AgroLink c9a8458f1) made an already-assigned device return 409 with current_zone_id/current_zone_name instead of silently moving it; commit E6 (adapted from AgroLink 17462573a) replaced the viewer-denylist with a canMutate() allowlist."
+      "max_chars": 5410,
+      "reason": "Supersedes the prior ceiling (4804). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main. Also includes E11: assigning an already-assigned device to the SAME zone is now accepted (idempotent) instead of hitting the 409 conflict path."
     },
     "scoped-device-unassign-router": {
       "max_chars": 3559,

@@ -9,6 +9,15 @@ const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = path.resolve(__dirname, '..');
+const scopeHelper = require(path.join(
+  ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js'
+));
+const osiLib = {
+  require(name) {
+    if (name === 'scope') return { ok: true, value: scopeHelper };
+    return { ok: false, error: `unexpected helper ${name}` };
+  },
+};
 const PROFILES = ['bcm2712', 'bcm2709'];
 const GATEWAY_EUI = '0016C001F11715E2';
 const CATALOG_HASH = 'a'.repeat(64);
@@ -396,7 +405,7 @@ async function runHistoryCloseRoute(node, options) {
   };
   try {
     const execute = new Function(
-      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR',
+      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR', 'osiLib',
       node.func
     );
     const result = await execute({
@@ -407,7 +416,7 @@ async function runHistoryCloseRoute(node, options) {
         params: {},
         query: {},
       },
-    }, globalContext, context.env, context.node, context.osiDb, {}, crypto, historyRuntime);
+    }, globalContext, context.env, context.node, context.osiDb, {}, crypto, historyRuntime, osiLib);
     return { result, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
@@ -583,9 +592,14 @@ for (const profile of PROFILES) {
     const flows = loadFlows(profile);
     const history = flows.find((node) => node.id === 'history-api-router-fn');
     assert.equal(history && history.name, 'History API Router');
-    assert.match(history.func, /\.code !== 'ENOENT'/, 'expected missing auth-secret files stay quiet');
+    // Pick-list commit 65 moved the missing-auth-secret-file quiet handling out of this
+    // node's own getAuthSecret() and into osi-scope-helper's shared resolveAuthSecret --
+    // assert the delegation, not the (now-relocated) ENOENT distinction itself; that
+    // distinction is covered directly by osi-scope-helper's own index.test.js.
+    assert.match(history.func, /osiLib\.require\('scope'\)/, 'expected the shared auth-secret resolver to be loaded via osiLib');
+    assert.match(history.func, /resolveAuthSecret/, 'expected getAuthSecret to delegate to the shared resolver');
     const execute = new Function(
-      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR',
+      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR', 'osiLib',
       history.func
     );
     const msg = { req: { method: 'GET', path: '/api/system/features' } };
@@ -597,7 +611,8 @@ for (const profile of PROFILES) {
       { Database: class { constructor() { throw new Error('feature route opened DB'); } } },
       {},
       crypto,
-      {}
+      {},
+      osiLib
     );
     assert.equal(result.statusCode, 200);
     assert.deepEqual(result.payload.features, {

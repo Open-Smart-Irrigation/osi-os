@@ -40,6 +40,15 @@ function expectExcludes(label, source, needle, description) {
   else fail(`${label}: ${description}; found ${JSON.stringify(needle)}`);
 }
 
+// Same exception flows-bare-require-scan.js applies: the lookbehind excludes
+// osiLib.require('scope') (the sanctioned in-repo module loader) from tripping
+// a check meant to catch a genuine bare Node.js require() call.
+const BARE_REQUIRE_PATTERN = /(?<![\w$.])require\(/;
+function expectNoBareRequire(label, source) {
+  if (!BARE_REQUIRE_PATTERN.test(source)) ok(`${label}: does not use a bare require(`);
+  else fail(`${label}: does not use a bare require(; found a bare require( call`);
+}
+
 function expectCondition(condition, passMessage, failureMessage) {
   if (condition) ok(passMessage);
   else fail(failureMessage);
@@ -309,9 +318,13 @@ const expectedNodeLibs = {
   'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
   'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
-  'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }],
+  'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }, { var: 'osiLib', module: 'osi-lib' }],
   'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
-  'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
+  // al-link-build-req: unlike AgroLink's own tree, this node's func never calls
+  // osiLib.require(...) on this branch (its getAuthSecret boilerplate wasn't part of
+  // pick-list commit 65's real delta for this specific node -- verified fresh against the
+  // rebuilt flows.json), so its libs stay osiDb-only.
   'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'al-link-restart-node-red': [],
   'al-unlink-restart-node-red': [],
@@ -337,7 +350,12 @@ const localRestartReader = [
   '}',
 ].join('\n');
 const protectedNodeHashes = {
-  'al-link-validate': 'c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7',
+  // Re-pinned (pick-list commit 65, AgroLink d2e81bd6a, "close auth and scoped-access
+  // review gaps"): al-link-validate's getAuthSecret/verifyBearer boilerplate now delegates
+  // to osi-scope-helper's shared resolveAuthSecret with the merged _osiAuthFailure tagging;
+  // ours matched AgroLink's own pre-commit-65 parent exactly for this node, so this hash is
+  // AgroLink's own post-commit value, taken wholesale. Hash re-derived fresh on this branch.
+  'al-link-validate': 'a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc',
   // Re-pinned #3 (port adaptation, migration 0029): the guarded devices rebuild's
   // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_channel_layout_json.
   // The source branch's own history never closed this gap -- a live rebuild would have created
@@ -901,9 +919,13 @@ for (const flowRelativePath of flowRelativePaths) {
     expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]),
       `${flowRelativePath}:${nodeId}: preserves its reviewed libs`,
       `${flowRelativePath}:${nodeId}: libs changed from ${JSON.stringify(expectedNodeLibs[nodeId])}`);
-    for (const banned of ["global.get('cp')", 'spawn(', 'require(']) {
+    for (const banned of ["global.get('cp')", 'spawn(']) {
       expectExcludes(`${flowRelativePath}:${nodeId}`, node.func, banned, `does not use ${banned}`);
     }
+    // osiLib.require('scope') (pick-list commit 65's shared auth-secret resolver) is the
+    // sanctioned in-repo module loader, not a bare require() -- excluded the same way
+    // flows-bare-require-scan.js excludes it, via a negative lookbehind on the dot.
+    expectNoBareRequire(`${flowRelativePath}:${nodeId}`, node.func);
   }
   for (const nodeId of syncBuilderIds) {
     const func = byId.get(nodeId) && byId.get(nodeId).func;
@@ -992,15 +1014,16 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  // 185: on top of the wave-3 scoped-access port through AgroLink 832d48ef
-  // (189 -> 187, see git blame for the fuller chain), AgroLink a6289e96
-  // (feat(api): enforce schedule scope and authority) converts two more:
-  // 70fcbea336401bd1's secret read/write catches gain visible node.warn as
-  // part of the merged _osiAuthFailure tagging: 187 -> 185.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 185 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 185,
-    'silent-catch baseline records 185 for both maintained profiles',
-    'silent-catch baseline must be 185 for both maintained profiles');
+  // 97: pick-list commit 65 (AgroLink d2e81bd6a, "close auth and scoped-access review
+  // gaps") shares the persisted auth-secret resolver across ~40 auth-boundary function
+  // nodes, replacing each node's own two silent file-read/file-write catch(_){} pairs
+  // with delegated, warn-visible handling inside osi-scope-helper's resolveAuthSecret:
+  // 185 -> 97, re-measured fresh with this file's own regex over both maintained profiles.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 97 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 97,
+    'silent-catch baseline records 97 for both maintained profiles',
+    'silent-catch baseline must be 97 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
+  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
 if (sizeAllowances) {
   const expectedGrowth = {
@@ -1048,9 +1071,9 @@ if (sizeAllowances) {
   // work that landed as a single unit) -- see the allowance file's own "in progress"
   // caveat. Re-verify against the branch's current total_allowance.delta rather than
   // treating any one intermediate value as final.
-  expectCondition(sizeAllowances.total_allowance?.delta === 236397,
-    'size total allowance: exact cumulative delta 236397',
-    'size total allowance: expected exact cumulative delta 236397');
+  expectCondition(sizeAllowances.total_allowance?.delta === 226760,
+    'size total allowance: exact cumulative delta 226760',
+    'size total allowance: expected exact cumulative delta 226760');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Field Journal port allowance', 'declares the inherited Field Journal provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
