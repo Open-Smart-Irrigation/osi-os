@@ -18,7 +18,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const [catalog, setCatalog] = useState<DeviceCatalogItem[]>([]);
-  const [selectedType, setSelectedType] = useState<DeviceType>('KIWI_SENSOR');
+  const [selectedType, setSelectedType] = useState<DeviceType | ''>('');
   const [name, setName] = useState('');
   const [deveui, setDeveui] = useState('');
   const [appkey, setAppkey] = useState('');
@@ -27,6 +27,8 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    setCatalog([]);
+    setSelectedType('');
     devicesAPI.getCatalog()
       .then((data) => {
         setCatalog(data);
@@ -48,10 +50,17 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
       return;
     }
 
+    if (catalog.length === 0 || !selectedType) {
+      setError(t('addModal.deviceTypeRequired', 'Select a device type'));
+      return;
+    }
+
     setLoading(true);
     try {
-      const currentCatalog = catalog.length > 0 ? catalog : await devicesAPI.getCatalog();
-      const typeId = currentCatalog[0]?.id ?? selectedType;
+      // The dropdown is the source of truth. The catalog effect already seeds
+      // selectedType with data[0].id when the modal opens, so there is nothing
+      // to re-fetch here -- and re-deriving from catalog[0] discarded the pick.
+      const typeId = selectedType;
       await devicesAPI.add({
         deveui,
         name,
@@ -141,7 +150,11 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
           <Button variant="secondary" onClick={onClose} className="flex-1 text-lg py-4">
             {tc('cancel')}
           </Button>
-          <Button type="submit" disabled={loading} className="flex-1 text-lg py-4 shadow-lg">
+          <Button
+            type="submit"
+            disabled={loading || catalog.length === 0 || !selectedType}
+            className="flex-1 text-lg py-4 shadow-lg"
+          >
             {loading ? t('addModal.adding') : t('addModal.submit')}
           </Button>
         </div>
