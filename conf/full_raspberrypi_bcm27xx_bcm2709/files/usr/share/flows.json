@@ -11529,6 +11529,154 @@
     "func": "// Auto-start probe identification for freshly registered SDI-12 nodes.\nif (!msg.deviceRegistration || msg.deviceRegistration.deviceType !== 'DRAGINO_SDI12') return null;\nmsg.deviceRow = {\n  deveui: String(msg.deviceRegistration.devEui || '').toUpperCase(),\n  chirpstack_app_id: msg.deviceRegistration.applicationId\n};\nreturn msg;   // -> link-out to sdi12-identify-trigger-link-in (Task 10)"
   },
   {
+    "id": "sdi12-config-action-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Save SDI-12 Config",
+    "func": "var body = msg.req.body || {};\nvar normRes = osiLib.require('sdi12-normalize');\nif (!normRes.ok) { msg.statusCode = 503; msg.payload = { message: 'profile registry unavailable' }; return msg; }\nvar profileId = String(body.probe_profile || '').trim();\nvar profile = normRes.value.getProfile(profileId);\nif (!profile) {\n  msg.statusCode = 400; msg.payload = { message: 'Unknown probe_profile' }; return msg;\n}\n// depths: { \"<slot>\": cm } keyed by the profile's physical depth slots.\nvar slotDepths = body.depths;\nvar depthsByChannel = null;\nif (slotDepths !== undefined) {\n  if (typeof slotDepths !== 'object' || slotDepths === null || Array.isArray(slotDepths)) {\n    msg.statusCode = 400; msg.payload = { message: 'depths must be an object of depthSlot->cm' }; return msg;\n  }\n  var validSlots = {};\n  profile.values.forEach(function (v) { if (v.depthSlot) validSlots[v.depthSlot] = true; });\n  depthsByChannel = {};\n  for (var slot in slotDepths) {\n    var cm = slotDepths[slot];\n    if (!validSlots[Number(slot)] || !Number.isFinite(cm) || cm < 0 || cm > 500) {\n      msg.statusCode = 400; msg.payload = { message: 'invalid depth entry for slot ' + slot }; return msg;\n    }\n    profile.values.forEach(function (v) {\n      if (v.depthSlot === Number(slot)) depthsByChannel[v.channel] = cm;   // fan out per channel\n    });\n  }\n}\nvar deveui = String(msg.deviceRow.deveui || '').toUpperCase();\n\nreturn (async () => {\n  var db = new osiDb.Database('/data/db/farming.db');\n  try {\n    if (depthsByChannel !== null) {\n      await db.run(\n        \"UPDATE devices SET sdi12_probe_profile = ?, sdi12_probe_status = 'manual', \" +\n        \"soil_moisture_probe_depths_json = ?, soil_moisture_probe_depths_configured = 1, \" +\n        \"sync_version = COALESCE(sync_version,0) + 1, \" +\n        \"updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE deveui = ?\",\n        [profileId, JSON.stringify(depthsByChannel), deveui]);\n    } else {\n      await db.run(\n        \"UPDATE devices SET sdi12_probe_profile = ?, sdi12_probe_status = 'manual', \" +\n        \"sync_version = COALESCE(sync_version,0) + 1, \" +\n        \"updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE deveui = ?\",\n        [profileId, deveui]);\n    }\n  } finally {\n    await db.close();\n  }\n  msg.payload = { probe_profile: profileId, status: 'manual', depths: depthsByChannel };\n  return msg;\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 960,
+    "y": 2320,
+    "wires": [
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "sdi12-config-auth-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Auth + Prepare SDI-12 Config",
+    "func": "function getAuthSecret() {\n  var configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  var fs = global.get('fs');\n  var secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (var i = 0; i < secretPaths.length; i++) {\n      try {\n        var existing = String(fs.readFileSync(secretPaths[i], 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (error) {\n        node.warn('SDI12 config auth secret read failed: ' + String(error && error.message ? error.message : error));\n      }\n    }\n    var generated = crypto.randomBytes(48).toString('hex');\n    for (var j = 0; j < secretPaths.length; j++) {\n      try {\n        fs.writeFileSync(secretPaths[j], generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (error) {\n        node.warn('SDI12 config auth secret write failed: ' + String(error && error.message ? error.message : error));\n      }\n    }\n  }\n  var err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  var value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    var missing = new Error('Unauthorized');\n    missing.statusCode = 401;\n    throw missing;\n  }\n  var token = authHeader.substring(7).trim();\n  var parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    var invalid = new Error('Invalid token');\n    invalid.statusCode = 401;\n    throw invalid;\n  }\n  var payloadB64 = parts[0];\n  var sig = parts[1];\n  var expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  var sigBuf = Buffer.from(sig, 'utf8');\n  var expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    var badSignature = new Error('Invalid token');\n    badSignature.statusCode = 401;\n    throw badSignature;\n  }\n  var payload;\n  try {\n    payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  } catch (error) {\n    var badPayload = new Error('Invalid token');\n    badPayload.statusCode = 401;\n    throw badPayload;\n  }\n  var userId = Number(payload.userId);\n  var username = String(payload.username || '').trim();\n  var exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username) {\n    var incomplete = new Error('Invalid token');\n    incomplete.statusCode = 401;\n    throw incomplete;\n  }\n  if (exp && Date.now() > exp) {\n    var expired = new Error('Token expired');\n    expired.statusCode = 401;\n    throw expired;\n  }\n  return { userId: userId, username: username };\n}\nreturn (async () => {\n  var db = null;\n  var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';\n  try {\n    var deveui = String(msg.req && msg.req.params && msg.req.params.deveui || '').trim().toUpperCase();\n    if (!/^[0-9A-F]{16}$/.test(deveui)) {\n      msg.statusCode = 400;\n      msg.payload = { message: 'Invalid deveui' };\n      return [null, msg];\n    }\n    var userId = null;\n    if (!scopedOn) {\n      var auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n      userId = auth.userId;\n    }\n    db = new osiDb.Database('/data/db/farming.db');\n    var row = userId === null\n      ? await db.get(\n        'SELECT deveui, type_id FROM devices WHERE deveui = ? AND deleted_at IS NULL LIMIT 1',\n        [deveui])\n      : await db.get(\n        'SELECT deveui, type_id FROM devices WHERE deveui = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1',\n        [deveui, userId]);\n    if (!row) {\n      msg.statusCode = 404;\n      msg.payload = { message: 'Device not found' };\n      return [null, msg];\n    }\n    if (String(row.type_id || '') !== 'DRAGINO_SDI12') {\n      msg.statusCode = 409;\n      msg.payload = { message: 'Device is not a DRAGINO_SDI12 soil node' };\n      return [null, msg];\n    }\n    msg.deviceRow = { deveui: String(row.deveui || '').toUpperCase() };\n    return [msg, null];\n  } catch (error) {\n    msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n    msg.payload = { message: String(error && error.message ? error.message : error) };\n    return [null, msg];\n  } finally {\n    if (db) {\n      try {\n        await db.close();\n      } catch (closeError) {\n        node.warn('SDI12 config auth DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n      }\n    }\n  }\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 670,
+    "y": 2320,
+    "wires": [
+      [
+        "sdi12-config-action-fn"
+      ],
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "sdi12-config-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "PUT /api/devices/:deveui/sdi12/config",
+    "url": "/api/devices/:deveui/sdi12/config",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 2320,
+    "wires": [
+      [
+        "scoped-device-config-guard"
+      ]
+    ]
+  },
+  {
+    "id": "sdi12-profiles-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "List SDI-12 Probe Profiles",
+    "func": "// Runs only after the cloned scope guard has admitted the session.\nvar normRes = osiLib.require('sdi12-normalize');\nif (!normRes.ok) {\n  msg.statusCode = 503;\n  msg.payload = { message: 'profile registry unavailable' };\n  return msg;\n}\nmsg.payload = { profiles: normRes.value.listProfiles() };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 630,
+    "y": 2240,
+    "wires": [
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "sdi12-profiles-scope-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Require Enabled Account for SDI-12 Profiles",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];\nlet db;\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('catalog read: scope module unavailable: ' + scopeLoad.error, msg);\n    const error = new Error('scope resolver unavailable');\n    error.statusCode = 500;\n    throw error;\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const user = await db.get(\n    'SELECT user_uuid FROM users WHERE id = ? AND username = ? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!user || !user.user_uuid) {\n    const error = new Error('Unauthorized');\n    error.statusCode = 401;\n    throw error;\n  }\n  await scope.assertEnabledAccount(db, user.user_uuid, { scopedMode: true });\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    message: msg.statusCode === 403\n      ? 'Forbidden'\n      : String(error && error.message || error)\n  };\n  return [null, msg];\n} finally {\n  if (db) {\n    try {\n      await new Promise(function(resolve) { db.close(function() { resolve(); }); });\n    } catch (error) {\n      node.warn('catalog read close: ' + String(error && error.message ? error.message : error));\n    }\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 365,
+    "y": 2240,
+    "wires": [
+      [
+        "sdi12-profiles-fn"
+      ],
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "sdi12-profiles-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "GET /api/sdi12/probe-profiles",
+    "url": "/api/sdi12/probe-profiles",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 2240,
+    "wires": [
+      [
+        "sdi12-profiles-scope-fn"
+      ]
+    ]
+  },
+  {
     "id": "sdi12-identify-http-success",
     "type": "function",
     "z": "device-api-tab",

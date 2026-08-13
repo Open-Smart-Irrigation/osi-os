@@ -313,7 +313,11 @@ node's `getProfileKind()` gains an explicit `DRAGINO_SDI12` mapping.
 - `post-devices-insert`: `appMap` (OSI Sensors) and `profileMap` entries.
 - New endpoints, following the LSN50 config-endpoint auth pattern and the
   command-safety registry:
-  - `GET /api/sdi12/probe-profiles` — registry listing for the GUI picker
+  - `GET /api/sdi12/probe-profiles` — registry listing for the GUI picker.
+    Session-scoped like the device catalog: the branch's scoped-access
+    ratchet requires every HTTP chain to reference the scope module, and
+    static registry data follows the catalog precedent, not the tiny
+    Phase-A public allowlist.
   - `PUT /api/devices/:deveui/sdi12/config` — probe profile + depths,
     validated against the selected profile's exact channel set (stale depth
     keys are replaced, not merged)
