@@ -135,6 +135,35 @@ const codecs = {
       },
     },
   },
+  sdi12: {
+    file: 'dragino_sdi12_decoder.js',
+    fPort: 2,
+    representativeFrame: [
+      0x0c, 0xe4, 0x01, 0x2b, 0x32, 0x2e, 0x34, 0x38, 0x2b, 0x32, 0x31, 0x2e, 0x35,
+    ],
+    expected: {
+      empty: {
+        data: {},
+      },
+      oneByte: {
+        data: {},
+      },
+      truncated: {
+        data: {
+          BatV: 3.3,
+          EXTI_Trigger: 'FALSE',
+          Payver: 1,
+          data_sum: '+2',
+          Node_type: 'SDI12',
+        },
+      },
+      unknownFPort: {
+        data: {
+          unsupported_fport: 99,
+        },
+      },
+    },
+  },
   lorain: {
     file: 'aquascope_lorain_decoder.js',
     fPort: 10,

@@ -79,7 +79,7 @@ git commit -m "docs: dragino sdi-12 soil node spec + plan (post external review)
 **Interfaces:**
 - Produces: `decodeUplink(input) -> { data }` where FPort 2 data is `{ BatV: number, EXTI_Trigger: 'TRUE'|'FALSE', Payver: number, data_sum: string, Node_type: 'SDI12' }`; FPort 5 data is `{ SENSOR_MODEL, FIRMWARE_VERSION, FREQUENCY_BAND, SUB_BAND, BAT }`; FPort 100 data is `{ datas_sum: string }`. Field names match Dragino's official decoder so bench captures compare 1:1.
 
-- [ ] **Step 1: Write the codec**
+- [x] **Step 1: Write the codec**
 
 The file is a plain script (no `module.exports`) — verifiers load it via `vm.runInNewContext`, ChirpStack uses it as `payloadCodecScript`. Model: `codecs/dragino_lsn50_decoder.js` lines 1–38 for the interface and byte helpers.
 
@@ -141,7 +141,7 @@ function Decode(fPort, bytes) {
 }
 ```
 
-- [ ] **Step 2: Write the failing verifier**
+- [x] **Step 2: Write the failing verifier**
 
 Model: `scripts/verify-lsn50-chameleon-codec.js` (vm load + hand-built frames + assert). Write `scripts/verify-sdi12-codec.js`:
 
@@ -206,7 +206,7 @@ ctx.decodeUplink({ fPort: 2, bytes: [0x01] });
 console.log('verify-sdi12-codec: PASS');
 ```
 
-- [ ] **Step 3: Run to verify current failure, then create the codec file and re-run**
+- [x] **Step 3: Run to verify current failure, then create the codec file and re-run**
 
 ```bash
 node scripts/verify-sdi12-codec.js   # first run: fails (codec file absent)
@@ -214,7 +214,7 @@ node scripts/verify-sdi12-codec.js   # first run: fails (codec file absent)
 node scripts/verify-sdi12-codec.js   # expect: verify-sdi12-codec: PASS
 ```
 
-- [ ] **Step 4: Register in robustness + CI**
+- [x] **Step 4: Register in robustness + CI**
 
 In `scripts/verify-codec-robustness.js`, copy the lsn50 table entry shape and add one for `dragino_sdi12_decoder.js`. In `.github/workflows/codecs.yml`, after the `verify-s2120-codec.js` line add:
 
@@ -224,7 +224,7 @@ In `scripts/verify-codec-robustness.js`, copy the lsn50 table entry shape and ad
 
 Run: `node scripts/verify-codec-robustness.js` — expect PASS including the sdi12 entry.
 
-- [ ] **Step 5: Mirror to bcm2709 and commit**
+- [x] **Step 5: Mirror to bcm2709 and commit**
 
 ```bash
 cp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js \
