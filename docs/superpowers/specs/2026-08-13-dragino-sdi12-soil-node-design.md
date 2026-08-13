@@ -243,6 +243,10 @@ telemetry field in its `json_object` payload — new columns do NOT ride
 in seed, migration, and the boot-node copy, gated by
 `verify-trigger-body-parity.js` and `verify-boot-ddl-interpolation.js`.
 
+SDI-12 channel values reach the cloud solely through `DEVICE_DATA_APPENDED`
+(the sync-outbox trigger); the MQTT `Build Telemetry` path intentionally does
+not carry them.
+
 All of the above — both migrations, seed, boot-node literals, repair
 script, telemetry trigger, and all seven bundled databases — lands as **one
 atomic commit**, per `osi-schema-change-control`.
