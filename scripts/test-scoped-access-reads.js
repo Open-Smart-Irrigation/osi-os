@@ -785,6 +785,62 @@ test('F4b: gateway history is admin-only while scoped access is enabled', async 
   }
 });
 
+test('P2: gateway card-preference writes are admin-only too', async () => {
+  for (const [label, method, path, params] of [
+    ['preferences PUT', 'PUT', '/api/history/gateways/A84041ABCDEF0002/cards/A84041ABCDEF0002:gateway:hub/preferences',
+      { gatewayEui: 'A84041ABCDEF0002', cardId: 'A84041ABCDEF0002:gateway:hub' }],
+    ['opened POST', 'POST', '/api/history/gateways/A84041ABCDEF0002/cards/A84041ABCDEF0002:gateway:hub/opened',
+      { gatewayEui: 'A84041ABCDEF0002', cardId: 'A84041ABCDEF0002:gateway:hub' }],
+  ]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    db.exec("UPDATE irrigation_zones SET gateway_device_eui = 'A84041ABCDEF0002' WHERE id = 2");
+    try {
+      const response = await executeFunction(loadNode('history-api-router-fn'), {
+        msg: historyRequest(3, 'view1', method, path, params, {}),
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        response.result && response.result.statusCode,
+        403,
+        `${label}: a viewer must not write a gateway card preference`
+      );
+    } finally {
+      db.close();
+    }
+  }
+  scopeHelper._resetForTests();
+});
+
+test('P2: an admin still writes gateway card preferences', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec("UPDATE irrigation_zones SET gateway_device_eui = 'A84041ABCDEF0002' WHERE id = 2");
+  try {
+    const response = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(
+        1,
+        'admin1',
+        'POST',
+        '/api/history/gateways/A84041ABCDEF0002/cards/A84041ABCDEF0002:gateway:hub/opened',
+        { gatewayEui: 'A84041ABCDEF0002', cardId: 'A84041ABCDEF0002:gateway:hub' },
+        {}
+      ),
+      env: ENV,
+      db,
+    });
+    assert.notEqual(
+      response.result && response.result.statusCode,
+      403,
+      'the admin path must not regress into a blanket denial'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
 test('F4b: workspace rows remain owner-only in scoped mode', async () => {
   const db = seedScopedDb();
   db.exec(`
