@@ -29,6 +29,8 @@ Device configuration commands. `config_version` is a monotonically increasing in
 
 Physical hardware actions — commands that move actuator hardware rather than change a stored setting. `action_setting` identifies the effect: `timed_action` (`SET_STREGA_TIMED_ACTION`), `partial_opening` (`SET_STREGA_PARTIAL_OPENING`), `flushing` (`SET_STREGA_FLUSHING`), `valve_action` (`VALVE_COMMAND`). `command_uuid` is the command's UUID, so each intentional issuance is distinct — as with `irrigation:manual`, a retry is a new command with a new UUID, not a coalesced duplicate. Unlike the `config:` and versioned-resource families, these commands are never rewritten in place; each issuance also carries a short expiry (5 minutes) after which the edge fences it as `EXPIRED` before dispatch instead of applying it late.
 
+The `action:` grammar is implemented by `osi-command-ledger` package version `1.0.0` (the command-ledger contract shipped with the current edge image). A cloud producer must not send these keys to a gateway whose command-ledger implementation predates this grammar; the capability/rollout pairing must be upgraded first. The grammar is a ledger contract, not a property inferred from the key string by an older gateway.
+
 ### `journal_entry:{entry_uuid}:{base_sync_version}`
 
 Entry upsert and void commands. `base_sync_version` is the version the originator read before issuing the mutation; creates use `0`. Optimistic concurrency permits only one mutation to win for an entry at a given base version. A new intentional mutation after that result must read the current version and generate a new key.
@@ -125,20 +127,20 @@ assignment set has its own version; it does not use `devices.sync_version`.
 
 - Force-sync replay must preserve the original `effect_key` from the source command.
 - Two non-journal commands sharing an `effect_key` are deduplicated to a single
-  applied effect, regardless of `command_id`. Zone and irrigation-config
-  commands additionally require the same gateway-bound canonical intent hash;
-  a changed payload at the same base reaches the applier and returns a version
-  conflict.
+  applied effect, regardless of `command_id`. Zone, irrigation-config, and
+  device-desired-state commands additionally require the same gateway-bound
+  canonical intent hash; a changed payload at the same base reaches the
+  applier and returns a version conflict.
 - `command_id` still identifies one delivery record. Retrying that record preserves both `command_id` and `effect_key`; recreating a delivery for the same versioned journal mutation changes `command_id` but preserves `effect_key`.
 
-Journal effect-key replay also requires an exact `submittedIntentHash` match. The
-edge hashes the pre-normalization logical mutation, command type, owner, author
-principal, author label, and entry duplicate-guard acknowledgement. Delivery
-metadata (`command_id`, issue/expiry timestamps, and lease fields) is excluded.
-The terminal ledger stores this hash with the owner, author, gateway, command
-type, and result. A legacy terminal row without the hash can replay only by its
-exact delivery ID; it cannot suppress a distinct delivery that happens to reuse
-the same effect key.
+Journal effect-key replay requires both an exact `submittedIntentHash` match and
+matching journal provenance: owner, author principal, author label, gateway,
+and command type. The edge hashes the pre-normalization logical mutation and
+the entry duplicate-guard acknowledgement. Delivery metadata (`command_id`,
+issue/expiry timestamps, and lease fields) is excluded. The terminal ledger
+stores this hash with the provenance and result. A legacy terminal row without
+the hash can replay only by its exact delivery ID; it cannot suppress a
+distinct delivery that happens to reuse the same effect key.
 
 `payloadHash` has a different scope: it is the hash of the normalized aggregate
 that was applied. Rejected commands therefore store `payloadHash: null`; when a

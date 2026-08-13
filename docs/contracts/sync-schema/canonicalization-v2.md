@@ -1,7 +1,12 @@
 # Field Journal V2 canonicalization
 
 V2 is a separate contract. It does not alter the V1 sync-event or command
-canonicalization rules and does not authorize a V2 producer or issuer.
+canonicalization rules. Canonicalization itself does not authorize a producer
+or issuer, but the shipped edge has an authorized V2 replication path: the
+`journal-v2-replication-tick` inject runs once at startup and every 30 seconds,
+and its worker reads, validates, and publishes the edge's pending replication
+state. Authentication, authorization, and producer eligibility remain outside
+the canonical byte and digest rules.
 
 Canonical bytes are compact UTF-8 JSON. Object property names are sorted in
 ascending UTF-16 code-unit order recursively, matching ECMAScript default sort

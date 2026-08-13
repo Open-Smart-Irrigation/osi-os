@@ -241,6 +241,9 @@ function validNonJournalEffectBinding(envelope, runtime) {
     const expectedSetting = hardwareConfigurationEffects[commandType(envelope)];
     return deviceEui === match[1] && (!expectedSetting || expectedSetting === match[2]);
   }
+  // Version dependency: the action grammar is part of osi-command-ledger
+  // package version 1.0.0. Older gateway ledgers must not receive action keys
+  // until their command-ledger implementation is upgraded.
   match = /^action:([0-9A-F]{16}):([a-z0-9_.-]+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(effectKey);
   if (match) {
     const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
