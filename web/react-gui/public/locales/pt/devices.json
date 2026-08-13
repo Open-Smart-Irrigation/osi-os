@@ -2,12 +2,17 @@
   "addModal": {
     "title": "Adicionar dispositivo",
     "deviceType": "Tipo de dispositivo",
+    "deviceTypeRequired": "Selecione um tipo de dispositivo",
     "deviceName": "Nome do dispositivo",
     "deviceNamePlaceholder": "ex. Campo Norte, Válvula principal",
     "deveui": "DevEUI",
     "deveuiPlaceholder": "16 caracteres hexadecimais",
     "deveuiHint": "Introduza exatamente 16 caracteres hexadecimais (0-9, A-F)",
     "deveuiInvalid": "O DevEUI deve ter exatamente 16 caracteres hexadecimais",
+    "appkeyInvalid": "A AppKey deve ter exatamente 32 caracteres hexadecimais",
+    "appkey": "AppKey",
+    "appkeyHint": "32 caracteres hexadecimais impressos na etiqueta do dispositivo",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "A adicionar...",
     "submit": "Adicionar dispositivo",
     "failed": "Falha ao adicionar dispositivo"
