@@ -419,6 +419,18 @@ async function loadScopedCatalog(db, principal, options) {
   return catalogDto(await loadCatalog(db, principal), options);
 }
 
+async function resolveCatalogPrincipal(db, principal, query) {
+  if (!principal || !principal.scoped) return principal;
+  const filters = query || {};
+  if (filters.plot_uuid != null && filters.plot_uuid !== '') {
+    return assertPlotWrite(db, principal, canonicalUuid(filters.plot_uuid, 'plot_uuid', true));
+  }
+  if (filters.zone_uuid != null && filters.zone_uuid !== '') {
+    return assertZoneWrite(db, principal, canonicalUuid(filters.zone_uuid, 'zone_uuid', true));
+  }
+  return principal;
+}
+
 function normalizedStringFilter(raw, field) {
   if (raw == null || raw === '') return null;
   if (typeof raw !== 'string' || Buffer.byteLength(raw, 'utf8') > 4096) {
@@ -715,11 +727,18 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!principal || !principal.scoped) return principal;
   const entry = await dbGet(
     db,
-    'SELECT plot_uuid FROM journal_entries WHERE entry_uuid=? AND gateway_device_eui=? ' +
+    'SELECT plot_uuid,owner_user_uuid,user_id FROM journal_entries WHERE entry_uuid=? AND gateway_device_eui=? ' +
       'AND deleted_at IS NULL LIMIT 1',
     [entryUuid, principal.gateway_device_eui]
   );
-  if (!entry || !entry.plot_uuid) throw apiError(404, 'not_found', 'Journal entry was not found');
+  if (!entry) throw apiError(404, 'not_found', 'Journal entry was not found');
+  if (!entry.plot_uuid) {
+    await assertJournalWriteRole(db, principal);
+    return Object.assign({}, principal, {
+      owner_user_uuid: entry.owner_user_uuid,
+      user_id: Number(entry.user_id),
+    });
+  }
   return assertPlotWrite(db, principal, entry.plot_uuid);
 }
 
@@ -3298,7 +3317,8 @@ async function handleHttpRequest(options) {
       await assertJournalWriteRole(db, principal);
     }
     if (method === 'GET' && requestPath === '/api/journal/catalog') {
-      return respond(200, await loadScopedCatalog(db, principal, {
+      const catalogPrincipal = await resolveCatalogPrincipal(db, principal, query);
+      return respond(200, await loadScopedCatalog(db, catalogPrincipal, {
         includeDefinitions: query.include === 'definitions',
       }));
     }

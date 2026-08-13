@@ -643,9 +643,16 @@ test('W2: a plot-less entry is still listed in scoped mode', async () => {
   seedIdentity(db);
   const plotlessEntryUuid = '22120000-0000-4000-8000-000000000001';
   const owner = principal();
+  const secondPlotlessEntryUuid = '22120000-0000-4000-8000-000000000002';
   await journal.saveEntry(
     db,
     entryInput(plotlessEntryUuid, null, '2026-07-13T08:00:00', { season_crop: 'barley' }),
+    owner,
+    { mode: 'create' }
+  );
+  await journal.saveEntry(
+    db,
+    entryInput(secondPlotlessEntryUuid, null, '2026-07-13T09:00:00', { season_crop: 'wheat' }),
     owner,
     { mode: 'create' }
   );
@@ -659,7 +666,10 @@ test('W2: a plot-less entry is still listed in scoped mode', async () => {
   const scoped = Object.assign({}, owner, { scope: scopeHelper, scoped: true });
   scopeHelper.invalidateScope(OWNER_UUID);
   const entries = (await journal.listEntries(db, { status: 'final' }, scoped)).entries;
-  assert.deepEqual(entries.map((entry) => entry.entry_uuid), [plotlessEntryUuid]);
+  assert.deepEqual(
+    entries.map((entry) => entry.entry_uuid),
+    [secondPlotlessEntryUuid, plotlessEntryUuid]
+  );
 
   // W2: a different account on the same gateway reads it too.
   const other = Object.assign({}, principal({
@@ -670,7 +680,98 @@ test('W2: a plot-less entry is still listed in scoped mode', async () => {
   }), { scope: scopeHelper, scoped: true });
   scopeHelper.invalidateScope(OTHER_OWNER_UUID);
   const foreignEntries = (await journal.listEntries(db, { status: 'final' }, other)).entries;
-  assert.deepEqual(foreignEntries.map((entry) => entry.entry_uuid), [plotlessEntryUuid]);
+  assert.deepEqual(
+    foreignEntries.map((entry) => entry.entry_uuid),
+    [secondPlotlessEntryUuid, plotlessEntryUuid]
+  );
+
+  const voided = await journal.voidEntry(
+    db,
+    plotlessEntryUuid,
+    { base_sync_version: 1, reason: 'Grantee correction' },
+    other
+  );
+  assert.equal(voided.entry_uuid, plotlessEntryUuid);
+
+  db.prepare("UPDATE users SET role='viewer' WHERE id=2").run();
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  const viewer = Object.assign({}, other, { scope: scopeHelper, scoped: true });
+  await assert.rejects(
+    journal.voidEntry(
+      db,
+      secondPlotlessEntryUuid,
+      { base_sync_version: 1, reason: 'Viewer correction' },
+      viewer
+    ),
+    (error) => error && error.code === 'forbidden' && error.statusCode === 403
+  );
+});
+
+test('scoped catalog GET rewrites a grantee to the plot owner, while no context stays owner-only', async () => {
+  const db = new TestDb('scoped-catalog-owner');
+  seedIdentity(db);
+  const plotUuid = '22130000-0000-4000-8000-000000000001';
+  const customUuid = '22130000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'owner-catalog-plot'), principal());
+  await journal.upsertCustomVocab(
+    db,
+    customVocabInput(customUuid, { kind: 'attribute', value_type: 'text' }),
+    principal()
+  );
+  db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22130000-0000-4000-8000-000000000003',
+    OTHER_OWNER_UUID,
+    plotUuid,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  const secret = 'scoped-catalog-owner-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 2,
+    username: 'other-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  const request = (query) => journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET',
+        path: '/api/journal/catalog',
+        headers: { authorization },
+        query: query || {},
+        params: {},
+      },
+    },
+    Database: ExistingDb,
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+    scope: scopeHelper,
+    scopedMode: true,
+  });
+
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  const withoutContext = await request();
+  assert.equal(withoutContext.statusCode, 200);
+  assert.equal(
+    withoutContext.payload.vocab.some((row) => row.code === 'custom.' + customUuid),
+    false
+  );
+  const withPlotContext = await request({ plot_uuid: plotUuid });
+  assert.equal(withPlotContext.statusCode, 200);
+  assert.equal(
+    withPlotContext.payload.vocab.some((row) => row.code === 'custom.' + customUuid),
+    true
+  );
 });
 
 test('scoped journal writes allow plot grantees, preserve ownership, and revoke immediately', async () => {
