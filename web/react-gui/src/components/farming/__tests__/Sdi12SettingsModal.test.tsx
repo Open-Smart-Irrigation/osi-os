@@ -42,13 +42,26 @@ describe('Sdi12SettingsModal', () => {
 
     expect(await screen.findByRole('option', { name: /ecoTech Tensiomark.*unverified/i })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Probe profile'), { target: { value: 'TENSIOMARK' } });
-    fireEvent.change(screen.getByLabelText('Depth slot 1 (cm)'), { target: { value: '30' } });
+    fireEvent.change(screen.getByLabelText('Depth slot 1 (cm)'), { target: { value: '35' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
         probe_profile: 'TENSIOMARK',
-        depths: { '1': 30 },
+        depths: { '1': 35 },
+      });
+    });
+  });
+
+  it('omits depths when the user edits none', async () => {
+    render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    await screen.findByRole('option', { name: /ecoTech Tensiomark.*unverified/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
+        probe_profile: 'TENSIOMARK',
       });
     });
   });

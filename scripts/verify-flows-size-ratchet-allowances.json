@@ -442,8 +442,8 @@
       "reason": "AgroLink SDI-12 ingest: prepared bound-parameter device configuration query."
     },
     "sdi12-write-fn": {
-      "max_chars": 2645,
-      "reason": "AgroLink SDI-12 ingest: normalizer, manifest, narrow-waist writer, and visible failure stages."
+      "max_chars": 3025,
+      "reason": "AgroLink SDI-12 ingest: normalizer, manifest, narrow-waist writer, visible failure stages, and the reviewed per-device dead-letter warning cooldown."
     },
     "934bf2bc19a8ce22": {
       "max_chars": 23053,
@@ -1102,8 +1102,8 @@
       "reason": "Task 10 routes shared identify trigger validation errors to HTTP callers and visibly warns for non-HTTP callers."
     },
     "sdi12-profiles-scope-fn": {
-      "max_chars": 1609,
-      "reason": "Task 12 clones the shipped catalog authenticated-read scope preamble for the session-scoped SDI-12 profile registry listing."
+      "max_chars": 1613,
+      "reason": "Task 12 clones the shipped catalog authenticated-read scope preamble for the session-scoped SDI-12 profile registry listing; review IN2 relabels its diagnostics."
     },
     "sdi12-profiles-fn": {
       "max_chars": 306,
@@ -1114,8 +1114,8 @@
       "reason": "Task 12 validates the SDI-12 config device identity with bound ownership lookup and the approved scoped/legacy auth fallback."
     },
     "sdi12-config-action-fn": {
-      "max_chars": 2356,
-      "reason": "Task 12 validates profile-specific depth slots, fans them out to exact channels, and persists the replacement config with bound SQL."
+      "max_chars": 3427,
+      "reason": "Task 12 validates profile-specific depth slots, fans them out to exact channels, and persists the replacement config with bound SQL; review IS1 read-modify-writes only the new profile's retained depth keys."
     },
     "scoped-zone-config-guard": {
       "max_chars": 3724,

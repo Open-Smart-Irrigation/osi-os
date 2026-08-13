@@ -1446,6 +1446,37 @@ test('W5: flag-off device-config routing preserves each legacy branch', async ()
   }
 });
 
+test('IS1: SDI-12 profile change without depths clears stale channel keys', async () => {
+  const db = seedScopedDb();
+  try {
+    db.prepare(
+      `UPDATE devices
+          SET type_id = 'DRAGINO_SDI12',
+              sdi12_probe_profile = 'GENERIC_VWC',
+              soil_moisture_probe_depths_json = ?
+        WHERE deveui = 'DENDRO1'`
+    ).run(JSON.stringify({ vwc_1: 40, swt_1: 30, soil_temp_1: 30 }));
+
+    await executeFunction(loadNode('sdi12-config-action-fn'), {
+      msg: {
+        req: { body: { probe_profile: 'TENSIOMARK' } },
+        deviceRow: { deveui: 'DENDRO1' },
+      },
+      env: ENV,
+      db,
+    });
+
+    const depths = JSON.parse(
+      db.prepare(
+        "SELECT soil_moisture_probe_depths_json FROM devices WHERE deveui = 'DENDRO1'"
+      ).get().soil_moisture_probe_depths_json
+    );
+    assert.deepEqual(depths, { swt_1: 30, soil_temp_1: 30 });
+  } finally {
+    db.close();
+  }
+});
+
 const ZONE_CONFIG_ROUTES = [
   ['PUT', '/api/irrigation-zones/1/timezone', { zone_id: '1' }],
   ['PUT', '/api/irrigation-zones/1/location', { zone_id: '1' }],

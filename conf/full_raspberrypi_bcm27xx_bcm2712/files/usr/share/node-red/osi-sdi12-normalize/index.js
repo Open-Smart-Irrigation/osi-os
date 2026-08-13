@@ -13,7 +13,9 @@ var TRANSFORMS = {
   hpa_to_kpa: function (v) { return v / 10; }
 };
 
-// Budget: 3 header bytes + worst-case 7 ASCII chars per value (sign + 6).
+// Budget assumption: 3 header bytes + worst-case 7 ASCII chars per value
+// (sign + 6); bench captures must verify real probe value widths before
+// profiles are de-provisionalized.
 // Dragino delivers at most 51 bytes per FPort 2 uplink at DR0; oversized
 // frames are dropped by the device. Fixed-cardinality profiles must fit.
 var UPLINK_HEADER_BYTES = 3;
@@ -217,9 +219,9 @@ function normalize(decoded, deviceConfig, meta) {
   var profileId = deviceConfig && deviceConfig.probeProfile;
   var profile = profileId ? getProfile(profileId) : null;
 
-  if (raw === 'NULL') {
-    // Exact match only: probe did not answer. Alive node, no data,
-    // never fabricate values. An embedded NULL is garbage, handled below.
+  if (raw === 'NULL' || raw === '') {
+    // Exact NULL or empty match only: probe did not answer. Alive node, no
+    // data, never fabricate values. An embedded NULL is garbage, handled below.
     noResponse = true;
   } else if (!profile) {
     unknown.sdi12_unconfigured = raw || '(empty)';

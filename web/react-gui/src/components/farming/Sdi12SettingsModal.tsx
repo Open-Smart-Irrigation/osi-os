@@ -55,6 +55,7 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   const [profiles, setProfiles] = useState<Sdi12Profile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState(device.sdi12_probe_profile ?? '');
   const [depthInputs, setDepthInputs] = useState<Record<string, string>>({});
+  const [initialDepthInputs, setInitialDepthInputs] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'identify' | 'save' | null>(null);
   const [identifyPending, setIdentifyPending] = useState(false);
@@ -89,7 +90,11 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   );
 
   useEffect(() => {
-    if (selectedProfile) setDepthInputs(depthInputsFor(selectedProfile, device));
+    if (selectedProfile) {
+      const nextDepthInputs = depthInputsFor(selectedProfile, device);
+      setDepthInputs(nextDepthInputs);
+      setInitialDepthInputs(nextDepthInputs);
+    }
   }, [device, selectedProfile]);
 
   const handleProfileChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -114,15 +119,19 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
       }
       depths[String(slot)] = value;
     }
+    const depthsChanged = depthSlots(selectedProfile).some((slot) => (
+      (depthInputs[String(slot)] ?? '') !== (initialDepthInputs[String(slot)] ?? '')
+    ));
 
     setBusy('save');
     setError(null);
     setInfo(null);
     try {
-      await putSdi12Config(device.deveui, {
+      const request = {
         probe_profile: selectedProfile.id,
-        depths,
-      });
+        ...(depthsChanged ? { depths } : {}),
+      };
+      await putSdi12Config(device.deveui, request);
       setInfo('SDI-12 configuration saved.');
       onUpdate();
     } catch {

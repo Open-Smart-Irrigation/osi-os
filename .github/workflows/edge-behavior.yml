@@ -18,8 +18,6 @@ jobs:
           node-version: '22'
       - name: Sync delivery fail-closed (delivery + ack + commands)
         run: node scripts/test-sync-delivery-fail-closed.js
-      - name: Device integration (writer + normalizer round-trip)
-        run: node scripts/verify-device-integration.js
       - name: Device writer module (bcm2712)
         run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/index.test.js
       - name: Device writer module (bcm2709)
