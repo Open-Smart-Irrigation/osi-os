@@ -741,6 +741,11 @@ function makeThrowingOsiDbStub(raw, sqlPattern) {
 
 test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a stored-GEN2 valve provisions onto the Gen2 ChirpStack profile', async () => {
   const { db, raw } = await tempDb();
+  // N2: cs-reg-cloud-fn now resolves the REGISTER_DEVICE principal by userUuid, falling back
+  // to cloud_user_id, and fails closed (UNKNOWN_PRINCIPAL) if neither maps to a local user.
+  // tempDb() seeds user id=1 with no cloud_user_id at all, so this payload's cloudUserId: 1
+  // must be given a matching row or every assertion below runs against a fenced no-op.
+  await db.run('UPDATE users SET cloud_user_id = 1 WHERE id = 1');
   const eui = '0016C001F1004001';
   // This cloud command payload carries no generation field at all (confirmed against the
   // sync contract): the stored valve_settings row is the ONLY signal this path has. A mutant
@@ -770,6 +775,10 @@ test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a stored-GEN2 valve provi
 
 test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a never-seen valve provisions onto the Gen1 profile (control case)', async () => {
   const { db, raw } = await tempDb();
+  // N2: see the stored-GEN2 test above -- this payload's cloudUserId: 1 must resolve to the
+  // tempDb()-seeded user id=1 or the new principal fence returns UNKNOWN_PRINCIPAL before
+  // reaching any STREGA-generation logic.
+  await db.run('UPDATE users SET cloud_user_id = 1 WHERE id = 1');
   const eui = '0016C001F1004002';
   // No valve_settings row at all: an empty storedRows result here is legitimate (a brand-new
   // device), not the defect -- this control case proves the mechanism can resolve GEN1, not
@@ -793,6 +802,10 @@ test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a never-seen valve provis
 
 test('cs-reg-cloud-fn (execution, review §5 residual): a throwing valve_settings lookup must not demote a stored GEN2 row', async () => {
   const { db, raw } = await tempDb();
+  // N2: see the stored-GEN2 test above -- this payload's cloudUserId: 1 must resolve to the
+  // tempDb()-seeded user id=1 or the new principal fence returns UNKNOWN_PRINCIPAL before
+  // reaching any STREGA-generation logic.
+  await db.run('UPDATE users SET cloud_user_id = 1 WHERE id = 1');
   const eui = '0016C001F1004003';
   // A real Gen2 valve already exists. The stored-generation lookup is wrapped in its own
   // try/catch that warns and falls back to the 'GEN1' default (a plausible transient failure
