@@ -99,7 +99,7 @@ CREATE TABLE devices (
   type_id                               TEXT NOT NULL CHECK(type_id IN (
                                           'KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50',
                                           'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN',
-                                          'MILESIGHT_UC512')),
+                                          'MILESIGHT_UC512','DRAGINO_SDI12')),
   user_id                               INTEGER NULL,
   farm_id                               TEXT NULL,
   current_state                         TEXT CHECK(current_state IN ('OPEN','CLOSED')),
@@ -136,6 +136,9 @@ CREATE TABLE devices (
   chameleon_swt1_depth_cm               REAL,
   chameleon_swt2_depth_cm               REAL,
   chameleon_swt3_depth_cm               REAL,
+  sdi12_probe_profile                   TEXT,
+  sdi12_probe_status                    TEXT CHECK(sdi12_probe_status IN ('pending_identify','identified','unmatched','manual')),
+  sdi12_identity                        TEXT,
   FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE SET NULL,
   FOREIGN KEY (farm_id)  REFERENCES farms(farm_id)        ON DELETE SET NULL
 );
@@ -224,6 +227,30 @@ CREATE TABLE device_data (
   valve_1_pulse             INTEGER,
   valve_2_pulse             INTEGER,
   pipe_pressure_kpa         REAL,
+  vwc_1                     REAL,
+  vwc_2                     REAL,
+  vwc_3                     REAL,
+  vwc_4                     REAL,
+  vwc_5                     REAL,
+  vwc_6                     REAL,
+  vwc_7                     REAL,
+  vwc_8                     REAL,
+  soil_temp_1               REAL,
+  soil_temp_2               REAL,
+  soil_temp_3               REAL,
+  soil_temp_4               REAL,
+  soil_temp_5               REAL,
+  soil_temp_6               REAL,
+  soil_temp_7               REAL,
+  soil_temp_8               REAL,
+  soil_ec_1                 REAL,
+  soil_ec_2                 REAL,
+  soil_ec_3                 REAL,
+  soil_ec_4                 REAL,
+  soil_ec_5                 REAL,
+  soil_ec_6                 REAL,
+  soil_ec_7                 REAL,
+  soil_ec_8                 REAL,
   FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
 );
 
@@ -1995,6 +2022,7 @@ WHEN
     COALESCE(NEW.is_reference_tree,0) <> COALESCE(OLD.is_reference_tree,0) OR
     COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
     COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
+    COALESCE(NEW.sdi12_probe_profile,'') <> COALESCE(OLD.sdi12_probe_profile,'') OR
     COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
     COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
     COALESCE(NEW.chameleon_enabled,0) <> COALESCE(OLD.chameleon_enabled,0) OR
@@ -2034,6 +2062,7 @@ BEGIN
       'current_state',                     NEW.current_state,
       'target_state',                      NEW.target_state,
       'strega_model',                      NEW.strega_model,
+      'sdi12_probe_profile',               NEW.sdi12_probe_profile,
       'soil_moisture_probe_depths_json',   json(COALESCE(NEW.soil_moisture_probe_depths_json,'{}')),
       'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured,0),
       'chameleon_enabled',                 NEW.chameleon_enabled,
@@ -2179,7 +2208,31 @@ BEGIN
       'wind_gust_mps',         NEW.wind_gust_mps,
       'uv_index',              NEW.uv_index,
       'rain_gauge_cumulative_mm', NEW.rain_gauge_cumulative_mm,
-      'bat_pct',               NEW.bat_pct
+      'bat_pct',               NEW.bat_pct,
+      'vwc_1',                 NEW.vwc_1,
+      'vwc_2',                 NEW.vwc_2,
+      'vwc_3',                 NEW.vwc_3,
+      'vwc_4',                 NEW.vwc_4,
+      'vwc_5',                 NEW.vwc_5,
+      'vwc_6',                 NEW.vwc_6,
+      'vwc_7',                 NEW.vwc_7,
+      'vwc_8',                 NEW.vwc_8,
+      'soil_temp_1',           NEW.soil_temp_1,
+      'soil_temp_2',           NEW.soil_temp_2,
+      'soil_temp_3',           NEW.soil_temp_3,
+      'soil_temp_4',           NEW.soil_temp_4,
+      'soil_temp_5',           NEW.soil_temp_5,
+      'soil_temp_6',           NEW.soil_temp_6,
+      'soil_temp_7',           NEW.soil_temp_7,
+      'soil_temp_8',           NEW.soil_temp_8,
+      'soil_ec_1',             NEW.soil_ec_1,
+      'soil_ec_2',             NEW.soil_ec_2,
+      'soil_ec_3',             NEW.soil_ec_3,
+      'soil_ec_4',             NEW.soil_ec_4,
+      'soil_ec_5',             NEW.soil_ec_5,
+      'soil_ec_6',             NEW.soil_ec_6,
+      'soil_ec_7',             NEW.soil_ec_7,
+      'soil_ec_8',             NEW.soil_ec_8
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),

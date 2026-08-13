@@ -34,6 +34,13 @@ test('legit upgrade: rebuild succeeds, rows preserved, CHECK gains AQUASCOPE_LOR
   assert.strictEqual(json.hasLorain, true);
 });
 
+test('SDI-12 sentinels survive the rebuild with all three columns present', () => {
+  const { json, code } = runCase('sdi12-sentinels');
+  assert.strictEqual(code, 0, JSON.stringify(json));
+  assert.strictEqual(json.sdi12Preserved, true);
+  assert.strictEqual(json.hasSdi12Columns, true);
+});
+
 test('extra drifted type: set-equality guard rebuilds and converges the CHECK (drops the extra), rows preserved', () => {
   const { json, code } = runCase('extra-type');
   assert.strictEqual(code, 0, JSON.stringify(json));

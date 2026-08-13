@@ -765,14 +765,14 @@ git add -A && git commit -m "feat(sdi12): vwc/soil_temp/soil_ec channel manifest
 
 Invoke the `osi-schema-change-control` skill before this task and follow its checklist alongside these steps.
 
-- [ ] **Step 1: Compute the next migration number**
+- [x] **Step 1: Compute the next migration number**
 
 ```bash
 NEXT=$(printf "%04d" $(( 10#$(ls database/migrations/ordered/ | grep -oE '^[0-9]{4}' | sort -n | tail -1) + 1 )))
 echo "$NEXT"
 ```
 
-- [ ] **Step 2: Write the migration**
+- [x] **Step 2: Write the migration**
 
 `database/migrations/ordered/${NEXT}__sdi12_columns.sql` (model: `0012__uc512_device_data_columns.sql`):
 
@@ -814,11 +814,11 @@ ALTER TABLE devices ADD COLUMN sdi12_identity TEXT;
 
 Replace `NNNN` in the comment with the computed number.
 
-- [ ] **Step 3: Mirror in seed-blank.sql**
+- [x] **Step 3: Mirror in seed-blank.sql**
 
 Append the same 24 columns to the `device_data` CREATE TABLE and the 3 columns (with the same CHECK) to the `devices` CREATE TABLE in `database/seed-blank.sql`, placed last in each column list so the migration replay matches.
 
-- [ ] **Step 4: Update CHECKSUMS.json and run the migration gates**
+- [x] **Step 4: Update CHECKSUMS.json and run the migration gates**
 
 ```bash
 node scripts/verify-migrations.js       # on checksum mismatch it reports the expected value; update CHECKSUMS.json to match
@@ -842,7 +842,7 @@ No commit yet — continue directly to Part B.
 
 Invoke `osi-schema-change-control` (this is its four-verifier merge-gate case) and `osi-flows-json-editing` for the flows edit.
 
-- [ ] **Step 1: Write the rebuild migration**
+- [x] **Step 1: Write the rebuild migration**
 
 Copy `database/migrations/ordered/0010__add_milesight_uc512_type.sql` as the structural template, but derive the `CREATE TABLE devices (...)` column list and both trigger texts **from the current `database/seed-blank.sql` on this branch** — NOT from 0010's literal (the branch has grown columns since, including Task 4's three). The deltas versus current seed are exactly:
 
@@ -871,7 +871,7 @@ and to the `json_object(...)` payload (after the `'strega_model'` pair):
 
 Header: `-- risk: destructive`, plus the 0010-style comment block explaining the rebuild.
 
-- [ ] **Step 2: Update ALL the boot-node literals in both flows files**
+- [x] **Step 2: Update ALL the boot-node literals in both flows files**
 
 The `sync-init-fn` node ("Sync Init Schema + Triggers", flows:5792) embeds
 three devices literals; updating only the type list makes a live rebuild
@@ -892,7 +892,7 @@ re-triggers the rebuild every boot. Change all three, plus the trigger copy:
 
 Then `cp` flows.json to the bcm2709 profile.
 
-- [ ] **Step 3: Extend the repair script**
+- [x] **Step 3: Extend the repair script**
 
 `scripts/repair-pi-schema.js` (`ensureDeviceTypeCheckIncludesLorain`, ~L232)
 carries its own hardcoded `deviceColumns` list and CHECK for a devices
@@ -900,7 +900,7 @@ rebuild on live Pis: add `'DRAGINO_SDI12'` to its CHECK text and the three
 `sdi12_*` columns to `deviceColumns`, following how the chameleon columns
 appear there.
 
-- [ ] **Step 4: Extend the rebuild rehearsal with sdi12 sentinels**
+- [x] **Step 4: Extend the rebuild rehearsal with sdi12 sentinels**
 
 In `scripts/rehearse-devices-rebuild.test.js`, add a case that seeds a
 device row with sentinel values (`sdi12_probe_profile='SENTINEL_P'`,
@@ -909,7 +909,7 @@ shipped `sync-init-fn` rebuild text, and asserts the sentinels survive and
 `PRAGMA table_info(devices)` contains all three columns — the existing
 verifiers compare type sets and fencing, not column preservation.
 
-- [ ] **Step 5: Run the extended merge gate**
+- [x] **Step 5: Run the extended merge gate**
 
 ```bash
 node scripts/verify-migrations.js            # update CHECKSUMS.json as in Part A
@@ -940,15 +940,15 @@ No commit yet — continue directly to Part C.
 **Interfaces:**
 - Consumes: Tasks 4–5 schema.
 
-- [ ] **Step 1: Extend schemaContract**
+- [x] **Step 1: Extend schemaContract**
 
 Add the 24 `device_data` columns and 3 `devices` columns wherever `schemaContract` enumerates those tables (follow how the UC512 columns were added — `git log -p --follow scripts/verify-db-schema-consistency.js` shows the 0012-era commit).
 
-- [ ] **Step 2: Regenerate the 7 bundled DBs**
+- [x] **Step 2: Regenerate the 7 bundled DBs**
 
 Follow the recipe in `.claude/skills/osi-schema-change-control/SKILL.md` section on regenerating bundled DBs (SKILL.md ~L493-506) — all seven in this one commit.
 
-- [ ] **Step 3: Run the schema battery**
+- [x] **Step 3: Run the schema battery**
 
 ```bash
 node scripts/verify-db-schema-consistency.js
@@ -961,7 +961,7 @@ test -f scripts/test-journal-schema.js && node scripts/test-journal-schema.js
 
 Expected: PASS.
 
-- [ ] **Step 4: The single atomic commit for the whole schema slice (Parts A+B+C)**
+- [x] **Step 4: The single atomic commit for the whole schema slice (Parts A+B+C)**
 
 ```bash
 git add -A && git commit -m "feat(sdi12): atomic schema slice - columns, type CHECK, boot literals, triggers, repair, bundled DBs"

@@ -42,5 +42,7 @@
   "0041__installation_identity.sql": "3cb46273464d3057163f60d5709ae39bcc33bd4ca12f91681a535fad0e631a98",
   "0042__installation_identity_backfill.sql": "0714d087204d6ea6e779ca65f615612814191c706ccfa5e1ef01d57472e27822",
   "0043__journal_v2_replication.sql": "563a4da98b9f1f9dde7c6d36896615f77e20505619cedda6b2d3dfccae678e81",
-  "0044__journal_v2_media.sql": "f54b272e387cc389653425572dca5392a322abbc9a925d8c1bdee47fe98b0d01"
+  "0044__journal_v2_media.sql": "f54b272e387cc389653425572dca5392a322abbc9a925d8c1bdee47fe98b0d01",
+  "0045__sdi12_columns.sql": "af9433f45a601cde57d8646f1c19ba417ff591084c40ecedb6b722e7f0b8c4f5",
+  "0046__add_dragino_sdi12_type.sql": "9c572bb5d718f7a71a8e106cecbdb37bd24360f9710956ed605f19922837c07d"
 }
