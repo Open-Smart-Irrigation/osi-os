@@ -36,13 +36,13 @@ describe('AddDeviceModal', () => {
     );
   };
 
-  it('registers the selected type from the header flow without a zone', async () => {
+  it('registers the rendered Dragino type from the header flow without a zone', async () => {
     renderModal();
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Strega valve' })).toBeInTheDocument(),
+      expect(screen.getByRole('option', { name: 'Dragino LSN50' })).toBeInTheDocument(),
     );
     fireEvent.change(screen.getByLabelText('addModal.deviceType'), {
-      target: { value: 'STREGA_VALVE' },
+      target: { value: 'DRAGINO_LSN50' },
     });
     fireEvent.change(screen.getByLabelText('addModal.deviceName'), {
       target: { value: 'Header sensor' },
@@ -56,7 +56,7 @@ describe('AddDeviceModal', () => {
       expect(devicesAPI.add).toHaveBeenCalledWith({
         deveui: 'AAAA000000000001',
         name: 'Header sensor',
-        type_id: 'STREGA_VALVE',
+        type_id: 'DRAGINO_LSN50',
         appkey: undefined,
       }),
     );

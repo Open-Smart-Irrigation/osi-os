@@ -119,6 +119,9 @@ describe('ZoneDeviceModal', () => {
     await waitFor(() =>
       expect(screen.getByRole('option', { name: 'Dragino LSN50' })).toBeInTheDocument(),
     );
+    fireEvent.change(screen.getByLabelText('addModal.deviceType'), {
+      target: { value: 'DRAGINO_LSN50' },
+    });
     fireEvent.change(screen.getByLabelText('addModal.deviceName'), {
       target: { value: 'New tree' },
     });
