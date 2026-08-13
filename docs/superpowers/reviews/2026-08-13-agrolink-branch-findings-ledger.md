@@ -72,6 +72,30 @@ agrolink-test-01, kaba100, and the production cloud DB.
 | D7 | — | Agroscope banner on the cloud branch is deliberate (`f6bc5491`), non-issue | None |
 | D8 | — | agrolink-test-01 went offline mid-session (SSH/:1880 timeout, Tailscale relay "fra"); healthy an hour earlier — looks like site network/power, not the deploys. The emit-gate check (D2's edge half) is still unrun | Confirm the gateway returns before scheduling the lockstep deploy; run the emit-gate check first thing |
 
+## Round 2 — fix-wave execution review findings (2026-08-13, post-wave)
+
+Reviews of the fix-wave commits themselves (edge `8fc83874..2e47ab5b`, cloud
+`85d6ccd8..67040c28`). The four security fixes (X2/X3/X4/X6) and the nine original merge
+gates verified fixed; the rows below are what the wave itself introduced or left open.
+Mutation tally: edge 21 mutants, 17 killed, 4 survivors (each a row below).
+
+| # | Sev | Finding | Fix shape |
+|---|---|---|---|
+| R1 | MG | Edge `58470b5c` rewrote the AddDeviceModal E1 test to select `catalog[0]` — reverting the E1 fix in that modal kills zero tests | Restore the `8fc83874` STREGA-selecting version (one line; passes against HEAD) |
+| R2 | MG | Edge `c0a60430` deleted `typecheck.yml`'s `working-directory: web/react-gui`: `npm ci` ENOENTs, the whole GUI gate stops running | Restore the defaults block |
+| R3 | MG | Edge X7 commit reds `test-contract-schemas.js:1103` (`cloudDeferred === []` hard pin) → 3 workflows red | Update the assertion to the staged set |
+| R4 | MG | `capture-history-router-vectors.js --verify` reds: the auth-secret refactor put `osiLib.require` in `history-api-router-fn`'s hot path and the harness sandbox provides no `osiLib` (runtime fine — `libs` declared). Same gap keeps `verify-strega-gen1.js` red (pre-existing) | Provide `osiLib` in the harness sandbox; retires both reds |
+| R5 | MG | Cloud vendored `sync-contract-golden.json` byte-differs from edge (edge staged 7 ops; cloud still `staged: []`); server vendor gate reds at the lockstep merge; no verifier compares the copies | Copy edge → cloud; add a cross-repo byte-compare to the parity verifier |
+| R6 | MG | Cloud ArchUnit red introduced at `85d6ccd8`: NOT a new cycle — identical 1402-cycle set, only violation example text changed (constructor signature churn). `allowStoreUpdate=true` is not a valid refreeze | Reviewed refreeze commit per precedent (`5648f753` et al.); evidence = the 0/0 cycle diff |
+| R7 | MG | Cloud C5 regression test is vacuous (claims the device by the zone owner — passes on pre-fix code, empirically proven) | Claim by a non-owner user (one line) |
+| R8 | MG* | X5 fence no-ops legitimate re-registration: unclaimed (`user_id IS NULL`) device → ACK `SUCCESS/ALREADY_REGISTERED`, never claimed, zoneUuid ignored, ChirpStack never provisioned, invisible under E3's predicate; same-owner re-key also no-ops (blocks zero-key repair). And the new ACK vocabulary is ungated on flag-off (breaks the §10 promise E5 restored). *Design decision: mirror local `post-devices-insert` semantics (claim unclaimed + revive, 409 only cross-owner), gate ACK vocabulary on scoped mode | Decide, then implement + de-vacuous the W4 pin (`cloudUserId` routing makes the zone-precondition mutant survive) |
+| R9 | SF | X7 stages the declaration only: migrations 0036/0038 triggers still emit `ZONE_IRRIGATION_CALIBRATION_UPSERTED`/`WEATHER_STATION_ZONES_REPLACED` unconditionally (only USER_* is runtime-gated via `scoped_access_emit`) — divergence guarded by rollout law alone | Runtime-gate both families like `scoped_access_emit`, or accept + document cloud-first as the sole guard |
+| R10 | SF | X2 destination-plot check load-bearing but unpinned (mutant survives; probe proves same-owner scope widening); X10 plotless void gated on role only — any writer can void another user's plotless entries | Pin destination check; add ownership comparison to plotless `assertEntryWrite` |
+| R11 | SF | D1 cloud follow-ups: aggregateKey vs `payload.device_eui` never cross-checked (WeatherStationZonesApplier has the fix shape); unseen-EUI first-writer-wins claiming; `writeHistoryMirror` still creates ownerless devices; journal ownership SQL zero runtime coverage | Sync-hardening bundle, cloud side |
+| R12 | SF | C2 fallout: devices with `gateway_device_eui IS NULL` unassignable from cloud with a wrong "different gateway" message; E6 returns 2xx while silently ignoring the requested zone (ledger asked 409-or-gate); C6 mismatch modal branch untested | Message + count NULL-EUI rows pre-deploy (deploy-day gate addition); E6 → 409; add the C6 branch test |
+| R13 | SF | CI residue: 42 script suites still unwired incl. every named command-path suite; `verify-sync-op-parity` pinned to a branch head not a sha (and cannot catch new-edge-vs-deployed-cloud); bcm2709 copies of new command tests never invoked; provenance workflow's second step deterministically red at test-concurrency ≥ 2; frontend `npm run test:unit` in no cloud workflow; new command-package tests cover 1 of 4 / 1 of 6 types (validateIdentity arms, `enabledAdminCount` at zero) | CI round 2 |
+| R14 | FU | Report corrections: cloud sweep is 1,608 passed not 1,609; ArchUnit red introduced by the wave, not pre-existing; anonymous skip = ClamAV EICAR IT; `d2e81bd6` commit message says "fail closed" where code deliberately falls back open (tested, but message misleads); E11 HistoryDashboard half has zero coverage; lg renders "hexadecimal" as base ten (feeds Uganda language gate) | Corrections + coverage |
+
 ## Rollout law (from the sync-contract review, extended)
 
 Cloud merges and deploys before any edge flows/firmware rollout — never the reverse. No
