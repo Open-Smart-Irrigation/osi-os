@@ -215,10 +215,15 @@ describe('FarmingDashboard header wiring', () => {
     expect(screen.getByText('Colleague zone')).toBeInTheDocument();
   });
 
-  it('shows the admin menu for a scoped admin', async () => {
+  it.each([
+    ['scoped', true],
+    // This row is the regression guard: a reverted `isAdmin && isScoped`
+    // expression hides the menu on a flag-off gateway.
+    ['flag-off', false],
+  ])('shows the admin menu for an %s admin', async (_label, isScoped) => {
     scopeState.role = 'admin';
     scopeState.isAdmin = true;
-    scopeState.isScoped = true;
+    scopeState.isScoped = isScoped;
 
     renderDashboard();
 
