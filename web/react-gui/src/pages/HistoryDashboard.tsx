@@ -393,7 +393,7 @@ export const HistoryDashboard: React.FC = () => {
   };
 
   const shellReady = featureFlags.historyEnabled && availableZones.length > 0 && !zonesError;
-  const loadingMessage = featureFlags.historyEnabled && (scopeLoading || zonesLoading || cardsLoading)
+  const loadingMessage = featureFlags.historyEnabled && (zonesLoading || cardsLoading)
     ? t('history.shell.loadingLocalCards')
     : null;
 
