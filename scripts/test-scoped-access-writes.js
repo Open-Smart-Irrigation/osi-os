@@ -2104,15 +2104,18 @@ const REGISTER_ENV = {
 
 const REGISTER_APPKEY = 'AABBCCDDEEFF00112233445566778899';
 
-function fakeChirpstackLib() {
+function fakeChirpstackLib(tracker = { provisionCalls: 0 }) {
   return {
     createProvisioningClientFromEnv: () => ({
-      ensureDeviceProvisioned: async (registration) => ({
+      ensureDeviceProvisioned: async (registration) => {
+        tracker.provisionCalls += 1;
+        return {
         devEui: registration.devEui,
         deviceAction: 'created',
         keysAction: 'created',
         keysVerified: true,
-      }),
+        };
+      },
       close: () => {},
     }),
   };
@@ -2134,12 +2137,15 @@ function registerCommand(devEui, extras = {}) {
 }
 
 async function applyRegister(db, devEui, extras) {
-  return executeFunction(loadNode('cs-reg-cloud-fn'), {
+  const tracker = { provisionCalls: 0 };
+  const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
     msg: registerCommand(devEui, extras),
     env: REGISTER_ENV,
     db,
-    libOverrides: { chirpstack: fakeChirpstackLib() },
+    libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
   });
+  response.provisionCalls = tracker.provisionCalls;
+  return response;
 }
 
 const REGISTER_ENV_FLAG_OFF = Object.assign({}, REGISTER_ENV, { OSI_SCOPED_ACCESS: '0' });
@@ -2152,6 +2158,53 @@ async function applyRegisterFlagOff(db, devEui, extras) {
     libOverrides: { chirpstack: fakeChirpstackLib() },
   });
 }
+
+function seedRegisterCloudUserIds(db) {
+  db.exec(`
+    UPDATE users
+       SET cloud_user_id = CASE id
+         WHEN 1 THEN 1001
+         WHEN 2 THEN 2002
+         WHEN 3 THEN 3003
+       END;
+  `);
+}
+
+test('X5: REGISTER_DEVICE refuses an EUI another account already claimed', async () => {
+  const db = seedScopedDb();
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 1001 });
+    const ack = response.result[0].specialAck;
+
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'ALREADY_CLAIMED');
+    assert.equal(ack.step, 'claim');
+    assert.equal(response.provisionCalls, 0, 'the claim fence must run before ChirpStack');
+    assert.equal(
+      db.prepare("SELECT user_id FROM devices WHERE deveui='DENDRO1'").get().user_id,
+      2,
+      'the original claim must survive'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('X5: re-registering an EUI the same account already owns is idempotent', async () => {
+  const db = seedScopedDb();
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 2002 });
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(ack.state, 'ALREADY_REGISTERED');
+    assert.equal(ack.provisionedInChirpStack, false);
+    assert.equal(response.provisionCalls, 0, 'idempotent registration must not reprovision');
+  } finally {
+    db.close();
+  }
+});
 
 test('§10: a flag-off gateway ignores a cloud zoneUuid and keeps the legacy ACK shape', async () => {
   const db = seedScopedDb();
@@ -2258,7 +2311,8 @@ test('P9: REGISTER_DEVICE without zoneUuid keeps registering unassigned', async 
 test('W4: a REGISTER_DEVICE replay never pulls a device out of the zone it already sits in', async () => {
   const db = seedScopedDb();
   try {
-    const response = await applyRegister(db, 'DENDRO1', { zoneUuid: 'z-2' });
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 2002, zoneUuid: 'z-2' });
     assert.equal(response.result[0].specialAck.result, 'SUCCESS');
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,

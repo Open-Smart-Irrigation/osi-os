@@ -4221,6 +4221,7 @@ expectIncludesById('cs-reg-cloud-fn', 'const code = error.code || null;', 'reads
 expectIncludesById('cs-reg-cloud-fn', "SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1", 'resolves the cloud-sent zoneUuid to an edge-local zone id (W5/P9)');
 expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns through the row-wise precondition-guarded UPDATE (P11/W4)');
 expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
+expectIncludesById('cs-reg-cloud-fn', "code: 'ALREADY_CLAIMED'", 'refuses an EUI another account already claimed before touching ChirpStack');
 expectIncludesById('cs-reg-cloud-fn', "var successExtras = { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true };", 'preserves the pre-seam success ACK shape as the flag-off baseline');
 expectIncludesById('cs-reg-cloud-fn', 'successExtras.zoneAssignedId = zoneId;', 'reports the P9 zone-resolution outcome in scoped mode');
 expectIncludesById('cs-reg-cloud-fn', '} finally {\n  if (client) {\n    try {\n      client.close();\n    } catch (_) {\n      node.warn(\'CS Register (cloud cmd): ChirpStack client close threw unexpectedly\');\n    }\n  }\n  try { await close(); } catch (_) {}\n}\n})();', 'closes the ChirpStack client and the local DB in a single finally on every REGISTER_DEVICE path, surfacing an unexpected close() throw via node.warn');
