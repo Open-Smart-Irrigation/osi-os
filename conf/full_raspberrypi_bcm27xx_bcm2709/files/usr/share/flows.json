@@ -12310,9 +12310,6 @@
         "sdi12-identify-action-fn"
       ],
       [
-        "device-response"
-      ],
-      [
         "sdi12-config-auth-fn"
       ],
       [
