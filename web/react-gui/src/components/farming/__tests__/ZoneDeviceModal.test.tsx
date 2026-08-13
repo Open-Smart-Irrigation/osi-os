@@ -142,6 +142,21 @@ describe('ZoneDeviceModal', () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it('exposes tab panels and moves focusable selection with arrow keys', () => {
+    renderModal();
+
+    const assignTab = screen.getByRole('tab', { name: 'zoneDeviceModal.tabAssign' });
+    const registerTab = screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' });
+    expect(assignTab).toHaveAttribute('aria-controls', 'zone-device-panel-assign');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'zone-device-tab-assign');
+
+    fireEvent.keyDown(assignTab, { key: 'ArrowRight' });
+
+    expect(registerTab).toHaveAttribute('aria-selected', 'true');
+    expect(registerTab).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'zone-device-tab-register');
+  });
+
   it('blocks registration while the catalog is still loading', () => {
     vi.mocked(devicesAPI.getCatalog).mockReturnValueOnce(new Promise(() => {}));
     renderModal();
