@@ -2142,6 +2142,63 @@ async function applyRegister(db, devEui, extras) {
   });
 }
 
+const REGISTER_ENV_FLAG_OFF = Object.assign({}, REGISTER_ENV, { OSI_SCOPED_ACCESS: '0' });
+
+async function applyRegisterFlagOff(db, devEui, extras) {
+  return executeFunction(loadNode('cs-reg-cloud-fn'), {
+    msg: registerCommand(devEui, extras),
+    env: REGISTER_ENV_FLAG_OFF,
+    db,
+    libOverrides: { chirpstack: fakeChirpstackLib() },
+  });
+}
+
+test('§10: a flag-off gateway ignores a cloud zoneUuid and keeps the legacy ACK shape', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegisterFlagOff(db, 'FLAGOFF1', { zoneUuid: 'z-1' });
+    const ack = response.result[0].specialAck;
+
+    assert.equal(ack.result, 'SUCCESS');
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(ack, 'zoneAssignedId'),
+      'flag-off ACKs must not gain zoneAssignedId'
+    );
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(ack, 'zoneWarning'),
+      'flag-off ACKs must not gain zoneWarning'
+    );
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='FLAGOFF1'").get()
+        .irrigation_zone_id,
+      null,
+      'a flag-off gateway must not honor a cloud-supplied zoneUuid'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('§10: the flag-off command ACK payload carries no zone keys', async () => {
+  const db = seedScopedDb();
+  try {
+    const applied = await applyRegisterFlagOff(db, 'FLAGOFF2', { zoneUuid: 'z-1' });
+    const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: applied.result[0],
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+    });
+    const payload = JSON.parse(ackMessage.result.payload);
+
+    assert.equal(payload.commandType, 'REGISTER_DEVICE');
+    assert.equal(payload.result, 'SUCCESS');
+    assert.ok(!('zoneAssignedId' in payload), 'no zoneAssignedId on a flag-off ACK payload');
+    assert.ok(!('zoneWarning' in payload), 'no zoneWarning on a flag-off ACK payload');
+  } finally {
+    db.close();
+  }
+});
+
 test('P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registration', async () => {
   const db = seedScopedDb();
   try {
