@@ -25,6 +25,12 @@ describe('channel registry', () => {
       'relative_humidity',
       'light_lux',
     ]);
+    expect(cardChannelsForSource('soil', { deviceType: 'DRAGINO_SDI12' })).toEqual([
+      'swt_1', 'swt_2', 'swt_3',
+      'vwc_1', 'vwc_2', 'vwc_3', 'vwc_4', 'vwc_5', 'vwc_6', 'vwc_7', 'vwc_8',
+      'soil_temp_1', 'soil_temp_2', 'soil_temp_3', 'soil_temp_4', 'soil_temp_5', 'soil_temp_6', 'soil_temp_7', 'soil_temp_8',
+      'soil_ec_1', 'soil_ec_2', 'soil_ec_3', 'soil_ec_4', 'soil_ec_5', 'soil_ec_6', 'soil_ec_7', 'soil_ec_8',
+    ]);
   });
 
   it('canonicalizes aliases', () => {

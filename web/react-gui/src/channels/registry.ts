@@ -39,8 +39,12 @@ export function createChannelRegistry(channels: ChannelManifestEntry[]): Channel
   }
 
   function cardChannelsForCard(cardType: string): string[] {
+    const legacySoilDefaults = new Set(['swt_1', 'swt_2', 'swt_3', 'vwc']);
     return channels
-      .filter((channel) => channel.cardType === cardType && channel.exportable !== false && channel.deprecated !== true)
+      .filter((channel) => channel.cardType === cardType
+        && channel.exportable !== false
+        && channel.deprecated !== true
+        && (cardType !== 'soil' || legacySoilDefaults.has(channel.key)))
       .map((channel) => channel.key);
   }
 
@@ -59,6 +63,21 @@ export function createChannelRegistry(channels: ChannelManifestEntry[]): Channel
 
       if (cardType === 'soil' && source.chameleonEnabled) {
         return filterAvailable(cardType, ['swt_1', 'swt_2', 'swt_3']);
+      }
+
+      if (cardType === 'soil' && source.deviceType === 'DRAGINO_SDI12') {
+        const sdi12Keys = new Set([
+          'swt_1', 'swt_2', 'swt_3',
+          ...Array.from({ length: 8 }, (_, index) => `vwc_${index + 1}`),
+          ...Array.from({ length: 8 }, (_, index) => `soil_temp_${index + 1}`),
+          ...Array.from({ length: 8 }, (_, index) => `soil_ec_${index + 1}`),
+        ]);
+        return channels
+          .filter((channel) => channel.cardType === cardType
+            && channel.exportable !== false
+            && channel.deprecated !== true
+            && sdi12Keys.has(channel.key))
+          .map((channel) => channel.key);
       }
 
       if (cardType === 'environment') {

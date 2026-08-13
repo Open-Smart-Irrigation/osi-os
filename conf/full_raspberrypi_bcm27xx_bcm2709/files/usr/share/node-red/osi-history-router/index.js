@@ -243,7 +243,7 @@ function validateAggregation(value) {
 
 function isSoilSource(device) {
   const typeId = String(device && device.type_id || '').toUpperCase();
-  return typeId === 'KIWI_SENSOR' || typeId === 'TEKTELIC_CLOVER' || Number(device && device.chameleon_enabled || 0) === 1;
+  return typeId === 'KIWI_SENSOR' || typeId === 'TEKTELIC_CLOVER' || typeId === 'DRAGINO_SDI12' || Number(device && device.chameleon_enabled || 0) === 1;
 }
 
 function isEnvironmentSource(device) {
