@@ -1375,7 +1375,7 @@ git add -A && git commit -m "feat(sdi12): aI! auto-identification via 0xA8 downl
 
 Invoke `osi-flows-json-editing`.
 
-- [ ] **Step 1: Catalog entry**
+- [x] **Step 1: Catalog entry**
 
 In `catalog-response` ("Return Catalog"), add:
 
@@ -1383,7 +1383,7 @@ In `catalog-response` ("Return Catalog"), add:
 { id: 'DRAGINO_SDI12', name: 'Dragino SDI-12 Soil Node (LB/LS)' },
 ```
 
-- [ ] **Step 2: Auth allow-list (+ pre-existing bug fix)**
+- [x] **Step 2: Auth allow-list (+ pre-existing bug fix)**
 
 In `post-devices-auth`, the type allow-list is missing two shipped types. Replace it with the complete list:
 
@@ -1392,7 +1392,7 @@ if (!['KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50','TEKTELIC_CLOVER','SENSECAP_S
       'AQUASCOPE_LORAIN','MILESIGHT_UC512','DRAGINO_SDI12'].includes(type_id)) {
 ```
 
-- [ ] **Step 3: Insert maps**
+- [x] **Step 3: Insert maps**
 
 In `post-devices-insert`, add to both maps:
 
@@ -1403,7 +1403,7 @@ DRAGINO_SDI12: env.get('CHIRPSTACK_PROFILE_SDI12'),    // profileMap
 
 (No `joinEuiMap` entry — Dragino uses per-device AppEUIs entered at registration.)
 
-- [ ] **Step 4: Post-registration identify hook**
+- [x] **Step 4: Post-registration identify hook**
 
 The spec's "registration starts identification" is a wiring obligation, not
 prose. Add `sdi12-post-reg-hook-fn` on the success path after
@@ -1423,7 +1423,7 @@ return msg;   // -> link-out to sdi12-identify-trigger-link-in (Task 10)
 A failed identify enqueue must not fail the registration — the hook rides a
 separate branch and its errors land in the tab's catch node.
 
-- [ ] **Step 5: Mirror, gates, commit**
+- [x] **Step 5: Mirror, gates, commit**
 
 Same gate block as Task 9 Step 6.
 
