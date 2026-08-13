@@ -1013,7 +1013,7 @@ Note in the commit body that osi-server needs the mirrored enum + channel copies
 **Interfaces:**
 - Produces: env/UCI keys `CHIRPSTACK_PROFILE_SDI12` / `chirpstack_profile_sdi12`; ChirpStack device profile named `OSI SDI-12 Soil Node` with the codec uploaded; the env var resolvable from UCI alone on env-file-less boots.
 
-- [ ] **Step 1: Add the six wiring points**
+- [x] **Step 1: Add the six wiring points**
 
 Follow the LSN50 wiring at the explore-verified line anchors (conf copy: 37, 43, 89, 95, 299, 439, 447-448, 472, 499):
 
@@ -1024,7 +1024,7 @@ Follow the LSN50 wiring at the explore-verified line anchors (conf copy: 37, 43,
 5. In step `[4/5]`: `const sdi12Script = readCodecScript(CFG.sdi12CodecPath, 'SDI12');` then `getOrCreateProfileWithCodec(client, tenantId, CFG.profileSdi12Name, 'Dragino SDI-12-LB/LS soil probe converter (LoRaWAN 1.0.3 OTAA)', sdi12Script)`.
 6. `envVars`: `CHIRPSTACK_PROFILE_SDI12: sdi12ProfileId`, plus the summary print line and the profile-count comment at the top (7 → 8).
 
-- [ ] **Step 2: Wire the UCI-only recovery path in node-red.init**
+- [x] **Step 2: Wire the UCI-only recovery path in node-red.init**
 
 Without this, a boot that recovers from UCI alone leaves
 `CHIRPSTACK_PROFILE_SDI12` empty and the strict gate silently drops every
@@ -1041,7 +1041,7 @@ and in the export block (~L230), next to `CHIRPSTACK_PROFILE_KIWI=…`:
         CHIRPSTACK_PROFILE_SDI12="$cs_profile_sdi12" \
 ```
 
-- [ ] **Step 3: Sync the copies and verify**
+- [x] **Step 3: Sync the copies and verify**
 
 ```bash
 cp scripts/chirpstack-bootstrap.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/chirpstack-bootstrap.js
