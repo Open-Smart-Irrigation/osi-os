@@ -1733,11 +1733,11 @@ git add -A && git commit -m "feat(sdi12): golden-vector round-trip + wire device
 **Files:**
 - Read (and only modify if needed): `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json` node `5f0d2b7e9b9b1b3a` ("Decide + build actuator cmd + build DB logs") and the latest-data query feeding it
 
-- [ ] **Step 1: Verify the SWT source query is type-agnostic**
+- [x] **Step 1: Verify the SWT source query is type-agnostic**
 
 Inspect the SQL that computes the zone SWT mean (`COALESCE(dd.swt_1, dd.swt_wm1)` pattern). Determine whether it selects devices by zone membership alone or filters `type_id`.
 
-- [ ] **Step 2: Act on the finding**
+- [x] **Step 2: Act on the finding**
 
 - Type-agnostic → no change; record the evidence (the query text) in the execution report.
 - Type-filtered → add `DRAGINO_SDI12` to the filter (flows edit via `osi-flows-json-editing`, mirror to bcm2709, run the Task 9 gate block), and commit:
