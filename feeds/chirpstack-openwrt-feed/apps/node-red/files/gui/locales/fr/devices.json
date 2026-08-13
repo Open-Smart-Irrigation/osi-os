@@ -28,6 +28,7 @@
     "tabAssign": "Affecter un appareil existant",
     "tabRegister": "Nouvel appareil",
     "assignConflict": "Cet appareil se trouve maintenant dans la zone « {{zoneName}} ». Désaffectez-le d’abord de cette zone.",
+    "assignConflictDeleted": "Cet appareil est encore affecté à une zone supprimée. Actualisez la liste des appareils et réessayez.",
     "registerZoneNotice": "Cet appareil sera enregistré directement dans {{zoneName}}.",
     "registerSubmit": "Enregistrer dans la zone",
     "registering": "Enregistrement..."

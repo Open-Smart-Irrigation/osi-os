@@ -69,9 +69,12 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
       onClose();
     } catch (err: any) {
       if (err?.response?.status === 409) {
-        setError(t('zoneDeviceModal.assignConflict', {
-          zoneName: err.response.data?.current_zone_name ?? '',
-        }));
+        const conflict = err.response.data || {};
+        setError(
+          conflict.current_zone_deleted || !conflict.current_zone_name
+            ? t('zoneDeviceModal.assignConflictDeleted')
+            : t('zoneDeviceModal.assignConflict', { zoneName: conflict.current_zone_name }),
+        );
         // The device moved under us; refresh the caller's lists so the picker
         // stops offering it.
         onChanged();

@@ -28,6 +28,7 @@
     "tabAssign": "Gabira ekiriwo",
     "tabRegister": "Ekyuma ekipya",
     "assignConflict": "Ekyuma kino kati kiri mu kitundu \"{{zoneName}}\". Sooka okiggyemu eyo.",
+    "assignConflictDeleted": "Ekyuma kino kikyalagiddwa mu kitundu ekyasaziddwamu. Komyawo olukalala lw'ebyuma ogezeeko nate.",
     "registerZoneNotice": "Ekyuma kino kijja kuwandiikibwa butereevu mu {{zoneName}}.",
     "registerSubmit": "Wandiika mu kitundu",
     "registering": "Kiwandiikibwa..."

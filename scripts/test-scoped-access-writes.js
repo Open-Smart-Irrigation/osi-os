@@ -2104,6 +2104,35 @@ const REGISTER_ENV = {
 
 const REGISTER_APPKEY = 'AABBCCDDEEFF00112233445566778899';
 
+const DEVICE_POST_ENV = {
+  DEVICE_EUI: '0016C001F1000001',
+  CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
+};
+
+async function applyDevicePost(db, deveui, zoneId) {
+  const row = db.prepare(
+    'SELECT deveui, user_id, type_id, gateway_device_eui, sync_version, irrigation_zone_id '
+      + 'FROM devices WHERE deveui = ?'
+  ).get(deveui);
+  const result = await executeFunction(loadNode('post-devices-insert'), {
+    msg: {
+      payload: [row],
+      ...(zoneId === undefined ? {} : { _deviceZoneId: zoneId }),
+    },
+    env: DEVICE_POST_ENV,
+    flowState: {
+      new_device_user_id: row.user_id,
+      new_device_deveui: row.deveui,
+      new_device_name: row.deveui + ' repost',
+      new_device_type: row.type_id,
+      new_device_appkey: REGISTER_APPKEY,
+    },
+    db,
+  });
+  return result;
+}
+
 function fakeChirpstackLib(tracker = { provisionCalls: 0 }) {
   return {
     createProvisioningClientFromEnv: () => ({
@@ -2158,6 +2187,98 @@ async function applyRegisterFlagOff(db, devEui, extras) {
     libOverrides: { chirpstack: fakeChirpstackLib() },
   });
 }
+
+test('E6: re-posting an assigned device without zone_id preserves its zone', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyDevicePost(db, 'DENDRO1');
+    assert.ok(response.result[0]);
+    assert.match(response.result[0].topic, /irrigation_zone_id\s*=\s*COALESCE\(irrigation_zone_id, NULL\)/);
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('E6: re-posting an assigned device into another zone is rejected without moving it', async () => {
+  const db = seedScopedDb();
+  try {
+    scopeHelper._resetForTests();
+    const response = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'DENDRO1',
+        zone_id: 2,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 409);
+    assert.equal(response.result[1].payload.current_zone_id, 1);
+    assert.equal(response.result[1].payload.current_zone_name, 'Z One');
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id, 1);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('E6: re-posting an assigned device into the same zone is idempotent', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyDevicePost(db, 'DENDRO1', 1);
+    assert.ok(response.result[0]);
+    assert.match(response.result[0].topic, /irrigation_zone_id\s*=\s*COALESCE\(irrigation_zone_id, 1\)/);
+  } finally {
+    db.close();
+  }
+});
+
+test('E7: deleting a zone unassigns members claimed by other users', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES ('OTHER1', 'Other user sensor', 'DRAGINO_LSN50', 1, 1, '2026-01-01', '2026-01-01');
+  `);
+  try {
+    const response = await executeFunction(loadNode('delete-zone-unassign'), {
+      msg: { payload: [{ id: 1, zone_uuid: 'z-1', sync_version: 1 }] },
+      flowState: { delete_zone_user_id: 2 },
+      env: DEVICE_POST_ENV,
+      db,
+    });
+    db.exec(response.result[0].topic);
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id, null);
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='OTHER1'").get().irrigation_zone_id, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('E7: assignment conflicts identify a soft-deleted current zone', async () => {
+  const db = seedScopedDb();
+  db.exec("UPDATE irrigation_zones SET deleted_at = '2026-08-13T00:00:00.000Z' WHERE id = 1");
+  try {
+    scopeHelper._resetForTests();
+    const response = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/2/devices/DENDRO1',
+        { id: '2', deveui: 'DENDRO1' },
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 409);
+    assert.equal(response.result[1].payload.current_zone_name, 'Z One');
+    assert.equal(response.result[1].payload.current_zone_deleted, true);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
 
 function seedRegisterCloudUserIds(db) {
   db.exec(`

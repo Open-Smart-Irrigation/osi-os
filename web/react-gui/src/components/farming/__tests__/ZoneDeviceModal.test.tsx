@@ -89,6 +89,29 @@ describe('ZoneDeviceModal', () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it('does not render an empty zone name when the conflict zone was deleted', async () => {
+    renderModal();
+    vi.mocked(irrigationZonesAPI.assignDevice).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          message: 'Device is already assigned to a zone',
+          current_zone_id: 3,
+          current_zone_name: null,
+          current_zone_deleted: true,
+        },
+      },
+    });
+
+    fireEvent.change(screen.getByLabelText('assignModal.selectDevice'), {
+      target: { value: 'AAAA000000000001' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'assignModal.submit' }));
+
+    await screen.findByText('zoneDeviceModal.assignConflictDeleted');
+    expect(screen.queryByText('zoneDeviceModal.assignConflict:')).not.toBeInTheDocument();
+  });
+
   it('registers a new device into the fixed zone from the second tab', async () => {
     const onChanged = renderModal();
 

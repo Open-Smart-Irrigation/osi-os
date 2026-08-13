@@ -28,6 +28,7 @@
     "tabAssign": "Assign existing",
     "tabRegister": "New device",
     "assignConflict": "That device is now in zone \"{{zoneName}}\". Unassign it there first.",
+    "assignConflictDeleted": "That device is still assigned to a deleted zone. Refresh the device list and try again.",
     "registerZoneNotice": "This device will be registered directly into {{zoneName}}.",
     "registerSubmit": "Register into zone",
     "registering": "Registering..."
