@@ -170,8 +170,8 @@
       "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)"
     },
     "history-api-router-fn": {
-      "delta": 2721,
-      "reason": "origin/main -> HEAD delta 2721. Wave 3 scoped-access port, commit close-review-gaps (adapted from AgroLink de9a53df8, \"fix: close AgroLink parity review gaps\"): defense-in-depth authUserId/authUsername split -- the scoped-read auth check now queries 'WHERE id = ? AND username = ?' (not username alone) and rejects with 403 when the id/username pair does not resolve, closing a username-reuse-after-rename gap. Re-measured fresh on port/wave3-edge-scope with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles (byte-identical bcm2712/bcm2709), delta vs origin/main. Supersedes prior entry: Wave 3 scoped-access port: cumulative through AgroLink 708e11410 (feat(api): require admin for diagnostic reads). Measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 60554 -> HEAD 63225 = +2671, superseding the previous +462 entry (fully subsumed: the card-data source field passthrough and Field Journal Task 12 additions are preserved verbatim). The remaining +2209 auto-merged in cleanly across the wave-3 scope commits (7 scope history reads, 9 admin diagnostic reads) without needing manual conflict resolution on this node."
+      "delta": 3001,
+      "reason": "Supersedes the prior entry (2721). Wave 3 scoped-access port, pick-list commit 58 (AgroLink a3ced0ca3, \"fix(scope): apply the admin gate to gateway card-preference writes\"): scopeRouteForRequest's gateway-route match drops its 'method === GET' conjunct -- PUT .../preferences and POST .../opened used to resolve to a null route, skipping the admin assertion in scopeCheckForRoute and handing an enabled viewer a gateway-existence oracle plus a write (+280, exact vs the prior entry). origin/main 60554 -> HEAD 63555 = 3001, exact delta vs origin/main. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Prior provenance retained: commit close-review-gaps (adapted from AgroLink de9a53df8) added the defense-in-depth authUserId/authUsername split on the scoped-read auth check; earlier history subsumes AgroLink 708e11410 (admin-only diagnostic reads) and 7 scope history read commits, all preserved verbatim; the all-zones-CSV-export feature (visibleZoneIdsForExport / buildAllZonesExportCsv / scope=allZones) remains excluded throughout, as it does not exist on this branch."
     },
     "sync-pending-split": {
       "delta": 401,
@@ -359,8 +359,8 @@
     }
   },
   "total_allowance": {
-    "delta": 233029,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 57(06c94d1b2), AgroLink 06c94d1b2) 1306003 chars = 233029. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 233315,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 58(a3ced0ca3), AgroLink a3ced0ca3) 1306289 chars = 233315. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
