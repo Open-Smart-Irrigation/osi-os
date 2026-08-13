@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.RdiControllerTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:07" hostname="osi-01" time="0.003">
+  <properties/>
+  <testcase name="propose_withNullObservedValueShortCircuitsToSkippedNoOp()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="propose_freezesOnForecastRainWithNonPositiveAdjustmentAndNoIntegralUpdate()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="observeNextDay_allowsNullObservedValueWithoutIntegrating()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="observeNextDay_scalesShortGapsAndSkipsBeyondMaxGap()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="observeNextDay_doesNotDoubleIntegrateClosedCycle()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="observeNextDay_doesNotGrowIntegralWhenTentativeOutputIsSaturated()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="configuredGainsWinOverPersistedAuditGains()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="propose_clampsOutputToConfiguredMaxAdjustment()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="propose_withLowConfidenceShortCircuitsToSkippedNoOpEvenWithObservedValue()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="observeNextDay_integratesTheFirstError()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="observeNextDay_skipsIntegralUpdateOnLowConfidenceDayAndCarriesState()" classname="org.osi.server.analytics.RdiControllerTest" time="0.0"/>
+  <testcase name="observeNextDay_doesNotIntegrateFrozenCycle()" classname="org.osi.server.analytics.RdiControllerTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

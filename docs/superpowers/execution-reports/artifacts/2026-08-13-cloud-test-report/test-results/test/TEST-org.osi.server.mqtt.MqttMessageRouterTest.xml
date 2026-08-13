@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.mqtt.MqttMessageRouterTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:44" hostname="osi-01" time="0.132">
+  <properties/>
+  <testcase name="routeLinkedAuthAckUpdatesLinkedGatewayStatusUsingAckVersion()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.11"/>
+  <testcase name="routeCommandAckKeepsAcceptedAckWhenDeviceLookupFailsAfterward()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.001"/>
+  <testcase name="routeDirectTelemetryPersistsCurrentStateUsingPayloadTimestamp()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.002"/>
+  <testcase name="routeDirectTelemetryAcceptsSensecapS2120DeviceType()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.001"/>
+  <testcase name="routeCommandAckUsesValidatedCompletionPath()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.001"/>
+  <testcase name="routeGatewayForwardedTelemetryDoesNotOverwriteCanonicalSensorState()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.001"/>
+  <testcase name="routeGatewayTopicCommandAckUsesPayloadDeviceEuiForDeviceLookup()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.0"/>
+  <testcase name="routeGatewayTopicStatusUsesPayloadDeviceEuiForValveStatus()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.001"/>
+  <testcase name="routeGatewayForwardedStregaTelemetryPersistsValveStateUsingPayloadDeviceEui()" classname="org.osi.server.mqtt.MqttMessageRouterTest" time="0.014"/>
+  <system-out><![CDATA[2026-08-13T11:26:44.832+02:00  WARN 2682197 --- [    Test worker] org.osi.server.mqtt.MqttMessageRouter    : Accepted linked-auth ACK for GW-1 could not be matched to a linked gateway account (localUserUuid=local-user-1, version=4)
+2026-08-13T11:26:44.835+02:00  WARN 2682197 --- [    Test worker] org.osi.server.mqtt.MqttMessageRouter    : Skipping WebSocket update for ACK from GW-1 because device lookup failed: Device not found: GW-1
+2026-08-13T11:26:44.839+02:00  WARN 2682197 --- [    Test worker] org.osi.server.mqtt.MqttMessageRouter    : Rejected command ACK from GW-1 for command 99
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

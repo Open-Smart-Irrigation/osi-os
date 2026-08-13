@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.prediction.PredictionInputAssemblerTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:46" hostname="osi-01" time="0.357">
+  <properties/>
+  <testcase name="assembleIncludesProbeDepthFingerprintInLiveSpatialInputMeta()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.323"/>
+  <testcase name="assembleAttachesClusteredShadowPayloadWhenFeatureEnabled()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.003"/>
+  <testcase name="assembleUsesFullReplayGatewayWeatherAndHistoricalSoilMoisture()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.006"/>
+  <testcase name="assembleUsesOnlyOpenMeteoArchiveForExplicitOpenMeteoSource()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.004"/>
+  <testcase name="assemblePrefersAssignedS2120WeatherStationObservedWeatherWhenAvailable()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.004"/>
+  <testcase name="assemblePrefersFieldGeometryCentroidAndAreaForPredictionInputs()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.003"/>
+  <testcase name="assembleIgnoresDevicesWithNullCurrentState()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.002"/>
+  <testcase name="assembleResolvesObservedEt0WithHargreavesWhenArchiveHasNoNativeEt0()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.003"/>
+  <testcase name="assembleFallsBackToAutoArchiveForExplicitMeteoSwissSource()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.002"/>
+  <testcase name="assembleFailsFastWhenZoneWaterSetupIsMissing()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.001"/>
+  <testcase name="assembleFallsBackToDirectOpenMeteoForecastWhenMergedForecastHasNoFutureDays()" classname="org.osi.server.prediction.PredictionInputAssemblerTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

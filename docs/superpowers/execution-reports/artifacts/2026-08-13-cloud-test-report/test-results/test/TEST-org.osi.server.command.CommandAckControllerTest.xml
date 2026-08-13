@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.command.CommandAckControllerTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:12" hostname="osi-01" time="0.418">
+  <properties/>
+  <testcase name="legacyAckEndpointRejectsNormalLoginTokenAtPrincipalLevel()" classname="org.osi.server.command.CommandAckControllerTest" time="0.325"/>
+  <testcase name="syncAckReturnsRetryableFailuresToPending()" classname="org.osi.server.command.CommandAckControllerTest" time="0.006"/>
+  <testcase name="gatewayAckEndpointRejectsNormalLoginToken()" classname="org.osi.server.command.CommandAckControllerTest" time="0.013"/>
+  <testcase name="legacyAckEndpointRejectsCommandLeasedToOtherGateway()" classname="org.osi.server.command.CommandAckControllerTest" time="0.012"/>
+  <testcase name="gatewayAckEndpointIsRegisteredAtSyncPath()" classname="org.osi.server.command.CommandAckControllerTest" time="0.012"/>
+  <testcase name="legacyAckEndpointAcceptsSyncTokenForCommandLeasedToGateway()" classname="org.osi.server.command.CommandAckControllerTest" time="0.011"/>
+  <testcase name="conflictAckMarksOperationAndCommandConflicted()" classname="org.osi.server.command.CommandAckControllerTest" time="0.002"/>
+  <testcase name="legacyAckEndpointAcceptsUnleasedCommandFromOwningGateway()" classname="org.osi.server.command.CommandAckControllerTest" time="0.011"/>
+  <testcase name="legacyAckEndpointRejectsUnleasedCommandFromForeignGateway()" classname="org.osi.server.command.CommandAckControllerTest" time="0.012"/>
+  <testcase name="syncAckFailedRetryableAtMaxAttemptsReturnsTerminalNacked()" classname="org.osi.server.command.CommandAckControllerTest" time="0.002"/>
+  <testcase name="syncAckTransitionsLeasedCommandToAcked()" classname="org.osi.server.command.CommandAckControllerTest" time="0.001"/>
+  <testcase name="syncAckRejectsMalformedAppliedAt()" classname="org.osi.server.command.CommandAckControllerTest" time="0.01"/>
+  <system-out><![CDATA[2026-08-13T11:26:13.148+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.150+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.150+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.150+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.150+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.150+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:13.151+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackBatch(String, String, CommandAckRequest)
+2026-08-13T11:26:13.158+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=ACKED, detail=null, result=null, applie (truncated)...]
+2026-08-13T11:26:13.160+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:13.161+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [CommandAckResponse[processed=0, succeeded=0, results=[]]]
+2026-08-13T11:26:13.176+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.177+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.177+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.177+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.177+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.177+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:13.178+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackGatewayBatch(Principal, String, String, CommandAckRequest)
+2026-08-13T11:26:13.181+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=null, detail=null, result=APPLIED, appl (truncated)...]
+2026-08-13T11:26:13.182+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:13.182+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Nothing to write: null body
+2026-08-13T11:26:13.187+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.188+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.189+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.189+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.189+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.189+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:13.189+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackBatch(String, String, CommandAckRequest)
+2026-08-13T11:26:13.191+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=ACKED, detail=null, result=null, applie (truncated)...]
+2026-08-13T11:26:13.192+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:13.193+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [CommandAckResponse[processed=1, succeeded=0, results=[CommandAckEntryResult[commandId=42, status=OWN (truncated)...]
+2026-08-13T11:26:13.200+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.202+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.202+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.202+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.202+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.202+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:13.203+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackGatewayBatch(Principal, String, String, CommandAckRequest)
+2026-08-13T11:26:13.206+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=null, detail=null, result=APPLIED, appl (truncated)...]
+2026-08-13T11:26:13.206+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:13.206+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Nothing to write: null body
+2026-08-13T11:26:13.211+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.212+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.212+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.213+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.213+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.213+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:13.213+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackBatch(String, String, CommandAckRequest)
+2026-08-13T11:26:13.215+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=ACKED, detail=null, result=null, applie (truncated)...]
+2026-08-13T11:26:13.217+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:13.217+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [CommandAckResponse[processed=1, succeeded=1, results=[CommandAckEntryResult[commandId=42, status=ACK (truncated)...]
+2026-08-13T11:26:13.224+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.225+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.225+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.225+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.225+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.226+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-08-13T11:26:13.226+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackBatch(String, String, CommandAckRequest)
+2026-08-13T11:26:13.228+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=ACKED, detail=null, result=null, applie (truncated)...]
+2026-08-13T11:26:13.230+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:13.230+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [CommandAckResponse[processed=1, succeeded=1, results=[CommandAckEntryResult[commandId=42, status=ACK (truncated)...]
+2026-08-13T11:26:13.236+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.237+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.238+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.238+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.238+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.238+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:13.238+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackBatch(String, String, CommandAckRequest)
+2026-08-13T11:26:13.241+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=ACKED, detail=null, result=null, applie (truncated)...]
+2026-08-13T11:26:13.242+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:13.242+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [CommandAckResponse[processed=1, succeeded=0, results=[CommandAckEntryResult[commandId=42, status=OWN (truncated)...]
+2026-08-13T11:26:13.251+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:13.251+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.252+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:13.252+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:13.252+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:13.252+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:13.252+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.command.CommandAckController#ackGatewayBatch(Principal, String, String, CommandAckRequest)
+2026-08-13T11:26:13.254+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json" to [CommandAckRequest[acks=[CommandAckEntry[commandId=42, status=null, detail=null, result=APPLIED, appl (truncated)...]
+2026-08-13T11:26:13.256+02:00 DEBUG 2682197 --- [    Test worker] .w.s.m.a.ResponseStatusExceptionResolver : Resolved [org.springframework.web.server.ResponseStatusException: 400 BAD_REQUEST "appliedAt must be an ISO-8601 instant"]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

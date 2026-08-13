@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.zone.IrrigationZoneControllerValidationTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.001">
+  <properties/>
+  <testcase name="validateScheduleRequest_appliesMetricSpecificRanges()" classname="org.osi.server.zone.IrrigationZoneControllerValidationTest" time="0.0"/>
+  <testcase name="zoneResponse_fromIncludesWeatherSource()" classname="org.osi.server.zone.IrrigationZoneControllerValidationTest" time="0.0"/>
+  <testcase name="validateScheduleRequest_requiresIntegerThresholdForDendro()" classname="org.osi.server.zone.IrrigationZoneControllerValidationTest" time="0.0"/>
+  <testcase name="validateScheduleRequest_rejectsOutOfRangeDuration()" classname="org.osi.server.zone.IrrigationZoneControllerValidationTest" time="0.0"/>
+  <testcase name="zoneResponse_fromIncludesPredictionCardEnabled()" classname="org.osi.server.zone.IrrigationZoneControllerValidationTest" time="0.0"/>
+  <testcase name="normalizeTriggerMetric_preservesCanonicalSwtMetrics()" classname="org.osi.server.zone.IrrigationZoneControllerValidationTest" time="0.0"/>
+  <testcase name="normalizeTriggerMetric_acceptsSupportedMetricsCaseInsensitively()" classname="org.osi.server.zone.IrrigationZoneControllerValidationTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

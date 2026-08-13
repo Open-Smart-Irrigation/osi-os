@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - SyncDeadLetterRepositoryIT</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>SyncDeadLetterRepositoryIT</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.sync.html">org.osi.server.sync</a> &gt; SyncDeadLetterRepositoryIT</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">3</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.031s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">acceptsUuidsLongerThanTheInboxColumn()</td>
+<td class="success">0.007s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">eventUuidIsUniqueAndExistsCheckWorks()</td>
+<td class="success">0.017s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">roundTripsJsonbPayloadAndReason()</td>
+<td class="success">0.007s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>2026-08-13T11:27:08.753+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [SyncDeadLetterRepositoryIT]: using SpringBootContextLoader
+2026-08-13T11:27:08.753+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.sync.SyncDeadLetterRepositoryIT]: SyncDeadLetterRepositoryIT does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T11:27:08.753+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [SyncDeadLetterRepositoryIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T11:27:08.756+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [SyncDeadLetterRepositoryIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T11:27:08.756+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.sync.SyncDeadLetterRepositoryIT
+2026-08-13T11:27:08.756+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [SyncDeadLetterRepositoryIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T11:27:08.759+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T11:27:08.763+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:27:08.766+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T11:27:08.767+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id,sdl1_0.aggregate_key,sdl1_0.aggregate_type,sdl1_0.contract_version,sdl1_0.created_at,sdl1_0.event_uuid,sdl1_0.gateway_eui,sdl1_0.occurred_at,sdl1_0.op,sdl1_0.payload,sdl1_0.reason,sdl1_0.reason_detail,sdl1_0.received_at,sdl1_0.source_node from sync_dead_letter sdl1_0
+Hibernate: select sdl1_0.id,sdl1_0.aggregate_key,sdl1_0.aggregate_type,sdl1_0.contract_version,sdl1_0.created_at,sdl1_0.event_uuid,sdl1_0.gateway_eui,sdl1_0.occurred_at,sdl1_0.op,sdl1_0.payload,sdl1_0.reason,sdl1_0.reason_detail,sdl1_0.received_at,sdl1_0.source_node from sync_dead_letter sdl1_0
+2026-08-13T11:27:08.774+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T11:27:08.775+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:27:08.776+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:27:08.776+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T11:27:08.782+02:00  WARN 2682197 --- [    Test worker] o.h.engine.jdbc.spi.SqlExceptionHelper   : SQL Error: 0, SQLState: 23505
+2026-08-13T11:27:08.782+02:00 ERROR 2682197 --- [    Test worker] o.h.engine.jdbc.spi.SqlExceptionHelper   : ERROR: duplicate key value violates unique constraint &quot;ux_sync_dead_letter_event_uuid&quot;
+  Detail: Key (event_uuid)=(dl-uq-1) already exists.
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+</div>
+</div>
+</body>
+</html>

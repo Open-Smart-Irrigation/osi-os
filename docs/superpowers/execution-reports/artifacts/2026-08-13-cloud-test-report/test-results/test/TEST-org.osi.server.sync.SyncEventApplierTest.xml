@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.sync.SyncEventApplierTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:08" hostname="osi-01" time="0.216">
+  <properties/>
+  <testcase name="irrigationCalibrationStaleVersionIsRejected()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.11"/>
+  <testcase name="irrigationCalibrationUsesZoneUuidAndDedicatedResourceType()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.0"/>
+  <testcase name="irrigationCalibrationMirrorIsObservedAfterApply()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.0"/>
+  <testcase name="scopedAccessAppliersAdvertiseOnlyGovernedMirrorOps()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.101"/>
+  <testcase name="irrigationCalibrationFromWrongGatewayIsRejected()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.001"/>
+  <testcase name="scopedUserEqualVersionDifferentPayloadIsRejectedAtWatermarkBoundary()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.001"/>
+  <testcase name="rejectedDuplicateStaleAndRetryableEventsNeverObserveMirror()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.001"/>
+  <testcase name="acceptedEventObservesMirrorAfterWatermark()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.0"/>
+  <testcase name="gatewayLocationApplierAdvertisesItsSingleSupportedOp()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.0"/>
+  <testcase name="irrigationCalibrationEqualVersionDifferentPayloadIsRejected()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.0"/>
+  <testcase name="irrigationCalibrationExactReplayIsDuplicate()" classname="org.osi.server.sync.SyncEventApplierTest" time="0.0"/>
+  <system-out><![CDATA[2026-08-13T11:27:09.005+02:00  WARN 2682197 --- [    Test worker] o.osi.server.sync.SyncEventTxExecutor    : Rejecting unsupported sync event event-1 op=ZONE_UPDATED contractVersion=null before ownership/watermark checks
+2026-08-13T11:27:09.005+02:00  WARN 2682197 --- [    Test worker] o.osi.server.sync.SyncEventTxExecutor    : Retryable sync event parent miss event-1 op=ZONE_UPDATED key=zone-1 due to Zone not found: zone-1
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

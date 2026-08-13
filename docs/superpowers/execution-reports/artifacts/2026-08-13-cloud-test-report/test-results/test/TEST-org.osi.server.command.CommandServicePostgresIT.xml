@@ -1,0 +1,508 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.command.CommandServicePostgresIT" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:19" hostname="osi-01" time="0.046">
+  <properties/>
+  <testcase name="legacyServiceExpiresDueRowsAndSelectsFutureRowsInOneTransaction()" classname="org.osi.server.command.CommandServicePostgresIT" time="0.046"/>
+  <system-out><![CDATA[2026-08-13T11:26:13.339+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [CommandServicePostgresIT]: using SpringBootContextLoader
+2026-08-13T11:26:13.340+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [CommandServicePostgresIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T11:26:13.344+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [CommandServicePostgresIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T11:26:13.361+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.command.CommandServicePostgresIT
+2026-08-13T11:26:13.361+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [CommandServicePostgresIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T11:26:13.387+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.images.PullPolicy     : Image pull policy will be performed by: DefaultPullPolicy()
+2026-08-13T11:26:13.389+02:00  INFO 2682197 --- [    Test worker] o.t.utility.ImageNameSubstitutor         : Image name substitution will be performed by: DefaultImageNameSubstitutor (composite of 'ConfigurationFileImageNameSubstitutor' and 'PrefixingImageNameSubstitutor')
+2026-08-13T11:26:13.394+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Testcontainers version: 1.21.4
+2026-08-13T11:26:13.494+02:00  INFO 2682197 --- [    Test worker] o.t.d.DockerClientProviderStrategy       : Loaded org.testcontainers.dockerclient.UnixSocketClientProviderStrategy from ~/.testcontainers.properties, will try it first
+2026-08-13T11:26:13.764+02:00  INFO 2682197 --- [    Test worker] o.t.d.DockerClientProviderStrategy       : Found Docker environment with local Unix socket (unix:///var/run/docker.sock)
+2026-08-13T11:26:13.765+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Docker host IP address is localhost
+2026-08-13T11:26:13.777+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Connected to docker: 
+  Server Version: 29.6.1
+  API Version: 1.55
+  Operating System: CachyOS
+  Total Memory: 23379 MB
+2026-08-13T11:26:13.903+02:00  INFO 2682197 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Creating container for image: testcontainers/ryuk:0.12.0
+2026-08-13T11:26:13.907+02:00  INFO 2682197 --- [    Test worker] o.t.utility.RegistryAuthLocator          : Failure when attempting to lookup auth config. Please ignore if you don't have images in an authenticated registry. Details: (dockerImageName: testcontainers/ryuk:0.12.0, configFile: /home/phil/.docker/config.json, configEnv: DOCKER_AUTH_CONFIG). Falling back to docker-java default behaviour. Exception message: Status 404: No config supplied. Checked in order: /home/phil/.docker/config.json (file not found), DOCKER_AUTH_CONFIG (not set)
+2026-08-13T11:26:14.412+02:00  INFO 2682197 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Container testcontainers/ryuk:0.12.0 is starting: c23a1e455eb2482c845735278c55fbafe91b039a97a582a0270cc70e6fdefea6
+2026-08-13T11:26:14.680+02:00  INFO 2682197 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Container testcontainers/ryuk:0.12.0 started in PT0.777237701S
+2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] o.t.utility.RyukResourceReaper           : Ryuk started - will monitor and terminate Testcontainers containers on JVM exit
+2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Checking the system...
+2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : ✔︎ Docker server version should be at least 1.6.0
+2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Creating container for image: postgres:16-alpine
+2026-08-13T11:26:14.853+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Container postgres:16-alpine is starting: 7b976adb73687eca379d07fbdd8f2c42aadc72132b73368795f0c2efaafdca0b
+2026-08-13T11:26:16.780+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Container postgres:16-alpine started in PT2.096774559S
+2026-08-13T11:26:16.781+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Container is started (JDBC URL: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF)
+2026-08-13T11:26:16.785+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T11:26:16.786+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T11:26:16.786+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T11:26:16.789+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.3)
+
+2026-08-13T11:26:16.796+02:00  INFO 2682197 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : Starting CommandServicePostgresIT using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T11:26:16.796+02:00  INFO 2682197 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : No active profile set, falling back to 1 default profile: "default"
+2026-08-13T11:26:16.796+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication,class org.osi.server.command.CommandServicePostgresIT$CommandServiceConfig
+2026-08-13T11:26:16.908+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T11:26:16.909+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T11:26:16.955+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 46 ms. Found 55 JPA repository interfaces.
+2026-08-13T11:26:17.347+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-08-13T11:26:17.475+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-08-13T11:26:17.514+02:00  INFO 2682197 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF (PostgreSQL 16.14)
+2026-08-13T11:26:17.569+02:00  INFO 2682197 --- [    Test worker] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
+2026-08-13T11:26:17.573+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.037s)
+2026-08-13T11:26:17.585+02:00  INFO 2682197 --- [    Test worker] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" ...
+2026-08-13T11:26:17.629+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema "public": << Empty Schema >>
+2026-08-13T11:26:17.637+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - create users"
+2026-08-13T11:26:17.660+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2 - create devices"
+2026-08-13T11:26:17.674+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "3 - create sensor data"
+2026-08-13T11:26:17.686+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "4 - create device commands"
+2026-08-13T11:26:17.704+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "5 - create irrigation zones"
+2026-08-13T11:26:17.715+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "6 - convert device type to varchar"
+2026-08-13T11:26:17.725+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "7 - add sensor flags"
+2026-08-13T11:26:17.731+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "8 - add dendro analytics"
+2026-08-13T11:26:17.743+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "9 - add irrigation schedules"
+2026-08-13T11:26:17.756+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "10 - dendro v4 analytics"
+2026-08-13T11:26:17.777+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "11 - add zone coordinates"
+2026-08-13T11:26:17.784+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "12 - phase4 polish"
+2026-08-13T11:26:17.792+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "13 - envelope twd v5"
+2026-08-13T11:26:17.800+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "14 - fix low confidence day type"
+2026-08-13T11:26:17.809+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "15 - zone recommendation quality metadata"
+2026-08-13T11:26:17.815+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "16 - zone config fields"
+2026-08-13T11:26:17.823+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "17 - bidirectional sync foundation"
+2026-08-13T11:26:17.846+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "18 - data plane mirror"
+2026-08-13T11:26:17.858+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "19 - super admin role"
+2026-08-13T11:26:17.861+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "20 - zone recommendation json"
+2026-08-13T11:26:17.865+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "21 - strega model column"
+2026-08-13T11:26:17.869+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "22 - gateway locations"
+2026-08-13T11:26:17.876+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "23 - prediction service v1"
+2026-08-13T11:26:17.895+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "24 - add rain flow flags"
+2026-08-13T11:26:17.899+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "25 - zone soil profiles"
+2026-08-13T11:26:17.908+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "26 - zone water config"
+2026-08-13T11:26:17.915+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "27 - device current state tracking"
+2026-08-13T11:26:17.921+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "28 - zone scheduling mode"
+2026-08-13T11:26:17.925+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "29 - backfill zone water config from prediction"
+2026-08-13T11:26:17.930+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "30 - prediction reference runs"
+2026-08-13T11:26:17.944+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "31 - add weather station zones"
+2026-08-13T11:26:17.951+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "32 - rebackfill zone water config"
+2026-08-13T11:26:17.955+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "33 - zone field geometries"
+2026-08-13T11:26:17.965+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "34 - add prediction card enabled"
+2026-08-13T11:26:17.970+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "35 - prediction shadow and comparison"
+2026-08-13T11:26:17.989+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "36 - add kiwi sensor depths"
+2026-08-13T11:26:17.994+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "37 - create linked gateway accounts"
+2026-08-13T11:26:18.002+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "38 - zone sensor anchors"
+2026-08-13T11:26:18.009+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "39 - prediction multi track persistence"
+2026-08-13T11:26:18.012+02:00  INFO 2682197 --- [    Test worker] o.f.c.i.s.DefaultSqlScriptExecutor       : DB: index "uq_zone_prediction_run_comparison_shadow_run" does not exist, skipping
+2026-08-13T11:26:18.016+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "40 - chameleon full mirror"
+2026-08-13T11:26:18.027+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "41 - chameleon data invalid"
+2026-08-13T11:26:18.030+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.010 - sync resource watermarks"
+2026-08-13T11:26:18.036+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.011 - device commands lease columns"
+2026-08-13T11:26:18.041+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.012 - device commands lease columns apply"
+2026-08-13T11:26:18.052+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.030 - retention indexes"
+2026-08-13T11:26:18.060+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.031 - ensure sync inbox event uuid unique"
+2026-08-13T11:26:18.067+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.20.001 - chameleon calibrations"
+2026-08-13T11:26:18.079+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.31.001 - history data visualization rollups"
+2026-08-13T11:26:18.107+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.12.001 - dendro v6 self calibrating"
+2026-08-13T11:26:18.113+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.18.001 - analysis views"
+2026-08-13T11:26:18.121+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.24.001 - canonical channel keys"
+2026-08-13T11:26:18.128+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.28.001 - edge history sync v1"
+2026-08-13T11:26:18.139+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.05.001 - add zone weather source"
+2026-08-13T11:26:18.143+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.05.002 - dendro rdi shadow"
+2026-08-13T11:26:18.153+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.06.001 - agroscope shadow"
+2026-08-13T11:26:18.164+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.08.001 - work requests"
+2026-08-13T11:26:18.178+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.09.001 - work request revised stage0"
+2026-08-13T11:26:18.184+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.09.002 - work request country code varchar"
+2026-08-13T11:26:18.192+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.001 - forge dispatch"
+2026-08-13T11:26:18.199+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.002 - sync dead letter"
+2026-08-13T11:26:18.208+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.003 - sensor data index vacuum"
+2026-08-13T11:26:18.215+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.001 - desired state operations"
+2026-08-13T11:26:18.231+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.002 - journal mirrors"
+2026-08-13T11:26:18.248+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.003 - scoped access mirrors"
+2026-08-13T11:26:18.266+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.004 - scoped access capabilities"
+2026-08-13T11:26:18.270+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.001 - zone desired state capability"
+2026-08-13T11:26:18.274+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.002 - irrigation config parity"
+2026-08-13T11:26:18.282+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.003 - cloud local irrigation calibration"
+2026-08-13T11:26:18.285+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.004 - device parity"
+2026-08-13T11:26:18.290+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.25.001 - durable history batch"
+2026-08-13T11:26:18.301+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.25.002 - installation recovery"
+2026-08-13T11:26:18.325+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.29.001 - recovery receipt binding"
+2026-08-13T11:26:18.329+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.03.001 - gateway installation optimistic lock"
+2026-08-13T11:26:18.333+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.05.001 - journal catalog advertisement"
+2026-08-13T11:26:18.337+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.08.001 - journal v2 authority"
+2026-08-13T11:26:18.392+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.08.002 - journal v2 attachments"
+2026-08-13T11:26:18.415+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.10.001 - journal conflict resolution"
+2026-08-13T11:26:18.422+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Successfully applied 77 migrations to schema "public", now at version v2026.08.10.001 (execution time 00:00.474s)
+2026-08-13T11:26:18.446+02:00  INFO 2682197 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T11:26:18.447+02:00  INFO 2682197 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T11:26:18.453+02:00  INFO 2682197 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T11:26:18.462+02:00  WARN 2682197 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T11:26:18.467+02:00  INFO 2682197 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
+	Database driver: undefined/unknown
+	Database version: 16.14
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-08-13T11:26:18.573+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T11:26:18.573+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T11:26:18.921+02:00  INFO 2682197 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T11:26:18.922+02:00  INFO 2682197 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T11:26:19.276+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+
+============================
+CONDITIONS EVALUATION REPORT
+============================
+
+
+Positive matches:
+-----------------
+
+   DataSourceAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: io.r2dbc.spi.ConnectionFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration matched:
+      - AnyNestedCondition 1 matched 1 did not; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.PooledDataSourceAvailable PooledDataSource found supported DataSource; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.ExplicitType @ConditionalOnProperty (spring.datasource.type) did not find property 'type' (DataSourceAutoConfiguration.PooledDataSourceCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource,javax.sql.XADataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration#jdbcConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceConfiguration.Hikari matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+      - @ConditionalOnProperty (spring.datasource.type=com.zaxxer.hikari.HikariDataSource) matched (OnPropertyCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceInitializationConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.datasource.init.DatabasePopulator' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.sql.init.SqlDataSourceScriptDatabaseInitializer,org.springframework.boot.autoconfigure.sql.init.SqlR2dbcScriptDatabaseInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.HikariPoolDataSourceMetadataProviderConfiguration matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate', 'org.springframework.transaction.TransactionManager' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   FlywayAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.flywaydb.core.Flyway' (OnClassCondition)
+      - @ConditionalOnProperty (spring.flyway.enabled) matched (OnPropertyCondition)
+      - AnyNestedCondition 2 matched 1 did not; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.FlywayUrlCondition @ConditionalOnProperty (spring.flyway.url) did not find property 'url'; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.JdbcConnectionDetailsCondition @ConditionalOnBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) found bean 'jdbcConnectionDetails'; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.DataSourceBeanCondition @ConditionalOnBean (types: javax.sql.DataSource; SearchStrategy: all) found bean 'dataSource' (FlywayAutoConfiguration.FlywayDataSourceCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.support.JdbcUtils' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: org.flywaydb.core.Flyway; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#flywayConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.flyway.FlywayConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#flywayInitializer matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.flyway.FlywayMigrationInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#postgresqlFlywayConfigurationCustomizer matched:
+      - @ConditionalOnClass found required class 'org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension' (OnClassCondition)
+
+   HibernateJpaAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean', 'jakarta.persistence.EntityManager', 'org.hibernate.engine.spi.SessionImplementor' (OnClassCondition)
+
+   HibernateJpaConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcClientAutoConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate; SearchStrategy: all) found a single bean 'namedParameterJdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.simple.JdbcClient; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JdbcTemplateAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcTemplateConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.jdbc.core.JdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactory matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactoryBuilder matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#jpaVendorAdapter matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.JpaVendorAdapter; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#transactionManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration#persistenceManagedTypes matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.persistenceunit.PersistenceManagedTypes; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaRepositoriesAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.data.jpa.repository.JpaRepository' (OnClassCondition)
+      - @ConditionalOnProperty (spring.data.jpa.repositories.enabled=true) matched (OnPropertyCondition)
+      - @ConditionalOnBean (types: javax.sql.DataSource; SearchStrategy: all) found bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.data.jpa.repository.support.JpaRepositoryFactoryBean,org.springframework.data.jpa.repository.config.JpaRepositoryConfigExtension; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NamedParameterJdbcTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.JdbcTemplate; SearchStrategy: all) found a single bean 'jdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NoOpCacheConfiguration matched:
+      - Cache org.springframework.boot.autoconfigure.cache.NoOpCacheConfiguration NONE cache type (CacheCondition)
+
+   SqlInitializationAutoConfiguration matched:
+      - @ConditionalOnProperty (spring.sql.init.enabled) matched (OnPropertyCondition)
+      - NoneNestedConditions 0 matched 1 did not; NestedCondition on SqlInitializationAutoConfiguration.SqlInitializationModeCondition.ModeIsNever @ConditionalOnProperty (spring.sql.init.mode=never) did not find property 'mode' (SqlInitializationAutoConfiguration.SqlInitializationModeCondition)
+
+   TestEntityManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'jakarta.persistence.EntityManagerFactory' (OnClassCondition)
+
+   TestEntityManagerAutoConfiguration#testEntityManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.transaction.PlatformTransactionManager' (OnClassCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration matched:
+      - @ConditionalOnBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found bean 'transactionManager'; @ConditionalOnMissingBean (types: org.springframework.transaction.annotation.AbstractTransactionManagementConfiguration; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.CglibAutoProxyConfiguration matched:
+      - @ConditionalOnProperty (spring.aop.proxy-target-class=true) matched (OnPropertyCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.transaction.PlatformTransactionManager; SearchStrategy: all) found a single bean 'transactionManager' (OnBeanCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration#transactionTemplate matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.support.TransactionOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+
+Negative matches:
+-----------------
+
+   Cache2kCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.cache2k.Cache2kBuilder' (OnClassCondition)
+
+   CacheAutoConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.cache.interceptor.CacheAspectSupport; SearchStrategy: all) did not find any beans of type org.springframework.cache.interceptor.CacheAspectSupport (OnBeanCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.cache.CacheManager' (OnClassCondition)
+
+   CacheAutoConfiguration.CacheManagerEntityManagerFactoryDependsOnPostProcessor:
+      Did not match:
+         - Ancestor org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration did not match (ConditionEvaluationReport.AncestorsMatchedCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean' (OnClassCondition)
+
+   CaffeineCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.github.benmanes.caffeine.cache.Caffeine' (OnClassCondition)
+
+   CouchbaseCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.couchbase.client.java.Cluster' (OnClassCondition)
+
+   DataSourceAutoConfiguration.EmbeddedDatabaseConfiguration:
+      Did not match:
+         - EmbeddedDataSource spring.datasource.url is set (DataSourceAutoConfiguration.EmbeddedDatabaseCondition)
+
+   DataSourceCheckpointRestoreConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.crac.Resource' (OnClassCondition)
+
+   DataSourceConfiguration.Dbcp2:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourceConfiguration.Generic:
+      Did not match:
+         - @ConditionalOnProperty (spring.datasource.type) did not find property 'spring.datasource.type' (OnPropertyCondition)
+
+   DataSourceConfiguration.OracleUcp:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSourceImpl', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourceConfiguration.Tomcat:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceJmxConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.jmx.enabled=true) found different value in property 'enabled' (OnPropertyCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.CommonsDbcp2PoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.OracleUcpPoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSource', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.TomcatDataSourcePoolMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration#transactionManager:
+      Did not match:
+         - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found beans of type 'org.springframework.transaction.TransactionManager' transactionManager (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#oracleFlywayConfigurationCustomizer:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.flywaydb.database.oracle.OracleConfigurationExtension' (OnClassCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#sqlServerFlywayConfigurationCustomizer:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.flywaydb.database.sqlserver.SQLServerConfigurationExtension' (OnClassCondition)
+
+   GenericCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.GenericCacheConfiguration unknown cache type (CacheCondition)
+
+   HazelcastCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.hazelcast.core.HazelcastInstance' (OnClassCondition)
+
+   InfinispanCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.infinispan.spring.embedded.provider.SpringEmbeddedCacheManager' (OnClassCondition)
+
+   JCacheCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'javax.cache.Caching' (OnClassCondition)
+
+   JpaBaseConfiguration.JpaWebConfiguration:
+      Did not match:
+         - not a servlet web application (OnWebApplicationCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.web.servlet.config.annotation.WebMvcConfigurer' (OnClassCondition)
+
+   JpaRepositoriesAutoConfiguration#entityManagerFactoryBootstrapExecutorCustomizer:
+      Did not match:
+         - AnyNestedCondition 0 matched 2 did not; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.LazyBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=lazy) found different value in property 'bootstrap-mode'; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.DeferredBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=deferred) found different value in property 'bootstrap-mode' (JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition)
+
+   LiquibaseAutoConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'liquibase.change.DatabaseChange' (OnClassCondition)
+
+   R2dbcInitializationConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'io.r2dbc.spi.ConnectionFactory', 'org.springframework.r2dbc.connection.init.DatabasePopulator' (OnClassCondition)
+
+   RedisCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.springframework.data.redis.connection.RedisConnectionFactory' (OnClassCondition)
+
+   SimpleCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.SimpleCacheConfiguration unknown cache type (CacheCondition)
+
+   TestDatabaseAutoConfiguration#dataSource:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=AUTO_CONFIGURED) found different value in property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#embeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=ANY) found different value in property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#nonTestEmbeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=NON_TEST) found different value in property 'replace' (OnPropertyCondition)
+
+   TransactionAutoConfiguration#transactionalOperator:
+      Did not match:
+         - @ConditionalOnSingleCandidate (types: org.springframework.transaction.ReactiveTransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.AspectJTransactionManagementConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.transaction.aspectj.AbstractTransactionAspect; SearchStrategy: all) did not find any beans of type org.springframework.transaction.aspectj.AbstractTransactionAspect (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.JdkDynamicAutoProxyConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.aop.proxy-target-class=false) did not find property 'proxy-target-class' (OnPropertyCondition)
+
+
+Exclusions:
+-----------
+
+    None
+
+
+Unconditional classes:
+----------------------
+
+    org.springframework.boot.test.autoconfigure.jdbc.TestDatabaseAutoConfiguration
+
+
+
+2026-08-13T11:26:19.277+02:00  INFO 2682197 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : Started CommandServicePostgresIT in 2.495 seconds (process running for 26.731)
+2026-08-13T11:26:19.282+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.282+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, name, type)
+VALUES (?, 'legacy-expiry-it', 'GATEWAY')
+RETURNING id
+]
+2026-08-13T11:26:19.285+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.285+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    expires_at
+) VALUES (?, ?, 'PENDING', ?, ?)
+]
+2026-08-13T11:26:19.288+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.288+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    expires_at
+) VALUES (?, ?, 'PENDING', ?, ?)
+]
+2026-08-13T11:26:19.306+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : UPDATE device_commands c
+   SET status = 'EXPIRED',
+       last_error = 'effect_expired',
+       lease_expires_at = NULL,
+       leased_to_gateway = NULL,
+       lease_granted_at = NULL
+ WHERE EXISTS (
+           SELECT 1
+             FROM devices d
+            WHERE d.id = c.device_id
+              AND UPPER(d.device_eui) = UPPER(?)
+       )
+   AND c.status IN ('PENDING', 'SENT')
+   AND c.expires_at IS NOT NULL
+   AND c.expires_at <= ?
+
+Hibernate: UPDATE device_commands c
+   SET status = 'EXPIRED',
+       last_error = 'effect_expired',
+       lease_expires_at = NULL,
+       leased_to_gateway = NULL,
+       lease_granted_at = NULL
+ WHERE EXISTS (
+           SELECT 1
+             FROM devices d
+            WHERE d.id = c.device_id
+              AND UPPER(d.device_eui) = UPPER(?)
+       )
+   AND c.status IN ('PENDING', 'SENT')
+   AND c.expires_at IS NOT NULL
+   AND c.expires_at <= ?
+
+2026-08-13T11:26:19.313+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select dc1_0.id,dc1_0.ack_detail,dc1_0.ack_payload_json,dc1_0.ack_received_at,dc1_0.ack_result,dc1_0.ack_status,dc1_0.acknowledged_at,dc1_0.aggregate_key,dc1_0.aggregate_type,dc1_0.applied_sync_version,dc1_0.attempt_count,dc1_0.cancel_reason,dc1_0.command_type,dc1_0.created_at,dc1_0.created_by,dc1_0.device_id,dc1_0.effect_key,dc1_0.error_message,dc1_0.event_uuid,dc1_0.executed_at,dc1_0.expires_at,dc1_0.last_error,dc1_0.lease_expires_at,dc1_0.lease_granted_at,dc1_0.leased_to_gateway,dc1_0.payload_json,dc1_0.sent_at,dc1_0.status from device_commands dc1_0 left join devices d1_0 on d1_0.id=dc1_0.device_id where d1_0.device_eui=? and dc1_0.status in (?,?) order by dc1_0.created_at
+Hibernate: select dc1_0.id,dc1_0.ack_detail,dc1_0.ack_payload_json,dc1_0.ack_received_at,dc1_0.ack_result,dc1_0.ack_status,dc1_0.acknowledged_at,dc1_0.aggregate_key,dc1_0.aggregate_type,dc1_0.applied_sync_version,dc1_0.attempt_count,dc1_0.cancel_reason,dc1_0.command_type,dc1_0.created_at,dc1_0.created_by,dc1_0.device_id,dc1_0.effect_key,dc1_0.error_message,dc1_0.event_uuid,dc1_0.executed_at,dc1_0.expires_at,dc1_0.last_error,dc1_0.lease_expires_at,dc1_0.lease_granted_at,dc1_0.leased_to_gateway,dc1_0.payload_json,dc1_0.sent_at,dc1_0.status from device_commands dc1_0 left join devices d1_0 on d1_0.id=dc1_0.device_id where d1_0.device_eui=? and dc1_0.status in (?,?) order by dc1_0.created_at
+2026-08-13T11:26:19.322+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.322+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT status::text
+  FROM device_commands
+ WHERE device_id = ?
+   AND command_type = 'SET_STREGA_TIMED_ACTION'
+]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.config.DataInitializerTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:19" hostname="osi-01" time="0.004">
+  <properties/>
+  <testcase name="seedSuperAdminUser_skipsWhenEnabledSuperAdminAlreadyExists()" classname="org.osi.server.config.DataInitializerTest" time="0.002"/>
+  <testcase name="seedSuperAdminUser_bootstrapsConfiguredSuperAdmin()" classname="org.osi.server.config.DataInitializerTest" time="0.001"/>
+  <testcase name="seedSuperAdminUser_failsWithoutBootstrapCredentialsWhenNoSuperAdminExists()" classname="org.osi.server.config.DataInitializerTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-13T11:26:19.949+02:00  INFO 2682197 --- [    Test worker] org.osi.server.config.DataInitializer    : Skipping super admin bootstrap because an enabled super admin already exists
+2026-08-13T11:26:19.950+02:00  INFO 2682197 --- [    Test worker] org.osi.server.config.DataInitializer    : Super admin 'root' is ready on startup
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

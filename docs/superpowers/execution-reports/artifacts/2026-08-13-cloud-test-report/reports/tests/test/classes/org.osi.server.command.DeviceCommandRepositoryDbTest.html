@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - DeviceCommandRepositoryDbTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>DeviceCommandRepositoryDbTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.command.html">org.osi.server.command</a> &gt; DeviceCommandRepositoryDbTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">4</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.048s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">commandRetentionSqlUpdatesOnlyStaleConfigAndDeletesTerminalRows()</td>
+<td class="success">0.014s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">leaseCandidateQueryUsesNativeSql()</td>
+<td class="success">0.008s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">leaseCandidateSqlFindsOnlyPollableRowsForTheRequestedGateway()</td>
+<td class="success">0.008s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">legacyExpirySqlTerminalizesCommandsDueAtTheCapturedBoundary()</td>
+<td class="success">0.018s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>2026-08-13T11:26:19.381+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Neither @ContextConfiguration nor @ContextHierarchy found for test class [DeviceCommandRepositoryDbTest]: using SpringBootContextLoader
+2026-08-13T11:26:19.382+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.command.DeviceCommandRepositoryDbTest]: DeviceCommandRepositoryDbTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T11:26:19.382+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using ContextCustomizerFactory implementations for test class [DeviceCommandRepositoryDbTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T11:26:19.385+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using ContextCustomizers for test class [DeviceCommandRepositoryDbTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T11:26:19.385+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.command.DeviceCommandRepositoryDbTest
+2026-08-13T11:26:19.386+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using TestExecutionListeners for test class [DeviceCommandRepositoryDbTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T11:26:19.390+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T11:26:19.396+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T11:26:19.396+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T11:26:19.402+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.3)
+
+2026-08-13T11:26:19.409+02:00  INFO 2682197 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : Starting DeviceCommandRepositoryDbTest using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T11:26:19.409+02:00  INFO 2682197 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : No active profile set, falling back to 1 default profile: &quot;default&quot;
+2026-08-13T11:26:19.409+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
+2026-08-13T11:26:19.498+02:00  INFO 2682197 --- [    Test worker] beddedDataSourceBeanFactoryPostProcessor : Replacing 'dataSource' DataSource bean with embedded version
+2026-08-13T11:26:19.512+02:00  INFO 2682197 --- [    Test worker] o.s.j.d.e.EmbeddedDatabaseFactory        : Starting embedded database: url='jdbc:h2:mem:e7629874-a86c-43de-8c6a-075e2adc7ae7;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false', username='sa'
+2026-08-13T11:26:19.520+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+
+============================
+CONDITIONS EVALUATION REPORT
+============================
+
+
+Positive matches:
+-----------------
+
+   DataSourceAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: io.r2dbc.spi.ConnectionFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration matched:
+      - AnyNestedCondition 1 matched 1 did not; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.PooledDataSourceAvailable PooledDataSource found supported DataSource; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.ExplicitType @ConditionalOnProperty (spring.datasource.type) did not find property 'type' (DataSourceAutoConfiguration.PooledDataSourceCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource,javax.sql.XADataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration#jdbcConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceConfiguration.Hikari matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+      - @ConditionalOnProperty (spring.datasource.type=com.zaxxer.hikari.HikariDataSource) matched (OnPropertyCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceInitializationConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.datasource.init.DatabasePopulator' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.sql.init.SqlDataSourceScriptDatabaseInitializer,org.springframework.boot.autoconfigure.sql.init.SqlR2dbcScriptDatabaseInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.HikariPoolDataSourceMetadataProviderConfiguration matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate', 'org.springframework.transaction.TransactionManager' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration#transactionManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JdbcClientAutoConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate; SearchStrategy: all) found a single bean 'namedParameterJdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.simple.JdbcClient; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JdbcTemplateAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcTemplateConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.jdbc.core.JdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NamedParameterJdbcTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.JdbcTemplate; SearchStrategy: all) found a single bean 'jdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NoOpCacheConfiguration matched:
+      - Cache org.springframework.boot.autoconfigure.cache.NoOpCacheConfiguration NONE cache type (CacheCondition)
+
+   SqlInitializationAutoConfiguration matched:
+      - @ConditionalOnProperty (spring.sql.init.enabled) matched (OnPropertyCondition)
+      - NoneNestedConditions 0 matched 1 did not; NestedCondition on SqlInitializationAutoConfiguration.SqlInitializationModeCondition.ModeIsNever @ConditionalOnProperty (spring.sql.init.mode=never) did not find property 'mode' (SqlInitializationAutoConfiguration.SqlInitializationModeCondition)
+
+   TestDatabaseAutoConfiguration#nonTestEmbeddedDataSourceBeanFactoryPostProcessor matched:
+      - @ConditionalOnProperty (spring.test.database.replace=NON_TEST) matched (OnPropertyCondition)
+
+   TransactionAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.transaction.PlatformTransactionManager' (OnClassCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration matched:
+      - @ConditionalOnBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found bean 'transactionManager'; @ConditionalOnMissingBean (types: org.springframework.transaction.annotation.AbstractTransactionManagementConfiguration; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.CglibAutoProxyConfiguration matched:
+      - @ConditionalOnProperty (spring.aop.proxy-target-class=true) matched (OnPropertyCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.transaction.PlatformTransactionManager; SearchStrategy: all) found a single bean 'transactionManager' (OnBeanCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration#transactionTemplate matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.support.TransactionOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+
+Negative matches:
+-----------------
+
+   Cache2kCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.cache2k.Cache2kBuilder' (OnClassCondition)
+
+   CacheAutoConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.cache.interceptor.CacheAspectSupport; SearchStrategy: all) did not find any beans of type org.springframework.cache.interceptor.CacheAspectSupport (OnBeanCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.cache.CacheManager' (OnClassCondition)
+
+   CacheAutoConfiguration.CacheManagerEntityManagerFactoryDependsOnPostProcessor:
+      Did not match:
+         - Ancestor org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration did not match (ConditionEvaluationReport.AncestorsMatchedCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean' (OnClassCondition)
+
+   CaffeineCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.github.benmanes.caffeine.cache.Caffeine' (OnClassCondition)
+
+   CouchbaseCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.couchbase.client.java.Cluster' (OnClassCondition)
+
+   DataSourceAutoConfiguration.EmbeddedDatabaseConfiguration:
+      Did not match:
+         - EmbeddedDataSource spring.datasource.url is set (DataSourceAutoConfiguration.EmbeddedDatabaseCondition)
+
+   DataSourceCheckpointRestoreConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.crac.Resource' (OnClassCondition)
+
+   DataSourceConfiguration.Dbcp2:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourceConfiguration.Generic:
+      Did not match:
+         - @ConditionalOnProperty (spring.datasource.type) did not find property 'spring.datasource.type' (OnPropertyCondition)
+
+   DataSourceConfiguration.OracleUcp:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSourceImpl', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourceConfiguration.Tomcat:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceJmxConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.jmx.enabled=true) found different value in property 'enabled' (OnPropertyCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.CommonsDbcp2PoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.OracleUcpPoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSource', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.TomcatDataSourcePoolMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   FlywayAutoConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.flyway.enabled) found different value in property 'enabled' (OnPropertyCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.flywaydb.core.Flyway' (OnClassCondition)
+
+   GenericCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.GenericCacheConfiguration unknown cache type (CacheCondition)
+
+   HazelcastCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.hazelcast.core.HazelcastInstance' (OnClassCondition)
+
+   InfinispanCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.infinispan.spring.embedded.provider.SpringEmbeddedCacheManager' (OnClassCondition)
+
+   JCacheCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'javax.cache.Caching' (OnClassCondition)
+
+   LiquibaseAutoConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'liquibase.change.DatabaseChange' (OnClassCondition)
+
+   R2dbcInitializationConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'io.r2dbc.spi.ConnectionFactory', 'org.springframework.r2dbc.connection.init.DatabasePopulator' (OnClassCondition)
+
+   RedisCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.springframework.data.redis.connection.RedisConnectionFactory' (OnClassCondition)
+
+   SimpleCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.SimpleCacheConfiguration unknown cache type (CacheCondition)
+
+   TestDatabaseAutoConfiguration#dataSource:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=AUTO_CONFIGURED) did not find property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#embeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=ANY) did not find property 'replace' (OnPropertyCondition)
+
+   TransactionAutoConfiguration#transactionalOperator:
+      Did not match:
+         - @ConditionalOnSingleCandidate (types: org.springframework.transaction.ReactiveTransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.AspectJTransactionManagementConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.transaction.aspectj.AbstractTransactionAspect; SearchStrategy: all) did not find any beans of type org.springframework.transaction.aspectj.AbstractTransactionAspect (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.JdkDynamicAutoProxyConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.aop.proxy-target-class=false) did not find property 'proxy-target-class' (OnPropertyCondition)
+
+
+Exclusions:
+-----------
+
+    None
+
+
+Unconditional classes:
+----------------------
+
+    org.springframework.boot.test.autoconfigure.jdbc.TestDatabaseAutoConfiguration
+
+
+
+2026-08-13T11:26:19.520+02:00  INFO 2682197 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : Started DeviceCommandRepositoryDbTest in 0.134 seconds (process running for 26.975)
+2026-08-13T11:26:19.525+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T11:26:19.525+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T11:26:19.525+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_eui VARCHAR(32) NOT NULL,
+    type VARCHAR(50) NOT NULL
+)
+]
+2026-08-13T11:26:19.526+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_id BIGINT NOT NULL,
+    command_type VARCHAR(50) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    lease_expires_at TIMESTAMP WITH TIME ZONE,
+    leased_to_gateway VARCHAR(32),
+    lease_granted_at TIMESTAMP WITH TIME ZONE,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error VARCHAR(255),
+    expires_at TIMESTAMP WITH TIME ZONE
+)
+]
+2026-08-13T11:26:19.531+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T11:26:19.533+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T11:26:19.533+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_eui VARCHAR(32) NOT NULL,
+    type VARCHAR(50) NOT NULL
+)
+]
+2026-08-13T11:26:19.533+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_id BIGINT NOT NULL,
+    command_type VARCHAR(50) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    lease_expires_at TIMESTAMP WITH TIME ZONE,
+    leased_to_gateway VARCHAR(32),
+    lease_granted_at TIMESTAMP WITH TIME ZONE,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error VARCHAR(255),
+    expires_at TIMESTAMP WITH TIME ZONE
+)
+]
+2026-08-13T11:26:19.537+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.537+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T11:26:19.539+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.539+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at,
+    expires_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL,
+    ?
+)
+]
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at,
+    expires_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL,
+    ?
+)
+]
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at,
+    expires_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL,
+    ?
+)
+]
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at,
+    expires_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL,
+    ?
+)
+]
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [UPDATE device_commands c
+   SET status = 'EXPIRED',
+       last_error = 'effect_expired',
+       lease_expires_at = NULL,
+       leased_to_gateway = NULL,
+       lease_granted_at = NULL
+ WHERE EXISTS (
+           SELECT 1
+             FROM devices d
+            WHERE d.id = c.device_id
+              AND UPPER(d.device_eui) = UPPER(?)
+       )
+   AND c.status IN ('PENDING', 'SENT')
+   AND c.expires_at IS NOT NULL
+   AND c.expires_at &lt;= ?
+]
+2026-08-13T11:26:19.544+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.545+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT command_type, status, last_error
+  FROM device_commands c
+  JOIN devices d ON d.id = c.device_id
+ WHERE d.device_eui = ?
+ ORDER BY c.created_at
+]
+2026-08-13T11:26:19.546+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.547+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT c.status
+  FROM device_commands c
+  JOIN devices d ON d.id = c.device_id
+ WHERE d.device_eui = ?
+]
+2026-08-13T11:26:19.549+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T11:26:19.549+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T11:26:19.550+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_eui VARCHAR(32) NOT NULL,
+    type VARCHAR(50) NOT NULL
+)
+]
+2026-08-13T11:26:19.550+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_id BIGINT NOT NULL,
+    command_type VARCHAR(50) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    lease_expires_at TIMESTAMP WITH TIME ZONE,
+    leased_to_gateway VARCHAR(32),
+    lease_granted_at TIMESTAMP WITH TIME ZONE,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error VARCHAR(255),
+    expires_at TIMESTAMP WITH TIME ZONE
+)
+]
+2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+  FROM device_commands
+ WHERE status IN ('PENDING', 'LEASED')
+   AND command_type IN ('SET_CHAMELEON_CONFIG')
+   AND created_at &lt; ?
+]
+2026-08-13T11:26:19.558+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.558+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+  FROM device_commands
+ WHERE status IN ('ACKED', 'NACKED', 'EXPIRED', 'CANCELLED', 'ACKNOWLEDGED', 'FAILED', 'SENT')
+   AND created_at &lt; ?
+]
+2026-08-13T11:26:19.559+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.559+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [UPDATE device_commands
+   SET status = 'EXPIRED',
+       last_error = COALESCE(last_error, 'retention_stale'),
+       lease_expires_at = NULL,
+       leased_to_gateway = NULL,
+       lease_granted_at = NULL
+ WHERE status IN ('PENDING', 'LEASED')
+   AND command_type IN ('SET_CHAMELEON_CONFIG')
+   AND created_at &lt; ?
+]
+2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM device_commands
+ WHERE status IN ('ACKED', 'NACKED', 'EXPIRED', 'CANCELLED', 'ACKNOWLEDGED', 'FAILED', 'SENT')
+   AND created_at &lt; ?
+]
+2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT status, last_error FROM device_commands ORDER BY created_at]
+2026-08-13T11:26:19.563+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T11:26:19.564+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T11:26:19.564+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_eui VARCHAR(32) NOT NULL,
+    type VARCHAR(50) NOT NULL
+)
+]
+2026-08-13T11:26:19.564+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    device_id BIGINT NOT NULL,
+    command_type VARCHAR(50) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    lease_expires_at TIMESTAMP WITH TIME ZONE,
+    leased_to_gateway VARCHAR(32),
+    lease_granted_at TIMESTAMP WITH TIME ZONE,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error VARCHAR(255),
+    expires_at TIMESTAMP WITH TIME ZONE
+)
+]
+2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at,
+    expires_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL,
+    ?
+)
+]
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+    device_id,
+    command_type,
+    status,
+    created_at,
+    lease_expires_at,
+    leased_to_gateway,
+    lease_granted_at
+) VALUES (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    NULL,
+    NULL
+)
+]
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT c.*
+  FROM device_commands c
+  JOIN devices d ON d.id = c.device_id
+ WHERE UPPER(d.device_eui) = UPPER(?)
+   AND (
+        c.status IN ('PENDING', 'SENT')
+        OR (c.status = 'LEASED' AND c.lease_expires_at &lt; ?)
+   )
+   AND (c.expires_at IS NULL OR c.expires_at &gt; ?)
+ ORDER BY c.created_at ASC
+ LIMIT ?
+]
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+</div>
+</div>
+</body>
+</html>

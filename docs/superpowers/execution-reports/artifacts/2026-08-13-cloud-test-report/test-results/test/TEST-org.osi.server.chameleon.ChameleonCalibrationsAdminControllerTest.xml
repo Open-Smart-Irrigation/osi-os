@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.chameleon.ChameleonCalibrationsAdminControllerTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:09" hostname="osi-01" time="0.329">
+  <properties/>
+  <testcase name="refreshForcesReFetch()" classname="org.osi.server.chameleon.ChameleonCalibrationsAdminControllerTest" time="0.314"/>
+  <testcase name="dumpReturnsAllRows()" classname="org.osi.server.chameleon.ChameleonCalibrationsAdminControllerTest" time="0.015"/>
+  <system-out><![CDATA[2026-08-13T11:26:09.475+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:09.487+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:09.512+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:09.524+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:09.524+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:09.525+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-08-13T11:26:09.548+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.chameleon.ChameleonCalibrationsAdminController#refresh(String)
+2026-08-13T11:26:09.570+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:09.576+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [CalibrationDto[array_id=28F8B2B40F0000C1, sensor_id=F8C1, sensor1_a=1.0, sensor1_b=2.0, sensor1_c=3. (truncated)...]
+2026-08-13T11:26:09.617+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:09.618+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:09.619+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:09.619+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:09.619+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:09.619+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:09.620+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.chameleon.ChameleonCalibrationsAdminController#dump()
+2026-08-13T11:26:09.622+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:09.622+02:00 DEBUG 2682197 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Writing [[]]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

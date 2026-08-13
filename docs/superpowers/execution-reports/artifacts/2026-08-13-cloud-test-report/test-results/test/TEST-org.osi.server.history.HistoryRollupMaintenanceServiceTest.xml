@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.history.HistoryRollupMaintenanceServiceTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:28" hostname="osi-01" time="0.025">
+  <properties/>
+  <testcase name="oneFailingUnitDoesNotAbortTheSweep()" classname="org.osi.server.history.HistoryRollupMaintenanceServiceTest" time="0.003"/>
+  <testcase name="productionConstructorDoesNotRequireClockBean()" classname="org.osi.server.history.HistoryRollupMaintenanceServiceTest" time="0.001"/>
+  <testcase name="backfillsHourlyAndDailyForEachCardOfEachZone()" classname="org.osi.server.history.HistoryRollupMaintenanceServiceTest" time="0.005"/>
+  <testcase name="forcesHourlyAndDailyLevelsRegardlessOfWindowSize()" classname="org.osi.server.history.HistoryRollupMaintenanceServiceTest" time="0.002"/>
+  <testcase name="perDeviceSoilAndEnvironmentRollupsUseTheSameSourceKeysAsCatalog()" classname="org.osi.server.history.HistoryRollupMaintenanceServiceTest" time="0.013"/>
+  <system-out><![CDATA[2026-08-13T11:26:28.734+02:00  WARN 2682197 --- [    Test worker] o.o.s.h.HistoryRollupMaintenanceService  : History rollup maintenance failed zone=12 card=uuid-a:soil:root-zone level=hourly: boom
+2026-08-13T11:26:28.734+02:00  INFO 2682197 --- [    Test worker] o.o.s.h.HistoryRollupMaintenanceService  : History rollup maintenance processed 2 zone/card/level units
+2026-08-13T11:26:28.736+02:00  INFO 2682197 --- [    Test worker] o.o.s.h.HistoryRollupMaintenanceService  : History rollup maintenance processed 2 zone/card/level units
+2026-08-13T11:26:28.742+02:00  INFO 2682197 --- [    Test worker] o.o.s.h.HistoryRollupMaintenanceService  : History rollup maintenance processed 2 zone/card/level units
+2026-08-13T11:26:28.749+02:00  INFO 2682197 --- [    Test worker] o.o.s.h.HistoryRollupMaintenanceService  : History rollup maintenance processed 4 zone/card/level units
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

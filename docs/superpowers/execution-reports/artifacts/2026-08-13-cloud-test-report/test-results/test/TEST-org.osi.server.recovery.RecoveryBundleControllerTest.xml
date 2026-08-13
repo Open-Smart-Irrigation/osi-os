@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.recovery.RecoveryBundleControllerTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:47" hostname="osi-01" time="0.297">
+  <properties/>
+  <testcase name="oversizedUploadIsRejectedBeforeMultipartBytesAreRead()" classname="org.osi.server.recovery.RecoveryBundleControllerTest" time="0.293"/>
+  <testcase name="listReturnsOnlyServiceAuthorizedMetadata()" classname="org.osi.server.recovery.RecoveryBundleControllerTest" time="0.002"/>
+  <testcase name="uploadAuthorizesMetadataBeforeReadingDatabaseBytes()" classname="org.osi.server.recovery.RecoveryBundleControllerTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

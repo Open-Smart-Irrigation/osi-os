@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.user.AdminUserDirectoryControllerTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:09" hostname="osi-01" time="0.002">
+  <properties/>
+  <testcase name="getDirectory_returnsEnabledAssignableUsers()" classname="org.osi.server.user.AdminUserDirectoryControllerTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - JournalMirrorReplayIT</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>JournalMirrorReplayIT</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.journal.html">org.osi.server.journal</a> &gt; JournalMirrorReplayIT</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">2</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.200s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">entryReplayRejectsStaleAndEqualVersionConflictThenStoresVoid()</td>
+<td class="success">0.076s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">mirrorsVocabularyPlotAndGroupAggregatesIncludingTombstonesAndMembers()</td>
+<td class="success">0.124s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>2026-08-13T11:26:30.336+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalMirrorReplayIT]: using SpringBootContextLoader
+2026-08-13T11:26:30.336+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.JournalMirrorReplayIT]: JournalMirrorReplayIT does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T11:26:30.337+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalMirrorReplayIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T11:26:30.340+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalMirrorReplayIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T11:26:30.340+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.JournalMirrorReplayIT
+2026-08-13T11:26:30.341+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalMirrorReplayIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T11:26:30.345+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T11:26:30.346+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T11:26:30.347+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T11:26:30.350+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.3)
+
+2026-08-13T11:26:30.354+02:00  INFO 2682197 --- [    Test worker] o.o.s.journal.JournalMirrorReplayIT      : Starting JournalMirrorReplayIT using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T11:26:30.355+02:00  INFO 2682197 --- [    Test worker] o.o.s.journal.JournalMirrorReplayIT      : No active profile set, falling back to 1 default profile: &quot;default&quot;
+2026-08-13T11:26:30.355+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
+2026-08-13T11:26:30.424+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T11:26:30.425+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T11:26:30.473+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 48 ms. Found 55 JPA repository interfaces.
+2026-08-13T11:26:31.071+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-4 - Starting...
+2026-08-13T11:26:31.079+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-4 - Start completed.
+2026-08-13T11:26:31.087+02:00  INFO 2682197 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF (PostgreSQL 16.14)
+2026-08-13T11:26:31.115+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.021s)
+2026-08-13T11:26:31.129+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema &quot;public&quot;: 2026.08.10.001
+2026-08-13T11:26:31.129+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema &quot;public&quot; is up to date. No migration necessary.
+2026-08-13T11:26:31.153+02:00  INFO 2682197 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T11:26:31.155+02:00  INFO 2682197 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T11:26:31.161+02:00  INFO 2682197 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T11:26:31.165+02:00  WARN 2682197 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T11:26:31.166+02:00  INFO 2682197 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-4)']
+	Database driver: undefined/unknown
+	Database version: 16.14
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-08-13T11:26:31.303+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T11:26:31.303+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T11:26:31.686+02:00  INFO 2682197 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T11:26:31.686+02:00  INFO 2682197 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T11:26:31.980+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+
+============================
+CONDITIONS EVALUATION REPORT
+============================
+
+
+Positive matches:
+-----------------
+
+   DataSourceAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: io.r2dbc.spi.ConnectionFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration matched:
+      - AnyNestedCondition 1 matched 1 did not; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.PooledDataSourceAvailable PooledDataSource found supported DataSource; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.ExplicitType @ConditionalOnProperty (spring.datasource.type) did not find property 'type' (DataSourceAutoConfiguration.PooledDataSourceCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource,javax.sql.XADataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration#jdbcConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceConfiguration.Hikari matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+      - @ConditionalOnProperty (spring.datasource.type=com.zaxxer.hikari.HikariDataSource) matched (OnPropertyCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceInitializationConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.datasource.init.DatabasePopulator' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.sql.init.SqlDataSourceScriptDatabaseInitializer,org.springframework.boot.autoconfigure.sql.init.SqlR2dbcScriptDatabaseInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.HikariPoolDataSourceMetadataProviderConfiguration matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate', 'org.springframework.transaction.TransactionManager' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   FlywayAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.flywaydb.core.Flyway' (OnClassCondition)
+      - @ConditionalOnProperty (spring.flyway.enabled) matched (OnPropertyCondition)
+      - AnyNestedCondition 2 matched 1 did not; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.FlywayUrlCondition @ConditionalOnProperty (spring.flyway.url) did not find property 'url'; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.JdbcConnectionDetailsCondition @ConditionalOnBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) found bean 'jdbcConnectionDetails'; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.DataSourceBeanCondition @ConditionalOnBean (types: javax.sql.DataSource; SearchStrategy: all) found bean 'dataSource' (FlywayAutoConfiguration.FlywayDataSourceCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.support.JdbcUtils' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: org.flywaydb.core.Flyway; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#flywayConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.flyway.FlywayConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#flywayInitializer matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.flyway.FlywayMigrationInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#postgresqlFlywayConfigurationCustomizer matched:
+      - @ConditionalOnClass found required class 'org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension' (OnClassCondition)
+
+   HibernateJpaAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean', 'jakarta.persistence.EntityManager', 'org.hibernate.engine.spi.SessionImplementor' (OnClassCondition)
+
+   HibernateJpaConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcClientAutoConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate; SearchStrategy: all) found a single bean 'namedParameterJdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.simple.JdbcClient; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JdbcTemplateAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcTemplateConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.jdbc.core.JdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactory matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactoryBuilder matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#jpaVendorAdapter matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.JpaVendorAdapter; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#transactionManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration#persistenceManagedTypes matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.persistenceunit.PersistenceManagedTypes; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaRepositoriesAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.data.jpa.repository.JpaRepository' (OnClassCondition)
+      - @ConditionalOnProperty (spring.data.jpa.repositories.enabled=true) matched (OnPropertyCondition)
+      - @ConditionalOnBean (types: javax.sql.DataSource; SearchStrategy: all) found bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.data.jpa.repository.support.JpaRepositoryFactoryBean,org.springframework.data.jpa.repository.config.JpaRepositoryConfigExtension; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NamedParameterJdbcTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.JdbcTemplate; SearchStrategy: all) found a single bean 'jdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NoOpCacheConfiguration matched:
+      - Cache org.springframework.boot.autoconfigure.cache.NoOpCacheConfiguration NONE cache type (CacheCondition)
+
+   SqlInitializationAutoConfiguration matched:
+      - @ConditionalOnProperty (spring.sql.init.enabled) matched (OnPropertyCondition)
+      - NoneNestedConditions 0 matched 1 did not; NestedCondition on SqlInitializationAutoConfiguration.SqlInitializationModeCondition.ModeIsNever @ConditionalOnProperty (spring.sql.init.mode=never) did not find property 'mode' (SqlInitializationAutoConfiguration.SqlInitializationModeCondition)
+
+   TestEntityManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'jakarta.persistence.EntityManagerFactory' (OnClassCondition)
+
+   TestEntityManagerAutoConfiguration#testEntityManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.transaction.PlatformTransactionManager' (OnClassCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration matched:
+      - @ConditionalOnBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found bean 'transactionManager'; @ConditionalOnMissingBean (types: org.springframework.transaction.annotation.AbstractTransactionManagementConfiguration; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.CglibAutoProxyConfiguration matched:
+      - @ConditionalOnProperty (spring.aop.proxy-target-class=true) matched (OnPropertyCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.transaction.PlatformTransactionManager; SearchStrategy: all) found a single bean 'transactionManager' (OnBeanCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration#transactionTemplate matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.support.TransactionOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+
+Negative matches:
+-----------------
+
+   Cache2kCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.cache2k.Cache2kBuilder' (OnClassCondition)
+
+   CacheAutoConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.cache.interceptor.CacheAspectSupport; SearchStrategy: all) did not find any beans of type org.springframework.cache.interceptor.CacheAspectSupport (OnBeanCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.cache.CacheManager' (OnClassCondition)
+
+   CacheAutoConfiguration.CacheManagerEntityManagerFactoryDependsOnPostProcessor:
+      Did not match:
+         - Ancestor org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration did not match (ConditionEvaluationReport.AncestorsMatchedCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean' (OnClassCondition)
+
+   CaffeineCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.github.benmanes.caffeine.cache.Caffeine' (OnClassCondition)
+
+   CouchbaseCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.couchbase.client.java.Cluster' (OnClassCondition)
+
+   DataSourceAutoConfiguration.EmbeddedDatabaseConfiguration:
+      Did not match:
+         - EmbeddedDataSource spring.datasource.url is set (DataSourceAutoConfiguration.EmbeddedDatabaseCondition)
+
+   DataSourceCheckpointRestoreConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.crac.Resource' (OnClassCondition)
+
+   DataSourceConfiguration.Dbcp2:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourceConfiguration.Generic:
+      Did not match:
+         - @ConditionalOnProperty (spring.datasource.type) did not find property 'spring.datasource.type' (OnPropertyCondition)
+
+   DataSourceConfiguration.OracleUcp:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSourceImpl', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourceConfiguration.Tomcat:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceJmxConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.jmx.enabled=true) found different value in property 'enabled' (OnPropertyCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.CommonsDbcp2PoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.OracleUcpPoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSource', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.TomcatDataSourcePoolMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration#transactionManager:
+      Did not match:
+         - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found beans of type 'org.springframework.transaction.TransactionManager' transactionManager (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#oracleFlywayConfigurationCustomizer:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.flywaydb.database.oracle.OracleConfigurationExtension' (OnClassCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#sqlServerFlywayConfigurationCustomizer:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.flywaydb.database.sqlserver.SQLServerConfigurationExtension' (OnClassCondition)
+
+   GenericCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.GenericCacheConfiguration unknown cache type (CacheCondition)
+
+   HazelcastCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.hazelcast.core.HazelcastInstance' (OnClassCondition)
+
+   InfinispanCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.infinispan.spring.embedded.provider.SpringEmbeddedCacheManager' (OnClassCondition)
+
+   JCacheCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'javax.cache.Caching' (OnClassCondition)
+
+   JpaBaseConfiguration.JpaWebConfiguration:
+      Did not match:
+         - not a servlet web application (OnWebApplicationCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.web.servlet.config.annotation.WebMvcConfigurer' (OnClassCondition)
+
+   JpaRepositoriesAutoConfiguration#entityManagerFactoryBootstrapExecutorCustomizer:
+      Did not match:
+         - AnyNestedCondition 0 matched 2 did not; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.LazyBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=lazy) found different value in property 'bootstrap-mode'; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.DeferredBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=deferred) found different value in property 'bootstrap-mode' (JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition)
+
+   LiquibaseAutoConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'liquibase.change.DatabaseChange' (OnClassCondition)
+
+   R2dbcInitializationConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'io.r2dbc.spi.ConnectionFactory', 'org.springframework.r2dbc.connection.init.DatabasePopulator' (OnClassCondition)
+
+   RedisCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.springframework.data.redis.connection.RedisConnectionFactory' (OnClassCondition)
+
+   SimpleCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.SimpleCacheConfiguration unknown cache type (CacheCondition)
+
+   TestDatabaseAutoConfiguration#dataSource:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=AUTO_CONFIGURED) found different value in property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#embeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=ANY) found different value in property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#nonTestEmbeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=NON_TEST) found different value in property 'replace' (OnPropertyCondition)
+
+   TransactionAutoConfiguration#transactionalOperator:
+      Did not match:
+         - @ConditionalOnSingleCandidate (types: org.springframework.transaction.ReactiveTransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.AspectJTransactionManagementConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.transaction.aspectj.AbstractTransactionAspect; SearchStrategy: all) did not find any beans of type org.springframework.transaction.aspectj.AbstractTransactionAspect (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.JdkDynamicAutoProxyConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.aop.proxy-target-class=false) did not find property 'proxy-target-class' (OnPropertyCondition)
+
+
+Exclusions:
+-----------
+
+    None
+
+
+Unconditional classes:
+----------------------
+
+    org.springframework.boot.test.autoconfigure.jdbc.TestDatabaseAutoConfiguration
+
+
+
+2026-08-13T11:26:31.982+02:00  INFO 2682197 --- [    Test worker] o.o.s.journal.JournalMirrorReplayIT      : Started JournalMirrorReplayIT in 1.639 seconds (process running for 39.436)
+2026-08-13T11:26:32.003+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.009+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.018+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.024+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:32.024+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+    custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
+    code, active, deleted_at, aggregate_json, mirrored_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
+ON CONFLICT (custom_field_uuid) DO UPDATE SET
+    gateway_eui = EXCLUDED.gateway_eui,
+    owner_user_uuid = EXCLUDED.owner_user_uuid,
+    sync_version = EXCLUDED.sync_version,
+    code = EXCLUDED.code,
+    active = EXCLUDED.active,
+    deleted_at = EXCLUDED.deleted_at,
+    aggregate_json = EXCLUDED.aggregate_json,
+    mirrored_at = CURRENT_TIMESTAMP
+]
+2026-08-13T11:26:32.047+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+Hibernate: INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+2026-08-13T11:26:32.050+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.051+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.053+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+Hibernate: insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+2026-08-13T11:26:32.056+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.059+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.062+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_cursor (last_event_at,last_event_uuid,last_full_backfill_at,peer_node) values (?,?,?,?)
+Hibernate: insert into sync_cursor (last_event_at,last_event_uuid,last_full_backfill_at,peer_node) values (?,?,?,?)
+2026-08-13T11:26:32.065+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.066+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.068+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.069+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:32.070+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+    plot_uuid, gateway_eui, owner_user_uuid, sync_version,
+    plot_code, zone_uuid, active, deleted_at, aggregate_json, mirrored_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
+ON CONFLICT (plot_uuid) DO UPDATE SET
+    gateway_eui = EXCLUDED.gateway_eui,
+    owner_user_uuid = EXCLUDED.owner_user_uuid,
+    sync_version = EXCLUDED.sync_version,
+    plot_code = EXCLUDED.plot_code,
+    zone_uuid = EXCLUDED.zone_uuid,
+    active = EXCLUDED.active,
+    deleted_at = EXCLUDED.deleted_at,
+    aggregate_json = EXCLUDED.aggregate_json,
+    mirrored_at = CURRENT_TIMESTAMP
+]
+2026-08-13T11:26:32.073+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+Hibernate: INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+2026-08-13T11:26:32.074+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.075+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.076+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+Hibernate: insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+2026-08-13T11:26:32.077+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.081+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.085+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+Hibernate: update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+2026-08-13T11:26:32.088+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.089+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.091+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.091+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:32.091+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+    group_uuid, gateway_eui, owner_user_uuid, sync_version,
+    label, resolved_at, deleted_at, aggregate_json, mirrored_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
+ON CONFLICT (group_uuid) DO UPDATE SET
+    gateway_eui = EXCLUDED.gateway_eui,
+    owner_user_uuid = EXCLUDED.owner_user_uuid,
+    sync_version = EXCLUDED.sync_version,
+    label = EXCLUDED.label,
+    resolved_at = EXCLUDED.resolved_at,
+    deleted_at = EXCLUDED.deleted_at,
+    aggregate_json = EXCLUDED.aggregate_json,
+    mirrored_at = CURRENT_TIMESTAMP
+]
+2026-08-13T11:26:32.095+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+Hibernate: INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+2026-08-13T11:26:32.096+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.097+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.098+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+Hibernate: insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+2026-08-13T11:26:32.100+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.102+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.103+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+Hibernate: update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+2026-08-13T11:26:32.104+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:32.104+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_vocab_mirror WHERE custom_field_uuid = ?]
+2026-08-13T11:26:32.105+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:32.105+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE plot_uuid = ?]
+2026-08-13T11:26:32.106+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:32.106+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE group_uuid = ?]
+2026-08-13T11:26:32.111+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.112+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.114+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.114+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:32.114+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+    entry_uuid, gateway_eui, owner_user_uuid, sync_version,
+    status, occurred_start, activity_code, plot_uuid, zone_uuid,
+    deleted_at, aggregate_json, mirrored_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
+ON CONFLICT (entry_uuid) DO UPDATE SET
+    gateway_eui = EXCLUDED.gateway_eui,
+    owner_user_uuid = EXCLUDED.owner_user_uuid,
+    sync_version = EXCLUDED.sync_version,
+    status = EXCLUDED.status,
+    occurred_start = EXCLUDED.occurred_start,
+    activity_code = EXCLUDED.activity_code,
+    plot_uuid = EXCLUDED.plot_uuid,
+    zone_uuid = EXCLUDED.zone_uuid,
+    deleted_at = EXCLUDED.deleted_at,
+    aggregate_json = EXCLUDED.aggregate_json,
+    mirrored_at = CURRENT_TIMESTAMP
+]
+2026-08-13T11:26:32.119+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+Hibernate: INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+2026-08-13T11:26:32.121+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.121+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.122+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+Hibernate: insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+2026-08-13T11:26:32.123+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.125+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.126+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+Hibernate: update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+2026-08-13T11:26:32.127+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:32.127+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE entry_uuid = ?]
+2026-08-13T11:26:32.128+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.133+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.134+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.136+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.137+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+Hibernate: update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+2026-08-13T11:26:32.138+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.139+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.140+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.141+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.144+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T11:26:32.147+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.147+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.148+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+Hibernate: insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+2026-08-13T11:26:32.149+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+Hibernate: update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+2026-08-13T11:26:32.150+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+Hibernate: update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+2026-08-13T11:26:32.152+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.153+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.155+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.156+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.157+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.159+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.160+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into sync_dead_letter (aggregate_key,aggregate_type,contract_version,event_uuid,gateway_eui,occurred_at,op,payload,reason,reason_detail,received_at,source_node) values (?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T11:26:32.161+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.162+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.162+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+Hibernate: insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+2026-08-13T11:26:32.163+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+Hibernate: update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+2026-08-13T11:26:32.164+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+Hibernate: update sync_dead_letter set aggregate_key=?,aggregate_type=?,contract_version=?,event_uuid=?,gateway_eui=?,occurred_at=?,op=?,payload=?,reason=?,reason_detail=?,received_at=?,source_node=? where id=?
+2026-08-13T11:26:32.166+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.167+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.168+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.169+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+Hibernate: select sdl1_0.id from sync_dead_letter sdl1_0 where sdl1_0.event_uuid=? fetch first ? rows only
+2026-08-13T11:26:32.171+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+Hibernate: select srw1_0.gateway_eui,srw1_0.resource_id,srw1_0.resource_type,srw1_0.highest_sync_version,srw1_0.last_event_uuid,srw1_0.payload_hash,srw1_0.updated_at from sync_resource_watermarks srw1_0 where srw1_0.gateway_eui=? and srw1_0.resource_type=? and srw1_0.resource_id=?
+2026-08-13T11:26:32.172+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T11:26:32.172+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+    entry_uuid, gateway_eui, owner_user_uuid, sync_version,
+    status, occurred_start, activity_code, plot_uuid, zone_uuid,
+    deleted_at, aggregate_json, mirrored_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
+ON CONFLICT (entry_uuid) DO UPDATE SET
+    gateway_eui = EXCLUDED.gateway_eui,
+    owner_user_uuid = EXCLUDED.owner_user_uuid,
+    sync_version = EXCLUDED.sync_version,
+    status = EXCLUDED.status,
+    occurred_start = EXCLUDED.occurred_start,
+    activity_code = EXCLUDED.activity_code,
+    plot_uuid = EXCLUDED.plot_uuid,
+    zone_uuid = EXCLUDED.zone_uuid,
+    deleted_at = EXCLUDED.deleted_at,
+    aggregate_json = EXCLUDED.aggregate_json,
+    mirrored_at = CURRENT_TIMESTAMP
+]
+2026-08-13T11:26:32.175+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+Hibernate: INSERT INTO sync_resource_watermarks
+    (gateway_eui, resource_type, resource_id, highest_sync_version, last_event_uuid, payload_hash, updated_at)
+VALUES (?, ?, ?,
+        ?, ?, ?, ?)
+ON CONFLICT (gateway_eui, resource_type, resource_id)
+DO UPDATE SET
+    highest_sync_version = GREATEST(sync_resource_watermarks.highest_sync_version, ?),
+    last_event_uuid = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                           THEN ?
+                           ELSE sync_resource_watermarks.last_event_uuid END,
+    payload_hash = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                        THEN ?
+                        ELSE sync_resource_watermarks.payload_hash END,
+    updated_at = CASE WHEN ? &gt;= sync_resource_watermarks.highest_sync_version
+                      THEN ?
+                      ELSE sync_resource_watermarks.updated_at END
+
+2026-08-13T11:26:32.176+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select count(*) from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.177+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+Hibernate: select sie1_0.event_uuid,sie1_0.processed_at,sie1_0.source_node from sync_inbox sie1_0 where sie1_0.event_uuid=?
+2026-08-13T11:26:32.178+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+Hibernate: insert into sync_inbox (processed_at,source_node,event_uuid) values (?,?,?)
+2026-08-13T11:26:32.179+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+Hibernate: select sc1_0.peer_node,sc1_0.last_event_at,sc1_0.last_event_uuid,sc1_0.last_full_backfill_at from sync_cursor sc1_0 where sc1_0.peer_node=?
+2026-08-13T11:26:32.180+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+Hibernate: select d1_0.id,d1_0.chameleon_enabled,d1_0.chameleon_swt1_depth_cm,d1_0.chameleon_swt2_depth_cm,d1_0.chameleon_swt3_depth_cm,d1_0.claimed_by_user_id,d1_0.created_at,d1_0.current_state_json,d1_0.current_state_recorded_at,d1_0.current_valve_state,d1_0.deleted_at,d1_0.dendro_enabled,d1_0.device_eui,d1_0.flow_meter_enabled,d1_0.gateway_device_eui,d1_0.irrigation_zone_id,d1_0.is_reference_tree,d1_0.last_ip,d1_0.last_seen,d1_0.name,d1_0.rain_gauge_enabled,d1_0.soil_moisture_probe_depths_configured,d1_0.soil_moisture_probe_depths_json,d1_0.strega_model,d1_0.sync_version,d1_0.target_state,d1_0.temp_enabled,d1_0.type from devices d1_0 where d1_0.device_eui=?
+2026-08-13T11:26:32.181+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+Hibernate: update sync_cursor set last_event_at=?,last_event_uuid=?,last_full_backfill_at=? where peer_node=?
+2026-08-13T11:26:32.182+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:26:32.182+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE entry_uuid = ?]
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+</div>
+</div>
+</body>
+</html>

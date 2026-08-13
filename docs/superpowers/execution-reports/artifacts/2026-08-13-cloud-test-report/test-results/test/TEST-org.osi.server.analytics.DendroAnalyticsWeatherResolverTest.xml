@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.DendroAnalyticsWeatherResolverTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:07" hostname="osi-01" time="0.006">
+  <properties/>
+  <testcase name="computeForAllZones_autoZoneReadsWeatherThroughResolver()" classname="org.osi.server.analytics.DendroAnalyticsWeatherResolverTest" time="0.006"/>
+  <system-out><![CDATA[2026-08-13T11:26:07.019+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T09:26:07.019601615Z
+2026-08-13T11:26:07.021+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 42 (Auto weather zone): stress=unknown → action=maintain
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

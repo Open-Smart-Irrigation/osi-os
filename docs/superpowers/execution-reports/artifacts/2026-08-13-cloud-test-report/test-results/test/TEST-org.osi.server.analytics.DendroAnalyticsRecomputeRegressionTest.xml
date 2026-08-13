@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.DendroAnalyticsRecomputeRegressionTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:06" hostname="osi-01" time="0.034">
+  <properties/>
+  <testcase name="computeForAllZones_isIdempotentWhenRunTwiceOnSameDay()" classname="org.osi.server.analytics.DendroAnalyticsRecomputeRegressionTest" time="0.034"/>
+  <system-out><![CDATA[2026-08-13T11:26:06.961+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T09:26:06.961512729Z
+2026-08-13T11:26:06.983+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 1 (Regression Zone): stress=severe → action=increase_10
+2026-08-13T11:26:06.984+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T09:26:06.984166201Z
+2026-08-13T11:26:06.986+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 1 (Regression Zone): stress=severe → action=increase_10
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

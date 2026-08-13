@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.WeatherRecordPmInputsTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:08" hostname="osi-01" time="0.0">
+  <properties/>
+  <testcase name="dailyWeatherRecord_preservesSixArgConstructorAndExposesPmInputs()" classname="org.osi.server.analytics.WeatherRecordPmInputsTest" time="0.0"/>
+  <testcase name="forecastDay_preservesSixArgConstructorAndExposesPmInputs()" classname="org.osi.server.analytics.WeatherRecordPmInputsTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

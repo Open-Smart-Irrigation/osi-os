@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.sync.SyncHealthServiceTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:09" hostname="osi-01" time="0.117">
+  <properties/>
+  <testcase name="malformedErrorsTotalAndErrorsLastAtValuesYieldNullsWithoutAffectingHealthStatus()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.104"/>
+  <testcase name="gatewayRowsWithoutEdgeHealthSkipEdgeHealthVerdict()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="healthyDbReturnsHealthyStatus()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.0"/>
+  <testcase name="gatewayRowsFlagRestFreshButMqttStale()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.0"/>
+  <testcase name="malformedSyncLinkedValueMakesAcceptedSchemaEdgeHealthUnhealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="gatewayQueryUsesPlaceholderSafeJsonbHealthPresenceCheck()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.0"/>
+  <testcase name="presentAllNullEdgeHealthIsUnhealthyBecauseSchemaIsNotAccepted()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="diskFreeBelowConfiguredMinimumMakesEdgeHealthUnhealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="unhealthyEdgeHealthMakesTopLevelStatusAttentionRequired()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.0"/>
+  <testcase name="finiteOutOfDomainMetricValuesMakeAcceptedSchemaEdgeHealthUnhealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="syncOldestAgeAboveConfiguredMaximumMakesEdgeHealthUnhealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="nonFiniteDiskFreeValuesMakeAcceptedSchemaEdgeHealthUnhealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="scalarQueryFailureExposesDbErrorEvenWhenCountsWork()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.0"/>
+  <testcase name="syncLinkedFalseMakesEdgeHealthUnhealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="schemaSignatureMustBeInAcceptedAllowlist()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.0"/>
+  <testcase name="presentHealthyEdgeHealthWithAcceptedSchemaYieldsHealthyVerdict()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.0"/>
+  <testcase name="gatewayQueryFailureExposesDbErrorEvenWhenCountsWork()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="dbFailureExposesErrorStateNotHealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <testcase name="syncRejectedAboveZeroMakesEdgeHealthUnhealthy()" classname="org.osi.server.sync.SyncHealthServiceTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-13T11:27:09.223+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.224+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.225+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.225+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.226+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 4 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.227+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.227+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 2 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.228+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService scalar query failed: timeout
+2026-08-13T11:27:09.229+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.230+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+2026-08-13T11:27:09.231+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService loadGatewayRows failed: relation devices missing
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService loadGatewayRows failed: connection refused
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService count query failed: connection refused
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService count query failed: connection refused
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService count query failed: connection refused
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService count query failed: connection refused
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService count query failed: connection refused
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService count query failed: connection refused
+2026-08-13T11:27:09.232+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : SyncHealthService scalar query failed: connection refused
+2026-08-13T11:27:09.233+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.SyncHealthService    : Sync health response includes 1 gateway(s) with unhealthy edge health
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

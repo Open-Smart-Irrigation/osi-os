@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.workrequest.WorkRequestStatusNotifierTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.002">
+  <properties/>
+  <testcase name="skipsStatusCommandWhenGatewayDeviceIsMissing()" classname="org.osi.server.workrequest.WorkRequestStatusNotifierTest" time="0.001"/>
+  <testcase name="mapsNeedsInfoAndRejectedReasons()" classname="org.osi.server.workrequest.WorkRequestStatusNotifierTest" time="0.0"/>
+  <testcase name="normalizesStateBeforeNeedsInfoHumanMessageFallback()" classname="org.osi.server.workrequest.WorkRequestStatusNotifierTest" time="0.001"/>
+  <testcase name="sendsAwaitingPublishStateInCommandPayload()" classname="org.osi.server.workrequest.WorkRequestStatusNotifierTest" time="0.0"/>
+  <system-out><![CDATA[2026-08-13T11:27:14.118+02:00  WARN 2682197 --- [    Test worker] o.o.s.w.WorkRequestStatusNotifier        : Skipping work request status command for req-stage0-1: gateway 0016C001F11715E2 not found
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.journal.JournalMirrorMigrationIT" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:30" hostname="osi-01" time="0.03">
+  <properties/>
+  <testcase name="createsFourJsonbJournalMirrorsWithScopeAndTimelineIndexes()" classname="org.osi.server.journal.JournalMirrorMigrationIT" time="0.015"/>
+  <testcase name="linkedGatewayAccountsPersistZoneDesiredStateCapability()" classname="org.osi.server.journal.JournalMirrorMigrationIT" time="0.007"/>
+  <testcase name="linkedGatewayAccountsPersistJournalCapability()" classname="org.osi.server.journal.JournalMirrorMigrationIT" time="0.007"/>
+  <system-out><![CDATA[2026-08-13T11:26:30.297+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalMirrorMigrationIT]: using SpringBootContextLoader
+2026-08-13T11:26:30.297+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.JournalMirrorMigrationIT]: JournalMirrorMigrationIT does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T11:26:30.298+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalMirrorMigrationIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T11:26:30.302+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalMirrorMigrationIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T11:26:30.303+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.JournalMirrorMigrationIT
+2026-08-13T11:26:30.304+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalMirrorMigrationIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T11:26:30.308+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL query [SELECT table_name
+  FROM information_schema.tables
+ WHERE table_schema = 'public'
+   AND table_name LIKE 'journal_%_mirror'
+ ORDER BY table_name
+]
+2026-08-13T11:26:30.311+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL query [SELECT COUNT(*)
+  FROM information_schema.columns
+ WHERE table_schema = 'public'
+   AND table_name IN (
+       'journal_entries_mirror',
+       'journal_vocab_mirror',
+       'journal_plots_mirror',
+       'journal_plot_groups_mirror')
+   AND column_name = 'aggregate_json'
+   AND data_type = 'jsonb'
+]
+2026-08-13T11:26:30.315+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL query [SELECT indexname
+  FROM pg_indexes
+ WHERE schemaname = 'public'
+   AND tablename LIKE 'journal_%_mirror'
+]
+2026-08-13T11:26:30.322+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL query [SELECT data_type
+  FROM information_schema.columns
+ WHERE table_schema = 'public'
+   AND table_name = 'linked_gateway_accounts'
+   AND column_name = 'zone_desired_state_supported'
+]
+2026-08-13T11:26:30.329+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL query [SELECT data_type
+  FROM information_schema.columns
+ WHERE table_schema = 'public'
+   AND table_name = 'linked_gateway_accounts'
+   AND column_name = 'field_journal_supported'
+]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

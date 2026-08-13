@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.history.HistoryServiceTest" tests="26" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:28" hostname="osi-01" time="0.401">
+  <properties/>
+  <testcase name="unsupportedGatewayAggregationReturnsBadRequestBeforeEmptyDataResponse()" classname="org.osi.server.history.HistoryServiceTest" time="0.19"/>
+  <testcase name="zoneCardDataMarksFreshnessSyncedStaleOrDegradedFromDataAge()" classname="org.osi.server.history.HistoryServiceTest" time="0.002"/>
+  <testcase name="seasonWithoutConfiguredBoundsReturnsAvailabilityResponseWithoutAggregationQuery()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="seasonWithoutConfiguredBoundsRejectsUnsupportedAggregationBeforeAvailabilityResponse()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="userCannotReadAnotherUsersZone()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="zoneAdvancedViewUsesMapContractWithoutInventedCloudFields()" classname="org.osi.server.history.HistoryServiceTest" time="0.09"/>
+  <testcase name="memberReadsZoneHistoryOnScopedGateway()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="gatewayConnectivityTimelineIsUnavailableUntilHeartbeatHistoryIsPersisted()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="gatewayAdvancedViewExposesDiagnosticsWithAvailabilityValues()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="gatewayRejectsDeferredStorageAndPowerViewsButKeepsAdvancedAvailable()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="unsupportedViewReturnsBadRequest()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="gatewayHistoryStaysOwnerOnlyForMembers()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="zoneCardDataRecordsAggregationSelectionMetrics()" classname="org.osi.server.history.HistoryServiceTest" time="0.002"/>
+  <testcase name="knownCardWithNoDataReturnsEmptyDataResponse()" classname="org.osi.server.history.HistoryServiceTest" time="0.007"/>
+  <testcase name="unsupportedAggregationReturnsBadRequestBeforeAggregationQuery()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="updateZoneCardPreferencesPersistsPinnedStateForOwnedCard()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="workspaceReadStaysUserScoped()" classname="org.osi.server.history.HistoryServiceTest" time="0.085"/>
+  <testcase name="zoneCardsReturnsUnavailableKnownCardsAsSuccessfulResponse()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="autoAggregationUsesResolvedBoundsBeforeLongRangeValidation()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="gatewayCardDataForAccessibleGatewayRemainsAvailable()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="legacyGatewayHistoryReadRemainsOwnerOnlyWhenNotScopedCapable()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="recordGatewayCardOpenedPersistsOpenCountAndLastOpenedForOwnedCard()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="memberWithoutZoneGrantReadsZoneHistory()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="unknownCardReturnsNotFoundInsteadOfEmptyKnownCardShape()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="seasonIgnoresCallerDatesAndRequiresConfiguredSeasonBounds()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <testcase name="nonMemberCannotReadZoneHistory()" classname="org.osi.server.history.HistoryServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.WeatherMathEt0Test" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:08" hostname="osi-01" time="0.001">
+  <properties/>
+  <testcase name="fao56Et0_matchesFao56Example18DailyData()" classname="org.osi.server.analytics.WeatherMathEt0Test" time="0.0"/>
+  <testcase name="hargreavesEt0_matchesFao56Example20()" classname="org.osi.server.analytics.WeatherMathEt0Test" time="0.0"/>
+  <testcase name="hargreavesEt0_returnsNullForInvalidInputs()" classname="org.osi.server.analytics.WeatherMathEt0Test" time="0.0"/>
+  <testcase name="fao56Et0_returnsNullForInvalidInputs()" classname="org.osi.server.analytics.WeatherMathEt0Test" time="0.001"/>
+  <testcase name="fao56Et0_clampsNegativeWinterValuesToZero()" classname="org.osi.server.analytics.WeatherMathEt0Test" time="0.0"/>
+  <testcase name="hargreavesEt0_clampsNegativeWinterValuesToZero()" classname="org.osi.server.analytics.WeatherMathEt0Test" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.ArchitectureTest" tests="3" skipped="0" failures="1" errors="0" timestamp="2026-08-13T09:27:15" hostname="osi-01" time="5.224">
+  <properties/>
+  <testcase name="noNewPackageCycles" classname="org.osi.server.ArchitectureTest" time="5.199">
+    <failure message="com.tngtech.archunit.library.freeze.StoreUpdateFailedException: Updating frozen violations is disabled (enable by configuration freeze.store.default.allowStoreUpdate=true)" type="com.tngtech.archunit.library.freeze.StoreUpdateFailedException">com.tngtech.archunit.library.freeze.StoreUpdateFailedException: Updating frozen violations is disabled (enable by configuration freeze.store.default.allowStoreUpdate=true)
+	at app//com.tngtech.archunit.library.freeze.TextFileBasedViolationStore.save(TextFileBasedViolationStore.java:144)
+	at app//com.tngtech.archunit.library.freeze.FreezingArchRule$ViolationStoreLineBreakAdapter.save(FreezingArchRule.java:277)
+	at app//com.tngtech.archunit.library.freeze.FreezingArchRule.removeObsoleteViolationsFromStore(FreezingArchRule.java:154)
+	at app//com.tngtech.archunit.library.freeze.FreezingArchRule.removeObsoleteViolationsFromStoreAndReturnNewViolations(FreezingArchRule.java:146)
+	at app//com.tngtech.archunit.library.freeze.FreezingArchRule.evaluate(FreezingArchRule.java:127)
+	at app//com.tngtech.archunit.lang.ArchRule$Assertions.check(ArchRule.java:84)
+	at app//com.tngtech.archunit.library.freeze.FreezingArchRule.check(FreezingArchRule.java:97)
+	at app//com.tngtech.archunit.junit.internal.ArchUnitTestDescriptor$ArchUnitRuleDescriptor.execute(ArchUnitTestDescriptor.java:168)
+	at app//com.tngtech.archunit.junit.internal.ArchUnitTestDescriptor$ArchUnitRuleDescriptor.execute(ArchUnitTestDescriptor.java:151)
+	at java.base@17.0.19/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at java.base@17.0.19/java.util.ArrayList.forEach(ArrayList.java:1511)
+</failure>
+  </testcase>
+  <testcase name="analyticsMustNotDependOnSync" classname="org.osi.server.ArchitectureTest" time="0.021"/>
+  <testcase name="controllersOnlyInControllerClasses" classname="org.osi.server.ArchitectureTest" time="0.004"/>
+  <system-out><![CDATA[2026-08-13T11:27:15.042+02:00  INFO 2682197 --- [    Test worker] com.tngtech.archunit.core.PluginLoader   : Detected Java version 17.0.19
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

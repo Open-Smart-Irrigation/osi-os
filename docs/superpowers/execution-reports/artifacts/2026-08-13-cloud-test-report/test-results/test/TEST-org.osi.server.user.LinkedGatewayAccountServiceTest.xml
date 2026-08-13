@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.user.LinkedGatewayAccountServiceTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:10" hostname="osi-01" time="0.108">
+  <properties/>
+  <testcase name="observeBootstrapIdentity_marksSupportedGatewayRepairRequiredWhenOfflineVerifierIsMissing()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.104"/>
+  <testcase name="recordLinkedAuthAck_marksCurrentVersionUpToDateAndClearsErrors()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.0"/>
+  <testcase name="observeBootstrapIdentity_backfillsIdentityAndKeepsDistinctGatewayRows()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.001"/>
+  <testcase name="recordLinkedAuthAck_ignoresOlderAckWhenNewerVersionIsPending()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.0"/>
+  <testcase name="gatewaysThatAdvertiseNoCatalogStampClearIt()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.0"/>
+  <testcase name="observeBootstrapIdentityPersistsTheAdvertisedJournalCatalogStamp()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.0"/>
+  <testcase name="observeBootstrapIdentity_refreshesCapabilitiesForExistingLinkedGateway()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.0"/>
+  <testcase name="recordLocalSyncLink_marksSupportedGatewayUpToDate()" classname="org.osi.server.user.LinkedGatewayAccountServiceTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

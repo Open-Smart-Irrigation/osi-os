@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.desiredstate.DesiredStateConvergenceIT" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:20" hostname="osi-01" time="0.17">
+  <properties/>
+  <testcase name="rejectedAndSupersededOperationsIgnoreMirrorTransitions()" classname="org.osi.server.desiredstate.DesiredStateConvergenceIT" time="0.085"/>
+  <testcase name="sameBaseMirrorDoesNotConflict()" classname="org.osi.server.desiredstate.DesiredStateConvergenceIT" time="0.076"/>
+  <testcase name="matchingMirrorWithoutAckRemainsPending()" classname="org.osi.server.desiredstate.DesiredStateConvergenceIT" time="0.002"/>
+  <testcase name="newerDifferentMirrorConflictsAndStoresCanonical()" classname="org.osi.server.desiredstate.DesiredStateConvergenceIT" time="0.002"/>
+  <testcase name="matchingMirrorThenAckApplies()" classname="org.osi.server.desiredstate.DesiredStateConvergenceIT" time="0.002"/>
+  <testcase name="ackThenMatchingMirrorApplies()" classname="org.osi.server.desiredstate.DesiredStateConvergenceIT" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

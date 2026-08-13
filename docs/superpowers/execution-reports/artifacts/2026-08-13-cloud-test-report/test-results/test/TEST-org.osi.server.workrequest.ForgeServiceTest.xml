@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.workrequest.ForgeServiceTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:11" hostname="osi-01" time="0.216">
+  <properties/>
+  <testcase name="claimRejectsNonAwaitingAgent()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.208"/>
+  <testcase name="reportRejectsDifferentRunner()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.0"/>
+  <testcase name="issueOpenDispatchRejectsTooRiskyRequest()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.001"/>
+  <testcase name="heartbeatRejectsUnclaimedJob()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.001"/>
+  <testcase name="reportRejectsInvalidState()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.0"/>
+  <testcase name="reportWhitelistsValidStates()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.001"/>
+  <testcase name="claimUsesForUpdateAndTransitionsAtomically()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.001"/>
+  <testcase name="heartbeatUpdatesClaimedJob()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.0"/>
+  <testcase name="issueOpenCanBeDispatchedToAwaitingAgent()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.001"/>
+  <testcase name="eligibleFiltersOsiOsClassZeroToTwoOnly()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.001"/>
+  <testcase name="issueOpenDispatchRejectsNonOsiOsTarget()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.0"/>
+  <testcase name="reportWithPrUrlSetsAgentPrUrl()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.001"/>
+  <testcase name="heartbeatRejectsDifferentRunner()" classname="org.osi.server.workrequest.ForgeServiceTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

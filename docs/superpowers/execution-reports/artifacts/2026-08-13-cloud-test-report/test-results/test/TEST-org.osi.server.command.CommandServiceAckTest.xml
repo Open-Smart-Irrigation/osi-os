@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.command.CommandServiceAckTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:13" hostname="osi-01" time="0.069">
+  <properties/>
+  <testcase name="applyAckSetsStatusToFailedOnNack()" classname="org.osi.server.command.CommandServiceAckTest" time="0.068"/>
+  <testcase name="applyAckSetsStatusToAcknowledged()" classname="org.osi.server.command.CommandServiceAckTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-13T11:26:13.336+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Applied ACK NACKED for command null → status FAILED
+2026-08-13T11:26:13.337+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Applied ACK ACKED for command null → status ACKNOWLEDGED
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

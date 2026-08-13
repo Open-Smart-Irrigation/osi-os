@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.telemetry.SensorDataIndexVacuumIT" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:09" hostname="osi-01" time="0.011">
+  <properties/>
+  <testcase name="sensorDataIndexVacuumMigrationBoundsRolloutAndBuildsBeforeCleanup()" classname="org.osi.server.telemetry.SensorDataIndexVacuumIT" time="0.002"/>
+  <testcase name="sensorDataShouldKeepAutovacuumBtreeAndBrinState()" classname="org.osi.server.telemetry.SensorDataIndexVacuumIT" time="0.008"/>
+  <system-out><![CDATA[2026-08-13T11:27:09.836+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [SensorDataIndexVacuumIT]: using SpringBootContextLoader
+2026-08-13T11:27:09.837+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.telemetry.SensorDataIndexVacuumIT]: SensorDataIndexVacuumIT does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T11:27:09.837+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [SensorDataIndexVacuumIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T11:27:09.840+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [SensorDataIndexVacuumIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T11:27:09.850+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.telemetry.SensorDataIndexVacuumIT
+2026-08-13T11:27:09.850+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [SensorDataIndexVacuumIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T11:27:09.855+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL query [SELECT option_name, option_value
+FROM pg_options_to_table(
+    COALESCE(
+        (SELECT reloptions FROM pg_class WHERE oid = 'sensor_data'::regclass),
+        ARRAY[]::text[]
+    )
+)
+ORDER BY option_name
+]
+2026-08-13T11:27:09.857+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:27:09.857+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+FROM pg_indexes
+WHERE tablename = 'sensor_data'
+  AND indexname = ?
+]
+2026-08-13T11:27:09.858+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:27:09.858+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+FROM pg_indexes
+WHERE tablename = 'sensor_data'
+  AND indexname = ?
+]
+2026-08-13T11:27:09.859+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:27:09.859+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+FROM pg_indexes
+WHERE tablename = 'sensor_data'
+  AND indexname = ?
+]
+2026-08-13T11:27:09.860+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T11:27:09.860+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+FROM pg_indexes
+WHERE tablename = 'sensor_data'
+  AND indexname = ?
+]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

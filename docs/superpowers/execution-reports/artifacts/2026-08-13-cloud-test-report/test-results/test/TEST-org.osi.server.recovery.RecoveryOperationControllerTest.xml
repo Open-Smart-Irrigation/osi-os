@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.recovery.RecoveryOperationControllerTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:49" hostname="osi-01" time="0.008">
+  <properties/>
+  <testcase name="startRunsFreshAdminAndPathPrecheckBeforeStarting()" classname="org.osi.server.recovery.RecoveryOperationControllerTest" time="0.001"/>
+  <testcase name="auditRunsFreshAdminAndPathPrecheckBeforeReadingEntries()" classname="org.osi.server.recovery.RecoveryOperationControllerTest" time="0.0"/>
+  <testcase name="interruptAndRollbackRunFreshAdminPathChecks()" classname="org.osi.server.recovery.RecoveryOperationControllerTest" time="0.003"/>
+  <testcase name="demotedOwnerCannotReachRecoveryMutationAfterPrecheck()" classname="org.osi.server.recovery.RecoveryOperationControllerTest" time="0.001"/>
+  <testcase name="demotedOwnerCannotPreview()" classname="org.osi.server.recovery.RecoveryOperationControllerTest" time="0.001"/>
+  <testcase name="previewUsesTheCurrentAuthenticatedGatewayAdmin()" classname="org.osi.server.recovery.RecoveryOperationControllerTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

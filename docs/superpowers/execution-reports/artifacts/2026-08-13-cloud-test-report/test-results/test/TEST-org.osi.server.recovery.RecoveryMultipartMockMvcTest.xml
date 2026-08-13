@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.recovery.RecoveryMultipartMockMvcTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:48" hostname="osi-01" time="0.185">
+  <properties/>
+  <testcase name="acceptsAReportedUploadExactlyAtTheServiceCap()" classname="org.osi.server.recovery.RecoveryMultipartMockMvcTest" time="0.163"/>
+  <testcase name="rejectsCapPlusOneWithoutAllocatingTheReportedSize()" classname="org.osi.server.recovery.RecoveryMultipartMockMvcTest" time="0.022"/>
+  <system-out><![CDATA[2026-08-13T11:26:48.434+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:48.436+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:48.436+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:48.436+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:48.436+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:48.436+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:48.444+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.recovery.RecoveryBundleController#upload(UUID, UploadMetadata, MultipartFile, UserDetails)
+2026-08-13T11:26:48.448+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.RequestPartMethodArgumentResolver : Read "application/json" to [UploadMetadata[sourceGatewayDeviceEui=AABBCCDDEEFF0011, formatVersion=1, schemaVersion=41, migration (truncated)...]
+2026-08-13T11:26:48.487+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:48.489+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [BundleSummary[bundleUuid=ab2585ed-1d33-4fca-b3d3-90187e436768, installationUuid=8e9c6f90-6a18-4a1a-9 (truncated)...]
+2026-08-13T11:26:48.497+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T11:26:48.499+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T11:26:48.499+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T11:26:48.499+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T11:26:48.499+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T11:26:48.499+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T11:26:48.502+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.recovery.RecoveryBundleController#upload(UUID, UploadMetadata, MultipartFile, UserDetails)
+2026-08-13T11:26:48.503+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.RequestPartMethodArgumentResolver : Read "application/json" to [UploadMetadata[sourceGatewayDeviceEui=AABBCCDDEEFF0011, formatVersion=1, schemaVersion=41, migration (truncated)...]
+2026-08-13T11:26:48.513+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : Using @ExceptionHandler org.osi.server.recovery.RecoveryBundleController#recoveryError(RecoveryBundleException)
+2026-08-13T11:26:48.514+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T11:26:48.514+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [ErrorResponse[error=Recovery database upload is too large]]
+2026-08-13T11:26:48.514+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : Resolved [org.osi.server.recovery.RecoveryBundleException: Recovery database upload is too large]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

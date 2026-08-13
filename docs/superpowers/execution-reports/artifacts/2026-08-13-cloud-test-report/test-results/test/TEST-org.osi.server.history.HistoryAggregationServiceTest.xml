@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.history.HistoryAggregationServiceTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:27" hostname="osi-01" time="0.122">
+  <properties/>
+  <testcase name="rollupAggregationCanonicalizesLegacyPointKeysBeforeBuildingSeries()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.012"/>
+  <testcase name="rollupFreshnessUsesPersistedLatestRecordedAtWhenPresent()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.003"/>
+  <testcase name="partialBackfillDoesNotOverwriteExistingPopulatedRollupWhenRawDataAlsoCoversThatBucket()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.01"/>
+  <testcase name="staleZeroSampleMarkerMakesMaintenanceCoverageIncompleteSoLateRawDataCanReplaceIt()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.005"/>
+  <testcase name="thirtyDayRangeWithMissingRollupsReturnsEmptyFreshnessMetadataWithoutBackfill()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="longRangeIrrigationPreservesEventsEvenWithoutSeriesChannels()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="closedHourlyRollupRefreshesWhenLaterMaintenanceSeesMoreSamples()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.006"/>
+  <testcase name="irrigationEventsAreTrimmedAndMarkedTruncatedWhenRepositoryReturnsLimitPlusOne()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.006"/>
+  <testcase name="thirtyDayRangeUsesDailyRollupsWithoutRawJsonbExtraction()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.005"/>
+  <testcase name="seasonRangeUsesWeeklyRollups()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="sevenDayRangeMayUseShortRangeRawQueries()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.003"/>
+  <testcase name="sparseRollupMaintenancePersistsZeroSampleMarkersSoNextMaintenanceRunSkipsRawExtraction()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.003"/>
+  <testcase name="thirtyDayRangeWithPartialRollupsReturnsPartialDataWithoutRawBackfill()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.003"/>
+  <testcase name="maintenanceCanonicalizesLegacyChannelKeysBeforeCheckingRollupCoverage()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="freshZeroSampleMarkerKeepsCoverageCompleteAndSkipsRawExtraction()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="customThirtyDayBoundsWithAutoReturnsEmptyRollupSeriesWithoutRawBackfillWhenRollupsAreMissing()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="sevenDayHourlyRawPathBucketsSamplesBeforeReturningSeries()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.003"/>
+  <testcase name="aggregationRecordsSourceAndTruncationMetrics()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.027"/>
+  <testcase name="openDailyRollupRefreshesWithLaterRawSamplesWhileClosedPopulatedBucketsStayProtected()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.007"/>
+  <testcase name="dendroChannelsUseChannelSpecificUnits()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="sparseRollupMaintenanceDoesNotOverwriteExistingPopulatedRollupWithZeroSampleMarker()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.003"/>
+  <testcase name="rawAggregationCanonicalizesLegacyPointKeysBeforeBuildingSeries()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="bucketedRawAggregationCanonicalizesLegacyPointKeysBeforeBuildingSeries()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.002"/>
+  <testcase name="rollupBackfillUsesUncappedRawExtractionSoLaterBucketsAreNotMarkedEmptyByReadLimit()" classname="org.osi.server.history.HistoryAggregationServiceTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

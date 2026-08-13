@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.DendroAnalyticsAgroscopeShadowIsolationTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:03" hostname="osi-01" time="0.399">
+  <properties/>
+  <testcase name="computeForAllZones_agroscopeShadowEnabledLeavesActuatedRecommendationByteIdentical()" classname="org.osi.server.analytics.DendroAnalyticsAgroscopeShadowIsolationTest" time="0.394"/>
+  <testcase name="computeForAllZones_agroscopeShadowDisabledDoesNotInvokeShadowPersistence()" classname="org.osi.server.analytics.DendroAnalyticsAgroscopeShadowIsolationTest" time="0.004"/>
+  <system-out><![CDATA[2026-08-13T11:26:03.750+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T09:26:03.750667813Z
+2026-08-13T11:26:03.779+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 10 (Agroscope Shadow Zone): stress=unknown → action=maintain
+2026-08-13T11:26:03.781+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T09:26:03.780952946Z
+2026-08-13T11:26:03.783+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 10 (Agroscope Shadow Zone): stress=unknown → action=maintain
+2026-08-13T11:26:03.785+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T09:26:03.785854593Z
+2026-08-13T11:26:03.788+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 10 (Agroscope Shadow Zone): stress=unknown → action=maintain
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

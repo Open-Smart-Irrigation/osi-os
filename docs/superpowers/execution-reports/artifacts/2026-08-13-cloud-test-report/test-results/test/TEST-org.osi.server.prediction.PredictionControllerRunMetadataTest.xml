@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.prediction.PredictionControllerRunMetadataTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:46" hostname="osi-01" time="0.385">
+  <properties/>
+  <testcase name="getPredictionRunReturnsLatestRunMetadataForOwnedZone()" classname="org.osi.server.prediction.PredictionControllerRunMetadataTest" time="0.385"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

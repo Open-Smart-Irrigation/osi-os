@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.AgroscopeAggregatorTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:25:56" hostname="osi-01" time="0.012">
+  <properties/>
+  <testcase name="emptyOrAllNull_nCountZero_allFieldsNull()" classname="org.osi.server.analytics.AgroscopeAggregatorTest" time="0.001"/>
+  <testcase name="knownMeanAndSd_upper95MatchesFormula()" classname="org.osi.server.analytics.AgroscopeAggregatorTest" time="0.008"/>
+  <testcase name="singleValue_upper95EqualsTheMeanItself()" classname="org.osi.server.analytics.AgroscopeAggregatorTest" time="0.001"/>
+  <testcase name="nullsAreDropped_beforeCounting()" classname="org.osi.server.analytics.AgroscopeAggregatorTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

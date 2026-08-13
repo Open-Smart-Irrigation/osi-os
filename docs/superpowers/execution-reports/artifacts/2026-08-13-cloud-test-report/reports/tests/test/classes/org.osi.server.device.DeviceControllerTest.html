@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - DeviceControllerTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>DeviceControllerTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.device.html">org.osi.server.device</a> &gt; DeviceControllerTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">88</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.202s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">deviceResponseIncludesMirroredSoilMoistureProbeDepths()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">deviceResponseIncludesMirroredStregaValveStateAndModel()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">deviceResponse_prefersCanonicalObservedTimestampOverStaleLastSeen()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">enableKiwiTemperatureHumidity_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">enableKiwiTemperatureHumidity_rejectsDeviceNotOwnedByCurrentUser()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">enableKiwiTemperatureHumidity_rejectsMissingInterval()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">enableKiwiTemperatureHumidity_rejectsNonKiwiDevices()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">enableKiwiTemperatureHumidity_rejectsWhenGatewayBindingMissing()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getDendroHistory_returnsStemChangeAndMechanicalHistoryForOwnedDevice()</td>
+<td class="success">0.003s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getDevice_disabledScopedMemberCannotReadWeatherStationDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getDevice_scopedMemberWithNoGrantCannotReadNonWeatherDevice()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getDevice_scopedMemberWithNoGrantReadsWeatherStationDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getMyDevices_mergesSharedWeatherRowsWithoutDuplicatingClaimedOnes()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getSensorHistory_allowsExtendedSensecapWeatherFields()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getSensorHistory_usesLegacyFallbackForCanonicalSwtFields()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getStatusHistory_rejectsUnknownStatusField()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getStatusHistory_returnsCategoricalHistoryForOwnedDevice()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">getWeatherStationZoneAssignments_returnsAssignmentsForOwnedSensecapStation()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">registerDevice_rejectsGatewayTheCallerDoesNotOwn()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">registerDevice_rejectsWhenUserHasNoGatewayWithoutCreatingServerDeviceRow()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">registerDevice_returnsPendingEdgeProvisioningAndPublishesGatewayCommandWithSyncContext()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">registerDevice_targetsTheRequestedOwnedGateway()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">rename_capableGatewayQueuesDesiredStateWithoutCanonicalWrite()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_bareOpenIsRejectedEvenWithValidDuration()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_closeIsRejected()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_duration256IsRejected()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_durationZeroIsRejected()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_legacyNonOwnerDenialCarriesMachineReadableBody()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_openForDurationBoundaryMinuteOneAndTwoFiftyFiveAreAccepted()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_openForDurationForwardsDurationMinutes()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_openForDurationWithoutDurationIsBadRequest()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_queuesGatewayValveCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_scopedDenialCarriesMachineReadableBody()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_scopedGatewayAdminWithoutZoneGrantIsForbidden()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_scopedGatewayGrantedResearcherIsEnqueuedWithActorUserUuid()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_scopedGatewayRevokedClaimerIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendCommand_scopedGatewayViewerIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendGatewayCommand_allowsSuperAdminToCommandGatewayTheyDoNotOwn()</td>
+<td class="success">0.003s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendGatewayCommand_rejectsGatewayNotOwnedByPlainAdmin()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">sendGatewayCommand_rejectsNonGatewayDevices()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setChameleonEnabled_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setFlowMeterEnabled_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setKiwiUplinkInterval_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setKiwiUplinkInterval_rejectsDeviceNotOwnedByCurrentUser()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setKiwiUplinkInterval_rejectsInvalidMinuteValues()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setKiwiUplinkInterval_rejectsNonKiwiDevices()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setKiwiUplinkInterval_rejectsWhenGatewayBindingMissing()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50FiveVoltWarmup_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50InterruptMode_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50InterruptMode_rejectsInvalidModeValues()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50Mode_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50Mode_rejectsDeviceNotOwnedByCurrentUser()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50Mode_rejectsInvalidModeValues()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50Mode_rejectsNonLsn50Devices()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50Mode_rejectsWhenGatewayBindingMissing()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50UplinkInterval_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setLsn50UplinkInterval_rejectsInvalidMinuteValues()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setRainGaugeEnabled_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setSoilMoistureDepths_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.006s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setSoilMoistureDepths_rejectsFractionalDepths()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaFlushing_legacyNonOwnerDenialCarriesMachineReadableBody()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaFlushing_queuesGatewayCommandForMotorizedValve()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaFlushing_scopedGatewayGrantedResearcherIsEnqueuedWithActorUserUuid()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaFlushing_scopedGatewayRevokedClaimerIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaFlushing_scopedGatewayViewerIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaMagnetMode_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaModel_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaPartialOpening_legacyNonOwnerDenialCarriesMachineReadableBody()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaPartialOpening_queuesGatewayCommandForMotorizedValve()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaPartialOpening_rejectsNonMotorizedValve()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaPartialOpening_scopedGatewayGrantedResearcherIsEnqueuedWithActorUserUuid()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaPartialOpening_scopedGatewayRevokedClaimerIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaPartialOpening_scopedGatewayViewerIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaTimedAction_legacyNonOwnerDenialCarriesMachineReadableBody()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaTimedAction_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaTimedAction_scopedGatewayGrantedResearcherIsEnqueuedWithActorUserUuid()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaTimedAction_scopedGatewayRevokedClaimerIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaTimedAction_scopedGatewayViewerIsForbidden()</td>
+<td class="success">0s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaUplinkInterval_acceptsAdvancedClosedOpenAndTamperPayload()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaUplinkInterval_queuesGatewayCommandForOwnedEdgeBackedDevice()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaUplinkInterval_rejectsDeviceNotOwnedByCurrentUser()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaUplinkInterval_rejectsInvalidMinuteValues()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaUplinkInterval_rejectsNonStregaDevices()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setStregaUplinkInterval_rejectsWhenGatewayBindingMissing()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setWeatherStationZoneAssignments_queuesProtectedReplacementWithoutCanonicalWrite()</td>
+<td class="success">0.090s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">setWeatherStationZoneAssignments_returnsCapabilityConflictWithoutLegacyWrite()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">unclaim_edgeBackedDeviceNotOwnedByActorIsForbidden()</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">unclaim_edgeBackedDeviceOwnedByActorQueuesUnclaim()</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+</div>
+</div>
+</body>
+</html>

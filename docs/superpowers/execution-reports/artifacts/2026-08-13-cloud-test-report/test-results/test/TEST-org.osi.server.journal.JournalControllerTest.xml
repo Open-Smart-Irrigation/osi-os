@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.journal.JournalControllerTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:30" hostname="osi-01" time="0.032">
+  <properties/>
+  <testcase name="listReturnsCanonicalResourceBesideLatestDesiredOperation()" classname="org.osi.server.journal.JournalControllerTest" time="0.005"/>
+  <testcase name="catalogReportsAMismatchWithoutFailingTheRequest()" classname="org.osi.server.journal.JournalControllerTest" time="0.004"/>
+  <testcase name="exportUsesTheSameScopeFilteredEntrySetAsList()" classname="org.osi.server.journal.JournalControllerTest" time="0.002"/>
+  <testcase name="foreignExistingMutationReturnsNotFoundBeforeCommandCreation()" classname="org.osi.server.journal.JournalControllerTest" time="0.004"/>
+  <testcase name="grantedUpdateAndVoidPassCanonicalIdentityToMutationService()" classname="org.osi.server.journal.JournalControllerTest" time="0.002"/>
+  <testcase name="catalogIsReadableByAnyScopedMemberAndReportsTheGatewayVerdict()" classname="org.osi.server.journal.JournalControllerTest" time="0.004"/>
+  <testcase name="entryMutationUsesGatewayLocalIdentityAndReturnsAccepted()" classname="org.osi.server.journal.JournalControllerTest" time="0.003"/>
+  <testcase name="catalogReportsUnknownForAGatewayThatNeverAdvertisedAStamp()" classname="org.osi.server.journal.JournalControllerTest" time="0.005"/>
+  <testcase name="invisibleCreateCollisionReturnsNotFoundBeforeCommandCreation()" classname="org.osi.server.journal.JournalControllerTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

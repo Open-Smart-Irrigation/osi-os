@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:09" hostname="osi-01" time="0.335">
+  <properties/>
+  <testcase name="shadowHashMismatchReturnsAckBeforeRejectedRow()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.319"/>
+  <testcase name="outOfOrderNumericHistoryKeysAreRejectedBeforeAnyAck()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.001"/>
+  <testcase name="missingRowsDefaultsToEmptyBatchInsteadOfThrowing()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.0"/>
+  <testcase name="durableBatchWritesMirrorAndIndexBeforeReturningCommittedAck()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.002"/>
+  <testcase name="unsupportedProtocolVersionIsRejectedBeforeRows()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.002"/>
+  <testcase name="bestEffortSegmentKeyDegradesToQuarantineInsteadOf500ingTheBatch()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.001"/>
+  <testcase name="unsupportedDurablePhaseIsRejectedBeforeAnyWrite()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.001"/>
+  <testcase name="quarantineCleanupFailureDoesNotReturnACommittedRowResult()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.001"/>
+  <testcase name="durableCorrectionOverwritesMirrorAndRecordsConflictState()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.001"/>
+  <testcase name="durableReplayWithSameHashIsDuplicateWithoutRewritingMirror()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.003"/>
+  <testcase name="shadowBatchValidatesHashAndReturnsAckWithoutWritingIndex()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.001"/>
+  <testcase name="outOfOrderNaturalHistoryKeysAreRejectedBeforeAnyAck()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.001"/>
+  <testcase name="retryableMirrorFailureDoesNotAdvanceCommittedPrefix()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.002"/>
+  <testcase name="hashMismatchStopsAckBeforeMapperApply()" classname="org.osi.server.sync.history.EdgeHistoryIngestServiceTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

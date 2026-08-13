@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.zone.ZoneSensorAnchorServiceTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.125">
+  <properties/>
+  <testcase name="probeInventoryStatusNoProbeDepthsForChameleonDeviceWithUnusableDepths()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.112"/>
+  <testcase name="probeInventoryStatusNoSoilDevicesForEmptyZone()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.0"/>
+  <testcase name="probeInventoryStatusNoSoilDevicesForValveOnlyZone()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="saveAnchorsRejectsProbeWhenDeviceIsNotAssignedToZone()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="saveAnchorsPersistsAssignedProbeLocationsInsideField()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.002"/>
+  <testcase name="saveAnchorsRejectsProbeOutsideFieldPolygon()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="getAnchorsReturnsEmptyResponseWhenFieldGeometryIsMissing()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="getAnchors_evaluatesChameleonConfiguredDepths()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.0"/>
+  <testcase name="availableProbesPreferChameleonDepthOverProbeDepthJson()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="availableProbesSkipNonPositiveChameleonDepthsAndMarkAnchored()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="probeInventoryStatusOkWhenProbesAvailable()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.0"/>
+  <testcase name="probeInventoryStatusNoProbeDepthsWhenCapableDeviceLacksInventory()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="availableProbesIncludeChameleonConfiguredDepths()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.0"/>
+  <testcase name="saveAnchorsRejectsProbeWithoutConfiguredDepth()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <testcase name="getAnchorsMarksInvalidAndInactiveAnchorsAsIneligible()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.002"/>
+  <testcase name="saveAnchorsFlagsWhenAStaleInventoryVersionOverwritesNewerServerState()" classname="org.osi.server.zone.ZoneSensorAnchorServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
