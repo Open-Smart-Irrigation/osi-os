@@ -527,7 +527,7 @@ FAIL: commands.schema.json enum drift: missing=SET_SDI12_IDENTIFY extra=(none) d
 - Contract amendment: added SET_SDI12_IDENTIFY to the commands schema enum and, because the verifier demanded exact golden-list parity, to sync-contract-golden.json accepted/cloudIssuerEnabled lists. No payload definition was required.
 - Final gate run: all commands below ran sequentially from the first Task 18 command. The frontend Vitest suite, TypeScript check, and production build were separate commands; the build was last and alone.
 - Evidence: 172 frontend test files and 1,705 tests passed; TypeScript exited 0; the production build transformed 1,723 modules and completed successfully in 7.50s. Scoped-access suites passed 5, 29, and 44 tests; the SDI-12 helper suite passed 11 tests.
-- Commit: this report and the checked-off Task 18 plan step are the Task 18 completion commit.
+- Commit: 3dd73a70 (report and checked-off Task 18 plan step).
 
 ### Full final Task 18 gate-battery output
 
