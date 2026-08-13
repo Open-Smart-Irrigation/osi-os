@@ -28,6 +28,7 @@
     "tabAssign": "Atribuir existente",
     "tabRegister": "Novo dispositivo",
     "assignConflict": "Esse dispositivo está agora na zona \"{{zoneName}}\". Primeiro remova-o dessa zona.",
+    "assignConflictDeleted": "Esse dispositivo ainda está atribuído a uma zona eliminada. Atualize a lista de dispositivos e tente novamente.",
     "registerZoneNotice": "Este dispositivo será registado diretamente em {{zoneName}}.",
     "registerSubmit": "Registar na zona",
     "registering": "A registar..."
