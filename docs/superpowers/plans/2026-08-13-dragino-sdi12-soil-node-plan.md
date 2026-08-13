@@ -24,6 +24,7 @@
 - All NEW SQL runs through `osiDb` with bound `?` parameters (playbook L153: "bound parameters only") — the older string-building lsn50 chains are legacy, not license.
 - **Flows ordering invariant:** `migrate-flows-journal-v2-replication.js` appends its worker cluster at the END of the flows array (`flows.push(...EXPECTED_NODES)`, ~L221) and its test asserts shipped bytes == migrator output. All new nodes in EVERY flows task must be inserted BEFORE the journal-v2 worker cluster, and the file keeps the exact `JSON.stringify(flows, null, 2) + '\n'` serialization.
 - **Protected-node hash pins:** `scripts/verify-live-gateway-identity.js` pins sha256 hashes of protected function nodes (`protectedNodeHashes`, ~L339; includes `sync-init-fn`). An APPROVED change to a protected node is completed by re-pinning its hash — after diffing old vs new function text and confirming the delta contains exactly the approved change, with the diff recorded in the execution report. An unapproved delta is a halt, not a re-pin.
+- **Scoped-access ratchet:** every new `http in` chain must reference `osiLib.require('scope')` downstream (`scripts/verify-scoped-access.js`); the Phase-A `PUBLIC_ALLOWLIST` is not for new endpoints. Clone the scope preamble from the closest shipped analogue (device catalog for static reads; the lsn50/chameleon config chains for device writes) and run `node scripts/verify-scoped-access.js` plus any `test-scoped-access-*.js` suites in every flows task's gate block.
 - All new prose docs must pass `node .claude/skills/anti-slop-writing/slop-check.js <file>`.
 
 ---
@@ -1443,11 +1444,22 @@ Invoke `osi-flows-json-editing`. Clone the `put-chameleon-enabled-*` chain (devi
 **Interfaces:**
 - Produces: `GET /api/sdi12/probe-profiles` returning `listProfiles()` output; `PUT /api/devices/:deveui/sdi12/config` accepting `{ probe_profile: string, depths: Record<depthSlot, cm> }` (slot-keyed; the endpoint fans depths out to the slot's channels and stores channel-keyed).
 
-- [ ] **Step 1: GET /api/sdi12/probe-profiles**
+- [x] **Step 1: GET /api/sdi12/probe-profiles (session-scoped)**
 
-http-in (GET) → function → http response:
+The scoped-access ratchet (`scripts/verify-scoped-access.js`) fails any
+`http in` chain that never references `osiLib.require('scope')` unless the
+exact node id is in its Phase-A `PUBLIC_ALLOWLIST` — and static registry
+data follows the device-catalog precedent (scoped), not the allowlist. Read
+the `GET /api/devices/catalog` chain first and clone its scope preamble
+verbatim (playbook rule: auth boilerplate is copied from the newest shipped
+endpoint), then serve the registry:
+
+http-in (GET, id `sdi12-profiles-http`) → scope-guard fn (cloned from the
+catalog chain, including its `libs` and rejection responses) → function →
+http response:
 
 ```js
+// Runs only after the cloned scope guard has admitted the session.
 var normRes = osiLib.require('sdi12-normalize');
 if (!normRes.ok) {
   msg.statusCode = 503;
@@ -1458,7 +1470,7 @@ msg.payload = { profiles: normRes.value.listProfiles() };
 return msg;
 ```
 
-- [ ] **Step 2: PUT /api/devices/:deveui/sdi12/config**
+- [x] **Step 2: PUT /api/devices/:deveui/sdi12/config**
 
 After the cloned auth/ownership nodes, the action node validates and updates:
 
@@ -1523,7 +1535,7 @@ return (async () => {
 })();
 ```
 
-- [ ] **Step 3: Mirror, gates, commit**
+- [x] **Step 3: Mirror, gates, commit**
 
 Same gate block as Task 9 Step 6.
 
