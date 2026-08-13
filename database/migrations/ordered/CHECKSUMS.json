@@ -23,5 +23,7 @@
   "0022__valve_control.sql": "a687fad8708c1f8ebc6397adbd215be1a19d272b3d1d1b08b511670578e130d2",
   "0023__app_settings.sql": "885d2d68d4d2c65e02398fabf35072062e95743ffc90a9a59274c2d043c2a022",
   "0024__valve_schedule_sync_triggers.sql": "5d527e6eb1ded61e4c6b6ddf20ff6d16375b958d3e8ef3b427c92778eb4a055f",
-  "0025__valve_settings_sync_triggers.sql": "337f8a252a88b8c71621c560cad1ee3842600e3afe5e2aec51736aa377ce68dd"
+  "0025__valve_settings_sync_triggers.sql": "337f8a252a88b8c71621c560cad1ee3842600e3afe5e2aec51736aa377ce68dd",
+  "0026__sdi12_columns.sql": "a146f3616c275cf4f853a4536dd895e14168dc83d9279ee5035e0f50148aae6b",
+  "0027__add_dragino_sdi12_type.sql": "cd505855b91c2eda0090a7dcedc9cd4e6397dcb0cfce2fc8c4fcd05483922734"
 }
