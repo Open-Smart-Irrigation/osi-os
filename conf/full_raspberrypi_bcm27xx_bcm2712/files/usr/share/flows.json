@@ -11600,7 +11600,7 @@
     "y": 2320,
     "wires": [
       [
-        "scoped-device-config-guard"
+        "sdi12-config-auth-fn"
       ]
     ]
   },
@@ -11756,7 +11756,7 @@
     "y": 2080,
     "wires": [
       [
-        "scoped-device-config-guard"
+        "sdi12-identify-action-fn"
       ]
     ]
   },
