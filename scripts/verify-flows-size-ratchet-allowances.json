@@ -34,8 +34,8 @@
       "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 10392 -> branch base a38c9db6 10392 -> HEAD 14764 = +4372, all +4372 of it this SDI-12 port. SDI-12 contribution: the device payload gains the SDI-12 probe/layout fields and the bounded recipe-deployment projection."
     },
     "cs-reg-cloud-ack-fn": {
-      "delta": 377,
-      "reason": "Wave 3 scoped-access port, pick-list commit 55 (AgroLink 97b70ab12, 'resolve zoneUuid on the REGISTER_DEVICE command applier'): the REGISTER_DEVICE ack payload gains zoneAssignedId/zoneWarning so the cloud can tell an assigned device from one registered unassigned because its requested zone was unknown or deleted (P9). Re-measured directly in the port worktree with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1906 -> HEAD 2283 = +377, exact delta vs origin/main."
+      "delta": 540,
+      "reason": "Supersedes the prior entry (377). Wave 3 scoped-access port, pick-list commit 59 (AgroLink cfeac77e2, \"fix(scope): gate the REGISTER_DEVICE zone seam on scoped mode\"): the zoneAssignedId/zoneWarning forwarding is now scoped-mode-only, guarded by Object.prototype.hasOwnProperty.call(ack, ...) instead of an unconditional assignment, so a flag-off gateway's ack (which never carries these keys) is forwarded byte-for-byte unchanged (+163, exact vs the prior entry). origin/main 1906 -> HEAD 2446 = 540, exact delta vs origin/main. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Prior provenance retained: pick-list commit 55 (AgroLink 97b70ab12) added zoneAssignedId/zoneWarning to the REGISTER_DEVICE ack payload (P9)."
     },
     "cs-reg-cloud-fn": {
       "delta": 2897,
@@ -359,8 +359,8 @@
     }
   },
   "total_allowance": {
-    "delta": 233315,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 58(a3ced0ca3), AgroLink a3ced0ca3) 1306289 chars = 233315. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 233900,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit 59(cfeac77e2), AgroLink cfeac77e2) 1306874 chars = 233900. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {

@@ -3487,12 +3487,19 @@ if (!helperPath) {
 // already assigned it to (P11/W4).
 expectIncludesById('cs-reg-cloud-fn', "SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1", 'resolves the cloud-sent zoneUuid to an edge-local zone id (W5/P9)');
 expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns through the row-wise precondition-guarded UPDATE (P11/W4)');
-expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true, zoneAssignedId: zoneId, zoneWarning: zoneWarning }), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
+// Spec section 10: the whole P9 zone seam is scoped-mode only, so a flag-off
+// gateway ignores a cloud-supplied zoneUuid and emits the pre-seam ACK shape.
+expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
+expectIncludesById('cs-reg-cloud-fn', "var successExtras = { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true };", 'preserves the pre-seam success ACK shape as the flag-off baseline');
+expectIncludesById('cs-reg-cloud-fn', 'successExtras.zoneAssignedId = zoneId;', 'reports the P9 zone-resolution outcome only in scoped mode');
+expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', successExtras), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
 
 // cs-reg-cloud-ack-fn (Build Special Command ACK) — forwards the P9 zone
-// resolution outcome on every REGISTER_DEVICE ack.
-expectIncludesById('cs-reg-cloud-ack-fn', 'payload.zoneAssignedId = ack.zoneAssignedId != null ? Number(ack.zoneAssignedId) : null;', 'forwards the P9 zone assignment outcome');
-expectIncludesById('cs-reg-cloud-ack-fn', 'payload.zoneWarning = ack.zoneWarning ? String(ack.zoneWarning) : null;', 'forwards the P9 zone resolution warning');
+// resolution outcome on every REGISTER_DEVICE ack, scoped mode only: the
+// applier omits both keys on a flag-off gateway, and this ACK payload omits
+// them in turn so a cloud that predates the seam sees the shape it expects.
+expectIncludesById('cs-reg-cloud-ack-fn', "Object.prototype.hasOwnProperty.call(ack, 'zoneAssignedId')", 'forwards the P9 zone assignment outcome only when the applier set it');
+expectIncludesById('cs-reg-cloud-ack-fn', "Object.prototype.hasOwnProperty.call(ack, 'zoneWarning')", 'forwards the P9 zone resolution warning only when the applier set it');
 
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function decodeUplink(input)', 'ships the STREGA ChirpStack decoder entry point');
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function Decode(fPort, bytes)', 'ships the vendor Gen1 STREGA decoder implementation');
