@@ -797,6 +797,112 @@ test('scoped journal writes allow plot grantees, preserve ownership, and revoke 
   );
 });
 
+test("a grantee without scope on the entry's plot cannot update it", async () => {
+  const db = new TestDb('scoped-entry-source-plot');
+  seedIdentity(db);
+  const sourcePlotUuid = '22210000-0000-4000-8000-000000000001';
+  const destinationPlotUuid = '22210000-0000-4000-8000-000000000002';
+  const entryUuid = '22210000-0000-4000-8000-000000000003';
+  const owner = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertPlot(db, plotInput(sourcePlotUuid, 'source-plot'), owner);
+  await journal.upsertPlot(db, plotInput(destinationPlotUuid, 'destination-plot'), owner);
+  await journal.saveEntry(
+    db,
+    entryInput(entryUuid, sourcePlotUuid, '2026-07-13T12:00:00', { season_crop: 'barley' }),
+    owner,
+    { mode: 'create' }
+  );
+  db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22210000-0000-4000-8000-000000000004',
+    OWNER_UUID,
+    destinationPlotUuid,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  const scoped = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(entryUuid, destinationPlotUuid, '2026-07-13T12:00:00', {
+        base_sync_version: 1,
+        season_crop: 'barley',
+      }),
+      scoped,
+      { mode: 'update', entryUuid }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+});
+
+test('re-parenting an entry requires write scope on both plots', async () => {
+  const db = new TestDb('scoped-entry-reparent');
+  seedIdentity(db);
+  const sourcePlotUuid = '22220000-0000-4000-8000-000000000001';
+  const destinationPlotUuid = '22220000-0000-4000-8000-000000000002';
+  const entryUuid = '22220000-0000-4000-8000-000000000003';
+  const owner = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertPlot(db, plotInput(sourcePlotUuid, 'source-plot'), owner);
+  await journal.upsertPlot(db, plotInput(destinationPlotUuid, 'destination-plot'), owner);
+  await journal.saveEntry(
+    db,
+    entryInput(entryUuid, sourcePlotUuid, '2026-07-13T13:00:00', { season_crop: 'barley' }),
+    owner,
+    { mode: 'create' }
+  );
+  const insertAssignment = (assignmentUuid, plotUuid) => db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(assignmentUuid, OWNER_UUID, plotUuid, GATEWAY_EUI, '2026-07-13T00:00:00.000Z');
+  insertAssignment('22220000-0000-4000-8000-000000000004', sourcePlotUuid);
+  insertAssignment('22220000-0000-4000-8000-000000000005', destinationPlotUuid);
+  const scoped = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+
+  const updated = await journal.saveEntry(
+    db,
+    entryInput(entryUuid, destinationPlotUuid, '2026-07-13T13:00:00', {
+      base_sync_version: 1,
+      season_crop: 'barley',
+    }),
+    scoped,
+    { mode: 'update', entryUuid }
+  );
+  assert.equal(updated.entry_uuid, entryUuid);
+
+  db.prepare(
+    "UPDATE user_plot_assignments SET deleted_at='2026-07-13T14:00:00.000Z' " +
+      'WHERE user_uuid=? AND plot_uuid=?'
+  ).run(OWNER_UUID, destinationPlotUuid);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(entryUuid, destinationPlotUuid, '2026-07-13T13:00:00', {
+        base_sync_version: 2,
+        season_crop: 'barley',
+      }),
+      scoped,
+      { mode: 'update', entryUuid }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+});
+
 test('scoped plot creation requires zone scope and keeps the creator as owner', async () => {
   const db = new TestDb('scoped-plot-create');
   seedIdentity(db);
