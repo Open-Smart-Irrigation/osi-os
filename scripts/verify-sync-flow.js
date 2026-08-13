@@ -3490,6 +3490,7 @@ expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns
 // Spec section 10: the whole P9 zone seam is scoped-mode only, so a flag-off
 // gateway ignores a cloud-supplied zoneUuid and emits the pre-seam ACK shape.
 expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
+expectIncludesById('cs-reg-cloud-fn', "code: 'ALREADY_CLAIMED'", 'refuses an EUI another account already claimed before touching ChirpStack');
 expectIncludesById('cs-reg-cloud-fn', "var successExtras = { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true };", 'preserves the pre-seam success ACK shape as the flag-off baseline');
 expectIncludesById('cs-reg-cloud-fn', 'successExtras.zoneAssignedId = zoneId;', 'reports the P9 zone-resolution outcome only in scoped mode');
 expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', successExtras), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');

@@ -61,6 +61,14 @@ function makeCallbackDb(raw) {
         if (cb) cb(null, rows);
       } catch (e) { if (cb) cb(e); }
     },
+    get(sql, params, cb) {
+      if (typeof params === 'function') { cb = params; params = undefined; }
+      try {
+        const stmt = raw.prepare(sql);
+        const row = params === undefined ? stmt.get() : stmt.get(...params);
+        if (cb) cb(null, row);
+      } catch (e) { if (cb) cb(e); }
+    },
     // Deliberately a no-op: the node under test calls close() when it's done, but the test
     // wants to keep querying the same connection afterward to assert what actually landed.
     close(cb) { if (cb) cb(); },
@@ -724,6 +732,7 @@ function makeThrowingOsiDbStub(raw, sqlPattern) {
           if (sqlPattern.test(sql)) { cb(new Error('injected valve_settings lookup failure')); return; }
           real.all(sql, params, cb);
         },
+        get: real.get,
         close: real.close,
       };
     },
@@ -737,7 +746,14 @@ test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a stored-GEN2 valve provi
   // sync contract): the stored valve_settings row is the ONLY signal this path has. A mutant
   // that defeats the SELECT (review MAJOR-1's "cloudsel" mutant) makes this resolve GEN1 and
   // actively re-point a real Gen2 valve's ChirpStack device back onto the Gen1 profile.
-  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
+  // The pre-seeded devices row is soft-deleted: the REGISTER_DEVICE claim fence (10a097e92)
+  // short-circuits to an idempotent no-reprovision ACK whenever a *live* devices row already
+  // exists for this EUI, so a live row here would make this test assert dead code instead of
+  // the GEN2 stickiness it actually pins. A soft-deleted row is what "sticky across
+  // re-registration" means in practice: devices are never hard-deleted (soft-delete via
+  // deleted_at only), and valve_settings.device_eui's FK is ON DELETE CASCADE, not
+  // ON UPDATE CASCADE, so the sticky row survives the soft-delete untouched.
+  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
   await db.run("INSERT INTO valve_settings (device_eui, strega_generation, updated_at) VALUES (?, 'GEN2', datetime('now'))", [eui]);
   const payload = {
     commandType: 'REGISTER_DEVICE',
@@ -788,7 +804,10 @@ test('cs-reg-cloud-fn (execution, review §5 residual): a throwing valve_setting
   // demoting upsert writes the SAME value the guarded upsert would have written -- no
   // observable difference. Only a lookup failure makes `stregaGeneration` diverge from what's
   // actually stored, which is exactly what distinguishes a guarded write from a demoting one.
-  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
+  // The pre-seeded devices row is soft-deleted, for the same reason as the stored-GEN2 test
+  // above: the REGISTER_DEVICE claim fence (10a097e92) short-circuits to an idempotent
+  // no-reprovision ACK whenever a *live* devices row already exists for this EUI.
+  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
   await db.run("INSERT INTO valve_settings (device_eui, strega_generation, updated_at) VALUES (?, 'GEN2', datetime('now'))", [eui]);
   const payload = {
     commandType: 'REGISTER_DEVICE',
