@@ -1889,6 +1889,9 @@ The 1,601-test sweep recorded in `69fc0667` cannot be verified from its artifact
 
 ## Task D2 — deploy-day gate: mirrors must populate
 
+There is no dedicated AgroLink lockstep deploy runbook under `docs/operations/`; this
+task owns the X7 deploy-day un-staging step and its two pinned parity checks.
+
 `gateway_user_mirrors` has zero rows on the live cloud and `last_acknowledged_at` is NULL on both linked accounts. `GatewayScopeService:70-73` throws `403 "Gateway membership has not been confirmed by the edge"` without a mirror row, surfaced to the user as `"Gateway membership is required"` (`GatewayReadAccessService:47`). Every widened read is that path. Deploy without this gate and the dashboard is dead for everyone.
 
 The edge machinery exists but has never emitted. `scoped_access_emit` is a one-row SQLite table seeded `enabled = 0` by `0033__scoped_access_schema.sql:44-50`, read only by the seven trigger `WHEN` clauses, and **written by nothing in runtime code** — no node, no API, no flag. Flipping it is a manual `UPDATE` on the gateway. That is why no USER event has ever been produced.

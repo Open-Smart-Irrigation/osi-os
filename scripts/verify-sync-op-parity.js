@@ -24,7 +24,17 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
 const EXACT_EDGE_DEFERRED_OPS = [];
-const EXACT_CLOUD_DEFERRED_OPS = [];
+// Temporary rollout capability matrix. After the cloud deploy answers, Phase 4
+// D2 re-runs both pinned parity checks and removes these seven staged ops.
+const EXACT_CLOUD_DEFERRED_OPS = [
+  'USER_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+  'WEATHER_STATION_ZONES_REPLACED',
+];
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',
@@ -1464,7 +1474,14 @@ function checkSyncOpParity(options = {}) {
   }
 
   const expectedServerOps = expectedSchemaOps.filter((op) => !staging.cloudDeferred.includes(op));
-  const serverDiffLines = formatDiff('server', 'union', diffSets(expectedServerOps, serverResult.ops));
+  // A paired branch may already implement an operation that the deployed cloud
+  // still lacks. Staging removes that operation from the required server set;
+  // keep requiring every non-staged op, while allowing staged server handlers
+  // as forward-compatible extras. Unknown server-only operations remain errors.
+  const serverDiffLines = formatDiff('server', 'union', {
+    missing: expectedServerOps.filter((op) => !serverResult.ops.includes(op)),
+    extra: serverResult.ops.filter((op) => !expectedSchemaOps.includes(op)),
+  });
   if (serverDiffLines.length) {
     ok = false;
     lines.push(...serverDiffLines);
@@ -1530,6 +1547,7 @@ module.exports = {
   extractFlowOps,
   extractSchemaOps,
   extractServerOps,
+  EXACT_CLOUD_DEFERRED_OPS,
   extractSqlOps,
   payloadHasTopLevelContractVersion,
   resolveDefaultServerSource,

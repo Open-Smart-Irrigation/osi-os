@@ -11,6 +11,7 @@ const {
   checkSyncOpParity,
   extractFlowOps,
   extractServerOps,
+  EXACT_CLOUD_DEFERRED_OPS,
   resolveDefaultServerSource,
   worktreeMatchedServerSourceCandidates,
   resolveServerSourceWithProvenance,
@@ -141,6 +142,16 @@ const SCOPED_ACCESS_EVENT_OPS = [
   'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
 
+const CLOUD_DEFERRED_EVENT_OPS = [
+  'USER_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+  'WEATHER_STATION_ZONES_REPLACED',
+];
+
 function exactRolloutStaging() {
   return {
     version: 1,
@@ -157,7 +168,7 @@ function exactRolloutStaging() {
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
       edgeDeferred: [],
-      cloudDeferred: [],
+      cloudDeferred: [...CLOUD_DEFERRED_EVENT_OPS],
     },
   };
 }
@@ -568,6 +579,21 @@ test('parity accepts active journal and scoped-access operations', () => {
   const result = checkSyncOpParity(createStagedParityFixture());
 
   assert.equal(result.ok, true, result.message);
+});
+
+test('rollout staging pins the seven event ops missing from the deployed cloud', () => {
+  const golden = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'docs/contracts/sync-schema/sync-contract-golden.json'),
+    'utf8'
+  ));
+  const staging = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json'),
+    'utf8'
+  ));
+
+  assert.deepEqual(EXACT_CLOUD_DEFERRED_OPS, CLOUD_DEFERRED_EVENT_OPS);
+  assert.deepEqual(golden.eventOperations.staged, CLOUD_DEFERRED_EVENT_OPS);
+  assert.deepEqual(staging.eventOps.cloudDeferred, CLOUD_DEFERRED_EVENT_OPS);
 });
 
 test('parity rejects arbitrary additions to the staged operation exemptions', () => {
