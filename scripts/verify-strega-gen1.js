@@ -31,6 +31,18 @@ const flowPath = path.resolve(
   'share',
   'flows.json',
 );
+const nodeRedRoot = path.resolve(
+  __dirname,
+  '..',
+  'conf',
+  'full_raspberrypi_bcm27xx_bcm2712',
+  'files',
+  'usr',
+  'share',
+  'node-red',
+);
+process.env.OSI_LIB_BASE = process.env.OSI_LIB_BASE || nodeRedRoot;
+const osiLib = require(path.join(nodeRedRoot, 'osi-lib'));
 
 function loadJson(jsonPath) {
   return JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
@@ -70,7 +82,7 @@ function getFunctionNode(flows, name) {
   return node;
 }
 
-function runFunctionNode(node, payload, secret, deviceEui) {
+async function runFunctionNode(node, payload, secret, deviceEui) {
   const msg = {
     req: {
       headers: {
@@ -90,6 +102,10 @@ function runFunctionNode(node, payload, secret, deviceEui) {
     Buffer,
     console,
     crypto,
+    osiLib,
+    osiDb: {
+      Database: class {},
+    },
     msg,
     env: {
       get(name) {
@@ -105,9 +121,10 @@ function runFunctionNode(node, payload, secret, deviceEui) {
     },
   };
   const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.vm.js`);
-  assert.ok(Array.isArray(result), `${node.name} must return a Node-RED output array`);
-  assert.ok(result[0], `${node.name} should emit the parsed command on output 1`);
-  return result[0];
+  const resolved = result && typeof result.then === 'function' ? await result : result;
+  assert.ok(Array.isArray(resolved), `${node.name} must return a Node-RED output array`);
+  assert.ok(resolved[0], `${node.name} should emit the parsed command on output 1`);
+  return resolved[0];
 }
 
 function verifyDecodeContract(decodeUplink, fixture) {
@@ -133,6 +150,7 @@ async function verifyStregaNormalizationContract(flows, fixture, object, label, 
     Buffer,
     console,
     crypto,
+    osiLib,
     msg: {
       payload: {
         deviceInfo: {
@@ -186,7 +204,7 @@ async function verifyStregaNormalizationContract(flows, fixture, object, label, 
   console.log(`OK ${label} STREGA normalization fixture`);
 }
 
-function verifyCommandMatrix(flows, fixture) {
+async function verifyCommandMatrix(flows, fixture) {
   const secret = 'strega-gen1-test-secret';
   const cases = [
     {
@@ -223,7 +241,7 @@ function verifyCommandMatrix(flows, fixture) {
 
   for (const testCase of cases) {
     const node = getFunctionNode(flows, testCase.name);
-    const parsed = runFunctionNode(node, testCase.payload, secret, fixture.deviceEui);
+    const parsed = await runFunctionNode(node, testCase.payload, secret, fixture.deviceEui);
     assert.equal(parsed._strega_payload_hex, testCase.expectedHex, `${testCase.name} should build ${testCase.expectedHex}`);
     assert.equal(parsed._strega_fport, testCase.expectedPort, `${testCase.name} should target fPort ${testCase.expectedPort}`);
     console.log(`OK ${testCase.name} builds ${testCase.expectedHex} on fPort ${testCase.expectedPort}`);
@@ -268,7 +286,7 @@ async function main() {
       currentState: 'OPEN',
     },
   );
-  verifyCommandMatrix(flows, fixture);
+  await verifyCommandMatrix(flows, fixture);
   console.log('OK Strega Gen1 smoke checks passed');
 }
 
