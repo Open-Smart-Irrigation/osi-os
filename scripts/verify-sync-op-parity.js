@@ -7,6 +7,8 @@ const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
+const SERVER_RELATIVE_GOLDEN = path.join('backend', 'src', 'test', 'resources', 'sync-contract', 'sync-contract-golden.json');
+const EDGE_RELATIVE_GOLDEN = path.join('docs', 'contracts', 'sync-schema', 'sync-contract-golden.json');
 const STAGING_MANIFEST_RELATIVE = 'scripts/fixtures/sync-contract-staging.json';
 const JOURNAL_MODULE_DIRECTORY =
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal';
@@ -166,6 +168,43 @@ function resolveServerSourceWithProvenance(root = REPO_ROOT) {
     return { source: matched, matchedWorktree: true };
   }
   return { source: resolveDefaultServerSource(root), matchedWorktree: false };
+}
+
+function fallbackServerGoldenCandidates(root = REPO_ROOT) {
+  const worktreeName = path.basename(root);
+  return uniquePaths([
+    path.resolve(root, '..', '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_GOLDEN),
+    path.resolve(root, '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_GOLDEN),
+  ]);
+}
+
+function resolveServerGolden(root = REPO_ROOT) {
+  const explicit = process.env.OSI_SERVER_SYNC_CONTRACT_GOLDEN;
+  if (explicit) return path.isAbsolute(explicit) ? explicit : path.resolve(root, explicit);
+  return fallbackServerGoldenCandidates(root).find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function compareSyncContractGolden(root = REPO_ROOT, serverGoldenPath) {
+  const edgeGoldenPath = path.join(root, EDGE_RELATIVE_GOLDEN);
+  const serverPath = serverGoldenPath || resolveServerGolden(root);
+  if (!fs.existsSync(edgeGoldenPath)) {
+    return { ok: false, message: `edge sync-contract-golden.json is missing at ${edgeGoldenPath}` };
+  }
+  if (!serverPath || !fs.existsSync(serverPath)) {
+    return {
+      ok: true,
+      warning: 'cloud sync-contract-golden.json unavailable; optional byte comparison skipped',
+    };
+  }
+  const edgeBytes = fs.readFileSync(edgeGoldenPath);
+  const serverBytes = fs.readFileSync(serverPath);
+  if (!edgeBytes.equals(serverBytes)) {
+    return {
+      ok: false,
+      message: `edge/cloud sync-contract-golden.json differs (${edgeGoldenPath} vs ${serverPath})`,
+    };
+  }
+  return { ok: true, message: `sync-contract-golden.json byte-identical with ${serverPath}` };
 }
 
 function skipWhitespace(source, index) {
@@ -1316,6 +1355,7 @@ function checkSyncOpParity(options = {}) {
   const root = path.resolve(options.root || REPO_ROOT);
   const schemaPath = options.schemaPath || path.join(root, 'docs/contracts/sync-schema/events.schema.json');
   const serverSource = options.serverSource || resolveDefaultServerSource(root);
+  const serverGoldenPath = options.serverGoldenPath;
   const flowSources = options.flowSources === undefined ? FLOW_SOURCES : options.flowSources;
   const sqlSources = options.sqlSources === undefined ? SQL_SOURCES : options.sqlSources;
   const databaseSources = options.databaseSources === undefined ? DATABASE_SOURCES : options.databaseSources;
@@ -1395,6 +1435,16 @@ function checkSyncOpParity(options = {}) {
   const sources = [...flowResults, ...sqlResults, ...databaseResults, ...moduleResults, schemaResult, serverResult];
   const lines = [];
   let ok = true;
+
+  const goldenCheck = compareSyncContractGolden(root, serverGoldenPath);
+  if (!goldenCheck.ok) {
+    ok = false;
+    lines.push(`  ERROR golden: ${goldenCheck.message}`);
+  } else if (goldenCheck.warning) {
+    lines.push(`  WARNING golden: ${goldenCheck.warning}`);
+  } else {
+    lines.push(`  ${goldenCheck.message}`);
+  }
 
   for (const error of stagingErrors) {
     ok = false;
@@ -1553,5 +1603,7 @@ module.exports = {
   resolveDefaultServerSource,
   worktreeMatchedServerSourceCandidates,
   resolveServerSourceWithProvenance,
+  compareSyncContractGolden,
+  resolveServerGolden,
   verifyV2ContractFiles,
 };
