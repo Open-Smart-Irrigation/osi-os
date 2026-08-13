@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.EnvelopeTwdTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:07" hostname="osi-01" time="0.007">
+<testsuite name="org.osi.server.analytics.EnvelopeTwdTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:46" hostname="osi-01" time="0.007">
   <properties/>
-  <testcase name="stepwise_monotonicallyRising_allNewMaxTwdNightZero()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.001"/>
+  <testcase name="stepwise_monotonicallyRising_allNewMaxTwdNightZero()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
   <testcase name="stepwise_twdNeverNegative()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
   <testcase name="linear_singleAnchor_twdLinMatchesStepwise()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.001"/>
   <testcase name="singlePoint_isNewMax_twdNightIsZero()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
@@ -11,10 +11,10 @@
   <testcase name="linear_twoAnchors_interpolatesCorrectly()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
   <testcase name="emptyInput_returnsEmptyList()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
   <testcase name="stepwise_newMaxDay_twdNightIsZero()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
-  <testcase name="stepwise_rollingWindow_stressAndRecoveryDetectable()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.001"/>
+  <testcase name="stepwise_rollingWindow_stressAndRecoveryDetectable()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
   <testcase name="stepwise_shrinkageDay_correctTwd()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
-  <testcase name="stepwise_windowExcludesOldPeak_envelopeIsWindowLocal()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
-  <testcase name="linear_afterFinalAnchor_isFlat()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.001"/>
+  <testcase name="stepwise_windowExcludesOldPeak_envelopeIsWindowLocal()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.001"/>
+  <testcase name="linear_afterFinalAnchor_isFlat()" classname="org.osi.server.analytics.EnvelopeTwdTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

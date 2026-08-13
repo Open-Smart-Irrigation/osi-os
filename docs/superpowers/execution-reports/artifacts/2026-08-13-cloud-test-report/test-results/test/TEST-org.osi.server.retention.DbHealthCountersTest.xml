@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.retention.DbHealthCountersTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:50" hostname="osi-01" time="0.004">
+<testsuite name="org.osi.server.retention.DbHealthCountersTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:36" hostname="osi-01" time="0.005">
   <properties/>
-  <testcase name="countRejectsUnexpectedSqlFragments()" classname="org.osi.server.retention.DbHealthCountersTest" time="0.0"/>
+  <testcase name="countRejectsUnexpectedSqlFragments()" classname="org.osi.server.retention.DbHealthCountersTest" time="0.001"/>
   <testcase name="retentionIndexMigrationUsesExistingSensorDataColumns()" classname="org.osi.server.retention.DbHealthCountersTest" time="0.001"/>
   <testcase name="snapshotCountsSensorDataRowsUsingTheServerTelemetryTable()" classname="org.osi.server.retention.DbHealthCountersTest" time="0.0"/>
-  <testcase name="snapshotKeepsFailureSentinelWhenACounterQueryFails()" classname="org.osi.server.retention.DbHealthCountersTest" time="0.003"/>
-  <system-out><![CDATA[2026-08-13T11:26:50.185+02:00  WARN 2682197 --- [    Test worker] o.osi.server.retention.DbHealthCounters  : Failed to query DB health counter 'sensor_data_rows' from 'sensor_data'
+  <testcase name="snapshotKeepsFailureSentinelWhenACounterQueryFails()" classname="org.osi.server.retention.DbHealthCountersTest" time="0.002"/>
+  <system-out><![CDATA[2026-08-13T16:46:36.233+02:00  WARN 3273021 --- [    Test worker] o.osi.server.retention.DbHealthCounters  : Failed to query DB health counter 'sensor_data_rows' from 'sensor_data'
 
 java.lang.RuntimeException: database unavailable
 	at org.springframework.jdbc.core.JdbcTemplate.queryForObject(JdbcTemplate.java:526) ~[spring-jdbc-6.2.3.jar:6.2.3]

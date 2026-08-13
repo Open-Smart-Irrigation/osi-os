@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.199s</div>
+<div class="counter">0.251s</div>
 <p>duration</p>
 </div>
 </td>
@@ -79,22 +79,22 @@
 </thead>
 <tr>
 <td class="success">getForecast_aggregatesPmInputsFromLocalForecastCsvAssets()</td>
-<td class="success">0.006s</td>
+<td class="success">0.009s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">getForecast_producesSaneFao56Et0FromConvertedPmInputs()</td>
-<td class="success">0.022s</td>
+<td class="success">0.024s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">getForecast_selectsNewestStacFeatureByDatetime()</td>
-<td class="success">0.013s</td>
+<td class="success">0.014s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">outsideSwissCoverage_returnsEmptyWithoutNetwork()</td>
-<td class="success">0.154s</td>
+<td class="success">0.200s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -112,78 +112,78 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:26:07.420+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/ch.meteoschweiz.ogd-local-forecasting/ogd-local-forecasting_meta_point.csv
-2026-08-13T11:26:07.421+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.421+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.421+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.423+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-local-forecasting/items?limit=50
-2026-08-13T11:26:07.425+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.425+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.425+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.Object]
-2026-08-13T11:26:07.427+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/new-rain.csv
-2026-08-13T11:26:07.427+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.427+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.427+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.428+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/new-temp.csv
-2026-08-13T11:26:07.428+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.428+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.428+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.587+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/ch.meteoschweiz.ogd-local-forecasting/ogd-local-forecasting_meta_point.csv
-2026-08-13T11:26:07.587+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.587+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.588+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.588+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-local-forecasting/items?limit=50
-2026-08-13T11:26:07.588+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.Object]
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rain.csv
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/temp.csv
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.590+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.590+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rh.csv
-2026-08-13T11:26:07.590+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.590+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.590+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.590+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/wind.csv
-2026-08-13T11:26:07.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/solar.csv
-2026-08-13T11:26:07.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.606+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/ch.meteoschweiz.ogd-local-forecasting/ogd-local-forecasting_meta_point.csv
-2026-08-13T11:26:07.607+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.607+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.607+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.607+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-local-forecasting/items?limit=50
-2026-08-13T11:26:07.608+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.608+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.608+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.Object]
-2026-08-13T11:26:07.608+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rain.csv
-2026-08-13T11:26:07.608+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.609+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.609+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/temp.csv
-2026-08-13T11:26:07.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.612+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rh.csv
-2026-08-13T11:26:07.612+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.612+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.612+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.613+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/wind.csv
-2026-08-13T11:26:07.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
-2026-08-13T11:26:07.615+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/solar.csv
-2026-08-13T11:26:07.615+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
-2026-08-13T11:26:07.615+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.615+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+<pre>2026-08-13T16:45:46.104+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/ch.meteoschweiz.ogd-local-forecasting/ogd-local-forecasting_meta_point.csv
+2026-08-13T16:45:46.104+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.104+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.105+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.107+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-local-forecasting/items?limit=50
+2026-08-13T16:45:46.109+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.110+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.110+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.Object]
+2026-08-13T16:45:46.111+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/new-rain.csv
+2026-08-13T16:45:46.111+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.112+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.112+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.113+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/new-temp.csv
+2026-08-13T16:45:46.113+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.113+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.113+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.318+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/ch.meteoschweiz.ogd-local-forecasting/ogd-local-forecasting_meta_point.csv
+2026-08-13T16:45:46.318+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.318+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.319+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.319+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-local-forecasting/items?limit=50
+2026-08-13T16:45:46.320+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.320+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.320+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.Object]
+2026-08-13T16:45:46.320+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rain.csv
+2026-08-13T16:45:46.320+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/temp.csv
+2026-08-13T16:45:46.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rh.csv
+2026-08-13T16:45:46.322+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.322+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.322+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.322+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/wind.csv
+2026-08-13T16:45:46.322+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.322+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.322+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.323+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/solar.csv
+2026-08-13T16:45:46.323+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.323+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.323+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.340+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/ch.meteoschweiz.ogd-local-forecasting/ogd-local-forecasting_meta_point.csv
+2026-08-13T16:45:46.341+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.341+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.341+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.341+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-local-forecasting/items?limit=50
+2026-08-13T16:45:46.342+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.342+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.342+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.Object]
+2026-08-13T16:45:46.343+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rain.csv
+2026-08-13T16:45:46.343+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.343+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.343+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.345+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/temp.csv
+2026-08-13T16:45:46.345+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.345+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.345+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.346+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/rh.csv
+2026-08-13T16:45:46.347+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.347+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.347+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.348+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/wind.csv
+2026-08-13T16:45:46.348+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.348+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.348+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
+2026-08-13T16:45:46.349+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://data.example/solar.csv
+2026-08-13T16:45:46.349+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[text/plain, application/json, application/*+json, */*]
+2026-08-13T16:45:46.349+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.349+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [java.lang.String] as &quot;text/plain&quot;
 </pre>
 </span>
 </div>
@@ -195,7 +195,7 @@
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

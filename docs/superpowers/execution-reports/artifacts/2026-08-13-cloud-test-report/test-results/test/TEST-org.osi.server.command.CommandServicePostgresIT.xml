@@ -1,38 +1,38 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.command.CommandServicePostgresIT" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:19" hostname="osi-01" time="0.046">
+<testsuite name="org.osi.server.command.CommandServicePostgresIT" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:59" hostname="osi-01" time="0.08">
   <properties/>
-  <testcase name="legacyServiceExpiresDueRowsAndSelectsFutureRowsInOneTransaction()" classname="org.osi.server.command.CommandServicePostgresIT" time="0.046"/>
-  <system-out><![CDATA[2026-08-13T11:26:13.339+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [CommandServicePostgresIT]: using SpringBootContextLoader
-2026-08-13T11:26:13.340+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [CommandServicePostgresIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
-2026-08-13T11:26:13.344+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [CommandServicePostgresIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
-2026-08-13T11:26:13.361+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.command.CommandServicePostgresIT
-2026-08-13T11:26:13.361+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [CommandServicePostgresIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
-2026-08-13T11:26:13.387+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.images.PullPolicy     : Image pull policy will be performed by: DefaultPullPolicy()
-2026-08-13T11:26:13.389+02:00  INFO 2682197 --- [    Test worker] o.t.utility.ImageNameSubstitutor         : Image name substitution will be performed by: DefaultImageNameSubstitutor (composite of 'ConfigurationFileImageNameSubstitutor' and 'PrefixingImageNameSubstitutor')
-2026-08-13T11:26:13.394+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Testcontainers version: 1.21.4
-2026-08-13T11:26:13.494+02:00  INFO 2682197 --- [    Test worker] o.t.d.DockerClientProviderStrategy       : Loaded org.testcontainers.dockerclient.UnixSocketClientProviderStrategy from ~/.testcontainers.properties, will try it first
-2026-08-13T11:26:13.764+02:00  INFO 2682197 --- [    Test worker] o.t.d.DockerClientProviderStrategy       : Found Docker environment with local Unix socket (unix:///var/run/docker.sock)
-2026-08-13T11:26:13.765+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Docker host IP address is localhost
-2026-08-13T11:26:13.777+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Connected to docker: 
+  <testcase name="legacyServiceExpiresDueRowsAndSelectsFutureRowsInOneTransaction()" classname="org.osi.server.command.CommandServicePostgresIT" time="0.08"/>
+  <system-out><![CDATA[2026-08-13T16:45:52.938+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [CommandServicePostgresIT]: using SpringBootContextLoader
+2026-08-13T16:45:52.940+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [CommandServicePostgresIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T16:45:52.947+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [CommandServicePostgresIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T16:45:52.959+02:00  INFO 3273021 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.command.CommandServicePostgresIT
+2026-08-13T16:45:52.960+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [CommandServicePostgresIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T16:45:52.993+02:00  INFO 3273021 --- [    Test worker] org.testcontainers.images.PullPolicy     : Image pull policy will be performed by: DefaultPullPolicy()
+2026-08-13T16:45:52.995+02:00  INFO 3273021 --- [    Test worker] o.t.utility.ImageNameSubstitutor         : Image name substitution will be performed by: DefaultImageNameSubstitutor (composite of 'ConfigurationFileImageNameSubstitutor' and 'PrefixingImageNameSubstitutor')
+2026-08-13T16:45:53.003+02:00  INFO 3273021 --- [    Test worker] org.testcontainers.DockerClientFactory   : Testcontainers version: 1.21.4
+2026-08-13T16:45:53.140+02:00  INFO 3273021 --- [    Test worker] o.t.d.DockerClientProviderStrategy       : Loaded org.testcontainers.dockerclient.UnixSocketClientProviderStrategy from ~/.testcontainers.properties, will try it first
+2026-08-13T16:45:53.451+02:00  INFO 3273021 --- [    Test worker] o.t.d.DockerClientProviderStrategy       : Found Docker environment with local Unix socket (unix:///var/run/docker.sock)
+2026-08-13T16:45:53.452+02:00  INFO 3273021 --- [    Test worker] org.testcontainers.DockerClientFactory   : Docker host IP address is localhost
+2026-08-13T16:45:53.467+02:00  INFO 3273021 --- [    Test worker] org.testcontainers.DockerClientFactory   : Connected to docker: 
   Server Version: 29.6.1
   API Version: 1.55
   Operating System: CachyOS
   Total Memory: 23379 MB
-2026-08-13T11:26:13.903+02:00  INFO 2682197 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Creating container for image: testcontainers/ryuk:0.12.0
-2026-08-13T11:26:13.907+02:00  INFO 2682197 --- [    Test worker] o.t.utility.RegistryAuthLocator          : Failure when attempting to lookup auth config. Please ignore if you don't have images in an authenticated registry. Details: (dockerImageName: testcontainers/ryuk:0.12.0, configFile: /home/phil/.docker/config.json, configEnv: DOCKER_AUTH_CONFIG). Falling back to docker-java default behaviour. Exception message: Status 404: No config supplied. Checked in order: /home/phil/.docker/config.json (file not found), DOCKER_AUTH_CONFIG (not set)
-2026-08-13T11:26:14.412+02:00  INFO 2682197 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Container testcontainers/ryuk:0.12.0 is starting: c23a1e455eb2482c845735278c55fbafe91b039a97a582a0270cc70e6fdefea6
-2026-08-13T11:26:14.680+02:00  INFO 2682197 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Container testcontainers/ryuk:0.12.0 started in PT0.777237701S
-2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] o.t.utility.RyukResourceReaper           : Ryuk started - will monitor and terminate Testcontainers containers on JVM exit
-2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : Checking the system...
-2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] org.testcontainers.DockerClientFactory   : ✔︎ Docker server version should be at least 1.6.0
-2026-08-13T11:26:14.683+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Creating container for image: postgres:16-alpine
-2026-08-13T11:26:14.853+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Container postgres:16-alpine is starting: 7b976adb73687eca379d07fbdd8f2c42aadc72132b73368795f0c2efaafdca0b
-2026-08-13T11:26:16.780+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Container postgres:16-alpine started in PT2.096774559S
-2026-08-13T11:26:16.781+02:00  INFO 2682197 --- [    Test worker] tc.postgres:16-alpine                    : Container is started (JDBC URL: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF)
-2026-08-13T11:26:16.785+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
-2026-08-13T11:26:16.786+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
-2026-08-13T11:26:16.786+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
-2026-08-13T11:26:16.789+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+2026-08-13T16:45:53.619+02:00  INFO 3273021 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Creating container for image: testcontainers/ryuk:0.12.0
+2026-08-13T16:45:53.624+02:00  INFO 3273021 --- [    Test worker] o.t.utility.RegistryAuthLocator          : Failure when attempting to lookup auth config. Please ignore if you don't have images in an authenticated registry. Details: (dockerImageName: testcontainers/ryuk:0.12.0, configFile: /home/phil/.docker/config.json, configEnv: DOCKER_AUTH_CONFIG). Falling back to docker-java default behaviour. Exception message: Status 404: No config supplied. Checked in order: /home/phil/.docker/config.json (file not found), DOCKER_AUTH_CONFIG (not set)
+2026-08-13T16:45:54.207+02:00  INFO 3273021 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Container testcontainers/ryuk:0.12.0 is starting: 0e0a592f18040b833d9d1a2b244cc8b94a403951a1fbf7063b00371cf6693e3b
+2026-08-13T16:45:54.502+02:00  INFO 3273021 --- [    Test worker] tc.testcontainers/ryuk:0.12.0            : Container testcontainers/ryuk:0.12.0 started in PT0.88286196S
+2026-08-13T16:45:54.505+02:00  INFO 3273021 --- [    Test worker] o.t.utility.RyukResourceReaper           : Ryuk started - will monitor and terminate Testcontainers containers on JVM exit
+2026-08-13T16:45:54.505+02:00  INFO 3273021 --- [    Test worker] org.testcontainers.DockerClientFactory   : Checking the system...
+2026-08-13T16:45:54.506+02:00  INFO 3273021 --- [    Test worker] org.testcontainers.DockerClientFactory   : ✔︎ Docker server version should be at least 1.6.0
+2026-08-13T16:45:54.506+02:00  INFO 3273021 --- [    Test worker] tc.postgres:16-alpine                    : Creating container for image: postgres:16-alpine
+2026-08-13T16:45:54.618+02:00  INFO 3273021 --- [    Test worker] tc.postgres:16-alpine                    : Container postgres:16-alpine is starting: 7ef0adea1610bb79b422f2b3cf429072403e6ca404e7cb9d622a8f2c2c28e8da
+2026-08-13T16:45:56.577+02:00  INFO 3273021 --- [    Test worker] tc.postgres:16-alpine                    : Container postgres:16-alpine started in PT2.071288789S
+2026-08-13T16:45:56.578+02:00  INFO 3273021 --- [    Test worker] tc.postgres:16-alpine                    : Container is started (JDBC URL: jdbc:postgresql://localhost:32832/test?loggerLevel=OFF)
+2026-08-13T16:45:56.585+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T16:45:56.587+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T16:45:56.587+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T16:45:56.591+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
 
   .   ____          _            __ _ _
  /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
@@ -43,103 +43,103 @@
 
  :: Spring Boot ::                (v3.4.3)
 
-2026-08-13T11:26:16.796+02:00  INFO 2682197 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : Starting CommandServicePostgresIT using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
-2026-08-13T11:26:16.796+02:00  INFO 2682197 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : No active profile set, falling back to 1 default profile: "default"
-2026-08-13T11:26:16.796+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication,class org.osi.server.command.CommandServicePostgresIT$CommandServiceConfig
-2026-08-13T11:26:16.908+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
-2026-08-13T11:26:16.909+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
-2026-08-13T11:26:16.955+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 46 ms. Found 55 JPA repository interfaces.
-2026-08-13T11:26:17.347+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
-2026-08-13T11:26:17.475+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
-2026-08-13T11:26:17.514+02:00  INFO 2682197 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF (PostgreSQL 16.14)
-2026-08-13T11:26:17.569+02:00  INFO 2682197 --- [    Test worker] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
-2026-08-13T11:26:17.573+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.037s)
-2026-08-13T11:26:17.585+02:00  INFO 2682197 --- [    Test worker] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" ...
-2026-08-13T11:26:17.629+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema "public": << Empty Schema >>
-2026-08-13T11:26:17.637+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - create users"
-2026-08-13T11:26:17.660+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2 - create devices"
-2026-08-13T11:26:17.674+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "3 - create sensor data"
-2026-08-13T11:26:17.686+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "4 - create device commands"
-2026-08-13T11:26:17.704+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "5 - create irrigation zones"
-2026-08-13T11:26:17.715+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "6 - convert device type to varchar"
-2026-08-13T11:26:17.725+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "7 - add sensor flags"
-2026-08-13T11:26:17.731+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "8 - add dendro analytics"
-2026-08-13T11:26:17.743+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "9 - add irrigation schedules"
-2026-08-13T11:26:17.756+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "10 - dendro v4 analytics"
-2026-08-13T11:26:17.777+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "11 - add zone coordinates"
-2026-08-13T11:26:17.784+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "12 - phase4 polish"
-2026-08-13T11:26:17.792+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "13 - envelope twd v5"
-2026-08-13T11:26:17.800+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "14 - fix low confidence day type"
-2026-08-13T11:26:17.809+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "15 - zone recommendation quality metadata"
-2026-08-13T11:26:17.815+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "16 - zone config fields"
-2026-08-13T11:26:17.823+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "17 - bidirectional sync foundation"
-2026-08-13T11:26:17.846+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "18 - data plane mirror"
-2026-08-13T11:26:17.858+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "19 - super admin role"
-2026-08-13T11:26:17.861+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "20 - zone recommendation json"
-2026-08-13T11:26:17.865+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "21 - strega model column"
-2026-08-13T11:26:17.869+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "22 - gateway locations"
-2026-08-13T11:26:17.876+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "23 - prediction service v1"
-2026-08-13T11:26:17.895+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "24 - add rain flow flags"
-2026-08-13T11:26:17.899+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "25 - zone soil profiles"
-2026-08-13T11:26:17.908+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "26 - zone water config"
-2026-08-13T11:26:17.915+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "27 - device current state tracking"
-2026-08-13T11:26:17.921+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "28 - zone scheduling mode"
-2026-08-13T11:26:17.925+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "29 - backfill zone water config from prediction"
-2026-08-13T11:26:17.930+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "30 - prediction reference runs"
-2026-08-13T11:26:17.944+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "31 - add weather station zones"
-2026-08-13T11:26:17.951+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "32 - rebackfill zone water config"
-2026-08-13T11:26:17.955+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "33 - zone field geometries"
-2026-08-13T11:26:17.965+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "34 - add prediction card enabled"
-2026-08-13T11:26:17.970+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "35 - prediction shadow and comparison"
-2026-08-13T11:26:17.989+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "36 - add kiwi sensor depths"
-2026-08-13T11:26:17.994+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "37 - create linked gateway accounts"
-2026-08-13T11:26:18.002+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "38 - zone sensor anchors"
-2026-08-13T11:26:18.009+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "39 - prediction multi track persistence"
-2026-08-13T11:26:18.012+02:00  INFO 2682197 --- [    Test worker] o.f.c.i.s.DefaultSqlScriptExecutor       : DB: index "uq_zone_prediction_run_comparison_shadow_run" does not exist, skipping
-2026-08-13T11:26:18.016+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "40 - chameleon full mirror"
-2026-08-13T11:26:18.027+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "41 - chameleon data invalid"
-2026-08-13T11:26:18.030+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.010 - sync resource watermarks"
-2026-08-13T11:26:18.036+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.011 - device commands lease columns"
-2026-08-13T11:26:18.041+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.012 - device commands lease columns apply"
-2026-08-13T11:26:18.052+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.030 - retention indexes"
-2026-08-13T11:26:18.060+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.031 - ensure sync inbox event uuid unique"
-2026-08-13T11:26:18.067+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.20.001 - chameleon calibrations"
-2026-08-13T11:26:18.079+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.31.001 - history data visualization rollups"
-2026-08-13T11:26:18.107+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.12.001 - dendro v6 self calibrating"
-2026-08-13T11:26:18.113+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.18.001 - analysis views"
-2026-08-13T11:26:18.121+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.24.001 - canonical channel keys"
-2026-08-13T11:26:18.128+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.28.001 - edge history sync v1"
-2026-08-13T11:26:18.139+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.05.001 - add zone weather source"
-2026-08-13T11:26:18.143+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.05.002 - dendro rdi shadow"
-2026-08-13T11:26:18.153+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.06.001 - agroscope shadow"
-2026-08-13T11:26:18.164+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.08.001 - work requests"
-2026-08-13T11:26:18.178+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.09.001 - work request revised stage0"
-2026-08-13T11:26:18.184+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.09.002 - work request country code varchar"
-2026-08-13T11:26:18.192+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.001 - forge dispatch"
-2026-08-13T11:26:18.199+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.002 - sync dead letter"
-2026-08-13T11:26:18.208+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.003 - sensor data index vacuum"
-2026-08-13T11:26:18.215+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.001 - desired state operations"
-2026-08-13T11:26:18.231+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.002 - journal mirrors"
-2026-08-13T11:26:18.248+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.003 - scoped access mirrors"
-2026-08-13T11:26:18.266+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.004 - scoped access capabilities"
-2026-08-13T11:26:18.270+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.001 - zone desired state capability"
-2026-08-13T11:26:18.274+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.002 - irrigation config parity"
-2026-08-13T11:26:18.282+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.003 - cloud local irrigation calibration"
-2026-08-13T11:26:18.285+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.004 - device parity"
-2026-08-13T11:26:18.290+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.25.001 - durable history batch"
-2026-08-13T11:26:18.301+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.25.002 - installation recovery"
-2026-08-13T11:26:18.325+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.29.001 - recovery receipt binding"
-2026-08-13T11:26:18.329+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.03.001 - gateway installation optimistic lock"
-2026-08-13T11:26:18.333+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.05.001 - journal catalog advertisement"
-2026-08-13T11:26:18.337+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.08.001 - journal v2 authority"
-2026-08-13T11:26:18.392+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.08.002 - journal v2 attachments"
-2026-08-13T11:26:18.415+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.10.001 - journal conflict resolution"
-2026-08-13T11:26:18.422+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Successfully applied 77 migrations to schema "public", now at version v2026.08.10.001 (execution time 00:00.474s)
-2026-08-13T11:26:18.446+02:00  INFO 2682197 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
-2026-08-13T11:26:18.447+02:00  INFO 2682197 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
-2026-08-13T11:26:18.453+02:00  INFO 2682197 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
-2026-08-13T11:26:18.462+02:00  WARN 2682197 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
-2026-08-13T11:26:18.467+02:00  INFO 2682197 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+2026-08-13T16:45:56.599+02:00  INFO 3273021 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : Starting CommandServicePostgresIT using Java 17.0.19 with PID 3273021 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T16:45:56.599+02:00  INFO 3273021 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : No active profile set, falling back to 1 default profile: "default"
+2026-08-13T16:45:56.599+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication,class org.osi.server.command.CommandServicePostgresIT$CommandServiceConfig
+2026-08-13T16:45:56.858+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T16:45:56.861+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T16:45:56.916+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 54 ms. Found 55 JPA repository interfaces.
+2026-08-13T16:45:57.327+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-08-13T16:45:57.524+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-08-13T16:45:57.576+02:00  INFO 3273021 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32832/test?loggerLevel=OFF (PostgreSQL 16.14)
+2026-08-13T16:45:57.649+02:00  INFO 3273021 --- [    Test worker] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
+2026-08-13T16:45:57.655+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.052s)
+2026-08-13T16:45:57.674+02:00  INFO 3273021 --- [    Test worker] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" ...
+2026-08-13T16:45:57.727+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema "public": << Empty Schema >>
+2026-08-13T16:45:57.739+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - create users"
+2026-08-13T16:45:57.771+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2 - create devices"
+2026-08-13T16:45:57.788+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "3 - create sensor data"
+2026-08-13T16:45:57.803+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "4 - create device commands"
+2026-08-13T16:45:57.821+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "5 - create irrigation zones"
+2026-08-13T16:45:57.840+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "6 - convert device type to varchar"
+2026-08-13T16:45:57.858+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "7 - add sensor flags"
+2026-08-13T16:45:57.868+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "8 - add dendro analytics"
+2026-08-13T16:45:57.889+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "9 - add irrigation schedules"
+2026-08-13T16:45:57.909+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "10 - dendro v4 analytics"
+2026-08-13T16:45:57.939+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "11 - add zone coordinates"
+2026-08-13T16:45:57.948+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "12 - phase4 polish"
+2026-08-13T16:45:57.960+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "13 - envelope twd v5"
+2026-08-13T16:45:57.973+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "14 - fix low confidence day type"
+2026-08-13T16:45:57.986+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "15 - zone recommendation quality metadata"
+2026-08-13T16:45:57.997+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "16 - zone config fields"
+2026-08-13T16:45:58.011+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "17 - bidirectional sync foundation"
+2026-08-13T16:45:58.041+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "18 - data plane mirror"
+2026-08-13T16:45:58.058+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "19 - super admin role"
+2026-08-13T16:45:58.065+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "20 - zone recommendation json"
+2026-08-13T16:45:58.073+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "21 - strega model column"
+2026-08-13T16:45:58.080+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "22 - gateway locations"
+2026-08-13T16:45:58.090+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "23 - prediction service v1"
+2026-08-13T16:45:58.112+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "24 - add rain flow flags"
+2026-08-13T16:45:58.122+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "25 - zone soil profiles"
+2026-08-13T16:45:58.135+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "26 - zone water config"
+2026-08-13T16:45:58.144+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "27 - device current state tracking"
+2026-08-13T16:45:58.155+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "28 - zone scheduling mode"
+2026-08-13T16:45:58.163+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "29 - backfill zone water config from prediction"
+2026-08-13T16:45:58.172+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "30 - prediction reference runs"
+2026-08-13T16:45:58.189+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "31 - add weather station zones"
+2026-08-13T16:45:58.202+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "32 - rebackfill zone water config"
+2026-08-13T16:45:58.207+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "33 - zone field geometries"
+2026-08-13T16:45:58.220+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "34 - add prediction card enabled"
+2026-08-13T16:45:58.225+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "35 - prediction shadow and comparison"
+2026-08-13T16:45:58.252+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "36 - add kiwi sensor depths"
+2026-08-13T16:45:58.258+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "37 - create linked gateway accounts"
+2026-08-13T16:45:58.269+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "38 - zone sensor anchors"
+2026-08-13T16:45:58.278+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "39 - prediction multi track persistence"
+2026-08-13T16:45:58.283+02:00  INFO 3273021 --- [    Test worker] o.f.c.i.s.DefaultSqlScriptExecutor       : DB: index "uq_zone_prediction_run_comparison_shadow_run" does not exist, skipping
+2026-08-13T16:45:58.289+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "40 - chameleon full mirror"
+2026-08-13T16:45:58.303+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "41 - chameleon data invalid"
+2026-08-13T16:45:58.308+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.010 - sync resource watermarks"
+2026-08-13T16:45:58.319+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.011 - device commands lease columns"
+2026-08-13T16:45:58.326+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.012 - device commands lease columns apply"
+2026-08-13T16:45:58.340+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.030 - retention indexes"
+2026-08-13T16:45:58.353+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.16.031 - ensure sync inbox event uuid unique"
+2026-08-13T16:45:58.361+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.20.001 - chameleon calibrations"
+2026-08-13T16:45:58.378+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.05.31.001 - history data visualization rollups"
+2026-08-13T16:45:58.411+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.12.001 - dendro v6 self calibrating"
+2026-08-13T16:45:58.418+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.18.001 - analysis views"
+2026-08-13T16:45:58.427+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.24.001 - canonical channel keys"
+2026-08-13T16:45:58.434+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.06.28.001 - edge history sync v1"
+2026-08-13T16:45:58.447+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.05.001 - add zone weather source"
+2026-08-13T16:45:58.453+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.05.002 - dendro rdi shadow"
+2026-08-13T16:45:58.466+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.06.001 - agroscope shadow"
+2026-08-13T16:45:58.481+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.08.001 - work requests"
+2026-08-13T16:45:58.500+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.09.001 - work request revised stage0"
+2026-08-13T16:45:58.508+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.09.002 - work request country code varchar"
+2026-08-13T16:45:58.522+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.001 - forge dispatch"
+2026-08-13T16:45:58.531+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.002 - sync dead letter"
+2026-08-13T16:45:58.542+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.10.003 - sensor data index vacuum"
+2026-08-13T16:45:58.556+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.001 - desired state operations"
+2026-08-13T16:45:58.579+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.002 - journal mirrors"
+2026-08-13T16:45:58.604+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.003 - scoped access mirrors"
+2026-08-13T16:45:58.625+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.23.004 - scoped access capabilities"
+2026-08-13T16:45:58.632+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.001 - zone desired state capability"
+2026-08-13T16:45:58.639+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.002 - irrigation config parity"
+2026-08-13T16:45:58.651+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.003 - cloud local irrigation calibration"
+2026-08-13T16:45:58.656+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.24.004 - device parity"
+2026-08-13T16:45:58.663+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.25.001 - durable history batch"
+2026-08-13T16:45:58.677+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.25.002 - installation recovery"
+2026-08-13T16:45:58.703+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.07.29.001 - recovery receipt binding"
+2026-08-13T16:45:58.708+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.03.001 - gateway installation optimistic lock"
+2026-08-13T16:45:58.713+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.05.001 - journal catalog advertisement"
+2026-08-13T16:45:58.720+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.08.001 - journal v2 authority"
+2026-08-13T16:45:58.783+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.08.002 - journal v2 attachments"
+2026-08-13T16:45:58.809+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2026.08.10.001 - journal conflict resolution"
+2026-08-13T16:45:58.820+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Successfully applied 77 migrations to schema "public", now at version v2026.08.10.001 (execution time 00:00.635s)
+2026-08-13T16:45:58.861+02:00  INFO 3273021 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T16:45:58.864+02:00  INFO 3273021 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T16:45:58.876+02:00  INFO 3273021 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T16:45:58.893+02:00  WARN 3273021 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T16:45:58.903+02:00  INFO 3273021 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
 	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
 	Database driver: undefined/unknown
 	Database version: 16.14
@@ -147,11 +147,11 @@
 	Isolation level: undefined/unknown
 	Minimum pool size: undefined/unknown
 	Maximum pool size: undefined/unknown
-2026-08-13T11:26:18.573+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:18.573+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:18.921+02:00  INFO 2682197 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
-2026-08-13T11:26:18.922+02:00  INFO 2682197 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
-2026-08-13T11:26:19.276+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+2026-08-13T16:45:59.059+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:45:59.059+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:45:59.526+02:00  INFO 3273021 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T16:45:59.526+02:00  INFO 3273021 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T16:45:59.966+02:00 DEBUG 3273021 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
 
 
 ============================
@@ -439,14 +439,14 @@ Unconditional classes:
 
 
 
-2026-08-13T11:26:19.277+02:00  INFO 2682197 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : Started CommandServicePostgresIT in 2.495 seconds (process running for 26.731)
-2026-08-13T11:26:19.282+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.282+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, name, type)
+2026-08-13T16:45:59.968+02:00  INFO 3273021 --- [    Test worker] o.o.s.command.CommandServicePostgresIT   : Started CommandServicePostgresIT in 3.389 seconds (process running for 31.023)
+2026-08-13T16:45:59.979+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:45:59.980+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, name, type)
 VALUES (?, 'legacy-expiry-it', 'GATEWAY')
 RETURNING id
 ]
-2026-08-13T11:26:19.285+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.285+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:45:59.986+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:45:59.987+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -454,8 +454,8 @@ RETURNING id
     expires_at
 ) VALUES (?, ?, 'PENDING', ?, ?)
 ]
-2026-08-13T11:26:19.288+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.288+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:45:59.990+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:45:59.990+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -463,7 +463,7 @@ RETURNING id
     expires_at
 ) VALUES (?, ?, 'PENDING', ?, ?)
 ]
-2026-08-13T11:26:19.306+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : UPDATE device_commands c
+2026-08-13T16:46:00.024+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : UPDATE device_commands c
    SET status = 'EXPIRED',
        last_error = 'effect_expired',
        lease_expires_at = NULL,
@@ -495,10 +495,10 @@ Hibernate: UPDATE device_commands c
    AND c.expires_at IS NOT NULL
    AND c.expires_at <= ?
 
-2026-08-13T11:26:19.313+02:00 DEBUG 2682197 --- [    Test worker] org.hibernate.SQL                        : select dc1_0.id,dc1_0.ack_detail,dc1_0.ack_payload_json,dc1_0.ack_received_at,dc1_0.ack_result,dc1_0.ack_status,dc1_0.acknowledged_at,dc1_0.aggregate_key,dc1_0.aggregate_type,dc1_0.applied_sync_version,dc1_0.attempt_count,dc1_0.cancel_reason,dc1_0.command_type,dc1_0.created_at,dc1_0.created_by,dc1_0.device_id,dc1_0.effect_key,dc1_0.error_message,dc1_0.event_uuid,dc1_0.executed_at,dc1_0.expires_at,dc1_0.last_error,dc1_0.lease_expires_at,dc1_0.lease_granted_at,dc1_0.leased_to_gateway,dc1_0.payload_json,dc1_0.sent_at,dc1_0.status from device_commands dc1_0 left join devices d1_0 on d1_0.id=dc1_0.device_id where d1_0.device_eui=? and dc1_0.status in (?,?) order by dc1_0.created_at
+2026-08-13T16:46:00.034+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select dc1_0.id,dc1_0.ack_detail,dc1_0.ack_payload_json,dc1_0.ack_received_at,dc1_0.ack_result,dc1_0.ack_status,dc1_0.acknowledged_at,dc1_0.aggregate_key,dc1_0.aggregate_type,dc1_0.applied_sync_version,dc1_0.attempt_count,dc1_0.cancel_reason,dc1_0.command_type,dc1_0.created_at,dc1_0.created_by,dc1_0.device_id,dc1_0.effect_key,dc1_0.error_message,dc1_0.event_uuid,dc1_0.executed_at,dc1_0.expires_at,dc1_0.last_error,dc1_0.lease_expires_at,dc1_0.lease_granted_at,dc1_0.leased_to_gateway,dc1_0.payload_json,dc1_0.sent_at,dc1_0.status from device_commands dc1_0 left join devices d1_0 on d1_0.id=dc1_0.device_id where d1_0.device_eui=? and dc1_0.status in (?,?) order by dc1_0.created_at
 Hibernate: select dc1_0.id,dc1_0.ack_detail,dc1_0.ack_payload_json,dc1_0.ack_received_at,dc1_0.ack_result,dc1_0.ack_status,dc1_0.acknowledged_at,dc1_0.aggregate_key,dc1_0.aggregate_type,dc1_0.applied_sync_version,dc1_0.attempt_count,dc1_0.cancel_reason,dc1_0.command_type,dc1_0.created_at,dc1_0.created_by,dc1_0.device_id,dc1_0.effect_key,dc1_0.error_message,dc1_0.event_uuid,dc1_0.executed_at,dc1_0.expires_at,dc1_0.last_error,dc1_0.lease_expires_at,dc1_0.lease_granted_at,dc1_0.leased_to_gateway,dc1_0.payload_json,dc1_0.sent_at,dc1_0.status from device_commands dc1_0 left join devices d1_0 on d1_0.id=dc1_0.device_id where d1_0.device_eui=? and dc1_0.status in (?,?) order by dc1_0.created_at
-2026-08-13T11:26:19.322+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.322+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT status::text
+2026-08-13T16:46:00.044+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.044+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT status::text
   FROM device_commands
  WHERE device_id = ?
    AND command_type = 'SET_STREGA_TIMED_ACTION'

@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.device.DeviceMutationServiceAssignScopeTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:22" hostname="osi-01" time="0.175">
+<testsuite name="org.osi.server.device.DeviceMutationServiceAssignScopeTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:03" hostname="osi-01" time="0.222">
   <properties/>
-  <testcase name="alreadyAssignedDeviceStillChecksItsCurrentZone()" classname="org.osi.server.device.DeviceMutationServiceAssignScopeTest" time="0.171"/>
+  <testcase name="alreadyAssignedDeviceStillChecksItsCurrentZone()" classname="org.osi.server.device.DeviceMutationServiceAssignScopeTest" time="0.217"/>
   <testcase name="grantedResearcherAssignsDeviceClaimedByAnotherUser()" classname="org.osi.server.device.DeviceMutationServiceAssignScopeTest" time="0.001"/>
-  <testcase name="unassignStillRequiresClaimerIdentityForAZonelessDevice()" classname="org.osi.server.device.DeviceMutationServiceAssignScopeTest" time="0.001"/>
-  <testcase name="researcherWithoutWriteScopeOnTargetZoneIsDenied()" classname="org.osi.server.device.DeviceMutationServiceAssignScopeTest" time="0.001"/>
+  <testcase name="unassignStillRequiresClaimerIdentityForAZonelessDevice()" classname="org.osi.server.device.DeviceMutationServiceAssignScopeTest" time="0.002"/>
+  <testcase name="researcherWithoutWriteScopeOnTargetZoneIsDenied()" classname="org.osi.server.device.DeviceMutationServiceAssignScopeTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

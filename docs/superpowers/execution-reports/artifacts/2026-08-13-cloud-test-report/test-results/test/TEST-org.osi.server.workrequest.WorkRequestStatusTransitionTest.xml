@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.workrequest.WorkRequestStatusTransitionTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.002">
+<testsuite name="org.osi.server.workrequest.WorkRequestStatusTransitionTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:05" hostname="osi-01" time="0.002">
   <properties/>
-  <testcase name="adminTriageAndRejectNotifyEdgeAfterSavingState()" classname="org.osi.server.workrequest.WorkRequestStatusTransitionTest" time="0.001"/>
-  <testcase name="adminNeedsInfoTriageStoresReasonBeforeNotifyingEdge()" classname="org.osi.server.workrequest.WorkRequestStatusTransitionTest" time="0.0"/>
-  <testcase name="intakeNotifiesEdgeAfterAcceptedRequestIsSaved()" classname="org.osi.server.workrequest.WorkRequestStatusTransitionTest" time="0.0"/>
+  <testcase name="adminTriageAndRejectNotifyEdgeAfterSavingState()" classname="org.osi.server.workrequest.WorkRequestStatusTransitionTest" time="0.0"/>
+  <testcase name="adminNeedsInfoTriageStoresReasonBeforeNotifyingEdge()" classname="org.osi.server.workrequest.WorkRequestStatusTransitionTest" time="0.001"/>
+  <testcase name="intakeNotifiesEdgeAfterAcceptedRequestIsSaved()" classname="org.osi.server.workrequest.WorkRequestStatusTransitionTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

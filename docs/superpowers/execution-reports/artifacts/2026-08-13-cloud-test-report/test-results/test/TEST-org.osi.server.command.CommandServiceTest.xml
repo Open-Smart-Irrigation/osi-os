@@ -1,50 +1,50 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.command.CommandServiceTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:19" hostname="osi-01" time="0.055">
+<testsuite name="org.osi.server.command.CommandServiceTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:00" hostname="osi-01" time="0.082">
   <properties/>
-  <testcase name="rewriteUnleasedGatewayCommandRejectsLeasedCommands()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[1] commandType=SET_LSN50_MODE, effectSetting=mode" classname="org.osi.server.command.CommandServiceTest" time="0.022"/>
-  <testcase name="[2] commandType=SET_LSN50_INTERVAL, effectSetting=uplink_interval" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[3] commandType=SET_LSN50_INTERRUPT_MODE, effectSetting=interrupt_mode" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[4] commandType=SET_LSN50_5V_WARMUP, effectSetting=5v_warmup" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[5] commandType=SET_KIWI_INTERVAL, effectSetting=uplink_interval" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[6] commandType=ENABLE_KIWI_TEMP_HUMIDITY, effectSetting=temperature_humidity" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[7] commandType=SET_STREGA_INTERVAL, effectSetting=reporting_interval" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[8] commandType=SET_STREGA_MODEL, effectSetting=model" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[9] commandType=SET_STREGA_MAGNET_MODE, effectSetting=magnet_mode" classname="org.osi.server.command.CommandServiceTest" time="0.0"/>
-  <testcase name="issueGatewayCommand_keepsCommandPendingWhenBestEffortMqttPublishFails()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="issueGatewayCommandRecordPersistsEffectMetadata()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[1] commandType=SET_STREGA_TIMED_ACTION, effectSetting=timed_action" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
+  <testcase name="rewriteUnleasedGatewayCommandRejectsLeasedCommands()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="[1] commandType=SET_LSN50_MODE, effectSetting=mode" classname="org.osi.server.command.CommandServiceTest" time="0.012"/>
+  <testcase name="[2] commandType=SET_LSN50_INTERVAL, effectSetting=uplink_interval" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="[3] commandType=SET_LSN50_INTERRUPT_MODE, effectSetting=interrupt_mode" classname="org.osi.server.command.CommandServiceTest" time="0.003"/>
+  <testcase name="[4] commandType=SET_LSN50_5V_WARMUP, effectSetting=5v_warmup" classname="org.osi.server.command.CommandServiceTest" time="0.005"/>
+  <testcase name="[5] commandType=SET_KIWI_INTERVAL, effectSetting=uplink_interval" classname="org.osi.server.command.CommandServiceTest" time="0.005"/>
+  <testcase name="[6] commandType=ENABLE_KIWI_TEMP_HUMIDITY, effectSetting=temperature_humidity" classname="org.osi.server.command.CommandServiceTest" time="0.003"/>
+  <testcase name="[7] commandType=SET_STREGA_INTERVAL, effectSetting=reporting_interval" classname="org.osi.server.command.CommandServiceTest" time="0.003"/>
+  <testcase name="[8] commandType=SET_STREGA_MODEL, effectSetting=model" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="[9] commandType=SET_STREGA_MAGNET_MODE, effectSetting=magnet_mode" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="issueGatewayCommand_keepsCommandPendingWhenBestEffortMqttPublishFails()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="issueGatewayCommandRecordPersistsEffectMetadata()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="[1] commandType=SET_STREGA_TIMED_ACTION, effectSetting=timed_action" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
   <testcase name="[2] commandType=SET_STREGA_PARTIAL_OPENING, effectSetting=partial_opening" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
   <testcase name="[3] commandType=SET_STREGA_FLUSHING, effectSetting=flushing" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="[4] commandType=VALVE_COMMAND, effectSetting=valve_action" classname="org.osi.server.command.CommandServiceTest" time="0.0"/>
-  <testcase name="issueGatewayCommand_valveCommandOnAggregateTrackingOverloadCarriesEffectAndExpiryAndNeverCoalesces()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="rewriteUnleasedGatewayCommandPreservesIdentityAndEffectKey()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
-  <testcase name="legacyPendingSelectionExpiresDueCommandsBeforeReadingWithOneCapturedInstant()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
+  <testcase name="[4] commandType=VALVE_COMMAND, effectSetting=valve_action" classname="org.osi.server.command.CommandServiceTest" time="0.003"/>
+  <testcase name="issueGatewayCommand_valveCommandOnAggregateTrackingOverloadCarriesEffectAndExpiryAndNeverCoalesces()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="rewriteUnleasedGatewayCommandPreservesIdentityAndEffectKey()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
+  <testcase name="legacyPendingSelectionExpiresDueCommandsBeforeReadingWithOneCapturedInstant()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
   <testcase name="commandCountsAndFailedCommandLookupsDelegateToRepository()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
   <testcase name="issueGatewayCommandRecordDoesNotPolluteCanonicalSnakeCasePayload()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
-  <testcase name="completeCommandFromAck_acceptsMatchingSenderAndSyncContext()" classname="org.osi.server.command.CommandServiceTest" time="0.003"/>
+  <testcase name="completeCommandFromAck_acceptsMatchingSenderAndSyncContext()" classname="org.osi.server.command.CommandServiceTest" time="0.005"/>
   <testcase name="completeCommandFromAck_rejectsMismatchedSenderOrMissingSyncContext()" classname="org.osi.server.command.CommandServiceTest" time="0.001"/>
   <testcase name="issueGatewayCommand_marksCommandSentWhenBestEffortMqttPublishSucceeds()" classname="org.osi.server.command.CommandServiceTest" time="0.002"/>
-  <system-out><![CDATA[2026-08-13T11:26:19.349+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_MODE on GW-1234
-2026-08-13T11:26:19.351+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_INTERVAL on GW-1234
-2026-08-13T11:26:19.352+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_INTERRUPT_MODE on GW-1234
-2026-08-13T11:26:19.353+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_5V_WARMUP on GW-1234
-2026-08-13T11:26:19.354+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_KIWI_INTERVAL on GW-1234
-2026-08-13T11:26:19.356+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command ENABLE_KIWI_TEMP_HUMIDITY on GW-1234
-2026-08-13T11:26:19.357+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_INTERVAL on GW-1234
-2026-08-13T11:26:19.358+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_MODEL on GW-1234
-2026-08-13T11:26:19.359+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_MAGNET_MODE on GW-1234
-2026-08-13T11:26:19.361+02:00  WARN 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish failed for command SET_FAN on GW-1234: broker unavailable. REST pending-commands delivery remains active.
-2026-08-13T11:26:19.362+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command UPSERT_ZONE_CONFIG on GW-1234
-2026-08-13T11:26:19.364+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_TIMED_ACTION on GW-1234
-2026-08-13T11:26:19.365+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_PARTIAL_OPENING on GW-1234
-2026-08-13T11:26:19.366+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_FLUSHING on GW-1234
-2026-08-13T11:26:19.367+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command VALVE_COMMAND on GW-1234
-2026-08-13T11:26:19.368+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command VALVE_COMMAND on GW-1234
-2026-08-13T11:26:19.369+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command VALVE_COMMAND on GW-1234
-2026-08-13T11:26:19.374+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command UPSERT_JOURNAL_ENTRY on GW-1234
-2026-08-13T11:26:19.378+02:00  WARN 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Rejecting command ACK for command 42 from GW-9999 due to sender/context mismatch
-2026-08-13T11:26:19.380+02:00  INFO 2682197 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_FAN on GW-1234
+  <system-out><![CDATA[2026-08-13T16:46:00.069+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_MODE on GW-1234
+2026-08-13T16:46:00.072+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_INTERVAL on GW-1234
+2026-08-13T16:46:00.076+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_INTERRUPT_MODE on GW-1234
+2026-08-13T16:46:00.081+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_LSN50_5V_WARMUP on GW-1234
+2026-08-13T16:46:00.087+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_KIWI_INTERVAL on GW-1234
+2026-08-13T16:46:00.092+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command ENABLE_KIWI_TEMP_HUMIDITY on GW-1234
+2026-08-13T16:46:00.096+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_INTERVAL on GW-1234
+2026-08-13T16:46:00.100+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_MODEL on GW-1234
+2026-08-13T16:46:00.102+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_MAGNET_MODE on GW-1234
+2026-08-13T16:46:00.104+02:00  WARN 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish failed for command SET_FAN on GW-1234: broker unavailable. REST pending-commands delivery remains active.
+2026-08-13T16:46:00.106+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command UPSERT_ZONE_CONFIG on GW-1234
+2026-08-13T16:46:00.109+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_TIMED_ACTION on GW-1234
+2026-08-13T16:46:00.111+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_PARTIAL_OPENING on GW-1234
+2026-08-13T16:46:00.112+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_STREGA_FLUSHING on GW-1234
+2026-08-13T16:46:00.115+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command VALVE_COMMAND on GW-1234
+2026-08-13T16:46:00.117+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command VALVE_COMMAND on GW-1234
+2026-08-13T16:46:00.117+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command VALVE_COMMAND on GW-1234
+2026-08-13T16:46:00.126+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command UPSERT_JOURNAL_ENTRY on GW-1234
+2026-08-13T16:46:00.134+02:00  WARN 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Rejecting command ACK for command 42 from GW-9999 due to sender/context mismatch
+2026-08-13T16:46:00.135+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command SET_FAN on GW-1234
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

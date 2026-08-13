@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.workrequest.WorkRequestPayloadTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.007">
+<testsuite name="org.osi.server.workrequest.WorkRequestPayloadTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:05" hostname="osi-01" time="0.006">
   <properties/>
-  <testcase name="mapsRevisedStage0SnakeAndCamelFields()" classname="org.osi.server.workrequest.WorkRequestPayloadTest" time="0.005"/>
-  <testcase name="normalizesGuiUserIntoStoredLocalUserRef()" classname="org.osi.server.workrequest.WorkRequestPayloadTest" time="0.002"/>
+  <testcase name="mapsRevisedStage0SnakeAndCamelFields()" classname="org.osi.server.workrequest.WorkRequestPayloadTest" time="0.003"/>
+  <testcase name="normalizesGuiUserIntoStoredLocalUserRef()" classname="org.osi.server.workrequest.WorkRequestPayloadTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

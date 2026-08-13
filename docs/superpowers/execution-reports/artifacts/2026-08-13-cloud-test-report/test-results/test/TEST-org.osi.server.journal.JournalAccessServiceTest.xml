@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.journal.JournalAccessServiceTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:29" hostname="osi-01" time="0.189">
+<testsuite name="org.osi.server.journal.JournalAccessServiceTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:11" hostname="osi-01" time="0.234">
   <properties/>
-  <testcase name="createCannotReuseAnExistingInvisibleResourceUuid()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.181"/>
-  <testcase name="existingGroupUpdateValidatesHiddenCanonicalMembers()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
-  <testcase name="viewerCanReadButCannotQueueJournalMutation()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
-  <testcase name="ownerCanRewriteTheirOwnPlotGroup()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
-  <testcase name="entryMoveAndEveryPlotGroupMemberMustBeVisible()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
-  <testcase name="entryCannotMoveToAVisiblePlotOwnedBySomeoneElse()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.0"/>
+  <testcase name="createCannotReuseAnExistingInvisibleResourceUuid()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.212"/>
+  <testcase name="existingGroupUpdateValidatesHiddenCanonicalMembers()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.002"/>
+  <testcase name="viewerCanReadButCannotQueueJournalMutation()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.002"/>
+  <testcase name="ownerCanRewriteTheirOwnPlotGroup()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.002"/>
+  <testcase name="entryMoveAndEveryPlotGroupMemberMustBeVisible()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.002"/>
+  <testcase name="entryCannotMoveToAVisiblePlotOwnedBySomeoneElse()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.002"/>
   <testcase name="resolvesGatewayLocalIdentityAndJournalCapability()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
-  <testcase name="existingForeignResourceIsNotAMutationTarget()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.0"/>
-  <testcase name="gatewayAdminCannotMutateAnUngrantedJournalPlot()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.0"/>
-  <testcase name="deniesForeignGatewayAndKeepsUnsupportedGatewayReadOnly()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.0"/>
+  <testcase name="existingForeignResourceIsNotAMutationTarget()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
+  <testcase name="gatewayAdminCannotMutateAnUngrantedJournalPlot()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
+  <testcase name="deniesForeignGatewayAndKeepsUnsupportedGatewayReadOnly()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.002"/>
   <testcase name="collaboratorCannotRewriteAnotherOwnersPlotGroup()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
-  <testcase name="plotGroupCannotSpanVisiblePlotsWithDifferentOwners()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
-  <testcase name="newEntryUsesTheGrantedPlotOwnerAsItsEffectiveOwner()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.0"/>
+  <testcase name="plotGroupCannotSpanVisiblePlotsWithDifferentOwners()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.002"/>
+  <testcase name="newEntryUsesTheGrantedPlotOwnerAsItsEffectiveOwner()" classname="org.osi.server.journal.JournalAccessServiceTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

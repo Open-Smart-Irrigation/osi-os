@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.043s</div>
+<div class="counter">0.055s</div>
 <p>duration</p>
 </div>
 </td>
@@ -79,12 +79,12 @@
 </thead>
 <tr>
 <td class="success">productAndCustomVocabularyAreWorkspaceScopedIdempotentAndReplicated()</td>
-<td class="success">0.030s</td>
+<td class="success">0.037s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">referencePayloadCannotForgeWorkspaceOwnerOrInventAGateway()</td>
-<td class="success">0.013s</td>
+<td class="success">0.018s</td>
 <td class="success">passed</td>
 </tr>
 </table>
@@ -92,16 +92,16 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:26:35.916+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalReferenceServiceTest]: using SpringBootContextLoader
-2026-08-13T11:26:35.916+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.v2.JournalReferenceServiceTest]: JournalReferenceServiceTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
-2026-08-13T11:26:35.916+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalReferenceServiceTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
-2026-08-13T11:26:35.919+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalReferenceServiceTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
-2026-08-13T11:26:35.919+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.v2.JournalReferenceServiceTest
-2026-08-13T11:26:35.919+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalReferenceServiceTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
-2026-08-13T11:26:35.922+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
-2026-08-13T11:26:35.923+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
-2026-08-13T11:26:35.923+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
-2026-08-13T11:26:35.926+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+<pre>2026-08-13T16:46:19.841+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalReferenceServiceTest]: using SpringBootContextLoader
+2026-08-13T16:46:19.842+02:00  INFO 3273021 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.v2.JournalReferenceServiceTest]: JournalReferenceServiceTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T16:46:19.842+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalReferenceServiceTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T16:46:19.846+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalReferenceServiceTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T16:46:19.846+02:00  INFO 3273021 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.v2.JournalReferenceServiceTest
+2026-08-13T16:46:19.847+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalReferenceServiceTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T16:46:19.854+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T16:46:19.855+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T16:46:19.855+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T16:46:19.861+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
 
   .   ____          _            __ _ _
  /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
@@ -112,23 +112,23 @@
 
  :: Spring Boot ::                (v3.4.3)
 
-2026-08-13T11:26:35.929+02:00  INFO 2682197 --- [    Test worker] o.o.s.j.v2.JournalReferenceServiceTest   : Starting JournalReferenceServiceTest using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
-2026-08-13T11:26:35.929+02:00  INFO 2682197 --- [    Test worker] o.o.s.j.v2.JournalReferenceServiceTest   : No active profile set, falling back to 1 default profile: &quot;default&quot;
-2026-08-13T11:26:35.929+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
-2026-08-13T11:26:35.994+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
-2026-08-13T11:26:35.995+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
-2026-08-13T11:26:36.027+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 32 ms. Found 55 JPA repository interfaces.
-2026-08-13T11:26:36.066+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-9 - Starting...
-2026-08-13T11:26:36.073+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-9 - Start completed.
-2026-08-13T11:26:36.080+02:00  INFO 2682197 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF (PostgreSQL 16.14)
-2026-08-13T11:26:36.097+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.012s)
-2026-08-13T11:26:36.120+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema &quot;public&quot;: 2026.08.10.001
-2026-08-13T11:26:36.120+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema &quot;public&quot; is up to date. No migration necessary.
-2026-08-13T11:26:36.137+02:00  INFO 2682197 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
-2026-08-13T11:26:36.138+02:00  INFO 2682197 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
-2026-08-13T11:26:36.143+02:00  INFO 2682197 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
-2026-08-13T11:26:36.145+02:00  WARN 2682197 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
-2026-08-13T11:26:36.145+02:00  INFO 2682197 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+2026-08-13T16:46:19.866+02:00  INFO 3273021 --- [    Test worker] o.o.s.j.v2.JournalReferenceServiceTest   : Starting JournalReferenceServiceTest using Java 17.0.19 with PID 3273021 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T16:46:19.866+02:00  INFO 3273021 --- [    Test worker] o.o.s.j.v2.JournalReferenceServiceTest   : No active profile set, falling back to 1 default profile: &quot;default&quot;
+2026-08-13T16:46:19.866+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
+2026-08-13T16:46:19.952+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T16:46:19.954+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T16:46:19.995+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 41 ms. Found 55 JPA repository interfaces.
+2026-08-13T16:46:20.045+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-9 - Starting...
+2026-08-13T16:46:20.052+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-9 - Start completed.
+2026-08-13T16:46:20.061+02:00  INFO 3273021 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32832/test?loggerLevel=OFF (PostgreSQL 16.14)
+2026-08-13T16:46:20.083+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.016s)
+2026-08-13T16:46:20.103+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema &quot;public&quot;: 2026.08.10.001
+2026-08-13T16:46:20.104+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema &quot;public&quot; is up to date. No migration necessary.
+2026-08-13T16:46:20.138+02:00  INFO 3273021 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T16:46:20.140+02:00  INFO 3273021 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T16:46:20.146+02:00  INFO 3273021 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T16:46:20.149+02:00  WARN 3273021 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T16:46:20.149+02:00  INFO 3273021 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
 	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-9)']
 	Database driver: undefined/unknown
 	Database version: 16.14
@@ -136,11 +136,11 @@
 	Isolation level: undefined/unknown
 	Minimum pool size: undefined/unknown
 	Maximum pool size: undefined/unknown
-2026-08-13T11:26:36.206+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:36.206+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:36.402+02:00  INFO 2682197 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
-2026-08-13T11:26:36.402+02:00  INFO 2682197 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
-2026-08-13T11:26:36.571+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+2026-08-13T16:46:20.239+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:20.239+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:20.461+02:00  INFO 3273021 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T16:46:20.461+02:00  INFO 3273021 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T16:46:20.646+02:00 DEBUG 3273021 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
 
 
 ============================
@@ -428,21 +428,21 @@ Unconditional classes:
 
 
 
-2026-08-13T11:26:36.572+02:00  INFO 2682197 --- [    Test worker] o.o.s.j.v2.JournalReferenceServiceTest   : Started JournalReferenceServiceTest in 0.652 seconds (process running for 44.027)
-2026-08-13T11:26:36.575+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.575+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:20.647+02:00  INFO 3273021 --- [    Test worker] o.o.s.j.v2.JournalReferenceServiceTest   : Started JournalReferenceServiceTest in 0.798 seconds (process running for 51.702)
+2026-08-13T16:46:20.650+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.650+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Reference test', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:36.577+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.577+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspace_members(workspace_uuid, principal_uuid, role, active)
+2026-08-13T16:46:20.651+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.651+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspace_members(workspace_uuid, principal_uuid, role, active)
 VALUES (?, ?, 'owner', TRUE)
 ON CONFLICT (workspace_uuid, principal_uuid) DO UPDATE SET active = TRUE
 ]
-2026-08-13T11:26:36.582+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.582+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
+2026-08-13T16:46:20.658+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.658+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
   FROM journal_workspace_members m
   JOIN journal_workspaces w ON w.workspace_uuid = m.workspace_uuid
  WHERE m.workspace_uuid = ?
@@ -450,47 +450,47 @@ ON CONFLICT (workspace_uuid, principal_uuid) DO UPDATE SET active = TRUE
    AND m.active = TRUE
    AND w.deleted_at IS NULL
 ]
-2026-08-13T11:26:36.584+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.584+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
+2026-08-13T16:46:20.659+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.659+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
   FROM journal_workspaces
  WHERE workspace_uuid = ? AND deleted_at IS NULL
 ]
-2026-08-13T11:26:36.584+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.584+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
-2026-08-13T11:26:36.585+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.585+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
+2026-08-13T16:46:20.660+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.660+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
+2026-08-13T16:46:20.661+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.661+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
        resource_uuid, payload_sha256, result_json::text
   FROM journal_mutation_idempotency
  WHERE mutation_uuid = ?
 ]
-2026-08-13T11:26:36.586+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.586+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
-2026-08-13T11:26:36.586+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.586+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_products_v2(
+2026-08-13T16:46:20.662+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.662+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
+2026-08-13T16:46:20.663+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.663+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_products_v2(
     workspace_uuid, product_uuid, version, payload_json,
     payload_sha256, updated_at)
 VALUES (?, ?, 1, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
 ON CONFLICT (workspace_uuid, product_uuid) DO NOTHING
 ]
-2026-08-13T11:26:36.588+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.588+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:36.588+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.588+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:36.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.589+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:20.665+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.665+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:20.665+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.665+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:20.667+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.667+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:36.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_mutation_idempotency(
+2026-08-13T16:46:20.669+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.669+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_mutation_idempotency(
     workspace_uuid, mutation_uuid, actor_type, actor_identifier,
     operation, resource_uuid, payload_sha256, outcome,
     result_json, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
 ]
-2026-08-13T11:26:36.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.591+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
+2026-08-13T16:46:20.670+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.670+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
   FROM journal_workspace_members m
   JOIN journal_workspaces w ON w.workspace_uuid = m.workspace_uuid
  WHERE m.workspace_uuid = ?
@@ -498,21 +498,21 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
    AND m.active = TRUE
    AND w.deleted_at IS NULL
 ]
-2026-08-13T11:26:36.592+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.592+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
+2026-08-13T16:46:20.671+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.671+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
   FROM journal_workspaces
  WHERE workspace_uuid = ? AND deleted_at IS NULL
 ]
-2026-08-13T11:26:36.592+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.592+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
-2026-08-13T11:26:36.593+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.593+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
+2026-08-13T16:46:20.672+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.672+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
+2026-08-13T16:46:20.672+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.672+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
        resource_uuid, payload_sha256, result_json::text
   FROM journal_mutation_idempotency
  WHERE mutation_uuid = ?
 ]
-2026-08-13T11:26:36.593+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.593+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
+2026-08-13T16:46:20.673+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.673+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
   FROM journal_workspace_members m
   JOIN journal_workspaces w ON w.workspace_uuid = m.workspace_uuid
  WHERE m.workspace_uuid = ?
@@ -520,67 +520,67 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
    AND m.active = TRUE
    AND w.deleted_at IS NULL
 ]
-2026-08-13T11:26:36.594+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.594+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
+2026-08-13T16:46:20.674+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.674+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
   FROM journal_workspaces
  WHERE workspace_uuid = ? AND deleted_at IS NULL
 ]
-2026-08-13T11:26:36.594+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.594+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
-2026-08-13T11:26:36.594+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.595+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
+2026-08-13T16:46:20.675+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.675+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
+2026-08-13T16:46:20.675+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.675+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
        resource_uuid, payload_sha256, result_json::text
   FROM journal_mutation_idempotency
  WHERE mutation_uuid = ?
 ]
-2026-08-13T11:26:36.595+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.595+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
-2026-08-13T11:26:36.595+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.595+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_custom_vocab_v2(
+2026-08-13T16:46:20.675+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.676+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
+2026-08-13T16:46:20.676+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.676+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_custom_vocab_v2(
     workspace_uuid, custom_field_uuid, version, payload_json,
     payload_sha256, updated_at)
 VALUES (?, ?, 1, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
 ON CONFLICT (workspace_uuid, custom_field_uuid) DO NOTHING
 ]
-2026-08-13T11:26:36.597+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.597+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:36.597+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.597+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:36.598+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.598+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:20.678+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.678+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:20.678+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.678+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:20.679+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.679+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:36.599+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.599+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_mutation_idempotency(
+2026-08-13T16:46:20.680+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.680+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_mutation_idempotency(
     workspace_uuid, mutation_uuid, actor_type, actor_identifier,
     operation, resource_uuid, payload_sha256, outcome,
     result_json, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP)
 ]
-2026-08-13T11:26:36.599+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.599+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*) FROM journal_products_v2 WHERE workspace_uuid = ?]
-2026-08-13T11:26:36.600+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.600+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*) FROM journal_custom_vocab_v2 WHERE workspace_uuid = ?]
-2026-08-13T11:26:36.600+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.600+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*) FROM journal_replication_log
+2026-08-13T16:46:20.680+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.680+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*) FROM journal_products_v2 WHERE workspace_uuid = ?]
+2026-08-13T16:46:20.681+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.681+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*) FROM journal_custom_vocab_v2 WHERE workspace_uuid = ?]
+2026-08-13T16:46:20.681+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.681+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*) FROM journal_replication_log
  WHERE workspace_uuid = ? AND kind = 'REFERENCE_DATA'
 ]
-2026-08-13T11:26:36.605+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.605+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:20.686+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.686+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Reference test', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:36.605+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:36.605+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspace_members(workspace_uuid, principal_uuid, role, active)
+2026-08-13T16:46:20.687+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:20.687+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspace_members(workspace_uuid, principal_uuid, role, active)
 VALUES (?, ?, 'owner', TRUE)
 ON CONFLICT (workspace_uuid, principal_uuid) DO UPDATE SET active = TRUE
 ]
-2026-08-13T11:26:36.608+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.608+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
+2026-08-13T16:46:20.691+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.691+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
   FROM journal_workspace_members m
   JOIN journal_workspaces w ON w.workspace_uuid = m.workspace_uuid
  WHERE m.workspace_uuid = ?
@@ -588,23 +588,23 @@ ON CONFLICT (workspace_uuid, principal_uuid) DO UPDATE SET active = TRUE
    AND m.active = TRUE
    AND w.deleted_at IS NULL
 ]
-2026-08-13T11:26:36.609+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.609+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
+2026-08-13T16:46:20.692+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.692+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
   FROM journal_workspaces
  WHERE workspace_uuid = ? AND deleted_at IS NULL
 ]
-2026-08-13T11:26:36.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
-2026-08-13T11:26:36.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
+2026-08-13T16:46:20.693+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.693+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
+2026-08-13T16:46:20.693+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.693+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
        resource_uuid, payload_sha256, result_json::text
   FROM journal_mutation_idempotency
  WHERE mutation_uuid = ?
 ]
-2026-08-13T11:26:36.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.610+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
-2026-08-13T11:26:36.612+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.612+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
+2026-08-13T16:46:20.694+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.694+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
+2026-08-13T16:46:20.696+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.696+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT m.role
   FROM journal_workspace_members m
   JOIN journal_workspaces w ON w.workspace_uuid = m.workspace_uuid
  WHERE m.workspace_uuid = ?
@@ -612,23 +612,23 @@ ON CONFLICT (workspace_uuid, principal_uuid) DO UPDATE SET active = TRUE
    AND m.active = TRUE
    AND w.deleted_at IS NULL
 ]
-2026-08-13T11:26:36.613+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.613+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
+2026-08-13T16:46:20.697+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.697+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT authority_state
   FROM journal_workspaces
  WHERE workspace_uuid = ? AND deleted_at IS NULL
 ]
-2026-08-13T11:26:36.613+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.613+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
-2026-08-13T11:26:36.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
+2026-08-13T16:46:20.698+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.698+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 1))]
+2026-08-13T16:46:20.698+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.698+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT workspace_uuid, actor_type, actor_identifier, operation,
        resource_uuid, payload_sha256, result_json::text
   FROM journal_mutation_idempotency
  WHERE mutation_uuid = ?
 ]
-2026-08-13T11:26:36.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
-2026-08-13T11:26:36.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:36.614+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT EXISTS (
+2026-08-13T16:46:20.698+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.698+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT owner_user_uuid FROM journal_workspaces WHERE workspace_uuid = ? AND deleted_at IS NULL]
+2026-08-13T16:46:20.699+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:20.699+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT EXISTS (
     SELECT 1 FROM journal_workspace_gateways
      WHERE workspace_uuid = ? AND gateway_eui = ? AND active = TRUE)
 ]
@@ -643,7 +643,7 @@ ON CONFLICT (workspace_uuid, principal_uuid) DO UPDATE SET active = TRUE
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

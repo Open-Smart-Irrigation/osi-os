@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.journal.v2.JournalScannerBridgeIT" tests="1" skipped="1" failures="0" errors="0" timestamp="2026-08-13T09:26:38" hostname="osi-01" time="0.001">
+<testsuite name="org.osi.server.journal.v2.JournalScannerBridgeIT" tests="1" skipped="1" failures="0" errors="0" timestamp="2026-08-13T14:46:22" hostname="osi-01" time="0.0">
   <properties/>
-  <testcase name="shippedBridgeStreamsCleanBytesAndRejectsEicarThroughClamav()" classname="org.osi.server.journal.v2.JournalScannerBridgeIT" time="0.001">
+  <testcase name="shippedBridgeStreamsCleanBytesAndRejectsEicarThroughClamav()" classname="org.osi.server.journal.v2.JournalScannerBridgeIT" time="0.0">
     <skipped/>
   </testcase>
   <system-out><![CDATA[]]></system-out>

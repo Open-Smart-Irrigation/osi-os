@@ -1,42 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.history.HistoryControllerTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:27" hostname="osi-01" time="0.119">
+<testsuite name="org.osi.server.history.HistoryControllerTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:10" hostname="osi-01" time="0.142">
   <properties/>
-  <testcase name="allZonesExportReturnsTextCsvAttachment()" classname="org.osi.server.history.HistoryControllerTest" time="0.095"/>
-  <testcase name="exportErrorsReturnJsonNotCsv()" classname="org.osi.server.history.HistoryControllerTest" time="0.01"/>
-  <testcase name="zoneExportReturnsTextCsvAttachment()" classname="org.osi.server.history.HistoryControllerTest" time="0.011"/>
-  <testcase name="zoneCardDataReturnsOkForKnownCardWithEmptyData()" classname="org.osi.server.history.HistoryControllerTest" time="0.001"/>
+  <testcase name="allZonesExportReturnsTextCsvAttachment()" classname="org.osi.server.history.HistoryControllerTest" time="0.121"/>
+  <testcase name="exportErrorsReturnJsonNotCsv()" classname="org.osi.server.history.HistoryControllerTest" time="0.009"/>
+  <testcase name="zoneExportReturnsTextCsvAttachment()" classname="org.osi.server.history.HistoryControllerTest" time="0.01"/>
+  <testcase name="zoneCardDataReturnsOkForKnownCardWithEmptyData()" classname="org.osi.server.history.HistoryControllerTest" time="0.0"/>
   <testcase name="zoneCardDataPropagatesNotFoundForUnknownCard()" classname="org.osi.server.history.HistoryControllerTest" time="0.001"/>
-  <testcase name="zonePreferencesReturnsNoContent()" classname="org.osi.server.history.HistoryControllerTest" time="0.0"/>
-  <testcase name="gatewayOpenedReturnsNoContent()" classname="org.osi.server.history.HistoryControllerTest" time="0.001"/>
-  <system-out><![CDATA[2026-08-13T11:26:28.038+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 16 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
-2026-08-13T11:26:28.039+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
-2026-08-13T11:26:28.039+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
-2026-08-13T11:26:28.039+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
-2026-08-13T11:26:28.039+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
-2026-08-13T11:26:28.039+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
-2026-08-13T11:26:28.040+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.history.HistoryController#exportAllZonesCsv(String, String, String, String, UserDetails)
-2026-08-13T11:26:28.042+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:text/csv;charset=utf-8' in response
-2026-08-13T11:26:28.042+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing ["timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value<EOL>"]
-2026-08-13T11:26:28.047+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 16 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
-2026-08-13T11:26:28.049+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
-2026-08-13T11:26:28.049+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
-2026-08-13T11:26:28.049+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
-2026-08-13T11:26:28.049+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
-2026-08-13T11:26:28.049+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
-2026-08-13T11:26:28.050+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.history.HistoryController#exportZoneCsv(Long, String, String, String, String, UserDetails)
-2026-08-13T11:26:28.051+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : Using @ExceptionHandler org.osi.server.history.HistoryController#handleHistoryExportError(HistoryExportError)
-2026-08-13T11:26:28.051+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
-2026-08-13T11:26:28.051+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{error=Export row cap exceeded, suggestion=Choose a narrower date range or a coarser granularity.}]
-2026-08-13T11:26:28.052+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : Resolved [org.osi.server.history.HistoryExportError: Export row cap exceeded]
-2026-08-13T11:26:28.059+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 16 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
-2026-08-13T11:26:28.060+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
-2026-08-13T11:26:28.060+02:00 DEBUG 2682197 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
-2026-08-13T11:26:28.060+02:00  INFO 2682197 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
-2026-08-13T11:26:28.060+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
-2026-08-13T11:26:28.060+02:00  INFO 2682197 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
-2026-08-13T11:26:28.061+02:00 DEBUG 2682197 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.history.HistoryController#exportZoneCsv(Long, String, String, String, String, UserDetails)
-2026-08-13T11:26:28.062+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:text/csv;charset=utf-8' in response
-2026-08-13T11:26:28.063+02:00 DEBUG 2682197 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing ["timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value<EOL>2026- (truncated)..."]
+  <testcase name="zonePreferencesReturnsNoContent()" classname="org.osi.server.history.HistoryControllerTest" time="0.001"/>
+  <testcase name="gatewayOpenedReturnsNoContent()" classname="org.osi.server.history.HistoryControllerTest" time="0.0"/>
+  <system-out><![CDATA[2026-08-13T16:46:10.306+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 16 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:46:10.308+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:46:10.308+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:46:10.308+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:46:10.308+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:46:10.308+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:46:10.309+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.history.HistoryController#exportAllZonesCsv(String, String, String, String, UserDetails)
+2026-08-13T16:46:10.312+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:text/csv;charset=utf-8' in response
+2026-08-13T16:46:10.312+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing ["timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value<EOL>"]
+2026-08-13T16:46:10.318+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 16 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:46:10.319+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:46:10.319+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:46:10.319+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:46:10.319+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:46:10.319+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:46:10.320+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.history.HistoryController#exportZoneCsv(Long, String, String, String, String, UserDetails)
+2026-08-13T16:46:10.321+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : Using @ExceptionHandler org.osi.server.history.HistoryController#handleHistoryExportError(HistoryExportError)
+2026-08-13T16:46:10.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:46:10.321+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{suggestion=Choose a narrower date range or a coarser granularity., error=Export row cap exceeded}]
+2026-08-13T16:46:10.322+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : Resolved [org.osi.server.history.HistoryExportError: Export row cap exceeded]
+2026-08-13T16:46:10.328+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 16 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:46:10.329+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:46:10.329+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:46:10.329+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:46:10.329+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:46:10.329+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:46:10.330+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.history.HistoryController#exportZoneCsv(Long, String, String, String, String, UserDetails)
+2026-08-13T16:46:10.331+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:text/csv;charset=utf-8' in response
+2026-08-13T16:46:10.331+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing ["timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value<EOL>2026- (truncated)..."]
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

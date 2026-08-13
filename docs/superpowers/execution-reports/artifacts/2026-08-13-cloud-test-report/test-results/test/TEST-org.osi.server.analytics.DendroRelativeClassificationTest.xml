@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.DendroRelativeClassificationTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:07" hostname="osi-01" time="0.015">
+<testsuite name="org.osi.server.analytics.DendroRelativeClassificationTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:46" hostname="osi-01" time="0.017">
   <properties/>
-  <testcase name="computeForAllZones_primaryV6Path_classifiesRelativeWhenBaselineIsComplete()" classname="org.osi.server.analytics.DendroRelativeClassificationTest" time="0.015"/>
-  <system-out><![CDATA[2026-08-13T11:26:07.396+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T09:26:07.396132009Z
-2026-08-13T11:26:07.406+02:00  INFO 2682197 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 10 (Relative-Path Zone): stress=moderate → action=decrease_10
+  <testcase name="computeForAllZones_primaryV6Path_classifiesRelativeWhenBaselineIsComplete()" classname="org.osi.server.analytics.DendroRelativeClassificationTest" time="0.017"/>
+  <system-out><![CDATA[2026-08-13T16:45:46.072+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 1 zone(s) — reference=2026-08-13T14:45:46.072389456Z
+2026-08-13T16:45:46.084+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 10 (Relative-Path Zone): stress=moderate → action=decrease_10
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

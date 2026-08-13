@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.sync.SyncExceptionClassifierTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:09" hostname="osi-01" time="0.001">
+<testsuite name="org.osi.server.sync.SyncExceptionClassifierTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:00" hostname="osi-01" time="0.002">
   <properties/>
   <testcase name="permanentCauseIsFoundAnywhereInTheChain()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>
   <testcase name="uniqueNotNullAndCheckViolationsArePermanent()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>
   <testcase name="hibernateConstraintViolationSqlStateIsClassified()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>
   <testcase name="unknownExceptionsDefaultToRetryable()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>
-  <testcase name="namedTransientClassesAreRetryable()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>
+  <testcase name="namedTransientClassesAreRetryable()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.001"/>
   <testcase name="dataIntegrityWithoutKnownSqlStateDefaultsToRetryable()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>
   <testcase name="selfReferentialCauseChainDoesNotLoopForever()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>
   <testcase name="unexpectedRollbackIsRetryable()" classname="org.osi.server.sync.SyncExceptionClassifierTest" time="0.0"/>

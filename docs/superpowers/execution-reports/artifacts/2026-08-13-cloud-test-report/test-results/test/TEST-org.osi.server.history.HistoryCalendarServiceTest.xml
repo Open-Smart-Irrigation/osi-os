@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.history.HistoryCalendarServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:27" hostname="osi-01" time="0.005">
+<testsuite name="org.osi.server.history.HistoryCalendarServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:10" hostname="osi-01" time="0.009">
   <properties/>
-  <testcase name="fillsEveryLocalDateInTheSelectedRangeWithNoDataCells()" classname="org.osi.server.history.HistoryCalendarServiceTest" time="0.004"/>
-  <testcase name="bucketsCalendarDaysInZoneTimezoneAndAddsMarkersSummaryAndMetrics()" classname="org.osi.server.history.HistoryCalendarServiceTest" time="0.001"/>
+  <testcase name="fillsEveryLocalDateInTheSelectedRangeWithNoDataCells()" classname="org.osi.server.history.HistoryCalendarServiceTest" time="0.007"/>
+  <testcase name="bucketsCalendarDaysInZoneTimezoneAndAddsMarkersSummaryAndMetrics()" classname="org.osi.server.history.HistoryCalendarServiceTest" time="0.002"/>
   <testcase name="returnsNoDataStateWhenCalendarViewHasNoBuckets()" classname="org.osi.server.history.HistoryCalendarServiceTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

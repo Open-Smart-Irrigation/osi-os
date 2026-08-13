@@ -1,29 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.sync.EdgeSyncServiceBootstrapTest" tests="18" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:06" hostname="osi-01" time="0.57">
+<testsuite name="org.osi.server.sync.EdgeSyncServiceBootstrapTest" tests="18" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:56" hostname="osi-01" time="0.784">
   <properties/>
-  <testcase name="applyBootstrap_skipsGatewayMigrationWhenInstallationGuardBlocksTheTransition()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.535"/>
-  <testcase name="applyBootstrap_migratesGatewayBoundCloudStateWhenPreviousGatewayIsDeclared()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.003"/>
-  <testcase name="applyBootstrap_mirrorsSoilMoistureProbeDepthMetadataOnDevices()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
+  <testcase name="applyBootstrap_skipsGatewayMigrationWhenInstallationGuardBlocksTheTransition()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.734"/>
+  <testcase name="applyBootstrap_migratesGatewayBoundCloudStateWhenPreviousGatewayIsDeclared()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.005"/>
+  <testcase name="applyBootstrap_mirrorsSoilMoistureProbeDepthMetadataOnDevices()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.003"/>
   <testcase name="applyBootstrap_upsertsGatewayLocationSnapshots()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
   <testcase name="applyBootstrap_importsIrrigationCalibrationDesiredState()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
-  <testcase name="applyBootstrap_mirrorsChameleonDeviceConfig()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
+  <testcase name="applyBootstrap_mirrorsChameleonDeviceConfig()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
   <testcase name="applyBootstrap_refreshesLinkedGatewayCapabilitiesFromGatewayIdentity()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
-  <testcase name="applyBootstrap_reusesExistingCloudUserWhenCloudUserIdMatches()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
-  <testcase name="applyBootstrap_ingestsExpandedDataPlaneSnapshotArrays()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.005"/>
+  <testcase name="applyBootstrap_reusesExistingCloudUserWhenCloudUserIdMatches()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
+  <testcase name="applyBootstrap_ingestsExpandedDataPlaneSnapshotArrays()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.006"/>
   <testcase name="applyBootstrap_stillConsultsMigrationGuardWithStrippedInstallationIdentity()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
-  <testcase name="applyBootstrap_ingestsChameleonReadings()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
+  <testcase name="applyBootstrap_ingestsChameleonReadings()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.003"/>
   <testcase name="applyBootstrap_sortsSensorSnapshotsOldestToNewestBeforeUpdatingCurrentState()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
-  <testcase name="applyBootstrap_rejectsPreviousGatewayClaimedByAnotherUser()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
-  <testcase name="applyBootstrap_bindsSnakeCaseJournalCatalogStampFromRealBootstrapJson()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.003"/>
-  <testcase name="applyBootstrap_prefersCloudIdentityOverConflictingEdgeOriginatedUserUuid()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
-  <testcase name="applyBootstrap_journalCatalogStampIsNullWhenGatewayIdentityCarriesNoJournalKeys()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.003"/>
+  <testcase name="applyBootstrap_rejectsPreviousGatewayClaimedByAnotherUser()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
+  <testcase name="applyBootstrap_bindsSnakeCaseJournalCatalogStampFromRealBootstrapJson()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.005"/>
+  <testcase name="applyBootstrap_prefersCloudIdentityOverConflictingEdgeOriginatedUserUuid()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
+  <testcase name="applyBootstrap_journalCatalogStampIsNullWhenGatewayIdentityCarriesNoJournalKeys()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.004"/>
   <testcase name="applyBootstrap_reusesLatestSensorRowWhenDuplicatesExist()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
-  <testcase name="applyBootstrap_updatesGatewayLastSeen()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.002"/>
-  <system-out><![CDATA[2026-08-13T11:27:06.629+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-NEW: identity guard blocked the transition (stale or recovery-frozen)
-2026-08-13T11:27:06.633+02:00  INFO 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Migrated gateway-backed cloud state from GW-OLD to GW-NEW for user 7
-2026-08-13T11:27:06.649+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-RETIRED: identity guard blocked the transition (stale or recovery-frozen)
-2026-08-13T11:27:06.658+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Preferring cloud user admin over conflicting edge user Test for edge payload user_uuid=user-1
-2026-08-13T11:27:06.663+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Found duplicate sensor_data rows for device DEV-1 at 2026-03-26T08:00:00Z; reusing latest row during sync
+  <testcase name="applyBootstrap_updatesGatewayLastSeen()" classname="org.osi.server.sync.EdgeSyncServiceBootstrapTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-13T16:46:57.264+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-NEW: identity guard blocked the transition (stale or recovery-frozen)
+2026-08-13T16:46:57.269+02:00  INFO 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Migrated gateway-backed cloud state from GW-OLD to GW-NEW for user 7
+2026-08-13T16:46:57.294+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-RETIRED: identity guard blocked the transition (stale or recovery-frozen)
+2026-08-13T16:46:57.308+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Preferring cloud user admin over conflicting edge user Test for edge payload user_uuid=user-1
+2026-08-13T16:46:57.314+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Found duplicate sensor_data rows for device DEV-1 at 2026-03-26T08:00:00Z; reusing latest row during sync
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

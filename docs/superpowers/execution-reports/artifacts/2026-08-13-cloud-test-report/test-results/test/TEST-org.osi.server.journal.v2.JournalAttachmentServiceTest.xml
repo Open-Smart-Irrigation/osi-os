@@ -1,35 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.journal.v2.JournalAttachmentServiceTest" tests="29" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:33" hostname="osi-01" time="0.355">
+<testsuite name="org.osi.server.journal.v2.JournalAttachmentServiceTest" tests="29" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:16" hostname="osi-01" time="0.443">
   <properties/>
-  <testcase name="chunkCommitRejectsWrongLengthAndWrongChunkHash()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.093"/>
-  <testcase name="listForEntryReportsRealPerAttachmentStateAndLiveDisposition()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.009"/>
-  <testcase name="completionRejectsMissingChunksAndNeverExposesFailedBytes()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.005"/>
+  <testcase name="chunkCommitRejectsWrongLengthAndWrongChunkHash()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.11"/>
+  <testcase name="listForEntryReportsRealPerAttachmentStateAndLiveDisposition()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.011"/>
+  <testcase name="completionRejectsMissingChunksAndNeverExposesFailedBytes()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.006"/>
   <testcase name="createRejectsANonDurableParentRevisionWithARetryableCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="expiredStagingPassNeverDeletesRetentionExpiredVerifiedObject()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="completionQuarantinesWrongWholeHashMimeAndScannerFailure()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.015"/>
-  <testcase name="entryUuidsWithFailedAttachmentsFlagsOnlyTerminalOrQuarantinedAndClearsOnRemoval()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.005"/>
-  <testcase name="verifiedBytesCanBeRangeDownloadedAndConflictParentStaysConflictBound()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.008"/>
+  <testcase name="expiredStagingPassNeverDeletesRetentionExpiredVerifiedObject()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
+  <testcase name="completionQuarantinesWrongWholeHashMimeAndScannerFailure()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.012"/>
+  <testcase name="entryUuidsWithFailedAttachmentsFlagsOnlyTerminalOrQuarantinedAndClearsOnRemoval()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.02"/>
+  <testcase name="verifiedBytesCanBeRangeDownloadedAndConflictParentStaysConflictBound()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.009"/>
   <testcase name="gatewayCannotMutateAnotherGatewaysExistingAttachmentInTheSameWorkspace()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
-  <testcase name="gatewayCannotCreateAttachmentForAnotherGatewaysExistingRevision()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.0"/>
-  <testcase name="gatewayControllerCannotReplayOrRestartAUserCreatedAttachmentOnItsRevision()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.173"/>
-  <testcase name="chunkCommitRejectsADifferentReplayOfAnAlreadyCommittedIndexAsATerminalCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.006"/>
+  <testcase name="gatewayCannotCreateAttachmentForAnotherGatewaysExistingRevision()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
+  <testcase name="gatewayControllerCannotReplayOrRestartAUserCreatedAttachmentOnItsRevision()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.21"/>
+  <testcase name="chunkCommitRejectsADifferentReplayOfAnAlreadyCommittedIndexAsATerminalCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.008"/>
   <testcase name="verificationFailureCommitsQuarantineStateBeforeReturning422()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.0"/>
   <testcase name="putChunkRejectsAnExpiredUploadSessionAsATerminalCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
   <testcase name="removeRechecksAttachmentAfterWaitingForItsLock()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="gatewayContextCannotCrossWorkspaceOrRegisterAgainstAnotherParentRevision()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.0"/>
-  <testcase name="expiredStagingCleanupPreservesRecoverablePromotedFinalObject()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.0"/>
-  <testcase name="secondCompletionWaitingBehindQuarantineCannotPromote()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="expiredUploadCanStartAFreshSessionAndRetentionDeletesOnlyAfterItsDeadline()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="createRejectsAReplayAgainstARemovedAttachmentWithATerminalCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.0"/>
-  <testcase name="expiredUploadRestartRevalidatesAfterWaitingForCompletionLock()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="[1] sizeMib=2" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.004"/>
-  <testcase name="[2] sizeMib=5" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.014"/>
-  <testcase name="createRejectsIdentifierReuseWithADifferentIntentAsATerminalCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="collectorPreservesSessionWhenRemoveCommitsItsTombstoneWhileCollectorWaits()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.003"/>
+  <testcase name="gatewayContextCannotCrossWorkspaceOrRegisterAgainstAnotherParentRevision()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
+  <testcase name="expiredStagingCleanupPreservesRecoverablePromotedFinalObject()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
+  <testcase name="secondCompletionWaitingBehindQuarantineCannotPromote()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
+  <testcase name="expiredUploadCanStartAFreshSessionAndRetentionDeletesOnlyAfterItsDeadline()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
+  <testcase name="createRejectsAReplayAgainstARemovedAttachmentWithATerminalCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
+  <testcase name="expiredUploadRestartRevalidatesAfterWaitingForCompletionLock()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.0"/>
+  <testcase name="[1] sizeMib=2" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.008"/>
+  <testcase name="[2] sizeMib=5" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.017"/>
+  <testcase name="createRejectsIdentifierReuseWithADifferentIntentAsATerminalCode()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
+  <testcase name="collectorPreservesSessionWhenRemoveCommitsItsTombstoneWhileCollectorWaits()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
   <testcase name="removeWritesRetentionTombstoneInsteadOfDeletingTheObject()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
   <testcase name="chunkWaitingBehindCompletionRechecksStateUnderTheAttachmentLock()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
   <testcase name="expiredStagingCandidateIsRevalidatedAfterWaitingForCompletionLock()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
-  <testcase name="workspaceGatewayCanReadVerifiedUserAttachmentWithoutGainingMutationAuthority()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.001"/>
+  <testcase name="workspaceGatewayCanReadVerifiedUserAttachmentWithoutGainingMutationAuthority()" classname="org.osi.server.journal.v2.JournalAttachmentServiceTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

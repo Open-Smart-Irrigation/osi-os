@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.prediction.PredictionFieldStateServiceTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:46" hostname="osi-01" time="0.108">
+<testsuite name="org.osi.server.prediction.PredictionFieldStateServiceTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:31" hostname="osi-01" time="0.178">
   <properties/>
-  <testcase name="supportsLegacyPhase1SpatialCheckpointByUpgradingUnitsWithoutAggregatedDays()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.015"/>
-  <testcase name="recomputesTrackAArtifactWhenAnchorFingerprintChangedToEmpty()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.012"/>
-  <testcase name="recomputesTrackAArtifactWhenSensorAnchorsChangedAfterStoredRun()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.011"/>
-  <testcase name="preservesSerializedAggregatedDayValuesFromStoredArtifact()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.007"/>
-  <testcase name="servesStoredArtifactWhenCatalogFetchFails()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.01"/>
-  <testcase name="servesStaleStoredArtifactWithWarningWhenRecomputeFails()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.012"/>
-  <testcase name="spatializesFromSampledSoilsAndAppliesDryBiasedAggregation()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.01"/>
-  <testcase name="prefersStoredTrackASpatialArtifactWhenAvailable()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.011"/>
-  <testcase name="returnsDiagnosticOnlyLegacyFallbackWhenTrackAArtifactIsUnavailable()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.005"/>
-  <testcase name="recomputesTrackAArtifactWhenPredictionConfigChangedAfterStoredRun()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.012"/>
-  <system-out><![CDATA[2026-08-13T11:26:46.673+02:00 ERROR 2682197 --- [    Test worker] o.o.s.p.PredictionFieldStateService      : Prediction catalog fetch failed for zone 77
+  <testcase name="supportsLegacyPhase1SpatialCheckpointByUpgradingUnitsWithoutAggregatedDays()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.025"/>
+  <testcase name="recomputesTrackAArtifactWhenAnchorFingerprintChangedToEmpty()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.019"/>
+  <testcase name="recomputesTrackAArtifactWhenSensorAnchorsChangedAfterStoredRun()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.015"/>
+  <testcase name="preservesSerializedAggregatedDayValuesFromStoredArtifact()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.011"/>
+  <testcase name="servesStoredArtifactWhenCatalogFetchFails()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.022"/>
+  <testcase name="servesStaleStoredArtifactWithWarningWhenRecomputeFails()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.017"/>
+  <testcase name="spatializesFromSampledSoilsAndAppliesDryBiasedAggregation()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.014"/>
+  <testcase name="prefersStoredTrackASpatialArtifactWhenAvailable()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.018"/>
+  <testcase name="returnsDiagnosticOnlyLegacyFallbackWhenTrackAArtifactIsUnavailable()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.012"/>
+  <testcase name="recomputesTrackAArtifactWhenPredictionConfigChangedAfterStoredRun()" classname="org.osi.server.prediction.PredictionFieldStateServiceTest" time="0.02"/>
+  <system-out><![CDATA[2026-08-13T16:46:31.847+02:00 ERROR 3273021 --- [    Test worker] o.o.s.p.PredictionFieldStateService      : Prediction catalog fetch failed for zone 77
 
 java.lang.RuntimeException: catalog service down
 	at org.osi.server.prediction.PredictionClient.fetchCatalog(PredictionClient.java:68) ~[main/:na]
@@ -103,7 +103,7 @@ java.lang.RuntimeException: catalog service down
 	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69) ~[gradle-worker.jar:na]
 	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74) ~[gradle-worker.jar:na]
 
-2026-08-13T11:26:46.685+02:00 ERROR 2682197 --- [    Test worker] o.o.s.p.PredictionFieldStateService      : Live Track A recompute failed for zone 16
+2026-08-13T16:46:31.869+02:00 ERROR 3273021 --- [    Test worker] o.o.s.p.PredictionFieldStateService      : Live Track A recompute failed for zone 16
 
 java.lang.RuntimeException: prediction down
 	at org.osi.server.prediction.PredictionClient.runPrediction(PredictionClient.java:105) ~[main/:na]

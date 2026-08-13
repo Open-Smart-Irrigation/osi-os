@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.zone.IrrigationZoneDesiredStateTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.003">
+<testsuite name="org.osi.server.zone.IrrigationZoneDesiredStateTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:06" hostname="osi-01" time="0.005">
   <properties/>
-  <testcase name="edgeBackedConfigReturnsPendingOperationAndUsesCurrentVersionAsBase()" classname="org.osi.server.zone.IrrigationZoneDesiredStateTest" time="0.001"/>
+  <testcase name="edgeBackedConfigReturnsPendingOperationAndUsesCurrentVersionAsBase()" classname="org.osi.server.zone.IrrigationZoneDesiredStateTest" time="0.002"/>
   <testcase name="zoneListOverlaysPendingDesiredFields()" classname="org.osi.server.zone.IrrigationZoneDesiredStateTest" time="0.001"/>
-  <testcase name="appliedOperationDoesNotReplaceCanonicalZoneFields()" classname="org.osi.server.zone.IrrigationZoneDesiredStateTest" time="0.001"/>
+  <testcase name="appliedOperationDoesNotReplaceCanonicalZoneFields()" classname="org.osi.server.zone.IrrigationZoneDesiredStateTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

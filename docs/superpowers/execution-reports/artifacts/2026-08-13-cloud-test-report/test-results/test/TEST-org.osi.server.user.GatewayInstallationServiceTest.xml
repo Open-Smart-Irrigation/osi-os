@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.user.GatewayInstallationServiceTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:10" hostname="osi-01" time="0.007">
+<testsuite name="org.osi.server.user.GatewayInstallationServiceTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:01" hostname="osi-01" time="0.009">
   <properties/>
   <testcase name="isMigrationBlocked_falseForOrdinaryTransitionResolvedFromDeclaredPreviousEui()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
   <testcase name="isMigrationBlocked_falseWhenNoGoverningInstallationFound()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
-  <testcase name="isCurrentTransitionBlocked_falseForBlankUuidOrAbsentInstallation()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
+  <testcase name="isCurrentTransitionBlocked_falseForBlankUuidOrAbsentInstallation()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
   <testcase name="isCurrentTransitionBlocked_trueForRetiredEuiOrRecoveryInProgress()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
   <testcase name="observe_mintsWhenInstallationAbsent()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
   <testcase name="observe_rejectsInstallationOwnedByAnotherUser()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
   <testcase name="isMigrationBlocked_trueForRetiredEuiEvenWithNoDeclaredPreviousEuis()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
   <testcase name="observe_allowsSameEuiWhileRecoveryInProgress()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
   <testcase name="observe_rejectsDifferentEuiWhileRecoveryInProgress()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
-  <testcase name="observe_replacesCurrentEuiAndRetainsOrderedHistory()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
+  <testcase name="observe_replacesCurrentEuiAndRetainsOrderedHistory()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
   <testcase name="observe_rejectsCurrentEuiOwnedByAnotherInstallation()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
-  <testcase name="observe_ignoresStaleBackwardFlipToKnownPreviousEui()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
+  <testcase name="observe_ignoresStaleBackwardFlipToKnownPreviousEui()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
   <testcase name="isMigrationBlocked_trueWhenGoverningInstallationIsRecoveryFrozen()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
-  <testcase name="observe_noOpMergesHistoryWhenObservingCurrentEui()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
-  <testcase name="observe_forwardFlipsToGenuinelyNewEuiWithEmptyDeclaredPrevious()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
-  <testcase name="isCurrentTransitionBlocked_falseForCurrentOrGenuinelyNewEui()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
-  <system-out><![CDATA[2026-08-13T11:27:10.116+02:00  WARN 2682197 --- [    Test worker] o.o.s.user.GatewayInstallationService    : Ignoring stale installation observation: GW-OLD is a retired EUI for installation 8e9c6f90-6a18-4a1a-9f10-9b1c8861703a (current GW-NEW)
+  <testcase name="observe_noOpMergesHistoryWhenObservingCurrentEui()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
+  <testcase name="observe_forwardFlipsToGenuinelyNewEuiWithEmptyDeclaredPrevious()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.0"/>
+  <testcase name="isCurrentTransitionBlocked_falseForCurrentOrGenuinelyNewEui()" classname="org.osi.server.user.GatewayInstallationServiceTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-13T16:47:01.421+02:00  WARN 3273021 --- [    Test worker] o.o.s.user.GatewayInstallationService    : Ignoring stale installation observation: GW-OLD is a retired EUI for installation 8e9c6f90-6a18-4a1a-9f10-9b1c8861703a (current GW-NEW)
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

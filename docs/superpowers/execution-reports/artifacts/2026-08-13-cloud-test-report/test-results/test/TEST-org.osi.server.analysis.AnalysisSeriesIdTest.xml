@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analysis.AnalysisSeriesIdTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:25:55" hostname="osi-01" time="0.005">
+<testsuite name="org.osi.server.analysis.AnalysisSeriesIdTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:32" hostname="osi-01" time="0.007">
   <properties/>
-  <testcase name="differsWhenAnyComponentDiffers()" classname="org.osi.server.analysis.AnalysisSeriesIdTest" time="0.001"/>
+  <testcase name="differsWhenAnyComponentDiffers()" classname="org.osi.server.analysis.AnalysisSeriesIdTest" time="0.002"/>
   <testcase name="isDeterministicAndSixteenHexChars()" classname="org.osi.server.analysis.AnalysisSeriesIdTest" time="0.001"/>
-  <testcase name="rejectsNullIdentityParts()" classname="org.osi.server.analysis.AnalysisSeriesIdTest" time="0.002"/>
+  <testcase name="rejectsNullIdentityParts()" classname="org.osi.server.analysis.AnalysisSeriesIdTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

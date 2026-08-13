@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.sync.history.HistoryHashV1Test" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:09" hostname="osi-01" time="0.0">
+<testsuite name="org.osi.server.sync.history.HistoryHashV1Test" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:00" hostname="osi-01" time="0.001">
   <properties/>
-  <testcase name="fixturesMatchExpectedHashes()" classname="org.osi.server.sync.history.HistoryHashV1Test" time="0.0"/>
+  <testcase name="fixturesMatchExpectedHashes()" classname="org.osi.server.sync.history.HistoryHashV1Test" time="0.001"/>
   <system-out><![CDATA[fixtureSetSha256=3278509b46717b07c1883a460b870c3f53b80be0e10dd2814d94210c44962af4
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>

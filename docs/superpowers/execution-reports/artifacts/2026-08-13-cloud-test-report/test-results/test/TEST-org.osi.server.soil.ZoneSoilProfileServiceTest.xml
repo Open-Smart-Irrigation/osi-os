@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.soil.ZoneSoilProfileServiceTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:50" hostname="osi-01" time="0.229">
+<testsuite name="org.osi.server.soil.ZoneSoilProfileServiceTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:37" hostname="osi-01" time="0.259">
   <properties/>
-  <testcase name="resolveForPredictionFallsBackToManualSoilCodeWhenProfileUnavailable()" classname="org.osi.server.soil.ZoneSoilProfileServiceTest" time="0.2"/>
+  <testcase name="resolveForPredictionFallsBackToManualSoilCodeWhenProfileUnavailable()" classname="org.osi.server.soil.ZoneSoilProfileServiceTest" time="0.233"/>
   <testcase name="refreshProfileConvertsLiveSoilGridsUnits()" classname="org.osi.server.soil.ZoneSoilProfileServiceTest" time="0.011"/>
   <testcase name="refreshProfileNormalizesRowsAndDerivesHydraulics()" classname="org.osi.server.soil.ZoneSoilProfileServiceTest" time="0.007"/>
-  <testcase name="refreshProfileUsesEffectiveGeometryCoordinatesWhenFieldGeometryExists()" classname="org.osi.server.soil.ZoneSoilProfileServiceTest" time="0.009"/>
+  <testcase name="refreshProfileUsesEffectiveGeometryCoordinatesWhenFieldGeometryExists()" classname="org.osi.server.soil.ZoneSoilProfileServiceTest" time="0.005"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

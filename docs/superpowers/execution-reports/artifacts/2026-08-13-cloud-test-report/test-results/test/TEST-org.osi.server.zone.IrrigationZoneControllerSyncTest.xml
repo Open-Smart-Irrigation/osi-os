@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.zone.IrrigationZoneControllerSyncTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.568">
+<testsuite name="org.osi.server.zone.IrrigationZoneControllerSyncTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:05" hostname="osi-01" time="0.615">
   <properties/>
-  <testcase name="capableScheduleMutationReturnsDesiredOverlayWithoutLegacyCommand()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.417"/>
+  <testcase name="capableScheduleMutationReturnsDesiredOverlayWithoutLegacyCommand()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.457"/>
   <testcase name="updateConfigForEdgeBackedZoneQueuesPredictionCardToggleUntilEdgeAppliesIt()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.003"/>
   <testcase name="createRequiresExplicitGatewayWhenUserHasMultipleGateways()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="updateScheduleForEdgeBackedZoneUsesScheduleSyncVersionAndGatewayIdentity()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
@@ -14,15 +14,15 @@
   <testcase name="environmentSummaryIncludesZoneOnMemberGatewayWithoutZoneGrant()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.118"/>
   <testcase name="getAllIncludesZoneOnMemberGateway()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="getAllIncludesSensecapStationsAssignedViaWeatherStationZones()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.004"/>
-  <testcase name="grantedResearcherDeleteUsesProtectedMutationInsteadOfCloudOwnership()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
-  <testcase name="capableCalibrationMutationReturnsDesiredOverlay()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.002"/>
+  <testcase name="grantedResearcherDeleteUsesProtectedMutationInsteadOfCloudOwnership()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.002"/>
+  <testcase name="capableCalibrationMutationReturnsDesiredOverlay()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="getAllKeepsCanonicalCardVisibleDuringPendingDelete()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="getAllOverlaysScheduleAndCalibrationOperationsSeparately()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.002"/>
   <testcase name="capableGatewayConfigCoalescesIntoFullZoneUpsertWithoutWeatherSource()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="assignDeviceOnCapableGatewayQueuesFullDesiredDeviceWithoutMirrorWrite()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="cloudLocalCalibrationPersistsCanonicalServerRow()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="capableGatewayLocationUsesFullZoneMutationProducer()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
-  <testcase name="getAllDoesNotKeepLegacyS2120ZoneWhenExplicitAssignmentsPointElsewhere()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
+  <testcase name="getAllDoesNotKeepLegacyS2120ZoneWhenExplicitAssignmentsPointElsewhere()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.002"/>
   <testcase name="updateConfigForCloudLocalZoneSavesNormalizedWeatherSource()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <testcase name="zoneDevicesIncludeDevicesClaimedByAnotherMember()" classname="org.osi.server.zone.IrrigationZoneControllerSyncTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>

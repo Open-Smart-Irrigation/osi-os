@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:34" hostname="osi-01" time="0.143">
+<testsuite name="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:17" hostname="osi-01" time="0.23">
   <properties/>
-  <testcase name="concurrentProjectionCallbacksRecomputeFromAllCanonicalHeads()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.051"/>
-  <testcase name="correctingASeedingHeadRecomputesAwayTheStaleActiveProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.019"/>
-  <testcase name="plantingTransplantingAloneOpensAProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.013"/>
-  <testcase name="voidingASeedingHeadRetiresItsProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.02"/>
-  <testcase name="twoCanonicalSeedingHeadsPreserveBothPlotsInOneProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.02"/>
-  <testcase name="correctingASeedingHeadToPlantingTransplantingKeepsItsProjectionActive()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.018"/>
-  <system-out><![CDATA[2026-08-13T11:26:33.534+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalCropCycleProjectionHardeningIT]: using SpringBootContextLoader
-2026-08-13T11:26:33.534+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT]: JournalCropCycleProjectionHardeningIT does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
-2026-08-13T11:26:33.535+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalCropCycleProjectionHardeningIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
-2026-08-13T11:26:33.537+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalCropCycleProjectionHardeningIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
-2026-08-13T11:26:33.551+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT
-2026-08-13T11:26:33.552+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalCropCycleProjectionHardeningIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
-2026-08-13T11:26:33.556+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
-2026-08-13T11:26:33.557+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
-2026-08-13T11:26:33.557+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
-2026-08-13T11:26:33.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+  <testcase name="concurrentProjectionCallbacksRecomputeFromAllCanonicalHeads()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.077"/>
+  <testcase name="correctingASeedingHeadRecomputesAwayTheStaleActiveProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.038"/>
+  <testcase name="plantingTransplantingAloneOpensAProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.022"/>
+  <testcase name="voidingASeedingHeadRetiresItsProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.03"/>
+  <testcase name="twoCanonicalSeedingHeadsPreserveBothPlotsInOneProjection()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.027"/>
+  <testcase name="correctingASeedingHeadToPlantingTransplantingKeepsItsProjectionActive()" classname="org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT" time="0.033"/>
+  <system-out><![CDATA[2026-08-13T16:46:16.673+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalCropCycleProjectionHardeningIT]: using SpringBootContextLoader
+2026-08-13T16:46:16.673+02:00  INFO 3273021 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT]: JournalCropCycleProjectionHardeningIT does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T16:46:16.673+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalCropCycleProjectionHardeningIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T16:46:16.678+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalCropCycleProjectionHardeningIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T16:46:16.703+02:00  INFO 3273021 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.v2.JournalCropCycleProjectionHardeningIT
+2026-08-13T16:46:16.704+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalCropCycleProjectionHardeningIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T16:46:16.711+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T16:46:16.712+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T16:46:16.712+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T16:46:16.719+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
 
   .   ____          _            __ _ _
  /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
@@ -27,23 +27,23 @@
 
  :: Spring Boot ::                (v3.4.3)
 
-2026-08-13T11:26:33.564+02:00  INFO 2682197 --- [    Test worker] .v.JournalCropCycleProjectionHardeningIT : Starting JournalCropCycleProjectionHardeningIT using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
-2026-08-13T11:26:33.564+02:00  INFO 2682197 --- [    Test worker] .v.JournalCropCycleProjectionHardeningIT : No active profile set, falling back to 1 default profile: "default"
-2026-08-13T11:26:33.564+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
-2026-08-13T11:26:33.627+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
-2026-08-13T11:26:33.628+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
-2026-08-13T11:26:33.662+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 35 ms. Found 55 JPA repository interfaces.
-2026-08-13T11:26:33.700+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-6 - Starting...
-2026-08-13T11:26:33.710+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-6 - Start completed.
-2026-08-13T11:26:33.719+02:00  INFO 2682197 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF (PostgreSQL 16.14)
-2026-08-13T11:26:33.742+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.017s)
-2026-08-13T11:26:33.758+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 2026.08.10.001
-2026-08-13T11:26:33.759+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
-2026-08-13T11:26:33.776+02:00  INFO 2682197 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
-2026-08-13T11:26:33.777+02:00  INFO 2682197 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
-2026-08-13T11:26:33.781+02:00  INFO 2682197 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
-2026-08-13T11:26:33.784+02:00  WARN 2682197 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
-2026-08-13T11:26:33.784+02:00  INFO 2682197 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+2026-08-13T16:46:16.727+02:00  INFO 3273021 --- [    Test worker] .v.JournalCropCycleProjectionHardeningIT : Starting JournalCropCycleProjectionHardeningIT using Java 17.0.19 with PID 3273021 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T16:46:16.727+02:00  INFO 3273021 --- [    Test worker] .v.JournalCropCycleProjectionHardeningIT : No active profile set, falling back to 1 default profile: "default"
+2026-08-13T16:46:16.727+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
+2026-08-13T16:46:16.817+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T16:46:16.819+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T16:46:16.864+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 45 ms. Found 55 JPA repository interfaces.
+2026-08-13T16:46:16.904+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-6 - Starting...
+2026-08-13T16:46:16.916+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-6 - Start completed.
+2026-08-13T16:46:16.928+02:00  INFO 3273021 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32832/test?loggerLevel=OFF (PostgreSQL 16.14)
+2026-08-13T16:46:16.952+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.016s)
+2026-08-13T16:46:16.967+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 2026.08.10.001
+2026-08-13T16:46:16.968+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2026-08-13T16:46:16.990+02:00  INFO 3273021 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T16:46:16.991+02:00  INFO 3273021 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T16:46:16.997+02:00  INFO 3273021 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T16:46:17.000+02:00  WARN 3273021 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T16:46:17.001+02:00  INFO 3273021 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
 	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-6)']
 	Database driver: undefined/unknown
 	Database version: 16.14
@@ -51,11 +51,11 @@
 	Isolation level: undefined/unknown
 	Minimum pool size: undefined/unknown
 	Maximum pool size: undefined/unknown
-2026-08-13T11:26:33.852+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:33.852+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:34.071+02:00  INFO 2682197 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
-2026-08-13T11:26:34.072+02:00  INFO 2682197 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
-2026-08-13T11:26:34.251+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+2026-08-13T16:46:17.102+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:17.102+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:17.382+02:00  INFO 3273021 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T16:46:17.382+02:00  INFO 3273021 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T16:46:17.729+02:00 DEBUG 3273021 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
 
 
 ============================
@@ -343,16 +343,16 @@ Unconditional classes:
 
 
 
-2026-08-13T11:26:34.252+02:00  INFO 2682197 --- [    Test worker] .v.JournalCropCycleProjectionHardeningIT : Started JournalCropCycleProjectionHardeningIT in 0.699 seconds (process running for 41.706)
-2026-08-13T11:26:34.254+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.254+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:17.730+02:00  INFO 3273021 --- [    Test worker] .v.JournalCropCycleProjectionHardeningIT : Started JournalCropCycleProjectionHardeningIT in 1.023 seconds (process running for 48.785)
+2026-08-13T16:46:17.733+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.733+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Projection hardening', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:34.263+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.263+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.745+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.745+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -367,8 +367,8 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.268+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.268+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.753+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.753+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -383,24 +383,24 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.272+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.272+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.272+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.272+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.273+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.273+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.758+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.758+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.759+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.759+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.760+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.760+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.274+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.274+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.762+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.762+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.279+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.279+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.767+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.767+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -412,30 +412,30 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.280+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.280+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.281+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.281+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.285+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.285+02:00 DEBUG 2682197 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.769+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.769+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.770+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.770+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.777+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.777+02:00 DEBUG 3273021 --- [pool-3-thread-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.287+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.287+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.780+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.780+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.289+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.289+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.783+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.783+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.294+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.294+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.790+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.790+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -447,27 +447,27 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.295+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.295+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.295+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.295+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.298+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.298+02:00 DEBUG 2682197 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.792+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.793+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.793+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.793+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.797+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.797+02:00 DEBUG 3273021 --- [pool-3-thread-1] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.300+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.300+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
-2026-08-13T11:26:34.305+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.305+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:17.801+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.801+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
+2026-08-13T16:46:17.810+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.810+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Projection hardening', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:34.308+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.308+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.815+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.815+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -482,22 +482,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.309+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.309+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.310+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.310+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.817+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.817+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.818+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.818+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.310+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.310+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.818+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.818+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.311+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.311+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.820+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.820+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -509,18 +509,18 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.312+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.312+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.312+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.312+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.313+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.314+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.822+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.822+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.823+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.823+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.825+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.825+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.315+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.315+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.828+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.828+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -535,22 +535,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.316+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.316+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.317+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.317+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.830+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.830+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.831+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.831+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.317+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.317+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.832+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.832+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.318+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.318+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.834+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.834+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -562,31 +562,31 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.319+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.319+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.319+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.319+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.320+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.320+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.835+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.835+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.836+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.836+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.838+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.838+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.321+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.321+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
+2026-08-13T16:46:17.840+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.840+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.321+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.321+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
-2026-08-13T11:26:34.324+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.325+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:17.841+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.841+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
+2026-08-13T16:46:17.848+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.848+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Projection hardening', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:34.327+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.327+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.852+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.852+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -601,22 +601,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.328+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.328+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.329+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.329+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.854+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.854+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.855+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.855+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.329+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.329+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.856+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.856+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.330+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.330+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.858+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.858+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -628,31 +628,31 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.331+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.331+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.332+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.332+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.333+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.333+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.859+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.859+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.860+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.860+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.862+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.862+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.334+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.334+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
+2026-08-13T16:46:17.864+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.864+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.335+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.335+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
-2026-08-13T11:26:34.338+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.338+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:17.865+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.865+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
+2026-08-13T16:46:17.870+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.870+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Projection hardening', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:34.341+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.341+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.875+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.875+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -667,22 +667,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.342+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.342+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.343+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.343+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.879+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.879+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.880+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.880+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.343+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.343+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.880+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.880+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.344+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.344+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.882+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.882+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -694,18 +694,18 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.345+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.345+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.345+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.345+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.347+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.347+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.883+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.883+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.883+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.883+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.885+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.885+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.348+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.348+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.888+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.888+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -720,22 +720,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.350+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.350+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.350+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.350+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.890+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.890+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.890+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.890+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.350+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.350+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.891+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.891+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.351+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.351+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.892+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.892+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -747,33 +747,33 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.352+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.352+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.352+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.352+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.353+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.353+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.893+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.893+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.893+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.894+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.895+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.895+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.354+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.354+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
+2026-08-13T16:46:17.896+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.896+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.355+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.355+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
-2026-08-13T11:26:34.355+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.355+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
-2026-08-13T11:26:34.358+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.358+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:17.896+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.896+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
+2026-08-13T16:46:17.897+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.897+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
+2026-08-13T16:46:17.901+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.902+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Projection hardening', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:34.362+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.362+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.908+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.908+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -788,22 +788,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.363+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.364+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.364+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.364+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.910+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.910+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.911+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.911+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.364+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.364+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.911+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.911+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.366+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.366+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.912+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.912+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -815,18 +815,18 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.366+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.366+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.367+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.367+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.368+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.368+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.913+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.913+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.913+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.913+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.914+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.914+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.370+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.370+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.916+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.916+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -841,22 +841,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.371+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.371+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.371+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.371+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.917+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.917+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.918+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.918+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.371+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.372+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.918+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.918+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.373+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.373+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.919+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.919+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -868,27 +868,27 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.373+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.373+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.374+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.374+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.375+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.375+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.920+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.920+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.921+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.921+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.376+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.376+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
-2026-08-13T11:26:34.379+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.379+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
+2026-08-13T16:46:17.924+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.924+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
+2026-08-13T16:46:17.929+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.929+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_workspaces(
     workspace_uuid, owner_user_uuid, display_name,
     created_by_principal_uuid, authority_state)
 VALUES (?, ?, 'Projection hardening', ?, 'cloud_primary')
 ON CONFLICT (workspace_uuid) DO NOTHING
 ]
-2026-08-13T11:26:34.382+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.382+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.933+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.933+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -903,22 +903,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.383+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.383+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.383+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.383+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.936+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.936+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.936+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.936+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.384+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.384+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.937+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.937+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.384+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.384+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.940+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.940+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -930,18 +930,18 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.385+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.385+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.385+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.385+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.386+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.386+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.941+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.941+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.942+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.942+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.944+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.944+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.388+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.388+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
+2026-08-13T16:46:17.946+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.946+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entry_heads(
     workspace_uuid, entry_uuid, entry_head_uuid, current_revision_uuid,
     version, plot_uuid, occurred_start, payload_json, payload_sha256,
     recorded_at, updated_at)
@@ -956,22 +956,22 @@ ON CONFLICT (workspace_uuid, entry_uuid) DO UPDATE SET
     recorded_at = EXCLUDED.recorded_at,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.389+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.389+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
-2026-08-13T11:26:34.390+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.390+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
+2026-08-13T16:46:17.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 3))]
+2026-08-13T16:46:17.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT projection_version, payload_json::text
   FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.390+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.390+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
+2026-08-13T16:46:17.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text
   FROM journal_entry_heads
  WHERE workspace_uuid = ?
    AND payload_json->>'season_uuid' = ?
  ORDER BY occurred_start, entry_uuid
 ]
-2026-08-13T11:26:34.391+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.391+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
+2026-08-13T16:46:17.949+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.949+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_crop_cycle_projection_v2(
     workspace_uuid, cycle_uuid, projection_version, gateway_eui,
     active, payload_json, payload_sha256, updated_at)
 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?, CURRENT_TIMESTAMP)
@@ -983,22 +983,22 @@ ON CONFLICT (workspace_uuid, cycle_uuid) DO UPDATE SET
     payload_sha256 = EXCLUDED.payload_sha256,
     updated_at = CURRENT_TIMESTAMP
 ]
-2026-08-13T11:26:34.392+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.392+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
-2026-08-13T11:26:34.392+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.392+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
-2026-08-13T11:26:34.393+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:34.393+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
+2026-08-13T16:46:17.950+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.950+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT pg_advisory_xact_lock(hashtextextended(?, 0))]
+2026-08-13T16:46:17.950+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.950+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COALESCE(MAX(sequence), 0) FROM journal_replication_log WHERE workspace_uuid = ?]
+2026-08-13T16:46:17.954+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:17.954+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_replication_log(
     workspace_uuid, sequence, kind, payload_json,
     payload_sha256, recorded_at)
 VALUES (?, ?, ?, CAST(? AS jsonb), ?, ?)
 ]
-2026-08-13T11:26:34.394+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.394+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
+2026-08-13T16:46:17.956+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.956+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT active FROM journal_crop_cycle_projection_v2
  WHERE workspace_uuid = ? AND cycle_uuid = ?
 ]
-2026-08-13T11:26:34.395+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:34.395+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
+2026-08-13T16:46:17.957+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:17.957+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT payload_json::text FROM journal_crop_cycle_projection_v2 WHERE workspace_uuid = ? AND cycle_uuid = ?]
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

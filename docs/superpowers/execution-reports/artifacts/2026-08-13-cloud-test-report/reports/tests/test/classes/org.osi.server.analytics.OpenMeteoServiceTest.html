@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.029s</div>
+<div class="counter">0.031s</div>
 <p>duration</p>
 </div>
 </td>
@@ -84,12 +84,12 @@
 </tr>
 <tr>
 <td class="success">getForecast_readsHourlyAndDailyForecastBlocks()</td>
-<td class="success">0.011s</td>
+<td class="success">0.014s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">getWeatherForDay_buildsSnapshotFromHourlyArchiveData()</td>
-<td class="success">0.010s</td>
+<td class="success">0.009s</td>
 <td class="success">passed</td>
 </tr>
 </table>
@@ -97,18 +97,18 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:26:07.698+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://archive-api.open-meteo.com/v1/archive?latitude=46.95&amp;longitude=7.44&amp;hourly=temperature_2m,relative_humidity_2m,precipitation&amp;timezone=Europe/Zurich&amp;start_date=2026-03-27&amp;end_date=2026-03-27
-2026-08-13T11:26:07.701+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.702+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.702+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoHourlyResponse]
-2026-08-13T11:26:07.706+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://api.open-meteo.com/v1/forecast?latitude=46.95&amp;longitude=7.44&amp;hourly=temperature_2m,relative_humidity_2m,precipitation,precipitation_probability,wind_speed_10m,wind_direction_10m&amp;daily=precipitation_sum,precipitation_probability_max,et0_fao_evapotranspiration,temperature_2m_min,temperature_2m_max&amp;timezone=Europe/Zurich&amp;forecast_days=6
-2026-08-13T11:26:07.713+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.714+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.714+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoForecastResponse]
-2026-08-13T11:26:07.717+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://api.open-meteo.com/v1/forecast?latitude=46.95&amp;longitude=7.44&amp;current=temperature_2m,relative_humidity_2m,precipitation,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m&amp;timezone=Europe/Zurich
-2026-08-13T11:26:07.722+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.722+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.722+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoForecastResponse]
+<pre>2026-08-13T16:45:46.452+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://archive-api.open-meteo.com/v1/archive?latitude=46.95&amp;longitude=7.44&amp;hourly=temperature_2m,relative_humidity_2m,precipitation&amp;timezone=Europe/Zurich&amp;start_date=2026-03-27&amp;end_date=2026-03-27
+2026-08-13T16:45:46.455+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.456+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.456+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoHourlyResponse]
+2026-08-13T16:45:46.461+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://api.open-meteo.com/v1/forecast?latitude=46.95&amp;longitude=7.44&amp;hourly=temperature_2m,relative_humidity_2m,precipitation,precipitation_probability,wind_speed_10m,wind_direction_10m&amp;daily=precipitation_sum,precipitation_probability_max,et0_fao_evapotranspiration,temperature_2m_min,temperature_2m_max&amp;timezone=Europe/Zurich&amp;forecast_days=6
+2026-08-13T16:45:46.470+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.470+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.470+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoForecastResponse]
+2026-08-13T16:45:46.475+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://api.open-meteo.com/v1/forecast?latitude=46.95&amp;longitude=7.44&amp;current=temperature_2m,relative_humidity_2m,precipitation,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m&amp;timezone=Europe/Zurich
+2026-08-13T16:45:46.479+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.479+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.479+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoForecastResponse]
 </pre>
 </span>
 </div>
@@ -120,7 +120,7 @@
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

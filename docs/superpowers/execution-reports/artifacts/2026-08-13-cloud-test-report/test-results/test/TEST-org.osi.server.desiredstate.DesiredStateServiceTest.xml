@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.desiredstate.DesiredStateServiceTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:21" hostname="osi-01" time="0.024">
+<testsuite name="org.osi.server.desiredstate.DesiredStateServiceTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:02" hostname="osi-01" time="0.043">
   <properties/>
-  <testcase name="latestCreatorProjectionReturnsOneOperationPerResource()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.005"/>
-  <testcase name="appliedAckClearsPriorRetryableFailureDetail()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
+  <testcase name="latestCreatorProjectionReturnsOneOperationPerResource()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.004"/>
+  <testcase name="appliedAckClearsPriorRetryableFailureDetail()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.002"/>
   <testcase name="expiredAckMarksOperationExpired()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
-  <testcase name="leasedConfigCommandIsNotRewrittenAndGetsANewCommand()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.002"/>
-  <testcase name="appliedAckWaitsForMirrorAsAcknowledged()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.0"/>
-  <testcase name="physicalEffectsNeverCoalesce()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
-  <testcase name="permanentRejectionStoresStableReason()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.0"/>
+  <testcase name="leasedConfigCommandIsNotRewrittenAndGetsANewCommand()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.003"/>
+  <testcase name="appliedAckWaitsForMirrorAsAcknowledged()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.002"/>
+  <testcase name="physicalEffectsNeverCoalesce()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.003"/>
+  <testcase name="permanentRejectionStoresStableReason()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
   <testcase name="credentialMutationAppliesOnAckWithoutMirror()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
-  <testcase name="unclaimNeverRewritesAnExistingCommand()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
-  <testcase name="secondConfigEditReusesSafeUnleasedCommandAndSupersedesFirstOperation()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
-  <testcase name="legacyCommandWithoutOperationAndSupersededOperationAreIgnored()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.0"/>
+  <testcase name="unclaimNeverRewritesAnExistingCommand()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.004"/>
+  <testcase name="secondConfigEditReusesSafeUnleasedCommandAndSupersedesFirstOperation()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.002"/>
+  <testcase name="legacyCommandWithoutOperationAndSupersededOperationAreIgnored()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
   <testcase name="retryableAckStaysPendingAndPreservesCommandIdentity()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.0"/>
-  <testcase name="physicalEffectRequiresFutureExpiryAndEffectKey()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
-  <testcase name="requestCreatesPendingOperationAndCommand()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.001"/>
-  <testcase name="conflictAckMarksOperationConflicted()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.0"/>
-  <testcase name="invalidVersionAndOversizedJsonAreRejected()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.004"/>
+  <testcase name="physicalEffectRequiresFutureExpiryAndEffectKey()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.003"/>
+  <testcase name="requestCreatesPendingOperationAndCommand()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.003"/>
+  <testcase name="conflictAckMarksOperationConflicted()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.002"/>
+  <testcase name="invalidVersionAndOversizedJsonAreRejected()" classname="org.osi.server.desiredstate.DesiredStateServiceTest" time="0.005"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

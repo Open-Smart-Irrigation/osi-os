@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.prediction.PredictionSchedulerTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:47" hostname="osi-01" time="0.002">
+<testsuite name="org.osi.server.prediction.PredictionSchedulerTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:33" hostname="osi-01" time="0.003">
   <properties/>
-  <testcase name="eligibleLocalDateReturnsNullBeforeCutoff()" classname="org.osi.server.prediction.PredictionSchedulerTest" time="0.0"/>
-  <testcase name="schedulerRunsOnlyForZonesPastLocalCutoffWithoutFreshRun()" classname="org.osi.server.prediction.PredictionSchedulerTest" time="0.001"/>
+  <testcase name="eligibleLocalDateReturnsNullBeforeCutoff()" classname="org.osi.server.prediction.PredictionSchedulerTest" time="0.001"/>
+  <testcase name="schedulerRunsOnlyForZonesPastLocalCutoffWithoutFreshRun()" classname="org.osi.server.prediction.PredictionSchedulerTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

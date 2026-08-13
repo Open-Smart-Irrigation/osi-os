@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.journal.v2.S3JournalBlobStoreIT" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:43" hostname="osi-01" time="0.295">
+<testsuite name="org.osi.server.journal.v2.S3JournalBlobStoreIT" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:28" hostname="osi-01" time="0.329">
   <properties/>
-  <testcase name="realS3CompatibleStoreResumesAssemblesPromotesAndRangesWithoutLocalDisk()" classname="org.osi.server.journal.v2.S3JournalBlobStoreIT" time="0.295"/>
-  <system-out><![CDATA[2026-08-13T11:26:42.641+02:00  INFO 2682197 --- [    Test worker] t.m.2024-01-16T16-07-38Z                 : Creating container for image: minio/minio:RELEASE.2024-01-16T16-07-38Z
-2026-08-13T11:26:43.164+02:00  INFO 2682197 --- [    Test worker] t.m.2024-01-16T16-07-38Z                 : Container minio/minio:RELEASE.2024-01-16T16-07-38Z is starting: ad76d1fad14e7ba09341c7a278a7a7f211a42134b98177d874f4eb3386d357fb
-2026-08-13T11:26:43.508+02:00  INFO 2682197 --- [    Test worker] t.m.2024-01-16T16-07-38Z                 : Container minio/minio:RELEASE.2024-01-16T16-07-38Z started in PT0.867656734S
+  <testcase name="realS3CompatibleStoreResumesAssemblesPromotesAndRangesWithoutLocalDisk()" classname="org.osi.server.journal.v2.S3JournalBlobStoreIT" time="0.329"/>
+  <system-out><![CDATA[2026-08-13T16:46:26.958+02:00  INFO 3273021 --- [    Test worker] t.m.2024-01-16T16-07-38Z                 : Creating container for image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+2026-08-13T16:46:27.455+02:00  INFO 3273021 --- [    Test worker] t.m.2024-01-16T16-07-38Z                 : Container minio/minio:RELEASE.2024-01-16T16-07-38Z is starting: df5fcc259431263431d66462a4ebc822ac0bec429400fa6d8ff7f8b2b7fda08d
+2026-08-13T16:46:27.804+02:00  INFO 3273021 --- [    Test worker] t.m.2024-01-16T16-07-38Z                 : Container minio/minio:RELEASE.2024-01-16T16-07-38Z started in PT0.845468231S
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

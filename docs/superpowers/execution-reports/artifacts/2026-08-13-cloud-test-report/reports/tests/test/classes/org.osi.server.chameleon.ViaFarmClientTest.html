@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.126s</div>
+<div class="counter">0.141s</div>
 <p>duration</p>
 </div>
 </td>
@@ -79,12 +79,12 @@
 </thead>
 <tr>
 <td class="success">returnsFoundOn200()</td>
-<td class="success">0.005s</td>
+<td class="success">0.006s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">returnsInvalidResponseOnMalformedBody()</td>
-<td class="success">0.005s</td>
+<td class="success">0.006s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -94,12 +94,12 @@
 </tr>
 <tr>
 <td class="success">returnsNotFoundOn302()</td>
-<td class="success">0.004s</td>
+<td class="success">0.005s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">returnsUnavailableOn5xx()</td>
-<td class="success">0.104s</td>
+<td class="success">0.116s</td>
 <td class="success">passed</td>
 </tr>
 </table>
@@ -107,24 +107,24 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:26:12.784+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:43299/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
-2026-08-13T11:26:12.786+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:12.805+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 503 SERVICE_UNAVAILABLE
-2026-08-13T11:26:12.811+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:34319/api/curve_params/?temperature_id_full=28DE7EC80B0000FF
-2026-08-13T11:26:12.812+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:12.813+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 302 FOUND
-2026-08-13T11:26:12.815+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:42297/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
-2026-08-13T11:26:12.816+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:12.820+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:12.821+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.chameleon.ViaFarmResponse]
-2026-08-13T11:26:12.823+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:33405/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
-2026-08-13T11:26:12.824+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:12.826+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:12.826+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.chameleon.ViaFarmResponse]
-2026-08-13T11:26:12.828+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:55991/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
-2026-08-13T11:26:12.829+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:12.830+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:12.830+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.chameleon.ViaFarmResponse]
+<pre>2026-08-13T16:45:52.305+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:57985/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
+2026-08-13T16:45:52.307+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:52.326+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 503 SERVICE_UNAVAILABLE
+2026-08-13T16:45:52.333+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:43897/api/curve_params/?temperature_id_full=28DE7EC80B0000FF
+2026-08-13T16:45:52.335+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:52.336+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 302 FOUND
+2026-08-13T16:45:52.339+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:45663/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
+2026-08-13T16:45:52.340+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:52.344+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:52.345+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.chameleon.ViaFarmResponse]
+2026-08-13T16:45:52.348+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:38847/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
+2026-08-13T16:45:52.349+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:52.350+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:52.351+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.chameleon.ViaFarmResponse]
+2026-08-13T16:45:52.354+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET http://localhost:38475/api/curve_params/?temperature_id_full=28DE7EC80B0000E2
+2026-08-13T16:45:52.355+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:52.356+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:52.356+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.chameleon.ViaFarmResponse]
 </pre>
 </span>
 </div>
@@ -136,7 +136,7 @@
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

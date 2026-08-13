@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.RdiSetpointTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:07" hostname="osi-01" time="0.0">
+<testsuite name="org.osi.server.analytics.RdiSetpointTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:46" hostname="osi-01" time="0.0">
   <properties/>
   <testcase name="resolve_usesZoneOverrideWhenPresent()" classname="org.osi.server.analytics.RdiSetpointTest" time="0.0"/>
   <testcase name="resolve_derivesFromMildRelativeThresholdAndPhenologyModifier()" classname="org.osi.server.analytics.RdiSetpointTest" time="0.0"/>

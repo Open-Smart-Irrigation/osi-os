@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.retention.TelemetryRetentionJobTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:50" hostname="osi-01" time="0.001">
+<testsuite name="org.osi.server.retention.TelemetryRetentionJobTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:36" hostname="osi-01" time="0.001">
   <properties/>
-  <testcase name="dryRunReportsCandidatesWithoutDeleting()" classname="org.osi.server.retention.TelemetryRetentionJobTest" time="0.0"/>
-  <testcase name="liveRunDeletesOldSensorRows()" classname="org.osi.server.retention.TelemetryRetentionJobTest" time="0.001"/>
-  <system-out><![CDATA[2026-08-13T11:26:50.393+02:00  INFO 2682197 --- [    Test worker] o.o.s.retention.TelemetryRetentionJob    : Purged 20 sensor_data rows older than 365 days
+  <testcase name="dryRunReportsCandidatesWithoutDeleting()" classname="org.osi.server.retention.TelemetryRetentionJobTest" time="0.001"/>
+  <testcase name="liveRunDeletesOldSensorRows()" classname="org.osi.server.retention.TelemetryRetentionJobTest" time="0.0"/>
+  <system-out><![CDATA[2026-08-13T16:46:36.457+02:00  INFO 3273021 --- [    Test worker] o.o.s.retention.TelemetryRetentionJob    : Purged 20 sensor_data rows older than 365 days
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

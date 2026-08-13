@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.device.DeviceServiceTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:26" hostname="osi-01" time="0.107">
+<testsuite name="org.osi.server.device.DeviceServiceTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:09" hostname="osi-01" time="0.118">
   <properties/>
-  <testcase name="ensureGatewayClaimForSync_rejectsLivingGatewayClaimedByAnotherUser()" classname="org.osi.server.device.DeviceServiceTest" time="0.096"/>
+  <testcase name="ensureGatewayClaimForSync_rejectsLivingGatewayClaimedByAnotherUser()" classname="org.osi.server.device.DeviceServiceTest" time="0.106"/>
   <testcase name="updateValveState_recordsObservedStatePayloadAndTimestamp()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
-  <testcase name="setSoilMoistureProbeDepths_savesDepthsAndIncrementsSyncVersion()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
+  <testcase name="setSoilMoistureProbeDepths_savesDepthsAndIncrementsSyncVersion()" classname="org.osi.server.device.DeviceServiceTest" time="0.0"/>
   <testcase name="setSoilMoistureProbeDepths_rejectsUnsupportedDeviceTypes()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
   <testcase name="adminAssign_rejectsDisabledUsers()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
   <testcase name="claimBulk_skipsGatewayClaimsForNonAdmins()" classname="org.osi.server.device.DeviceServiceTest" time="0.002"/>
-  <testcase name="ensureGatewayClaimForSync_createsMissingGatewayForUser()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
-  <testcase name="adminUnassign_rejectsGatewayTransferWhenDependentDevicesExist()" classname="org.osi.server.device.DeviceServiceTest" time="0.002"/>
-  <testcase name="adminAssign_clearsZoneAndGatewayForNonGatewayDevice()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
+  <testcase name="ensureGatewayClaimForSync_createsMissingGatewayForUser()" classname="org.osi.server.device.DeviceServiceTest" time="0.0"/>
+  <testcase name="adminUnassign_rejectsGatewayTransferWhenDependentDevicesExist()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
+  <testcase name="adminAssign_clearsZoneAndGatewayForNonGatewayDevice()" classname="org.osi.server.device.DeviceServiceTest" time="0.0"/>
   <testcase name="adminAssign_rejectsGatewayTransferWhenZonesStillReferenceIt()" classname="org.osi.server.device.DeviceServiceTest" time="0.0"/>
-  <testcase name="ensureGatewayClaimForSync_allowsRelinkWhenGatewayWasSoftDeleted()" classname="org.osi.server.device.DeviceServiceTest" time="0.0"/>
+  <testcase name="ensureGatewayClaimForSync_allowsRelinkWhenGatewayWasSoftDeleted()" classname="org.osi.server.device.DeviceServiceTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

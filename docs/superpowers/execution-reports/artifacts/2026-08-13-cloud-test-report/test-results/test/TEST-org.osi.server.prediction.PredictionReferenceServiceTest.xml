@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.prediction.PredictionReferenceServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:47" hostname="osi-01" time="0.203">
+<testsuite name="org.osi.server.prediction.PredictionReferenceServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:32" hostname="osi-01" time="0.27">
   <properties/>
-  <testcase name="persistsSuccessfulReferenceRunAndMetrics()" classname="org.osi.server.prediction.PredictionReferenceServiceTest" time="0.201"/>
+  <testcase name="persistsSuccessfulReferenceRunAndMetrics()" classname="org.osi.server.prediction.PredictionReferenceServiceTest" time="0.267"/>
   <testcase name="prefersLatestReferenceDayBiomassOverSeasonSummaryBiomass()" classname="org.osi.server.prediction.PredictionReferenceServiceTest" time="0.002"/>
-  <testcase name="referenceFailureDoesNotBubbleAndPersistsFailedRun()" classname="org.osi.server.prediction.PredictionReferenceServiceTest" time="0.0"/>
+  <testcase name="referenceFailureDoesNotBubbleAndPersistsFailedRun()" classname="org.osi.server.prediction.PredictionReferenceServiceTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:47" hostname="osi-01" time="0.036">
+<testsuite name="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:33" hostname="osi-01" time="0.073">
   <properties/>
-  <testcase name="assembleUsesLegacyAliasForUnconfiguredDevices()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.013"/>
-  <testcase name="assembleSkipsLayerObservationsWhenProbeAnchorIsIneligible()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.005"/>
-  <testcase name="assembleBuildsAdaptiveClustersAndMapsLayerObservations()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.006"/>
-  <testcase name="assembleIgnoresConfiguredSoilChannelsWithoutDepthMapping()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.003"/>
-  <testcase name="assembleWeightsAnchoredSwtObservationsBySpatialUnitDistance()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.004"/>
-  <testcase name="assemblePreservesExactMixedProbeContributorsForLayerObservations()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.004"/>
+  <testcase name="assembleUsesLegacyAliasForUnconfiguredDevices()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.03"/>
+  <testcase name="assembleSkipsLayerObservationsWhenProbeAnchorIsIneligible()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.01"/>
+  <testcase name="assembleBuildsAdaptiveClustersAndMapsLayerObservations()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.009"/>
+  <testcase name="assembleIgnoresConfiguredSoilChannelsWithoutDepthMapping()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.006"/>
+  <testcase name="assembleWeightsAnchoredSwtObservationsBySpatialUnitDistance()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.009"/>
+  <testcase name="assemblePreservesExactMixedProbeContributorsForLayerObservations()" classname="org.osi.server.prediction.PredictionSpatialUnitAssemblerTest" time="0.007"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

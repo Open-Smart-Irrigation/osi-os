@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:29" hostname="osi-01" time="0.1">
+<testsuite name="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:11" hostname="osi-01" time="0.102">
   <properties/>
   <testcase name="dendroRawQueriesIncludeSyncedDendroReadingsTable()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.005"/>
-  <testcase name="environmentRawQueriesUseCanonicalJsonFieldNames()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.001"/>
+  <testcase name="environmentRawQueriesUseCanonicalJsonFieldNames()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.002"/>
   <testcase name="soilRawQueriesFilterToTheMatchingPerDeviceSourceKey()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.002"/>
-  <testcase name="rollupBackfillRawQueryIsNotCappedByTheShortRangeReadLimit()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.001"/>
-  <testcase name="rawQueriesAcceptManifestExpandedExportableChannels()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.001"/>
+  <testcase name="rollupBackfillRawQueryIsNotCappedByTheShortRangeReadLimit()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.0"/>
+  <testcase name="rawQueriesAcceptManifestExpandedExportableChannels()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.0"/>
   <testcase name="shortRangeRawQueryKeepsTheReadLimit()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.001"/>
-  <testcase name="capExportRowsTrimsTheSentinelRow()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.08"/>
+  <testcase name="capExportRowsTrimsTheSentinelRow()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.078"/>
   <testcase name="environmentRawQueriesAcceptLegacyAliasesButEmitCanonicalChannelKeys()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.002"/>
   <testcase name="irrigationEventsQueryFetchesOneExtraRowForTruncationDetection()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.001"/>
   <testcase name="environmentRawQueriesFilterToTheMatchingPerDeviceSourceKey()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.001"/>
-  <testcase name="dendroRawQueriesFilterToTheMatchingSourceDeviceInTheZone()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.001"/>
-  <testcase name="exportRawReadingsUseLimitPlusOneForCapDetectionAndArrayIdMapping()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.002"/>
+  <testcase name="dendroRawQueriesFilterToTheMatchingSourceDeviceInTheZone()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.002"/>
+  <testcase name="exportRawReadingsUseLimitPlusOneForCapDetectionAndArrayIdMapping()" classname="org.osi.server.history.JdbcHistoryRawQueryRepositoryTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

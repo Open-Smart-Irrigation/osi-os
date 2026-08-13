@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.security.EdgeOwnershipServiceTest" tests="32" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:50" hostname="osi-01" time="0.012">
+<testsuite name="org.osi.server.security.EdgeOwnershipServiceTest" tests="32" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:37" hostname="osi-01" time="0.014">
   <properties/>
-  <testcase name="weatherStationZoneOwnershipResolvesViaDevice()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="workRequestOwnershipUsesGatewayPrefixBeforeSeparator()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="absentWorkRequestAndUserResourcesStayDenied()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="weatherStationZoneOwnershipResolvesViaDevice()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.002"/>
+  <testcase name="workRequestOwnershipUsesGatewayPrefixBeforeSeparator()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="absentWorkRequestAndUserResourcesStayDenied()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="absentZoneAllowsEdgeOriginatedRegistration()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
-  <testcase name="absentWeatherStationZonesStayDenied()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="deviceDataOwnershipResolvesViaDevice()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="absentWeatherStationZonesStayDenied()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="deviceDataOwnershipResolvesViaDevice()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="scheduleOwnershipResolvesViaZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
-  <testcase name="foreignGatewayCannotMutateZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="requireMutateThrowsForForeignGateway()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="foreignGatewayCannotMutateZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="requireMutateThrowsForForeignGateway()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="absentJournalEntryResolvesRatherThanFallingToUnknownType()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="presentDeviceDataRowResolvesOwnershipThroughDeviceEuiPrefixLikeItsParent()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="deviceDataOwnershipNormalizesEuiCase()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="presentDeviceDataRowResolvesOwnershipThroughDeviceEuiPrefixLikeItsParent()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="deviceDataOwnershipNormalizesEuiCase()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="gatewayOwnershipIsSelfMatch()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
   <testcase name="canTombstoneMirrorsCanMutateExactly()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
   <testcase name="ownerGatewayCanMutateDevice()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
@@ -23,19 +23,19 @@
   <testcase name="irrigationEventOwnershipResolvesViaZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="gatewayOwnershipNormalizesCase()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
   <testcase name="eventAndUnknownResourceTypesFailClosed()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
-  <testcase name="zoneLocationOwnershipResolvesViaZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
-  <testcase name="ownerGatewayCanMutateZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="irrigationCalibrationOwnershipResolvesViaZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="zoneLocationOwnershipResolvesViaZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
+  <testcase name="ownerGatewayCanMutateZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="irrigationCalibrationOwnershipResolvesViaZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="dendroOwnershipResolvesViaDevice()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
-  <testcase name="absentTelemetryResourcesAllowEdgeOriginatedRegistrationAfterTheApplierAssignsOwnership()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
-  <testcase name="unknownResourceTypeDenies()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="absentTelemetryResourcesAllowEdgeOriginatedRegistrationAfterTheApplierAssignsOwnership()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
+  <testcase name="unknownResourceTypeDenies()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="absentScheduleZoneAllowsSyncToProceedToTheParentMissingRetry()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
   <testcase name="absentZoneConfigAndZoneLocationAllowEdgeOriginatedRegistration()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
   <testcase name="zoneConfigOwnershipResolvesViaZone()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.001"/>
   <testcase name="chameleonOwnershipResolvesViaDevice()" classname="org.osi.server.security.EdgeOwnershipServiceTest" time="0.0"/>
-  <system-out><![CDATA[2026-08-13T11:26:50.954+02:00  WARN 2682197 --- [    Test worker] o.o.s.security.EdgeOwnershipService      : EdgeOwnershipService: unknown resourceType 'EVENT'
-2026-08-13T11:26:50.954+02:00  WARN 2682197 --- [    Test worker] o.o.s.security.EdgeOwnershipService      : EdgeOwnershipService: unknown resourceType 'TOTALLY_UNKNOWN'
-2026-08-13T11:26:50.955+02:00  WARN 2682197 --- [    Test worker] o.o.s.security.EdgeOwnershipService      : EdgeOwnershipService: unknown resourceType 'UNKNOWN_TYPE'
+  <system-out><![CDATA[2026-08-13T16:46:37.045+02:00  WARN 3273021 --- [    Test worker] o.o.s.security.EdgeOwnershipService      : EdgeOwnershipService: unknown resourceType 'EVENT'
+2026-08-13T16:46:37.045+02:00  WARN 3273021 --- [    Test worker] o.o.s.security.EdgeOwnershipService      : EdgeOwnershipService: unknown resourceType 'TOTALLY_UNKNOWN'
+2026-08-13T16:46:37.047+02:00  WARN 3273021 --- [    Test worker] o.o.s.security.EdgeOwnershipService      : EdgeOwnershipService: unknown resourceType 'UNKNOWN_TYPE'
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

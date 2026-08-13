@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:07" hostname="osi-01" time="0.005">
+<testsuite name="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:45" hostname="osi-01" time="0.006">
   <properties/>
   <testcase name="computeAbsoluteDeltaTwdSmoothed_usesAbsoluteTwdWithoutNormalizedHistory()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.0"/>
   <testcase name="decisionEscalationStress_usesTodayStressForIncrease10()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.0"/>
   <testcase name="computeZoneDayWindow_anchorsToPreviousLocalCalendarDay()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.001"/>
   <testcase name="priorDailyHistoryDesc_excludesTodayAndKeepsNewestPriorDayFirst()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.001"/>
-  <testcase name="computeAbsoluteDeltaTwdSmoothed_returnsNullWithoutYesterdayAbsoluteTwd()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.0"/>
+  <testcase name="computeAbsoluteDeltaTwdSmoothed_returnsNullWithoutYesterdayAbsoluteTwd()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.001"/>
   <testcase name="priorDailyHistoryDesc_isEmptyWhenOnlyTodayExists()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.0"/>
-  <testcase name="priorZoneRecommendationsDesc_excludesTodayAndPreservesDescendingOrder()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.0"/>
-  <testcase name="meetsDendroThreshold_blocksActionsBelowConfiguredStress()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.001"/>
-  <testcase name="dendroThresholdStressLevel_mapsStoredThresholdEncoding()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.0"/>
+  <testcase name="priorZoneRecommendationsDesc_excludesTodayAndPreservesDescendingOrder()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.001"/>
+  <testcase name="meetsDendroThreshold_blocksActionsBelowConfiguredStress()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.0"/>
+  <testcase name="dendroThresholdStressLevel_mapsStoredThresholdEncoding()" classname="org.osi.server.analytics.DendroAnalyticsServiceHistoryTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

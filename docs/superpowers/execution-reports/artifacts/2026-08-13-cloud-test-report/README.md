@@ -1,13 +1,16 @@
-# Cloud C8 test sweep
+# Cloud Round 2 test sweep
 
-Command: `./gradlew --stop && ./gradlew test` from the cloud backend worktree.
+Command: `./gradlew cleanTest test --no-daemon` from the cloud backend worktree.
 
-The copied Gradle artifacts contain 1,610 tests across 284 XML result files:
+The copied Gradle artifacts contain 1,610 tests across the current XML result files:
 
 - 1,609 passed
-- 1 failed: `ArchitectureTest.noNewPackageCycles`, the existing frozen ArchUnit store reports `StoreUpdateFailedException`
 - 1 skipped
 - 0 errors
+
+The skip is the anonymous ClamAV EICAR integration test, `JournalScannerBridgeIT`; the local scanner dependency is unavailable.
+
+The ArchUnit suite is green after the Round 2 delete-and-recreate refreeze. The frozen store contains the identical 1,402-cycle set, with zero added and zero removed cycles; the changed text is constructor-signature churn.
 
 The three required Testcontainers suites ran without skips:
 
@@ -16,5 +19,4 @@ The three required Testcontainers suites ran without skips:
 - `IrrigationConfigMigrationIT`: 1 test, 0 skipped
 
 The full HTML report is under `reports/tests/test/` and raw XML results are under
-`test-results/test/`. The one ArchUnit failure matches the pre-existing baseline
-failure reproduced before C7; no new omitted-dependency `+4552` counter was found.
+`test-results/test/`.

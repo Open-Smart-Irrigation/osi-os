@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.workrequest.WorkRequestDiagnosticsRetentionJobTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:13" hostname="osi-01" time="0.001">
+<testsuite name="org.osi.server.workrequest.WorkRequestDiagnosticsRetentionJobTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:05" hostname="osi-01" time="0.001">
   <properties/>
   <testcase name="dryRunDoesNotPurgeDiagnostics()" classname="org.osi.server.workrequest.WorkRequestDiagnosticsRetentionJobTest" time="0.001"/>
   <testcase name="purgesDiagnosticsOlderThanConfiguredRetention()" classname="org.osi.server.workrequest.WorkRequestDiagnosticsRetentionJobTest" time="0.0"/>
-  <system-out><![CDATA[2026-08-13T11:27:13.935+02:00  INFO 2682197 --- [    Test worker] o.s.w.WorkRequestDiagnosticsRetentionJob : Purged diagnostics from 3 work requests older than 90 days
+  <system-out><![CDATA[2026-08-13T16:47:05.404+02:00  INFO 3273021 --- [    Test worker] o.s.w.WorkRequestDiagnosticsRetentionJob : Purged diagnostics from 3 work requests older than 90 days
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

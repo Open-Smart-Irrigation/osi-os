@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.config.CorsProfileWiringTest$ProdProfile" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:19" hostname="osi-01" time="0.001">
+<testsuite name="org.osi.server.config.CorsProfileWiringTest$ProdProfile" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:00" hostname="osi-01" time="0.001">
   <properties/>
   <testcase name="prodWiresExactlyOneSource()" classname="org.osi.server.config.CorsProfileWiringTest$ProdProfile" time="0.001"/>
   <system-out><![CDATA[]]></system-out>

@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:12" hostname="osi-01" time="1.349">
+<testsuite name="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:04" hostname="osi-01" time="1.372">
   <properties/>
-  <testcase name="publishFailureReleasesReservationForRetry()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.359"/>
-  <testcase name="[1] state=REJECTED" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.197"/>
-  <testcase name="[2] state=RATE_LIMITED" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.159"/>
-  <testcase name="[3] state=DUPLICATE_OF" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.054"/>
-  <testcase name="issueBodyContainsCountryFlagAndFencedRequestTextButNotDiagnostics()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.105"/>
-  <testcase name="triageDoesNotOverwriteTerminalIssueOpenState()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.079"/>
-  <testcase name="publishWithUnsafePublicArtifactFailsClosedWithoutCallingGithub()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.062"/>
-  <testcase name="publishWithSafeArtifactCreatesGithubIssueWithFieldLabels()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.073"/>
-  <testcase name="publishAlreadyPublishingReturnsCurrentStateWithoutCreatingGithubIssue()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.054"/>
-  <testcase name="rejectDoesNotMarkAlreadyOpenGithubIssueRejected()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.088"/>
-  <testcase name="publishWithMissingGithubConfigFailsClosedWithoutCallingGithub()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.042"/>
-  <testcase name="duplicatePublishReturnsExistingIssueWithoutCreatingAnother()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.075"/>
-  <system-out><![CDATA[2026-08-13T11:27:12.938+02:00  WARN 2682197 --- [    Test worker] o.o.s.w.WorkRequestAdminService          : GitHub publish failed for work request 42
+  <testcase name="publishFailureReleasesReservationForRetry()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.33"/>
+  <testcase name="[1] state=REJECTED" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.106"/>
+  <testcase name="[2] state=RATE_LIMITED" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.106"/>
+  <testcase name="[3] state=DUPLICATE_OF" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.088"/>
+  <testcase name="issueBodyContainsCountryFlagAndFencedRequestTextButNotDiagnostics()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.198"/>
+  <testcase name="triageDoesNotOverwriteTerminalIssueOpenState()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.054"/>
+  <testcase name="publishWithUnsafePublicArtifactFailsClosedWithoutCallingGithub()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.056"/>
+  <testcase name="publishWithSafeArtifactCreatesGithubIssueWithFieldLabels()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.165"/>
+  <testcase name="publishAlreadyPublishingReturnsCurrentStateWithoutCreatingGithubIssue()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.05"/>
+  <testcase name="rejectDoesNotMarkAlreadyOpenGithubIssueRejected()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.038"/>
+  <testcase name="publishWithMissingGithubConfigFailsClosedWithoutCallingGithub()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.149"/>
+  <testcase name="duplicatePublishReturnsExistingIssueWithoutCreatingAnother()" classname="org.osi.server.workrequest.WorkRequestAdminServicePublishTest" time="0.028"/>
+  <system-out><![CDATA[2026-08-13T16:47:04.353+02:00  WARN 3273021 --- [    Test worker] o.o.s.w.WorkRequestAdminService          : GitHub publish failed for work request 42
 
 java.lang.RuntimeException: github unavailable
 	at org.osi.server.workrequest.GitHubIssueClient.createIssue(GitHubIssueClient.java:46) ~[main/:na]
@@ -105,14 +105,14 @@ java.lang.RuntimeException: github unavailable
 	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69) ~[gradle-worker.jar:na]
 	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74) ~[gradle-worker.jar:na]
 
-2026-08-13T11:27:13.408+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:59321/app/installations/456/access_tokens
-2026-08-13T11:27:13.409+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:27:13.409+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{}] with org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
-2026-08-13T11:27:13.413+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:27:13.413+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubAppTokenService$InstallationTokenResponse]
-2026-08-13T11:27:13.413+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:59321/repos/Open-Smart-Irrigation/osi-os/issues
-2026-08-13T11:27:13.414+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:27:13.414+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{title=[Field] Dashboard chart label is wrong, body=Field-submitted work request.
+2026-08-13T16:47:04.808+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:43623/app/installations/456/access_tokens
+2026-08-13T16:47:04.809+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:47:04.809+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{}] with org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+2026-08-13T16:47:04.812+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:47:04.812+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubAppTokenService$InstallationTokenResponse]
+2026-08-13T16:47:04.813+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:43623/repos/Open-Smart-Irrigation/osi-os/issues
+2026-08-13T16:47:04.813+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:47:04.814+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{title=[Field] Dashboard chart label is wrong, body=Field-submitted work request.
 
 - Gateway: gw_abc123def456
 - Country: UG ]]>&#x1f1fa;<![CDATA[]]>&#x1f1ec;<![CDATA[
@@ -138,16 +138,16 @@ The chart says liters.
 Steps:
 Open the dashboard rain card.
 ```, labels=[from-field, class:1, area:dashboard, sev:annoying, gw:gw_abc123def456]}] with org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
-2026-08-13T11:27:13.416+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:27:13.457+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubIssueClient$GitHubIssueResponse]
-2026-08-13T11:27:13.625+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:56229/app/installations/456/access_tokens
-2026-08-13T11:27:13.625+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:27:13.626+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{}] with org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
-2026-08-13T11:27:13.627+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:27:13.627+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubAppTokenService$InstallationTokenResponse]
-2026-08-13T11:27:13.627+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:56229/repos/Open-Smart-Irrigation/osi-os/issues
-2026-08-13T11:27:13.627+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:27:13.628+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{title=[Field] Dashboard chart label is wrong, body=Field-submitted work request.
+2026-08-13T16:47:04.817+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:47:04.858+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubIssueClient$GitHubIssueResponse]
+2026-08-13T16:47:05.085+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:47787/app/installations/456/access_tokens
+2026-08-13T16:47:05.086+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:47:05.087+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{}] with org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+2026-08-13T16:47:05.089+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:47:05.089+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubAppTokenService$InstallationTokenResponse]
+2026-08-13T16:47:05.090+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST http://localhost:47787/repos/Open-Smart-Irrigation/osi-os/issues
+2026-08-13T16:47:05.090+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:47:05.090+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{title=[Field] Dashboard chart label is wrong, body=Field-submitted work request.
 
 - Gateway: gw_abc123def456
 - Country: UG ]]>&#x1f1fa;<![CDATA[]]>&#x1f1ec;<![CDATA[
@@ -173,8 +173,8 @@ The chart says liters.
 Steps:
 Open the dashboard rain card.
 ```, labels=[from-field, class:1, area:dashboard, sev:annoying, gw:gw_abc123def456]}] with org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
-2026-08-13T11:27:13.630+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:27:13.672+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubIssueClient$GitHubIssueResponse]
+2026-08-13T16:47:05.093+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:47:05.134+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.workrequest.GitHubIssueClient$GitHubIssueResponse]
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

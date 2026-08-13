@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.recovery.RecoveryBundleServiceTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:47" hostname="osi-01" time="0.337">
+<testsuite name="org.osi.server.recovery.RecoveryBundleServiceTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:33" hostname="osi-01" time="0.396">
   <properties/>
-  <testcase name="demotedInstallationOwnerCannotListRecoveryBundles()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.297"/>
+  <testcase name="demotedInstallationOwnerCannotListRecoveryBundles()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.359"/>
   <testcase name="tamperedAuthenticatedMetadataCannotDecryptBundle()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.007"/>
   <testcase name="rejectsBundleForAnotherInstallation()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.002"/>
   <testcase name="demotedAdminCannotUploadOrDecryptRecoveryBundles()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.003"/>
   <testcase name="enabledNonOwnerGatewayAdminCanListRecoveryBundles()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.002"/>
-  <testcase name="encryptsBeforePersistenceAndDecryptsForOwningInstallation()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.006"/>
+  <testcase name="encryptsBeforePersistenceAndDecryptsForOwningInstallation()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.004"/>
   <testcase name="rejectsHashOrLengthMismatchBeforePersistence()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.003"/>
-  <testcase name="truncatedCiphertextCannotDecryptBundle()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.006"/>
+  <testcase name="truncatedCiphertextCannotDecryptBundle()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.004"/>
   <testcase name="dataKeyIsZeroedEvenWhenCiphertextCleanupFails()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.004"/>
   <testcase name="failsClosedWithoutConfiguredProviderAndDoesNotPersist()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.002"/>
   <testcase name="wrongProviderKeyCannotDecryptPersistedBundle()" classname="org.osi.server.recovery.RecoveryBundleServiceTest" time="0.004"/>

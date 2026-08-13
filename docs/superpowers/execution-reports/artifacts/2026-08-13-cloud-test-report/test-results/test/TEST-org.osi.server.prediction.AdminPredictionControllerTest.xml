@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.prediction.AdminPredictionControllerTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:44" hostname="osi-01" time="0.108">
+<testsuite name="org.osi.server.prediction.AdminPredictionControllerTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:29" hostname="osi-01" time="0.175">
   <properties/>
-  <testcase name="getExperimentArtifactReturnsAttachmentContentWithRequestedMediaType()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.105"/>
-  <testcase name="getLatestRunReturnsServiceResponse()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.001"/>
-  <testcase name="recomputeReturnsUpdatedWorkspaceSnapshot()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.0"/>
-  <testcase name="getCapabilitiesReturnsServiceResponse()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.001"/>
+  <testcase name="getExperimentArtifactReturnsAttachmentContentWithRequestedMediaType()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.166"/>
+  <testcase name="getLatestRunReturnsServiceResponse()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.004"/>
+  <testcase name="recomputeReturnsUpdatedWorkspaceSnapshot()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.002"/>
+  <testcase name="getCapabilitiesReturnsServiceResponse()" classname="org.osi.server.prediction.AdminPredictionControllerTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

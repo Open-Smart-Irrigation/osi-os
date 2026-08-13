@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.workrequest.WorkRequestRateLimiterTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.028">
+<testsuite name="org.osi.server.workrequest.WorkRequestRateLimiterTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:05" hostname="osi-01" time="0.034">
   <properties/>
   <testcase name="limitsUnlinkedSupportRequestsBySourceIp()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.001"/>
   <testcase name="sourceIpLimitShortCircuitsRepositoryBackedUnlinkedChecks()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.0"/>
-  <testcase name="appliesRevisedGatewayDailyAndWeeklyLimits()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.0"/>
-  <testcase name="blocksUnlinkedSupportWhenPendingCircuitBreakerIsFull()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.001"/>
-  <testcase name="boundsTrackedUnlinkedSourceIpIdentities()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.024"/>
-  <testcase name="honorsGatewayControlRateOverrides()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.001"/>
+  <testcase name="appliesRevisedGatewayDailyAndWeeklyLimits()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.001"/>
+  <testcase name="blocksUnlinkedSupportWhenPendingCircuitBreakerIsFull()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.0"/>
+  <testcase name="boundsTrackedUnlinkedSourceIpIdentities()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.03"/>
+  <testcase name="honorsGatewayControlRateOverrides()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.0"/>
   <testcase name="countsByServerCreatedAtRatherThanEdgeSubmittedAt()" classname="org.osi.server.workrequest.WorkRequestRateLimiterTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

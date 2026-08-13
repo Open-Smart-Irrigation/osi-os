@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.user.LocalSyncServiceTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:10" hostname="osi-01" time="0.006">
+<testsuite name="org.osi.server.user.LocalSyncServiceTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:01" hostname="osi-01" time="0.005">
   <properties/>
-  <testcase name="localSync_upgradesCapableInstallationToVerifierV2()" classname="org.osi.server.user.LocalSyncServiceTest" time="0.002"/>
+  <testcase name="localSync_upgradesCapableInstallationToVerifierV2()" classname="org.osi.server.user.LocalSyncServiceTest" time="0.001"/>
   <testcase name="localSync_provisionsBeforeClaimingGatewayAndDevices()" classname="org.osi.server.user.LocalSyncServiceTest" time="0.001"/>
   <testcase name="localSync_reportsFailureAfterProvisioningWithoutIssuingToken()" classname="org.osi.server.user.LocalSyncServiceTest" time="0.001"/>
   <testcase name="localSync_mapsLosingConcurrentInstallationObserveTo409()" classname="org.osi.server.user.LocalSyncServiceTest" time="0.001"/>

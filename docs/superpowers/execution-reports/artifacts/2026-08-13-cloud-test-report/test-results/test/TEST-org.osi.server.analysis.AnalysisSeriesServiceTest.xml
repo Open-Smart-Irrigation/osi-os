@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analysis.AnalysisSeriesServiceTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:25:55" hostname="osi-01" time="0.135">
+<testsuite name="org.osi.server.analysis.AnalysisSeriesServiceTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:32" hostname="osi-01" time="0.136">
   <properties/>
-  <testcase name="rejectsRangesThatExceedTheBucketCap()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.039"/>
-  <testcase name="dropsUnsupportedChannelsWithMatchingReason()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.01"/>
+  <testcase name="rejectsRangesThatExceedTheBucketCap()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.049"/>
+  <testcase name="dropsUnsupportedChannelsWithMatchingReason()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.009"/>
   <testcase name="rejectsExtremeCustomRangeWithoutIntegerOverflow()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.006"/>
   <testcase name="resolvesLegacySeriesIdToCanonicalCatalogEntry()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.014"/>
-  <testcase name="resolvesKnownSeriesAndDropsUnknownOnes()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.007"/>
+  <testcase name="resolvesKnownSeriesAndDropsUnknownOnes()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.006"/>
   <testcase name="dropsUnsupportedCatalogEntriesWithoutQueryingRollups()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.025"/>
   <testcase name="rejectsReversedCustomRangeAsBadRequest()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.005"/>
   <testcase name="allowsCustomRangeAtExactBucketCap()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.006"/>
-  <testcase name="rejectsUnsupportedRangeLabels()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.006"/>
-  <testcase name="dropsNullableSelectorsWithoutQueryingRollups()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.007"/>
+  <testcase name="rejectsUnsupportedRangeLabels()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.004"/>
+  <testcase name="dropsNullableSelectorsWithoutQueryingRollups()" classname="org.osi.server.analysis.AnalysisSeriesServiceTest" time="0.005"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.sync.SyncApplierRegistryTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:08" hostname="osi-01" time="0.11">
+<testsuite name="org.osi.server.sync.SyncApplierRegistryTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:59" hostname="osi-01" time="0.126">
   <properties/>
-  <testcase name="duplicateSupportedOpsFailFastInApplierFold()" classname="org.osi.server.sync.SyncApplierRegistryTest" time="0.11"/>
+  <testcase name="duplicateSupportedOpsFailFastInApplierFold()" classname="org.osi.server.sync.SyncApplierRegistryTest" time="0.126"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

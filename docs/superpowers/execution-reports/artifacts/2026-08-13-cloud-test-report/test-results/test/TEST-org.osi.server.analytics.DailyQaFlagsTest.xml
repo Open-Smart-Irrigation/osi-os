@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.DailyQaFlagsTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:03" hostname="osi-01" time="0.005">
+<testsuite name="org.osi.server.analytics.DailyQaFlagsTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:41" hostname="osi-01" time="0.006">
   <properties/>
-  <testcase name="build_notEnoughSamples_lowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.001"/>
-  <testcase name="build_missingPredawnWindow_fallbackAndLowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
+  <testcase name="build_notEnoughSamples_lowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
+  <testcase name="build_missingPredawnWindow_fallbackAndLowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.001"/>
   <testcase name="confidenceScore_stepArtifact_isSeventyPercent()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
   <testcase name="confidenceScore_notEnoughSamples_isZero()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
   <testcase name="build_stepArtifact_doesNotAloneRaiseLowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.001"/>
   <testcase name="build_fullQuality_noFlags()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
-  <testcase name="build_lowSignalExactThreshold_notFlagged()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
+  <testcase name="build_lowSignalExactThreshold_notFlagged()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.001"/>
   <testcase name="confidenceScore_usedFallback_isMid()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
-  <testcase name="confidenceScore_lowSignal_isLow()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
+  <testcase name="confidenceScore_lowSignal_isLow()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.001"/>
   <testcase name="build_lowSignal_lowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
   <testcase name="build_nullMds_lowSignalFalse()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
-  <testcase name="confidenceScore_fullQuality_isOne()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.001"/>
+  <testcase name="confidenceScore_fullQuality_isOne()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
   <testcase name="confidenceScore_missingPredawn_isEightyPercent()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
-  <testcase name="build_missingAfternoonWindow_fallbackAndLowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.0"/>
+  <testcase name="build_missingAfternoonWindow_fallbackAndLowConfidence()" classname="org.osi.server.analytics.DailyQaFlagsTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

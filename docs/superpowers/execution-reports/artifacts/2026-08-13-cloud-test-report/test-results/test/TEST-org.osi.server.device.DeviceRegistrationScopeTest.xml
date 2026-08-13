@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.device.DeviceRegistrationScopeTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:26" hostname="osi-01" time="0.117">
+<testsuite name="org.osi.server.device.DeviceRegistrationScopeTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:08" hostname="osi-01" time="0.117">
   <properties/>
-  <testcase name="registrationWithoutZoneIdLeavesDeviceUnassigned()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.108"/>
-  <testcase name="viewerCannotRegister()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.001"/>
+  <testcase name="registrationWithoutZoneIdLeavesDeviceUnassigned()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.107"/>
+  <testcase name="viewerCannotRegister()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.002"/>
   <testcase name="registrationWithGrantedZoneIdCarriesZoneUuid()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.002"/>
   <testcase name="researcherOnMemberGatewayRegistersWithoutClaimingIt()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.001"/>
-  <testcase name="registrationWithZoneOnAnotherGatewayIsForbidden()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.002"/>
+  <testcase name="registrationWithZoneOnAnotherGatewayIsForbidden()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.001"/>
   <testcase name="ownerOnFlagOffGatewayStillRegisters()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.001"/>
   <testcase name="registrationWithOutOfScopeZoneIdIsForbidden()" classname="org.osi.server.device.DeviceRegistrationScopeTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>

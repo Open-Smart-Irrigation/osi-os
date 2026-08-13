@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.048s</div>
+<div class="counter">0.080s</div>
 <p>duration</p>
 </div>
 </td>
@@ -79,22 +79,22 @@
 </thead>
 <tr>
 <td class="success">commandRetentionSqlUpdatesOnlyStaleConfigAndDeletesTerminalRows()</td>
-<td class="success">0.014s</td>
+<td class="success">0.019s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">leaseCandidateQueryUsesNativeSql()</td>
-<td class="success">0.008s</td>
+<td class="success">0.020s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">leaseCandidateSqlFindsOnlyPollableRowsForTheRequestedGateway()</td>
-<td class="success">0.008s</td>
+<td class="success">0.009s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">legacyExpirySqlTerminalizesCommandsDueAtTheCapturedBoundary()</td>
-<td class="success">0.018s</td>
+<td class="success">0.032s</td>
 <td class="success">passed</td>
 </tr>
 </table>
@@ -102,16 +102,16 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:26:19.381+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Neither @ContextConfiguration nor @ContextHierarchy found for test class [DeviceCommandRepositoryDbTest]: using SpringBootContextLoader
-2026-08-13T11:26:19.382+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.command.DeviceCommandRepositoryDbTest]: DeviceCommandRepositoryDbTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
-2026-08-13T11:26:19.382+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using ContextCustomizerFactory implementations for test class [DeviceCommandRepositoryDbTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
-2026-08-13T11:26:19.385+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using ContextCustomizers for test class [DeviceCommandRepositoryDbTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
-2026-08-13T11:26:19.385+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.command.DeviceCommandRepositoryDbTest
-2026-08-13T11:26:19.386+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using TestExecutionListeners for test class [DeviceCommandRepositoryDbTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
-2026-08-13T11:26:19.390+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
-2026-08-13T11:26:19.396+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
-2026-08-13T11:26:19.396+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
-2026-08-13T11:26:19.402+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+<pre>2026-08-13T16:46:00.137+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Neither @ContextConfiguration nor @ContextHierarchy found for test class [DeviceCommandRepositoryDbTest]: using SpringBootContextLoader
+2026-08-13T16:46:00.138+02:00  INFO 3273021 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.command.DeviceCommandRepositoryDbTest]: DeviceCommandRepositoryDbTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T16:46:00.138+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using ContextCustomizerFactory implementations for test class [DeviceCommandRepositoryDbTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T16:46:00.141+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using ContextCustomizers for test class [DeviceCommandRepositoryDbTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T16:46:00.142+02:00  INFO 3273021 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.command.DeviceCommandRepositoryDbTest
+2026-08-13T16:46:00.142+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.t.a.j.JdbcTestContextBootstrapper  : Using TestExecutionListeners for test class [DeviceCommandRepositoryDbTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T16:46:00.147+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T16:46:00.150+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T16:46:00.150+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T16:46:00.156+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
 
   .   ____          _            __ _ _
  /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
@@ -122,12 +122,12 @@
 
  :: Spring Boot ::                (v3.4.3)
 
-2026-08-13T11:26:19.409+02:00  INFO 2682197 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : Starting DeviceCommandRepositoryDbTest using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
-2026-08-13T11:26:19.409+02:00  INFO 2682197 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : No active profile set, falling back to 1 default profile: &quot;default&quot;
-2026-08-13T11:26:19.409+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
-2026-08-13T11:26:19.498+02:00  INFO 2682197 --- [    Test worker] beddedDataSourceBeanFactoryPostProcessor : Replacing 'dataSource' DataSource bean with embedded version
-2026-08-13T11:26:19.512+02:00  INFO 2682197 --- [    Test worker] o.s.j.d.e.EmbeddedDatabaseFactory        : Starting embedded database: url='jdbc:h2:mem:e7629874-a86c-43de-8c6a-075e2adc7ae7;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false', username='sa'
-2026-08-13T11:26:19.520+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+2026-08-13T16:46:00.163+02:00  INFO 3273021 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : Starting DeviceCommandRepositoryDbTest using Java 17.0.19 with PID 3273021 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T16:46:00.164+02:00  INFO 3273021 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : No active profile set, falling back to 1 default profile: &quot;default&quot;
+2026-08-13T16:46:00.164+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
+2026-08-13T16:46:00.272+02:00  INFO 3273021 --- [    Test worker] beddedDataSourceBeanFactoryPostProcessor : Replacing 'dataSource' DataSource bean with embedded version
+2026-08-13T16:46:00.288+02:00  INFO 3273021 --- [    Test worker] o.s.j.d.e.EmbeddedDatabaseFactory        : Starting embedded database: url='jdbc:h2:mem:a17fce2d-e09d-4c4d-9354-8c2a08bfef00;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false', username='sa'
+2026-08-13T16:46:00.298+02:00 DEBUG 3273021 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
 
 
 ============================
@@ -348,16 +348,16 @@ Unconditional classes:
 
 
 
-2026-08-13T11:26:19.520+02:00  INFO 2682197 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : Started DeviceCommandRepositoryDbTest in 0.134 seconds (process running for 26.975)
-2026-08-13T11:26:19.525+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
-2026-08-13T11:26:19.525+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
-2026-08-13T11:26:19.525+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+2026-08-13T16:46:00.299+02:00  INFO 3273021 --- [    Test worker] o.o.s.c.DeviceCommandRepositoryDbTest    : Started DeviceCommandRepositoryDbTest in 0.156 seconds (process running for 31.354)
+2026-08-13T16:46:00.317+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T16:46:00.317+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T16:46:00.317+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_eui VARCHAR(32) NOT NULL,
     type VARCHAR(50) NOT NULL
 )
 ]
-2026-08-13T11:26:19.526+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+2026-08-13T16:46:00.318+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_id BIGINT NOT NULL,
     command_type VARCHAR(50) NOT NULL,
@@ -371,15 +371,15 @@ Unconditional classes:
     expires_at TIMESTAMP WITH TIME ZONE
 )
 ]
-2026-08-13T11:26:19.531+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
-2026-08-13T11:26:19.533+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
-2026-08-13T11:26:19.533+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+2026-08-13T16:46:00.323+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T16:46:00.325+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T16:46:00.325+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_eui VARCHAR(32) NOT NULL,
     type VARCHAR(50) NOT NULL
 )
 ]
-2026-08-13T11:26:19.533+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+2026-08-13T16:46:00.326+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_id BIGINT NOT NULL,
     command_type VARCHAR(50) NOT NULL,
@@ -393,16 +393,16 @@ Unconditional classes:
     expires_at TIMESTAMP WITH TIME ZONE
 )
 ]
-2026-08-13T11:26:19.537+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.537+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
-2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
-2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
-2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.538+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
-2026-08-13T11:26:19.539+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.539+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.332+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.333+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T16:46:00.334+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.334+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T16:46:00.335+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.335+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T16:46:00.335+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.335+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T16:46:00.336+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.336+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -422,8 +422,8 @@ Unconditional classes:
     ?
 )
 ]
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.338+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.338+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -443,8 +443,8 @@ Unconditional classes:
     ?
 )
 ]
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.338+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.338+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -464,8 +464,8 @@ Unconditional classes:
     ?
 )
 ]
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.339+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.339+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -485,8 +485,8 @@ Unconditional classes:
     ?
 )
 ]
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.540+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [UPDATE device_commands c
+2026-08-13T16:46:00.339+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.339+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [UPDATE device_commands c
    SET status = 'EXPIRED',
        last_error = 'effect_expired',
        lease_expires_at = NULL,
@@ -502,28 +502,28 @@ Unconditional classes:
    AND c.expires_at IS NOT NULL
    AND c.expires_at &lt;= ?
 ]
-2026-08-13T11:26:19.544+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.545+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT command_type, status, last_error
+2026-08-13T16:46:00.347+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.348+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT command_type, status, last_error
   FROM device_commands c
   JOIN devices d ON d.id = c.device_id
  WHERE d.device_eui = ?
  ORDER BY c.created_at
 ]
-2026-08-13T11:26:19.546+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.547+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT c.status
+2026-08-13T16:46:00.352+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.352+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT c.status
   FROM device_commands c
   JOIN devices d ON d.id = c.device_id
  WHERE d.device_eui = ?
 ]
-2026-08-13T11:26:19.549+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
-2026-08-13T11:26:19.549+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
-2026-08-13T11:26:19.550+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+2026-08-13T16:46:00.356+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T16:46:00.356+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T16:46:00.356+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_eui VARCHAR(32) NOT NULL,
     type VARCHAR(50) NOT NULL
 )
 ]
-2026-08-13T11:26:19.550+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+2026-08-13T16:46:00.357+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_id BIGINT NOT NULL,
     command_type VARCHAR(50) NOT NULL,
@@ -537,12 +537,12 @@ Unconditional classes:
     expires_at TIMESTAMP WITH TIME ZONE
 )
 ]
-2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
-2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
-2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.551+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.358+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.358+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T16:46:00.358+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.358+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T16:46:00.359+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.359+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -560,8 +560,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.359+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.359+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -579,8 +579,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.359+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.359+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -598,8 +598,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.360+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.360+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -617,8 +617,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.360+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.360+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -636,21 +636,21 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.552+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+2026-08-13T16:46:00.360+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.360+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
   FROM device_commands
  WHERE status IN ('PENDING', 'LEASED')
    AND command_type IN ('SET_CHAMELEON_CONFIG')
    AND created_at &lt; ?
 ]
-2026-08-13T11:26:19.558+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.558+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
+2026-08-13T16:46:00.369+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.369+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT COUNT(*)
   FROM device_commands
  WHERE status IN ('ACKED', 'NACKED', 'EXPIRED', 'CANCELLED', 'ACKNOWLEDGED', 'FAILED', 'SENT')
    AND created_at &lt; ?
 ]
-2026-08-13T11:26:19.559+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.559+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [UPDATE device_commands
+2026-08-13T16:46:00.370+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.370+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [UPDATE device_commands
    SET status = 'EXPIRED',
        last_error = COALESCE(last_error, 'retention_stale'),
        lease_expires_at = NULL,
@@ -660,22 +660,22 @@ Unconditional classes:
    AND command_type IN ('SET_CHAMELEON_CONFIG')
    AND created_at &lt; ?
 ]
-2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM device_commands
+2026-08-13T16:46:00.371+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.371+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM device_commands
  WHERE status IN ('ACKED', 'NACKED', 'EXPIRED', 'CANCELLED', 'ACKNOWLEDGED', 'FAILED', 'SENT')
    AND created_at &lt; ?
 ]
-2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.560+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT status, last_error FROM device_commands ORDER BY created_at]
-2026-08-13T11:26:19.563+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
-2026-08-13T11:26:19.564+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
-2026-08-13T11:26:19.564+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
+2026-08-13T16:46:00.372+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.372+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT status, last_error FROM device_commands ORDER BY created_at]
+2026-08-13T16:46:00.375+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS device_commands]
+2026-08-13T16:46:00.375+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS devices]
+2026-08-13T16:46:00.375+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE devices (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_eui VARCHAR(32) NOT NULL,
     type VARCHAR(50) NOT NULL
 )
 ]
-2026-08-13T11:26:19.564+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
+2026-08-13T16:46:00.376+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE device_commands (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     device_id BIGINT NOT NULL,
     command_type VARCHAR(50) NOT NULL,
@@ -689,16 +689,16 @@ Unconditional classes:
     expires_at TIMESTAMP WITH TIME ZONE
 )
 ]
-2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
-2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.565+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO devices(device_eui, type) VALUES (?, 'GATEWAY')]
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.377+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT id FROM devices WHERE device_eui = ?]
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -716,8 +716,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.566+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -735,8 +735,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -754,8 +754,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -775,8 +775,8 @@ Unconditional classes:
     ?
 )
 ]
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
+2026-08-13T16:46:00.379+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:00.379+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO device_commands(
     device_id,
     command_type,
     status,
@@ -794,8 +794,8 @@ Unconditional classes:
     NULL
 )
 ]
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:19.567+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT c.*
+2026-08-13T16:46:00.379+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:00.379+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT c.*
   FROM device_commands c
   JOIN devices d ON d.id = c.device_id
  WHERE UPPER(d.device_eui) = UPPER(?)
@@ -818,7 +818,7 @@ Unconditional classes:
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

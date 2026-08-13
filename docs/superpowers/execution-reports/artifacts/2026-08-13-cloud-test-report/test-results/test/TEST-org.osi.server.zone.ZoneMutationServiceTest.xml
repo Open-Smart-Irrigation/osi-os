@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.zone.ZoneMutationServiceTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.008">
+<testsuite name="org.osi.server.zone.ZoneMutationServiceTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:06" hostname="osi-01" time="0.006">
   <properties/>
-  <testcase name="grantedResearcherUpdateRetainsCanonicalOwnerIdentity()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.002"/>
-  <testcase name="createUsesGatewayLocalIdentityAndStrictVersionedEnvelope()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.0"/>
+  <testcase name="grantedResearcherUpdateRetainsCanonicalOwnerIdentity()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.001"/>
+  <testcase name="createUsesGatewayLocalIdentityAndStrictVersionedEnvelope()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.001"/>
   <testcase name="deleteUsesReducedTombstoneAndDistinctEffectNamespace()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.001"/>
-  <testcase name="unrelatedGatewayMembershipCannotDiscoverZone()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.002"/>
+  <testcase name="unrelatedGatewayMembershipCannotDiscoverZone()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.001"/>
   <testcase name="capabilityMustBeExplicitlyAdvertised()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.0"/>
-  <testcase name="sequentialUpdateCarriesForwardUnmirroredDesiredFields()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.001"/>
+  <testcase name="sequentialUpdateCarriesForwardUnmirroredDesiredFields()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.0"/>
   <testcase name="viewerCannotMutateZone()" classname="org.osi.server.zone.ZoneMutationServiceTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.command.CommandLeaseServiceTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:13" hostname="osi-01" time="0.01">
+<testsuite name="org.osi.server.command.CommandLeaseServiceTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:52" hostname="osi-01" time="0.02">
   <properties/>
-  <testcase name="reclaimExpiredLeasesReturnsRetryableCommandsToPending()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.001"/>
-  <testcase name="reclaimExpiredLeasesUsesSingleTerminalTimestampAtMaxAttempts()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.002"/>
-  <testcase name="leasePendingMarksCommandsLeasedForGateway()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.004"/>
-  <testcase name="commandBuilderDefaultsAttemptCountToZero()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.001"/>
-  <testcase name="leasePendingReclaimsExpiredLeasesBeforeLeasingNextBatch()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.001"/>
+  <testcase name="reclaimExpiredLeasesReturnsRetryableCommandsToPending()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.002"/>
+  <testcase name="reclaimExpiredLeasesUsesSingleTerminalTimestampAtMaxAttempts()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.005"/>
+  <testcase name="leasePendingMarksCommandsLeasedForGateway()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.008"/>
+  <testcase name="commandBuilderDefaultsAttemptCountToZero()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.002"/>
+  <testcase name="leasePendingReclaimsExpiredLeasesBeforeLeasingNextBatch()" classname="org.osi.server.command.CommandLeaseServiceTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

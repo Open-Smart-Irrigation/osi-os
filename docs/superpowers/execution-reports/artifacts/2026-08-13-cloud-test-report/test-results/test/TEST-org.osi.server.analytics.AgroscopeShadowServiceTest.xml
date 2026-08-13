@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.AgroscopeShadowServiceTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:03" hostname="osi-01" time="0.3">
+<testsuite name="org.osi.server.analytics.AgroscopeShadowServiceTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:40" hostname="osi-01" time="0.407">
   <properties/>
-  <testcase name="runShadow_sameDayRerunWithEmptyWindowPreservesExistingNonSkippedDailyRow()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.247"/>
-  <testcase name="runShadow_closesPendingCycleAgainstPendingDaysOwnSetpointNotTodays()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.009"/>
-  <testcase name="runShadow_meteredOptedInZoneWritesDailyStressAndDose()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.004"/>
-  <testcase name="runShadow_splitsLargeBackfillIntoAgroscopeDayBoundedRepositoryCalls()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.025"/>
-  <testcase name="runShadow_warnsWhenOptedInZoneHasNoFlowMeterDeviceOrDailyFlowRow(CapturedOutput)" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.005"/>
+  <testcase name="runShadow_sameDayRerunWithEmptyWindowPreservesExistingNonSkippedDailyRow()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.346"/>
+  <testcase name="runShadow_closesPendingCycleAgainstPendingDaysOwnSetpointNotTodays()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.008"/>
+  <testcase name="runShadow_meteredOptedInZoneWritesDailyStressAndDose()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.006"/>
+  <testcase name="runShadow_splitsLargeBackfillIntoAgroscopeDayBoundedRepositoryCalls()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.031"/>
+  <testcase name="runShadow_warnsWhenOptedInZoneHasNoFlowMeterDeviceOrDailyFlowRow(CapturedOutput)" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.006"/>
   <testcase name="runShadow_closePendingCycleMarksPriorDailyRowClosedWithPostCloseIntegral()" classname="org.osi.server.analytics.AgroscopeShadowServiceTest" time="0.009"/>
-  <system-out><![CDATA[2026-08-13T11:26:03.299+02:00  WARN 2682197 --- [    Test worker] o.o.s.analytics.AgroscopeShadowService   : Agroscope shadow enabled zone 10 has no flow-meter device
-2026-08-13T11:26:03.300+02:00  WARN 2682197 --- [    Test worker] o.o.s.analytics.AgroscopeShadowService   : Agroscope shadow enabled zone 10 has no flow_liters row for 2026-07-05
+  <system-out><![CDATA[2026-08-13T16:45:40.958+02:00  WARN 3273021 --- [    Test worker] o.o.s.analytics.AgroscopeShadowService   : Agroscope shadow enabled zone 10 has no flow-meter device
+2026-08-13T16:45:40.959+02:00  WARN 3273021 --- [    Test worker] o.o.s.analytics.AgroscopeShadowService   : Agroscope shadow enabled zone 10 has no flow_liters row for 2026-07-05
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

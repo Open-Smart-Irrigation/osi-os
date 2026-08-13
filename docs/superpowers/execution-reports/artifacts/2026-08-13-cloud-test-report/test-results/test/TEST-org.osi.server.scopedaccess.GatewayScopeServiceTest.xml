@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.scopedaccess.GatewayScopeServiceTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:50" hostname="osi-01" time="0.307">
+<testsuite name="org.osi.server.scopedaccess.GatewayScopeServiceTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:36" hostname="osi-01" time="0.314">
   <properties/>
-  <testcase name="tryResolveReturnsEmptyWhenGatewayIsNotLinked()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.301"/>
+  <testcase name="tryResolveReturnsEmptyWhenGatewayIsNotLinked()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.309"/>
   <testcase name="adminWriteScopeIsOwnedAndGrantedNotGlobal()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.002"/>
-  <testcase name="disabledMembershipIsDeniedImmediately()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.001"/>
-  <testcase name="resolvesOwnedAndGrantedResourcesWithoutUsingGlobalRole()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.0"/>
-  <testcase name="tryResolveReturnsScopeOnSuccess()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.0"/>
+  <testcase name="disabledMembershipIsDeniedImmediately()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.0"/>
+  <testcase name="resolvesOwnedAndGrantedResourcesWithoutUsingGlobalRole()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.001"/>
+  <testcase name="tryResolveReturnsScopeOnSuccess()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.001"/>
   <testcase name="sameCloudUserCanBeAdminOnOneGatewayAndViewerOnAnother()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.001"/>
   <testcase name="tryResolveReturnsEmptyInsteadOfThrowingOnDisabledMembership()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.0"/>
   <testcase name="missingMembershipAndForeignGatewayAreBothNotFound()" classname="org.osi.server.scopedaccess.GatewayScopeServiceTest" time="0.0"/>

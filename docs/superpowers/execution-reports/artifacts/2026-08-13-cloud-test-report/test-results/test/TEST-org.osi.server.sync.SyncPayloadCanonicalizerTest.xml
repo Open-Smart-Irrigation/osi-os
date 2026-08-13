@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.sync.SyncPayloadCanonicalizerTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:09" hostname="osi-01" time="0.002">
+<testsuite name="org.osi.server.sync.SyncPayloadCanonicalizerTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:00" hostname="osi-01" time="0.003">
   <properties/>
-  <testcase name="acceptsBasicIsoOffsetTimestamps()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.001"/>
+  <testcase name="acceptsBasicIsoOffsetTimestamps()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
   <testcase name="vector4_floatFixedPoint()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
   <testcase name="vector6_euiUppercaseUuidLowercase()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
   <testcase name="vector5_nullPreserved()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
   <testcase name="vector3_timestampPrecision()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
-  <testcase name="vector1_emptyObject()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
+  <testcase name="vector1_emptyObject()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.001"/>
   <testcase name="hashIsLowercaseHexSha256()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
   <testcase name="sameInputProducesSameHash()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
   <testcase name="vector2_sortedKeys()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
-  <testcase name="convertsOffsetTimestampsToFixedMillisecondUtc()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
+  <testcase name="convertsOffsetTimestampsToFixedMillisecondUtc()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.001"/>
   <testcase name="expandsEui48BeforeHashing()" classname="org.osi.server.sync.SyncPayloadCanonicalizerTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

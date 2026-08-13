@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.072s</div>
+<div class="counter">0.093s</div>
 <p>duration</p>
 </div>
 </td>
@@ -79,12 +79,12 @@
 </thead>
 <tr>
 <td class="success">getCurrentConditions_parsesHostedCurrentWeather()</td>
-<td class="success">0.016s</td>
+<td class="success">0.022s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">getForecast_parsesRainAndProbabilityFromHostedForecast()</td>
-<td class="success">0.005s</td>
+<td class="success">0.008s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -94,7 +94,7 @@
 </tr>
 <tr>
 <td class="success">getWeatherForDay_authenticatesAndBuildsSnapshotFromHourlyHistory()</td>
-<td class="success">0.028s</td>
+<td class="success">0.040s</td>
 <td class="success">passed</td>
 </tr>
 </table>
@@ -102,33 +102,33 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:26:07.631+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://weather.example/api/data/forecast5/?lat=46.95&amp;lon=7.44
-2026-08-13T11:26:07.632+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.634+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.634+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$ForecastResponse[]]
-2026-08-13T11:26:07.646+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST https://weather.example/api/v1/auth/token
-2026-08-13T11:26:07.648+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.649+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{username=[osi-weather], password=[secret]}] as &quot;application/x-www-form-urlencoded&quot;
-2026-08-13T11:26:07.651+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.651+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$AuthTokenResponse]
-2026-08-13T11:26:07.652+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://weather.example/api/data/weather/?lat=46.95&amp;lon=7.44
-2026-08-13T11:26:07.657+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.657+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.658+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$CurrentWeatherResponse]
-2026-08-13T11:26:07.661+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://weather.example/api/data/forecast5/?lat=46.95&amp;lon=7.44
-2026-08-13T11:26:07.661+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.662+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.662+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$ForecastResponse[]]
-2026-08-13T11:26:07.671+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST https://weather.example/api/v1/auth/token
-2026-08-13T11:26:07.672+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.672+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{username=[osi-weather], password=[secret]}] as &quot;application/x-www-form-urlencoded&quot;
-2026-08-13T11:26:07.673+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.673+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$AuthTokenResponse]
-2026-08-13T11:26:07.674+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST https://weather.example/api/v1/history/hourly/
-2026-08-13T11:26:07.678+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
-2026-08-13T11:26:07.679+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{lat=46.95, lon=7.44, start=2026-03-27, end=2026-03-27, variables=[temperature_2m, relative_humidity_2m, precipitation], radius_km=12.0}] as &quot;application/json&quot;
-2026-08-13T11:26:07.691+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
-2026-08-13T11:26:07.692+02:00 DEBUG 2682197 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$HourlyHistoryResponse]
+<pre>2026-08-13T16:45:46.366+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://weather.example/api/data/forecast5/?lat=46.95&amp;lon=7.44
+2026-08-13T16:45:46.367+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.369+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.370+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$ForecastResponse[]]
+2026-08-13T16:45:46.381+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST https://weather.example/api/v1/auth/token
+2026-08-13T16:45:46.382+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.385+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{username=[osi-weather], password=[secret]}] as &quot;application/x-www-form-urlencoded&quot;
+2026-08-13T16:45:46.387+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.387+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$AuthTokenResponse]
+2026-08-13T16:45:46.389+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://weather.example/api/data/weather/?lat=46.95&amp;lon=7.44
+2026-08-13T16:45:46.397+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.398+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.398+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$CurrentWeatherResponse]
+2026-08-13T16:45:46.403+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://weather.example/api/data/forecast5/?lat=46.95&amp;lon=7.44
+2026-08-13T16:45:46.404+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.404+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.404+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$ForecastResponse[]]
+2026-08-13T16:45:46.418+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST https://weather.example/api/v1/auth/token
+2026-08-13T16:45:46.420+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.421+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{username=[osi-weather], password=[secret]}] as &quot;application/x-www-form-urlencoded&quot;
+2026-08-13T16:45:46.422+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.422+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$AuthTokenResponse]
+2026-08-13T16:45:46.423+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP POST https://weather.example/api/v1/history/hourly/
+2026-08-13T16:45:46.430+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.432+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Writing [{lat=46.95, lon=7.44, start=2026-03-27, end=2026-03-27, variables=[temperature_2m, relative_humidity_2m, precipitation], radius_km=12.0}] as &quot;application/json&quot;
+2026-08-13T16:45:46.446+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.446+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenAgriWeatherService$HourlyHistoryResponse]
 </pre>
 </span>
 </div>
@@ -140,7 +140,7 @@
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

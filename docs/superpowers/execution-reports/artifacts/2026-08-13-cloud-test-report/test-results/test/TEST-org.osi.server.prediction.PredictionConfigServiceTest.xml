@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.prediction.PredictionConfigServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:45" hostname="osi-01" time="0.097">
+<testsuite name="org.osi.server.prediction.PredictionConfigServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:30" hostname="osi-01" time="0.147">
   <properties/>
-  <testcase name="saveConfigAllowsEnabledPredictionWithoutManualSoilCode()" classname="org.osi.server.prediction.PredictionConfigServiceTest" time="0.094"/>
-  <testcase name="saveConfigUsesCatalogDefaultsAndCanonicalizesCodes()" classname="org.osi.server.prediction.PredictionConfigServiceTest" time="0.002"/>
-  <testcase name="saveConfigRequiresZoneOwnedWaterSetupWhenPredictionIsEnabled()" classname="org.osi.server.prediction.PredictionConfigServiceTest" time="0.001"/>
+  <testcase name="saveConfigAllowsEnabledPredictionWithoutManualSoilCode()" classname="org.osi.server.prediction.PredictionConfigServiceTest" time="0.138"/>
+  <testcase name="saveConfigUsesCatalogDefaultsAndCanonicalizesCodes()" classname="org.osi.server.prediction.PredictionConfigServiceTest" time="0.005"/>
+  <testcase name="saveConfigRequiresZoneOwnedWaterSetupWhenPredictionIsEnabled()" classname="org.osi.server.prediction.PredictionConfigServiceTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

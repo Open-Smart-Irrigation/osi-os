@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:50" hostname="osi-01" time="0.005">
+<testsuite name="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:36" hostname="osi-01" time="0.007">
   <properties/>
   <testcase name="userEventUpsertsMirrorAndDenormalizesLinkedMembership()" classname="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" time="0.002"/>
-  <testcase name="duplicateUserUpsertedAtEqualVersionAppliesIdempotently()" classname="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" time="0.001"/>
+  <testcase name="duplicateUserUpsertedAtEqualVersionAppliesIdempotently()" classname="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" time="0.002"/>
   <testcase name="assignmentBeforeUserIsRetryableParentMiss()" classname="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" time="0.001"/>
-  <testcase name="unknownAssignmentTombstoneIsPersisted()" classname="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" time="0.0"/>
+  <testcase name="unknownAssignmentTombstoneIsPersisted()" classname="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" time="0.001"/>
   <testcase name="rejectsPayloadFromAnotherGateway()" classname="org.osi.server.scopedaccess.ScopedAccessMirrorServiceTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.zone.ZoneGatewayAccessAdapterTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:27:14" hostname="osi-01" time="0.003">
+<testsuite name="org.osi.server.zone.ZoneGatewayAccessAdapterTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:06" hostname="osi-01" time="0.003">
   <properties/>
   <testcase name="tryResolveReturnsEmptyInsteadOfThrowingOnDenial()" classname="org.osi.server.zone.ZoneGatewayAccessAdapterTest" time="0.001"/>
   <testcase name="researcherCanMutateOwnedAndGrantedZonesOnly()" classname="org.osi.server.zone.ZoneGatewayAccessAdapterTest" time="0.0"/>
   <testcase name="viewerMembershipIsReadOnly()" classname="org.osi.server.zone.ZoneGatewayAccessAdapterTest" time="0.001"/>
   <testcase name="tryResolveReturnsAccessWithoutThrowingOnSuccess()" classname="org.osi.server.zone.ZoneGatewayAccessAdapterTest" time="0.0"/>
-  <testcase name="adminScopeIsOwnedAndGrantedNotAllZones()" classname="org.osi.server.zone.ZoneGatewayAccessAdapterTest" time="0.0"/>
+  <testcase name="adminScopeIsOwnedAndGrantedNotAllZones()" classname="org.osi.server.zone.ZoneGatewayAccessAdapterTest" time="0.001"/>
   <testcase name="resolvePropagatesDenialStatus()" classname="org.osi.server.zone.ZoneGatewayAccessAdapterTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

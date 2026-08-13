@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.history.HistoryWorkspaceServiceTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:29" hostname="osi-01" time="0.03">
+<testsuite name="org.osi.server.history.HistoryWorkspaceServiceTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:11" hostname="osi-01" time="0.034">
   <properties/>
   <testcase name="createRejectsWorkspaceForZoneOwnedByAnotherUser()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
-  <testcase name="createPreservesInvalidCardReferenceInsideOwnedZone()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.006"/>
+  <testcase name="createPreservesInvalidCardReferenceInsideOwnedZone()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.007"/>
   <testcase name="createPreservesDanglingPanelCardIdsWithinOwnedWorkspaceScope()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
-  <testcase name="createRejectsWorkspaceJsonGatewayReferencesForAnotherUser()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
-  <testcase name="createClearsExistingDefaultForUserBeforeSavingNewDefault()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
-  <testcase name="createStoresCloudOwnedWorkspaceForAccessibleZone()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.001"/>
+  <testcase name="createRejectsWorkspaceJsonGatewayReferencesForAnotherUser()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.003"/>
+  <testcase name="createClearsExistingDefaultForUserBeforeSavingNewDefault()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.003"/>
+  <testcase name="createStoresCloudOwnedWorkspaceForAccessibleZone()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
   <testcase name="createPreservesWorkspaceJsonCardReferencesWithoutCatalogValidation()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
   <testcase name="createMigratesSparseWorkspaceJsonToCloudWorkspaceDefaults()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
   <testcase name="createRejectsCloudWorkspacesOverThePanelCap()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.003"/>
-  <testcase name="updateClearsExistingDefaultForUserBeforeSavingNewDefault()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.003"/>
-  <testcase name="listPreservesPersistedWorkspaceJsonCardReferencesEvenWhenStale()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
+  <testcase name="updateClearsExistingDefaultForUserBeforeSavingNewDefault()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
+  <testcase name="listPreservesPersistedWorkspaceJsonCardReferencesEvenWhenStale()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.001"/>
   <testcase name="createRejectsFarmReferencesBecauseFarmAccessIsNotModeled()" classname="org.osi.server.history.HistoryWorkspaceServiceTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

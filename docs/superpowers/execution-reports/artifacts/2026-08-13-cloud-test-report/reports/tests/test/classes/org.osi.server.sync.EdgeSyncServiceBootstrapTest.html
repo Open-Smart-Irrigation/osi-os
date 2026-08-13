@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.569s</div>
+<div class="counter">0.778s</div>
 <p>duration</p>
 </div>
 </td>
@@ -79,7 +79,7 @@
 </thead>
 <tr>
 <td class="success">applyBootstrap_bindsSnakeCaseJournalCatalogStampFromRealBootstrapJson()</td>
-<td class="success">0.003s</td>
+<td class="success">0.005s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -89,37 +89,37 @@
 </tr>
 <tr>
 <td class="success">applyBootstrap_ingestsChameleonReadings()</td>
-<td class="success">0.001s</td>
+<td class="success">0.003s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">applyBootstrap_ingestsExpandedDataPlaneSnapshotArrays()</td>
-<td class="success">0.005s</td>
+<td class="success">0.006s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">applyBootstrap_journalCatalogStampIsNullWhenGatewayIdentityCarriesNoJournalKeys()</td>
-<td class="success">0.003s</td>
+<td class="success">0.004s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">applyBootstrap_migratesGatewayBoundCloudStateWhenPreviousGatewayIsDeclared()</td>
-<td class="success">0.003s</td>
+<td class="success">0.005s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">applyBootstrap_mirrorsChameleonDeviceConfig()</td>
-<td class="success">0.001s</td>
+<td class="success">0.002s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">applyBootstrap_mirrorsSoilMoistureProbeDepthMetadataOnDevices()</td>
-<td class="success">0.002s</td>
+<td class="success">0.003s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">applyBootstrap_prefersCloudIdentityOverConflictingEdgeOriginatedUserUuid()</td>
-<td class="success">0.002s</td>
+<td class="success">0.001s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -129,12 +129,12 @@
 </tr>
 <tr>
 <td class="success">applyBootstrap_rejectsPreviousGatewayClaimedByAnotherUser()</td>
-<td class="success">0.001s</td>
+<td class="success">0.002s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">applyBootstrap_reusesExistingCloudUserWhenCloudUserIdMatches()</td>
-<td class="success">0.001s</td>
+<td class="success">0.002s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -144,7 +144,7 @@
 </tr>
 <tr>
 <td class="success">applyBootstrap_skipsGatewayMigrationWhenInstallationGuardBlocksTheTransition()</td>
-<td class="success">0.535s</td>
+<td class="success">0.734s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -159,7 +159,7 @@
 </tr>
 <tr>
 <td class="success">applyBootstrap_updatesGatewayLastSeen()</td>
-<td class="success">0.002s</td>
+<td class="success">0.001s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -172,11 +172,11 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:27:06.629+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-NEW: identity guard blocked the transition (stale or recovery-frozen)
-2026-08-13T11:27:06.633+02:00  INFO 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Migrated gateway-backed cloud state from GW-OLD to GW-NEW for user 7
-2026-08-13T11:27:06.649+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-RETIRED: identity guard blocked the transition (stale or recovery-frozen)
-2026-08-13T11:27:06.658+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Preferring cloud user admin over conflicting edge user Test for edge payload user_uuid=user-1
-2026-08-13T11:27:06.663+02:00  WARN 2682197 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Found duplicate sensor_data rows for device DEV-1 at 2026-03-26T08:00:00Z; reusing latest row during sync
+<pre>2026-08-13T16:46:57.264+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-NEW: identity guard blocked the transition (stale or recovery-frozen)
+2026-08-13T16:46:57.269+02:00  INFO 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Migrated gateway-backed cloud state from GW-OLD to GW-NEW for user 7
+2026-08-13T16:46:57.294+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Skipping gateway migration to GW-RETIRED: identity guard blocked the transition (stale or recovery-frozen)
+2026-08-13T16:46:57.308+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Preferring cloud user admin over conflicting edge user Test for edge payload user_uuid=user-1
+2026-08-13T16:46:57.314+02:00  WARN 3273021 --- [    Test worker] org.osi.server.sync.EdgeSyncService      : Found duplicate sensor_data rows for device DEV-1 at 2026-03-26T08:00:00Z; reusing latest row during sync
 </pre>
 </span>
 </div>
@@ -188,7 +188,7 @@
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

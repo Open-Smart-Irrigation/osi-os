@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.DendroConfidenceGatingTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:07" hostname="osi-01" time="0.001">
+<testsuite name="org.osi.server.analytics.DendroConfidenceGatingTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:45" hostname="osi-01" time="0.002">
   <properties/>
   <testcase name="insufficientSampleCount_impliesLowConfidence_viaSampleFloor()" classname="org.osi.server.analytics.DendroConfidenceGatingTest" time="0.0"/>
-  <testcase name="confidentDay_aboveConfidentFloor_notLowConfidence()" classname="org.osi.server.analytics.DendroConfidenceGatingTest" time="0.0"/>
-  <testcase name="confidenceScore_confidentDay_isOne()" classname="org.osi.server.analytics.DendroConfidenceGatingTest" time="0.001"/>
+  <testcase name="confidentDay_aboveConfidentFloor_notLowConfidence()" classname="org.osi.server.analytics.DendroConfidenceGatingTest" time="0.001"/>
+  <testcase name="confidenceScore_confidentDay_isOne()" classname="org.osi.server.analytics.DendroConfidenceGatingTest" time="0.0"/>
   <testcase name="sparseDayAboveExtremesFloor_stillLowConfidence()" classname="org.osi.server.analytics.DendroConfidenceGatingTest" time="0.0"/>
   <testcase name="confidenceScore_sparseAboveExtremesFloor_isCapped()" classname="org.osi.server.analytics.DendroConfidenceGatingTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>

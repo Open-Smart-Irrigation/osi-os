@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">0.098s</div>
+<div class="counter">0.132s</div>
 <p>duration</p>
 </div>
 </td>
@@ -79,42 +79,42 @@
 </thead>
 <tr>
 <td class="success">customVocabStaysOwnerScoped()</td>
-<td class="success">0.016s</td>
+<td class="success">0.018s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">existenceCheckDetectsAForeignUuid()</td>
-<td class="success">0.008s</td>
+<td class="success">0.012s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">findWithinWriteScopeStillHidesForeignUngrantedResources()</td>
-<td class="success">0.011s</td>
+<td class="success">0.017s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">gatewayAdminSeesAccountWideJournalResources()</td>
-<td class="success">0.011s</td>
+<td class="success">0.015s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">granteeSeesAccountWidePlotEntriesAndContainingGroups()</td>
-<td class="success">0.011s</td>
+<td class="success">0.017s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">listReturnsAllPlotGroupMembersWithoutRedaction()</td>
-<td class="success">0.009s</td>
+<td class="success">0.012s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">ownerSeesAccountWideJournalResources()</td>
-<td class="success">0.009s</td>
+<td class="success">0.014s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
 <td class="success">researcherReadsForeignUngrantedResourcesAccountWide()</td>
-<td class="success">0.010s</td>
+<td class="success">0.014s</td>
 <td class="success">passed</td>
 </tr>
 <tr>
@@ -127,16 +127,16 @@
 <div id="tab1" class="tab">
 <h2>Standard output</h2>
 <span class="code">
-<pre>2026-08-13T11:26:32.193+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalQueryServiceTest]: using SpringBootContextLoader
-2026-08-13T11:26:32.193+02:00  INFO 2682197 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.JournalQueryServiceTest]: JournalQueryServiceTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
-2026-08-13T11:26:32.193+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalQueryServiceTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
-2026-08-13T11:26:32.196+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalQueryServiceTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
-2026-08-13T11:26:32.196+02:00  INFO 2682197 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.JournalQueryServiceTest
-2026-08-13T11:26:32.197+02:00 DEBUG 2682197 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalQueryServiceTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
-2026-08-13T11:26:32.203+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
-2026-08-13T11:26:32.204+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
-2026-08-13T11:26:32.204+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
-2026-08-13T11:26:32.207+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+<pre>2026-08-13T16:46:14.997+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [JournalQueryServiceTest]: using SpringBootContextLoader
+2026-08-13T16:46:14.997+02:00  INFO 3273021 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.journal.JournalQueryServiceTest]: JournalQueryServiceTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T16:46:14.997+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [JournalQueryServiceTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T16:46:15.000+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [JournalQueryServiceTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T16:46:15.000+02:00  INFO 3273021 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.journal.JournalQueryServiceTest
+2026-08-13T16:46:15.001+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [JournalQueryServiceTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T16:46:15.007+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T16:46:15.008+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T16:46:15.008+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T16:46:15.012+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
 
   .   ____          _            __ _ _
  /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
@@ -147,23 +147,23 @@
 
  :: Spring Boot ::                (v3.4.3)
 
-2026-08-13T11:26:32.210+02:00  INFO 2682197 --- [    Test worker] o.o.s.journal.JournalQueryServiceTest    : Starting JournalQueryServiceTest using Java 17.0.19 with PID 2682197 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
-2026-08-13T11:26:32.210+02:00  INFO 2682197 --- [    Test worker] o.o.s.journal.JournalQueryServiceTest    : No active profile set, falling back to 1 default profile: &quot;default&quot;
-2026-08-13T11:26:32.210+02:00 DEBUG 2682197 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
-2026-08-13T11:26:32.274+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
-2026-08-13T11:26:32.275+02:00 DEBUG 2682197 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
-2026-08-13T11:26:32.310+02:00  INFO 2682197 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 34 ms. Found 55 JPA repository interfaces.
-2026-08-13T11:26:32.343+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-5 - Starting...
-2026-08-13T11:26:32.350+02:00  INFO 2682197 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-5 - Start completed.
-2026-08-13T11:26:32.357+02:00  INFO 2682197 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32826/test?loggerLevel=OFF (PostgreSQL 16.14)
-2026-08-13T11:26:32.376+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.013s)
-2026-08-13T11:26:32.405+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema &quot;public&quot;: 2026.08.10.001
-2026-08-13T11:26:32.405+02:00  INFO 2682197 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema &quot;public&quot; is up to date. No migration necessary.
-2026-08-13T11:26:32.432+02:00  INFO 2682197 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
-2026-08-13T11:26:32.433+02:00  INFO 2682197 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
-2026-08-13T11:26:32.438+02:00  INFO 2682197 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
-2026-08-13T11:26:32.441+02:00  WARN 2682197 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
-2026-08-13T11:26:32.442+02:00  INFO 2682197 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+2026-08-13T16:46:15.016+02:00  INFO 3273021 --- [    Test worker] o.o.s.journal.JournalQueryServiceTest    : Starting JournalQueryServiceTest using Java 17.0.19 with PID 3273021 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T16:46:15.016+02:00  INFO 3273021 --- [    Test worker] o.o.s.journal.JournalQueryServiceTest    : No active profile set, falling back to 1 default profile: &quot;default&quot;
+2026-08-13T16:46:15.016+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
+2026-08-13T16:46:15.094+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T16:46:15.095+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T16:46:15.133+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 38 ms. Found 55 JPA repository interfaces.
+2026-08-13T16:46:15.174+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-5 - Starting...
+2026-08-13T16:46:15.182+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-5 - Start completed.
+2026-08-13T16:46:15.190+02:00  INFO 3273021 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32832/test?loggerLevel=OFF (PostgreSQL 16.14)
+2026-08-13T16:46:15.213+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.016s)
+2026-08-13T16:46:15.240+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema &quot;public&quot;: 2026.08.10.001
+2026-08-13T16:46:15.240+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema &quot;public&quot; is up to date. No migration necessary.
+2026-08-13T16:46:15.260+02:00  INFO 3273021 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T16:46:15.262+02:00  INFO 3273021 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T16:46:15.272+02:00  INFO 3273021 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T16:46:15.275+02:00  WARN 3273021 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T16:46:15.276+02:00  INFO 3273021 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
 	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-5)']
 	Database driver: undefined/unknown
 	Database version: 16.14
@@ -171,11 +171,11 @@
 	Isolation level: undefined/unknown
 	Minimum pool size: undefined/unknown
 	Maximum pool size: undefined/unknown
-2026-08-13T11:26:32.523+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:32.523+02:00  WARN 2682197 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
-2026-08-13T11:26:32.742+02:00  INFO 2682197 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
-2026-08-13T11:26:32.742+02:00  INFO 2682197 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
-2026-08-13T11:26:32.924+02:00 DEBUG 2682197 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+2026-08-13T16:46:15.382+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:15.382+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:15.648+02:00  INFO 3273021 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T16:46:15.648+02:00  INFO 3273021 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T16:46:15.885+02:00 DEBUG 3273021 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
 
 
 ============================
@@ -463,135 +463,135 @@ Unconditional classes:
 
 
 
-2026-08-13T11:26:32.925+02:00  INFO 2682197 --- [    Test worker] o.o.s.journal.JournalQueryServiceTest    : Started JournalQueryServiceTest in 0.726 seconds (process running for 40.38)
-2026-08-13T11:26:32.928+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.928+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.930+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.930+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.931+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.931+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.931+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.931+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.932+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.932+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.886+02:00  INFO 3273021 --- [    Test worker] o.o.s.journal.JournalQueryServiceTest    : Started JournalQueryServiceTest in 0.883 seconds (process running for 46.941)
+2026-08-13T16:46:15.890+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.890+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.892+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.892+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.893+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.893+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.894+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.894+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.895+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.895+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.934+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.934+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.896+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.896+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.934+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.934+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.897+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.897+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.935+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.935+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.897+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.897+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.936+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.936+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.898+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.898+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.936+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.936+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.899+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.899+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.937+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.937+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:15.900+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.900+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.938+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.938+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:15.901+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.901+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.939+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.939+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_vocab_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL ORDER BY code, custom_field_uuid]
-2026-08-13T11:26:32.943+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.943+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.944+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.944+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.944+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.944+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.944+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.944+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.945+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.945+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.902+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.902+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_vocab_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL ORDER BY code, custom_field_uuid]
+2026-08-13T16:46:15.908+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.908+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.908+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.908+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.909+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.909+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.909+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.909+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.910+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.910+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.946+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.946+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.910+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.910+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.947+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.947+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.911+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.911+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.947+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.947+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.912+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.912+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.948+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.948+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.912+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.912+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.949+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.949+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.913+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.913+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.950+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.950+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:15.914+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.914+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.951+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.951+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:15.915+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.915+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.952+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.952+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?
+2026-08-13T16:46:15.916+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.916+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?
 OR EXISTS (
     SELECT 1
       FROM jsonb_array_elements_text(
@@ -599,472 +599,472 @@ OR EXISTS (
            ) AS members(member)
      WHERE member IN (?)
 )) AND deleted_at IS NULL AND group_uuid = ? ORDER BY label, group_uuid]
-2026-08-13T11:26:32.957+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.957+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.958+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.958+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.958+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.958+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.958+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.958+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.959+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.959+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.921+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.921+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.922+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.923+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.923+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.959+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.959+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.924+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.924+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.960+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.960+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.925+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.925+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.960+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.960+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.926+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.926+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.961+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.961+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.927+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.927+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.961+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.961+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.927+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.927+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.962+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.962+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:15.928+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.928+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.962+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.962+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:15.929+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.929+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.963+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.963+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL AND plot_uuid = ? ORDER BY plot_code, plot_uuid]
-2026-08-13T11:26:32.964+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.964+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL AND entry_uuid = ? ORDER BY occurred_start DESC, entry_uuid]
-2026-08-13T11:26:32.965+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.965+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL AND group_uuid = ? ORDER BY label, group_uuid]
-2026-08-13T11:26:32.968+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.968+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.969+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.969+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.969+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.969+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.969+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.969+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.970+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.970+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.931+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.931+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL AND plot_uuid = ? ORDER BY plot_code, plot_uuid]
+2026-08-13T16:46:15.932+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.932+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL AND entry_uuid = ? ORDER BY occurred_start DESC, entry_uuid]
+2026-08-13T16:46:15.933+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.933+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND (owner_user_uuid = ?) AND deleted_at IS NULL AND group_uuid = ? ORDER BY label, group_uuid]
+2026-08-13T16:46:15.938+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.938+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.939+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.939+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.940+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.940+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.940+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.940+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.941+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.941+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.971+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.971+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.942+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.942+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.971+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.971+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.943+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.943+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.971+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.971+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.943+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.943+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.972+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.972+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.944+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.944+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.972+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.972+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.944+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.944+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.973+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.973+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:15.945+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.945+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.973+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.973+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:15.946+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.946+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.974+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.974+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
-2026-08-13T11:26:32.975+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.975+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
-2026-08-13T11:26:32.976+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.976+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
-2026-08-13T11:26:32.979+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.979+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.980+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.980+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.980+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.980+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.980+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.980+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.981+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.981+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.947+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.947+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
+2026-08-13T16:46:15.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.948+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
+2026-08-13T16:46:15.949+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.949+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
+2026-08-13T16:46:15.953+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.953+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.954+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.954+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.955+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.955+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.955+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.955+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.956+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.956+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.982+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.982+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.957+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.957+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.982+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.982+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.958+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.958+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.982+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.983+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.959+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.959+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.983+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.983+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.959+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.959+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.984+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.984+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.960+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.960+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.984+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.984+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:15.961+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.961+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.985+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.985+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:15.961+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.961+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.986+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.986+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
-2026-08-13T11:26:32.987+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.987+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
-2026-08-13T11:26:32.987+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.987+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
-2026-08-13T11:26:32.991+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.991+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.991+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.991+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.991+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.991+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.992+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.992+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:32.992+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.992+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.962+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.962+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
+2026-08-13T16:46:15.963+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.963+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
+2026-08-13T16:46:15.964+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.964+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
+2026-08-13T16:46:15.967+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.967+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.968+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.968+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.968+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.968+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.968+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.968+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.969+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.969+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.993+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.993+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.969+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.969+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.993+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.993+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.970+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.970+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.994+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.994+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.970+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.970+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.994+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.994+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.971+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.971+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.994+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.994+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.972+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.972+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.995+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.995+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:15.972+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.972+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.996+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:32.996+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:15.977+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.977+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:32.996+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.996+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
-2026-08-13T11:26:32.998+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.998+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
-2026-08-13T11:26:32.999+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:32.999+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
-2026-08-13T11:26:33.002+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.002+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.002+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.002+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.002+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.002+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.002+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.003+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.003+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.003+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.978+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.978+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
+2026-08-13T16:46:15.980+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.980+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
+2026-08-13T16:46:15.981+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.981+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
+2026-08-13T16:46:15.985+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.985+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.986+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.986+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.986+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.986+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.986+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.986+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.987+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.987+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.004+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.004+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.988+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.988+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.004+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.004+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.989+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.989+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.004+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.004+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.989+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.989+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.005+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.005+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.990+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.990+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.005+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.005+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:15.991+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.991+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.006+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.006+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:15.992+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.992+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.006+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.006+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:15.993+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.993+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.007+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:33.007+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT EXISTS (SELECT 1 FROM journal_plots_mirror WHERE gateway_eui = ? AND plot_uuid = ?)]
-2026-08-13T11:26:33.010+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.010+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.011+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.011+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.011+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.011+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.011+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.011+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.012+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.012+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:15.994+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:15.994+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT EXISTS (SELECT 1 FROM journal_plots_mirror WHERE gateway_eui = ? AND plot_uuid = ?)]
+2026-08-13T16:46:15.997+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.998+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.998+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.998+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.998+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.998+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:15.999+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:15.999+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:16.000+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.000+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.012+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.012+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:16.000+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.000+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.013+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.013+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:16.001+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.001+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.013+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.013+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:16.001+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.001+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.014+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.014+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:16.002+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.002+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.014+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.014+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:16.002+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.002+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.015+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.015+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:16.003+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.003+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.015+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.015+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:16.004+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.004+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.016+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:33.016+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
-2026-08-13T11:26:33.017+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:33.017+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
-2026-08-13T11:26:33.020+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.020+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.021+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.021+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.021+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.021+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.021+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.021+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
-2026-08-13T11:26:33.022+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.022+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:16.005+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:16.005+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plots_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY plot_code, plot_uuid]
+2026-08-13T16:46:16.007+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:16.007+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_entries_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY occurred_start DESC, entry_uuid]
+2026-08-13T16:46:16.012+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.012+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_entries_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:16.012+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.012+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plot_groups_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:16.013+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.013+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_plots_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:16.013+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.013+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [DELETE FROM journal_vocab_mirror WHERE gateway_eui = ?]
+2026-08-13T16:46:16.014+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.014+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.022+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.022+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:16.014+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.014+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.023+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.023+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
+2026-08-13T16:46:16.015+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.015+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plots_mirror(
     plot_uuid, gateway_eui, owner_user_uuid, sync_version,
     plot_code, zone_uuid, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, NULL, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.023+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.023+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:16.016+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.016+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.024+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.024+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:16.016+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.016+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.024+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.024+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
+2026-08-13T16:46:16.017+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.017+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_entries_mirror(
     entry_uuid, gateway_eui, owner_user_uuid, sync_version,
     status, occurred_start, activity_code, plot_uuid, zone_uuid,
     deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'final', '2026-07-29T10:00:00Z',
         'irrigation', ?, NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.025+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.025+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
+2026-08-13T16:46:16.018+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.018+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_plot_groups_mirror(
     group_uuid, gateway_eui, owner_user_uuid, sync_version,
     label, resolved_at, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, 'Shared group', NULL, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.025+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
-2026-08-13T11:26:33.025+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
+2026-08-13T16:46:16.018+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:46:16.018+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO journal_vocab_mirror(
     custom_field_uuid, gateway_eui, owner_user_uuid, sync_version,
     code, active, deleted_at, aggregate_json)
 VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 ]
-2026-08-13T11:26:33.026+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-08-13T11:26:33.026+02:00 DEBUG 2682197 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
+2026-08-13T16:46:16.019+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
+2026-08-13T16:46:16.019+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT aggregate_json::text FROM journal_plot_groups_mirror WHERE gateway_eui = ? AND deleted_at IS NULL ORDER BY label, group_uuid]
 </pre>
 </span>
 </div>
@@ -1076,7 +1076,7 @@ VALUES (?, ?, ?, 1, ?, TRUE, NULL, CAST(? AS jsonb))
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 11:27:21 AM</p>
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
 </div>
 </div>
 </body>

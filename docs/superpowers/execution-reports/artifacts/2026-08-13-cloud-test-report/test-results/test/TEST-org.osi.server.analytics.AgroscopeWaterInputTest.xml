@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.osi.server.analytics.AgroscopeWaterInputTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T09:26:03" hostname="osi-01" time="0.003">
+<testsuite name="org.osi.server.analytics.AgroscopeWaterInputTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:41" hostname="osi-01" time="0.004">
   <properties/>
   <testcase name="noEnvRowMeansZeroMeasuredWater()" classname="org.osi.server.analytics.AgroscopeWaterInputTest" time="0.002"/>
   <testcase name="litresOverAreaGivesMm()" classname="org.osi.server.analytics.AgroscopeWaterInputTest" time="0.001"/>
