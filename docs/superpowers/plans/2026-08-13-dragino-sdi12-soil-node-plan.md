@@ -692,7 +692,7 @@ git add -A && git commit -m "feat(sdi12): probe-profile normalize module with re
 **Interfaces:**
 - Produces: channel keys `vwc_1..8`, `soil_temp_1..8`, `soil_ec_1..8`, each with `edgeField` equal to the key. Tasks 4, 9, 13, 15 rely on these exact keys.
 
-- [ ] **Step 1: Generate the 24 entries**
+- [x] **Step 1: Generate the 24 entries**
 
 Read one existing soil entry in `channels.json` (e.g. `swt_1`) to confirm the field set, then run this once from the repo root (adjust only if the entry shape differs):
 
@@ -715,7 +715,7 @@ console.log("entries now:", arr.length);
 '
 ```
 
-- [ ] **Step 2: Regenerate the edge manifest and record the new SHA**
+- [x] **Step 2: Regenerate the edge manifest and record the new SHA**
 
 ```bash
 node scripts/build-edge-manifest.js
@@ -724,11 +724,11 @@ sha256sum web/react-gui/src/channels/channels.json
 
 Replace the recorded SHA-256 at the end of `docs/channel-manifest.md` with the new value.
 
-- [ ] **Step 3: Extend osi-history-helper's channel list**
+- [x] **Step 3: Extend osi-history-helper's channel list**
 
 `verify-channel-manifest-parity.js` asserts channels.json against `osi-history-helper/index.js` in both profiles. Grep the helper for `swt_1`, add the 24 new channels in the same structure, and mirror the file to bcm2709.
 
-- [ ] **Step 4: Run the gates**
+- [x] **Step 4: Run the gates**
 
 ```bash
 node scripts/verify-channel-manifest-parity.js
@@ -738,7 +738,7 @@ node scripts/verify-profile-parity.js
 
 Expected: all PASS. (`verify-db-schema-consistency` will fail until Task 5 adds the columns — that is expected and is why this task does not run it.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(sdi12): vwc/soil_temp/soil_ec channel manifest entries (8 depths)"

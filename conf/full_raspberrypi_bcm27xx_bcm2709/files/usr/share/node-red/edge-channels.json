@@ -243,5 +243,125 @@
     "key": "pipe_pressure_kpa",
     "edgeField": "pipe_pressure_kpa",
     "unit": "kPa"
+  },
+  {
+    "key": "vwc_1",
+    "edgeField": "vwc_1",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_2",
+    "edgeField": "vwc_2",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_3",
+    "edgeField": "vwc_3",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_4",
+    "edgeField": "vwc_4",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_5",
+    "edgeField": "vwc_5",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_6",
+    "edgeField": "vwc_6",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_7",
+    "edgeField": "vwc_7",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_8",
+    "edgeField": "vwc_8",
+    "unit": "%"
+  },
+  {
+    "key": "soil_temp_1",
+    "edgeField": "soil_temp_1",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_temp_2",
+    "edgeField": "soil_temp_2",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_temp_3",
+    "edgeField": "soil_temp_3",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_temp_4",
+    "edgeField": "soil_temp_4",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_temp_5",
+    "edgeField": "soil_temp_5",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_temp_6",
+    "edgeField": "soil_temp_6",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_temp_7",
+    "edgeField": "soil_temp_7",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_temp_8",
+    "edgeField": "soil_temp_8",
+    "unit": "°C"
+  },
+  {
+    "key": "soil_ec_1",
+    "edgeField": "soil_ec_1",
+    "unit": "µS/cm"
+  },
+  {
+    "key": "soil_ec_2",
+    "edgeField": "soil_ec_2",
+    "unit": "µS/cm"
+  },
+  {
+    "key": "soil_ec_3",
+    "edgeField": "soil_ec_3",
+    "unit": "µS/cm"
+  },
+  {
+    "key": "soil_ec_4",
+    "edgeField": "soil_ec_4",
+    "unit": "µS/cm"
+  },
+  {
+    "key": "soil_ec_5",
+    "edgeField": "soil_ec_5",
+    "unit": "µS/cm"
+  },
+  {
+    "key": "soil_ec_6",
+    "edgeField": "soil_ec_6",
+    "unit": "µS/cm"
+  },
+  {
+    "key": "soil_ec_7",
+    "edgeField": "soil_ec_7",
+    "unit": "µS/cm"
+  },
+  {
+    "key": "soil_ec_8",
+    "edgeField": "soil_ec_8",
+    "unit": "µS/cm"
   }
 ]
