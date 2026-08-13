@@ -1801,7 +1801,7 @@ git add -A && git commit -m "docs(sdi12): device guide + AGENTS.md catalog row"
 
 ### Task 18: Full gate battery
 
-- [ ] **Step 1: Run everything**
+- [x] **Step 1: Run everything**
 
 ```bash
 node scripts/verify-sdi12-codec.js
@@ -1838,7 +1838,7 @@ node scripts/verify-sync-flow.js
 
 Expected: every command PASS. Any failure: fix, re-run the full block (not just the failed command), and only then proceed.
 
-- [ ] **Step 2: Final commit if fixes were needed**
+- [x] **Step 2: Final commit if fixes were needed**
 
 ```bash
 git add -A && git commit -m "chore(sdi12): gate battery fixes"
