@@ -903,7 +903,60 @@ test('re-parenting an entry requires write scope on both plots', async () => {
   );
 });
 
-test('scoped plot creation requires zone scope and keeps the creator as owner', async () => {
+test("a scoped zone entry reuses the zone's existing plot", async () => {
+  const db = new TestDb('scoped-zone-existing-plot');
+  seedIdentity(db);
+  const plotUuid = '22230000-0000-4000-8000-000000000001';
+  const entryUuid = '22230000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(
+    db,
+    plotInput(plotUuid, 'existing-zone-plot', { zone_uuid: ZONE_UUID }),
+    principal()
+  );
+  db.prepare('DELETE FROM sync_outbox').run();
+  db.prepare(
+    'INSERT INTO user_zone_assignments ' +
+      '(assignment_uuid,user_uuid,zone_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22230000-0000-4000-8000-000000000003',
+    OTHER_OWNER_UUID,
+    ZONE_UUID,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  const scoped = Object.assign({}, principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  }), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+
+  const created = await journal.saveEntry(
+    db,
+    entryInput(entryUuid, null, '2026-07-13T14:00:00', {
+      zone_uuid: ZONE_UUID,
+      layout_code: 'open_field',
+      layout_version: 1,
+      season_crop: 'barley',
+    }),
+    scoped,
+    { mode: 'create' }
+  );
+  assert.equal(created.entry_uuid, entryUuid);
+  assert.equal(
+    db.prepare(
+      'SELECT COUNT(*) AS n FROM journal_plots WHERE zone_uuid=? AND active=1 AND deleted_at IS NULL'
+    ).get(ZONE_UUID).n,
+    1
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='JOURNAL_PLOT'").get().n,
+    0
+  );
+});
+
+test('scoped plot creation requires zone scope and uses the zone owner', async () => {
   const db = new TestDb('scoped-plot-create');
   seedIdentity(db);
   const plotUuid = '22300000-0000-4000-8000-000000000001';
@@ -941,7 +994,7 @@ test('scoped plot creation requires zone scope and keeps the creator as owner', 
   assert.equal(
     db.prepare('SELECT owner_user_uuid FROM journal_plots WHERE plot_uuid=?')
       .get(plotUuid).owner_user_uuid,
-    OWNER_UUID
+    OTHER_OWNER_UUID
   );
 });
 
