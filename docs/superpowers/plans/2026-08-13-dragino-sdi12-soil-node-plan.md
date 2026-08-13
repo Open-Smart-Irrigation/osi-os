@@ -1754,7 +1754,7 @@ git add -A && git commit -m "fix(sdi12): include DRAGINO_SDI12 in scheduler swt 
 - Create: `docs/devices/dragino-sdi12.md`
 - Modify: `AGENTS.md` (device catalog section — add the `DRAGINO_SDI12` row following the existing rows' format)
 
-- [ ] **Step 1: Write the device doc**
+- [x] **Step 1: Write the device doc**
 
 Contents (all bench-status items explicitly labeled "unverified until bench capture"):
 
@@ -1771,7 +1771,7 @@ Contents (all bench-status items explicitly labeled "unverified until bench capt
 
 Run `node .claude/skills/anti-slop-writing/slop-check.js docs/devices/dragino-sdi12.md` — expect PASS.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add -A && git commit -m "docs(sdi12): device guide + AGENTS.md catalog row"

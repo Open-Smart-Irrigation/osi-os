@@ -183,6 +183,7 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 | KIWI_SENSOR | Sensors | Kiwi | SWT, light, temp, humidity |
 | TEKTELIC_CLOVER | Sensors | (same as Kiwi) | VWC, temp, humidity |
 | DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow) |
+| DRAGINO_SDI12 | Sensors | OSI SDI-12 Soil Node | Probe-profile VWC, soil temp, soil EC, battery |
 | SENSECAP_S2120 | Sensors | S2120 | Wind, rain, pressure, UV, temp/humidity |
 | AQUASCOPE_LORAIN | Sensors | LoRain | Interval rain, ambient temp, battery |
 | STREGA_VALVE | Actuators | STREGA | Valve state, battery |
