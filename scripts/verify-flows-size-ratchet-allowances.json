@@ -86,8 +86,8 @@
       "reason": "issue #10: sim INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version"
     },
     "sync-init-fn": {
-      "max_chars": 74217,
-      "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
+      "max_chars": 75227,
+      "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A); AgroLink SDI-12 schema slice adds DRAGINO_SDI12 and the SDI-12 device columns/trigger payload (+1010)"
     },
     "sync-bootstrap-build": {
       "max_chars": 37111,
@@ -430,8 +430,20 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "8809bb5239dfb3d4": {
-      "max_chars": 12175,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 14215,
+      "reason": "Inherited f50950b1 baseline at exact measured size; AgroLink SDI-12 ingest adds explicit profile dispatch and 24 soil telemetry fields (+2040)."
+    },
+    "sdi12-gate-fn": {
+      "max_chars": 1034,
+      "reason": "AgroLink SDI-12 ingest: strict profile gate and FPort 2/100 output split."
+    },
+    "sdi12-config-query-fn": {
+      "max_chars": 232,
+      "reason": "AgroLink SDI-12 ingest: prepared bound-parameter device configuration query."
+    },
+    "sdi12-write-fn": {
+      "max_chars": 2645,
+      "reason": "AgroLink SDI-12 ingest: normalizer, manifest, narrow-waist writer, and visible failure stages."
     },
     "934bf2bc19a8ce22": {
       "max_chars": 23053,
@@ -1095,7 +1107,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1278466,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411); AgroLink review R2 (post-E3-review) adds the scheduler's message-level system-actuation marker and its edge-side exemption (+1041 write-strega-expectation, +48 scheduler); AgroLink review R4 (post-E3-review) queues a terminal scope_denied ack when an actor is present but denied (+1682); AgroLink review X1 (post-R4-review) rethrows non-statusCode scope-helper errors instead of acking them as denials (+692); AgroLink review X2 (post-R-wave-review) closes the GUI STREGA advanced chain's actuation gap: scope+actor gate in put-strega-timed-auth-fn (+2690) and actor propagation onto every actuatorMsg in put-strega-advanced-authorize-fn (+630); Task 6 adds the isolated bounded Journal V2 replication worker and its success/error status paths (+2536), then adds the identity-transition fail-closed check (+513)."
+    "max_total": 1285427,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411); AgroLink review R2 (post-E3-review) adds the scheduler's message-level system-actuation marker and its edge-side exemption (+1041 write-strega-expectation, +48 scheduler); AgroLink review R4 (post-R4-review) queues a terminal scope_denied ack when an actor is present but denied (+1682); AgroLink review X1 (post-R4-review) rethrows non-statusCode scope-helper errors instead of acking them as denials (+692); AgroLink review X2 (post-R-wave-review) closes the GUI STREGA advanced chain's actuation gap: scope+actor gate in put-strega-timed-auth-fn (+2690) and actor propagation onto every actuatorMsg in put-strega-advanced-authorize-fn (+630); Task 6 adds the isolated bounded Journal V2 replication worker and its success/error status paths (+2536), then adds the identity-transition fail-closed check (+513); AgroLink SDI-12 schema slice adds sanctioned boot literals (+1010), and the SDI-12 ingest adds the explicit profile dispatcher, 24 soil telemetry fields, and three new function nodes (+5951)."
   }
 }

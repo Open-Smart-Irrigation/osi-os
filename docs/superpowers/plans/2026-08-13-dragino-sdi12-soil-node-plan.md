@@ -22,6 +22,8 @@
 - Frontend: run tests with `npx vitest run <paths>`; never run two frontend builds concurrently on this workstation (zram swap, OOM risk); reviewers must not build at all.
 - Function nodes must use `osiLib.require(...)`, never bare `require` (`scripts/flows-bare-require-scan.js` gates), and must not add silent catches (`scripts/verify-no-new-silent-catch.js`).
 - All NEW SQL runs through `osiDb` with bound `?` parameters (playbook L153: "bound parameters only") — the older string-building lsn50 chains are legacy, not license.
+- **Flows ordering invariant:** `migrate-flows-journal-v2-replication.js` appends its worker cluster at the END of the flows array (`flows.push(...EXPECTED_NODES)`, ~L221) and its test asserts shipped bytes == migrator output. All new nodes in EVERY flows task must be inserted BEFORE the journal-v2 worker cluster, and the file keeps the exact `JSON.stringify(flows, null, 2) + '\n'` serialization.
+- **Protected-node hash pins:** `scripts/verify-live-gateway-identity.js` pins sha256 hashes of protected function nodes (`protectedNodeHashes`, ~L339; includes `sync-init-fn`). An APPROVED change to a protected node is completed by re-pinning its hash — after diffing old vs new function text and confirming the delta contains exactly the approved change, with the diff recorded in the execution report. An unapproved delta is a halt, not a re-pin.
 - All new prose docs must pass `node .claude/skills/anti-slop-writing/slop-check.js <file>`.
 
 ---
@@ -1066,11 +1068,11 @@ Invoke `osi-flows-json-editing` first. Model the UC512 tab (`c571729fb2943059` �
 - Consumes: `osiLib.require('sdi12-normalize')` (Task 2), `osiLib.require('device-writer')`, `/srv/node-red/edge-channels.json` (Task 3), `CHIRPSTACK_PROFILE_SDI12` (Task 8).
 - Produces: new tab `Sensor_SDI12` with nodes wired: `sdi12-mqtt-in` → `sdi12-gate-fn` → `sdi12-config-query-fn` → `sdi12-config-sqlite` → `sdi12-write-fn` → `sdi12-debug`; `sdi12-gate-fn` created with 2 outputs, output 2 left UNCONNECTED here (Task 10 wires it to `sdi12-identify-fn`); `record-error-catch-sdi12` → link-out to the shared error recorder.
 
-- [ ] **Step 1: Create the tab and MQTT-in**
+- [x] **Step 1: Create the tab and MQTT-in**
 
 New `mqtt in` node `sdi12-mqtt-in` ("SDI12 IN"), broker `b0b19352dac3fb34`, topic exactly `application/+/device/+/event/up` (`scripts/check-mqtt-topics.sh` gates the literal string).
 
-- [ ] **Step 2: Gate + decode function node (`sdi12-gate-fn`, 2 outputs)**
+- [x] **Step 2: Gate + decode function node (`sdi12-gate-fn`, 2 outputs)**
 
 Create the node with 2 outputs. Output 2 (FPort 100 identify echoes) stays
 **unconnected in this task** — Task 10 creates the identify handler and wires
@@ -1097,7 +1099,7 @@ node.status({ fill: 'grey', shape: 'ring', text: 'dropped fport ' + fPort + ' ' 
 return null;
 ```
 
-- [ ] **Step 3: Config query + sqlite read**
+- [x] **Step 3: Config query + sqlite read**
 
 `sdi12-config-query-fn` (model: `lsn50-config-query-fn` — read it first for the exact escaping convention used with the sqlite node):
 
@@ -1114,7 +1116,7 @@ bound-parameters rule applies to new code even where the lsn50 chain
 string-builds. Stash `msg.sdi12` survives the sqlite node (it replaces only
 `msg.payload`).
 
-- [ ] **Step 4: Normalize + Write function node (`sdi12-write-fn`)**
+- [x] **Step 4: Normalize + Write function node (`sdi12-write-fn`)**
 
 Setup tab `libs`: both `osiDb` (module `osi-db-helper`) and `osiLib` (module
 `osi-lib`) — copy the libs config from the UC512 node `6b28e0d879808dd9`
@@ -1209,7 +1211,7 @@ return (async () => {
 })();
 ```
 
-- [ ] **Step 5: Telemetry dispatcher mapping**
+- [x] **Step 5: Telemetry dispatcher mapping**
 
 In node `8809bb5239dfb3d4` ("Build Telemetry"), two changes — the type
 mapping alone publishes none of the new values:
@@ -1223,7 +1225,7 @@ mapping alone publishes none of the new values:
    are copied into the telemetry payload, following that node's existing
    field-copy shape.
 
-- [ ] **Step 6: Catch node, mirror, gates, commit**
+- [x] **Step 6: Catch node, mirror, gates, commit**
 
 Add `record-error-catch-sdi12` (catch, scoped to the new tab) → link-out to the shared error recorder (copy the LSN50 tab's `record-error-link-out-lsn50` wiring). Then:
 
