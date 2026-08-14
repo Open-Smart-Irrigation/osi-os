@@ -62,6 +62,10 @@ jobs:
       - run: node scripts/verify-no-stray-ddl.js
       - run: node scripts/verify-flows-size-ratchet.js
       - run: node scripts/verify-seed-replay.js
+      # Replays migrations/seed/boot DDL/bundled DBs with sqlite3's function_arg limit
+      # pinned to the gateway's 127. CI's sqlite3 and node:sqlite both allow 1000, which
+      # is how migration 0046's 150-arg json_object reached a live Pi (2026-08-14).
+      - run: node scripts/verify-sqlite-cli-limits.js
       - run: node scripts/verify-sync-flow.js
       - run: node scripts/verify-no-new-silent-catch.js
       - run: node scripts/verify-runtime-schema-parity.js

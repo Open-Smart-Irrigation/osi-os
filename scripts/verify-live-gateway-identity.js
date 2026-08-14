@@ -338,7 +338,10 @@ const localRestartReader = [
 ].join('\n');
 const protectedNodeHashes = {
   'al-link-validate': 'a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc',
-  'sync-init-fn': '2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222',
+  // Re-pinned 2026-08-14: trg_dp_device_data_outbox_ai's payload json_object was split
+  // into json_insert(json_object(...), ...) so no single call exceeds the gateway's
+  // SQLITE_MAX_FUNCTION_ARG=127. Previous pin: 2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222
+  'sync-init-fn': 'e7c2cbb10c8e3117dc5c059cb5f5b2f7db1b88763f53e3d2f04edd3456e395e4',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
