@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.retention.CommandRetentionJobTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:36" hostname="osi-01" time="0.002">
+  <properties/>
+  <testcase name="dryRunReportsCompletedAndStaleConfigCandidatesWithoutWriting()" classname="org.osi.server.retention.CommandRetentionJobTest" time="0.001"/>
+  <testcase name="liveRunDeletesCompletedAndExpiresOnlyStaleConfigCommands()" classname="org.osi.server.retention.CommandRetentionJobTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-13T16:46:36.230+02:00  INFO 3273021 --- [    Test worker] o.o.s.retention.CommandRetentionJob      : Command retention expired 2 stale config commands and deleted 3 terminal commands
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.DendroControllerRdiCompareTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:45" hostname="osi-01" time="0.412">
+  <properties/>
+  <testcase name="compareRdiIsAdminGuarded()" classname="org.osi.server.analytics.DendroControllerRdiCompareTest" time="0.387"/>
+  <testcase name="compareShadowReturnsThreeWaySeriesWithTrackingErrors()" classname="org.osi.server.analytics.DendroControllerRdiCompareTest" time="0.013"/>
+  <testcase name="compareRdiOmitsOrphanShadowRowsWithoutAV6Recommendation()" classname="org.osi.server.analytics.DendroControllerRdiCompareTest" time="0.005"/>
+  <testcase name="compareShadowIsAdminGuarded()" classname="org.osi.server.analytics.DendroControllerRdiCompareTest" time="0.002"/>
+  <testcase name="compareRdiReturnsJoinedV6AndShadowSeries()" classname="org.osi.server.analytics.DendroControllerRdiCompareTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" tests="21" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:57" hostname="osi-01" time="0.499">
+  <properties/>
+  <testcase name="applyEventsV2_updatesIrrigationCalibrationOnlyForNewerVersion()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.414"/>
+  <testcase name="applyEvents_mirrorsDataPlaneRowsIdempotently()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.005"/>
+  <testcase name="applyEvents_mirrorsChameleonReadings()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.004"/>
+  <testcase name="applyEvents_updatesGatewayLastSeenEvenWhenBatchIsEmpty()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.002"/>
+  <testcase name="applyEventsV2_createsIrrigationCalibrationMirror()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.003"/>
+  <testcase name="applyEventsV2_chameleonReadingAppendedSecondReadingSameDeviceApplies()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.002"/>
+  <testcase name="applyEventsV2_unknownOpIsRejectedRatherThanSilentlyMirrored()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.004"/>
+  <testcase name="applyEventsV2_mirrorsWeatherStationZonesAndWatermarksTheSet()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.005"/>
+  <testcase name="applyEventsV2_returnsPerEventResultsAndRecordsWatermark()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.003"/>
+  <testcase name="applyEventsV2_ingestsWorkRequestsWithGatewayScopedWatermark()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.007"/>
+  <testcase name="applyEventsV2_deviceDataAppendedSecondReadingSameDeviceApplies()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.005"/>
+  <testcase name="[1] op=DEVICE_ASSIGNED" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.004"/>
+  <testcase name="[2] op=DEVICE_UNASSIGNED" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.003"/>
+  <testcase name="[3] op=DEVICE_FLAGS_UPDATED" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.002"/>
+  <testcase name="[4] op=DEVICE_UNCLAIMED" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.004"/>
+  <testcase name="applyEvents_doesNotRegressCurrentStateWhenOlderBacklogTelemetryArrives()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.004"/>
+  <testcase name="applyEvents_zoneConfigPreservesWeatherSourceWhenAbsentAndNormalizesWhenPresent()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.004"/>
+  <testcase name="applyEvents_mirrorsSoilMoistureProbeDepthMetadataFromDeviceUpdates()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.003"/>
+  <testcase name="applyEventsV2_rejectsStaleResourceVersionsWithoutApplying()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.003"/>
+  <testcase name="applyEventsV2_rejectsEqualVersionWeatherAssignmentConflictBeforeMirrorWrite()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.006"/>
+  <testcase name="applyEventsV2_retriesIrrigationCalibrationWhenZoneIsUnknown()" classname="org.osi.server.sync.EdgeSyncServiceDataPlaneTest" time="0.005"/>
+  <system-out><![CDATA[2026-08-13T16:46:57.763+02:00  WARN 3273021 --- [    Test worker] o.osi.server.sync.SyncEventTxExecutor    : Rejecting unsupported sync event evt-unknown-op op=NEVER_SEEN_OP_TYPE_2026 contractVersion=1 before ownership/watermark checks
+2026-08-13T16:46:57.764+02:00  WARN 3273021 --- [    Test worker] o.osi.server.sync.SyncEventTxExecutor    : Rejecting unsupported sync event evt-device-unknown-op op=DEVICE_FOO_2026 contractVersion=null before ownership/watermark checks
+2026-08-13T16:46:57.764+02:00  WARN 3273021 --- [    Test worker] o.osi.server.sync.SyncEventTxExecutor    : Rejecting unsupported sync event evt-null-op op=null contractVersion=null before ownership/watermark checks
+2026-08-13T16:46:57.827+02:00  WARN 3273021 --- [    Test worker] o.osi.server.sync.SyncEventTxExecutor    : Retryable sync event parent miss calibration-event-404 op=ZONE_IRRIGATION_CALIBRATION_UPSERTED key=ZONE-404 due to Zone not found for irrigation calibration sync: ZONE-404
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

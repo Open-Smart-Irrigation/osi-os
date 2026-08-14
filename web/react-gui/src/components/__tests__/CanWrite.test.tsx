@@ -7,7 +7,7 @@ const scopeState = vi.hoisted(() => ({
   loading: false,
   canWrite: true,
   isScoped: true,
-  isZoneVisible: vi.fn<(zoneUuid: string) => boolean>(() => true),
+  zoneWritable: vi.fn<(zoneUuid: string) => boolean>(() => true),
 }));
 
 vi.mock('../../contexts/ScopeContext', () => ({
@@ -19,7 +19,8 @@ describe('CanWrite', () => {
     scopeState.loading = false;
     scopeState.canWrite = true;
     scopeState.isScoped = true;
-    scopeState.isZoneVisible.mockReturnValue(true);
+    scopeState.zoneWritable.mockClear();
+    scopeState.zoneWritable.mockReturnValue(true);
   });
 
   it('does not flash mutation controls while scope is loading', () => {
@@ -28,7 +29,7 @@ describe('CanWrite', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
-  it('hides writes from viewers and out-of-scope researchers', () => {
+  it('hides writes from viewers and from zones outside the write scope', () => {
     scopeState.canWrite = false;
     const { rerender } = render(
       <CanWrite zoneUuid="zone-1"><button type="button">Save</button></CanWrite>,
@@ -36,20 +37,27 @@ describe('CanWrite', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
 
     scopeState.canWrite = true;
-    scopeState.isZoneVisible.mockReturnValue(false);
+    scopeState.zoneWritable.mockReturnValue(false);
     rerender(<CanWrite zoneUuid="zone-1"><button type="button">Save</button></CanWrite>);
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
-  it('renders in-scope writes and preserves flag-off behavior', () => {
+  it('renders writable zones and stays open when the write scope is a wildcard', () => {
     const { rerender } = render(
       <CanWrite zoneUuid="zone-1"><button type="button">Save</button></CanWrite>,
     );
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
 
     scopeState.isScoped = false;
-    scopeState.isZoneVisible.mockReturnValue(false);
+    scopeState.zoneWritable.mockReturnValue(true);
     rerender(<CanWrite zoneUuid="zone-foreign"><button type="button">Save</button></CanWrite>);
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+
+  it('renders unscoped children when no zone is named', () => {
+    scopeState.zoneWritable.mockReturnValue(false);
+    render(<CanWrite><button type="button">Save</button></CanWrite>);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(scopeState.zoneWritable).not.toHaveBeenCalled();
   });
 });

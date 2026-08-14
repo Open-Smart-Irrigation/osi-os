@@ -1069,10 +1069,11 @@ test('W3: researcher cannot delete a multi-holder zone; admin can', async () => 
   }
 });
 
-test('W4: scoped claims require an accessible target zone except for admins', async () => {
+test('W5: registration accepts an optional in-scope zone_id, unassigned for any writer', async () => {
   const db = seedScopedDb();
   try {
-    const researcherMissing = await executeFunction(loadNode('scoped-device-claim-router'), {
+    // W3: no zone_id is legal for every mutation-capable role, researcher included.
+    const researcherUnassigned = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
         deveui: 'NEW1',
         name: 'New sensor',
@@ -1081,46 +1082,105 @@ test('W4: scoped claims require an accessible target zone except for admins', as
       env: ENV,
       db,
     });
-    assert.equal(researcherMissing.result[1].statusCode, 400);
+    assert.ok(researcherUnassigned.result[0], 'a researcher may register without a zone (W3)');
+    assert.equal(researcherUnassigned.result[0]._deviceZoneId, null);
 
     scopeHelper._resetForTests();
-    const adminMissing = await executeFunction(loadNode('scoped-device-claim-router'), {
+    const adminUnassigned = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
-        deveui: 'NEW1',
+        deveui: 'NEW2',
         name: 'New sensor',
         type_id: 'DRAGINO_LSN50',
       }),
       env: ENV,
       db,
     });
-    assert.ok(adminMissing.result[0]);
-    assert.equal(adminMissing.result[0]._scopedTargetZoneId, null);
+    assert.equal(adminUnassigned.result[0]._deviceZoneId, null);
 
     scopeHelper._resetForTests();
-    const scoped = await executeFunction(loadNode('scoped-device-claim-router'), {
+    const inScope = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
-        deveui: 'NEW2',
+        deveui: 'NEW3',
         name: 'Scoped sensor',
         type_id: 'DRAGINO_LSN50',
-        irrigation_zone_id: 1,
+        zone_id: 1,
       }),
       env: ENV,
       db,
     });
-    assert.equal(scoped.result[0]._scopedTargetZoneId, 1);
+    assert.equal(inScope.result[0]._deviceZoneId, 1);
 
     scopeHelper._resetForTests();
-    const foreignZone = await executeFunction(loadNode('scoped-device-claim-router'), {
+    const outOfScope = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
-        deveui: 'NEW3',
+        deveui: 'NEW4',
         name: 'Foreign sensor',
         type_id: 'DRAGINO_LSN50',
-        irrigation_zone_id: 1,
+        zone_id: 1,
       }),
       env: ENV,
       db,
     });
-    assert.equal(foreignZone.result[1].statusCode, 404);
+    assert.equal(outOfScope.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const unknownZone = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW5',
+        name: 'Ghost zone',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 999,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(unknownZone.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const badZone = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW6',
+        name: 'Bad zone',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 'not-a-number',
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(badZone.result[1].statusCode, 400);
+
+    scopeHelper._resetForTests();
+    const viewer = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(3, 'view1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW7',
+        name: 'Viewer sensor',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 1,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result[1].statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('W5: flag-off registration ignores the scoped claim router', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW8',
+        name: 'Flag-off sensor',
+        type_id: 'DRAGINO_LSN50',
+        zone_id: 1,
+      }),
+      env: { AUTH_TOKEN_SECRET: ENV.AUTH_TOKEN_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.ok(response.result[0], 'flag-off must pass the message through untouched');
+    assert.equal(response.result[0]._deviceZoneId, undefined);
   } finally {
     db.close();
   }
@@ -1134,7 +1194,7 @@ test('W4: a foreign existing device is hidden before claim or reassignment', asy
         deveui: 'DENDRO1',
         name: 'Tree 1',
         type_id: 'DRAGINO_LSN50',
-        irrigation_zone_id: 2,
+        zone_id: 2,
       }),
       env: ENV,
       db,
@@ -1154,17 +1214,25 @@ test('W4: a foreign existing device is hidden before claim or reassignment', asy
       env: ENV,
       db,
     });
-    assert.equal(assignment.result[1].statusCode, 404);
-    assert.deepEqual(assignment.result[1].payload, { message: 'Device not found' });
+    assert.equal(assignment.result[1].statusCode, 409);
+    assert.equal(assignment.result[1].payload.current_zone_id, 1);
+    assert.equal(assignment.result[1].payload.current_zone_name, 'Z One');
   } finally {
     db.close();
   }
 });
 
-test('W4: assignment and removal fresh-check both the device and zone', async () => {
+test('P7: assignment only takes unassigned devices and names the conflict', async () => {
   const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, sync_version, created_at, updated_at
+    ) VALUES
+      ('UNASSIGNED1', 'Fresh LSN50', 'DRAGINO_LSN50', 1, NULL, 0, '2026-01-01', '2026-01-01');
+  `);
   try {
-    const assigned = await executeFunction(loadNode('scoped-device-assign-router'), {
+    // DENDRO1 already lives in zone 1: assigning it to zone 2 is a 409, not a move.
+    const conflict = await executeFunction(loadNode('scoped-device-assign-router'), {
       msg: scopedRequest(
         2,
         'res1',
@@ -1175,35 +1243,154 @@ test('W4: assignment and removal fresh-check both the device and zone', async ()
       env: ENV,
       db,
     });
-    assert.equal(assigned.result[1].statusCode, 200);
-    assert.equal(assigned.result[1].payload.sync_version, 2);
+    assert.equal(conflict.result[1].statusCode, 409);
+    assert.equal(conflict.result[1].payload.current_zone_id, 1);
+    assert.equal(conflict.result[1].payload.current_zone_name, 'Z One');
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
         .irrigation_zone_id,
+      1,
+      'a conflicting assign must not move the device'
+    );
+
+    // An unassigned device assigns cleanly and bumps sync_version (P11).
+    scopeHelper._resetForTests();
+    const assigned = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/2/devices/UNASSIGNED1',
+        { id: '2', deveui: 'UNASSIGNED1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(assigned.result[1].statusCode, 200);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='UNASSIGNED1'").get()
+        .irrigation_zone_id,
+      2
+    );
+    // The insert trigger normalizes a new row from 0 to 1; assignment bumps it again.
+    assert.equal(
+      db.prepare("SELECT sync_version FROM devices WHERE deveui='UNASSIGNED1'").get().sync_version,
       2
     );
 
+    // W4: unassign, then assign — the explicit move.
     scopeHelper._resetForTests();
     const removed = await executeFunction(loadNode('scoped-device-unassign-router'), {
       msg: scopedRequest(
         2,
         'res1',
         'DELETE',
+        '/api/irrigation-zones/1/devices/DENDRO1',
+        { id: '1', deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(removed.result[1].statusCode, 200);
+
+    scopeHelper._resetForTests();
+    const reassigned = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
         '/api/irrigation-zones/2/devices/DENDRO1',
         { id: '2', deveui: 'DENDRO1' }
       ),
       env: ENV,
       db,
     });
-    assert.equal(removed.result[1].statusCode, 200);
-    assert.equal(removed.result[1].payload.sync_version, 3);
+    assert.equal(reassigned.result[1].statusCode, 200);
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
         .irrigation_zone_id,
-      null
+      2
     );
   } finally {
     db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('E11: assigning an already assigned device to the same zone is accepted', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/DENDRO1',
+        { id: '1', deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 202);
+    assert.equal(response.result[1].payload.irrigation_zone_id, 1);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('P7: assignment keeps its role and target-zone write gates', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('UNASSIGNED1', 'Fresh LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+  `);
+  try {
+    const viewer = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/UNASSIGNED1',
+        { id: '1', deveui: 'UNASSIGNED1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result[1].statusCode, 403);
+
+    scopeHelper._resetForTests();
+    const foreignZone = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        1,
+        'admin1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/UNASSIGNED1',
+        { id: '1', deveui: 'UNASSIGNED1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreignZone.result[1].statusCode, 404, 'admin1 has no write scope on zone 1');
+
+    scopeHelper._resetForTests();
+    const missingDevice = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/1/devices/NOPE',
+        { id: '1', deveui: 'NOPE' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(missingDevice.result[1].statusCode, 404);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
   }
 });
 
@@ -2034,5 +2221,766 @@ test('E6: an unrecognized role fails closed on every mutation gate while reads s
     assert.equal(cancelValve.result.statusCode, 403, 'cancel STREGA actuation');
   } finally {
     db.close();
+  }
+});
+
+const REGISTER_ENV = {
+  AUTH_TOKEN_SECRET: AUTH_SECRET,
+  OSI_SCOPED_ACCESS: '1',
+  DEVICE_EUI: '0016C001F1000001',
+  CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi',
+  CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
+};
+
+const REGISTER_APPKEY = 'AABBCCDDEEFF00112233445566778899';
+
+const DEVICE_POST_ENV = {
+  DEVICE_EUI: '0016C001F1000001',
+  CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
+};
+
+async function applyDevicePost(db, deveui, zoneId) {
+  const row = db.prepare(
+    'SELECT deveui, user_id, type_id, gateway_device_eui, sync_version, irrigation_zone_id '
+      + 'FROM devices WHERE deveui = ?'
+  ).get(deveui);
+  const result = await executeFunction(loadNode('post-devices-insert'), {
+    msg: {
+      payload: [row],
+      ...(zoneId === undefined ? {} : { _deviceZoneId: zoneId }),
+    },
+    env: DEVICE_POST_ENV,
+    flowState: {
+      new_device_user_id: row.user_id,
+      new_device_deveui: row.deveui,
+      new_device_name: row.deveui + ' repost',
+      new_device_type: row.type_id,
+      new_device_appkey: REGISTER_APPKEY,
+    },
+    db,
+  });
+  return result;
+}
+
+function fakeChirpstackLib(tracker = { provisionCalls: 0 }) {
+  return {
+    createProvisioningClientFromEnv: () => ({
+      ensureDeviceProvisioned: async (registration) => {
+        tracker.provisionCalls += 1;
+        return {
+        devEui: registration.devEui,
+        deviceAction: 'created',
+        keysAction: 'created',
+        keysVerified: true,
+        };
+      },
+      close: () => {},
+    }),
+  };
+}
+
+function registerCommand(devEui, extras = {}) {
+  return {
+    payload: {
+      commandType: 'REGISTER_DEVICE',
+      commandId: 'cmd-' + devEui,
+      params: Object.assign({
+        devEui,
+        name: 'Cloud sensor ' + devEui,
+      deviceType: 'DRAGINO_LSN50',
+      appKey: REGISTER_APPKEY,
+        userUuid: 'u-res1',
+      }, extras),
+    },
+  };
+}
+
+async function applyRegister(db, devEui, extras) {
+  const tracker = { provisionCalls: 0 };
+  const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+    msg: registerCommand(devEui, extras),
+    env: REGISTER_ENV,
+    db,
+    libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+  });
+  response.provisionCalls = tracker.provisionCalls;
+  return response;
+}
+
+const REGISTER_ENV_FLAG_OFF = Object.assign({}, REGISTER_ENV, { OSI_SCOPED_ACCESS: '0' });
+
+async function applyRegisterFlagOff(db, devEui, extras) {
+  return executeFunction(loadNode('cs-reg-cloud-fn'), {
+    msg: registerCommand(devEui, extras),
+    env: REGISTER_ENV_FLAG_OFF,
+    db,
+    libOverrides: { chirpstack: fakeChirpstackLib() },
+  });
+}
+
+test('E6: re-posting an assigned device without zone_id preserves its zone', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyDevicePost(db, 'DENDRO1');
+    assert.ok(response.result[0]);
+    assert.match(response.result[0].topic, /irrigation_zone_id\s*=\s*COALESCE\(irrigation_zone_id, NULL\)/);
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('E6: re-posting an assigned device into another zone is rejected without moving it', async () => {
+  const db = seedScopedDb();
+  try {
+    scopeHelper._resetForTests();
+    const response = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'DENDRO1',
+        zone_id: 2,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 409);
+    assert.equal(response.result[1].payload.current_zone_id, 1);
+    assert.equal(response.result[1].payload.current_zone_name, 'Z One');
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id, 1);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('E6: re-posting an assigned device into the same zone is idempotent', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyDevicePost(db, 'DENDRO1', 1);
+    assert.ok(response.result[0]);
+    assert.match(response.result[0].topic, /irrigation_zone_id\s*=\s*COALESCE\(irrigation_zone_id, 1\)/);
+  } finally {
+    db.close();
+  }
+});
+
+test('E7: deleting a zone unassigns members claimed by other users', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES ('OTHER1', 'Other user sensor', 'DRAGINO_LSN50', 1, 1, '2026-01-01', '2026-01-01');
+  `);
+  try {
+    const response = await executeFunction(loadNode('delete-zone-unassign'), {
+      msg: { payload: [{ id: 1, zone_uuid: 'z-1', sync_version: 1 }] },
+      flowState: { delete_zone_user_id: 2 },
+      env: DEVICE_POST_ENV,
+      db,
+    });
+    db.exec(response.result[0].topic);
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id, null);
+    assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='OTHER1'").get().irrigation_zone_id, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('E7: assignment conflicts identify a soft-deleted current zone', async () => {
+  const db = seedScopedDb();
+  db.exec("UPDATE irrigation_zones SET deleted_at = '2026-08-13T00:00:00.000Z' WHERE id = 1");
+  try {
+    scopeHelper._resetForTests();
+    const response = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/2/devices/DENDRO1',
+        { id: '2', deveui: 'DENDRO1' },
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 409);
+    assert.equal(response.result[1].payload.current_zone_name, 'Z One');
+    assert.equal(response.result[1].payload.current_zone_deleted, true);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+function seedRegisterCloudUserIds(db) {
+  db.exec(`
+    UPDATE users
+       SET cloud_user_id = CASE id
+         WHEN 1 THEN 1001
+         WHEN 2 THEN 2002
+         WHEN 3 THEN 3003
+       END;
+  `);
+}
+
+test('X5: REGISTER_DEVICE refuses an EUI another account already claimed', async () => {
+  const db = seedScopedDb();
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 1001, userUuid: 'u-admin' });
+    const ack = response.result[0].specialAck;
+
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'ALREADY_CLAIMED');
+    assert.equal(ack.step, 'claim');
+    assert.equal(response.provisionCalls, 0, 'the claim fence must run before ChirpStack');
+    assert.equal(
+      db.prepare("SELECT user_id FROM devices WHERE deveui='DENDRO1'").get().user_id,
+      2,
+      'the original claim must survive'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('X5: re-registering an EUI the same account already owns is idempotent', async () => {
+  const db = seedScopedDb();
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 2002 });
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(ack.state, 'ALREADY_REGISTERED');
+    assert.equal(ack.provisionedInChirpStack, true);
+    assert.equal(response.provisionCalls, 1, 'same-owner registration must reprovision to repair missing or zero keys');
+  } finally {
+    db.close();
+  }
+});
+
+test('N1: flag-off REGISTER_DEVICE still fences a cross-owner claim with the legacy FAILED ACK', async () => {
+  const db = seedScopedDb();
+  const tracker = { provisionCalls: 0 };
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('DENDRO1', { cloudUserId: 1001, userUuid: 'u-admin' }),
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'ALREADY_CLAIMED');
+    assert.equal(ack.state, 'FAILED');
+    assert.equal(tracker.provisionCalls, 0, 'flag-off cross-owner claims must not reach ChirpStack');
+    assert.equal(
+      db.prepare("SELECT user_id FROM devices WHERE deveui='DENDRO1'").get().user_id,
+      2,
+      'the original owner must remain unchanged'
+    );
+
+    const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: response.result[0],
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+    });
+    assert.equal(
+      ackMessage.result.payload,
+      '{"commandId":"cmd-DENDRO1","eventUuid":null,"aggregateType":null,"aggregateKey":"DENDRO1","result":"FAILED","state":"FAILED","commandType":"REGISTER_DEVICE","appliedSyncVersion":null,"deviceEui":"DENDRO1","provisionedInChirpStack":false,"error":"DevEUI DENDRO1 is already claimed on this gateway","step":"claim","code":"ALREADY_CLAIMED"}'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('N1: flag-off REGISTER_DEVICE still rejects a type conflict before provisioning', async () => {
+  const db = seedScopedDb();
+  const tracker = { provisionCalls: 0 };
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('DENDRO1', { cloudUserId: 2002, deviceType: 'KIWI_SENSOR' }),
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'TYPE_CONFLICT');
+    assert.equal(ack.state, 'FAILED');
+    assert.equal(tracker.provisionCalls, 0, 'type conflicts must be rejected before ChirpStack');
+    assert.equal(
+      db.prepare("SELECT type_id, user_id FROM devices WHERE deveui='DENDRO1'").get().type_id,
+      'DRAGINO_LSN50'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('N2: REGISTER_DEVICE resolves the claimant by userUuid before cloud_user_id', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES ('N2UUID1', 'UUID claim target', 'DRAGINO_LSN50', NULL, NULL, '2026-01-01', '2026-01-01');
+  `);
+  const tracker = { provisionCalls: 0 };
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('N2UUID1', { userUuid: 'u-res1', cloudUserId: 9999 }),
+      env: REGISTER_ENV,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, deleted_at FROM devices WHERE deveui='N2UUID1'"
+    ).get();
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(row.user_id, 2, 'the stable local user UUID must select user 2');
+    assert.equal(row.irrigation_zone_id, null);
+    assert.equal(row.deleted_at, null);
+    assert.equal(tracker.provisionCalls, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('N2: an unmapped principal fails without mutation or ChirpStack provisioning', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES ('N2UNKNOWN1', 'Unknown principal target', 'DRAGINO_LSN50', NULL, NULL, '2026-01-01', '2026-01-01');
+  `);
+  const tracker = { provisionCalls: 0 };
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('N2UNKNOWN1', { userUuid: 'u-not-local', cloudUserId: 9999 }),
+      env: REGISTER_ENV,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, deleted_at, sync_version FROM devices WHERE deveui='N2UNKNOWN1'"
+    ).get();
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'UNKNOWN_PRINCIPAL');
+    assert.equal(ack.state, 'FAILED');
+    assert.equal(row.user_id, null);
+    assert.equal(row.irrigation_zone_id, null);
+    assert.equal(row.deleted_at, null);
+    assert.equal(row.sync_version, 1);
+    assert.equal(tracker.provisionCalls, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('N2: an unmapped principal is not treated as the owner of user 1 device', async () => {
+  const db = seedScopedDb();
+  const tracker = { provisionCalls: 0 };
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: registerCommand('DENDRO2', { userUuid: 'u-not-local', cloudUserId: 9999 }),
+      env: REGISTER_ENV,
+      db,
+      libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, sync_version FROM devices WHERE deveui='DENDRO2'"
+    ).get();
+    assert.equal(ack.result, 'FAILED');
+    assert.equal(ack.code, 'UNKNOWN_PRINCIPAL');
+    assert.equal(row.user_id, 1);
+    assert.equal(row.irrigation_zone_id, 2);
+    assert.equal(row.sync_version, 1);
+    assert.equal(tracker.provisionCalls, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('R8: an unclaimed existing device is claimed, revived, provisioned, and assigned', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, sync_version,
+      deleted_at, created_at, updated_at
+    ) VALUES (
+      'UNCLAIMED1', 'Old sensor', 'DRAGINO_LSN50', NULL, NULL, 4,
+      '2026-08-01T00:00:00.000Z', '2026-01-01', '2026-08-01'
+    );
+  `);
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'UNCLAIMED1', {
+      cloudUserId: 2002,
+      zoneUuid: 'z-1',
+    });
+    const ack = response.result[0].specialAck;
+    const row = db.prepare(
+      "SELECT user_id, irrigation_zone_id, deleted_at FROM devices WHERE deveui='UNCLAIMED1'"
+    ).get();
+
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(ack.provisionedInChirpStack, true);
+    assert.equal(response.provisionCalls, 1);
+    assert.equal(row.user_id, 2);
+    assert.equal(row.irrigation_zone_id, 1);
+    assert.equal(row.deleted_at, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('§10: a flag-off gateway ignores a cloud zoneUuid and keeps the legacy ACK shape', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegisterFlagOff(db, 'FLAGOFF1', { zoneUuid: 'z-1' });
+    const ack = response.result[0].specialAck;
+
+    assert.equal(ack.result, 'SUCCESS');
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(ack, 'zoneAssignedId'),
+      'flag-off ACKs must not gain zoneAssignedId'
+    );
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(ack, 'zoneWarning'),
+      'flag-off ACKs must not gain zoneWarning'
+    );
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='FLAGOFF1'").get()
+        .irrigation_zone_id,
+      null,
+      'a flag-off gateway must not honor a cloud-supplied zoneUuid'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('§10: the flag-off command ACK payload carries no zone keys', async () => {
+  const db = seedScopedDb();
+  try {
+    const applied = await applyRegisterFlagOff(db, 'FLAGOFF2', { zoneUuid: 'z-1' });
+    const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: applied.result[0],
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+    });
+    const payload = JSON.parse(ackMessage.result.payload);
+
+    assert.equal(
+      ackMessage.result.payload,
+      '{"commandId":"cmd-FLAGOFF2","eventUuid":null,"aggregateType":null,"aggregateKey":"FLAGOFF2","result":"SUCCESS","state":"APPLIED","commandType":"REGISTER_DEVICE","appliedSyncVersion":null,"deviceEui":"FLAGOFF2","provisionedInChirpStack":true}'
+    );
+    assert.equal(payload.commandType, 'REGISTER_DEVICE');
+    assert.equal(payload.result, 'SUCCESS');
+    assert.ok(!('zoneAssignedId' in payload), 'no zoneAssignedId on a flag-off ACK payload');
+    assert.ok(!('zoneWarning' in payload), 'no zoneWarning on a flag-off ACK payload');
+  } finally {
+    db.close();
+  }
+});
+
+test('X9: a key-verification reconciliation flag survives the REGISTER_DEVICE ACK', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: {
+        specialAck: {
+          commandId: 'cmd-verify-keys',
+          commandType: 'REGISTER_DEVICE',
+          result: 'FAILED',
+          state: 'FAILED',
+          verificationRequired: true,
+          error: 'key read-back did not match',
+        },
+        payload: {},
+      },
+      env: REGISTER_ENV,
+      db,
+    });
+    const payload = JSON.parse(response.result.payload);
+    assert.equal(payload.verificationRequired, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('§10: flag-off REGISTER_DEVICE ACK bytes omit the scoped verificationRequired field', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: {
+        specialAck: {
+          commandId: 'cmd-flagoff-verify',
+          commandType: 'REGISTER_DEVICE',
+          result: 'FAILED',
+          state: 'FAILED',
+          verificationRequired: true,
+          error: 'key read-back did not match',
+        },
+        payload: {},
+      },
+      env: REGISTER_ENV_FLAG_OFF,
+      db,
+    });
+    assert.equal(
+      response.result.payload,
+      '{"commandId":"cmd-flagoff-verify","eventUuid":null,"aggregateType":null,"aggregateKey":null,"result":"FAILED","state":"FAILED","commandType":"REGISTER_DEVICE","appliedSyncVersion":null,"deviceEui":null,"provisionedInChirpStack":false,"error":"key read-back did not match"}'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('X9: CS Register compensation failure produces only the explicit HTTP response', () => {
+  const source = loadNode('cs-register-device-fn').func;
+  assert.doesNotMatch(
+    source,
+    /guarded ChirpStack compensation failed:[\s\S]*?, msg\)/,
+    'compensation logging must not route the request message into a second response'
+  );
+});
+
+test('X12: admin flow asserts that guarded SQL replacements changed their anchors', () => {
+  const source = loadNode('scoped-admin-account-router').func;
+  assert.match(source, /const roleGuardedSql = scope\.buildDeroleUserGuardedSql\(\)/);
+  assert.match(source, /if \(guardedSql === roleGuardedSql\)/);
+  assert.match(source, /const disableGuardedSql = scope\.buildDisableUserGuardedSql\(\)/);
+  assert.match(source, /if \(guardedSql === disableGuardedSql\)/);
+});
+
+test('P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registration', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegister(db, 'CLOUDREG1', { zoneUuid: 'z-1' });
+
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(ack.zoneAssignedId, 1);
+    assert.equal(ack.zoneWarning, null);
+
+    const row = db.prepare("SELECT irrigation_zone_id, sync_version FROM devices WHERE deveui='CLOUDREG1'").get();
+    assert.equal(row.irrigation_zone_id, 1, 'the device must land in the resolved zone');
+    assert.ok(Number(row.sync_version) >= 2, 'P11: the row-wise assignment UPDATE must bump sync_version');
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: an unknown or deleted zoneUuid registers unassigned with an ACK warning', async () => {
+  const db = seedScopedDb();
+  db.prepare("UPDATE irrigation_zones SET deleted_at = '2026-01-01T00:00:00.000Z' WHERE id = 2").run();
+  try {
+    const unknown = await applyRegister(db, 'CLOUDREG2', { zoneUuid: 'z-does-not-exist' });
+    assert.equal(unknown.result[0].specialAck.result, 'SUCCESS', 'an unknown zone must not fail the registration');
+    assert.equal(unknown.result[0].specialAck.zoneAssignedId, null);
+    assert.match(unknown.result[0].specialAck.zoneWarning, /z-does-not-exist/);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='CLOUDREG2'").get().irrigation_zone_id,
+      null,
+    );
+
+    const deleted = await applyRegister(db, 'CLOUDREG3', { zoneUuid: 'z-2' });
+    assert.equal(deleted.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(deleted.result[0].specialAck.zoneAssignedId, null);
+    assert.match(deleted.result[0].specialAck.zoneWarning, /z-2/);
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: REGISTER_DEVICE without zoneUuid keeps registering unassigned', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await applyRegister(db, 'CLOUDREG4');
+    assert.equal(response.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(response.result[0].specialAck.zoneAssignedId, null);
+    assert.equal(response.result[0].specialAck.zoneWarning, null);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='CLOUDREG4'").get().irrigation_zone_id,
+      null,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W4: a REGISTER_DEVICE replay never pulls a device out of the zone it already sits in', async () => {
+  const db = seedScopedDb();
+  try {
+    seedRegisterCloudUserIds(db);
+    const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 2002, zoneUuid: 'z-2' });
+    assert.equal(response.result[0].specialAck.result, 'SUCCESS');
+    assert.equal(response.provisionCalls, 1, 'same-owner replay must reach ChirpStack re-provisioning');
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,
+      1,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('P9: the command ACK payload carries the zone warning to the cloud', async () => {
+  const db = seedScopedDb();
+  try {
+    const applied = await applyRegister(db, 'CLOUDREG5', { zoneUuid: 'z-nope' });
+    const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
+      msg: applied.result[0],
+      env: REGISTER_ENV,
+      db,
+    });
+    const payload = JSON.parse(ackMessage.result.payload);
+    assert.equal(payload.commandType, 'REGISTER_DEVICE');
+    assert.equal(payload.result, 'SUCCESS');
+    assert.equal(payload.zoneAssignedId, null);
+    assert.match(payload.zoneWarning, /z-nope/);
+  } finally {
+    db.close();
+  }
+});
+
+function seedUnassignedDeleteTarget(db) {
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('TYPO1', 'Mistyped LSN50', 'DRAGINO_LSN50', 1, NULL, '2026-01-01', '2026-01-01');
+  `);
+}
+
+test('W10: a researcher can delete an unassigned device', async () => {
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const response = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 200);
+
+    // The route unclaims; it must NOT hard-delete and must NOT tombstone.
+    const row = db.prepare("SELECT user_id, irrigation_zone_id, deleted_at, sync_version FROM devices WHERE deveui='TYPO1'").get();
+    assert.ok(row, 'the row must survive as an unclaimed device, not be hard-deleted');
+    assert.equal(row.user_id, null);
+    assert.equal(row.irrigation_zone_id, null);
+    assert.equal(row.deleted_at, null, 'this route unclaims; it does not tombstone');
+    assert.ok(Number(row.sync_version) >= 2, 'P11: the row-wise unclaim UPDATE must bump sync_version');
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: a deleted device leaves the account-wide device list', async () => {
+  // The point of the pairing: the row SURVIVES in the table (delete unclaims,
+  // it does not tombstone) but must LEAVE the list every account now shares.
+  // Without Task 1's d.user_id IS NOT NULL lifecycle filter, delete would be a
+  // visual no-op in scoped mode.
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const before = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1 },
+      env: ENV,
+      db,
+    });
+    assert.ok(
+      db.prepare(before.result[0].topic).all().some((row) => row.deveui === 'TYPO1'),
+      'test setup: an admin must see the device before it is deleted'
+    );
+
+    scopeHelper._resetForTests();
+    const deleted = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(deleted.result[1].statusCode, 200);
+
+    scopeHelper._resetForTests();
+    const after = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 1 }], authUserId: 1 },
+      env: ENV,
+      db,
+    });
+    assert.ok(
+      !db.prepare(after.result[0].topic).all().some((row) => row.deveui === 'TYPO1'),
+      'a researcher deleting the device must remove it from the admin list too'
+    );
+    assert.ok(
+      db.prepare("SELECT deveui FROM devices WHERE deveui='TYPO1'").get(),
+      'and the row must still exist: this is an unclaim, not a hard delete'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: a viewer still cannot delete an unassigned device', async () => {
+  const db = seedScopedDb();
+  seedUnassignedDeleteTarget(db);
+  try {
+    const response = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(3, 'view1', 'DELETE', '/api/devices/TYPO1', { deveui: 'TYPO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 403);
+    assert.equal(
+      db.prepare("SELECT user_id FROM devices WHERE deveui='TYPO1'").get().user_id,
+      1,
+      'a denied delete must not unclaim the device'
+    );
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('W10: the zone-assigned delete gate is unchanged', async () => {
+  const db = seedScopedDb();
+  try {
+    // admin1 has no write scope on zone 1, where DENDRO1 lives.
+    const foreign = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(1, 'admin1', 'DELETE', '/api/devices/DENDRO1', { deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreign.result[1].statusCode, 404);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id,
+      1
+    );
+
+    scopeHelper._resetForTests();
+    const missing = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/NOPE', { deveui: 'NOPE' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(missing.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const inScope = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/DENDRO1', { deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(inScope.result[1].statusCode, 200, 'an in-scope zone-assigned delete still works');
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
   }
 });

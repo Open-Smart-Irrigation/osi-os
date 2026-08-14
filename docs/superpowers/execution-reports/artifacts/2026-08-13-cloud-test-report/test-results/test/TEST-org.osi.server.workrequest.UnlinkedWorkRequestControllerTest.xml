@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" tests="20" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:03" hostname="osi-01" time="0.152">
+  <properties/>
+  <testcase name="rateLimitsBadContractPublicRequestsBeforeIntake()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.014"/>
+  <testcase name="missingContentTypeStillUsesPublicEnvelopeAndSourceIpLimit()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.012"/>
+  <testcase name="textPlainContentTypeStillUsesPublicEnvelopeAndSourceIpLimit()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.012"/>
+  <testcase name="statusPollingForbidsWhenStoredStatusSecretHashIsMissing()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.006"/>
+  <testcase name="statusPollingRateLimitsEleventhRequestPerClientIp()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.009"/>
+  <testcase name="oversizedRequestShortCircuitsBeforeParsingAndIntake()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.008"/>
+  <testcase name="statusPollingForbidsWhenStatusSecretDoesNotMatchStoredHash()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.005"/>
+  <testcase name="unknownLengthOversizedBodyStopsAfterLimitWithoutParsingOrIntake()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.004"/>
+  <testcase name="statusPollingReturnsCurrentStateForValidStatusSecret()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.005"/>
+  <testcase name="rejectsMalformedAndOversizedBodiesAsInvalidWithoutIntake()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.005"/>
+  <testcase name="rateLimitsMalformedPublicRequestsBeforeIntake()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.01"/>
+  <testcase name="mapsIntakeStatusesForEdgeWorker()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.008"/>
+  <testcase name="roundTripSubmitThenStatusPollWithMatchingSecret()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.006"/>
+  <testcase name="textPlainAcceptStillUsesPublicEnvelopeAndSourceIpLimit()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.011"/>
+  <testcase name="rejectsJsonNullAsInvalidWithoutIntake()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.004"/>
+  <testcase name="requiresContractVersionGatewayEuiAndPublicConsentBeforeIntake()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.006"/>
+  <testcase name="statusPollingUsesExplicitDiagnosticsHumanMessageWhenPresent()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.005"/>
+  <testcase name="statusPollingRequiresStatusSecretHeader()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.004"/>
+  <testcase name="acceptsValidUnlinkedPayloadWithEdgeWorkerResponseShape()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.004"/>
+  <testcase name="statusPollingDoesNotRevealWhetherInvalidSecretRequestIdExists()" classname="org.osi.server.workrequest.UnlinkedWorkRequestControllerTest" time="0.011"/>
+  <system-out><![CDATA[2026-08-13T16:47:03.541+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.542+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.542+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.542+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.542+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.542+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.543+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.544+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.544+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.545+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.545+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.545+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.546+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.546+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.546+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.547+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.547+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.547+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.548+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.548+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.548+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.548+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.549+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.549+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.549+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.550+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.550+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.550+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.550+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.550+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.551+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.551+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.551+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.551+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.552+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.552+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.552+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.552+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.552+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=rate_limited, status=RATE_LIMITED, human_message=Too many work requests. (truncated)...]
+2026-08-13T16:47:03.555+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.556+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.556+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.556+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.556+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.556+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.556+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.557+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.557+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.558+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.558+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.558+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.558+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.559+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.559+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.559+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.559+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.559+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.560+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.560+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.560+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.561+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.561+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.561+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.561+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.561+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.561+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.562+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.562+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.562+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.562+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.563+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.563+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.563+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.563+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.563+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.564+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.564+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.564+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=rate_limited, status=RATE_LIMITED, human_message=Too many work requests. (truncated)...]
+2026-08-13T16:47:03.568+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.569+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.569+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.569+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.569+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.569+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.569+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.570+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.570+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.570+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.571+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.571+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.571+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.572+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.572+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.572+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.572+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.572+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.573+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.573+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.573+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.573+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.573+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.573+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.574+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.574+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.574+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.574+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.575+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.575+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.575+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.575+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.575+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.576+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.576+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.576+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.576+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.576+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.576+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=rate_limited, status=RATE_LIMITED, human_message=Too many work requests. (truncated)...]
+2026-08-13T16:47:03.579+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.580+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.580+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.580+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.580+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.580+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.581+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.581+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.582+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=forbidden, status=forbidden, human_message=Work request rejected: status (truncated)...]
+2026-08-13T16:47:03.585+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.585+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.585+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.585+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.585+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.586+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-08-13T16:47:03.586+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.586+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.587+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.587+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.587+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.587+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.588+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.588+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.588+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.588+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.588+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.588+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.588+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.589+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.590+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.590+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.590+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.590+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.590+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.590+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.590+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.591+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.591+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=ISSUE_OPEN, reason=null, human_message=null, up (truncated)...]
+2026-08-13T16:47:03.591+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.591+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.591+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=rate_limited, status=RATE_LIMITED, human_message=Too many work requests. (truncated)...]
+2026-08-13T16:47:03.593+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.594+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.594+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.594+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.594+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.595+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.596+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.597+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.598+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.598+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.598+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.598+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.598+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.598+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.599+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: payload_to (truncated)...]
+2026-08-13T16:47:03.602+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.603+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.603+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.603+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.603+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.603+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.603+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.604+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.604+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=forbidden, status=forbidden, human_message=Work request rejected: status (truncated)...]
+2026-08-13T16:47:03.606+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.607+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.607+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.607+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.607+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.607+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.611+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.612+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.612+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.612+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.612+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.612+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.613+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.613+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.613+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=NEEDS_INFO, reason=Please attach a photo., huma (truncated)...]
+2026-08-13T16:47:03.617+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.618+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.618+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.618+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.618+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.618+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.618+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.619+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.619+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.619+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.620+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.620+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: payload_to (truncated)...]
+2026-08-13T16:47:03.622+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.623+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.623+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.623+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.623+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.623+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.623+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.624+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.624+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.625+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.625+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.625+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.625+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.625+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.625+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.626+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.626+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.626+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.626+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.626+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.626+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.627+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.627+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.627+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.627+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.627+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.628+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.628+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.628+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.628+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.628+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.628+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.629+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.629+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.629+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.629+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.629+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.629+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.630+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=rate_limited, status=RATE_LIMITED, human_message=Too many work requests. (truncated)...]
+2026-08-13T16:47:03.634+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.635+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.635+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.635+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.635+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.635+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.635+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.636+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.636+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=duplicate, status=DUPLICATE_OF, human_message=Work request already recei (truncated)...]
+2026-08-13T16:47:03.637+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.637+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.637+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=rate_limited, status=RATE_LIMITED, human_message=Too many work requests. (truncated)...]
+2026-08-13T16:47:03.638+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.638+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.638+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=quarantined, status=REJECTED, human_message=This gateway cannot submit w (truncated)...]
+2026-08-13T16:47:03.641+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.641+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.641+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.641+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.641+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.642+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-08-13T16:47:03.642+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.643+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.643+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=accepted, status=SUBMITTED, human_message=Work request received., server (truncated)...]
+2026-08-13T16:47:03.643+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.644+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.644+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=AWAITING_PUBLISH, reason=null, human_message=nu (truncated)...]
+2026-08-13T16:47:03.647+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.648+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.648+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.648+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.648+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.648+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.648+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.649+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.649+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.650+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.650+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.650+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.650+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.651+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.651+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.651+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.651+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.651+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.651+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.652+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.653+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.653+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.653+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.653+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.653+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.654+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.654+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.654+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.654+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: malformed_ (truncated)...]
+2026-08-13T16:47:03.655+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.655+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.655+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=rate_limited, status=RATE_LIMITED, human_message=Too many work requests. (truncated)...]
+2026-08-13T16:47:03.657+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.658+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.658+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.658+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.658+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.658+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.658+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.659+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.659+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_pa (truncated)...]
+2026-08-13T16:47:03.662+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.662+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.662+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.663+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.663+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.663+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.663+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.663+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.663+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: invalid_co (truncated)...]
+2026-08-13T16:47:03.664+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.664+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.664+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: gateway_de (truncated)...]
+2026-08-13T16:47:03.665+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.665+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.665+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=invalid, status=invalid, human_message=Work request rejected: consent_pu (truncated)...]
+2026-08-13T16:47:03.669+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.669+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.669+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.669+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.669+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.670+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-08-13T16:47:03.670+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.670+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.671+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, request_id=req-stage0-1, status=NEEDS_INFO, reason=Please attach a photo., huma (truncated)...]
+2026-08-13T16:47:03.673+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.674+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.674+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.674+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.674+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.674+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.674+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.674+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.675+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=forbidden, status=forbidden, human_message=Work request rejected: status (truncated)...]
+2026-08-13T16:47:03.677+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.677+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.678+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.678+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.678+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.678+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.678+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#submit(HttpServletRequest)
+2026-08-13T16:47:03.679+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.679+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=accepted, status=SUBMITTED, human_message=Work request received., server (truncated)...]
+2026-08-13T16:47:03.682+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:47:03.683+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.683+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:47:03.683+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:47:03.683+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:47:03.683+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:47:03.684+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.684+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.684+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=forbidden, status=forbidden, human_message=Work request rejected: status (truncated)...]
+2026-08-13T16:47:03.685+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.workrequest.UnlinkedWorkRequestController#status(HttpServletRequest, String, String)
+2026-08-13T16:47:03.685+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Found 'Content-Type:application/json' in response
+2026-08-13T16:47:03.689+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{contract_version=1, result=forbidden, status=forbidden, human_message=Work request rejected: status (truncated)...]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

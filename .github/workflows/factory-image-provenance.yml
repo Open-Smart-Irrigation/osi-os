@@ -1,0 +1,30 @@
+name: Factory image provenance
+
+on:
+  push:
+    branches: [main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  provenance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify committed factory-image provenance
+        run: node scripts/verify-factory-image-provenance.js
+      - name: Verify provenance generators and built-rootfs verifier
+        run: |
+          node --test \
+            scripts/generate-factory-image-provenance.test.js \
+            scripts/verify-factory-image-provenance.test.js \
+            scripts/verify-built-factory-image-provenance.test.js \
+            scripts/factory-image-provenance-cli.test.js

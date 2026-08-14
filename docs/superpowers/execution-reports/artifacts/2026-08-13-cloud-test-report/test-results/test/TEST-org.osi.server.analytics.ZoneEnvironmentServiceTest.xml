@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.ZoneEnvironmentServiceTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:48" hostname="osi-01" time="0.119">
+  <properties/>
+  <testcase name="buildSummary_usesDailyEnvironmentTotalsAndPrefersDendroRecommendationForWaterAction()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.077"/>
+  <testcase name="buildSummary_prefersLocalMedianClimateAndUsesForecastEt0ForEtc()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.007"/>
+  <testcase name="buildSummary_usesCurrentStateRecordedAtForFreshnessInsteadOfStaleLastSeen()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.001"/>
+  <testcase name="buildSummary_undatedForecastDayDoesNotResolveEt0WithJanFirstFallback()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.002"/>
+  <testcase name="buildSummary_excludesLegacyZoneMembershipWhenExplicitS2120AssignmentsPointElsewhere()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.003"/>
+  <testcase name="buildSummary_cacheKeyIncludesWeatherSourceForSameCoordinates()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.004"/>
+  <testcase name="buildSummary_autoWeatherSourcePreservesExistingCloudForecastMerge()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.003"/>
+  <testcase name="buildSummary_usesEdgeCompatibleWeatherAndCropCoefficientForSyncedZones()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.003"/>
+  <testcase name="buildSummary_includesJunctionAssignedS2120InSensorHealth()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.003"/>
+  <testcase name="buildSummary_autoWithNullNativeEt0ComputesHargreavesFallback()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.005"/>
+  <testcase name="buildSummary_resolvesForecastEt0FromPmInputsBeforeSummaryMapping()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.005"/>
+  <testcase name="buildSummary_prefersS2120TemperatureOverKiwiWhenAssignedViaJunctionTable()" classname="org.osi.server.analytics.ZoneEnvironmentServiceTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

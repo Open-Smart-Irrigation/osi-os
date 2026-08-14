@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.recovery.RecoveryOperationServiceTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:35" hostname="osi-01" time="0.256">
+  <properties/>
+  <testcase name="staleBundleIsRejectedBeforeOperationMutation()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.243"/>
+  <testcase name="prepareRejectsAnOperationThatIsNotInstallationCurrent()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.002"/>
+  <testcase name="completionRejectsACallerGeneratedSelfConsistentReceiptHash()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.002"/>
+  <testcase name="previewVerifiesWithoutMutatingInstallationAndWritesAudit()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.002"/>
+  <testcase name="completionRequiresReconcilingReceiptBeforeInstallationBecomesActive()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.002"/>
+  <testcase name="startLocksInstallationBeforeLockingTheOperation()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.001"/>
+  <testcase name="rollbackUsesRecordedBundleAndSameGuardedTokenBoundary()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.001"/>
+  <testcase name="secondPreviewCannotTakeAnInstallationWhoseFirstOperationStarted()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.0"/>
+  <testcase name="interruptedRestoreRemainsBlockedAndCannotComplete()" classname="org.osi.server.recovery.RecoveryOperationServiceTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

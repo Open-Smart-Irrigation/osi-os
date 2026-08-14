@@ -31,8 +31,7 @@ const mocks = vi.hoisted(() => ({
     isScoped: false,
     role: 'admin',
     canWrite: true,
-    isZoneVisible: vi.fn<(zoneUuid: string) => boolean>(() => true),
-    isPlotVisible: vi.fn<(plotUuid: string) => boolean>(() => true),
+    zoneWritable: vi.fn<(zoneUuid: string) => boolean>(() => true),
   },
 }));
 
@@ -540,8 +539,7 @@ describe('JournalPage', () => {
     mocks.scopeState.isScoped = false;
     mocks.scopeState.role = 'admin';
     mocks.scopeState.canWrite = true;
-    mocks.scopeState.isZoneVisible.mockReturnValue(true);
-    mocks.scopeState.isPlotVisible.mockReturnValue(true);
+    mocks.scopeState.zoneWritable.mockReturnValue(true);
     mocks.getZones.mockResolvedValue(zones);
     mocks.useSWR.mockReturnValue({
       data: zones,
@@ -669,49 +667,49 @@ describe('JournalPage', () => {
     expect(screen.queryAllByRole('status')).toHaveLength(0);
   });
 
+  it('renders the journal timeline even when the scope profile never resolves', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.loading = true;
+
+    renderPage();
+
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.queryByText('timeline.loading')).not.toBeInTheDocument();
+  });
+
   it.each([
-    ['researcher', true, false],
-    ['viewer', true, false],
-    ['admin', false, true],
-  ])(
-    'filters journal plot choices for a %s when scoped=%s',
-    (role, isScoped, showsForeign) => {
-      mocks.isDesktopBrowser.mockReturnValue(false);
-      mocks.scopeState.role = role;
-      mocks.scopeState.isScoped = isScoped;
-      mocks.scopeState.isPlotVisible.mockImplementation(
-        (plotUuid: string) => !isScoped || plotUuid === ROUTE_FIXTURE_IDS.primaryPlot,
-      );
-      mocks.useJournalPlots.mockReturnValue({
-        plots: [
-          plots[0],
-          {
-            ...plots[0],
-            plot_uuid: ROUTE_FIXTURE_IDS.secondaryPlot,
-            plot_code: 'S-2',
-            name: 'Foreign field',
-          },
-        ],
-        loading: false,
-        error: undefined,
-        retry: mocks.retryPlots,
-        revalidate: mocks.retryPlots,
-        createPlot: vi.fn(),
-        updatePlot: vi.fn(),
-      });
+    ['researcher', true],
+    ['viewer', true],
+    ['admin', false],
+  ])('offers every plot to a %s when scoped=%s', (role, isScoped) => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.role = role;
+    mocks.scopeState.isScoped = isScoped;
+    mocks.useJournalPlots.mockReturnValue({
+      plots: [
+        plots[0],
+        {
+          ...plots[0],
+          plot_uuid: ROUTE_FIXTURE_IDS.secondaryPlot,
+          plot_code: 'S-2',
+          name: 'Colleague field',
+        },
+      ],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
+      createPlot: vi.fn(),
+      updatePlot: vi.fn(),
+    });
 
-      renderPage();
+    renderPage();
 
-      expect(
-        screen.getByRole('option', { name: plots[0].name ?? plots[0].plot_code }),
-      ).toBeInTheDocument();
-      if (showsForeign) {
-        expect(screen.getByRole('option', { name: 'Foreign field' })).toBeInTheDocument();
-      } else {
-        expect(screen.queryByRole('option', { name: 'Foreign field' })).not.toBeInTheDocument();
-      }
-    },
-  );
+    expect(
+      screen.getByRole('option', { name: plots[0].name ?? plots[0].plot_code }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Colleague field' })).toBeInTheDocument();
+  });
 
   it('keeps reads disabled while the catalog probe is loading', () => {
     mocks.useJournalCatalog.mockReturnValue({

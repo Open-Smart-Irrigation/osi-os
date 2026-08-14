@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.command.LegacyCommandClassifierTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:00" hostname="osi-01" time="0.003">
+  <properties/>
+  <testcase name="hydrateLegacyDoesNotSetPastExpiry()" classname="org.osi.server.command.LegacyCommandClassifierTest" time="0.0"/>
+  <testcase name="hydrateLegacyKeepsNaturalExpiryForRecentCommands()" classname="org.osi.server.command.LegacyCommandClassifierTest" time="0.0"/>
+  <testcase name="preWs3PendingCommandIsLegacy()" classname="org.osi.server.command.LegacyCommandClassifierTest" time="0.0"/>
+  <testcase name="freshlyCreatedPendingCommandIsNotLegacy()" classname="org.osi.server.command.LegacyCommandClassifierTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analysis.AnalysisCatalogServiceTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:30" hostname="osi-01" time="1.798">
+  <properties/>
+  <testcase name="flattensAccessibleZonesIntoChannelLeavesWithSeriesIds()" classname="org.osi.server.analysis.AnalysisCatalogServiceTest" time="1.719"/>
+  <testcase name="cachesEntriesWithinTtlAndRebuildsAfterExpiry()" classname="org.osi.server.analysis.AnalysisCatalogServiceTest" time="0.019"/>
+  <testcase name="evictsExpiredEntriesOfOtherUsersOnRebuild()" classname="org.osi.server.analysis.AnalysisCatalogServiceTest" time="0.012"/>
+  <testcase name="keepsUnexpiredEntriesOfOtherUsersOnRebuild()" classname="org.osi.server.analysis.AnalysisCatalogServiceTest" time="0.008"/>
+  <testcase name="labelsPerDeviceDendroLeavesWithoutChangingSourceKey()" classname="org.osi.server.analysis.AnalysisCatalogServiceTest" time="0.015"/>
+  <testcase name="enumeratesPerDeviceSoilAndEnvironmentLeavesWithDeviceLabelsAndDepths()" classname="org.osi.server.analysis.AnalysisCatalogServiceTest" time="0.019"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

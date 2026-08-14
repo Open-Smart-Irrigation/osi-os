@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.history.HistoryCsvWriterTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:10" hostname="osi-01" time="0.001">
+  <properties/>
+  <testcase name="writesNullsAsEmptyCells()" classname="org.osi.server.history.HistoryCsvWriterTest" time="0.001"/>
+  <testcase name="writesUnifiedHeaderAndEscapesCells()" classname="org.osi.server.history.HistoryCsvWriterTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.DendroCalibrationTest" tests="28" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:45" hostname="osi-01" time="0.039">
+  <properties/>
+  <testcase name="classifyRelative_phenoModTightensThresholds()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_belowMild_none()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.001"/>
+  <testcase name="forKey_apple_returnsApple()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_atSignificant_significant()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_atModerate_moderate()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classifyRelative_atSevere_isSevere()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="grapevine twd=0.0 -&gt; none" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.007"/>
+  <testcase name="grapevine twd=19.9 -&gt; none" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="grapevine twd=20.0 -&gt; mild" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="grapevine twd=40.0 -&gt; moderate" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="grapevine twd=70.0 -&gt; significant" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="grapevine twd=100.0 -&gt; severe" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="grapevine twd=150.0 -&gt; severe" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_phenoModZero_treatedAsOne()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="forKey_null_returnsDefault()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.001"/>
+  <testcase name="forKey_caseInsensitive()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="apple_hasRelativeThresholds()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_phenoModLessThanOne_tightensThresholds()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="forKey_unknown_returnsDefault()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classifyRelative_belowMild_isNone()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="twdMethod_allBuiltIns_stepwise()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_aboveSevere_severe()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_atMild_mild()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_atSevere_severe()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="forKey_blank_returnsDefault()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_phenoModGreaterThanOne_relaxesThresholds()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="classify_phenoModNegative_treatedAsOne()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.0"/>
+  <testcase name="forKey_trailingSpaces_normalized()" classname="org.osi.server.analytics.DendroCalibrationTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

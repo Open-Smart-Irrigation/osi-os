@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.ArchitectureTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:06" hostname="osi-01" time="5.32">
+  <properties/>
+  <testcase name="noNewPackageCycles" classname="org.osi.server.ArchitectureTest" time="5.299"/>
+  <testcase name="analyticsMustNotDependOnSync" classname="org.osi.server.ArchitectureTest" time="0.015"/>
+  <testcase name="controllersOnlyInControllerClasses" classname="org.osi.server.ArchitectureTest" time="0.006"/>
+  <system-out><![CDATA[2026-08-13T16:47:06.644+02:00  INFO 3273021 --- [    Test worker] com.tngtech.archunit.core.PluginLoader   : Detected Java version 17.0.19
+2026-08-13T16:47:08.374+02:00  INFO 3273021 --- [MessageBroker-1] o.s.w.s.c.WebSocketMessageBrokerStats    : WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 15, active threads = 1, queued tasks = 13, completed tasks = 1]
+2026-08-13T16:47:08.451+02:00 DEBUG 3273021 --- [MessageBroker-3] org.hibernate.SQL                        : select dso1_0.operation_uuid,dso1_0.ack_result,dso1_0.acknowledged_at,dso1_0.base_sync_version,dso1_0.canonical_json,dso1_0.command_id,dso1_0.command_type,dso1_0.created_at,dso1_0.created_by,dso1_0.desired_json,dso1_0.expires_at,dso1_0.gateway_eui,dso1_0.mirrored_at,dso1_0.mirrored_sync_version,dso1_0.mutation_kind,dso1_0.rejection_code,dso1_0.rejection_detail,dso1_0.resource_id,dso1_0.resource_type,dso1_0.status,dso1_0.superseded_by,dso1_0.target_sync_version,dso1_0.updated_at from desired_state_operations dso1_0 where dso1_0.mutation_kind=? and dso1_0.status in (?,?) and dso1_0.expires_at is not null and dso1_0.expires_at<=? order by dso1_0.expires_at for no key update
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

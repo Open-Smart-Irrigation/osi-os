@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:05" hostname="osi-01" time="0.011">
+  <properties/>
+  <testcase name="failPublishRestoresOriginalPublishableDispositionForRetry()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.002"/>
+  <testcase name="failPublishDoesNotRestoreClearedBlockedDisposition()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.002"/>
+  <testcase name="reserveForPublishFailsClosedWhenPseudonymSecretIsMissing()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.001"/>
+  <testcase name="reserveForPublishRecoversStalePublishingReservationForRetry()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.001"/>
+  <testcase name="reserveForPublishFailsClosedWhenGatewayPseudonymDoesNotMatchConfiguredSecret()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.0"/>
+  <testcase name="reserveForPublishReturnsInProgressForPublishingWithoutSaving()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.001"/>
+  <testcase name="reserveForPublishUsesUnspecifiedAreaLabelWhenAreaIsBlank()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.001"/>
+  <testcase name="reserveForPublishStoresPublishingBeforeGithubCall()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.001"/>
+  <testcase name="completePublishStoresIssueMetadataInSeparateStep()" classname="org.osi.server.workrequest.WorkRequestPublishReservationServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - RecoveryMultipartConfigurationTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>RecoveryMultipartConfigurationTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.recovery.html">org.osi.server.recovery</a> &gt; RecoveryMultipartConfigurationTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">2</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.016s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">applicationDefaultsPermitTheBoundedRecoveryUpload()</td>
+<td class="success">0.011s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">deploymentCanLowerTheMultipartBoundary()</td>
+<td class="success">0.005s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>2026-08-13T16:46:34.108+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: file [/home/phil/Repos/osi-server/.worktrees/agrolink/backend/src/main/resources/application.yml]
+2026-08-13T16:46:34.112+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={application={name=osi-server}, datasource={url=${DB_URL:jdbc:postgresql://localhost:5432/osiserver}, username=${DB_USER:osiserver}, password=${DB_PASSWORD:osiserver}, driver-class-name=org.postgresql.Driver}, jpa={hibernate={ddl-auto=validate}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.PostgreSQLDialect, format_sql=true}}}, flyway={enabled=true, baseline-on-migrate=true, locations=classpath:db/migration}, servlet={multipart={max-file-size=${OSI_RECOVERY_MAX_FILE_SIZE:256MB}, max-request-size=${OSI_RECOVERY_MAX_REQUEST_SIZE:257MB}}}}, server={port=${SERVER_PORT:8080}}, jwt={secret=${JWT_SECRET}, expiration-ms=${JWT_EXPIRATION_MS:86400000}}, journal={v2={cloud-issuer-enabled=${JOURNAL_V2_CLOUD_ISSUER_ENABLED:false}, attachments={enabled=${JOURNAL_V2_ATTACHMENTS_ENABLED:false}, endpoint=${JOURNAL_V2_ATTACHMENTS_S3_ENDPOINT:}, bucket=${JOURNAL_V2_ATTACHMENTS_S3_BUCKET:}, region=${JOURNAL_V2_ATTACHMENTS_S3_REGION:us-east-1}, access-key=${JOURNAL_S3_ACCESS_KEY:}, secret-key=${JOURNAL_S3_SECRET_KEY:}, path-style-access=${JOURNAL_V2_ATTACHMENTS_S3_PATH_STYLE:true}, internal-multipart-part-size-bytes=${JOURNAL_V2_ATTACHMENTS_INTERNAL_PART_BYTES:5242880}, chunk-size-bytes=1048576, max-attachment-bytes=${JOURNAL_V2_ATTACHMENTS_MAX_BYTES:26214400}, workspace-quota-bytes=${JOURNAL_V2_ATTACHMENTS_WORKSPACE_QUOTA_BYTES:5368709120}, allowed-mime-types=${JOURNAL_V2_ATTACHMENTS_ALLOWED_MIME:image/jpeg,image/png,image/webp,image/heic,image/heif}, scanner-command=${JOURNAL_V2_ATTACHMENTS_SCANNER_COMMAND:}, scanner-service-url=${JOURNAL_V2_ATTACHMENTS_SCANNER_URL:}, upload-session-ttl=${JOURNAL_V2_ATTACHMENTS_UPLOAD_TTL:2d}, tombstone-retention=${JOURNAL_V2_ATTACHMENTS_TOMBSTONE_RETENTION:90d}, orphan-grace=${JOURNAL_V2_ATTACHMENTS_ORPHAN_GRACE:24h}, orphan-collection-cron=${JOURNAL_V2_ATTACHMENTS_ORPHAN_CRON:0 35 3 * * *}, retention-collection-cron=${JOURNAL_V2_ATTACHMENTS_RETENTION_CRON:0 45 3 * * *}}}}, mqtt={broker-url=${MQTT_BROKER_URL:tcp://localhost:1883}, client-id=${MQTT_CLIENT_ID:osi-server-backend}, username=${MQTT_USERNAME:server}, password=${MQTT_PASSWORD:serverpass}, device-provisioning={enabled=${MQTT_DEVICE_PROVISIONING_ENABLED:true}, password-file=${MQTT_DEVICE_PASSWORD_FILE:/mosquitto/data/passwd}, public-broker-url=${MQTT_DEVICE_PUBLIC_BROKER_URL:wss://server.opensmartirrigation.org/mqtt}, secret=${MQTT_DEVICE_PROVISIONING_SECRET:}, reconcile-on-startup=${MQTT_DEVICE_RECONCILE_ON_STARTUP:true}}}, admin={username=${ADMIN_USERNAME:}, email=${ADMIN_EMAIL:}, password=${ADMIN_PASSWORD:}}, superadmin={username=${SUPERADMIN_USERNAME:${ADMIN_USERNAME:}}, email=${SUPERADMIN_EMAIL:${ADMIN_EMAIL:}}, password=${SUPERADMIN_PASSWORD:${ADMIN_PASSWORD:}}}, weather={agromonitoring={base-url=${AGROMONITORING_BASE_URL:https://api.agromonitoring.com/agro/1.0}, api-key=${AGROMONITORING_API_KEY:}}, openagri={base-url=${OPENAGRI_WEATHER_BASE_URL:}, bearer-token=${OPENAGRI_WEATHER_BEARER_TOKEN:}, username=${OPENAGRI_WEATHER_USERNAME:}, password=${OPENAGRI_WEATHER_PASSWORD:}, radius-km=${OPENAGRI_WEATHER_RADIUS_KM:10}}, cache={current-minutes=${OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES:30}, forecast-minutes=${OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES:120}}}, via-farm={base-url=${VIA_FARM_BASE_URL:https://via.farm/api}, api-token=${VIA_FARM_API_TOKEN:}, timeout-millis=5000}, work-requests={diagnostics-retention-days=${WORK_REQUESTS_DIAGNOSTICS_RETENTION_DAYS:90}, diagnostics-retention-cron=${WORK_REQUESTS_DIAGNOSTICS_RETENTION_CRON:0 20 3 * * *}, pseudonym-secret=${WORK_REQUESTS_PSEUDONYM_SECRET:}, github={app-id=${WORK_REQUESTS_GITHUB_APP_ID:}, installation-id=${WORK_REQUESTS_GITHUB_INSTALLATION_ID:}, private-key-pem=${WORK_REQUESTS_GITHUB_PRIVATE_KEY_PEM:}, api-base-url=${WORK_REQUESTS_GITHUB_API_BASE_URL:https://api.github.com}, default-repo=${WORK_REQUESTS_GITHUB_DEFAULT_REPO:Open-Smart-Irrigation/osi-os}, allowed-repos=${WORK_REQUESTS_GITHUB_ALLOWED_REPOS:Open-Smart-Irrigation/osi-os,Open-Smart-Irrigation/osi-server}}}, forge={runner-token=${FORGE_RUNNER_TOKEN:}}, soilhive={auth-base-url=${SOILHIVE_AUTH_BASE_URL:https://auth.soilhive.ag}, api-base-url=${SOILHIVE_API_BASE_URL:https://api.soilhive.ag/v1}, audience=${SOILHIVE_AUDIENCE:https://api.soilhive.ag/}, client-id=${SOILHIVE_CLIENT_ID:}, client-secret=${SOILHIVE_CLIENT_SECRET:}, connect-timeout-seconds=${SOILHIVE_CONNECT_TIMEOUT_SECONDS:10}, read-timeout-seconds=${SOILHIVE_READ_TIMEOUT_SECONDS:120}, token-refresh-skew-seconds=${SOILHIVE_TOKEN_REFRESH_SKEW_SECONDS:60}, profile-ttl-days=${SOILHIVE_PROFILE_TTL_DAYS:30}}, osi={recovery={staging-directory=${OSI_RECOVERY_STAGING_DIRECTORY:${java.io.tmpdir}/osi-recovery-staging}, staging-orphan-max-age=${OSI_RECOVERY_STAGING_ORPHAN_MAX_AGE:1d}}, history={rollup={enabled=${OSI_HISTORY_ROLLUP_ENABLED:true}, hourly-window-days=${OSI_HISTORY_ROLLUP_HOURLY_WINDOW_DAYS:7}, daily-window-days=${OSI_HISTORY_ROLLUP_DAILY_WINDOW_DAYS:90}}}}, prediction={service={base-url=${PREDICTION_SERVICE_BASE_URL:http://prediction-service:8090}, shared-token=${PREDICTION_SERVICE_TOKEN:change_me_prediction_internal}, connect-timeout-seconds=${PREDICTION_SERVICE_CONNECT_TIMEOUT_SECONDS:10}, read-timeout-seconds=${PREDICTION_SERVICE_READ_TIMEOUT_SECONDS:120}, catalog-cache-minutes=${PREDICTION_SERVICE_CATALOG_CACHE_MINUTES:5}}, reference-service={enabled=${PREDICTION_REFERENCE_ENABLED:false}, base-url=${FAO_REFERENCE_BASE_URL:http://fao-reference-service:8091}, shared-token=${FAO_REFERENCE_SERVICE_TOKEN:change_me_fao_reference_internal}, connect-timeout-seconds=${FAO_REFERENCE_SERVICE_CONNECT_TIMEOUT_SECONDS:10}, read-timeout-seconds=${FAO_REFERENCE_SERVICE_READ_TIMEOUT_SECONDS:180}}, scheduling={enabled=${PREDICTION_SCHEDULER_ENABLED:true}, cron=${PREDICTION_SCHEDULER_CRON:0 10 * * * *}, cutoff-local-time=${PREDICTION_SCHEDULER_CUTOFF_LOCAL_TIME:00:30}}, defaults={model-engine=${PREDICTION_DEFAULT_MODEL_ENGINE:aquacrop_ospy}, forecast-horizon-days=${PREDICTION_FORECAST_HORIZON_DAYS:7}, history-days=${PREDICTION_HISTORY_DAYS:45}, irrigation-efficiency-pct=${PREDICTION_DEFAULT_IRRIGATION_EFFICIENCY_PCT:85}, rooting-depth-m=${PREDICTION_DEFAULT_ROOTING_DEPTH_M:0.6}, allowed-depletion-pct=${PREDICTION_DEFAULT_ALLOWED_DEPLETION_PCT:35}}, features={shadow-enabled=${PREDICTION_SHADOW_ENABLED:false}, admin-lab-enabled=${PREDICTION_ADMIN_LAB_ENABLED:false}, evaluation-enabled=${PREDICTION_EVALUATION_ENABLED:false}}, evaluation={store-root=${PREDICTION_EVAL_STORE_DIR:/var/lib/prediction-eval}}}, management={endpoints={web={exposure={include=health,info,prometheus}}}, endpoint={health={show-details=when-authorized}}}, logging={level={org.osi.server=DEBUG, org.springframework.security=INFO}}}
+2026-08-13T16:46:34.114+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={config={activate={on-profile=dev}}, jpa={show-sql=true}}, logging={level={org.osi.server=DEBUG, org.springframework.security=DEBUG}}}
+2026-08-13T16:46:34.115+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={config={activate={on-profile=prod}}, jpa={show-sql=false}}, server={forward-headers-strategy=native}, logging={level={org.osi.server=INFO, root=WARN}}}
+2026-08-13T16:46:34.115+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 3 documents from YAML resource: file [/home/phil/Repos/osi-server/.worktrees/agrolink/backend/src/main/resources/application.yml]
+2026-08-13T16:46:34.120+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: file [/home/phil/Repos/osi-server/.worktrees/agrolink/backend/src/main/resources/application.yml]
+2026-08-13T16:46:34.122+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={application={name=osi-server}, datasource={url=${DB_URL:jdbc:postgresql://localhost:5432/osiserver}, username=${DB_USER:osiserver}, password=${DB_PASSWORD:osiserver}, driver-class-name=org.postgresql.Driver}, jpa={hibernate={ddl-auto=validate}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.PostgreSQLDialect, format_sql=true}}}, flyway={enabled=true, baseline-on-migrate=true, locations=classpath:db/migration}, servlet={multipart={max-file-size=${OSI_RECOVERY_MAX_FILE_SIZE:256MB}, max-request-size=${OSI_RECOVERY_MAX_REQUEST_SIZE:257MB}}}}, server={port=${SERVER_PORT:8080}}, jwt={secret=${JWT_SECRET}, expiration-ms=${JWT_EXPIRATION_MS:86400000}}, journal={v2={cloud-issuer-enabled=${JOURNAL_V2_CLOUD_ISSUER_ENABLED:false}, attachments={enabled=${JOURNAL_V2_ATTACHMENTS_ENABLED:false}, endpoint=${JOURNAL_V2_ATTACHMENTS_S3_ENDPOINT:}, bucket=${JOURNAL_V2_ATTACHMENTS_S3_BUCKET:}, region=${JOURNAL_V2_ATTACHMENTS_S3_REGION:us-east-1}, access-key=${JOURNAL_S3_ACCESS_KEY:}, secret-key=${JOURNAL_S3_SECRET_KEY:}, path-style-access=${JOURNAL_V2_ATTACHMENTS_S3_PATH_STYLE:true}, internal-multipart-part-size-bytes=${JOURNAL_V2_ATTACHMENTS_INTERNAL_PART_BYTES:5242880}, chunk-size-bytes=1048576, max-attachment-bytes=${JOURNAL_V2_ATTACHMENTS_MAX_BYTES:26214400}, workspace-quota-bytes=${JOURNAL_V2_ATTACHMENTS_WORKSPACE_QUOTA_BYTES:5368709120}, allowed-mime-types=${JOURNAL_V2_ATTACHMENTS_ALLOWED_MIME:image/jpeg,image/png,image/webp,image/heic,image/heif}, scanner-command=${JOURNAL_V2_ATTACHMENTS_SCANNER_COMMAND:}, scanner-service-url=${JOURNAL_V2_ATTACHMENTS_SCANNER_URL:}, upload-session-ttl=${JOURNAL_V2_ATTACHMENTS_UPLOAD_TTL:2d}, tombstone-retention=${JOURNAL_V2_ATTACHMENTS_TOMBSTONE_RETENTION:90d}, orphan-grace=${JOURNAL_V2_ATTACHMENTS_ORPHAN_GRACE:24h}, orphan-collection-cron=${JOURNAL_V2_ATTACHMENTS_ORPHAN_CRON:0 35 3 * * *}, retention-collection-cron=${JOURNAL_V2_ATTACHMENTS_RETENTION_CRON:0 45 3 * * *}}}}, mqtt={broker-url=${MQTT_BROKER_URL:tcp://localhost:1883}, client-id=${MQTT_CLIENT_ID:osi-server-backend}, username=${MQTT_USERNAME:server}, password=${MQTT_PASSWORD:serverpass}, device-provisioning={enabled=${MQTT_DEVICE_PROVISIONING_ENABLED:true}, password-file=${MQTT_DEVICE_PASSWORD_FILE:/mosquitto/data/passwd}, public-broker-url=${MQTT_DEVICE_PUBLIC_BROKER_URL:wss://server.opensmartirrigation.org/mqtt}, secret=${MQTT_DEVICE_PROVISIONING_SECRET:}, reconcile-on-startup=${MQTT_DEVICE_RECONCILE_ON_STARTUP:true}}}, admin={username=${ADMIN_USERNAME:}, email=${ADMIN_EMAIL:}, password=${ADMIN_PASSWORD:}}, superadmin={username=${SUPERADMIN_USERNAME:${ADMIN_USERNAME:}}, email=${SUPERADMIN_EMAIL:${ADMIN_EMAIL:}}, password=${SUPERADMIN_PASSWORD:${ADMIN_PASSWORD:}}}, weather={agromonitoring={base-url=${AGROMONITORING_BASE_URL:https://api.agromonitoring.com/agro/1.0}, api-key=${AGROMONITORING_API_KEY:}}, openagri={base-url=${OPENAGRI_WEATHER_BASE_URL:}, bearer-token=${OPENAGRI_WEATHER_BEARER_TOKEN:}, username=${OPENAGRI_WEATHER_USERNAME:}, password=${OPENAGRI_WEATHER_PASSWORD:}, radius-km=${OPENAGRI_WEATHER_RADIUS_KM:10}}, cache={current-minutes=${OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES:30}, forecast-minutes=${OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES:120}}}, via-farm={base-url=${VIA_FARM_BASE_URL:https://via.farm/api}, api-token=${VIA_FARM_API_TOKEN:}, timeout-millis=5000}, work-requests={diagnostics-retention-days=${WORK_REQUESTS_DIAGNOSTICS_RETENTION_DAYS:90}, diagnostics-retention-cron=${WORK_REQUESTS_DIAGNOSTICS_RETENTION_CRON:0 20 3 * * *}, pseudonym-secret=${WORK_REQUESTS_PSEUDONYM_SECRET:}, github={app-id=${WORK_REQUESTS_GITHUB_APP_ID:}, installation-id=${WORK_REQUESTS_GITHUB_INSTALLATION_ID:}, private-key-pem=${WORK_REQUESTS_GITHUB_PRIVATE_KEY_PEM:}, api-base-url=${WORK_REQUESTS_GITHUB_API_BASE_URL:https://api.github.com}, default-repo=${WORK_REQUESTS_GITHUB_DEFAULT_REPO:Open-Smart-Irrigation/osi-os}, allowed-repos=${WORK_REQUESTS_GITHUB_ALLOWED_REPOS:Open-Smart-Irrigation/osi-os,Open-Smart-Irrigation/osi-server}}}, forge={runner-token=${FORGE_RUNNER_TOKEN:}}, soilhive={auth-base-url=${SOILHIVE_AUTH_BASE_URL:https://auth.soilhive.ag}, api-base-url=${SOILHIVE_API_BASE_URL:https://api.soilhive.ag/v1}, audience=${SOILHIVE_AUDIENCE:https://api.soilhive.ag/}, client-id=${SOILHIVE_CLIENT_ID:}, client-secret=${SOILHIVE_CLIENT_SECRET:}, connect-timeout-seconds=${SOILHIVE_CONNECT_TIMEOUT_SECONDS:10}, read-timeout-seconds=${SOILHIVE_READ_TIMEOUT_SECONDS:120}, token-refresh-skew-seconds=${SOILHIVE_TOKEN_REFRESH_SKEW_SECONDS:60}, profile-ttl-days=${SOILHIVE_PROFILE_TTL_DAYS:30}}, osi={recovery={staging-directory=${OSI_RECOVERY_STAGING_DIRECTORY:${java.io.tmpdir}/osi-recovery-staging}, staging-orphan-max-age=${OSI_RECOVERY_STAGING_ORPHAN_MAX_AGE:1d}}, history={rollup={enabled=${OSI_HISTORY_ROLLUP_ENABLED:true}, hourly-window-days=${OSI_HISTORY_ROLLUP_HOURLY_WINDOW_DAYS:7}, daily-window-days=${OSI_HISTORY_ROLLUP_DAILY_WINDOW_DAYS:90}}}}, prediction={service={base-url=${PREDICTION_SERVICE_BASE_URL:http://prediction-service:8090}, shared-token=${PREDICTION_SERVICE_TOKEN:change_me_prediction_internal}, connect-timeout-seconds=${PREDICTION_SERVICE_CONNECT_TIMEOUT_SECONDS:10}, read-timeout-seconds=${PREDICTION_SERVICE_READ_TIMEOUT_SECONDS:120}, catalog-cache-minutes=${PREDICTION_SERVICE_CATALOG_CACHE_MINUTES:5}}, reference-service={enabled=${PREDICTION_REFERENCE_ENABLED:false}, base-url=${FAO_REFERENCE_BASE_URL:http://fao-reference-service:8091}, shared-token=${FAO_REFERENCE_SERVICE_TOKEN:change_me_fao_reference_internal}, connect-timeout-seconds=${FAO_REFERENCE_SERVICE_CONNECT_TIMEOUT_SECONDS:10}, read-timeout-seconds=${FAO_REFERENCE_SERVICE_READ_TIMEOUT_SECONDS:180}}, scheduling={enabled=${PREDICTION_SCHEDULER_ENABLED:true}, cron=${PREDICTION_SCHEDULER_CRON:0 10 * * * *}, cutoff-local-time=${PREDICTION_SCHEDULER_CUTOFF_LOCAL_TIME:00:30}}, defaults={model-engine=${PREDICTION_DEFAULT_MODEL_ENGINE:aquacrop_ospy}, forecast-horizon-days=${PREDICTION_FORECAST_HORIZON_DAYS:7}, history-days=${PREDICTION_HISTORY_DAYS:45}, irrigation-efficiency-pct=${PREDICTION_DEFAULT_IRRIGATION_EFFICIENCY_PCT:85}, rooting-depth-m=${PREDICTION_DEFAULT_ROOTING_DEPTH_M:0.6}, allowed-depletion-pct=${PREDICTION_DEFAULT_ALLOWED_DEPLETION_PCT:35}}, features={shadow-enabled=${PREDICTION_SHADOW_ENABLED:false}, admin-lab-enabled=${PREDICTION_ADMIN_LAB_ENABLED:false}, evaluation-enabled=${PREDICTION_EVALUATION_ENABLED:false}}, evaluation={store-root=${PREDICTION_EVAL_STORE_DIR:/var/lib/prediction-eval}}}, management={endpoints={web={exposure={include=health,info,prometheus}}}, endpoint={health={show-details=when-authorized}}}, logging={level={org.osi.server=DEBUG, org.springframework.security=INFO}}}
+2026-08-13T16:46:34.122+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={config={activate={on-profile=dev}}, jpa={show-sql=true}}, logging={level={org.osi.server=DEBUG, org.springframework.security=DEBUG}}}
+2026-08-13T16:46:34.122+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={config={activate={on-profile=prod}}, jpa={show-sql=false}}, server={forward-headers-strategy=native}, logging={level={org.osi.server=INFO, root=WARN}}}
+2026-08-13T16:46:34.122+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 3 documents from YAML resource: file [/home/phil/Repos/osi-server/.worktrees/agrolink/backend/src/main/resources/application.yml]
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
+</div>
+</div>
+</body>
+</html>

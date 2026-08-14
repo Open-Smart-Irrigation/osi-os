@@ -1434,7 +1434,8 @@ expectIncludes('Clear linked account state', "flow.set('account_linked', false)"
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
-expectIncludes('Process Result', 'osi_auth_token_secret', 'uses a persisted local auth secret');
+expectIncludes('Process Result', "osiLib.require('scope')", 'loads the shared authentication secret helper');
+expectIncludes('Process Result', 'resolveAuthSecret', 'uses the shared persisted local auth secret implementation');
 expectIncludes('Process Result', "env.get('LINK_GATEWAY_DEVICE_EUI')", 'uses the linked gateway identity captured at account-link time');
 expectIncludes('Process Result', 'decodeGatewayDeviceEuiFromSyncToken', 'falls back to the gateway encoded into the sync token');
 expectIncludes('Process Result', "env.get('DEVICE_EUI')", 'uses canonical runtime gateway identity only as a last resort');
@@ -4218,13 +4219,25 @@ expectExcludesById('cs-reg-cloud-fn', 'grpcStatus', 'the retired numeric grpcSta
 expectExcludesById('cs-reg-cloud-fn', 'error.details', 'the retired error.details field');
 expectIncludesById('cs-reg-cloud-fn', "typeof provisioned.compensate === 'function'", 'uses guarded helper compensation after any post-provisioning local save failure');
 expectIncludesById('cs-reg-cloud-fn', 'const code = error.code || null;', 'reads the new normalized error.code instead of numeric grpcStatus');
-expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true }), null];", 'preserves the exact success ACK shape (commit/ACK path unchanged)');
+expectIncludesById('cs-reg-cloud-fn', "SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1", 'resolves the cloud-sent zoneUuid to an edge-local zone id (W5/P9)');
+expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns through the row-wise precondition-guarded UPDATE (P11/W4)');
+expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
+expectIncludesById('cs-reg-cloud-fn', 'SELECT user_id, type_id, irrigation_zone_id, deleted_at, gateway_device_eui, sync_version FROM devices WHERE deveui = ? LIMIT 1', 'loads deleted, unclaimed, assigned, and owned device state before the scoped claim fence');
+expectIncludesById('cs-reg-cloud-fn', "code: 'ALREADY_CLAIMED'", 'refuses an EUI another account already claimed before touching ChirpStack');
+expectIncludesById('cs-reg-cloud-fn', "var successState = scopedOn && existing && existingOwnerId !== null ? 'ALREADY_REGISTERED' : 'APPLIED';", 'scopes the already-registered ACK state while retaining the legacy APPLIED state when the flag is off');
+expectIncludesById('cs-reg-cloud-fn', ', deleted_at = NULL', 'revives a deleted existing device during an allowed scoped claim');
+expectIncludesById('cs-reg-cloud-fn', 'if (scopedOn && error.verificationRequired === true)', 'gates verification-required failure detail on scoped mode');
+expectIncludesById('cs-reg-cloud-fn', 'successExtras.zoneAssignedId = zoneId;', 'reports the P9 zone-resolution outcome in scoped mode');
 expectIncludesById('cs-reg-cloud-fn', '} finally {\n  if (client) {\n    try {\n      client.close();\n    } catch (_) {\n      node.warn(\'CS Register (cloud cmd): ChirpStack client close threw unexpectedly\');\n    }\n  }\n  try { await close(); } catch (_) {}\n}\n})();', 'closes the ChirpStack client and the local DB in a single finally on every REGISTER_DEVICE path, surfacing an unexpected close() throw via node.warn');
 
 // cs-reg-cloud-ack-fn (Build Special Command ACK) — grpcStatus -> error.code,
 // nine-field lease-token-bound cloud ACK contract otherwise byte-stable.
 expectIncludesById('cs-reg-cloud-ack-fn', 'if (ack.code) payload.code = String(ack.code);', 'forwards the normalized error.code instead of the retired grpcStatus');
 expectExcludesById('cs-reg-cloud-ack-fn', 'grpcStatus', 'the retired grpcStatus field');
+expectIncludesById('cs-reg-cloud-ack-fn', "Object.prototype.hasOwnProperty.call(ack, 'zoneAssignedId')", 'forwards the P9 zone assignment outcome only when the applier set it');
+expectIncludesById('cs-reg-cloud-ack-fn', "Object.prototype.hasOwnProperty.call(ack, 'zoneWarning')", 'forwards the P9 zone resolution warning only when the applier set it');
+expectIncludesById('cs-reg-cloud-ack-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'resolves scoped mode before forwarding scoped-only ACK detail');
+expectIncludesById('cs-reg-cloud-ack-fn', 'if (scopedOn && ack.verificationRequired === true) payload.verificationRequired = true;', 'omits verification-required detail from flag-off ACK bytes');
 
 // post-devices-response (Format Response) — forwards the reconciliation
 // result opaquely; never hardcodes the retired deviceCreated field.

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.OpenMeteoServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:46" hostname="osi-01" time="0.032">
+  <properties/>
+  <testcase name="getWeatherForDay_buildsSnapshotFromHourlyArchiveData()" classname="org.osi.server.analytics.OpenMeteoServiceTest" time="0.009"/>
+  <testcase name="getForecast_readsHourlyAndDailyForecastBlocks()" classname="org.osi.server.analytics.OpenMeteoServiceTest" time="0.014"/>
+  <testcase name="getCurrentConditions_readsForecastCurrentBlock()" classname="org.osi.server.analytics.OpenMeteoServiceTest" time="0.008"/>
+  <system-out><![CDATA[2026-08-13T16:45:46.452+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://archive-api.open-meteo.com/v1/archive?latitude=46.95&longitude=7.44&hourly=temperature_2m,relative_humidity_2m,precipitation&timezone=Europe/Zurich&start_date=2026-03-27&end_date=2026-03-27
+2026-08-13T16:45:46.455+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.456+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.456+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoHourlyResponse]
+2026-08-13T16:45:46.461+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://api.open-meteo.com/v1/forecast?latitude=46.95&longitude=7.44&hourly=temperature_2m,relative_humidity_2m,precipitation,precipitation_probability,wind_speed_10m,wind_direction_10m&daily=precipitation_sum,precipitation_probability_max,et0_fao_evapotranspiration,temperature_2m_min,temperature_2m_max&timezone=Europe/Zurich&forecast_days=6
+2026-08-13T16:45:46.470+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.470+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.470+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoForecastResponse]
+2026-08-13T16:45:46.475+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : HTTP GET https://api.open-meteo.com/v1/forecast?latitude=46.95&longitude=7.44&current=temperature_2m,relative_humidity_2m,precipitation,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m&timezone=Europe/Zurich
+2026-08-13T16:45:46.479+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Accept=[application/json, application/*+json]
+2026-08-13T16:45:46.479+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Response 200 OK
+2026-08-13T16:45:46.479+02:00 DEBUG 3273021 --- [    Test worker] o.s.web.client.RestTemplate              : Reading to [org.osi.server.analytics.OpenMeteoService$OpenMeteoForecastResponse]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

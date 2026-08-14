@@ -246,10 +246,22 @@ async function runCase(caseName) {
   const osiDb = { Database: function Database() { return makeFacadeShim(dbPath); } };
   const httpMode = caseName === 'provider-unavailable' ? 'fail' : 'ok';
   const httpStub = makeHttpStub(httpMode);
+  // Node-RED's flow `global` context, which the scope helper reads `fs` from.
+  const globalStore = {};
+  const globalObj = {
+    get(key) { return key === 'fs' ? fs : globalStore[key]; },
+    set(key, value) { globalStore[key] = value; },
+  };
   const osiLib = {
     require(name) {
       if (name === 'zone-env') {
         return { ok: true, value: require(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env')) };
+      }
+      // The auth preamble resolves its token secret through the scope helper
+      // (osi-lib 'scope'), so this harness has to offer the same seam the flow
+      // gets at runtime or every case 500s before it reaches the zone-env code.
+      if (name === 'scope') {
+        return { ok: true, value: require(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper')) };
       }
       return { ok: false, error: `unknown module ${name}` };
     },
@@ -258,8 +270,8 @@ async function runCase(caseName) {
   const RealDate = global.Date;
   global.Date = fixedDateClass(RealDate);
   try {
-    const fn = new Function('osiDb', 'crypto', 'httpLib', 'httpsLib', 'env', 'node', 'msg', 'osiLib', flowFunctionText());
-    const result = await fn(osiDb, crypto, httpStub, httpStub, env, node, msg, osiLib);
+    const fn = new Function('osiDb', 'crypto', 'httpLib', 'httpsLib', 'env', 'global', 'node', 'msg', 'osiLib', flowFunctionText());
+    const result = await fn(osiDb, crypto, httpStub, httpStub, env, globalObj, node, msg, osiLib);
     const response = result && result.payload ? result : msg;
     if (response.statusCode !== 200) {
       throw new Error(`unexpected status ${response.statusCode}: ${JSON.stringify(response.payload)}`);

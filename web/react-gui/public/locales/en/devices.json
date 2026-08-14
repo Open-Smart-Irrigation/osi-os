@@ -2,12 +2,17 @@
   "addModal": {
     "title": "Add Device",
     "deviceType": "Device Type",
+    "deviceTypeRequired": "Select a device type",
     "deviceName": "Device Name",
     "deviceNamePlaceholder": "e.g., North Field, Main Valve",
     "deveui": "DevEUI",
     "deveuiPlaceholder": "16 hex characters",
     "deveuiHint": "Enter exactly 16 hexadecimal characters (0-9, A-F)",
     "deveuiInvalid": "DevEUI must be exactly 16 hexadecimal characters",
+    "appkeyInvalid": "AppKey must be exactly 32 hex characters",
+    "appkey": "AppKey",
+    "appkeyHint": "32 hex characters printed on the device label",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Adding...",
     "submit": "Add Device",
     "failed": "Failed to add device"
@@ -22,6 +27,16 @@
     "submit": "Assign Device",
     "pleaseSelect": "Please select a device",
     "failed": "Failed to assign device"
+  },
+  "zoneDeviceModal": {
+    "title": "Add a device to {{zoneName}}",
+    "tabAssign": "Assign existing",
+    "tabRegister": "New device",
+    "assignConflict": "That device is now in zone \"{{zoneName}}\". Unassign it there first.",
+    "assignConflictDeleted": "That device is still assigned to a deleted zone. Refresh the device list and try again.",
+    "registerZoneNotice": "This device will be registered directly into {{zoneName}}.",
+    "registerSubmit": "Register into zone",
+    "registering": "Registering..."
   },
   "createZoneModal": {
     "title": "Create Zone",

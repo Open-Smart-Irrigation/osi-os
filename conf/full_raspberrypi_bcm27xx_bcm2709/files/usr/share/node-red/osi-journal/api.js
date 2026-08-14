@@ -419,6 +419,18 @@ async function loadScopedCatalog(db, principal, options) {
   return catalogDto(await loadCatalog(db, principal), options);
 }
 
+async function resolveCatalogPrincipal(db, principal, query) {
+  if (!principal || !principal.scoped) return principal;
+  const filters = query || {};
+  if (filters.plot_uuid != null && filters.plot_uuid !== '') {
+    return assertPlotWrite(db, principal, canonicalUuid(filters.plot_uuid, 'plot_uuid', true));
+  }
+  if (filters.zone_uuid != null && filters.zone_uuid !== '') {
+    return assertZoneWrite(db, principal, canonicalUuid(filters.zone_uuid, 'zone_uuid', true));
+  }
+  return principal;
+}
+
 function normalizedStringFilter(raw, field) {
   if (raw == null || raw === '') return null;
   if (typeof raw !== 'string' || Buffer.byteLength(raw, 'utf8') > 4096) {
@@ -499,24 +511,9 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   const params = readScope
     ? [principal.gateway_device_eui]
     : [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui];
-  if (readScope) {
-    // Entries created via the zone-only (no-plot) path (lifecycle.js resolvePlotContext,
-    // plotUuid == null) persist with a NULL plot_uuid. A `plot_uuid IN (...)` filter alone
-    // never matches NULL, so even the entry's own author/owner could not see it once
-    // scoped access was on -- mirror the cloud's JournalQueryService semantics
-    // (owner_user_uuid = ? OR plot_uuid IN (...)) with an explicit owner OR-branch.
-    const plotUuids = [...readScope.plotUuids];
-    if (!plotUuids.length) {
-      clauses.push('e.owner_user_uuid=?');
-      params.push(principal.owner_user_uuid);
-    } else {
-      clauses.push(
-        '(e.owner_user_uuid=? OR e.plot_uuid IN (' +
-          plotUuids.map(function() { return '?'; }).join(',') + '))'
-      );
-      params.push(principal.owner_user_uuid, ...plotUuids);
-    }
-  }
+  // Write-only scoping (W2): every enabled account on the gateway reads every
+  // journal entry, including plot-less (zone-only) entries. resolvedReadScope
+  // is retained for its disabled-account 403 (P1); its plotUuids are not read.
   if (filters.status !== 'all') {
     clauses.push('e.status=?');
     params.push(filters.status);
@@ -675,7 +672,18 @@ async function assertZoneWrite(db, principal, zoneUuid) {
     zoneUuid,
     { scopedMode: true }
   );
-  return principal;
+  const owner = await dbGet(
+    db,
+    'SELECT z.user_id AS owner_user_id,u.user_uuid AS owner_user_uuid ' +
+      'FROM irrigation_zones AS z JOIN users AS u ON u.id=z.user_id ' +
+      'WHERE z.zone_uuid=? AND z.deleted_at IS NULL LIMIT 1',
+    [zoneUuid]
+  );
+  if (!owner) throw apiError(404, 'not_found', 'Zone was not found');
+  return Object.assign({}, principal, {
+    user_id: Number(owner.owner_user_id),
+    owner_user_uuid: owner.owner_user_uuid,
+  });
 }
 
 async function assertPlotWrite(db, principal, plotUuid) {
@@ -719,11 +727,18 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!principal || !principal.scoped) return principal;
   const entry = await dbGet(
     db,
-    'SELECT plot_uuid FROM journal_entries WHERE entry_uuid=? AND gateway_device_eui=? ' +
+    'SELECT plot_uuid,owner_user_uuid,user_id FROM journal_entries WHERE entry_uuid=? AND gateway_device_eui=? ' +
       'AND deleted_at IS NULL LIMIT 1',
     [entryUuid, principal.gateway_device_eui]
   );
-  if (!entry || !entry.plot_uuid) throw apiError(404, 'not_found', 'Journal entry was not found');
+  if (!entry) throw apiError(404, 'not_found', 'Journal entry was not found');
+  if (!entry.plot_uuid) {
+    await assertJournalWriteRole(db, principal);
+    return Object.assign({}, principal, {
+      owner_user_uuid: entry.owner_user_uuid,
+      user_id: Number(entry.user_id),
+    });
+  }
   return assertPlotWrite(db, principal, entry.plot_uuid);
 }
 
@@ -772,7 +787,7 @@ function exactBaseVersion(value, creating) {
 
 async function ownedZone(tx, zoneUuid, principal) {
   if (principal && principal.scoped) {
-    await assertZoneWrite(tx, principal, zoneUuid);
+    principal = await assertZoneWrite(tx, principal, zoneUuid);
     const scopedZone = await dbGet(
       tx,
       'SELECT z.id,z.name,z.zone_uuid,z.gateway_device_eui,z.user_id,u.user_uuid ' +
@@ -1013,7 +1028,9 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
   if (inputUuid && inputUuid !== plotUuid) badRequest('path_body_mismatch', 'Path and body plot UUID differ');
   if (pathUuid) principal = await assertPlotWrite(db, principal, plotUuid);
   const requestedZoneUuid = canonicalUuid(input.zone_uuid, 'zone_uuid', false);
-  if (!pathUuid && requestedZoneUuid) await assertZoneWrite(db, principal, requestedZoneUuid);
+  if (!pathUuid && requestedZoneUuid) {
+    principal = await assertZoneWrite(db, principal, requestedZoneUuid);
+  }
   return writeTransaction(db, async function(tx) {
     const existing = await dbGet(
       tx,
@@ -1276,12 +1293,20 @@ async function saveEntry(db, input, principal, options) {
       principal,
       batchMembers.map(function(member) { return member.plot_uuid; })
     );
+  } else if (mode === 'update') {
+    // The entry's OWN plot is the authority on an update. Checking only the
+    // body-supplied plot let a revoked grantee overwrite an entry, and
+    // re-parent it, by naming a plot they still hold.
+    principal = await assertEntryWrite(db, principal, body.entry_uuid);
+    if (plotUuid) {
+      // A re-parent needs write scope on the destination too, and the
+      // destination owner is the principal the write is attributed to.
+      principal = await assertPlotWrite(db, principal, plotUuid);
+    }
   } else if (plotUuid) {
     principal = await assertPlotWrite(db, principal, plotUuid);
-  } else if (mode === 'update') {
-    principal = await assertEntryWrite(db, principal, body.entry_uuid);
   } else if (zoneUuid) {
-    await assertZoneWrite(db, principal, zoneUuid);
+    principal = await assertZoneWrite(db, principal, zoneUuid);
   }
   if (!plotUuid && zoneUuid) {
     plotUuid = await ensureZonePlot(db, zoneUuid, body, principal);
@@ -1368,17 +1393,15 @@ async function listPlotsLegacy(db, principal) {
 async function listPlots(db, principal) {
   const scope = await resolvedReadScope(db, principal);
   if (!scope) return listPlotsLegacy(db, principal);
-  const plotUuids = [...scope.plotUuids];
-  if (!plotUuids.length) return { plots: [] };
+  // Write-only scoping (W2): account-wide plot list.
   const rows = await dbAll(
     db,
     'SELECT p.*,s.layout_code,s.context_json,s.updated_at AS settings_updated_at,' +
       's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
     'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
-    'WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL AND p.plot_uuid IN (' +
-      plotUuids.map(function() { return '?'; }).join(',') + ') ' +
+    'WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
     'ORDER BY p.plot_code,p.plot_uuid',
-    [principal.gateway_device_eui, ...plotUuids]
+    [principal.gateway_device_eui]
   );
   return aggregatePlotRows(db, rows, principal);
 }
@@ -2156,20 +2179,12 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
 
 async function listPlotGroupsInSnapshot(db, principal) {
   const scope = await resolvedReadScope(db, principal);
-  const plotUuids = scope ? [...scope.plotUuids] : null;
   const rows = scope
     ? await dbAll(
       db,
-      'SELECT DISTINCT g.* FROM journal_plot_groups AS g ' +
-        'WHERE g.gateway_device_eui=? AND g.deleted_at IS NULL AND (' +
-          'g.owner_user_uuid=?' +
-          (plotUuids.length
-            ? ' OR EXISTS (SELECT 1 FROM journal_plot_group_members AS gm ' +
-                'WHERE gm.group_uuid=g.group_uuid AND gm.plot_uuid IN (' +
-                plotUuids.map(function() { return '?'; }).join(',') + '))'
-            : '') +
-        ') ORDER BY g.resolved_at IS NOT NULL,g.label,g.group_uuid',
-      [principal.gateway_device_eui, principal.owner_user_uuid, ...plotUuids]
+      'SELECT * FROM journal_plot_groups WHERE gateway_device_eui=? AND deleted_at IS NULL ' +
+        'ORDER BY resolved_at IS NOT NULL,label,group_uuid',
+      [principal.gateway_device_eui]
     )
     : await dbAll(
       db,
@@ -2180,24 +2195,17 @@ async function listPlotGroupsInSnapshot(db, principal) {
   if (!rows.length) return { plot_groups: [] };
   const ids = rows.map(function(row) { return row.group_uuid; });
   const memberships = scope
-    ? (plotUuids.length
-      ? await dbAll(
-        db,
-        'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
-          'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
-          'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
-          'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
-          'AND g.gateway_device_eui=? AND g.deleted_at IS NULL ' +
-          'AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
-          'AND m.plot_uuid IN (' + plotUuids.map(function() { return '?'; }).join(',') + ') ' +
-          'ORDER BY m.group_uuid,m.plot_uuid',
-        ids.concat([
-          principal.gateway_device_eui,
-          principal.gateway_device_eui,
-          ...plotUuids,
-        ])
-      )
-      : [])
+    ? await dbAll(
+      db,
+      'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
+        'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
+        'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+        'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
+        'AND g.gateway_device_eui=? AND g.deleted_at IS NULL ' +
+        'AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
+        'ORDER BY m.group_uuid,m.plot_uuid',
+      ids.concat([principal.gateway_device_eui, principal.gateway_device_eui])
+    )
     : await dbAll(
       db,
         'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
@@ -3309,7 +3317,8 @@ async function handleHttpRequest(options) {
       await assertJournalWriteRole(db, principal);
     }
     if (method === 'GET' && requestPath === '/api/journal/catalog') {
-      return respond(200, await loadScopedCatalog(db, principal, {
+      const catalogPrincipal = await resolveCatalogPrincipal(db, principal, query);
+      return respond(200, await loadScopedCatalog(db, catalogPrincipal, {
         includeDefinitions: query.include === 'definitions',
       }));
     }

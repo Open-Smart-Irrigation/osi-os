@@ -1,9 +1,9 @@
 name: Edge Migrations
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 jobs:
   migrations:
     runs-on: ubuntu-latest
@@ -89,10 +89,24 @@ jobs:
       - run: node --test scripts/test-gateway-health-persistence.js
       - run: node --test scripts/deploy-canary-gate.test.js
       - run: node scripts/test-contract-schemas.js
-      - run: node --test scripts/verify-sync-op-parity.test.js
+      - name: Verify edge/cloud sync operation parity against the checked-out server revision
+        run: |
+          set -euo pipefail
+          node --test scripts/verify-sync-op-parity.test.js 2>&1 | tee /tmp/verify-sync-op-parity.test.out
+          if grep -q 'not a trustworthy branch pairing' /tmp/verify-sync-op-parity.test.out; then
+            echo '::error::sync parity test used an untrusted osi-server fallback'
+            exit 1
+          fi
         env:
           OSI_SERVER_EDGE_SYNC_SERVICE: osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
-      - run: node scripts/verify-sync-op-parity.js osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
+      - name: Verify sync operation parity against the checked-out server revision
+        run: |
+          set -euo pipefail
+          node scripts/verify-sync-op-parity.js osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java 2>&1 | tee /tmp/verify-sync-op-parity.out
+          if grep -q 'not a trustworthy branch pairing' /tmp/verify-sync-op-parity.out; then
+            echo '::error::sync parity verifier used an untrusted osi-server fallback'
+            exit 1
+          fi
       - run: node scripts/verify-dendro-contract-mirror.js osi-server
       - run: node scripts/verify-channel-manifest-parity.js
       - name: Cross-repo channels.json byte-identity (DD5)
@@ -122,4 +136,16 @@ jobs:
             echo "ChannelManifestTest.java + verify-channel-manifest-sync.js on a same-named osi-server branch."
             exit 1
           fi
+      - name: Cross-repo sync-contract golden byte-identity
+        run: |
+          set -euo pipefail
+          edge_golden="docs/contracts/sync-schema/sync-contract-golden.json"
+          server_golden="osi-server/backend/src/test/resources/sync-contract/sync-contract-golden.json"
+          test -s "$edge_golden" || { echo "::error::edge sync-contract golden is missing or empty."; exit 1; }
+          test -s "$server_golden" || { echo "::error::osi-server sync-contract golden is missing or empty."; exit 1; }
+          if ! cmp -s "$edge_golden" "$server_golden"; then
+            echo "::error::edge and osi-server sync-contract-golden.json differ."
+            exit 1
+          fi
+          echo "Edge/cloud sync-contract-golden.json is byte-identical."
       - run: node scripts/verify-command-safety.js

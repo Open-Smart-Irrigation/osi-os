@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:57" hostname="osi-01" time="0.012">
+  <properties/>
+  <testcase name="applyEvents_deviceFlagsUpdatedSyncsRainAndFlowFlags()" classname="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" time="0.002"/>
+  <testcase name="applyEvents_zoneDeletedSetsTombstoneAndDetachesDevices()" classname="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" time="0.003"/>
+  <testcase name="applyEvents_ignoresStaleZoneUpsert()" classname="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" time="0.002"/>
+  <testcase name="applyEvents_zoneUpsertMirrorsPredictionCardFlagFromEdge()" classname="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" time="0.001"/>
+  <testcase name="applyEvents_skipsDuplicateEventWithoutReapplyingState()" classname="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" time="0.001"/>
+  <testcase name="applyEvents_deviceFlagsUpdatedMirrorsStregaValveStateAndModelMetadata()" classname="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" time="0.001"/>
+  <testcase name="applyEvents_gatewayLocationUpsertStoresMirrorState()" classname="org.osi.server.sync.EdgeSyncServiceControlPlaneTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

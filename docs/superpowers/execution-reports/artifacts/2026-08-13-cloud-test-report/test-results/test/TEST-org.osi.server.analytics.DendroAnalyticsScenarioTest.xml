@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.DendroAnalyticsScenarioTest" tests="26" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:45" hostname="osi-01" time="0.024">
+  <properties/>
+  <testcase name="updateRecoveryVerification_clearsHoldWhenAllTreesRecovered()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="irrDecision_severeQuorum_triggersEmergencyIrrigation()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="updateRecoveryVerification_holdsWhenTwdRelAboveMildThreshold()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="applyVpdStressAdjustment_requiresVpdAndTwdRel()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="updateRecoveryVerification_usesCalibrationAwareThresholds()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="irrDecision_activeRainSuppressionIsNotRearmedOnSevereRainyRecompute()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="irrDecision_unknownStress_maintainsCurrentVolume()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="aggregateZoneStress_allLowConfidence_returnsUnknownWithCounts()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="irrDecision_significantStressFirstDay_usesIncrease10()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="irrDecision_singleSevereDayWithoutEmergencyCriteria_stillIncreasesIrrigation()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="irrDecision_heavyRainUses72HourSuppressionTimeout()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="aggregateZoneStress_filtersSoloExtremeOutlierWithoutEscalatingZone()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="irrDecision_rainSuppressionExitsWhenTwdRespondsToRain()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="irrDecision_persistentSoloSevere_triggersEmergencyIrrigation()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="enterRecoveryVerification_requiresThreePriorHighStressDays()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="applyVpdStressAdjustment_downgradesStressOnHotRecoveringDay()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="enterRecoveryVerification_ignoresOlderHistoryOutsidePreviousThreeDays()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="updateRecoveryVerification_requiresBaselineCompletedTrees()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="irrDecision_significantStressSecondDay_usesIncrease20()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="applyVpdStressAdjustment_upgradesStressOnCoolPoorRecoveryDay()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.0"/>
+  <testcase name="irrDecision_rainSuppressionHoldsWhenStressHasNotRecovered()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="aggregateZoneStress_surfacesP75OfRelativeTwdNotAbsoluteMicrometers()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="computeRollingSdVpdDiagnostics_flagsDecouplingWhenCurrentWindowBreaksBaseline()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="enterRecoveryVerification_startsAfterExtendedHighStressPeriod()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="applyDendroSchedulePolicy_blocksEscalationBelowConfiguredThreshold()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <testcase name="aggregateZoneStress_leavesRelativeTwdNullWhenNoFilteredTreeHasRelativeValue()" classname="org.osi.server.analytics.DendroAnalyticsScenarioTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-13T16:45:45.511+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone Test Zone: recovery verification PASSED
+2026-08-13T16:45:45.513+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone Test Zone: recovery verification PASSED
+2026-08-13T16:45:45.519+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone Scenario Zone: rain suppression exited — TWD responded
+2026-08-13T16:45:45.531+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone Zone A: entering recovery verification after 3 high-stress days
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

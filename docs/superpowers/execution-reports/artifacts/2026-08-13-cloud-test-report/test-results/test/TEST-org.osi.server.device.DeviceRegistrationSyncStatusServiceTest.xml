@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:08" hostname="osi-01" time="0.005">
+  <properties/>
+  <testcase name="resolve_returnsFailedForNackedUnclaimCommand()" classname="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" time="0.001"/>
+  <testcase name="resolve_returnsPendingEdgeProvisioningForPendingOrSentRegisterCommand()" classname="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" time="0.001"/>
+  <testcase name="resolve_returnsPendingForQueuedUnclaimCommand()" classname="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" time="0.0"/>
+  <testcase name="resolve_returnsAppliedWhenNoRegisterCommandExists()" classname="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" time="0.001"/>
+  <testcase name="resolve_returnsPendingForQueuedZoneDetachCommandWhenNoDeviceCommandExists()" classname="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" time="0.001"/>
+  <testcase name="resolve_usesNewestCommandAcrossDeviceAndAssignmentCommands()" classname="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" time="0.001"/>
+  <testcase name="resolve_returnsFailedForFailedRegisterCommand()" classname="org.osi.server.device.DeviceRegistrationSyncStatusServiceTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - DendroAnalyticsAgroscopeShadowPoisonComputeTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>DendroAnalyticsAgroscopeShadowPoisonComputeTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.analytics.html">org.osi.server.analytics</a> &gt; DendroAnalyticsAgroscopeShadowPoisonComputeTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">1</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.244s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">computeForAllZones_commitsAllV6RecommendationsWhenRealAgroscopeRepositoryFailsAfterDbWrite()</td>
+<td class="success">0.244s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>2026-08-13T16:45:41.588+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [DendroAnalyticsAgroscopeShadowPoisonComputeTest]: using SpringBootContextLoader
+2026-08-13T16:45:41.589+02:00  INFO 3273021 --- [    Test worker] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest]: DendroAnalyticsAgroscopeShadowPoisonComputeTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-08-13T16:45:41.590+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [DendroAnalyticsAgroscopeShadowPoisonComputeTest]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T16:45:41.598+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [DendroAnalyticsAgroscopeShadowPoisonComputeTest]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T16:45:41.600+02:00  INFO 3273021 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest
+2026-08-13T16:45:41.602+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [DendroAnalyticsAgroscopeShadowPoisonComputeTest]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T16:45:41.612+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T16:45:41.614+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T16:45:41.616+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T16:45:41.623+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.3)
+
+2026-08-13T16:45:41.631+02:00  INFO 3273021 --- [    Test worker] nalyticsAgroscopeShadowPoisonComputeTest : Starting DendroAnalyticsAgroscopeShadowPoisonComputeTest using Java 17.0.19 with PID 3273021 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T16:45:41.631+02:00  INFO 3273021 --- [    Test worker] nalyticsAgroscopeShadowPoisonComputeTest : No active profile set, falling back to 1 default profile: &quot;default&quot;
+2026-08-13T16:45:41.631+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication
+2026-08-13T16:45:41.880+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T16:45:41.882+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T16:45:41.945+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 62 ms. Found 55 JPA repository interfaces.
+2026-08-13T16:45:41.970+02:00  INFO 3273021 --- [    Test worker] beddedDataSourceBeanFactoryPostProcessor : Replacing 'dataSource' DataSource bean with embedded version
+2026-08-13T16:45:42.047+02:00  INFO 3273021 --- [    Test worker] o.s.j.d.e.EmbeddedDatabaseFactory        : Starting embedded database: url='jdbc:h2:mem:a7ccd427-8ef9-442e-8ff3-b1b20524be47;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false', username='sa'
+2026-08-13T16:45:42.084+02:00  INFO 3273021 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T16:45:42.086+02:00  INFO 3273021 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T16:45:42.101+02:00  INFO 3273021 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T16:45:42.104+02:00  WARN 3273021 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: H2Dialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T16:45:42.104+02:00  INFO 3273021 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseFactory$EmbeddedDataSourceProxy@3db2a286']
+	Database driver: undefined/unknown
+	Database version: 2.3.232
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-08-13T16:45:42.274+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:45:42.275+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:45:42.716+02:00  INFO 3273021 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T16:45:42.716+02:00  INFO 3273021 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T16:45:43.361+02:00 DEBUG 3273021 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+
+============================
+CONDITIONS EVALUATION REPORT
+============================
+
+
+Positive matches:
+-----------------
+
+   DataSourceAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: io.r2dbc.spi.ConnectionFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration matched:
+      - AnyNestedCondition 1 matched 1 did not; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.PooledDataSourceAvailable PooledDataSource found supported DataSource; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.ExplicitType @ConditionalOnProperty (spring.datasource.type) did not find property 'type' (DataSourceAutoConfiguration.PooledDataSourceCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource,javax.sql.XADataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration#jdbcConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceConfiguration.Hikari matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+      - @ConditionalOnProperty (spring.datasource.type=com.zaxxer.hikari.HikariDataSource) matched (OnPropertyCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceInitializationConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.datasource.init.DatabasePopulator' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.sql.init.SqlDataSourceScriptDatabaseInitializer,org.springframework.boot.autoconfigure.sql.init.SqlR2dbcScriptDatabaseInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.HikariPoolDataSourceMetadataProviderConfiguration matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate', 'org.springframework.transaction.TransactionManager' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   HibernateJpaAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean', 'jakarta.persistence.EntityManager', 'org.hibernate.engine.spi.SessionImplementor' (OnClassCondition)
+
+   HibernateJpaConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcClientAutoConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate; SearchStrategy: all) found a single bean 'namedParameterJdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.simple.JdbcClient; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JdbcTemplateAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcTemplateConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.jdbc.core.JdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactory matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactoryBuilder matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#jpaVendorAdapter matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.JpaVendorAdapter; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#transactionManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration#persistenceManagedTypes matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.persistenceunit.PersistenceManagedTypes; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaRepositoriesAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.data.jpa.repository.JpaRepository' (OnClassCondition)
+      - @ConditionalOnProperty (spring.data.jpa.repositories.enabled=true) matched (OnPropertyCondition)
+      - @ConditionalOnBean (types: javax.sql.DataSource; SearchStrategy: all) found bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.data.jpa.repository.support.JpaRepositoryFactoryBean,org.springframework.data.jpa.repository.config.JpaRepositoryConfigExtension; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NamedParameterJdbcTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.JdbcTemplate; SearchStrategy: all) found a single bean 'jdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NoOpCacheConfiguration matched:
+      - Cache org.springframework.boot.autoconfigure.cache.NoOpCacheConfiguration NONE cache type (CacheCondition)
+
+   SqlInitializationAutoConfiguration matched:
+      - @ConditionalOnProperty (spring.sql.init.enabled) matched (OnPropertyCondition)
+      - NoneNestedConditions 0 matched 1 did not; NestedCondition on SqlInitializationAutoConfiguration.SqlInitializationModeCondition.ModeIsNever @ConditionalOnProperty (spring.sql.init.mode=never) did not find property 'mode' (SqlInitializationAutoConfiguration.SqlInitializationModeCondition)
+
+   TestDatabaseAutoConfiguration#embeddedDataSourceBeanFactoryPostProcessor matched:
+      - @ConditionalOnProperty (spring.test.database.replace=ANY) matched (OnPropertyCondition)
+
+   TestEntityManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'jakarta.persistence.EntityManagerFactory' (OnClassCondition)
+
+   TestEntityManagerAutoConfiguration#testEntityManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.transaction.PlatformTransactionManager' (OnClassCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration matched:
+      - @ConditionalOnBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found bean 'transactionManager'; @ConditionalOnMissingBean (types: org.springframework.transaction.annotation.AbstractTransactionManagementConfiguration; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.CglibAutoProxyConfiguration matched:
+      - @ConditionalOnProperty (spring.aop.proxy-target-class=true) matched (OnPropertyCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.transaction.PlatformTransactionManager; SearchStrategy: all) found a single bean 'transactionManager' (OnBeanCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration#transactionTemplate matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.support.TransactionOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+
+Negative matches:
+-----------------
+
+   Cache2kCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.cache2k.Cache2kBuilder' (OnClassCondition)
+
+   CacheAutoConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.cache.interceptor.CacheAspectSupport; SearchStrategy: all) did not find any beans of type org.springframework.cache.interceptor.CacheAspectSupport (OnBeanCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.cache.CacheManager' (OnClassCondition)
+
+   CacheAutoConfiguration.CacheManagerEntityManagerFactoryDependsOnPostProcessor:
+      Did not match:
+         - Ancestor org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration did not match (ConditionEvaluationReport.AncestorsMatchedCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean' (OnClassCondition)
+
+   CaffeineCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.github.benmanes.caffeine.cache.Caffeine' (OnClassCondition)
+
+   CouchbaseCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.couchbase.client.java.Cluster' (OnClassCondition)
+
+   DataSourceAutoConfiguration.EmbeddedDatabaseConfiguration:
+      Did not match:
+         - EmbeddedDataSource spring.datasource.url is set (DataSourceAutoConfiguration.EmbeddedDatabaseCondition)
+
+   DataSourceCheckpointRestoreConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.crac.Resource' (OnClassCondition)
+
+   DataSourceConfiguration.Dbcp2:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourceConfiguration.Generic:
+      Did not match:
+         - @ConditionalOnProperty (spring.datasource.type) did not find property 'spring.datasource.type' (OnPropertyCondition)
+
+   DataSourceConfiguration.OracleUcp:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSourceImpl', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourceConfiguration.Tomcat:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceJmxConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.jmx.enabled=true) found different value in property 'enabled' (OnPropertyCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.CommonsDbcp2PoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.OracleUcpPoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSource', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.TomcatDataSourcePoolMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration#transactionManager:
+      Did not match:
+         - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found beans of type 'org.springframework.transaction.TransactionManager' transactionManager (OnBeanCondition)
+
+   FlywayAutoConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.flyway.enabled) found different value in property 'enabled' (OnPropertyCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.flywaydb.core.Flyway' (OnClassCondition)
+
+   GenericCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.GenericCacheConfiguration unknown cache type (CacheCondition)
+
+   HazelcastCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.hazelcast.core.HazelcastInstance' (OnClassCondition)
+
+   InfinispanCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.infinispan.spring.embedded.provider.SpringEmbeddedCacheManager' (OnClassCondition)
+
+   JCacheCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'javax.cache.Caching' (OnClassCondition)
+
+   JpaBaseConfiguration.JpaWebConfiguration:
+      Did not match:
+         - not a servlet web application (OnWebApplicationCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.web.servlet.config.annotation.WebMvcConfigurer' (OnClassCondition)
+
+   JpaRepositoriesAutoConfiguration#entityManagerFactoryBootstrapExecutorCustomizer:
+      Did not match:
+         - AnyNestedCondition 0 matched 2 did not; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.LazyBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=lazy) found different value in property 'bootstrap-mode'; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.DeferredBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=deferred) found different value in property 'bootstrap-mode' (JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition)
+
+   LiquibaseAutoConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'liquibase.change.DatabaseChange' (OnClassCondition)
+
+   R2dbcInitializationConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'io.r2dbc.spi.ConnectionFactory', 'org.springframework.r2dbc.connection.init.DatabasePopulator' (OnClassCondition)
+
+   RedisCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.springframework.data.redis.connection.RedisConnectionFactory' (OnClassCondition)
+
+   SimpleCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.SimpleCacheConfiguration unknown cache type (CacheCondition)
+
+   TestDatabaseAutoConfiguration#dataSource:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=AUTO_CONFIGURED) found different value in property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#nonTestEmbeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=NON_TEST) found different value in property 'replace' (OnPropertyCondition)
+
+   TransactionAutoConfiguration#transactionalOperator:
+      Did not match:
+         - @ConditionalOnSingleCandidate (types: org.springframework.transaction.ReactiveTransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.AspectJTransactionManagementConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.transaction.aspectj.AbstractTransactionAspect; SearchStrategy: all) did not find any beans of type org.springframework.transaction.aspectj.AbstractTransactionAspect (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.JdkDynamicAutoProxyConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.aop.proxy-target-class=false) did not find property 'proxy-target-class' (OnPropertyCondition)
+
+
+Exclusions:
+-----------
+
+    None
+
+
+Unconditional classes:
+----------------------
+
+    org.springframework.boot.test.autoconfigure.jdbc.TestDatabaseAutoConfiguration
+
+
+
+2026-08-13T16:45:43.363+02:00  INFO 3273021 --- [    Test worker] nalyticsAgroscopeShadowPoisonComputeTest : Started DendroAnalyticsAgroscopeShadowPoisonComputeTest in 1.757 seconds (process running for 14.417)
+2026-08-13T16:45:43.378+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS zone_daily_recommendations]
+2026-08-13T16:45:43.385+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS zone_daily_environment]
+2026-08-13T16:45:43.386+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS irrigation_zones]
+2026-08-13T16:45:43.387+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS agroscope_shadow_daily]
+2026-08-13T16:45:43.387+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS agroscope_shadow_state]
+2026-08-13T16:45:43.388+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [DROP TABLE IF EXISTS agroscope_tree_state]
+2026-08-13T16:45:43.388+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE irrigation_zones (id BIGINT PRIMARY KEY)]
+2026-08-13T16:45:43.390+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE zone_daily_environment (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    zone_id BIGINT NOT NULL,
+    date DATE NOT NULL,
+    rainfall_mm DOUBLE PRECISION NOT NULL DEFAULT 0,
+    flow_liters DOUBLE PRECISION NOT NULL DEFAULT 0,
+    rain_source VARCHAR(30),
+    computed_at TIMESTAMP
+)
+]
+2026-08-13T16:45:43.394+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE zone_daily_recommendations (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    zone_id BIGINT NOT NULL,
+    date DATE NOT NULL,
+    zone_stress_summary VARCHAR(20) NOT NULL,
+    rainfall_mm DOUBLE PRECISION NOT NULL,
+    water_delivered_liters DOUBLE PRECISION NOT NULL,
+    irrigation_action VARCHAR(30) NOT NULL,
+    action_reasoning CLOB NOT NULL,
+    recommendation_json CLOB,
+    rain_suppression_active INTEGER NOT NULL,
+    recovery_verification_active INTEGER NOT NULL,
+    vpd_max_kpa DOUBLE PRECISION,
+    vpd_source VARCHAR(30),
+    irrigation_window_json CLOB,
+    usable_tree_count INTEGER NOT NULL,
+    low_confidence_tree_count INTEGER NOT NULL,
+    outlier_filtered_tree_count INTEGER NOT NULL,
+    zone_confidence_score DOUBLE PRECISION,
+    computed_at TIMESTAMP
+)
+]
+2026-08-13T16:45:43.396+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE agroscope_tree_state (
+    device_id BIGINT PRIMARY KEY,
+    historical_max_um DOUBLE PRECISION,
+    last_end_max_um DOUBLE PRECISION,
+    last_processed_date DATE,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+]
+2026-08-13T16:45:43.398+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE agroscope_shadow_state (
+    zone_id BIGINT PRIMARY KEY,
+    integral DOUBLE PRECISION NOT NULL DEFAULT 0,
+    last_error DOUBLE PRECISION,
+    kp DOUBLE PRECISION NOT NULL,
+    ki DOUBLE PRECISION NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'idle',
+    pending_date DATE,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+]
+2026-08-13T16:45:43.399+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing SQL statement [CREATE TABLE agroscope_shadow_daily (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    zone_id BIGINT NOT NULL,
+    date DATE NOT NULL,
+    stress_upper95_um DOUBLE PRECISION,
+    stress_mean_um DOUBLE PRECISION,
+    stress_sd_um DOUBLE PRECISION,
+    n_trees INTEGER,
+    setpoint_um DOUBLE PRECISION,
+    setpoint_source VARCHAR(12),
+    error DOUBLE PRECISION,
+    dose_mm DOUBLE PRECISION,
+    integral_after DOUBLE PRECISION,
+    forecast_rain_mm DOUBLE PRECISION,
+    water_input_mm DOUBLE PRECISION,
+    low_confidence BOOLEAN NOT NULL DEFAULT false,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_agro_daily UNIQUE (zone_id, date)
+)
+]
+2026-08-13T16:45:43.402+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:45:43.403+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO irrigation_zones (id) VALUES (?)]
+2026-08-13T16:45:43.408+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:45:43.408+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO irrigation_zones (id) VALUES (?)]
+2026-08-13T16:45:43.409+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:45:43.409+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters) VALUES (?, ?, 0, 10)]
+2026-08-13T16:45:43.411+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL update
+2026-08-13T16:45:43.411+02:00 DEBUG 3273021 --- [    Test worker] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters) VALUES (?, ?, 0, 10)]
+2026-08-13T16:45:43.419+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Dendro analytics v5: 2 zone(s) — reference=2026-08-13T14:45:43.419438678Z
+2026-08-13T16:45:43.434+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? order by zdr1_0.date desc fetch first ? rows only
+Hibernate: select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? order by zdr1_0.date desc fetch first ? rows only
+2026-08-13T16:45:43.444+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+Hibernate: select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+2026-08-13T16:45:43.451+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into zone_daily_recommendations (action_reasoning,computed_at,date,irrigation_action,irrigation_window_json,low_confidence_tree_count,outlier_filtered_tree_count,rain_suppression_active,rainfall_mm,recommendation_json,recovery_verification_active,usable_tree_count,vpd_max_kpa,vpd_source,water_delivered_liters,zone_id,zone_confidence_score,zone_stress_summary,id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,default)
+Hibernate: insert into zone_daily_recommendations (action_reasoning,computed_at,date,irrigation_action,irrigation_window_json,low_confidence_tree_count,outlier_filtered_tree_count,rain_suppression_active,rainfall_mm,recommendation_json,recovery_verification_active,usable_tree_count,vpd_max_kpa,vpd_source,water_delivered_liters,zone_id,zone_confidence_score,zone_stress_summary,id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,default)
+2026-08-13T16:45:43.461+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+Hibernate: select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+2026-08-13T16:45:43.467+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+Hibernate: select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+2026-08-13T16:45:43.468+02:00  WARN 3273021 --- [    Test worker] o.o.s.analytics.AgroscopeShadowService   : Agroscope shadow enabled zone 101 has no flow_liters row for 2026-08-12
+2026-08-13T16:45:43.472+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select asd1_0.id,asd1_0.created_at,asd1_0.date,asd1_0.dose_mm,asd1_0.error,asd1_0.forecast_rain_mm,asd1_0.integral_after,asd1_0.low_confidence,asd1_0.n_trees,asd1_0.setpoint_source,asd1_0.setpoint_um,asd1_0.status,asd1_0.stress_mean_um,asd1_0.stress_sd_um,asd1_0.stress_upper95_um,asd1_0.water_input_mm,asd1_0.zone_id from agroscope_shadow_daily asd1_0 where asd1_0.zone_id=? and asd1_0.date=?
+Hibernate: select asd1_0.id,asd1_0.created_at,asd1_0.date,asd1_0.dose_mm,asd1_0.error,asd1_0.forecast_rain_mm,asd1_0.integral_after,asd1_0.low_confidence,asd1_0.n_trees,asd1_0.setpoint_source,asd1_0.setpoint_um,asd1_0.status,asd1_0.stress_mean_um,asd1_0.stress_sd_um,asd1_0.stress_upper95_um,asd1_0.water_input_mm,asd1_0.zone_id from agroscope_shadow_daily asd1_0 where asd1_0.zone_id=? and asd1_0.date=?
+2026-08-13T16:45:43.477+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ass1_0.zone_id,ass1_0.integral,ass1_0.ki,ass1_0.kp,ass1_0.last_error,ass1_0.pending_date,ass1_0.status,ass1_0.updated_at from agroscope_shadow_state ass1_0 where ass1_0.zone_id=?
+Hibernate: select ass1_0.zone_id,ass1_0.integral,ass1_0.ki,ass1_0.kp,ass1_0.last_error,ass1_0.pending_date,ass1_0.status,ass1_0.updated_at from agroscope_shadow_state ass1_0 where ass1_0.zone_id=?
+2026-08-13T16:45:43.487+02:00 ERROR 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Agroscope shadow failed zone 101: 
+Cannot call abstract real method on java object!
+Calling real methods is only possible when mocking non abstract method.
+  //correct example:
+  when(mockOfConcreteClass.nonAbstractMethod()).thenCallRealMethod(); (total shadow failures: 1)
+
+org.mockito.exceptions.base.MockitoException: 
+Cannot call abstract real method on java object!
+Calling real methods is only possible when mocking non abstract method.
+  //correct example:
+  when(mockOfConcreteClass.nonAbstractMethod()).thenCallRealMethod();
+	at org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest.lambda$computeForAllZones_commitsAllV6RecommendationsWhenRealAgroscopeRepositoryFailsAfterDbWrite$1(DendroAnalyticsAgroscopeShadowPoisonComputeTest.java:103) ~[test/:na]
+	at org.osi.server.analytics.AgroscopeShadowService.runShadow(AgroscopeShadowService.java:142) ~[main/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:359) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:380) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:727) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.osi.server.analytics.AgroscopeShadowService$$SpringCGLIB$$0.runShadow(&lt;generated&gt;) ~[main/:na]
+	at org.osi.server.analytics.DendroAnalyticsService.computeForZone(DendroAnalyticsService.java:268) ~[main/:na]
+	at org.osi.server.analytics.DendroAnalyticsService.computeForAllZones(DendroAnalyticsService.java:137) ~[main/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:359) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:380) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:727) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.osi.server.analytics.DendroAnalyticsService$$SpringCGLIB$$0.computeForAllZones(&lt;generated&gt;) ~[main/:na]
+	at org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest.lambda$computeForAllZones_commitsAllV6RecommendationsWhenRealAgroscopeRepositoryFailsAfterDbWrite$2(DendroAnalyticsAgroscopeShadowPoisonComputeTest.java:108) ~[test/:na]
+	at org.assertj.core.api.ThrowableAssert.catchThrowable(ThrowableAssert.java:63) ~[assertj-core-3.26.3.jar:na]
+	at org.assertj.core.api.AssertionsForClassTypes.catchThrowable(AssertionsForClassTypes.java:904) ~[assertj-core-3.26.3.jar:na]
+	at org.assertj.core.api.AssertionsForClassTypes.assertThatCode(AssertionsForClassTypes.java:875) ~[assertj-core-3.26.3.jar:na]
+	at org.assertj.core.api.Assertions.assertThatCode(Assertions.java:1390) ~[assertj-core-3.26.3.jar:na]
+	at org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest.computeForAllZones_commitsAllV6RecommendationsWhenRealAgroscopeRepositoryFailsAfterDbWrite(DendroAnalyticsAgroscopeShadowPoisonComputeTest.java:108) ~[test/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767) ~[junit-platform-commons-1.11.4.jar:1.11.4]
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor$CollectAllTestClassesExecutor.processAllTestClasses(JUnitPlatformTestClassProcessor.java:124) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor$CollectAllTestClassesExecutor.access$000(JUnitPlatformTestClassProcessor.java:99) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor.stop(JUnitPlatformTestClassProcessor.java:94) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.SuiteTestClassProcessor.stop(SuiteTestClassProcessor.java:63) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:36) ~[na:na]
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:24) ~[na:na]
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33) ~[na:na]
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:92) ~[na:na]
+	at jdk.proxy1/jdk.proxy1.$Proxy4.stop(Unknown Source) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$3.run(TestWorker.java:200) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:132) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63) ~[na:na]
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56) ~[na:na]
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:121) ~[na:na]
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:71) ~[na:na]
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69) ~[gradle-worker.jar:na]
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74) ~[gradle-worker.jar:na]
+
+2026-08-13T16:45:43.492+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 101 (Zone 101): stress=unknown → action=maintain
+2026-08-13T16:45:43.499+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? order by zdr1_0.date desc fetch first ? rows only
+Hibernate: select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? order by zdr1_0.date desc fetch first ? rows only
+2026-08-13T16:45:43.505+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+Hibernate: select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+2026-08-13T16:45:43.509+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into zone_daily_recommendations (action_reasoning,computed_at,date,irrigation_action,irrigation_window_json,low_confidence_tree_count,outlier_filtered_tree_count,rain_suppression_active,rainfall_mm,recommendation_json,recovery_verification_active,usable_tree_count,vpd_max_kpa,vpd_source,water_delivered_liters,zone_id,zone_confidence_score,zone_stress_summary,id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,default)
+Hibernate: insert into zone_daily_recommendations (action_reasoning,computed_at,date,irrigation_action,irrigation_window_json,low_confidence_tree_count,outlier_filtered_tree_count,rain_suppression_active,rainfall_mm,recommendation_json,recovery_verification_active,usable_tree_count,vpd_max_kpa,vpd_source,water_delivered_liters,zone_id,zone_confidence_score,zone_stress_summary,id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,default)
+2026-08-13T16:45:43.515+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+Hibernate: select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+2026-08-13T16:45:43.524+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+Hibernate: select zde1_0.id,zde1_0.computed_at,zde1_0.date,zde1_0.flow_liters,zde1_0.rain_source,zde1_0.rainfall_mm,zde1_0.zone_id from zone_daily_environment zde1_0 left join irrigation_zones z1_0 on z1_0.id=zde1_0.zone_id where z1_0.id=? and zde1_0.date=?
+2026-08-13T16:45:43.527+02:00  WARN 3273021 --- [    Test worker] o.o.s.analytics.AgroscopeShadowService   : Agroscope shadow enabled zone 202 has no flow_liters row for 2026-08-12
+2026-08-13T16:45:43.531+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select asd1_0.id,asd1_0.created_at,asd1_0.date,asd1_0.dose_mm,asd1_0.error,asd1_0.forecast_rain_mm,asd1_0.integral_after,asd1_0.low_confidence,asd1_0.n_trees,asd1_0.setpoint_source,asd1_0.setpoint_um,asd1_0.status,asd1_0.stress_mean_um,asd1_0.stress_sd_um,asd1_0.stress_upper95_um,asd1_0.water_input_mm,asd1_0.zone_id from agroscope_shadow_daily asd1_0 where asd1_0.zone_id=? and asd1_0.date=?
+Hibernate: select asd1_0.id,asd1_0.created_at,asd1_0.date,asd1_0.dose_mm,asd1_0.error,asd1_0.forecast_rain_mm,asd1_0.integral_after,asd1_0.low_confidence,asd1_0.n_trees,asd1_0.setpoint_source,asd1_0.setpoint_um,asd1_0.status,asd1_0.stress_mean_um,asd1_0.stress_sd_um,asd1_0.stress_upper95_um,asd1_0.water_input_mm,asd1_0.zone_id from agroscope_shadow_daily asd1_0 where asd1_0.zone_id=? and asd1_0.date=?
+2026-08-13T16:45:43.542+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ass1_0.zone_id,ass1_0.integral,ass1_0.ki,ass1_0.kp,ass1_0.last_error,ass1_0.pending_date,ass1_0.status,ass1_0.updated_at from agroscope_shadow_state ass1_0 where ass1_0.zone_id=?
+Hibernate: select ass1_0.zone_id,ass1_0.integral,ass1_0.ki,ass1_0.kp,ass1_0.last_error,ass1_0.pending_date,ass1_0.status,ass1_0.updated_at from agroscope_shadow_state ass1_0 where ass1_0.zone_id=?
+2026-08-13T16:45:43.545+02:00 ERROR 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Agroscope shadow failed zone 202: 
+Cannot call abstract real method on java object!
+Calling real methods is only possible when mocking non abstract method.
+  //correct example:
+  when(mockOfConcreteClass.nonAbstractMethod()).thenCallRealMethod(); (total shadow failures: 2)
+
+org.mockito.exceptions.base.MockitoException: 
+Cannot call abstract real method on java object!
+Calling real methods is only possible when mocking non abstract method.
+  //correct example:
+  when(mockOfConcreteClass.nonAbstractMethod()).thenCallRealMethod();
+	at org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest.lambda$computeForAllZones_commitsAllV6RecommendationsWhenRealAgroscopeRepositoryFailsAfterDbWrite$1(DendroAnalyticsAgroscopeShadowPoisonComputeTest.java:103) ~[test/:na]
+	at org.osi.server.analytics.AgroscopeShadowService.runShadow(AgroscopeShadowService.java:142) ~[main/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:359) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:380) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:727) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.osi.server.analytics.AgroscopeShadowService$$SpringCGLIB$$0.runShadow(&lt;generated&gt;) ~[main/:na]
+	at org.osi.server.analytics.DendroAnalyticsService.computeForZone(DendroAnalyticsService.java:268) ~[main/:na]
+	at org.osi.server.analytics.DendroAnalyticsService.computeForAllZones(DendroAnalyticsService.java:137) ~[main/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:359) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:380) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119) ~[spring-tx-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:727) ~[spring-aop-6.2.3.jar:6.2.3]
+	at org.osi.server.analytics.DendroAnalyticsService$$SpringCGLIB$$0.computeForAllZones(&lt;generated&gt;) ~[main/:na]
+	at org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest.lambda$computeForAllZones_commitsAllV6RecommendationsWhenRealAgroscopeRepositoryFailsAfterDbWrite$2(DendroAnalyticsAgroscopeShadowPoisonComputeTest.java:108) ~[test/:na]
+	at org.assertj.core.api.ThrowableAssert.catchThrowable(ThrowableAssert.java:63) ~[assertj-core-3.26.3.jar:na]
+	at org.assertj.core.api.AssertionsForClassTypes.catchThrowable(AssertionsForClassTypes.java:904) ~[assertj-core-3.26.3.jar:na]
+	at org.assertj.core.api.AssertionsForClassTypes.assertThatCode(AssertionsForClassTypes.java:875) ~[assertj-core-3.26.3.jar:na]
+	at org.assertj.core.api.Assertions.assertThatCode(Assertions.java:1390) ~[assertj-core-3.26.3.jar:na]
+	at org.osi.server.analytics.DendroAnalyticsAgroscopeShadowPoisonComputeTest.computeForAllZones_commitsAllV6RecommendationsWhenRealAgroscopeRepositoryFailsAfterDbWrite(DendroAnalyticsAgroscopeShadowPoisonComputeTest.java:108) ~[test/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767) ~[junit-platform-commons-1.11.4.jar:1.11.4]
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68) ~[junit-jupiter-engine-5.11.4.jar:5.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511) ~[na:na]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54) ~[junit-platform-engine-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47) ~[junit-platform-launcher-1.11.4.jar:1.11.4]
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor$CollectAllTestClassesExecutor.processAllTestClasses(JUnitPlatformTestClassProcessor.java:124) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor$CollectAllTestClassesExecutor.access$000(JUnitPlatformTestClassProcessor.java:99) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor.stop(JUnitPlatformTestClassProcessor.java:94) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.SuiteTestClassProcessor.stop(SuiteTestClassProcessor.java:63) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:36) ~[na:na]
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:24) ~[na:na]
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33) ~[na:na]
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:92) ~[na:na]
+	at jdk.proxy1/jdk.proxy1.$Proxy4.stop(Unknown Source) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$3.run(TestWorker.java:200) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:132) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103) ~[na:na]
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63) ~[na:na]
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56) ~[na:na]
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:121) ~[na:na]
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:71) ~[na:na]
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69) ~[gradle-worker.jar:na]
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74) ~[gradle-worker.jar:na]
+
+2026-08-13T16:45:43.548+02:00  INFO 3273021 --- [    Test worker] o.o.s.analytics.DendroAnalyticsService   : Zone 202 (Zone 202): stress=unknown → action=maintain
+2026-08-13T16:45:43.581+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+Hibernate: select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+2026-08-13T16:45:43.595+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+Hibernate: select zdr1_0.id,zdr1_0.action_reasoning,zdr1_0.computed_at,zdr1_0.date,zdr1_0.irrigation_action,zdr1_0.irrigation_window_json,zdr1_0.low_confidence_tree_count,zdr1_0.outlier_filtered_tree_count,zdr1_0.rain_suppression_active,zdr1_0.rainfall_mm,zdr1_0.recommendation_json,zdr1_0.recovery_verification_active,zdr1_0.usable_tree_count,zdr1_0.vpd_max_kpa,zdr1_0.vpd_source,zdr1_0.water_delivered_liters,zdr1_0.zone_id,zdr1_0.zone_confidence_score,zdr1_0.zone_stress_summary from zone_daily_recommendations zdr1_0 left join irrigation_zones z1_0 on z1_0.id=zdr1_0.zone_id where z1_0.id=? and zdr1_0.date=?
+2026-08-13T16:45:43.602+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select asd1_0.id,asd1_0.created_at,asd1_0.date,asd1_0.dose_mm,asd1_0.error,asd1_0.forecast_rain_mm,asd1_0.integral_after,asd1_0.low_confidence,asd1_0.n_trees,asd1_0.setpoint_source,asd1_0.setpoint_um,asd1_0.status,asd1_0.stress_mean_um,asd1_0.stress_sd_um,asd1_0.stress_upper95_um,asd1_0.water_input_mm,asd1_0.zone_id from agroscope_shadow_daily asd1_0 where asd1_0.zone_id=? and asd1_0.date=?
+Hibernate: select asd1_0.id,asd1_0.created_at,asd1_0.date,asd1_0.dose_mm,asd1_0.error,asd1_0.forecast_rain_mm,asd1_0.integral_after,asd1_0.low_confidence,asd1_0.n_trees,asd1_0.setpoint_source,asd1_0.setpoint_um,asd1_0.status,asd1_0.stress_mean_um,asd1_0.stress_sd_um,asd1_0.stress_upper95_um,asd1_0.water_input_mm,asd1_0.zone_id from agroscope_shadow_daily asd1_0 where asd1_0.zone_id=? and asd1_0.date=?
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
+</div>
+</div>
+</body>
+</html>

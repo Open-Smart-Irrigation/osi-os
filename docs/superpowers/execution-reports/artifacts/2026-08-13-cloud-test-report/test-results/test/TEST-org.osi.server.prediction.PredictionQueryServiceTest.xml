@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.prediction.PredictionQueryServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:32" hostname="osi-01" time="0.155">
+  <properties/>
+  <testcase name="trajectoryFallsBackToSuccessfulRunWhenLatestRunFailed()" classname="org.osi.server.prediction.PredictionQueryServiceTest" time="0.149"/>
+  <testcase name="returnsLatestReferenceComparisonForLatestPredictionRun()" classname="org.osi.server.prediction.PredictionQueryServiceTest" time="0.003"/>
+  <testcase name="summaryFallsBackToLastSuccessfulRunWhenLatestRunFailed()" classname="org.osi.server.prediction.PredictionQueryServiceTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

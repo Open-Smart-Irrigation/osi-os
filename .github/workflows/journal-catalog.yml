@@ -1,9 +1,9 @@
 name: Journal Catalog Vendor Parity
 on:
   push:
-    branches: [ AgroLink ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ AgroLink ]
+  workflow_dispatch:
 jobs:
   catalog-parity:
     runs-on: ubuntu-latest

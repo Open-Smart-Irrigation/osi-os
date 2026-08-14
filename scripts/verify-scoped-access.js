@@ -29,6 +29,32 @@ const PUBLIC_ALLOWLIST = new Set([
 const PHASE_C_PENDING = new Set([]);
 const ALLOWLIST = new Set([...PUBLIC_ALLOWLIST, ...PHASE_C_PENDING]);
 
+// Write-only scoping (W1): the read-filter API is retired. A route that
+// reintroduces one of these calls is reintroducing read scoping, which the
+// behavioral matrix would catch only if someone wrote the matching test.
+const RETIRED_READ_FILTERS = [
+  'assertZoneAccess',
+  'assertPlotAccess',
+  'assertDeviceAccess',
+  'listScopeZoneUuids',
+  'filterZoneUuids',
+];
+
+function findReadFilterRegressions(flows, profileLabel) {
+  const failures = [];
+  for (const node of flows) {
+    const text = String(node.func || '');
+    for (const name of RETIRED_READ_FILTERS) {
+      if (text.includes(name + '(')) {
+        failures.push(
+          `${profileLabel}: node ${node.id} (${node.name || 'unnamed'}) calls retired read filter ${name}()`
+        );
+      }
+    }
+  }
+  return failures;
+}
+
 function findFailures(flows, profileLabel, allowlist = ALLOWLIST) {
   const failures = [];
   const byId = new Map(flows.map((node) => [node.id, node]));
@@ -68,6 +94,7 @@ function verifyProfiles(profiles = PROFILES) {
   for (const relativePath of profiles) {
     const flows = JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), 'utf8'));
     failures.push(...findFailures(flows, relativePath));
+    failures.push(...findReadFilterRegressions(flows, relativePath));
   }
   return failures;
 }
@@ -86,6 +113,8 @@ module.exports = {
   PHASE_C_PENDING,
   PROFILES,
   PUBLIC_ALLOWLIST,
+  RETIRED_READ_FILTERS,
   findFailures,
+  findReadFilterRegressions,
   verifyProfiles,
 };

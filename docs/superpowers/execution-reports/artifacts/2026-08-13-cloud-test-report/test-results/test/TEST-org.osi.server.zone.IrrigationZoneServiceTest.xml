@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.zone.IrrigationZoneServiceTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:06" hostname="osi-01" time="0.003">
+  <properties/>
+  <testcase name="assignDeviceRejectsCrossGatewayBinding()" classname="org.osi.server.zone.IrrigationZoneServiceTest" time="0.001"/>
+  <testcase name="assignDevicePropagatesZoneGatewayAndIncrementsDeviceSyncVersion()" classname="org.osi.server.zone.IrrigationZoneServiceTest" time="0.0"/>
+  <testcase name="updatePredictionCardEnabled_persistsFlag()" classname="org.osi.server.zone.IrrigationZoneServiceTest" time="0.0"/>
+  <testcase name="updateLocationMarksSoilProfileStaleAndTriggersRefresh()" classname="org.osi.server.zone.IrrigationZoneServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

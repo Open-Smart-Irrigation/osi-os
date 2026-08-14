@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - ChameleonCalibrationsAdminControllerTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>ChameleonCalibrationsAdminControllerTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.chameleon.html">org.osi.server.chameleon</a> &gt; ChameleonCalibrationsAdminControllerTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">2</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.391s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">dumpReturnsAllRows()</td>
+<td class="success">0.015s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">refreshForcesReFetch()</td>
+<td class="success">0.376s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>2026-08-13T16:45:49.009+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:45:49.024+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:45:49.057+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:45:49.069+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:45:49.070+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:45:49.072+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 2 ms
+2026-08-13T16:45:49.099+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.chameleon.ChameleonCalibrationsAdminController#refresh(String)
+2026-08-13T16:45:49.125+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T16:45:49.132+02:00 DEBUG 3273021 --- [    Test worker] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [CalibrationDto[array_id=28F8B2B40F0000C1, sensor_id=F8C1, sensor1_a=1.0, sensor1_b=2.0, sensor1_c=3. (truncated)...]
+2026-08-13T16:45:49.177+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 2 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:45:49.178+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:45:49.179+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:45:49.179+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:45:49.179+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:45:49.179+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:45:49.180+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.chameleon.ChameleonCalibrationsAdminController#dump()
+2026-08-13T16:45:49.182+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T16:45:49.182+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Writing [[]]
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
+</div>
+</div>
+</body>
+</html>

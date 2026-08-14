@@ -118,8 +118,13 @@ function physicalActionExpiry(envelope, type, runtime) {
     const text = String(value).trim();
     return { text, millis: Date.parse(text) };
   });
-  if (parsed.length === 0 ||
-      parsed.some(function(value) { return !Number.isFinite(value.millis); }) ||
+  if (parsed.length === 0) {
+    // No expiry anywhere means a legacy issuer, not a malformed command. The
+    // deployed cloud does not send expires_at, and fencing its commands NACKed
+    // every physical action permanently during a mixed-version rollout.
+    return null;
+  }
+  if (parsed.some(function(value) { return !Number.isFinite(value.millis); }) ||
       parsed.some(function(value) { return value.millis !== parsed[0].millis; })) {
     return {
       terminal: true,
@@ -236,6 +241,9 @@ function validNonJournalEffectBinding(envelope, runtime) {
     const expectedSetting = hardwareConfigurationEffects[commandType(envelope)];
     return deviceEui === match[1] && (!expectedSetting || expectedSetting === match[2]);
   }
+  // Version dependency: the action grammar is part of osi-command-ledger
+  // package version 1.0.0. Older gateway ledgers must not receive action keys
+  // until their command-ledger implementation is upgraded.
   match = /^action:([0-9A-F]{16}):([a-z0-9_.-]+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(effectKey);
   if (match) {
     const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')

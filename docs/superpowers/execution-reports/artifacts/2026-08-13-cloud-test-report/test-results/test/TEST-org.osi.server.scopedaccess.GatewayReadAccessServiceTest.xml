@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.scopedaccess.GatewayReadAccessServiceTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:36" hostname="osi-01" time="0.003">
+  <properties/>
+  <testcase name="unlinkedGatewayIsNotAMember()" classname="org.osi.server.scopedaccess.GatewayReadAccessServiceTest" time="0.001"/>
+  <testcase name="disabledMembershipIsNotAMember()" classname="org.osi.server.scopedaccess.GatewayReadAccessServiceTest" time="0.0"/>
+  <testcase name="blankGatewayEuiIsNotAMember()" classname="org.osi.server.scopedaccess.GatewayReadAccessServiceTest" time="0.001"/>
+  <testcase name="memberGatewayEuisSkipsDeniedGatewaysWithoutThrowing()" classname="org.osi.server.scopedaccess.GatewayReadAccessServiceTest" time="0.0"/>
+  <testcase name="memberOfLinkedGatewayIsAllowed()" classname="org.osi.server.scopedaccess.GatewayReadAccessServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

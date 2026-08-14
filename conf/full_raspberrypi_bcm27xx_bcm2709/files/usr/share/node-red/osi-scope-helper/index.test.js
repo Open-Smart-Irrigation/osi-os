@@ -71,38 +71,29 @@ test('cache reuses scope until invalidated', async () => {
   assert.equal(reads, 2);
 });
 
-test('fresh zone assertion bypasses the read cache', async () => {
-  let grantReads = 0;
-  const db = fakeDb({
-    get: () => ({ id: 7, username: 'user', role: 'researcher', disabled_at: null }),
-    all: (sql) => {
-      if (sql.includes('user_zone_assignments')) {
-        grantReads += 1;
-        return [{ zone_uuid: 'z1' }];
-      }
-      return [];
-    },
-  });
-  await scope.resolveScope(db, 'u1', { scopedMode: true });
-  await scope.assertZoneAccess(db, 'u1', 'z1', { scopedMode: true });
-  assert.equal(grantReads, 1);
-  await scope.assertFreshZoneAccess(db, 'u1', 'z1', { scopedMode: true });
-  assert.equal(grantReads, 2);
-});
-
-test('resource and role denials carry stable HTTP status codes', async () => {
-  const db = fakeDb({
-    get: () => ({ id: 7, username: 'user', role: 'viewer', disabled_at: null }),
-    all: () => [],
-  });
-  await assert.rejects(
-    () => scope.assertZoneAccess(db, 'u1', 'z-foreign', { scopedMode: true }),
-    (error) => error.status === 404 && error.statusCode === 404
-  );
-  await assert.rejects(
-    () => scope.assertRole(db, 'u1', 'admin', { scopedMode: true }),
-    (error) => error.status === 403 && error.statusCode === 403
-  );
+test('the read-filter API is retired: write-only scoping exports no read predicate', () => {
+  for (const name of [
+    'assertZoneAccess',
+    'assertPlotAccess',
+    'assertDeviceAccess',
+    'listScopeZoneUuids',
+    'filterZoneUuids',
+  ]) {
+    assert.equal(scope[name], undefined, `${name} must not be exported (W1)`);
+  }
+  for (const name of [
+    'assertEnabledAccount',
+    'assertFreshZoneAccess',
+    'assertFreshPlotAccess',
+    'assertFreshDeviceAccess',
+    'assertFreshRole',
+    'assertRole',
+    'authorizeAdminRead',
+    'canMutate',
+    'resolveZoneUuidById',
+  ]) {
+    assert.equal(typeof scope[name], 'function', `${name} must survive`);
+  }
 });
 
 test('disabled account fails closed on fresh paths', async () => {
@@ -152,78 +143,6 @@ test('resolveZoneUuidById maps numeric id to uuid; null when missing', async () 
   assert.equal(await scope.resolveZoneUuidById(missingDb, 99), null);
 });
 
-test('assertDeviceAccess: weather-class passes any enabled user; zone device needs scope', async () => {
-  const makeDb = (device) => fakeDb({
-    get: (sql) => {
-      if (sql.includes('FROM devices')) return device;
-      if (sql.includes('FROM users')) {
-        return {
-          id: 7,
-          username: 'user',
-          role: 'researcher',
-          disabled_at: null,
-          user_uuid: 'u1',
-        };
-      }
-      return undefined;
-    },
-    all: () => [],
-  });
-  await scope.assertDeviceAccess(
-    makeDb({ deveui: 'W1', type_id: 'SENSECAP_S2120', zone_uuid: 'z-foreign' }),
-    'u1',
-    'W1',
-    { scopedMode: true }
-  );
-  await scope.assertDeviceAccess(
-    makeDb({ deveui: 'W2', type_id: 'AQUASCOPE_LORAIN', zone_uuid: null }),
-    'u1',
-    'W2',
-    { scopedMode: true }
-  );
-  await assert.rejects(
-    () => scope.assertDeviceAccess(
-      makeDb({ deveui: 'D1', type_id: 'DRAGINO_LSN50', zone_uuid: 'z-foreign' }),
-      'u1',
-      'D1',
-      { scopedMode: true }
-    ),
-    (error) => error.status === 404
-  );
-});
-
-test('assertDeviceAccess: unknown device is 404, not 403', async () => {
-  const db = fakeDb({ get: () => undefined });
-  await assert.rejects(
-    () => scope.assertDeviceAccess(db, 'u1', 'NOPE', { scopedMode: true }),
-    (error) => error.status === 404
-  );
-});
-
-test('listScopeZoneUuids: wildcard returns null (no filter), scoped returns array', async () => {
-  const unscopedDb = fakeDb({});
-  assert.equal(
-    await scope.listScopeZoneUuids(unscopedDb, 'u1', { scopedMode: false }),
-    null
-  );
-  const scopedDb = fakeDb({
-    get: () => ({
-      id: 7,
-      username: 'user',
-      role: 'researcher',
-      disabled_at: null,
-      user_uuid: 'u1',
-    }),
-    all: (sql) => sql.includes('user_zone_assignments')
-      ? [{ zone_uuid: 'z1' }]
-      : [{ zone_uuid: 'z0' }],
-  });
-  assert.deepEqual(
-    (await scope.listScopeZoneUuids(scopedDb, 'u1', { scopedMode: true })).sort(),
-    ['z0', 'z1']
-  );
-});
-
 test('verifyBearer accepts the edge two-part HMAC token and rejects forged tokens', () => {
   const secret = 'scope-auth-test-secret';
   const payload = Buffer.from(JSON.stringify({
@@ -240,6 +159,30 @@ test('verifyBearer accepts the edge two-part HMAC token and rejects forged token
     () => scope.verifyBearer(`Bearer ${payload}.forged`, { configuredSecret: secret }),
     (error) => error.statusCode === 401
   );
+});
+
+test('concurrent auth-secret resolution reuses the one persisted secret', async () => {
+  const files = new Map();
+  const fakeFs = {
+    readFileSync(path) {
+      if (!files.has(path)) {
+        const error = new Error('missing');
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return files.get(path);
+    },
+    writeFileSync(path, value) {
+      files.set(path, value);
+    },
+  };
+  const [first, second] = await Promise.all([
+    scope.resolveAuthSecret({ fs: fakeFs }),
+    scope.resolveAuthSecret({ fs: fakeFs }),
+  ]);
+  assert.equal(first, second);
+  assert.equal(files.size, 1);
+  assert.equal(files.values().next().value.trim(), first);
 });
 
 test('assertAuthenticatedRole binds token id and username before checking role', async () => {
@@ -440,7 +383,29 @@ test('buildDisableUserGuardedSql protects only the last enabled admin', () => {
 test('buildDeroleUserGuardedSql protects the last enabled admin', () => {
   const sql = scope.buildDeroleUserGuardedSql();
   assert.match(sql, /^UPDATE users SET role = \?/);
+  assert.match(sql, /disabled_at IS NOT NULL/);
   assert.match(sql, /COUNT\(\*\).*role='admin'/);
+});
+
+test('admin guarded SQL exposes stable replacement anchors and deroles a disabled admin', () => {
+  const disableSql = scope.buildDisableUserGuardedSql();
+  const deroleSql = scope.buildDeroleUserGuardedSql();
+  assert.match(disableSql, /SET disabled_at =/);
+  assert.match(deroleSql, /SET role = \?/);
+
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE users (
+      user_uuid TEXT PRIMARY KEY,
+      role TEXT NOT NULL,
+      disabled_at TEXT
+    );
+    INSERT INTO users (user_uuid, role, disabled_at)
+    VALUES ('u-enabled','admin',NULL), ('u-disabled','admin','2026-01-01T00:00:00.000Z');
+  `);
+  assert.equal(db.prepare(deroleSql).run('researcher', 'u-disabled', 'researcher').changes, 1);
+  db.close();
 });
 
 test('canMutate is an allowlist: only admin/researcher, everything else (including a corrupted role) fails closed', () => {

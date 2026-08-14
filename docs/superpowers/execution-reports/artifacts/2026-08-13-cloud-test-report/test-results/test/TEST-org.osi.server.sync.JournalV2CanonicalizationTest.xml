@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.sync.JournalV2CanonicalizationTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:58" hostname="osi-01" time="0.017">
+  <properties/>
+  <testcase name="matchesCompleteMutationAndReplicationEnvelopeVectors()" classname="org.osi.server.sync.JournalV2CanonicalizationTest" time="0.008"/>
+  <testcase name="sha256NarrowsCatchToGenuineCryptoFailuresOnly()" classname="org.osi.server.sync.JournalV2CanonicalizationTest" time="0.001"/>
+  <testcase name="leapSecondShapedFreeTextFallsThroughInsteadOfThrowing()" classname="org.osi.server.sync.JournalV2CanonicalizationTest" time="0.001"/>
+  <testcase name="rejectsEverySharedSemanticVector()" classname="org.osi.server.sync.JournalV2CanonicalizationTest" time="0.006"/>
+  <testcase name="matchesEveryVendoredGoldenVector()" classname="org.osi.server.sync.JournalV2CanonicalizationTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -153,6 +153,7 @@ function toGrpcError(error, step) {
 function reconciliationRequiredError(step, resourceKind) {
   const error = boundedError(step, 'RECONCILIATION_REQUIRED');
   error.resourceKind = resourceKind;
+  if (resourceKind === 'keys') error.verificationRequired = true;
   return error;
 }
 
@@ -320,6 +321,22 @@ function constantTimeEqual(a, b) {
     return false;
   }
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// ChirpStack >= 4.12 stores device keys as fixed-width AES128 values and
+// returns an unset appKey/genAppKey as 32 zero hex chars, where older
+// releases returned the empty string. Both encodings mean "no key", so
+// read-back comparisons must canonicalize before comparing or every
+// fresh provisioning fails its verifyKeys step against a 4.12+ store.
+const UNSET_KEY_ZEROS = '0'.repeat(32);
+
+function canonicalStoredKey(value) {
+  const normalized = normalizeHexKey(value);
+  return normalized === '' ? UNSET_KEY_ZEROS : normalized;
+}
+
+function storedKeyEqual(a, b) {
+  return constantTimeEqual(canonicalStoredKey(a), canonicalStoredKey(b));
 }
 
 class ChirpStackClient {
@@ -561,9 +578,9 @@ class ChirpStackClient {
         const keysFenceHolds = !needsKeysFence || Boolean(
           fenceKeys
           && ctx.desiredKeysSnapshot
-          && constantTimeEqual(normalizeHexKey(fenceKeys.getNwkKey()), ctx.desiredKeysSnapshot.nwkKey)
-          && constantTimeEqual(normalizeHexKey(fenceKeys.getAppKey()), ctx.desiredKeysSnapshot.appKey)
-          && constantTimeEqual(normalizeHexKey(fenceKeys.getGenAppKey()), ctx.desiredKeysSnapshot.genAppKey)
+          && storedKeyEqual(fenceKeys.getNwkKey(), ctx.desiredKeysSnapshot.nwkKey)
+          && storedKeyEqual(fenceKeys.getAppKey(), ctx.desiredKeysSnapshot.appKey)
+          && storedKeyEqual(fenceKeys.getGenAppKey(), ctx.desiredKeysSnapshot.genAppKey)
         );
         if (!deviceFenceHolds || !keysFenceHolds) {
           return reconciliationRequiredError(error.step, !deviceFenceHolds ? 'device' : 'keys');
@@ -638,6 +655,14 @@ class ChirpStackClient {
       throw boundedError('validate', 'INVALID_ARGUMENT');
     }
     if (!/^[0-9A-F]{32}$/.test(nwkKey)) {
+      throw boundedError('validate', 'INVALID_ARGUMENT');
+    }
+    if (nwkKey === UNSET_KEY_ZEROS) {
+      // ChirpStack 4.12+ reports an unset key as 32 zeros, and canonicalStoredKey
+      // maps an empty read-back to the same value. Accepting zeros as a REQUESTED
+      // key therefore "verifies" against a device that has no key at all: the ACK
+      // says SUCCESS and the device can never join. Reject at the boundary; do not
+      // relax the comparator, which needs that canonicalization to work.
       throw boundedError('validate', 'INVALID_ARGUMENT');
     }
 
@@ -730,7 +755,7 @@ class ChirpStackClient {
         expectedGenAppKey = originalKeys.genAppKey;
         // Same before-the-RPC ordering guarantee as the create branch above.
         ctx.desiredKeysSnapshot = { nwkKey, appKey: expectedAppKey, genAppKey: expectedGenAppKey };
-        if (!constantTimeEqual(originalKeys.nwkKey, nwkKey)) {
+        if (!storedKeyEqual(originalKeys.nwkKey, nwkKey)) {
           await this.updateKeys({
             devEui,
             nwkKey,
@@ -752,9 +777,9 @@ class ChirpStackClient {
 
       const finalKeys = await this.getKeys(devEui);
       const keysOk = Boolean(finalKeys)
-        && constantTimeEqual(normalizeHexKey(finalKeys.getNwkKey()), nwkKey)
-        && constantTimeEqual(normalizeHexKey(finalKeys.getAppKey()), expectedAppKey)
-        && constantTimeEqual(normalizeHexKey(finalKeys.getGenAppKey()), expectedGenAppKey);
+        && storedKeyEqual(finalKeys.getNwkKey(), nwkKey)
+        && storedKeyEqual(finalKeys.getAppKey(), expectedAppKey)
+        && storedKeyEqual(finalKeys.getGenAppKey(), expectedGenAppKey);
       if (!keysOk) {
         throw boundedError('verifyKeys', 'FAILED_PRECONDITION');
       }

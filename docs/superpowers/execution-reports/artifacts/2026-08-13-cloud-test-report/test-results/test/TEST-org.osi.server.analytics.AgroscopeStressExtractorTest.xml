@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.AgroscopeStressExtractorTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:41" hostname="osi-01" time="0.012">
+  <properties/>
+  <testcase name="units_positionMmConvertedToMicrons_timesOneThousand()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.002"/>
+  <testcase name="endMax_isMaxOverEndOfDayWindow_notRawDailyMax()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.001"/>
+  <testcase name="dawnBoundary_pointAt0130Local_groupedIntoPreviousDay()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.001"/>
+  <testcase name="historicalMax_isMonotoneNonDecreasing()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.001"/>
+  <testcase name="nanDay_nullsStressThatDayAndTheNextCoveredDay_butHwmStillAdvances()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.002"/>
+  <testcase name="stress_equalsEndMaxMinusPreviousHistoricalMax()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.001"/>
+  <testcase name="newPeakDay_hasPositiveStress_deficitDay_hasNonPositiveStress()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.001"/>
+  <testcase name="warmRestart_usesPersistedState_noFullRecompute()" classname="org.osi.server.analytics.AgroscopeStressExtractorTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

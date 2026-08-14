@@ -31,7 +31,7 @@ const irrigationActuationsFetcher = () => irrigationOutcomesAPI.recentActuations
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
-  const { canWrite, isAdmin, isScoped, isZoneVisible, loading: scopeLoading } = useScope();
+  const { canWrite, isAdmin, loading: scopeLoading } = useScope();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
@@ -71,17 +71,9 @@ export const FarmingDashboard: React.FC = () => {
     }
   );
 
-  const visibleZones = useMemo(
-    () => (zones ?? []).filter((zone) => {
-      const uuid = zone.zone_uuid ?? zone.zoneUuid;
-      return typeof uuid === 'string' ? isZoneVisible(uuid) : !isScoped;
-    }),
-    [isScoped, isZoneVisible, zones],
-  );
-  const visibleZoneIds = useMemo(
-    () => new Set(visibleZones.map((zone) => zone.id)),
-    [visibleZones],
-  );
+  // Write-only scoping (W1): enabled accounts read every zone and device.
+  // canWrite still gates mutation affordances below.
+  const allZones = useMemo(() => zones ?? [], [zones]);
 
   const handleUpdate = () => {
     mutateDevices();
@@ -103,23 +95,28 @@ export const FarmingDashboard: React.FC = () => {
       return { devicesByZone: new Map(), unassignedDevices: [] };
     }
 
+    const zoneIds = new Set(zones.map((zone) => zone.id));
     const byZone = new Map<number, Device[]>();
     const unassigned: Device[] = [];
 
     devices.forEach((device) => {
-      const weatherDevice =
-        device.type_id === 'SENSECAP_S2120' || device.type_id === 'AQUASCOPE_LORAIN';
-      if (device.irrigation_zone_id && visibleZoneIds.has(device.irrigation_zone_id)) {
+      // Write-only scoping (W1) removed the visible-zone term from this branch.
+      // The weather-station term went with it: it existed only to sweep weather
+      // stations out of zones the caller could not see. A zone-assigned weather
+      // station belongs on its zone card, where IrrigationZoneCard renders its
+      // own weather section; unassignedS2120/unassignedLoRain still cover the
+      // genuinely unassigned ones.
+      if (device.irrigation_zone_id && zoneIds.has(device.irrigation_zone_id)) {
         const zoneDevices = byZone.get(device.irrigation_zone_id) || [];
         zoneDevices.push(device);
         byZone.set(device.irrigation_zone_id, zoneDevices);
-      } else if (!device.irrigation_zone_id || weatherDevice) {
+      } else {
         unassigned.push(device);
       }
     });
 
     return { devicesByZone: byZone, unassignedDevices: unassigned };
-  }, [devices, visibleZoneIds, zones]);
+  }, [devices, zones]);
 
   const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
@@ -129,11 +126,11 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedSdi12 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_SDI12');
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
-    () => new Map(visibleZones.map((zone) => [zone.id, zone.timezone])),
-    [visibleZones],
+    () => new Map(allZones.map((zone) => [zone.id, zone.timezone])),
+    [allZones],
   );
   const irrigationOutcomeZoneContexts = useMemo(
-    () => new Map<number, IrrigationOutcomeZoneContext>(visibleZones.map((zone) => [
+    () => new Map<number, IrrigationOutcomeZoneContext>(allZones.map((zone) => [
       zone.id,
       {
         timeZone: zone.timezone ?? null,
@@ -141,10 +138,10 @@ export const FarmingDashboard: React.FC = () => {
         irrigationEfficiencyPct: zone.irrigationEfficiencyPct ?? zone.irrigation_efficiency_pct ?? null,
       },
     ])),
-    [visibleZones],
+    [allZones],
   );
 
-  const isLoading = scopeLoading || (!devices && !devicesError && !zones && !zonesError);
+  const isLoading = !devices && !devicesError && !zones && !zonesError;
   const error = devicesError || zonesError;
 
   return (
@@ -155,7 +152,7 @@ export const FarmingDashboard: React.FC = () => {
         onAddDevice={() => setIsAddDeviceModalOpen(true)}
         onLogout={logout}
         canWrite={canWrite && !scopeLoading}
-        showAdmin={isAdmin && isScoped && !scopeLoading}
+        showAdmin={isAdmin && !scopeLoading}
       />
 
       {/* Maintainer decision 3(c) (S6): one explanation per surface, not per
@@ -189,10 +186,10 @@ export const FarmingDashboard: React.FC = () => {
         )}
 
         {/* Dashboard Content */}
-        {!scopeLoading && devices && zones && (
+        {devices && zones && (
           <>
             {/* Empty State */}
-            {devices.length === 0 && visibleZones.length === 0 && (
+            {devices.length === 0 && allZones.length === 0 && (
               <EmptyState title={t('emptyState.title')} subtitle={t('emptyState.subtitle')}>
                 {canWrite && (
                   <>
@@ -216,16 +213,16 @@ export const FarmingDashboard: React.FC = () => {
             {/* Zones section — heading omitted; the active nav tab labels the
                 page. The Unassigned Devices section below keeps its heading
                 because it is a distinct section. */}
-            {visibleZones.length > 0 && (
+            {allZones.length > 0 && (
               <div className="mb-8">
-                {visibleZones.map((zone) => (
+                {allZones.map((zone) => (
                   <IrrigationZoneCard
                     key={zone.id}
                     zone={zone}
                     devices={devicesByZone.get(zone.id) || []}
                     unassignedDevices={unassignedDevices}
                     onUpdate={handleUpdate}
-                    allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
+                    allZones={allZones.map((z) => ({ id: z.id, name: z.name }))}
                     irrigationActuations={irrigationActuations}
                     canWrite={canWrite}
                   />
@@ -326,7 +323,7 @@ export const FarmingDashboard: React.FC = () => {
                           <SenseCapWeatherCard
                             key={device.deveui}
                             device={device}
-                            allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
+                            allZones={allZones.map((z) => ({ id: z.id, name: z.name }))}
                             onUpdate={handleUpdate}
                             readOnly={!canWrite}
                           />

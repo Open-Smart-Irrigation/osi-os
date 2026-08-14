@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analysis.AnalysisGridAlignerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:32" hostname="osi-01" time="0.015">
+  <properties/>
+  <testcase name="thirtyDayRangeUsesDailyBuckets()" classname="org.osi.server.analysis.AnalysisGridAlignerTest" time="0.001"/>
+  <testcase name="rejectsMissingBoundsWhenSizingCustomGridStep()" classname="org.osi.server.analysis.AnalysisGridAlignerTest" time="0.002"/>
+  <testcase name="rejectsReversedRanges()" classname="org.osi.server.analysis.AnalysisGridAlignerTest" time="0.001"/>
+  <testcase name="rejectsDuplicateRollupPointsForOneAlignedBucket()" classname="org.osi.server.analysis.AnalysisGridAlignerTest" time="0.002"/>
+  <testcase name="hourlyGridHasOnePointPerBucketWithExplicitGaps()" classname="org.osi.server.analysis.AnalysisGridAlignerTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

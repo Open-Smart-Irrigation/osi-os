@@ -201,7 +201,8 @@ function verifyHistoryRouterImplementation(flows, failures, extractedModuleSourc
   assertContains(failures, adapterSource, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
   assertContains(failures, adapterSource, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
   assertContains(failures, adapterSource, 'osiHistory.buildAllZonesExportCsv', 'helper-owned account-wide CSV export');
-  assertContains(failures, adapterSource, 'listScopeZoneUuids', 'account-wide CSV export zone-scope resolver');
+  assertContains(failures, adapterSource, "assertRole(db, user.user_uuid, 'admin', { scopedMode: true })", 'gateway history stays admin-only (P2)');
+  assertContains(failures, adapterSource, 'SELECT id FROM irrigation_zones WHERE deleted_at IS NULL ORDER BY id ASC', 'account-wide CSV export covers every gateway zone (W1)');
   assertContains(failures, adapterSource, "query.scope !== 'allZones'", 'account-wide CSV export scope validation');
   assertContains(failures, adapterSource, 'channels', 'zone CSV export forwards channels query param');
   assertContains(failures, adapterSource, 'site:', 'zone CSV export forwards gateway site id');
@@ -266,7 +267,10 @@ function verifyAnalysisRouterImplementation(flows, failures) {
   const source = String(router.func || '');
   assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
   assertContains(failures, source, "osiLib.require('scope')", 'analysis reads load the shared scope module');
-  assertContains(failures, source, 'scopeZoneUuids = await scopeLoad.value.listScopeZoneUuids', 'analysis reads resolve owned-plus-granted zone scope');
+  assertContains(failures, source, 'assertEnabledAccount(db, ownerUuid, { scopedMode: true })', 'analysis reads gate on an enabled account (P1)');
+  assertContains(failures, source, 'null is the legacy owner-only path in osi-history-helper', 'analysis null sentinel stays legacy owner-only');
+  assertContains(failures, source, 'SELECT zone_uuid FROM irrigation_zones WHERE deleted_at IS NULL AND zone_uuid IS NOT NULL ORDER BY id ASC', 'scoped analysis reads load an explicit account-wide zone array');
+  assertContains(failures, source, 'scopeZoneUuids = accountZoneRows', 'scoped analysis reads pass the explicit zone array');
   assertContains(failures, source, 'osiHistory.buildAnalysisCatalog', 'analysis /channels calls buildAnalysisCatalog');
   assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids })', 'analysis /channels scopes catalog to authenticated user and owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');

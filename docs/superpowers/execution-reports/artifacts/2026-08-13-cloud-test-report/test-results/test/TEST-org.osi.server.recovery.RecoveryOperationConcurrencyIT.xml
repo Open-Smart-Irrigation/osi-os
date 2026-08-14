@@ -1,0 +1,488 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.recovery.RecoveryOperationConcurrencyIT" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:35" hostname="osi-01" time="0.202">
+  <properties/>
+  <testcase name="installationLockAllowsOnlyOneOfTwoPreviewedOperationsToStart()" classname="org.osi.server.recovery.RecoveryOperationConcurrencyIT" time="0.132"/>
+  <testcase name="concurrentStartAndTransitionUseOneLockOrderWithoutDeadlock()" classname="org.osi.server.recovery.RecoveryOperationConcurrencyIT" time="0.069"/>
+  <system-out><![CDATA[2026-08-13T16:46:34.328+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Neither @ContextConfiguration nor @ContextHierarchy found for test class [RecoveryOperationConcurrencyIT]: using SpringBootContextLoader
+2026-08-13T16:46:34.329+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizerFactory implementations for test class [RecoveryOperationConcurrencyIT]: [OnFailureConditionReportContextCustomizerFactory, OverrideAutoConfigurationContextCustomizerFactory, ObservabilityContextCustomizerFactory, TypeExcludeFiltersContextCustomizerFactory, PropertyMappingContextCustomizerFactory, WebDriverContextCustomizerFactory, ImportsContextCustomizerFactory, ExcludeFilterContextCustomizerFactory, HttpGraphQlTesterContextCustomizerFactory, DuplicateJsonObjectContextCustomizerFactory, MockitoContextCustomizerFactory, TestRestTemplateContextCustomizerFactory, WebTestClientContextCustomizerFactory, DisableReactorResourceFactoryGlobalResourcesContextCustomizerFactory, BeanOverrideContextCustomizerFactory, MockServerContainerContextCustomizerFactory, DynamicPropertiesContextCustomizerFactory]
+2026-08-13T16:46:34.334+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using ContextCustomizers for test class [RecoveryOperationConcurrencyIT]: [OnFailureConditionReportContextCustomizer, DisableAutoConfigurationContextCustomizer, DisableObservabilityContextCustomizer, TypeExcludeFiltersContextCustomizer, PropertyMappingContextCustomizer, WebDriverContextCustomizer, ImportsContextCustomizer, ExcludeFilterContextCustomizer, DuplicateJsonObjectContextCustomizer, MockitoContextCustomizer, DisableReactorResourceFactoryGlobalResourcesContextCustomizerCustomizer, DynamicPropertiesContextCustomizer]
+2026-08-13T16:46:34.346+02:00  INFO 3273021 --- [    Test worker] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration org.osi.server.OsiServerApplication for test class org.osi.server.recovery.RecoveryOperationConcurrencyIT
+2026-08-13T16:46:34.347+02:00 DEBUG 3273021 --- [    Test worker] b.t.a.o.j.DataJpaTestContextBootstrapper : Using TestExecutionListeners for test class [RecoveryOperationConcurrencyIT]: [ServletTestExecutionListener, DirtiesContextBeforeModesTestExecutionListener, ApplicationEventsTestExecutionListener, MockitoTestExecutionListener, BeanOverrideTestExecutionListener, DependencyInjectionTestExecutionListener, DirtiesContextTestExecutionListener, CommonCachesTestExecutionListener, TransactionalTestExecutionListener, SqlScriptsTestExecutionListener, WithSecurityContextTestExecutionListener, EventPublishingTestExecutionListener, ReactorContextTestExecutionListener, RestDocsTestExecutionListener, MockRestServiceServerResetTestExecutionListener, MockMvcPrintOnlyOnFailureTestExecutionListener, WebDriverTestExecutionListener, MockWebServiceServerTestExecutionListener, ResetMocksTestExecutionListener, MockitoResetTestExecutionListener]
+2026-08-13T16:46:34.353+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loading from YAML: class path resource [application.yml]
+2026-08-13T16:46:34.353+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Merging document (no matchers set): {spring={datasource={url=jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH, driver-class-name=org.h2.Driver, username=sa, password=}, jpa={hibernate={ddl-auto=create-drop}, show-sql=false, properties={hibernate={dialect=org.hibernate.dialect.H2Dialect}}}, flyway={enabled=false}}, jwt={secret=0123456789012345678901234567890123456789012345678901234567890123, expiration-ms=86400000}}
+2026-08-13T16:46:34.353+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.env.OriginTrackedYamlLoader     : Loaded 1 document from YAML resource: class path resource [application.yml]
+2026-08-13T16:46:34.357+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.ApplicationEnvironment          : Activating profiles []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.3)
+
+2026-08-13T16:46:34.361+02:00  INFO 3273021 --- [    Test worker] o.o.s.r.RecoveryOperationConcurrencyIT   : Starting RecoveryOperationConcurrencyIT using Java 17.0.19 with PID 3273021 (started by phil in /home/phil/Repos/osi-server/.worktrees/agrolink/backend)
+2026-08-13T16:46:34.361+02:00  INFO 3273021 --- [    Test worker] o.o.s.r.RecoveryOperationConcurrencyIT   : No active profile set, falling back to 1 default profile: "default"
+2026-08-13T16:46:34.361+02:00 DEBUG 3273021 --- [    Test worker] o.s.boot.SpringApplication               : Loading source class org.osi.server.OsiServerApplication,class org.osi.server.recovery.RecoveryOperationConcurrencyIT$ServiceConfig
+2026-08-13T16:46:34.432+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-13T16:46:34.433+02:00 DEBUG 3273021 --- [    Test worker] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'org.osi.server'. Automatic @Repository and @Entity scanning is enabled.
+2026-08-13T16:46:34.468+02:00  INFO 3273021 --- [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 35 ms. Found 55 JPA repository interfaces.
+2026-08-13T16:46:34.831+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-14 - Starting...
+2026-08-13T16:46:34.849+02:00  INFO 3273021 --- [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-14 - Start completed.
+2026-08-13T16:46:34.858+02:00  INFO 3273021 --- [    Test worker] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:32832/test?loggerLevel=OFF (PostgreSQL 16.14)
+2026-08-13T16:46:34.888+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbValidate     : Successfully validated 77 migrations (execution time 00:00.022s)
+2026-08-13T16:46:34.902+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 2026.08.10.001
+2026-08-13T16:46:34.903+02:00  INFO 3273021 --- [    Test worker] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2026-08-13T16:46:34.922+02:00  INFO 3273021 --- [    Test worker] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-13T16:46:34.924+02:00  INFO 3273021 --- [    Test worker] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-13T16:46:34.929+02:00  INFO 3273021 --- [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-13T16:46:34.933+02:00  WARN 3273021 --- [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-08-13T16:46:34.934+02:00  INFO 3273021 --- [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-14)']
+	Database driver: undefined/unknown
+	Database version: 16.14
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-08-13T16:46:35.017+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000038: Composite-id class does not override equals(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:35.017+02:00  WARN 3273021 --- [    Test worker] org.hibernate.mapping.RootClass          : HHH000039: Composite-id class does not override hashCode(): org.osi.server.sync.SyncResourceWatermark$WatermarkId
+2026-08-13T16:46:35.247+02:00  INFO 3273021 --- [    Test worker] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-13T16:46:35.247+02:00  INFO 3273021 --- [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-13T16:46:35.528+02:00 DEBUG 3273021 --- [    Test worker] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+
+============================
+CONDITIONS EVALUATION REPORT
+============================
+
+
+Positive matches:
+-----------------
+
+   DataSourceAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: io.r2dbc.spi.ConnectionFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration matched:
+      - AnyNestedCondition 1 matched 1 did not; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.PooledDataSourceAvailable PooledDataSource found supported DataSource; NestedCondition on DataSourceAutoConfiguration.PooledDataSourceCondition.ExplicitType @ConditionalOnProperty (spring.datasource.type) did not find property 'type' (DataSourceAutoConfiguration.PooledDataSourceCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource,javax.sql.XADataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceAutoConfiguration.PooledDataSourceConfiguration#jdbcConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceConfiguration.Hikari matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+      - @ConditionalOnProperty (spring.datasource.type=com.zaxxer.hikari.HikariDataSource) matched (OnPropertyCondition)
+      - @ConditionalOnMissingBean (types: javax.sql.DataSource; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourceInitializationConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.datasource.init.DatabasePopulator' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.sql.init.SqlDataSourceScriptDatabaseInitializer,org.springframework.boot.autoconfigure.sql.init.SqlR2dbcScriptDatabaseInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.HikariPoolDataSourceMetadataProviderConfiguration matched:
+      - @ConditionalOnClass found required class 'com.zaxxer.hikari.HikariDataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate', 'org.springframework.transaction.TransactionManager' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   FlywayAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.flywaydb.core.Flyway' (OnClassCondition)
+      - @ConditionalOnProperty (spring.flyway.enabled) matched (OnPropertyCondition)
+      - AnyNestedCondition 2 matched 1 did not; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.FlywayUrlCondition @ConditionalOnProperty (spring.flyway.url) did not find property 'url'; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.JdbcConnectionDetailsCondition @ConditionalOnBean (types: org.springframework.boot.autoconfigure.jdbc.JdbcConnectionDetails; SearchStrategy: all) found bean 'jdbcConnectionDetails'; NestedCondition on FlywayAutoConfiguration.FlywayDataSourceCondition.DataSourceBeanCondition @ConditionalOnBean (types: javax.sql.DataSource; SearchStrategy: all) found bean 'dataSource' (FlywayAutoConfiguration.FlywayDataSourceCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.jdbc.support.JdbcUtils' (OnClassCondition)
+      - @ConditionalOnMissingBean (types: org.flywaydb.core.Flyway; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#flywayConnectionDetails matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.flyway.FlywayConnectionDetails; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#flywayInitializer matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.autoconfigure.flyway.FlywayMigrationInitializer; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#postgresqlFlywayConfigurationCustomizer matched:
+      - @ConditionalOnClass found required class 'org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension' (OnClassCondition)
+
+   HibernateJpaAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean', 'jakarta.persistence.EntityManager', 'org.hibernate.engine.spi.SessionImplementor' (OnClassCondition)
+
+   HibernateJpaConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcClientAutoConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate; SearchStrategy: all) found a single bean 'namedParameterJdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.simple.JdbcClient; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JdbcTemplateAutoConfiguration matched:
+      - @ConditionalOnClass found required classes 'javax.sql.DataSource', 'org.springframework.jdbc.core.JdbcTemplate' (OnClassCondition)
+      - @ConditionalOnSingleCandidate (types: javax.sql.DataSource; SearchStrategy: all) found a single bean 'dataSource' (OnBeanCondition)
+
+   JdbcTemplateConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.jdbc.core.JdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactory matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#entityManagerFactoryBuilder matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#jpaVendorAdapter matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.JpaVendorAdapter; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration#transactionManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean,jakarta.persistence.EntityManagerFactory; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaBaseConfiguration.PersistenceManagedTypesConfiguration#persistenceManagedTypes matched:
+      - @ConditionalOnMissingBean (types: org.springframework.orm.jpa.persistenceunit.PersistenceManagedTypes; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   JpaRepositoriesAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.data.jpa.repository.JpaRepository' (OnClassCondition)
+      - @ConditionalOnProperty (spring.data.jpa.repositories.enabled=true) matched (OnPropertyCondition)
+      - @ConditionalOnBean (types: javax.sql.DataSource; SearchStrategy: all) found bean 'dataSource'; @ConditionalOnMissingBean (types: org.springframework.data.jpa.repository.support.JpaRepositoryFactoryBean,org.springframework.data.jpa.repository.config.JpaRepositoryConfigExtension; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NamedParameterJdbcTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.jdbc.core.JdbcTemplate; SearchStrategy: all) found a single bean 'jdbcTemplate'; @ConditionalOnMissingBean (types: org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   NoOpCacheConfiguration matched:
+      - Cache org.springframework.boot.autoconfigure.cache.NoOpCacheConfiguration NONE cache type (CacheCondition)
+
+   SqlInitializationAutoConfiguration matched:
+      - @ConditionalOnProperty (spring.sql.init.enabled) matched (OnPropertyCondition)
+      - NoneNestedConditions 0 matched 1 did not; NestedCondition on SqlInitializationAutoConfiguration.SqlInitializationModeCondition.ModeIsNever @ConditionalOnProperty (spring.sql.init.mode=never) did not find property 'mode' (SqlInitializationAutoConfiguration.SqlInitializationModeCondition)
+
+   TestEntityManagerAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'jakarta.persistence.EntityManagerFactory' (OnClassCondition)
+
+   TestEntityManagerAutoConfiguration#testEntityManager matched:
+      - @ConditionalOnMissingBean (types: org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'org.springframework.transaction.PlatformTransactionManager' (OnClassCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration matched:
+      - @ConditionalOnBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found bean 'transactionManager'; @ConditionalOnMissingBean (types: org.springframework.transaction.annotation.AbstractTransactionManagementConfiguration; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.CglibAutoProxyConfiguration matched:
+      - @ConditionalOnProperty (spring.aop.proxy-target-class=true) matched (OnPropertyCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration matched:
+      - @ConditionalOnSingleCandidate (types: org.springframework.transaction.PlatformTransactionManager; SearchStrategy: all) found a single bean 'transactionManager' (OnBeanCondition)
+
+   TransactionAutoConfiguration.TransactionTemplateConfiguration#transactionTemplate matched:
+      - @ConditionalOnMissingBean (types: org.springframework.transaction.support.TransactionOperations; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+
+Negative matches:
+-----------------
+
+   Cache2kCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.cache2k.Cache2kBuilder' (OnClassCondition)
+
+   CacheAutoConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.cache.interceptor.CacheAspectSupport; SearchStrategy: all) did not find any beans of type org.springframework.cache.interceptor.CacheAspectSupport (OnBeanCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.cache.CacheManager' (OnClassCondition)
+
+   CacheAutoConfiguration.CacheManagerEntityManagerFactoryDependsOnPostProcessor:
+      Did not match:
+         - Ancestor org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration did not match (ConditionEvaluationReport.AncestorsMatchedCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean' (OnClassCondition)
+
+   CaffeineCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.github.benmanes.caffeine.cache.Caffeine' (OnClassCondition)
+
+   CouchbaseCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.couchbase.client.java.Cluster' (OnClassCondition)
+
+   DataSourceAutoConfiguration.EmbeddedDatabaseConfiguration:
+      Did not match:
+         - EmbeddedDataSource spring.datasource.url is set (DataSourceAutoConfiguration.EmbeddedDatabaseCondition)
+
+   DataSourceCheckpointRestoreConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.crac.Resource' (OnClassCondition)
+
+   DataSourceConfiguration.Dbcp2:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourceConfiguration.Generic:
+      Did not match:
+         - @ConditionalOnProperty (spring.datasource.type) did not find property 'spring.datasource.type' (OnPropertyCondition)
+
+   DataSourceConfiguration.OracleUcp:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSourceImpl', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourceConfiguration.Tomcat:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceJmxConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.jmx.enabled=true) found different value in property 'enabled' (OnPropertyCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.CommonsDbcp2PoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.commons.dbcp2.BasicDataSource' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.OracleUcpPoolDataSourceMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'oracle.ucp.jdbc.PoolDataSource', 'oracle.jdbc.OracleConnection' (OnClassCondition)
+
+   DataSourcePoolMetadataProvidersConfiguration.TomcatDataSourcePoolMetadataProviderConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.apache.tomcat.jdbc.pool.DataSource' (OnClassCondition)
+
+   DataSourceTransactionManagerAutoConfiguration.JdbcTransactionManagerConfiguration#transactionManager:
+      Did not match:
+         - @ConditionalOnMissingBean (types: org.springframework.transaction.TransactionManager; SearchStrategy: all) found beans of type 'org.springframework.transaction.TransactionManager' transactionManager (OnBeanCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#oracleFlywayConfigurationCustomizer:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.flywaydb.database.oracle.OracleConfigurationExtension' (OnClassCondition)
+
+   FlywayAutoConfiguration.FlywayConfiguration#sqlServerFlywayConfigurationCustomizer:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.flywaydb.database.sqlserver.SQLServerConfigurationExtension' (OnClassCondition)
+
+   GenericCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.GenericCacheConfiguration unknown cache type (CacheCondition)
+
+   HazelcastCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'com.hazelcast.core.HazelcastInstance' (OnClassCondition)
+
+   InfinispanCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.infinispan.spring.embedded.provider.SpringEmbeddedCacheManager' (OnClassCondition)
+
+   JCacheCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'javax.cache.Caching' (OnClassCondition)
+
+   JpaBaseConfiguration.JpaWebConfiguration:
+      Did not match:
+         - not a servlet web application (OnWebApplicationCondition)
+      Matched:
+         - @ConditionalOnClass found required class 'org.springframework.web.servlet.config.annotation.WebMvcConfigurer' (OnClassCondition)
+
+   JpaRepositoriesAutoConfiguration#entityManagerFactoryBootstrapExecutorCustomizer:
+      Did not match:
+         - AnyNestedCondition 0 matched 2 did not; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.LazyBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=lazy) found different value in property 'bootstrap-mode'; NestedCondition on JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition.DeferredBootstrapMode @ConditionalOnProperty (spring.data.jpa.repositories.bootstrap-mode=deferred) found different value in property 'bootstrap-mode' (JpaRepositoriesAutoConfiguration.BootstrapExecutorCondition)
+
+   LiquibaseAutoConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'liquibase.change.DatabaseChange' (OnClassCondition)
+
+   R2dbcInitializationConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required classes 'io.r2dbc.spi.ConnectionFactory', 'org.springframework.r2dbc.connection.init.DatabasePopulator' (OnClassCondition)
+
+   RedisCacheConfiguration:
+      Did not match:
+         - @ConditionalOnClass did not find required class 'org.springframework.data.redis.connection.RedisConnectionFactory' (OnClassCondition)
+
+   SimpleCacheConfiguration:
+      Did not match:
+         - Cache org.springframework.boot.autoconfigure.cache.SimpleCacheConfiguration unknown cache type (CacheCondition)
+
+   TestDatabaseAutoConfiguration#dataSource:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=AUTO_CONFIGURED) found different value in property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#embeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=ANY) found different value in property 'replace' (OnPropertyCondition)
+
+   TestDatabaseAutoConfiguration#nonTestEmbeddedDataSourceBeanFactoryPostProcessor:
+      Did not match:
+         - @ConditionalOnProperty (spring.test.database.replace=NON_TEST) found different value in property 'replace' (OnPropertyCondition)
+
+   TransactionAutoConfiguration#transactionalOperator:
+      Did not match:
+         - @ConditionalOnSingleCandidate (types: org.springframework.transaction.ReactiveTransactionManager; SearchStrategy: all) did not find any beans (OnBeanCondition)
+
+   TransactionAutoConfiguration.AspectJTransactionManagementConfiguration:
+      Did not match:
+         - @ConditionalOnBean (types: org.springframework.transaction.aspectj.AbstractTransactionAspect; SearchStrategy: all) did not find any beans of type org.springframework.transaction.aspectj.AbstractTransactionAspect (OnBeanCondition)
+
+   TransactionAutoConfiguration.EnableTransactionManagementConfiguration.JdkDynamicAutoProxyConfiguration:
+      Did not match:
+         - @ConditionalOnProperty (spring.aop.proxy-target-class=false) did not find property 'proxy-target-class' (OnPropertyCondition)
+
+
+Exclusions:
+-----------
+
+    None
+
+
+Unconditional classes:
+----------------------
+
+    org.springframework.boot.test.autoconfigure.jdbc.TestDatabaseAutoConfiguration
+
+
+
+2026-08-13T16:46:35.529+02:00  INFO 3273021 --- [    Test worker] o.o.s.r.RecoveryOperationConcurrencyIT   : Started RecoveryOperationConcurrencyIT in 1.18 seconds (process running for 66.584)
+2026-08-13T16:46:35.535+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into users (created_at,data_retention_days,edge_originated,email,enabled,password_hash,role,user_uuid,username) values (?,?,?,?,?,?,?,?,?)
+Hibernate: insert into users (created_at,data_retention_days,edge_originated,email,enabled,password_hash,role,user_uuid,username) values (?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.545+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into gateway_installations (created_at,current_gateway_device_eui,current_recovery_operation_uuid,last_completed_recovery_at,owner_user_id,previous_gateway_device_euis,recovery_state,updated_at,version,installation_uuid) values (?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into gateway_installations (created_at,current_gateway_device_eui,current_recovery_operation_uuid,last_completed_recovery_at,owner_user_id,previous_gateway_device_euis,recovery_state,updated_at,version,installation_uuid) values (?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.552+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.557+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.560+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.562+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.565+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.568+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into installation_recovery_operations (bundle_uuid,completed_at,installation_uuid,interrupted_at,last_error,prepare_receipt_sha256,preview_sha256,receipt_proof_key_id,reconciled_at,reconciliation_receipt_sha256,requested_at,requested_by_user_id,rollback_bundle_uuid,started_at,state,target_gateway_device_eui,operation_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_operations (bundle_uuid,completed_at,installation_uuid,interrupted_at,last_error,prepare_receipt_sha256,preview_sha256,receipt_proof_key_id,reconciled_at,reconciliation_receipt_sha256,requested_at,requested_by_user_id,rollback_bundle_uuid,started_at,state,target_gateway_device_eui,operation_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.570+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.571+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into installation_recovery_operations (bundle_uuid,completed_at,installation_uuid,interrupted_at,last_error,prepare_receipt_sha256,preview_sha256,receipt_proof_key_id,reconciled_at,reconciliation_receipt_sha256,requested_at,requested_by_user_id,rollback_bundle_uuid,started_at,state,target_gateway_device_eui,operation_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_operations (bundle_uuid,completed_at,installation_uuid,interrupted_at,last_error,prepare_receipt_sha256,preview_sha256,receipt_proof_key_id,reconciled_at,reconciliation_receipt_sha256,requested_at,requested_by_user_id,rollback_bundle_uuid,started_at,state,target_gateway_device_eui,operation_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.579+02:00 DEBUG 3273021 --- [pool-8-thread-1] org.hibernate.SQL                        : select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.579+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.583+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+2026-08-13T16:46:35.583+02:00 DEBUG 3273021 --- [pool-8-thread-1] org.hibernate.SQL                        : select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+Hibernate: select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+Hibernate: select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+2026-08-13T16:46:35.590+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+2026-08-13T16:46:35.594+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.598+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.600+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : insert into installation_recovery_audit (actor_user_id,bundle_sha256,bundle_uuid,detail_json,event_type,gateway_device_eui,installation_uuid,occurred_at,operation_uuid) values (?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_audit (actor_user_id,bundle_sha256,bundle_uuid,detail_json,event_type,gateway_device_eui,installation_uuid,occurred_at,operation_uuid) values (?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.604+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : update gateway_installations set current_gateway_device_eui=?,current_recovery_operation_uuid=?,last_completed_recovery_at=?,owner_user_id=?,previous_gateway_device_euis=?,recovery_state=?,updated_at=?,version=? where installation_uuid=? and version=?
+Hibernate: update gateway_installations set current_gateway_device_eui=?,current_recovery_operation_uuid=?,last_completed_recovery_at=?,owner_user_id=?,previous_gateway_device_euis=?,recovery_state=?,updated_at=?,version=? where installation_uuid=? and version=?
+2026-08-13T16:46:35.606+02:00 DEBUG 3273021 --- [pool-8-thread-2] org.hibernate.SQL                        : update installation_recovery_operations set bundle_uuid=?,completed_at=?,installation_uuid=?,interrupted_at=?,last_error=?,prepare_receipt_sha256=?,preview_sha256=?,receipt_proof_key_id=?,reconciled_at=?,reconciliation_receipt_sha256=?,requested_at=?,requested_by_user_id=?,rollback_bundle_uuid=?,started_at=?,state=?,target_gateway_device_eui=? where operation_uuid=?
+Hibernate: update installation_recovery_operations set bundle_uuid=?,completed_at=?,installation_uuid=?,interrupted_at=?,last_error=?,prepare_receipt_sha256=?,preview_sha256=?,receipt_proof_key_id=?,reconciled_at=?,reconciliation_receipt_sha256=?,requested_at=?,requested_by_user_id=?,rollback_bundle_uuid=?,started_at=?,state=?,target_gateway_device_eui=? where operation_uuid=?
+2026-08-13T16:46:35.616+02:00 DEBUG 3273021 --- [pool-8-thread-1] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+2026-08-13T16:46:35.620+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=?
+Hibernate: select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=?
+2026-08-13T16:46:35.623+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.625+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ra1_0.id,ra1_0.actor_user_id,ra1_0.bundle_sha256,ra1_0.bundle_uuid,ra1_0.detail_json,ra1_0.event_type,ra1_0.gateway_device_eui,ra1_0.installation_uuid,ra1_0.occurred_at,ra1_0.operation_uuid from installation_recovery_audit ra1_0
+Hibernate: select ra1_0.id,ra1_0.actor_user_id,ra1_0.bundle_sha256,ra1_0.bundle_uuid,ra1_0.detail_json,ra1_0.event_type,ra1_0.gateway_device_eui,ra1_0.installation_uuid,ra1_0.occurred_at,ra1_0.operation_uuid from installation_recovery_audit ra1_0
+2026-08-13T16:46:35.627+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_audit where id=?
+Hibernate: delete from installation_recovery_audit where id=?
+2026-08-13T16:46:35.629+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0
+2026-08-13T16:46:35.631+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_operations where operation_uuid=?
+Hibernate: delete from installation_recovery_operations where operation_uuid=?
+2026-08-13T16:46:35.632+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_operations where operation_uuid=?
+Hibernate: delete from installation_recovery_operations where operation_uuid=?
+2026-08-13T16:46:35.634+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0
+2026-08-13T16:46:35.636+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_bundles where bundle_uuid=?
+Hibernate: delete from installation_recovery_bundles where bundle_uuid=?
+2026-08-13T16:46:35.637+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_bundles where bundle_uuid=?
+Hibernate: delete from installation_recovery_bundles where bundle_uuid=?
+2026-08-13T16:46:35.639+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0
+Hibernate: select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0
+2026-08-13T16:46:35.641+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from gateway_installations where installation_uuid=? and version=?
+Hibernate: delete from gateway_installations where installation_uuid=? and version=?
+2026-08-13T16:46:35.645+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select u1_0.id,u1_0.created_at,u1_0.data_retention_days,u1_0.edge_originated,u1_0.email,u1_0.enabled,u1_0.password_hash,u1_0.role,u1_0.user_uuid,u1_0.username from users u1_0
+Hibernate: select u1_0.id,u1_0.created_at,u1_0.data_retention_days,u1_0.edge_originated,u1_0.email,u1_0.enabled,u1_0.password_hash,u1_0.role,u1_0.user_uuid,u1_0.username from users u1_0
+2026-08-13T16:46:35.649+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from users where id=?
+Hibernate: delete from users where id=?
+2026-08-13T16:46:35.657+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from users where id=?
+Hibernate: delete from users where id=?
+2026-08-13T16:46:35.659+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from users where id=?
+Hibernate: delete from users where id=?
+2026-08-13T16:46:35.667+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into users (created_at,data_retention_days,edge_originated,email,enabled,password_hash,role,user_uuid,username) values (?,?,?,?,?,?,?,?,?)
+Hibernate: insert into users (created_at,data_retention_days,edge_originated,email,enabled,password_hash,role,user_uuid,username) values (?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.669+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into gateway_installations (created_at,current_gateway_device_eui,current_recovery_operation_uuid,last_completed_recovery_at,owner_user_id,previous_gateway_device_euis,recovery_state,updated_at,version,installation_uuid) values (?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into gateway_installations (created_at,current_gateway_device_eui,current_recovery_operation_uuid,last_completed_recovery_at,owner_user_id,previous_gateway_device_euis,recovery_state,updated_at,version,installation_uuid) values (?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.671+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.673+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.675+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.676+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_bundles (authenticated_metadata,ciphertext,ciphertext_nonce,created_at,created_by_user_id,database_byte_length,database_sha256,format_version,installation_uuid,key_provider_id,key_reference,migration_head,schema_fingerprint,schema_version,source_gateway_device_eui,wrapped_data_key,wrapped_key_nonce,bundle_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.678+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.679+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : insert into installation_recovery_operations (bundle_uuid,completed_at,installation_uuid,interrupted_at,last_error,prepare_receipt_sha256,preview_sha256,receipt_proof_key_id,reconciled_at,reconciliation_receipt_sha256,requested_at,requested_by_user_id,rollback_bundle_uuid,started_at,state,target_gateway_device_eui,operation_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_operations (bundle_uuid,completed_at,installation_uuid,interrupted_at,last_error,prepare_receipt_sha256,preview_sha256,receipt_proof_key_id,reconciled_at,reconciliation_receipt_sha256,requested_at,requested_by_user_id,rollback_bundle_uuid,started_at,state,target_gateway_device_eui,operation_uuid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.684+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.684+02:00 DEBUG 3273021 --- [pool-9-thread-2] org.hibernate.SQL                        : select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+Hibernate: select ro1_0.installation_uuid from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=?
+2026-08-13T16:46:35.685+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+Hibernate: select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+2026-08-13T16:46:35.685+02:00 DEBUG 3273021 --- [pool-9-thread-2] org.hibernate.SQL                        : select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+Hibernate: select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0 where gi1_0.installation_uuid=? for no key update
+2026-08-13T16:46:35.686+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+2026-08-13T16:46:35.688+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.691+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.693+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : insert into installation_recovery_audit (actor_user_id,bundle_sha256,bundle_uuid,detail_json,event_type,gateway_device_eui,installation_uuid,occurred_at,operation_uuid) values (?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_audit (actor_user_id,bundle_sha256,bundle_uuid,detail_json,event_type,gateway_device_eui,installation_uuid,occurred_at,operation_uuid) values (?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.697+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : update gateway_installations set current_gateway_device_eui=?,current_recovery_operation_uuid=?,last_completed_recovery_at=?,owner_user_id=?,previous_gateway_device_euis=?,recovery_state=?,updated_at=?,version=? where installation_uuid=? and version=?
+Hibernate: update gateway_installations set current_gateway_device_eui=?,current_recovery_operation_uuid=?,last_completed_recovery_at=?,owner_user_id=?,previous_gateway_device_euis=?,recovery_state=?,updated_at=?,version=? where installation_uuid=? and version=?
+2026-08-13T16:46:35.699+02:00 DEBUG 3273021 --- [pool-9-thread-1] org.hibernate.SQL                        : update installation_recovery_operations set bundle_uuid=?,completed_at=?,installation_uuid=?,interrupted_at=?,last_error=?,prepare_receipt_sha256=?,preview_sha256=?,receipt_proof_key_id=?,reconciled_at=?,reconciliation_receipt_sha256=?,requested_at=?,requested_by_user_id=?,rollback_bundle_uuid=?,started_at=?,state=?,target_gateway_device_eui=? where operation_uuid=?
+Hibernate: update installation_recovery_operations set bundle_uuid=?,completed_at=?,installation_uuid=?,interrupted_at=?,last_error=?,prepare_receipt_sha256=?,preview_sha256=?,receipt_proof_key_id=?,reconciled_at=?,reconciliation_receipt_sha256=?,requested_at=?,requested_by_user_id=?,rollback_bundle_uuid=?,started_at=?,state=?,target_gateway_device_eui=? where operation_uuid=?
+2026-08-13T16:46:35.701+02:00 DEBUG 3273021 --- [pool-9-thread-2] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0 where ro1_0.operation_uuid=? for no key update
+2026-08-13T16:46:35.703+02:00 DEBUG 3273021 --- [pool-9-thread-2] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0 where rb1_0.bundle_uuid=?
+2026-08-13T16:46:35.704+02:00 DEBUG 3273021 --- [pool-9-thread-2] org.hibernate.SQL                        : insert into installation_recovery_audit (actor_user_id,bundle_sha256,bundle_uuid,detail_json,event_type,gateway_device_eui,installation_uuid,occurred_at,operation_uuid) values (?,?,?,?,?,?,?,?,?)
+Hibernate: insert into installation_recovery_audit (actor_user_id,bundle_sha256,bundle_uuid,detail_json,event_type,gateway_device_eui,installation_uuid,occurred_at,operation_uuid) values (?,?,?,?,?,?,?,?,?)
+2026-08-13T16:46:35.707+02:00 DEBUG 3273021 --- [pool-9-thread-2] org.hibernate.SQL                        : update gateway_installations set current_gateway_device_eui=?,current_recovery_operation_uuid=?,last_completed_recovery_at=?,owner_user_id=?,previous_gateway_device_euis=?,recovery_state=?,updated_at=?,version=? where installation_uuid=? and version=?
+Hibernate: update gateway_installations set current_gateway_device_eui=?,current_recovery_operation_uuid=?,last_completed_recovery_at=?,owner_user_id=?,previous_gateway_device_euis=?,recovery_state=?,updated_at=?,version=? where installation_uuid=? and version=?
+2026-08-13T16:46:35.708+02:00 DEBUG 3273021 --- [pool-9-thread-2] org.hibernate.SQL                        : update installation_recovery_operations set bundle_uuid=?,completed_at=?,installation_uuid=?,interrupted_at=?,last_error=?,prepare_receipt_sha256=?,preview_sha256=?,receipt_proof_key_id=?,reconciled_at=?,reconciliation_receipt_sha256=?,requested_at=?,requested_by_user_id=?,rollback_bundle_uuid=?,started_at=?,state=?,target_gateway_device_eui=? where operation_uuid=?
+Hibernate: update installation_recovery_operations set bundle_uuid=?,completed_at=?,installation_uuid=?,interrupted_at=?,last_error=?,prepare_receipt_sha256=?,preview_sha256=?,receipt_proof_key_id=?,reconciled_at=?,reconciliation_receipt_sha256=?,requested_at=?,requested_by_user_id=?,rollback_bundle_uuid=?,started_at=?,state=?,target_gateway_device_eui=? where operation_uuid=?
+2026-08-13T16:46:35.711+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ra1_0.id,ra1_0.actor_user_id,ra1_0.bundle_sha256,ra1_0.bundle_uuid,ra1_0.detail_json,ra1_0.event_type,ra1_0.gateway_device_eui,ra1_0.installation_uuid,ra1_0.occurred_at,ra1_0.operation_uuid from installation_recovery_audit ra1_0
+Hibernate: select ra1_0.id,ra1_0.actor_user_id,ra1_0.bundle_sha256,ra1_0.bundle_uuid,ra1_0.detail_json,ra1_0.event_type,ra1_0.gateway_device_eui,ra1_0.installation_uuid,ra1_0.occurred_at,ra1_0.operation_uuid from installation_recovery_audit ra1_0
+2026-08-13T16:46:35.713+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_audit where id=?
+Hibernate: delete from installation_recovery_audit where id=?
+2026-08-13T16:46:35.714+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_audit where id=?
+Hibernate: delete from installation_recovery_audit where id=?
+2026-08-13T16:46:35.716+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0
+Hibernate: select ro1_0.operation_uuid,ro1_0.bundle_uuid,ro1_0.completed_at,ro1_0.installation_uuid,ro1_0.interrupted_at,ro1_0.last_error,ro1_0.prepare_receipt_sha256,ro1_0.preview_sha256,ro1_0.receipt_proof_key_id,ro1_0.reconciled_at,ro1_0.reconciliation_receipt_sha256,ro1_0.requested_at,ro1_0.requested_by_user_id,ro1_0.rollback_bundle_uuid,ro1_0.started_at,ro1_0.state,ro1_0.target_gateway_device_eui from installation_recovery_operations ro1_0
+2026-08-13T16:46:35.718+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_operations where operation_uuid=?
+Hibernate: delete from installation_recovery_operations where operation_uuid=?
+2026-08-13T16:46:35.720+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0
+Hibernate: select rb1_0.bundle_uuid,rb1_0.authenticated_metadata,rb1_0.ciphertext,rb1_0.ciphertext_nonce,rb1_0.created_at,rb1_0.created_by_user_id,rb1_0.database_byte_length,rb1_0.database_sha256,rb1_0.format_version,rb1_0.installation_uuid,rb1_0.key_provider_id,rb1_0.key_reference,rb1_0.migration_head,rb1_0.schema_fingerprint,rb1_0.schema_version,rb1_0.source_gateway_device_eui,rb1_0.wrapped_data_key,rb1_0.wrapped_key_nonce from installation_recovery_bundles rb1_0
+2026-08-13T16:46:35.722+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_bundles where bundle_uuid=?
+Hibernate: delete from installation_recovery_bundles where bundle_uuid=?
+2026-08-13T16:46:35.723+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from installation_recovery_bundles where bundle_uuid=?
+Hibernate: delete from installation_recovery_bundles where bundle_uuid=?
+2026-08-13T16:46:35.724+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0
+Hibernate: select gi1_0.installation_uuid,gi1_0.created_at,gi1_0.current_gateway_device_eui,gi1_0.current_recovery_operation_uuid,gi1_0.last_completed_recovery_at,gi1_0.owner_user_id,gi1_0.previous_gateway_device_euis,gi1_0.recovery_state,gi1_0.updated_at,gi1_0.version from gateway_installations gi1_0
+2026-08-13T16:46:35.726+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from gateway_installations where installation_uuid=? and version=?
+Hibernate: delete from gateway_installations where installation_uuid=? and version=?
+2026-08-13T16:46:35.728+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : select u1_0.id,u1_0.created_at,u1_0.data_retention_days,u1_0.edge_originated,u1_0.email,u1_0.enabled,u1_0.password_hash,u1_0.role,u1_0.user_uuid,u1_0.username from users u1_0
+Hibernate: select u1_0.id,u1_0.created_at,u1_0.data_retention_days,u1_0.edge_originated,u1_0.email,u1_0.enabled,u1_0.password_hash,u1_0.role,u1_0.user_uuid,u1_0.username from users u1_0
+2026-08-13T16:46:35.730+02:00 DEBUG 3273021 --- [    Test worker] org.hibernate.SQL                        : delete from users where id=?
+Hibernate: delete from users where id=?
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

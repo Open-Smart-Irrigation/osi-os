@@ -1,9 +1,9 @@
 name: GUI Typecheck & Unit Tests
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, AgroLink, 'feat/**', 'fix/**', 'docs/**' ]
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 defaults:
   run:
     working-directory: web/react-gui

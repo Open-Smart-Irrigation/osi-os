@@ -37,6 +37,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'osi-journal',
     'scope',
     'scoped-access-commands',
+    'sdi12-normalize',
     'uc512-normalize',
     'zone-commands',
     'zone-env',

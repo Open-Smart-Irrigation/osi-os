@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+<meta http-equiv="x-ua-compatible" content="IE=edge"/>
+<title>Test results - SystemFeatureControllerTest</title>
+<link href="../css/base-style.css" rel="stylesheet" type="text/css"/>
+<link href="../css/style.css" rel="stylesheet" type="text/css"/>
+<script src="../js/report.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="content">
+<h1>SystemFeatureControllerTest</h1>
+<div class="breadcrumbs">
+<a href="../index.html">all</a> &gt; 
+<a href="../packages/org.osi.server.config.html">org.osi.server.config</a> &gt; SystemFeatureControllerTest</div>
+<div id="summary">
+<table>
+<tr>
+<td>
+<div class="summaryGroup">
+<table>
+<tr>
+<td>
+<div class="infoBox" id="tests">
+<div class="counter">3</div>
+<p>tests</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="failures">
+<div class="counter">0</div>
+<p>failures</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="ignored">
+<div class="counter">0</div>
+<p>ignored</p>
+</div>
+</td>
+<td>
+<div class="infoBox" id="duration">
+<div class="counter">0.029s</div>
+<p>duration</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</td>
+<td>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
+<p>successful</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div id="tabs">
+<ul class="tabLinks">
+<li>
+<a href="#tab0">Tests</a>
+</li>
+<li>
+<a href="#tab1">Standard output</a>
+</li>
+</ul>
+<div id="tab0" class="tab">
+<h2>Tests</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Duration</th>
+<th>Result</th>
+</tr>
+</thead>
+<tr>
+<td class="success">reportsJournalV2CloudIssuerDisabledByDefault()</td>
+<td class="success">0.007s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">reportsJournalV2CloudIssuerEnabledWhenConfigured()</td>
+<td class="success">0.013s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">returnsImplementedFrontendFeatureFlags()</td>
+<td class="success">0.009s</td>
+<td class="success">passed</td>
+</tr>
+</table>
+</div>
+<div id="tab1" class="tab">
+<h2>Standard output</h2>
+<span class="code">
+<pre>2026-08-13T16:46:01.219+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 1 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:46:01.221+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.221+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.221+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:46:01.221+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:46:01.221+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:46:01.221+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.config.SystemFeatureController#features()
+2026-08-13T16:46:01.223+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T16:46:01.224+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Writing [SystemFeatureFlags[historyUxEnabled=true, historyComparisonEnabled=true, historyWorkspacesEnabled=tr (truncated)...]
+2026-08-13T16:46:01.228+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 1 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:46:01.230+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.230+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.230+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:46:01.230+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:46:01.230+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:46:01.234+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 1 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:46:01.236+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.236+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.236+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:46:01.236+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:46:01.236+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:46:01.236+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.config.SystemFeatureController#features()
+2026-08-13T16:46:01.237+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T16:46:01.237+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Writing [SystemFeatureFlags[historyUxEnabled=true, historyComparisonEnabled=true, historyWorkspacesEnabled=tr (truncated)...]
+2026-08-13T16:46:01.240+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : 1 mappings in org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+2026-08-13T16:46:01.242+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.242+02:00 DEBUG 3273021 --- [    Test worker] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-08-13T16:46:01.242+02:00  INFO 3273021 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-13T16:46:01.242+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-13T16:46:01.242+02:00  INFO 3273021 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-13T16:46:01.243+02:00 DEBUG 3273021 --- [    Test worker] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to org.osi.server.config.SystemFeatureController#features()
+2026-08-13T16:46:01.244+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2026-08-13T16:46:01.244+02:00 DEBUG 3273021 --- [    Test worker] m.m.a.RequestResponseBodyMethodProcessor : Writing [SystemFeatureFlags[historyUxEnabled=true, historyComparisonEnabled=true, historyWorkspacesEnabled=tr (truncated)...]
+</pre>
+</span>
+</div>
+</div>
+<div id="footer">
+<p>
+<div>
+<label class="hidden" id="label-for-line-wrapping-toggle" for="line-wrapping-toggle">Wrap lines
+<input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
+</label>
+</div>Generated by 
+<a href="http://www.gradle.org">Gradle 8.12</a> at Aug 13, 2026, 4:47:13 PM</p>
+</div>
+</div>
+</body>
+</html>

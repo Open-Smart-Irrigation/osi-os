@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.AgroscopeControllerTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:33" hostname="osi-01" time="0.017">
+  <properties/>
+  <testcase name="proposeUsesSetpointMinusObservedStress()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.002"/>
+  <testcase name="skippedProposalIsNoOpWithNullError()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.001"/>
+  <testcase name="closeAfterGapStillIntegratesExactlyOneStep()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.001"/>
+  <testcase name="proposeSubtractsMeasuredWaterBeforeClamping()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.001"/>
+  <testcase name="skippedCloseCarriesStateWithoutNpe()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.007"/>
+  <testcase name="persistedGainsWinOverConfiguredGains()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.001"/>
+  <testcase name="rainFreezeProposalKeepsErrorButForcesZeroDoseAndNoIntegralUpdate()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.001"/>
+  <testcase name="proposeDoesNotChangeIntegral()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.0"/>
+  <testcase name="closeDoesNotIntegrateWhenNextTargetSaturatesHighOrLow()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.0"/>
+  <testcase name="closeIntegratesOnceWhenNextTargetIsInsideClamp()" classname="org.osi.server.analytics.AgroscopeControllerTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

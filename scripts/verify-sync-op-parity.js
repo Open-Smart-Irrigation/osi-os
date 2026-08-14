@@ -7,6 +7,8 @@ const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
+const SERVER_RELATIVE_GOLDEN = path.join('backend', 'src', 'test', 'resources', 'sync-contract', 'sync-contract-golden.json');
+const EDGE_RELATIVE_GOLDEN = path.join('docs', 'contracts', 'sync-schema', 'sync-contract-golden.json');
 const STAGING_MANIFEST_RELATIVE = 'scripts/fixtures/sync-contract-staging.json';
 const JOURNAL_MODULE_DIRECTORY =
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal';
@@ -24,7 +26,17 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
 const EXACT_EDGE_DEFERRED_OPS = [];
-const EXACT_CLOUD_DEFERRED_OPS = [];
+// Temporary rollout capability matrix. After the cloud deploy answers, Phase 4
+// D2 re-runs both pinned parity checks and removes these seven staged ops.
+const EXACT_CLOUD_DEFERRED_OPS = [
+  'USER_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+  'WEATHER_STATION_ZONES_REPLACED',
+];
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',
@@ -156,6 +168,59 @@ function resolveServerSourceWithProvenance(root = REPO_ROOT) {
     return { source: matched, matchedWorktree: true };
   }
   return { source: resolveDefaultServerSource(root), matchedWorktree: false };
+}
+
+function fallbackServerGoldenCandidates(root = REPO_ROOT) {
+  const worktreeName = path.basename(root);
+  return uniquePaths([
+    path.resolve(root, '..', '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_GOLDEN),
+    path.resolve(root, '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_GOLDEN),
+  ]);
+}
+
+function resolveServerGolden(root = REPO_ROOT) {
+  const explicit = process.env.OSI_SERVER_SYNC_CONTRACT_GOLDEN;
+  if (explicit) return path.isAbsolute(explicit) ? explicit : path.resolve(root, explicit);
+  return fallbackServerGoldenCandidates(root).find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function resolveServerGoldenFromSource(serverSource) {
+  const absoluteSource = path.resolve(serverSource);
+  const sourceSuffix = path.join(SERVER_RELATIVE_SOURCE);
+  if (!absoluteSource.endsWith(sourceSuffix)) {
+    throw new Error(`cannot derive osi-server root from EdgeSyncService.java path: ${serverSource}`);
+  }
+  const serverRoot = absoluteSource.slice(0, -sourceSuffix.length);
+  return path.join(serverRoot, SERVER_RELATIVE_GOLDEN);
+}
+
+function compareSyncContractGolden(root = REPO_ROOT, serverGoldenPath) {
+  const edgeGoldenPath = path.join(root, EDGE_RELATIVE_GOLDEN);
+  const serverPath = serverGoldenPath || resolveServerGolden(root);
+  if (!fs.existsSync(edgeGoldenPath)) {
+    return { ok: false, message: `edge sync-contract-golden.json is missing at ${edgeGoldenPath}` };
+  }
+  if (!serverPath || !fs.existsSync(serverPath)) {
+    if (serverGoldenPath) {
+      return {
+        ok: false,
+        message: `resolved osi-server sync-contract-golden.json is missing at ${serverPath}`,
+      };
+    }
+    return {
+      ok: true,
+      warning: 'cloud sync-contract-golden.json unavailable; optional byte comparison skipped',
+    };
+  }
+  const edgeBytes = fs.readFileSync(edgeGoldenPath);
+  const serverBytes = fs.readFileSync(serverPath);
+  if (!edgeBytes.equals(serverBytes)) {
+    return {
+      ok: false,
+      message: `edge/cloud sync-contract-golden.json differs (${edgeGoldenPath} vs ${serverPath})`,
+    };
+  }
+  return { ok: true, message: `sync-contract-golden.json byte-identical with ${serverPath}` };
 }
 
 function skipWhitespace(source, index) {
@@ -1306,6 +1371,7 @@ function checkSyncOpParity(options = {}) {
   const root = path.resolve(options.root || REPO_ROOT);
   const schemaPath = options.schemaPath || path.join(root, 'docs/contracts/sync-schema/events.schema.json');
   const serverSource = options.serverSource || resolveDefaultServerSource(root);
+  const serverGoldenPath = options.serverGoldenPath;
   const flowSources = options.flowSources === undefined ? FLOW_SOURCES : options.flowSources;
   const sqlSources = options.sqlSources === undefined ? SQL_SOURCES : options.sqlSources;
   const databaseSources = options.databaseSources === undefined ? DATABASE_SOURCES : options.databaseSources;
@@ -1386,6 +1452,16 @@ function checkSyncOpParity(options = {}) {
   const lines = [];
   let ok = true;
 
+  const goldenCheck = compareSyncContractGolden(root, serverGoldenPath);
+  if (!goldenCheck.ok) {
+    ok = false;
+    lines.push(`  ERROR golden: ${goldenCheck.message}`);
+  } else if (goldenCheck.warning) {
+    lines.push(`  WARNING golden: ${goldenCheck.warning}`);
+  } else {
+    lines.push(`  ${goldenCheck.message}`);
+  }
+
   for (const error of stagingErrors) {
     ok = false;
     lines.push(`  ERROR staging: ${error}`);
@@ -1464,7 +1540,14 @@ function checkSyncOpParity(options = {}) {
   }
 
   const expectedServerOps = expectedSchemaOps.filter((op) => !staging.cloudDeferred.includes(op));
-  const serverDiffLines = formatDiff('server', 'union', diffSets(expectedServerOps, serverResult.ops));
+  // A paired branch may already implement an operation that the deployed cloud
+  // still lacks. Staging removes that operation from the required server set;
+  // keep requiring every non-staged op, while allowing staged server handlers
+  // as forward-compatible extras. Unknown server-only operations remain errors.
+  const serverDiffLines = formatDiff('server', 'union', {
+    missing: expectedServerOps.filter((op) => !serverResult.ops.includes(op)),
+    extra: serverResult.ops.filter((op) => !expectedSchemaOps.includes(op)),
+  });
   if (serverDiffLines.length) {
     ok = false;
     lines.push(...serverDiffLines);
@@ -1505,7 +1588,8 @@ function main() {
     }
     serverSource = resolution.source;
   }
-  const result = checkSyncOpParity({ serverSource });
+  const serverGoldenPath = resolveServerGoldenFromSource(serverSource);
+  const result = checkSyncOpParity({ serverSource, serverGoldenPath });
   console.log(result.message);
   if (!result.ok) {
     console.error('verify-sync-op-parity: FAIL');
@@ -1530,10 +1614,14 @@ module.exports = {
   extractFlowOps,
   extractSchemaOps,
   extractServerOps,
+  EXACT_CLOUD_DEFERRED_OPS,
   extractSqlOps,
   payloadHasTopLevelContractVersion,
   resolveDefaultServerSource,
   worktreeMatchedServerSourceCandidates,
   resolveServerSourceWithProvenance,
+  compareSyncContractGolden,
+  resolveServerGoldenFromSource,
+  resolveServerGolden,
   verifyV2ContractFiles,
 };

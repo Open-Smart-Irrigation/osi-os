@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.AgroMonitoringWeatherServiceTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:33" hostname="osi-01" time="0.244">
+  <properties/>
+  <testcase name="getWeatherForDay_andDailyArchive_buildFromHistory()" classname="org.osi.server.analytics.AgroMonitoringWeatherServiceTest" time="0.216"/>
+  <testcase name="getForecast_parsesThreeHourForecast()" classname="org.osi.server.analytics.AgroMonitoringWeatherServiceTest" time="0.014"/>
+  <testcase name="getCurrentConditions_parsesCurrentWeather()" classname="org.osi.server.analytics.AgroMonitoringWeatherServiceTest" time="0.012"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

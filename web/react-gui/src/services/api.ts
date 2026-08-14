@@ -280,6 +280,7 @@ export const devicesAPI = {
     return rows.map(normaliseDevice);
   },
 
+  // zone_id is optional and is write-scope-checked by the edge route.
   add: async (device: AddDeviceRequest): Promise<Device> => {
     const response = await api.post<Device>('/api/devices', device);
     return normaliseDevice(response.data);

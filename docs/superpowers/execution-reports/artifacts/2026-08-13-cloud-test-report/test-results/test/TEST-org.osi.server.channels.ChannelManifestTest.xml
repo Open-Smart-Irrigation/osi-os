@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.channels.ChannelManifestTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:52" hostname="osi-01" time="0.01">
+  <properties/>
+  <testcase name="rejectsLegacyAliasThatCollidesWithCanonicalKey()" classname="org.osi.server.channels.ChannelManifestTest" time="0.001"/>
+  <testcase name="rejectsDuplicateLegacyAliasAcrossEntries()" classname="org.osi.server.channels.ChannelManifestTest" time="0.0"/>
+  <testcase name="backendManifestIsUniquePinnedAndByteIdenticalToFrontendCopy()" classname="org.osi.server.channels.ChannelManifestTest" time="0.007"/>
+  <testcase name="rejectsDuplicateLegacyAliasOnSameEntry()" classname="org.osi.server.channels.ChannelManifestTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

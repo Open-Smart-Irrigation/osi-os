@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.sync.SyncDeadLetterAdminControllerTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:59" hostname="osi-01" time="0.002">
+  <properties/>
+  <testcase name="listsFleetWideWhenGatewayOmitted()" classname="org.osi.server.sync.SyncDeadLetterAdminControllerTest" time="0.001"/>
+  <testcase name="listsPerGatewayNormalizedAndBounded()" classname="org.osi.server.sync.SyncDeadLetterAdminControllerTest" time="0.001"/>
+  <testcase name="limitIsFlooredAtOne()" classname="org.osi.server.sync.SyncDeadLetterAdminControllerTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

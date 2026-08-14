@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.journal.JournalMutationServiceTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:14" hostname="osi-01" time="0.005">
+  <properties/>
+  <testcase name="newGrantedEntryUsesPlotOwnerAndActingPrincipal()" classname="org.osi.server.journal.JournalMutationServiceTest" time="0.001"/>
+  <testcase name="voidRequiresCanonicalEntryIdentity()" classname="org.osi.server.journal.JournalMutationServiceTest" time="0.001"/>
+  <testcase name="voidBuildsASeparateCommandAndMinimalDesiredSubset()" classname="org.osi.server.journal.JournalMutationServiceTest" time="0.001"/>
+  <testcase name="grantedVoidPreservesOwnerAndAttributesVoidToActingPrincipal()" classname="org.osi.server.journal.JournalMutationServiceTest" time="0.0"/>
+  <testcase name="grantedEntryUpdatePreservesCanonicalOwnerAndOriginalAuthor()" classname="org.osi.server.journal.JournalMutationServiceTest" time="0.001"/>
+  <testcase name="entryMutationOverwritesIdentityAndBuildsCanonicalCommand()" classname="org.osi.server.journal.JournalMutationServiceTest" time="0.0"/>
+  <testcase name="resourceMutationsUseTheirContractKeysAndCommandBodies()" classname="org.osi.server.journal.JournalMutationServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.history.HistoryAggregationServiceSpringWiringTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:09" hostname="osi-01" time="0.412">
+  <properties/>
+  <testcase name="springCanInstantiateAggregationServiceWithRepositoryAndMeterBeans()" classname="org.osi.server.history.HistoryAggregationServiceSpringWiringTest" time="0.102"/>
+  <testcase name="springCanInstantiateHistoryComponentsWithProductionConstructors()" classname="org.osi.server.history.HistoryAggregationServiceSpringWiringTest" time="0.31"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

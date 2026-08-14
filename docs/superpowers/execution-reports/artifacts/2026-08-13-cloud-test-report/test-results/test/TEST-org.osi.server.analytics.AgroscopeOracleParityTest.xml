@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analytics.AgroscopeOracleParityTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:33" hostname="osi-01" time="0.332">
+  <properties/>
+  <testcase name="[1] caseName=clean" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.029"/>
+  <testcase name="[2] caseName=nan-day" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.007"/>
+  <testcase name="[3] caseName=saturation" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.002"/>
+  <testcase name="[4] caseName=rain-freeze" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.001"/>
+  <testcase name="[1] caseName=clean" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.081"/>
+  <testcase name="[2] caseName=nan-day" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.055"/>
+  <testcase name="[3] caseName=partial-day" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.012"/>
+  <testcase name="warmRestartSplitMatchesSingleBatchAcrossNanDay()" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.062"/>
+  <testcase name="waterInputMatchesOracleFlowLitresOverArea()" classname="org.osi.server.analytics.AgroscopeOracleParityTest" time="0.071"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

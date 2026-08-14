@@ -566,14 +566,14 @@ test('plot and group lists hide same-gateway resources owned by another user', a
   assert.deepEqual((await journal.listPlotGroups(db, principal())).plot_groups[0].members, [plotUuid]);
 });
 
-test('scoped journal reads use owned-plus-granted plots while flag-off stays owner-only', async () => {
+test('W2: scoped journal reads are account-wide while flag-off stays owner-only', async () => {
   const db = new TestDb('scoped-resource-lists');
   seedIdentity(db);
   const ownedPlotUuid = '22100000-0000-4000-8000-000000000001';
-  const grantedPlotUuid = '22100000-0000-4000-8000-000000000002';
+  const foreignPlotUuid = '22100000-0000-4000-8000-000000000002';
   const foreignGroupUuid = '22100000-0000-4000-8000-000000000003';
   const ownedEntryUuid = '22100000-0000-4000-8000-000000000004';
-  const grantedEntryUuid = '22100000-0000-4000-8000-000000000005';
+  const foreignEntryUuid = '22100000-0000-4000-8000-000000000005';
   const owner = principal();
   const other = principal({
     user_id: 2,
@@ -582,13 +582,13 @@ test('scoped journal reads use owned-plus-granted plots while flag-off stays own
     author_label: 'other-user',
   });
   await journal.upsertPlot(db, plotInput(ownedPlotUuid, 'scoped-owned'), owner);
-  await journal.upsertPlot(db, plotInput(grantedPlotUuid, 'scoped-granted'), other);
+  await journal.upsertPlot(db, plotInput(foreignPlotUuid, 'scoped-foreign'), other);
   await journal.upsertPlotGroup(db, {
     group_uuid: foreignGroupUuid,
     base_sync_version: 0,
-    label: 'Granted cohort',
+    label: 'Foreign cohort',
     resolved: false,
-    members: [grantedPlotUuid],
+    members: [foreignPlotUuid],
   }, other);
   await journal.saveEntry(
     db,
@@ -598,63 +598,61 @@ test('scoped journal reads use owned-plus-granted plots while flag-off stays own
   );
   await journal.saveEntry(
     db,
-    entryInput(grantedEntryUuid, grantedPlotUuid, '2026-07-13T09:00:00', { season_crop: 'barley' }),
+    entryInput(foreignEntryUuid, foreignPlotUuid, '2026-07-13T09:00:00', { season_crop: 'barley' }),
     other,
     { mode: 'create' }
   );
 
+  // Flag-off is unchanged: owner-only.
   const legacy = await journal.listPlots(db, owner);
   assert.deepEqual(legacy.plots.map((plot) => plot.plot_uuid), [ownedPlotUuid]);
+  assert.deepEqual(
+    (await journal.listEntries(db, { status: 'final' }, owner)).entries
+      .map((entry) => entry.entry_uuid),
+    [ownedEntryUuid]
+  );
 
+  // Scoped mode: account-wide, with no plot grant of any kind (W2).
   const scoped = Object.assign({}, owner, {
     scope: scopeHelper,
     scoped: true,
   });
   scopeHelper.invalidateScope(OWNER_UUID);
   assert.deepEqual(
-    (await journal.listPlots(db, scoped)).plots.map((plot) => plot.plot_uuid),
-    [ownedPlotUuid]
-  );
-
-  db.prepare(
-    'INSERT INTO user_plot_assignments ' +
-      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
-  ).run(
-    '22100000-0000-4000-8000-000000000006',
-    OWNER_UUID,
-    grantedPlotUuid,
-    GATEWAY_EUI,
-    '2026-07-13T00:00:00.000Z'
-  );
-  scopeHelper.invalidateScope(OWNER_UUID);
-
-  assert.deepEqual(
     (await journal.listPlots(db, scoped)).plots.map((plot) => plot.plot_uuid).sort(),
-    [grantedPlotUuid, ownedPlotUuid].sort()
+    [foreignPlotUuid, ownedPlotUuid].sort()
   );
   assert.deepEqual(
     (await journal.listEntries(db, { status: 'final' }, scoped)).entries
       .map((entry) => entry.entry_uuid).sort(),
-    [grantedEntryUuid, ownedEntryUuid].sort()
+    [foreignEntryUuid, ownedEntryUuid].sort()
   );
   assert.deepEqual(
     (await journal.listPlotGroups(db, scoped)).plot_groups
       .map((group) => group.group_uuid),
     [foreignGroupUuid]
   );
+  assert.deepEqual(
+    (await journal.listPlotGroups(db, scoped)).plot_groups[0].members,
+    [foreignPlotUuid]
+  );
 });
 
-test('E5: scoped journal entry list surfaces the owner\'s plot-less entries, not just plot_uuid IN (...)', async () => {
+test('W2: a plot-less entry is still listed in scoped mode', async () => {
   const db = new TestDb('scoped-plotless-entry');
   seedIdentity(db);
   const plotlessEntryUuid = '22120000-0000-4000-8000-000000000001';
   const owner = principal();
-  // Zone-only (no-plot) entry creation persists plot_uuid=NULL (lifecycle.js
-  // resolvePlotContext, plotUuid==null, no zone_uuid override -- see the "zone-only
-  // entry provisioning" tests below for the auto-provisioning path this is NOT).
+  const secondPlotlessEntryUuid = '22120000-0000-4000-8000-000000000002';
   await journal.saveEntry(
     db,
     entryInput(plotlessEntryUuid, null, '2026-07-13T08:00:00', { season_crop: 'barley' }),
+    owner,
+    { mode: 'create' }
+  );
+  await journal.saveEntry(
+    db,
+    entryInput(secondPlotlessEntryUuid, null, '2026-07-13T09:00:00', { season_crop: 'wheat' }),
     owner,
     { mode: 'create' }
   );
@@ -667,24 +665,113 @@ test('E5: scoped journal entry list surfaces the owner\'s plot-less entries, not
 
   const scoped = Object.assign({}, owner, { scope: scopeHelper, scoped: true });
   scopeHelper.invalidateScope(OWNER_UUID);
-  // The owner has no plot grants at all here -- before the fix, a bare
-  // `plot_uuid IN (...)` filter (or its `1=0` empty-set fallback) never matches NULL,
-  // so even the entry's own author/owner could not see it once scoped access was on.
   const entries = (await journal.listEntries(db, { status: 'final' }, scoped)).entries;
-  assert.deepEqual(entries.map((entry) => entry.entry_uuid), [plotlessEntryUuid]);
+  assert.deepEqual(
+    entries.map((entry) => entry.entry_uuid),
+    [secondPlotlessEntryUuid, plotlessEntryUuid]
+  );
 
-  // A foreign user, even with a real plot grant elsewhere, must not see it.
-  const other = principal({
+  // W2: a different account on the same gateway reads it too.
+  const other = Object.assign({}, principal({
     user_id: 2,
     owner_user_uuid: OTHER_OWNER_UUID,
     author_principal_uuid: OTHER_OWNER_UUID,
     author_label: 'other-user',
-    scope: scopeHelper,
-    scoped: true,
-  });
+  }), { scope: scopeHelper, scoped: true });
   scopeHelper.invalidateScope(OTHER_OWNER_UUID);
   const foreignEntries = (await journal.listEntries(db, { status: 'final' }, other)).entries;
-  assert.deepEqual(foreignEntries.map((entry) => entry.entry_uuid), []);
+  assert.deepEqual(
+    foreignEntries.map((entry) => entry.entry_uuid),
+    [secondPlotlessEntryUuid, plotlessEntryUuid]
+  );
+
+  const voided = await journal.voidEntry(
+    db,
+    plotlessEntryUuid,
+    { base_sync_version: 1, reason: 'Grantee correction' },
+    other
+  );
+  assert.equal(voided.entry_uuid, plotlessEntryUuid);
+
+  db.prepare("UPDATE users SET role='viewer' WHERE id=2").run();
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  const viewer = Object.assign({}, other, { scope: scopeHelper, scoped: true });
+  await assert.rejects(
+    journal.voidEntry(
+      db,
+      secondPlotlessEntryUuid,
+      { base_sync_version: 1, reason: 'Viewer correction' },
+      viewer
+    ),
+    (error) => error && error.code === 'forbidden' && error.statusCode === 403
+  );
+});
+
+test('scoped catalog GET rewrites a grantee to the plot owner, while no context stays owner-only', async () => {
+  const db = new TestDb('scoped-catalog-owner');
+  seedIdentity(db);
+  const plotUuid = '22130000-0000-4000-8000-000000000001';
+  const customUuid = '22130000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'owner-catalog-plot'), principal());
+  await journal.upsertCustomVocab(
+    db,
+    customVocabInput(customUuid, { kind: 'attribute', value_type: 'text' }),
+    principal()
+  );
+  db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22130000-0000-4000-8000-000000000003',
+    OTHER_OWNER_UUID,
+    plotUuid,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  const secret = 'scoped-catalog-owner-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 2,
+    username: 'other-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  const request = (query) => journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET',
+        path: '/api/journal/catalog',
+        headers: { authorization },
+        query: query || {},
+        params: {},
+      },
+    },
+    Database: ExistingDb,
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+    scope: scopeHelper,
+    scopedMode: true,
+  });
+
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  const withoutContext = await request();
+  assert.equal(withoutContext.statusCode, 200);
+  assert.equal(
+    withoutContext.payload.vocab.some((row) => row.code === 'custom.' + customUuid),
+    false
+  );
+  const withPlotContext = await request({ plot_uuid: plotUuid });
+  assert.equal(withPlotContext.statusCode, 200);
+  assert.equal(
+    withPlotContext.payload.vocab.some((row) => row.code === 'custom.' + customUuid),
+    true
+  );
 });
 
 test('scoped journal writes allow plot grantees, preserve ownership, and revoke immediately', async () => {
@@ -811,7 +898,166 @@ test('scoped journal writes allow plot grantees, preserve ownership, and revoke 
   );
 });
 
-test('scoped plot creation requires zone scope and keeps the creator as owner', async () => {
+test("a grantee without scope on the entry's plot cannot update it", async () => {
+  const db = new TestDb('scoped-entry-source-plot');
+  seedIdentity(db);
+  const sourcePlotUuid = '22210000-0000-4000-8000-000000000001';
+  const destinationPlotUuid = '22210000-0000-4000-8000-000000000002';
+  const entryUuid = '22210000-0000-4000-8000-000000000003';
+  const owner = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertPlot(db, plotInput(sourcePlotUuid, 'source-plot'), owner);
+  await journal.upsertPlot(db, plotInput(destinationPlotUuid, 'destination-plot'), owner);
+  await journal.saveEntry(
+    db,
+    entryInput(entryUuid, sourcePlotUuid, '2026-07-13T12:00:00', { season_crop: 'barley' }),
+    owner,
+    { mode: 'create' }
+  );
+  db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22210000-0000-4000-8000-000000000004',
+    OWNER_UUID,
+    destinationPlotUuid,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  const scoped = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(entryUuid, destinationPlotUuid, '2026-07-13T12:00:00', {
+        base_sync_version: 1,
+        season_crop: 'barley',
+      }),
+      scoped,
+      { mode: 'update', entryUuid }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+});
+
+test('re-parenting an entry requires write scope on both plots', async () => {
+  const db = new TestDb('scoped-entry-reparent');
+  seedIdentity(db);
+  const sourcePlotUuid = '22220000-0000-4000-8000-000000000001';
+  const destinationPlotUuid = '22220000-0000-4000-8000-000000000002';
+  const entryUuid = '22220000-0000-4000-8000-000000000003';
+  const owner = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertPlot(db, plotInput(sourcePlotUuid, 'source-plot'), owner);
+  await journal.upsertPlot(db, plotInput(destinationPlotUuid, 'destination-plot'), owner);
+  await journal.saveEntry(
+    db,
+    entryInput(entryUuid, sourcePlotUuid, '2026-07-13T13:00:00', { season_crop: 'barley' }),
+    owner,
+    { mode: 'create' }
+  );
+  const insertAssignment = (assignmentUuid, plotUuid) => db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(assignmentUuid, OWNER_UUID, plotUuid, GATEWAY_EUI, '2026-07-13T00:00:00.000Z');
+  insertAssignment('22220000-0000-4000-8000-000000000004', sourcePlotUuid);
+  insertAssignment('22220000-0000-4000-8000-000000000005', destinationPlotUuid);
+  const scoped = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+
+  const updated = await journal.saveEntry(
+    db,
+    entryInput(entryUuid, destinationPlotUuid, '2026-07-13T13:00:00', {
+      base_sync_version: 1,
+      season_crop: 'barley',
+    }),
+    scoped,
+    { mode: 'update', entryUuid }
+  );
+  assert.equal(updated.entry_uuid, entryUuid);
+
+  db.prepare(
+    "UPDATE user_plot_assignments SET deleted_at='2026-07-13T14:00:00.000Z' " +
+      'WHERE user_uuid=? AND plot_uuid=?'
+  ).run(OWNER_UUID, destinationPlotUuid);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(entryUuid, destinationPlotUuid, '2026-07-13T13:00:00', {
+        base_sync_version: 2,
+        season_crop: 'barley',
+      }),
+      scoped,
+      { mode: 'update', entryUuid }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+});
+
+test("a scoped zone entry reuses the zone's existing plot", async () => {
+  const db = new TestDb('scoped-zone-existing-plot');
+  seedIdentity(db);
+  const plotUuid = '22230000-0000-4000-8000-000000000001';
+  const entryUuid = '22230000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(
+    db,
+    plotInput(plotUuid, 'existing-zone-plot', { zone_uuid: ZONE_UUID }),
+    principal()
+  );
+  db.prepare('DELETE FROM sync_outbox').run();
+  db.prepare(
+    'INSERT INTO user_zone_assignments ' +
+      '(assignment_uuid,user_uuid,zone_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22230000-0000-4000-8000-000000000003',
+    OTHER_OWNER_UUID,
+    ZONE_UUID,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  const scoped = Object.assign({}, principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  }), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+
+  const created = await journal.saveEntry(
+    db,
+    entryInput(entryUuid, null, '2026-07-13T14:00:00', {
+      zone_uuid: ZONE_UUID,
+      layout_code: 'open_field',
+      layout_version: 1,
+      season_crop: 'barley',
+    }),
+    scoped,
+    { mode: 'create' }
+  );
+  assert.equal(created.entry_uuid, entryUuid);
+  assert.equal(
+    db.prepare(
+      'SELECT COUNT(*) AS n FROM journal_plots WHERE zone_uuid=? AND active=1 AND deleted_at IS NULL'
+    ).get(ZONE_UUID).n,
+    1
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='JOURNAL_PLOT'").get().n,
+    0
+  );
+});
+
+test('scoped plot creation requires zone scope and uses the zone owner', async () => {
   const db = new TestDb('scoped-plot-create');
   seedIdentity(db);
   const plotUuid = '22300000-0000-4000-8000-000000000001';
@@ -849,7 +1095,7 @@ test('scoped plot creation requires zone scope and keeps the creator as owner', 
   assert.equal(
     db.prepare('SELECT owner_user_uuid FROM journal_plots WHERE plot_uuid=?')
       .get(plotUuid).owner_user_uuid,
-    OWNER_UUID
+    OTHER_OWNER_UUID
   );
 });
 

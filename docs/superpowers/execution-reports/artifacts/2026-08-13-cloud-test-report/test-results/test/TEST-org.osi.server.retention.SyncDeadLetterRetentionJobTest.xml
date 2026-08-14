@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.retention.SyncDeadLetterRetentionJobTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:36" hostname="osi-01" time="0.117">
+  <properties/>
+  <testcase name="dryRunReportsCandidatesWithoutDeleting()" classname="org.osi.server.retention.SyncDeadLetterRetentionJobTest" time="0.116"/>
+  <testcase name="liveRunDeletesOldRows()" classname="org.osi.server.retention.SyncDeadLetterRetentionJobTest" time="0.0"/>
+  <system-out><![CDATA[2026-08-13T16:46:36.353+02:00  INFO 3273021 --- [    Test worker] o.o.s.r.SyncDeadLetterRetentionJob       : Purged 4 sync_dead_letter rows older than 90 days
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

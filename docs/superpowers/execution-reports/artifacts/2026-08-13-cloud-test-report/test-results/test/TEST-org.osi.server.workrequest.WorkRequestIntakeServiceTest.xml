@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.workrequest.WorkRequestIntakeServiceTest" tests="31" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:47:05" hostname="osi-01" time="0.159">
+  <properties/>
+  <testcase name="failsClosedWhenPseudonymSecretIsNotConfigured()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="derivesPrivateLocalUserRefFromEdgeGuiUserPayload()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.003"/>
+  <testcase name="acceptsMatchingSoftDedupHashForDifferentRequestIds()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.002"/>
+  <testcase name="classifiesCopyRequestsAsCosmeticPublishClass()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="returnsRateLimitedWhenDailyGatewayLimitIsReached()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="rejectsInvalidSubmittedAtWithoutThrowing()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="rejectsQuarantinedGatewaysWithEventReason()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.0"/>
+  <testcase name="honorsGatewayControlRateLimitOverridesDuringIntake()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.0"/>
+  <testcase name="rejectsInvalidBoundedEnumFieldsBeforeDatabaseSaveFailure()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="normalizesStatusSecretHashToLowercaseHex()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="sourceIpLimitedUnlinkedSupportDoesNotPersistRateLimitedRows()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.003"/>
+  <testcase name="rejectsMissingPublicConsentWithoutPublicArtifactText()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="rejectsMissingRequestIdWithoutPersistence()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.0"/>
+  <testcase name="linkedSyncBypassesKnownGatewayGate()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="rejectsInvalidStatusSecretHashFormatWithoutBlockingRequest()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="storesPrivateGatewayPseudonymAndDiagnosticsWithoutPublishingDiagnostics()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="acceptsUnlinkedSupportFromKnownGatewayAndPersistsProvenance()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="treatsRepeatedRequestIdAsIdempotentDuplicateBeforeRateLimit()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.0"/>
+  <testcase name="persistsRevisedContactStatusSecretAndLinkedProvenance()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="redactsSecretsFromPublicTitleAndBody()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="resolvesTrustedProxyClientIpBeforeGeoIpLookup()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.122"/>
+  <testcase name="rejectsUnlinkedSupportFromUnknownGatewayWithoutPersistence()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="omitsDiagnosticsJsonWhenConsentDiagnosticsIsFalseOrNull()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="storesUnknownCountryWhenGeoIpIsUnavailable()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="failClosesFeedbackShortDescriptionsUnsafeKeywordsAndOperationalAreas()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.002"/>
+  <testcase name="rejectsRevisedPayloadBounds()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.002"/>
+  <testcase name="classifiesSafePresentationAreasForPublishWithoutAgentEligibility()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <testcase name="malformedRequestsStillHonorGatewayQuarantine()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.0"/>
+  <testcase name="sourceIpLimitAppliesBeforeUnknownGatewayLookupForUnlinkedSupport()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.0"/>
+  <testcase name="returnsRateLimitedWhenWeeklyGatewayLimitIsReached()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.002"/>
+  <testcase name="malformedRequestsStillHonorRateLimit()" classname="org.osi.server.workrequest.WorkRequestIntakeServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

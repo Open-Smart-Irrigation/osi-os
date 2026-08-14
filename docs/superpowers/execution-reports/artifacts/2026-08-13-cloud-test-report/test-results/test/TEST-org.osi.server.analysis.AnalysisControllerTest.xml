@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.analysis.AnalysisControllerTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:45:32" hostname="osi-01" time="0.22">
+  <properties/>
+  <testcase name="seriesRejectsTooManySelectors()" classname="org.osi.server.analysis.AnalysisControllerTest" time="0.175"/>
+  <testcase name="seriesRejectsMissingRequestBody()" classname="org.osi.server.analysis.AnalysisControllerTest" time="0.009"/>
+  <testcase name="rejectsStalePrincipalAsUnauthorized()" classname="org.osi.server.analysis.AnalysisControllerTest" time="0.011"/>
+  <testcase name="seriesRejectsUnknownRangeWithStructuredBody()" classname="org.osi.server.analysis.AnalysisControllerTest" time="0.004"/>
+  <testcase name="seriesDelegatesForValidRange()" classname="org.osi.server.analysis.AnalysisControllerTest" time="0.007"/>
+  <testcase name="seriesRejectsSeasonRangeWithStructuredBody()" classname="org.osi.server.analysis.AnalysisControllerTest" time="0.004"/>
+  <testcase name="rejectsMissingPrincipalAsUnauthorized()" classname="org.osi.server.analysis.AnalysisControllerTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

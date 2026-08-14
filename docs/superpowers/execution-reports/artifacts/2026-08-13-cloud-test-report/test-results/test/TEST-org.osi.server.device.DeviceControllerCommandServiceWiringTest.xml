@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.osi.server.device.DeviceControllerCommandServiceWiringTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-13T14:46:02" hostname="osi-01" time="0.548">
+  <properties/>
+  <testcase name="sendCommand_canonicalEuiWiresThroughRealCommandServiceWithEffectKeyAndExpiry()" classname="org.osi.server.device.DeviceControllerCommandServiceWiringTest" time="0.541"/>
+  <testcase name="sendCommand_nonCanonicalDeviceEuiThrowsIllegalArgumentThatGlobalExceptionHandlerMapsTo400()" classname="org.osi.server.device.DeviceControllerCommandServiceWiringTest" time="0.007"/>
+  <system-out><![CDATA[2026-08-13T16:46:03.214+02:00  INFO 3273021 --- [    Test worker] org.osi.server.command.CommandService    : Best-effort MQTT publish succeeded for command VALVE_COMMAND on GW-1234
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

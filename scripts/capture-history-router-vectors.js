@@ -32,9 +32,16 @@ const { deepStrictEqual } = require('node:assert');
 const REPO = path.resolve(__dirname, '..');
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const SEED_SQL = path.join(REPO, 'database/seed-blank.sql');
+const NODE_RED_ROOT = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
 const HELPER_PATH = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js');
 const ROUTER_PATH = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.js');
 const CASES_DIR = path.join(REPO, 'docs/contracts/history-router/cases');
+
+// Function-node tests must provide the same loader seam as Node-RED. The
+// runtime defaults to /srv/node-red, so point the loader at the bundled
+// profile when this harness runs from the repository.
+process.env.OSI_LIB_BASE = process.env.OSI_LIB_BASE || NODE_RED_ROOT;
+const osiLib = require(path.join(NODE_RED_ROOT, 'osi-lib'));
 
 // ───────────────────────────── fixed clock ─────────────────────────
 
@@ -416,10 +423,10 @@ async function runNodeForRoute(funcText, dbPath, route) {
     // async IIFE that returns the modified msg. We wrap it in a function that
     // has the required globals in scope.
     const wrappedFunc = new Function(
-      'osiDb', 'osiHistory', 'crypto', 'env', 'global', 'node', 'msg', 'Buffer', 'HR',
+      'osiDb', 'osiHistory', 'crypto', 'env', 'global', 'node', 'msg', 'Buffer', 'HR', 'osiLib',
       funcText
     );
-    const result = await wrappedFunc(osiDb, osiHistory, crypto, env, globalObj, node, msg, Buffer, HR);
+    const result = await wrappedFunc(osiDb, osiHistory, crypto, env, globalObj, node, msg, Buffer, HR, osiLib);
 
     return {
       statusCode: msg.statusCode,

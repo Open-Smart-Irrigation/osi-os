@@ -182,18 +182,6 @@ function scopeAllows(scope, kind, uuid) {
   return values.has(uuid);
 }
 
-async function assertZoneAccess(db, userUuid, zoneUuid, options) {
-  const scope = await resolveScope(db, userUuid, options);
-  if (!scopeAllows(scope, 'zone', zoneUuid)) throw httpError(404, 'zone not found');
-  return scope;
-}
-
-async function assertPlotAccess(db, userUuid, plotUuid, options) {
-  const scope = await resolveScope(db, userUuid, options);
-  if (!scopeAllows(scope, 'plot', plotUuid)) throw httpError(404, 'plot not found');
-  return scope;
-}
-
 async function freshScope(db, userUuid, scopedMode) {
   if (!isScopedMode() && scopedMode !== true) {
     return { role: 'admin', disabled: false, wildcard: true };
@@ -308,6 +296,7 @@ function buildDisableUserGuardedSql() {
 function buildDeroleUserGuardedSql() {
   return 'UPDATE users SET role = ? WHERE user_uuid = ? ' +
     "AND (role != 'admin' OR ? = 'admin' OR " +
+    'disabled_at IS NOT NULL OR ' +
     "(SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1)";
 }
 
@@ -318,13 +307,6 @@ async function isAdmin(db, userUuid, options) {
   return !scope.disabled && (scope.wildcard || scope.role === 'admin');
 }
 
-async function filterZoneUuids(db, userUuid, zoneUuids, options) {
-  const scope = await resolveScope(db, userUuid, options);
-  if (scope.wildcard) return zoneUuids;
-  if (scope.disabled) return [];
-  return zoneUuids.filter((zoneUuid) => scope.zoneUuids.has(zoneUuid));
-}
-
 async function resolveZoneUuidById(db, zoneId) {
   const row = await db.get(
     'SELECT zone_uuid FROM irrigation_zones WHERE id = ? AND deleted_at IS NULL',
@@ -333,41 +315,16 @@ async function resolveZoneUuidById(db, zoneId) {
   return row && row.zone_uuid ? row.zone_uuid : null;
 }
 
-async function assertDeviceAccess(db, userUuid, deveui, options) {
-  const device = await db.get(
-    `SELECT d.deveui, d.type_id, iz.zone_uuid
-       FROM devices d LEFT JOIN irrigation_zones iz
-         ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
-      WHERE d.deveui = ? AND d.deleted_at IS NULL`,
-    [deveui]
-  );
-  if (!device) throw httpError(404, 'device not found');
-  if (WEATHER_TYPE_IDS.has(device.type_id)) {
-    const scope = await resolveScope(db, userUuid, options);
-    if (scope.disabled) throw httpError(403, 'account disabled');
-    return scope;
-  }
-  if (!device.zone_uuid) throw httpError(404, 'device not found');
-  return assertZoneAccess(db, userUuid, device.zone_uuid, options);
-}
-
-async function listScopeZoneUuids(db, userUuid, options) {
-  const scope = await resolveScope(db, userUuid, options);
-  if (scope.wildcard) return null;
-  return [...scope.zoneUuids];
-}
-
 function _resetForTests() {
   cache.clear();
 }
 
 module.exports = {
   isScopedMode,
+  resolveAuthSecret,
   verifyBearer,
   resolveScope,
   invalidateScope,
-  assertZoneAccess,
-  assertPlotAccess,
   assertFreshZoneAccess,
   assertFreshPlotAccess,
   assertFreshDeviceAccess,
@@ -381,9 +338,6 @@ module.exports = {
   buildDeroleUserGuardedSql,
   buildDeriveUserGuardedSql,
   isAdmin,
-  filterZoneUuids,
   resolveZoneUuidById,
-  assertDeviceAccess,
-  listScopeZoneUuids,
   _resetForTests,
 };
