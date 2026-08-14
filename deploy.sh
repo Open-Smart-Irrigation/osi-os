@@ -844,6 +844,10 @@ fetch_required "UC512 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/milesight_uc512_decoder.js" \
     "/srv/node-red/codecs/milesight_uc512_decoder.js"
 
+fetch_required "SDI12 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
+    "/srv/node-red/codecs/dragino_sdi12_decoder.js"
+
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
