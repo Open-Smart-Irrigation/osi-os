@@ -338,7 +338,11 @@ const localRestartReader = [
 ].join('\n');
 const protectedNodeHashes = {
   'al-link-validate': 'c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7',
-  'sync-init-fn': '2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222',
+  // Re-pinned: trg_dp_device_data_outbox_ai's payload json_object was split into
+  // json_insert(json_object(...), ...) so no single call exceeds the gateway's
+  // SQLITE_MAX_FUNCTION_ARG=127. Hash re-derived on this branch, not copied from
+  // AgroLink. Previous pin: 2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222
+  'sync-init-fn': 'e7c2cbb10c8e3117dc5c059cb5f5b2f7db1b88763f53e3d2f04edd3456e395e4',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
