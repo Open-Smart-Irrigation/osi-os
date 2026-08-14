@@ -28,6 +28,7 @@ const PUBLIC_HEALTH_KEYS = [
   'sync_pending',
   'sync_oldest_age_s',
   'sync_rejected',
+  'sync_rejected_recent',
   'sync_dirty_pending',
   'disk_free_pct',
   'crash_count',
@@ -145,6 +146,7 @@ function assertSyncFieldsNull(health) {
   assert.strictEqual(health.sync_pending, null);
   assert.strictEqual(health.sync_oldest_age_s, null);
   assert.strictEqual(health.sync_rejected, null);
+  assert.strictEqual(health.sync_rejected_recent, null);
   assert.strictEqual(health.sync_dirty_pending, null);
 }
 
@@ -165,6 +167,7 @@ test('modern schema reports schema, sync, and disk health', async () => {
     assert.strictEqual(health.sync_pending, 0);
     assert.strictEqual(health.sync_oldest_age_s, 0);
     assert.strictEqual(health.sync_rejected, 0);
+    assert.strictEqual(health.sync_rejected_recent, 0);
     assert.strictEqual(health.sync_dirty_pending, 0);
     assertDiskFreePct(health.disk_free_pct);
   } finally {
@@ -251,8 +254,51 @@ test('sync backlog counters count pending, rejected, and dirty pending rows inde
     assertPublicHealthShape(health);
     assert.strictEqual(health.sync_pending, 2);
     assert.strictEqual(health.sync_rejected, 1);
+    assert.strictEqual(health.sync_rejected_recent, 0, 'the fixture rejection is long past the 24h window');
     assert.strictEqual(health.sync_dirty_pending, 1);
     assert(Number.isInteger(health.sync_oldest_age_s));
+  } finally {
+    db.close();
+  }
+});
+
+test('sync_rejected_recent excludes stale rejections and keeps health_state healthy when only old rejections exist', async () => {
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    const staleRejectedAt = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    await db.exec(`
+      INSERT INTO sync_outbox(event_uuid, occurred_at, delivered_at, rejected_at)
+      VALUES ('stale-rejected', '2026-07-05T00:00:00Z', NULL, '${staleRejectedAt}');
+    `);
+
+    const health = await gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+    assertPublicHealthShape(health);
+    assert.strictEqual(health.sync_rejected, 1, 'all-time counter still sees the old rejection');
+    assert.strictEqual(health.sync_rejected_recent, 0, 'the rejection is outside the 24h window');
+    assert.strictEqual(health.health_state, 'healthy', 'health_state must not be driven by all-time sync_rejected');
+  } finally {
+    db.close();
+  }
+});
+
+test('a rejection within the last 24 hours drives sync_rejected_recent and health_state to degraded', async () => {
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    const recentRejectedAt = new Date(Date.now() - 3600 * 1000).toISOString();
+    await db.exec(`
+      INSERT INTO sync_outbox(event_uuid, occurred_at, delivered_at, rejected_at)
+      VALUES ('recent-rejected', '2026-07-05T00:00:00Z', NULL, '${recentRejectedAt}');
+    `);
+
+    const health = await gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+    assertPublicHealthShape(health);
+    assert.strictEqual(health.sync_rejected, 1);
+    assert.strictEqual(health.sync_rejected_recent, 1);
+    assert.strictEqual(health.health_state, 'degraded', 'a recent rejection must flip health_state');
   } finally {
     db.close();
   }
