@@ -25,6 +25,7 @@ const REQUIRED_HEALTH_KEYS = [
   'sync_oldest_age_s',
   'sync_pending',
   'sync_rejected',
+  'sync_rejected_recent',
 ];
 
 const REQUIRED_GATHER_LIBS = [
@@ -291,6 +292,7 @@ function assertHealthPayload(profile, buildNode) {
     sync_pending: 3,
     sync_oldest_age_s: 42,
     sync_rejected: 1,
+    sync_rejected_recent: 0,
     sync_dirty_pending: 2,
     disk_free_pct: 87,
     errors_total: 3,
@@ -323,6 +325,7 @@ function assertHealthPayload(profile, buildNode) {
       sync_pending: 0,
       sync_oldest_age_s: null,
       sync_rejected: null,
+      sync_rejected_recent: null,
       sync_dirty_pending: null,
       disk_free_pct: 0,
       errors_total: null,
