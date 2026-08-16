@@ -1,6 +1,6 @@
 # Agroscope Integration — Program Overview (umbrella)
 
-**Status:** Decomposition / program map. Each sub-project gets its own spec → plan → build.
+**Status:** Historical program map. The current sequencing and 2027 production gates are defined in [dendrometer-production-readiness-2027.md](dendrometer-production-readiness-2027.md).
 **Date:** 2026-07-06
 **Scope:** OSI edge (osi-os) + cloud (osi-server) + an external integration to Agroscope IoT.
 

@@ -1,6 +1,6 @@
 # Agroscope Dendrometer Controller Architecture
 
-**Status:** Draft design, not shipped behavior.
+**Status:** Draft design, not shipped behavior. It is subordinate to the [2027 dendrometer readiness gates](dendrometer-production-readiness-2027.md).
 
 This document preserves the durable architecture from the Agroscope-style dendrometer controller design. Treat it as the starting point for implementation planning, not as a description of the current runtime.
 

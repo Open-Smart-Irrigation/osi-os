@@ -1,6 +1,6 @@
 # Standalone Agroscope Shadow Controller — Design Spec
 
-**Status:** Approved design, not yet implemented.
+**Status:** Implemented in `osi-server` as an opt-in compute-only shadow. End-to-end field validation and production use are deferred to the [2027 dendrometer readiness program](dendrometer-production-readiness-2027.md).
 **Date:** 2026-07-06
 **Scope:** OSI Server (osi-server, cloud, Java/Spring). Compute-only shadow, additive, droppable.
 **Sibling:** the v6-RDI shadow ([closed-loop-rdi-controller-design.md](closed-loop-rdi-controller-design.md), PR #49). This is the *third* comparison arm.

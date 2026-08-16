@@ -193,6 +193,8 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 
 **Agroscope dendrometer controller draft:** [docs/architecture/agroscope-dendrometer-controller.md](docs/architecture/agroscope-dendrometer-controller.md) captures the future opt-in `controller_mode='dendrometer'` architecture. It is recommendation-only, edge-authoritative, and not current shipped behavior.
 
+**Dendrometer production readiness:** [docs/architecture/dendrometer-production-readiness-2027.md](docs/architecture/dendrometer-production-readiness-2027.md) is the deferred roadmap and acceptance contract for the planned 2027 production installation. Current dendrometer and Agroscope outputs remain observational or compute-only; the document's acquisition, persistence, replay, field, and operational gates must pass before production use.
+
 **MQTT IN topic rule:** all Node-RED MQTT IN nodes must subscribe to `application/+/device/+/event/up`. ChirpStack generates per-installation application UUIDs at bootstrap; hardcoded UUIDs break silently. Device-type discrimination is done downstream via `CHIRPSTACK_PROFILE_*` env vars and `deviceProfileName` fallback. Enforced by `scripts/check-mqtt-topics.sh`.
 
 ---
