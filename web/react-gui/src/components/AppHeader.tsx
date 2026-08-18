@@ -30,7 +30,14 @@ interface AppHeaderProps {
 /* Phones carry up to three of these next to the tab pill, so they run compact
    below `sm` and reach their full size once there is room. py-2.5 + text-base
    still measures 44px, the touch minimum. */
-const LIQUID_SIZING = 'px-3 py-2.5 text-base sm:px-6 sm:py-3 sm:text-lg';
+export const LIQUID_SIZING = 'px-3 py-2.5 text-base sm:px-6 sm:py-3 sm:text-lg';
+
+/* Primary tab pill: one text-size token above LIQUID_SIZING at every
+   breakpoint (text-lg > text-base, text-xl > text-lg), so tabs read as the
+   dominant navigation over the Settings/Account chrome rather than merely
+   equal to it (F2, 2026-08-18). See AppHeader.test.tsx's relative-ordering
+   guard against LIQUID_SIZING. */
+export const TAB_SIZING = 'px-5 py-3 text-lg sm:px-7 sm:py-3.5 sm:text-xl';
 
 const LIQUID_BUTTON =
   `btn-liquid rounded-lg text-center font-bold text-[var(--text)] ${LIQUID_SIZING}`;
@@ -96,7 +103,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                     key={tab.key}
                     to={tab.to}
                     aria-current={tab.active ? 'page' : undefined}
-                    className={`glass-tab px-5 py-2 text-[15px] font-semibold ${
+                    className={`glass-tab ${TAB_SIZING} font-bold ${
                       tab.active
                         ? 'text-[var(--header-text)]'
                         : 'text-[var(--text-tertiary)] hover:text-[var(--header-text)]'
