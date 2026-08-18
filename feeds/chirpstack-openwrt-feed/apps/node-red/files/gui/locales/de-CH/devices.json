@@ -267,5 +267,11 @@
       "CLOSE_TIMEOUT": "Schliessungs-Timeout",
       "UNKNOWN": "Unbekannt"
     }
+  },
+  "sdi12": {
+    "identify": "Sonde identifizieren",
+    "reCheck": "Sonde erneut prüfen",
+    "actButtonHint": "Falls die Sonde nicht reagiert, drücken Sie die ACT-Taste am Dragino-Gerät und versuchen Sie es erneut.",
+    "noResponse": "Sonde hat nicht auf die Identifikation reagiert"
   }
 }

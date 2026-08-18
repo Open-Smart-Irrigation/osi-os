@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { Device, Sdi12Profile } from '../../types/farming';
 import {
@@ -13,6 +14,12 @@ interface Sdi12SettingsModalProps {
   onClose: () => void;
   onUpdate: () => void;
 }
+
+// Larger than the device's slowest plausible TX interval. Past this age, a
+// pending_identify device is presented as "no response" instead of spinning
+// forever -- client-derived only, no DB status change (see A4 plan note: the
+// devices.sdi12_probe_status CHECK constraint has no such value).
+const SDI12_IDENTIFY_TIMEOUT_MINUTES = 15;
 
 function depthSlots(profile: Sdi12Profile): number[] {
   if (profile.depthSlots?.length) return profile.depthSlots;
@@ -40,11 +47,15 @@ function depthInputsFor(profile: Sdi12Profile, device: Device): Record<string, s
   }));
 }
 
-function pendingAgeLabel(updatedAt: string | null | undefined): string {
-  if (!updatedAt) return 'Identification pending.';
+function pendingMinutes(updatedAt: string | null | undefined): number | null {
+  if (!updatedAt) return null;
   const timestamp = new Date(updatedAt).getTime();
-  if (!Number.isFinite(timestamp)) return 'Identification pending.';
-  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (!Number.isFinite(timestamp)) return null;
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+}
+
+function pendingAgeLabel(minutes: number | null): string {
+  if (minutes == null) return 'Identification pending.';
   return `Identification pending for ${minutes} minute${minutes === 1 ? '' : 's'}.`;
 }
 
@@ -53,6 +64,7 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   onClose,
   onUpdate,
 }) => {
+  const { t } = useTranslation('devices');
   const [profiles, setProfiles] = useState<Sdi12Profile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState(device.sdi12_probe_profile ?? '');
   const [depthInputs, setDepthInputs] = useState<Record<string, string>>({});
@@ -159,6 +171,9 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   };
 
   const pending = identifyPending || device.sdi12_probe_status === 'pending_identify';
+  const pendingMinutesAgo = pending ? pendingMinutes(device.updated_at) : null;
+  const pendingNoResponse = pendingMinutesAgo != null && pendingMinutesAgo > SDI12_IDENTIFY_TIMEOUT_MINUTES;
+  const identifyLabel = device.sdi12_probe_status ? t('sdi12.reCheck') : t('sdi12.identify');
 
   return (
     <div
@@ -249,7 +264,7 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
               disabled={busy !== null}
               className="rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy === 'identify' ? 'Requesting…' : 'Detect probe'}
+              {busy === 'identify' ? 'Requesting…' : identifyLabel}
             </button>
             <button
               type="button"
@@ -261,7 +276,16 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
             </button>
           </div>
 
-          {pending && !identifyPending && <p className="mt-3 text-sm text-[var(--warn-text)]">{pendingAgeLabel(device.updated_at)}</p>}
+          {pending && !identifyPending && (
+            pendingNoResponse ? (
+              <div className="mt-3 rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
+                <p>{t('sdi12.noResponse')}</p>
+                <p className="mt-1">{t('sdi12.actButtonHint')}</p>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-[var(--warn-text)]">{pendingAgeLabel(pendingMinutesAgo)}</p>
+            )
+          )}
           {info && <p className="mt-3 text-sm text-[var(--text-tertiary)]">{info}</p>}
           {error && <p className="mt-3 text-sm text-[var(--error-text)]">{error}</p>}
         </div>

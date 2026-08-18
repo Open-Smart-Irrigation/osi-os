@@ -1,9 +1,14 @@
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
 import { Sdi12SoilCard } from '../Sdi12SoilCard';
+
+// t() returns the key itself, matching this codebase's convention.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
 
 const baseDevice: Device = {
   deveui: '70B3D5E75E004202',
@@ -53,5 +58,17 @@ describe('Sdi12SoilCard', () => {
     })} />);
 
     expect(screen.getByText('unmatched')).toBeInTheDocument();
+  });
+
+  it('shows the client-derived no-response state once pending_identify has aged past the timeout', () => {
+    const stale = new Date(Date.now() - 16 * 60000).toISOString();
+    render(<Sdi12SoilCard device={makeDevice({
+      sdi12_probe_status: 'pending_identify',
+      updated_at: stale,
+      latest: { bat_v: 3.3 },
+    })} />);
+
+    expect(screen.getByText('sdi12.noResponse')).toBeInTheDocument();
+    expect(screen.queryByText(/detecting probe/i)).not.toBeInTheDocument();
   });
 });
