@@ -26,5 +26,5 @@
   "0025__valve_settings_sync_triggers.sql": "337f8a252a88b8c71621c560cad1ee3842600e3afe5e2aec51736aa377ce68dd",
   "0026__sdi12_columns.sql": "a146f3616c275cf4f853a4536dd895e14168dc83d9279ee5035e0f50148aae6b",
   "0027__add_dragino_sdi12_type.sql": "653362d45eb35744f661c64eb44bf82b4015a464c8422e3979012a17ef4c9831",
-  "0028__sdi12_value_count.sql": "6a437b628b15db9e8ced3cd41d96b80baae054a4e5d9d308ff58ffbf310b95f7"
+  "0028__sdi12_value_count.sql": "858f8b7fc46ada81cb1f52dd102c08c6f52597791b63f9bbc956c2666195e276"
 }
