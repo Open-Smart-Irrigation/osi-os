@@ -89,10 +89,15 @@ test('A2: identify still 409s when CHIRPSTACK_APP_SENSORS is unset (no fabricate
       db,
     });
     assert.equal(response.result[0].deviceRow.chirpstack_app_id, '');
-    // sdi12-identify-trigger-fn is the node that actually 409s on empty appId;
-    // this test only proves this node does not fabricate a value -- add a
-    // second assertion chaining into loadNode('sdi12-identify-trigger-fn') with
-    // this msg to prove the 409 still fires end to end.
+    // Chain into the trigger node: it is the one that 409s on an empty appId.
+    // Without this the test is vacuous (the pre-fix node also returned '').
+    const trigger = await executeFunction(loadNode('sdi12-identify-trigger-fn'), {
+      msg: response.result[0],
+      env: Object.assign({}, ENV, { OSI_SCOPED_ACCESS: '1', CHIRPSTACK_APP_SENSORS: '' }),
+      db,
+    });
+    assert.equal(trigger.result[0], null, 'no downlink may be queued without an app id');
+    assert.equal(trigger.result[1].statusCode, 409, 'identify must still 409 when no app id can be resolved');
   } finally {
     db.close();
   }
