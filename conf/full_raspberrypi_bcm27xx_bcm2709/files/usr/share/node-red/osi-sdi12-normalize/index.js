@@ -13,13 +13,42 @@ var TRANSFORMS = {
   hpa_to_kpa: function (v) { return v / 10; }
 };
 
-// Budget assumption: 3 header bytes + worst-case 7 ASCII chars per value
-// (sign + 6); bench captures must verify real probe value widths before
-// profiles are de-provisionalized.
+// Budget assumption: 3 header bytes + worst-case 9 ASCII chars per value
+// (sign + 8; bench-measured against real Sentek value widths, e.g.
+// "+123.456" plus a sign/margin digit -- corrected from the original
+// datasheet-derived 7).
 // Dragino delivers at most 51 bytes per FPort 2 uplink at DR0; oversized
 // frames are dropped by the device. Fixed-cardinality profiles must fit.
 var UPLINK_HEADER_BYTES = 3;
-var WORST_CHARS_PER_VALUE = 7;
+var WORST_CHARS_PER_VALUE = 9;
+
+// Profiles whose value-mapping entries are recomputed per call from a
+// learned deviceConfig.sdi12ValueCount (task A6, option b). Only these three
+// -- all homogeneous seq('vwc', n) layouts -- get this treatment; every
+// other profile (including HYDRASCOUT, whose values are NOT homogeneous)
+// keeps its static profile.values regardless of any learned count.
+var VARIABLE_SEQ_PROFILE_IDS = {
+  SENTEK_ENVIROSCAN: true,
+  DELTAT_PR2_4: true,
+  DELTAT_PR2_6: true
+};
+
+// Resolve the per-uplink expected reading count: a valid learned
+// deviceConfig.sdi12ValueCount takes priority over the profile's own
+// expectedValues; an out-of-range learned count (which should never exist
+// once the migration CHECK + config-save validation are both in place, but
+// normalize() must not trust a value that bypassed both) is treated as if
+// nothing were learned, falling back to the profile's expectation.
+function resolveCount(profile, deviceConfig) {
+  var learned = deviceConfig && Number.isInteger(deviceConfig.sdi12ValueCount)
+    ? deviceConfig.sdi12ValueCount
+    : null;
+  var resolved = learned != null ? learned : (profile ? profile.expectedValues : null);
+  if (resolved != null && (resolved < 1 || resolved > 8)) {
+    resolved = profile ? profile.expectedValues : null;
+  }
+  return resolved;
+}
 
 function worstCaseUplinkBytes(profile) {
   var n = profile.expectedValues == null ? profile.values.length : profile.expectedValues;
@@ -50,30 +79,37 @@ var PROFILES = [
   },
   {
     id: 'SENTEK_ENVIROSCAN',
-    label: 'Sentek EnviroSCAN (VWC, up to 6 depths in v1)',
+    label: 'Sentek EnviroSCAN (VWC, up to 8 depths, variable count)',
     provisional: true,
     identityMatch: null,
-    expectedValues: 6,                  // 8 depths needs AT+DATAUP=1 (phase 2): 8*7+3 > 51-byte DR0 budget
-    values: seq('vwc', 6),
-    defaultDepthsCm: [10, 20, 30, 40, 50, 60]
+    // Variable: no fixed depth count on the wire. Per-device count is learned
+    // via devices.sdi12_value_count (task A6, option b) and enforced by
+    // resolveCount()/resolvedCount below, not by a static expectedValues here.
+    // 8 depths needs AT+DATAUP=1 (phase 2): 8*9+3 > 51-byte DR0 budget either
+    // way -- the phase-2 gating note stays valid with the corrected constant.
+    expectedValues: null,
+    values: seq('vwc', 8),
+    defaultDepthsCm: []
   },
   {
     id: 'DELTAT_PR2_4',
-    label: 'Delta-T PR2/4 (VWC, 4 depths)',
+    label: 'Delta-T PR2/4 (VWC, up to 8 depths, variable count)',
     provisional: true,
     identityMatch: null,
-    expectedValues: 4,
-    values: seq('vwc', 4),
-    defaultDepthsCm: [10, 20, 30, 40]
+    // Variable, same treatment as SENTEK_ENVIROSCAN above -- learned per-device.
+    expectedValues: null,
+    values: seq('vwc', 8),
+    defaultDepthsCm: []
   },
   {
     id: 'DELTAT_PR2_6',
-    label: 'Delta-T PR2/6 (VWC, 6 depths)',
+    label: 'Delta-T PR2/6 (VWC, up to 8 depths, variable count)',
     provisional: true,
     identityMatch: null,
-    expectedValues: 6,
-    values: seq('vwc', 6),
-    defaultDepthsCm: [10, 20, 30, 40, 60, 100]
+    // Variable, same treatment as SENTEK_ENVIROSCAN above -- learned per-device.
+    expectedValues: null,
+    values: seq('vwc', 8),
+    defaultDepthsCm: []
   },
   {
     id: 'TENSIOMARK',
@@ -104,7 +140,8 @@ var PROFILES = [
     label: 'HydraScout (VWC + temp + EC, 2 depths in v1)',
     provisional: true,
     identityMatch: null,
-    expectedValues: 6,                  // more depths needs AT+DATAUP=1 (phase 2)
+    expectedValues: 6,                  // more depths needs AT+DATAUP=1 (phase 2): 8 depths x 3
+                                         // channels x 9 chars + 3 > 51-byte DR0 budget (was 7 chars)
     // PROVISIONAL interleave (per-depth vwc,temp,ec) - bench capture decides.
     values: [
       { index: 0, channel: 'vwc_1', depthSlot: 1 },
@@ -227,15 +264,30 @@ function normalize(decoded, deviceConfig, meta) {
     unknown.sdi12_unconfigured = raw || '(empty)';
   } else {
     var values = parseSdi12Values(raw);
+    var resolvedCount = resolveCount(profile, deviceConfig);
     if (values === null) {
       unknown.unparseable_sdi12 = raw || '(empty)';
-    } else if (profile.expectedValues != null && values.length !== profile.expectedValues) {
+    } else if (resolvedCount != null && values.length !== resolvedCount) {
       // Cardinality mismatch rejects the frame atomically: a glued address
       // digit or truncated response must never produce a partial write.
+      // resolvedCount is either a learned per-device sdi12_value_count or
+      // the profile's own fixed expectedValues -- either way, a mismatch
+      // here means the frame is wrong, not that the count is variable.
       unknown.sdi12_value_count = raw;
     } else {
-      for (var i = 0; i < profile.values.length; i++) {
-        var entry = profile.values[i];
+      var learnedCount = deviceConfig && Number.isInteger(deviceConfig.sdi12ValueCount)
+        && deviceConfig.sdi12ValueCount >= 1 && deviceConfig.sdi12ValueCount <= 8
+        ? deviceConfig.sdi12ValueCount
+        : null;
+      // Only the three homogeneous variable-count profiles remap their
+      // channel entries to the learned count; every other profile (notably
+      // HYDRASCOUT's non-homogeneous interleave) always uses its static
+      // profile.values, unaffected by any learned count.
+      var valueEntries = (learnedCount != null && VARIABLE_SEQ_PROFILE_IDS[profile.id])
+        ? seq('vwc', learnedCount)
+        : profile.values;
+      for (var i = 0; i < valueEntries.length; i++) {
+        var entry = valueEntries[i];
         if (entry.index >= values.length) continue;
         var res = applyValue(entry, values[entry.index]);
         if (res.error) {

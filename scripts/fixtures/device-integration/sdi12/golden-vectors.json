@@ -64,5 +64,119 @@
         "reason": "unknown_channel"
       }
     ]
+  },
+  {
+    "name": "Sentek 5-of-8 variable count (per-device identified)",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": { "probeProfile": "SENTEK_ENVIROSCAN", "sdi12ValueCount": 5 },
+    "bytes": [12, 228, 1, 43, 49, 50, 46, 51, 43, 49, 52, 46, 49, 43, 49, 56, 46, 55, 43, 50, 50, 46, 48, 43, 57, 46, 53],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek 8-of-8 variable count",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": { "probeProfile": "SENTEK_ENVIROSCAN", "sdi12ValueCount": 8 },
+    "bytes": [12, 228, 1, 43, 49, 50, 46, 51, 43, 49, 52, 46, 49, 43, 49, 56, 46, 55, 43, 50, 50, 46, 48, 43, 57, 46, 53, 43, 49, 49, 46, 48, 43, 49, 51, 46, 50, 43, 49, 53, 46, 56],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "vwc_6": 11.0,
+      "vwc_7": 13.2,
+      "vwc_8": 15.8,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek 1-of-8 variable count",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": { "probeProfile": "SENTEK_ENVIROSCAN", "sdi12ValueCount": 1 },
+    "bytes": [12, 228, 1, 43, 49, 50, 46, 51],
+    "expected": {
+      "vwc_1": 12.3,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek pre-identification, no sdi12ValueCount set: variable, no atomic rejection",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "bytes": [12, 228, 1, 43, 49, 50, 46, 51, 43, 49, 52, 46, 49, 43, 49, 56, 46, 55, 43, 50, 50, 46, 48, 43, 57, 46, 53, 43, 49, 49, 46, 48],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "vwc_6": 11.0,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek learned-count mismatch is rejected atomically",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": { "probeProfile": "SENTEK_ENVIROSCAN", "sdi12ValueCount": 5 },
+    "bytes": [12, 228, 1, 43, 49, 50, 46, 51, 43, 49, 52, 46, 49, 43, 49, 56, 46, 55, 43, 50, 50, 46, 48],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [
+      {
+        "channel": "sdi12_value_count",
+        "reason": "unknown_channel"
+      }
+    ]
+  },
+  {
+    "name": "Sentek learned count of 9 is clamped, falls back to variable (not accepted as literal 9)",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": { "probeProfile": "SENTEK_ENVIROSCAN", "sdi12ValueCount": 9 },
+    "bytes": [12, 228, 1, 43, 49, 50, 46, 51, 43, 49, 52, 46, 49, 43, 49, 56, 46, 55, 43, 50, 50, 46, 48, 43, 57, 46, 53, 43, 49, 49, 46, 48, 43, 49, 51, 46, 50, 43, 49, 53, 46, 56],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "vwc_6": 11.0,
+      "vwc_7": 13.2,
+      "vwc_8": 15.8,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "HydraScout stays fixed-shape (regression guard: not swept into variable-count treatment)",
+    "fPort": 2,
+    "probeProfile": "HYDRASCOUT",
+    "bytes": [12, 228, 1, 43, 50, 53, 46, 52, 43, 49, 56, 46, 50, 43, 49, 50, 48, 48, 43, 50, 55, 46, 49, 43, 49, 55, 46, 57, 43, 49, 49, 53, 48],
+    "expected": {
+      "vwc_1": 25.4,
+      "soil_temp_1": 18.2,
+      "soil_ec_1": 1200,
+      "vwc_2": 27.1,
+      "soil_temp_2": 17.9,
+      "soil_ec_2": 1150,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
   }
 ]

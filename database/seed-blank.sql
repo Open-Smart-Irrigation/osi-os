@@ -139,6 +139,7 @@ CREATE TABLE devices (
   sdi12_probe_profile                   TEXT,
   sdi12_probe_status                    TEXT CHECK(sdi12_probe_status IN ('pending_identify','identified','unmatched','manual')),
   sdi12_identity                        TEXT,
+  sdi12_value_count                     INTEGER CHECK(sdi12_value_count IS NULL OR (sdi12_value_count BETWEEN 1 AND 8)),
   FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE SET NULL,
   FOREIGN KEY (farm_id)  REFERENCES farms(farm_id)        ON DELETE SET NULL
 );
@@ -2023,6 +2024,7 @@ WHEN
     COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
     COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
     COALESCE(NEW.sdi12_probe_profile,'') <> COALESCE(OLD.sdi12_probe_profile,'') OR
+    COALESCE(NEW.sdi12_value_count,-1) <> COALESCE(OLD.sdi12_value_count,-1) OR
     COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
     COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
     COALESCE(NEW.chameleon_enabled,0) <> COALESCE(OLD.chameleon_enabled,0) OR
@@ -2063,6 +2065,7 @@ BEGIN
       'target_state',                      NEW.target_state,
       'strega_model',                      NEW.strega_model,
       'sdi12_probe_profile',               NEW.sdi12_probe_profile,
+      'sdi12_value_count',                 NEW.sdi12_value_count,
       'soil_moisture_probe_depths_json',   json(COALESCE(NEW.soil_moisture_probe_depths_json,'{}')),
       'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured,0),
       'chameleon_enabled',                 NEW.chameleon_enabled,

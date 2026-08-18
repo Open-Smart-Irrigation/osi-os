@@ -184,7 +184,7 @@ describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', ()
 
       const normalizeResult = normalizer.normalize(
         decoded.data,
-        { probeProfile: vector.probeProfile },
+        vector.deviceConfig ?? { probeProfile: vector.probeProfile },
         { recordedAt: '2026-07-12T10:00:00Z' }
       );
       assert.ok(normalizeResult.channels && typeof normalizeResult.channels === 'object');

@@ -259,6 +259,7 @@ function normaliseDevice(device: any): Device {
     sdi12_probe_profile: device?.sdi12_probe_profile ?? null,
     sdi12_probe_status: device?.sdi12_probe_status ?? null,
     sdi12_identity: device?.sdi12_identity ?? null,
+    sdi12_value_count: device?.sdi12_value_count ?? null,
     soilMoistureProbeDepths,
     soilMoistureProbeDepthsConfigured,
     activeValveActuation,
@@ -307,6 +308,7 @@ export const devicesAPI = {
 export interface Sdi12ConfigRequest {
   probe_profile: string;
   depths?: Record<string, number>;
+  value_count?: number | null;
 }
 
 export const fetchSdi12Profiles = async (): Promise<{ profiles: Sdi12Profile[] }> => {

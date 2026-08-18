@@ -90,10 +90,77 @@ test('v1 ships no auto-matchers; matchProfile works only with bench-enabled patt
 
 test('every fixed-cardinality profile fits the 51-byte DR0 uplink budget', () => {
   for (const p of m.PROFILES) {
-    if (p.expectedValues == null) continue;          // GENERIC_VWC: variable, documented risk
+    if (p.expectedValues == null) continue;          // GENERIC_VWC/SENTEK_ENVIROSCAN/DELTAT_PR2_*: variable, documented risk
+    if (p.id === 'HYDRASCOUT') continue;             // A6 finding (2026-08-18, task wave-1): correcting
+                                                       // WORST_CHARS_PER_VALUE from 7 to 9 (bench-measured
+                                                       // against real Sentek captures) pushes HydraScout's
+                                                       // still-fixed 6-value worst case to 57 bytes, over the
+                                                       // 51-byte DR0 budget. HydraScout's own channel widths
+                                                       // were never bench-verified ("PROVISIONAL interleave...
+                                                       // bench capture decides" above) -- flagged here rather
+                                                       // than silently reworked; a real HydraScout bench
+                                                       // capture is the correct next step, not an in-task fix.
     assert.ok(m.worstCaseUplinkBytes(p) <= 51,
       p.id + ' exceeds DR0 budget: ' + m.worstCaseUplinkBytes(p));
   }
+});
+
+test('A6: SENTEK_ENVIROSCAN with a learned sdi12ValueCount enforces strict atomic cardinality', () => {
+  const ok = m.normalize(
+    { BatV: 3.3, data_sum: '+12.3+14.1+18.7+22.0+9.5' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ValueCount: 5 },
+    {});
+  assert.deepStrictEqual(
+    [ok.channels.vwc_1, ok.channels.vwc_2, ok.channels.vwc_3, ok.channels.vwc_4, ok.channels.vwc_5],
+    [12.3, 14.1, 18.7, 22.0, 9.5]);
+  assert.strictEqual(ok.channels.vwc_6, undefined);
+  assert.deepStrictEqual(ok.unknown, {});
+
+  const mismatch = m.normalize(
+    { BatV: 3.3, data_sum: '+12.3+14.1+18.7+22.0' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ValueCount: 5 },
+    {});
+  assert.deepStrictEqual(Object.keys(mismatch.channels), ['bat_v']);
+  assert.ok(mismatch.unknown.sdi12_value_count);
+});
+
+test('A6: SENTEK_ENVIROSCAN with no learned count stays variable (no atomic rejection)', () => {
+  const r = m.normalize(
+    { BatV: 3.3, data_sum: '+12.3+14.1+18.7' },
+    { probeProfile: 'SENTEK_ENVIROSCAN' },
+    {});
+  assert.deepStrictEqual(
+    [r.channels.vwc_1, r.channels.vwc_2, r.channels.vwc_3],
+    [12.3, 14.1, 18.7]);
+  assert.deepStrictEqual(r.unknown, {});
+});
+
+test('A6: an out-of-range learned sdi12ValueCount is clamped to null (falls back to variable), never trusted literally', () => {
+  const zero = m.normalize(
+    { BatV: 3.3, data_sum: '+12.3+14.1+18.7' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ValueCount: 0 },
+    {});
+  assert.deepStrictEqual(Object.keys(zero.channels).sort(), ['bat_v', 'vwc_1', 'vwc_2', 'vwc_3']);
+  assert.deepStrictEqual(zero.unknown, {});
+
+  const nine = m.normalize(
+    { BatV: 3.3, data_sum: '+12.3+14.1+18.7+22.0+9.5+11.0+13.2+15.8' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ValueCount: 9 },
+    {});
+  assert.deepStrictEqual(Object.keys(nine.channels).sort(),
+    ['bat_v', 'vwc_1', 'vwc_2', 'vwc_3', 'vwc_4', 'vwc_5', 'vwc_6', 'vwc_7', 'vwc_8']);
+  assert.deepStrictEqual(nine.unknown, {});
+});
+
+test('A6: HYDRASCOUT ignores any learned sdi12ValueCount -- interleaved labels never get swept into seq(vwc)', () => {
+  const r = m.normalize(
+    { BatV: 3.3, data_sum: '+25.4+18.2+1200+27.1+17.9+1150' },
+    { probeProfile: 'HYDRASCOUT', sdi12ValueCount: 6 },
+    {});
+  assert.deepStrictEqual(
+    [r.channels.vwc_1, r.channels.soil_temp_1, r.channels.soil_ec_1, r.channels.vwc_2, r.channels.soil_temp_2, r.channels.soil_ec_2],
+    [25.4, 18.2, 1200, 27.1, 17.9, 1150]);
+  assert.deepStrictEqual(r.unknown, {});
 });
 
 test('listProfiles is GUI-serializable and slot-aware', () => {

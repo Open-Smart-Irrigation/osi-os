@@ -154,6 +154,7 @@
                 "zone_id": {"type": ["integer", "null"]},
                 "chameleon_enabled": {"type": ["integer", "null"], "enum": [0, 1, null]},
                 "sdi12_probe_profile": {"type": ["string", "null"]},
+                "sdi12_value_count": {"type": ["integer", "null"]},
                 "chameleon_swt1_depth_cm": {"type": ["number", "null"]},
                 "chameleon_swt2_depth_cm": {"type": ["number", "null"]},
                 "chameleon_swt3_depth_cm": {"type": ["number", "null"]},
@@ -187,6 +188,7 @@
                     ]
                 },
                 "sdi12_probe_profile": {"type": ["string", "null"]},
+                "sdi12_value_count": {"type": ["integer", "null"]},
                 "claimed_user_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
                 "zone_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
                 "dendro_enabled": {"type": "integer", "enum": [0, 1]},
