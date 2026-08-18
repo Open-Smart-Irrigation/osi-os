@@ -321,5 +321,11 @@
       "CLOSE_TIMEOUT": "Délai de fermeture dépassé",
       "UNKNOWN": "Inconnu"
     }
+  },
+  "sdi12": {
+    "identify": "Identifier la sonde",
+    "reCheck": "Revérifier la sonde",
+    "actButtonHint": "Si la sonde ne répond pas, appuyez sur le bouton ACT de l'appareil Dragino, puis réessayez.",
+    "noResponse": "La sonde n'a pas répondu à l'identification"
   }
 }

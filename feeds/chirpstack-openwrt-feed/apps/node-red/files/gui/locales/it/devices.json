@@ -231,5 +231,11 @@
       "CLOSE_TIMEOUT": "Timeout chiusura",
       "UNKNOWN": "Sconosciuto"
     }
+  },
+  "sdi12": {
+    "identify": "Identifica sonda",
+    "reCheck": "Riverifica sonda",
+    "actButtonHint": "Se la sonda non risponde, premi il pulsante ACT sull'unità Dragino, quindi riprova.",
+    "noResponse": "La sonda non ha risposto all'identificazione"
   }
 }

@@ -301,5 +301,11 @@
       "CLOSE_TIMEOUT": "Ekiseera kyokuggalawo kiwedde",
       "UNKNOWN": "Tekimanyiddwa"
     }
+  },
+  "sdi12": {
+    "identify": "Kebera ekyuma",
+    "reCheck": "Ddamu okukebera ekyuma",
+    "actButtonHint": "Ekyuma bwe kitaddamu, nyiga akabonero ACT ku kyuma kya Dragino, oluvannyuma ogezeeko nate.",
+    "noResponse": "Ekyuma tekyaddamu ku kukebera"
   }
 }

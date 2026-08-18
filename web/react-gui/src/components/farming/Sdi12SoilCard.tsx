@@ -1,8 +1,14 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { Device } from '../../types/farming';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { formatSwtValue, kpaToPf } from '../../utils/swt';
+
+// Larger than the device's slowest plausible TX interval -- must match
+// Sdi12SettingsModal.tsx's SDI12_IDENTIFY_TIMEOUT_MINUTES. Client-derived
+// only; the devices.sdi12_probe_status CHECK constraint has no such value.
+const SDI12_IDENTIFY_TIMEOUT_MINUTES = 15;
 
 interface Sdi12SoilCardProps {
   device: Device;
@@ -68,10 +74,13 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   onOpenSettings,
   readOnly = false,
 }) => {
+  const { t } = useTranslation('devices');
   const data = device.latest_data ?? {};
   const status = device.sdi12_probe_status ?? 'unknown';
   const statusLabel = status === 'pending_identify' ? 'identifying' : status;
   const profile = device.sdi12_probe_profile || 'No probe profile';
+  const pendingMinutesAgo = status === 'pending_identify' ? minutesSince(device.updated_at) : null;
+  const pendingNoResponse = pendingMinutesAgo != null && pendingMinutesAgo > SDI12_IDENTIFY_TIMEOUT_MINUTES;
   const rows = Array.from({ length: 8 }, (_, offset) => {
     const index = offset + 1;
     const values = CHANNELS.map(({ kind }) => ({
@@ -115,7 +124,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
 
       {status === 'pending_identify' && (
         <p className="mb-3 rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
-          Detecting probe (pending)
+          {pendingNoResponse ? t('sdi12.noResponse') : 'Detecting probe (pending)'}
         </p>
       )}
 

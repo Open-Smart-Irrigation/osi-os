@@ -301,5 +301,11 @@
       "CLOSE_TIMEOUT": "Tiempo de cierre agotado",
       "UNKNOWN": "Desconocido"
     }
+  },
+  "sdi12": {
+    "identify": "Identificar sonda",
+    "reCheck": "Volver a comprobar sonda",
+    "actButtonHint": "Si la sonda no responde, pulsa el botón ACT en la unidad Dragino y vuelve a intentarlo.",
+    "noResponse": "La sonda no respondió a la identificación"
   }
 }
