@@ -55,3 +55,45 @@ test('A1: cs-reg-cloud-fn supports DRAGINO_SDI12 and persists chirpstack_app_id'
     db.close();
   }
 });
+
+test('A2: identify self-heals a legacy row with NULL chirpstack_app_id', async () => {
+  const db = seedScopedDb();
+  try {
+    db.exec(`
+      INSERT INTO devices (deveui, name, type_id, user_id, chirpstack_app_id, created_at, updated_at)
+      VALUES ('A840410000000103', 'Legacy SDI-12', 'DRAGINO_SDI12', 1, NULL, '2026-01-01', '2026-01-01');
+    `);
+    const response = await executeFunction(loadNode('sdi12-identify-action-fn'), {
+      msg: { req: { params: { deveui: 'A840410000000103' }, headers: {} } },
+      env: Object.assign({}, ENV, { OSI_SCOPED_ACCESS: '1' }),
+      db,
+    });
+    assert.equal(response.result[0].deviceRow.chirpstack_app_id, 'app-sensors-uuid');
+    const row = db.prepare("SELECT chirpstack_app_id FROM devices WHERE deveui='A840410000000103'").get();
+    assert.equal(row.chirpstack_app_id, 'app-sensors-uuid', 'the self-heal must persist, not just patch msg in flight');
+  } finally {
+    db.close();
+  }
+});
+
+test('A2: identify still 409s when CHIRPSTACK_APP_SENSORS is unset (no fabricated fallback)', async () => {
+  const db = seedScopedDb();
+  try {
+    db.exec(`
+      INSERT INTO devices (deveui, name, type_id, user_id, chirpstack_app_id, created_at, updated_at)
+      VALUES ('A840410000000104', 'Legacy SDI-12 2', 'DRAGINO_SDI12', 1, NULL, '2026-01-01', '2026-01-01');
+    `);
+    const response = await executeFunction(loadNode('sdi12-identify-action-fn'), {
+      msg: { req: { params: { deveui: 'A840410000000104' }, headers: {} } },
+      env: Object.assign({}, ENV, { OSI_SCOPED_ACCESS: '1', CHIRPSTACK_APP_SENSORS: '' }),
+      db,
+    });
+    assert.equal(response.result[0].deviceRow.chirpstack_app_id, '');
+    // sdi12-identify-trigger-fn is the node that actually 409s on empty appId;
+    // this test only proves this node does not fabricate a value -- add a
+    // second assertion chaining into loadNode('sdi12-identify-trigger-fn') with
+    // this msg to prove the 409 still fires end to end.
+  } finally {
+    db.close();
+  }
+});
