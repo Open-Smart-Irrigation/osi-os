@@ -35,6 +35,24 @@
 -- either omits the trigger entirely or recreates it with mismatched spacing
 -- both reproduce this failure; only a byte-exact match against the boot
 -- literal (as below) verifies clean across a simulated restart.
+--
+-- CAVEAT (Fable A6 review, advisory, verified by rehearsal): "byte-exact
+-- match" above holds ONLY on a gateway whose DEVICE_EUI is Silvan's
+-- (0016C001F11715E2). The boot literal computes gatewaySql live from
+-- env.get('DEVICE_EUI') on every restart and inlines it as the
+-- gateway_device_eui COALESCE fallback in TWO places in this trigger body;
+-- this migration and seed-blank.sql instead hardcode the literal string
+-- '0016C001F11715E2', matching only that one gateway. A rehearsal against
+-- a different DEVICE_EUI (e.g. Uganda's 0016C001F151B1D6) reproduces
+-- "schema drift detected" on the very first post-deploy restart, same as
+-- the mismatched-spacing case above. This is a PRE-EXISTING gap, not
+-- introduced here: migration 0046 hardcodes the same literal EUI in its own
+-- CREATE TRIGGER for the identical reason, and every other boot-owned
+-- trigger with a gateway_device_eui fallback shares it. It is the
+-- osi-os#153 class of issue (boot literals diverging from migration-stamped
+-- fingerprints), pre-existing since 0046/6d8dae60, out of scope for this
+-- migration to fix generally -- flagged here so this file's own byte-exact
+-- claim is not read as broader than it is.
 
 ALTER TABLE devices ADD COLUMN sdi12_value_count INTEGER
   CHECK(sdi12_value_count IS NULL OR (sdi12_value_count BETWEEN 1 AND 8));
