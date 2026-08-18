@@ -40,6 +40,15 @@ var VARIABLE_SEQ_PROFILE_IDS = {
 // normalize() must not trust a value that bypassed both) is treated as if
 // nothing were learned, falling back to the profile's expectation.
 function resolveCount(profile, deviceConfig) {
+  // Fixed-shape profiles (expectedValues != null, e.g. HYDRASCOUT, TENSIOMARK)
+  // NEVER honour a learned deviceConfig.sdi12ValueCount, even if one is
+  // present (e.g. a stale value left over from switching the device away
+  // from a variable profile). Their own expectedValues is the only valid
+  // cardinality check -- treating a learned count as authoritative here
+  // would quarantine every normal frame the moment the two disagree.
+  if (profile && profile.expectedValues != null) {
+    return profile.expectedValues;
+  }
   var learned = deviceConfig && Number.isInteger(deviceConfig.sdi12ValueCount)
     ? deviceConfig.sdi12ValueCount
     : null;

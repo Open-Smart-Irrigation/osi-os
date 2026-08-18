@@ -171,3 +171,49 @@ test('A4: sdi12-write-fn does not re-trigger identify once an attempt has alread
     db.close();
   }
 });
+
+test('B1 (Fable A6 review SHOULD-FIX 1): GET /api/devices (merge-device-data) projects sdi12_value_count', async () => {
+  // The modal tests seed the field directly on the Device fixture, so they
+  // cannot see this bug: it lives entirely in the merge step between the
+  // devices-list SQL row (which already has the column via SELECT d.*) and
+  // the API response shape. Drive merge-device-data directly instead.
+  const response = await executeFunction(loadNode('merge-device-data'), {
+    msg: {
+      devices_to_format: [{
+        deveui: 'A840410000000108', name: 'SDI12 dev', type_id: 'DRAGINO_SDI12',
+        sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_probe_status: 'manual',
+        sdi12_identity: null, sdi12_value_count: 5,
+      }],
+      payload: [],
+    },
+    env: {},
+    db: seedScopedDb(),
+  });
+  assert.equal(response.result.payload[0].sdi12_value_count, 5,
+    'GET /api/devices must return the learned sdi12_value_count, not silently drop it');
+});
+
+test('B2 (Fable A6 review SHOULD-FIX 2): PUT /sdi12/config nulls a stale value_count when switching to a fixed-shape profile', async () => {
+  const db = seedScopedDb();
+  try {
+    db.exec(`
+      INSERT INTO devices (deveui, name, type_id, user_id, sdi12_probe_profile, sdi12_probe_status, sdi12_value_count, created_at, updated_at)
+      VALUES ('A840410000000109', 'SDI12 switch', 'DRAGINO_SDI12', 1, 'SENTEK_ENVIROSCAN', 'manual', 5, '2026-01-01', '2026-01-01');
+    `);
+    // Modal hides the value-count field for fixed-shape profiles, so a
+    // real PUT switching to HYDRASCOUT never sends value_count at all.
+    const response = await executeFunction(loadNode('sdi12-config-action-fn'), {
+      msg: { req: { body: { probe_profile: 'HYDRASCOUT' } }, deviceRow: { deveui: 'A840410000000109' } },
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result.statusCode, undefined, 'must not error: ' + JSON.stringify(response.result.payload));
+    assert.equal(response.result.payload.value_count, null, 'response must report the count as cleared');
+    const row = db.prepare("SELECT sdi12_probe_profile, sdi12_value_count FROM devices WHERE deveui='A840410000000109'").get();
+    assert.equal(row.sdi12_probe_profile, 'HYDRASCOUT');
+    assert.equal(row.sdi12_value_count, null,
+      'a stale learned count from the prior variable profile must not survive a switch to a fixed-shape profile');
+  } finally {
+    db.close();
+  }
+});

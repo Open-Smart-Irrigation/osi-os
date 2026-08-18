@@ -153,13 +153,33 @@ test('A6: an out-of-range learned sdi12ValueCount is clamped to null (falls back
 });
 
 test('A6: HYDRASCOUT ignores any learned sdi12ValueCount -- interleaved labels never get swept into seq(vwc)', () => {
+  // Mismatched on purpose (4 != HYDRASCOUT's fixed expectedValues of 6): a
+  // vacuous version of this test used sdi12ValueCount: 6 (== expectedValues),
+  // which passes whether or not the learned count is actually honoured for
+  // fixed-shape profiles. This exercises the real bug: a stale learned count
+  // left over from switching the device away from a variable profile must
+  // NOT be treated as the cardinality check for a fixed-shape profile --
+  // that would quarantine every normal 6-value HydraScout frame.
   const r = m.normalize(
     { BatV: 3.3, data_sum: '+25.4+18.2+1200+27.1+17.9+1150' },
-    { probeProfile: 'HYDRASCOUT', sdi12ValueCount: 6 },
+    { probeProfile: 'HYDRASCOUT', sdi12ValueCount: 4 },
     {});
   assert.deepStrictEqual(
     [r.channels.vwc_1, r.channels.soil_temp_1, r.channels.soil_ec_1, r.channels.vwc_2, r.channels.soil_temp_2, r.channels.soil_ec_2],
     [25.4, 18.2, 1200, 27.1, 17.9, 1150]);
+  assert.deepStrictEqual(r.unknown, {});
+});
+
+test('A6 review fix: TENSIOMARK ignores a mismatched learned sdi12ValueCount', () => {
+  // TENSIOMARK expectedValues is 2; a stale learned count of 3 must not
+  // become the cardinality check -- a normal 2-value frame must still map,
+  // not get quarantined as sdi12_value_count.
+  const r = m.normalize(
+    { BatV: 3.3, data_sum: '+2.48+21.5' },
+    { probeProfile: 'TENSIOMARK', sdi12ValueCount: 3 },
+    {});
+  assert.strictEqual(r.channels.swt_1, 30.2);
+  assert.strictEqual(r.channels.soil_temp_1, 21.5);
   assert.deepStrictEqual(r.unknown, {});
 });
 

@@ -34,7 +34,7 @@ test('legit upgrade: rebuild succeeds, rows preserved, CHECK gains AQUASCOPE_LOR
   assert.strictEqual(json.hasLorain, true);
 });
 
-test('SDI-12 sentinels survive the rebuild with all three columns present', () => {
+test('SDI-12 sentinels survive the rebuild with all four columns present (A6 review fix: sdi12_value_count)', () => {
   const { json, code } = runCase('sdi12-sentinels');
   assert.strictEqual(code, 0, JSON.stringify(json));
   assert.strictEqual(json.sdi12Preserved, true);
