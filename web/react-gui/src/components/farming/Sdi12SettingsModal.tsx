@@ -8,6 +8,7 @@ import {
   postSdi12Identify,
   putSdi12Config,
 } from '../../services/api';
+import type { Sdi12ConfigRequest } from '../../services/api';
 
 interface Sdi12SettingsModalProps {
   device: Device;
@@ -69,6 +70,7 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   const [selectedProfileId, setSelectedProfileId] = useState(device.sdi12_probe_profile ?? '');
   const [depthInputs, setDepthInputs] = useState<Record<string, string>>({});
   const [initialDepthInputs, setInitialDepthInputs] = useState<Record<string, string>>({});
+  const [valueCountInput, setValueCountInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'identify' | 'save' | null>(null);
   const [identifyPending, setIdentifyPending] = useState(false);
@@ -107,8 +109,16 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
       const nextDepthInputs = depthInputsFor(selectedProfile, device);
       setDepthInputs(nextDepthInputs);
       setInitialDepthInputs(nextDepthInputs);
+      setValueCountInput(device.sdi12_value_count != null ? String(device.sdi12_value_count) : '');
     }
   }, [device, selectedProfile]);
+
+  // Variable-count profiles have no fixed expectedValues -- this is the same
+  // set the edge normalizer treats as learnable (SENTEK_ENVIROSCAN,
+  // DELTAT_PR2_4, DELTAT_PR2_6, and the pre-existing GENERIC_VWC escape
+  // hatch). Fixed-shape profiles like HYDRASCOUT/TENSIOMARK/IMKO_PICO64
+  // never show this field.
+  const isVariableCountProfile = selectedProfile ? selectedProfile.expectedValues == null : false;
 
   const handleProfileChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedProfileId(event.target.value);
@@ -136,13 +146,27 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
       (depthInputs[String(slot)] ?? '') !== (initialDepthInputs[String(slot)] ?? '')
     ));
 
+    let valueCount: number | null = null;
+    if (isVariableCountProfile) {
+      const rawValueCount = valueCountInput.trim();
+      if (rawValueCount) {
+        const parsedValueCount = Number(rawValueCount);
+        if (!Number.isInteger(parsedValueCount) || parsedValueCount < 1 || parsedValueCount > 8) {
+          setError('Value count must be a whole number between 1 and 8.');
+          return;
+        }
+        valueCount = parsedValueCount;
+      }
+    }
+
     setBusy('save');
     setError(null);
     setInfo(null);
     try {
-      const request = {
+      const request: Sdi12ConfigRequest = {
         probe_profile: selectedProfile.id,
         ...(depthsChanged ? { depths } : {}),
+        ...(isVariableCountProfile ? { value_count: valueCount } : {}),
       };
       await putSdi12Config(device.deveui, request);
       setInfo('SDI-12 configuration saved.');
@@ -229,6 +253,26 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
             <p className="mt-3 rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
               Unmatched probe identity: <span className="font-mono">{device.sdi12_identity}</span>
             </p>
+          )}
+
+          {isVariableCountProfile && (
+            <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+              <label htmlFor={`sdi12-value-count-${device.deveui}`} className="block text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                {t('sdi12.valueCount')}
+              </label>
+              <input
+                id={`sdi12-value-count-${device.deveui}`}
+                type="number"
+                min={1}
+                max={8}
+                step={1}
+                value={valueCountInput}
+                disabled={busy !== null}
+                onChange={(event) => setValueCountInput(event.target.value)}
+                className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+              />
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">{t('sdi12.valueCountHelp')}</p>
+            </div>
           )}
 
           {selectedProfile && depthSlots(selectedProfile).length > 0 && (

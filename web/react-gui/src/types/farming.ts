@@ -18,6 +18,7 @@ export interface Device {
   sdi12_probe_profile?: string | null;
   sdi12_probe_status?: Sdi12ProbeStatus | null;
   sdi12_identity?: string | null;
+  sdi12_value_count?: number | null;
 
   // Specific data payload matching Node-RED output
   latest_data: {

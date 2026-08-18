@@ -326,7 +326,9 @@
     "identify": "Identify probe",
     "reCheck": "Re-check probe",
     "actButtonHint": "If the probe doesn't respond, press the ACT button on the Dragino unit, then try again.",
-    "noResponse": "Probe did not respond to identification"
+    "noResponse": "Probe did not respond to identification",
+    "valueCount": "Value count",
+    "valueCountHelp": "Leave empty to accept any number of readings. Set a number to reject frames that don't match exactly."
   },
   "sdi12Soil": {
     "removeConfirm": "Remove this device?",

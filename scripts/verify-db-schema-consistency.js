@@ -60,6 +60,7 @@ const schemaContract = {
     'device_mode',
     'sdi12_probe_profile',
     'sdi12_probe_status',
+    'sdi12_value_count',
     'sdi12_identity',
   ],
   device_data: [

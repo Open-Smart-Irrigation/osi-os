@@ -236,7 +236,9 @@
     "identify": "Kebera ekyuma",
     "reCheck": "Ddamu okukebera ekyuma",
     "actButtonHint": "Ekyuma bwe kitaddamu, nyiga akabonero ACT ku kyuma kya Dragino, oluvannyuma ogezeeko nate.",
-    "noResponse": "Ekyuma tekyaddamu ku kukebera"
+    "noResponse": "Ekyuma tekyaddamu ku kukebera",
+    "valueCount": "Omuwendo gw'emiwendo",
+    "valueCountHelp": "Kireke nga tekiriimu okukkiriza omuwendo gwonna ogw'okusoma. Teeka omuwendo okugaana ebifo ebitagwana ddala."
   },
   "sdi12Soil": {
     "removeConfirm": "Ggyawo ekyuma kino?",

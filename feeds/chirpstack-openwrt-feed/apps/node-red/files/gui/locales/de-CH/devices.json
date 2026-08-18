@@ -236,7 +236,9 @@
     "identify": "Sonde identifizieren",
     "reCheck": "Sonde erneut prüfen",
     "actButtonHint": "Falls die Sonde nicht reagiert, drücken Sie die ACT-Taste am Dragino-Gerät und versuchen Sie es erneut.",
-    "noResponse": "Sonde hat nicht auf die Identifikation reagiert"
+    "noResponse": "Sonde hat nicht auf die Identifikation reagiert",
+    "valueCount": "Anzahl Werte",
+    "valueCountHelp": "Leer lassen, um eine beliebige Anzahl Messwerte zu akzeptieren. Eine Zahl festlegen, um Rahmen abzulehnen, die nicht genau übereinstimmen."
   },
   "sdi12Soil": {
     "removeConfirm": "Dieses Gerät entfernen?",

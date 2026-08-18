@@ -236,7 +236,9 @@
     "identify": "Identifica sonda",
     "reCheck": "Riverifica sonda",
     "actButtonHint": "Se la sonda non risponde, premi il pulsante ACT sull'unità Dragino, quindi riprova.",
-    "noResponse": "La sonda non ha risposto all'identificazione"
+    "noResponse": "La sonda non ha risposto all'identificazione",
+    "valueCount": "Numero di valori",
+    "valueCountHelp": "Lascia vuoto per accettare qualsiasi numero di letture. Imposta un numero per rifiutare i frame che non corrispondono esattamente."
   },
   "sdi12Soil": {
     "removeConfirm": "Rimuovere questo dispositivo?",

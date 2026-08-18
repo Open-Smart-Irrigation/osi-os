@@ -40,6 +40,7 @@ describe('Sdi12SettingsModal', () => {
         id: 'TENSIOMARK',
         label: 'ecoTech Tensiomark',
         provisional: true,
+        expectedValues: 2,
         defaultDepthsCm: [30],
         channels: ['swt_1', 'soil_temp_1'],
       }],
@@ -123,6 +124,75 @@ describe('Sdi12SettingsModal', () => {
     render(<Sdi12SettingsModal device={stillPending} onClose={vi.fn()} onUpdate={vi.fn()} />);
     expect(await screen.findByText(/Identification pending for 5 minutes\./)).toBeInTheDocument();
     expect(screen.queryByText('sdi12.noResponse')).not.toBeInTheDocument();
+  });
+
+  it('A6: shows the value-count field only for variable-count profiles and sends it on save', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({
+      profiles: [
+        {
+          id: 'TENSIOMARK',
+          label: 'ecoTech Tensiomark',
+          provisional: true,
+          expectedValues: 2,
+          defaultDepthsCm: [30],
+          channels: ['swt_1', 'soil_temp_1'],
+        },
+        {
+          id: 'SENTEK_ENVIROSCAN',
+          label: 'Sentek EnviroSCAN',
+          provisional: true,
+          expectedValues: null,
+          defaultDepthsCm: [],
+          channels: ['vwc_1', 'vwc_2', 'vwc_3', 'vwc_4', 'vwc_5', 'vwc_6', 'vwc_7', 'vwc_8'],
+        },
+      ],
+    });
+    render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    // TENSIOMARK is the default selection (device.sdi12_probe_profile is unset,
+    // so the modal falls back to the first profile returned): fixed cardinality,
+    // no value-count field.
+    await screen.findByRole('option', { name: /ecoTech Tensiomark/i });
+    expect(screen.queryByLabelText('sdi12.valueCount')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Probe profile'), { target: { value: 'SENTEK_ENVIROSCAN' } });
+    const valueCountInput = await screen.findByLabelText('sdi12.valueCount');
+    fireEvent.change(valueCountInput, { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
+        probe_profile: 'SENTEK_ENVIROSCAN',
+        value_count: 5,
+      });
+    });
+  });
+
+  it('A6: an empty value-count field explicitly clears the stored count', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({
+      profiles: [{
+        id: 'SENTEK_ENVIROSCAN',
+        label: 'Sentek EnviroSCAN',
+        provisional: true,
+        expectedValues: null,
+        defaultDepthsCm: [],
+        channels: ['vwc_1'],
+      }],
+    });
+    const withCount: Device = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_value_count: 5 };
+    render(<Sdi12SettingsModal device={withCount} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    const valueCountInput = await screen.findByLabelText('sdi12.valueCount');
+    expect(valueCountInput).toHaveValue(5);
+    fireEvent.change(valueCountInput, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(putSdi12Config).toHaveBeenCalledWith(withCount.deveui, {
+        probe_profile: 'SENTEK_ENVIROSCAN',
+        value_count: null,
+      });
+    });
   });
 
   it('surfaces the server message on a failed save', async () => {
