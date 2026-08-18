@@ -237,5 +237,12 @@
     "reCheck": "Verificar sonda novamente",
     "actButtonHint": "Se a sonda não responder, prima o botão ACT na unidade Dragino e tente novamente.",
     "noResponse": "A sonda não respondeu à identificação"
+  },
+  "sdi12Soil": {
+    "removeConfirm": "Remover este dispositivo?",
+    "removeSubtitle": "O dispositivo será desvinculado da sua conta.",
+    "yesRemove": "Sim, remover",
+    "removing": "A remover...",
+    "failedToRemove": "Falha ao remover dispositivo"
   }
 }

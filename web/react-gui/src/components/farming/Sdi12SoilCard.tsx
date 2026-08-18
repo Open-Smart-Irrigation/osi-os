@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Device } from '../../types/farming';
+import { devicesAPI } from '../../services/api';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { formatSwtValue, kpaToPf } from '../../utils/swt';
 
@@ -72,15 +73,33 @@ function minutesSince(value: string | null | undefined): number | null {
 export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   device,
   onOpenSettings,
+  onRemove,
   readOnly = false,
 }) => {
   const { t } = useTranslation('devices');
+  const { t: tc } = useTranslation('common');
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const data = device.latest_data ?? {};
   const status = device.sdi12_probe_status ?? 'unknown';
   const statusLabel = status === 'pending_identify' ? 'identifying' : status;
   const profile = device.sdi12_probe_profile || 'No probe profile';
   const pendingMinutesAgo = status === 'pending_identify' ? minutesSince(device.updated_at) : null;
   const pendingNoResponse = pendingMinutesAgo != null && pendingMinutesAgo > SDI12_IDENTIFY_TIMEOUT_MINUTES;
+
+  const handleRemove = async () => {
+    setIsRemoving(true);
+    setRemoveError(null);
+    try {
+      await devicesAPI.remove(device.deveui);
+      onRemove?.();
+    } catch (err: any) {
+      setRemoveError(err.response?.data?.message || t('sdi12Soil.failedToRemove'));
+      setIsRemoving(false);
+    }
+  };
+
   const rows = Array.from({ length: 8 }, (_, offset) => {
     const index = offset + 1;
     const values = CHANNELS.map(({ kind }) => ({
@@ -112,6 +131,17 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
               ⚙
             </button>
           )}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => setShowConfirm(true)}
+              disabled={isRemoving}
+              className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Remove device"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
       <p className="text-xs text-[var(--text-tertiary)] font-mono mb-2 truncate">{device.deveui}</p>
@@ -121,6 +151,42 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
           {statusLabel}
         </span>
       </div>
+
+      {removeError && (
+        <div className="bg-[var(--error-bg)] border border-[var(--error-text)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-3 text-sm">
+          {removeError}
+        </div>
+      )}
+
+      {!readOnly && showConfirm && (
+        <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-3">
+          <p className="font-bold mb-2">{t('sdi12Soil.removeConfirm')}</p>
+          <p className="text-sm mb-3">{t('sdi12Soil.removeSubtitle')}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRemove}
+              disabled={isRemoving}
+              className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center gap-2 disabled:text-[var(--text-disabled)]"
+            >
+              {isRemoving ? (
+                <>
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                  {t('sdi12Soil.removing')}
+                </>
+              ) : (
+                t('sdi12Soil.yesRemove')
+              )}
+            </button>
+            <button
+              onClick={() => setShowConfirm(false)}
+              disabled={isRemoving}
+              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            >
+              {tc('cancel')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {status === 'pending_identify' && (
         <p className="mb-3 rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">

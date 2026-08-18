@@ -237,5 +237,12 @@
     "reCheck": "Sonde erneut prüfen",
     "actButtonHint": "Falls die Sonde nicht reagiert, drücken Sie die ACT-Taste am Dragino-Gerät und versuchen Sie es erneut.",
     "noResponse": "Sonde hat nicht auf die Identifikation reagiert"
+  },
+  "sdi12Soil": {
+    "removeConfirm": "Dieses Gerät entfernen?",
+    "removeSubtitle": "Das Gerät wird von Ihrem Konto getrennt.",
+    "yesRemove": "Ja, entfernen",
+    "removing": "Wird entfernt...",
+    "failedToRemove": "Gerät konnte nicht entfernt werden"
   }
 }
