@@ -307,6 +307,7 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             onOpenSettings={() => setSdi12SettingsDevice(device)}
+                            onRemove={handleUpdate}
                             readOnly={!canWrite}
                           />
                         ))}

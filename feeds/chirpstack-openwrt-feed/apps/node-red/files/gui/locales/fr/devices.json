@@ -273,5 +273,12 @@
     "reCheck": "Revérifier la sonde",
     "actButtonHint": "Si la sonde ne répond pas, appuyez sur le bouton ACT de l'appareil Dragino, puis réessayez.",
     "noResponse": "La sonde n'a pas répondu à l'identification"
+  },
+  "sdi12Soil": {
+    "removeConfirm": "Supprimer cet appareil ?",
+    "removeSubtitle": "L'appareil sera dissocié de votre compte.",
+    "yesRemove": "Oui, supprimer",
+    "removing": "Suppression en cours...",
+    "failedToRemove": "Impossible de supprimer l'appareil"
   }
 }

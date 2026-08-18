@@ -1,13 +1,18 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
+import { devicesAPI } from '../../../services/api';
 import { Sdi12SoilCard } from '../Sdi12SoilCard';
 
 // t() returns the key itself, matching this codebase's convention.
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
+}));
+
+vi.mock('../../../services/api', () => ({
+  devicesAPI: { remove: vi.fn().mockResolvedValue(undefined) },
 }));
 
 const baseDevice: Device = {
@@ -70,5 +75,23 @@ describe('Sdi12SoilCard', () => {
 
     expect(screen.getByText('sdi12.noResponse')).toBeInTheDocument();
     expect(screen.queryByText(/detecting probe/i)).not.toBeInTheDocument();
+  });
+
+  it('removes the device when the operator confirms', async () => {
+    const onRemove = vi.fn();
+    vi.mocked(devicesAPI.remove).mockResolvedValueOnce(undefined as never);
+    const device = makeDevice();
+    render(<Sdi12SoilCard device={device} onRemove={onRemove} />);
+
+    fireEvent.click(screen.getByTitle('Remove device'));
+    fireEvent.click(screen.getByText('sdi12Soil.yesRemove'));
+
+    await waitFor(() => expect(devicesAPI.remove).toHaveBeenCalledWith(device.deveui));
+    await waitFor(() => expect(onRemove).toHaveBeenCalled());
+  });
+
+  it('does not render a remove button in readOnly mode', () => {
+    render(<Sdi12SoilCard device={makeDevice()} readOnly />);
+    expect(screen.queryByTitle('Remove device')).not.toBeInTheDocument();
   });
 });

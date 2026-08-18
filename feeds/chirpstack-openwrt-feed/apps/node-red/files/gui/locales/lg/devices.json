@@ -273,5 +273,12 @@
     "reCheck": "Ddamu okukebera ekyuma",
     "actButtonHint": "Ekyuma bwe kitaddamu, nyiga akabonero ACT ku kyuma kya Dragino, oluvannyuma ogezeeko nate.",
     "noResponse": "Ekyuma tekyaddamu ku kukebera"
+  },
+  "sdi12Soil": {
+    "removeConfirm": "Ggyawo ekyuma kino?",
+    "removeSubtitle": "Ekyuma kiggyibwako ku akawunti yo.",
+    "yesRemove": "Yee, Ggyawo",
+    "removing": "Tikuggyawo...",
+    "failedToRemove": "Okuggyawo ekyuma kugaanye"
   }
 }
