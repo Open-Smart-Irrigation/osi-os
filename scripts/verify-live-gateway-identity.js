@@ -985,41 +985,41 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 215 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 215,
-    'silent-catch baseline records 215 for both maintained profiles',
-    'silent-catch baseline must be 215 for both maintained profiles after three sys-stats fan catches are removed');
-  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 213 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 213,
+    'silent-catch baseline records 213 for both maintained profiles',
+    'silent-catch baseline must be 213 for both maintained profiles after registration compensation stops swallowing failures');
+  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'registration compensation now reports failures instead of swallowing them', 'records the PR #149 compensation cleanup');
 }
+// Ownership split (refactor-program A0 repair commit 3): the numeric ceilings
+// (max_chars / max_total) in scripts/verify-flows-size-ratchet-allowances.json are now
+// owned exclusively by scripts/verify-flows-size-ratchet.js - that script enforces every
+// absolute ceiling and rejects stale/malformed entries. This verifier keeps only the
+// identity-specific invariants: that each node this feature grew still has an owned
+// entry at all (so a later PR cannot silently drop the entry and re-widen the node with
+// no ceiling), and that its reason still documents the identity-restart-sentinel
+// provenance. It does not know or care what the numeric ceiling is.
 if (sizeAllowances) {
-  const expectedGrowth = {
-    'sync-bootstrap-build': 5709,
-    'sync-outbox-build': 1597,
-    'sync-pending-build': 1344,
-    'sync-force-build': 6697,
-    'command-ack-build-batch': 975,
-    'sync-state-build': 1072,
-    'al-link-build-req': 969,
-    'al-link-restart-node-red': 1761,
-    'al-unlink-restart-node-red': 1773,
-  };
-  for (const [nodeId, delta] of Object.entries(expectedGrowth)) {
-    expectCondition(sizeAllowances.node_allowances?.[nodeId]?.delta === delta,
-      `size allowance ${nodeId}: exact cumulative delta ${delta}`,
-      `size allowance ${nodeId}: expected exact cumulative delta ${delta}`);
+  const identityGrowthNodeIds = [
+    'sync-bootstrap-build',
+    'sync-outbox-build',
+    'sync-pending-build',
+    'sync-force-build',
+    'command-ack-build-batch',
+    'sync-state-build',
+    'al-link-build-req',
+    'al-link-restart-node-red',
+    'al-unlink-restart-node-red',
+  ];
+  for (const nodeId of identityGrowthNodeIds) {
+    expectCondition(Boolean(sizeAllowances.node_allowances?.[nodeId]),
+      `size allowance ${nodeId}: owned entry present`,
+      `size allowance ${nodeId}: expected an owned allowances entry (general ratchet owns its ceiling; identity owns only the reason)`);
     expectIncludes(`size allowance ${nodeId}`, String(sizeAllowances.node_allowances?.[nodeId]?.reason || ''), 'live identity restart sentinel (Option C Slice 1)', 'declares Task 4 growth');
   }
-  expectCondition(sizeAllowances.node_allowances?.['sys-stats-fn']?.delta === 4862,
-    'size allowance sys-stats-fn: exact Task 5 delta 4862',
-    'size allowance sys-stats-fn: expected exact Task 5 delta 4862');
+  expectCondition(Boolean(sizeAllowances.node_allowances?.['sys-stats-fn']),
+    'size allowance sys-stats-fn: owned entry present',
+    'size allowance sys-stats-fn: expected an owned allowances entry (general ratchet owns its ceiling; identity owns only the reason)');
   expectIncludes('size allowance sys-stats-fn', String(sizeAllowances.node_allowances?.['sys-stats-fn']?.reason || ''), 'filtered restartPending status (Option C Slice 1b)', 'declares Task 5 growth');
-  expectCondition(sizeAllowances.total_allowance?.delta === 41034,
-    'size total allowance: exact cumulative delta 41034',
-    'size total allowance: expected exact cumulative delta 41034');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862)', 'declares exact Task 5 total growth');
-  const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
-  expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
-    'size allowances contain no duplicate node keys',
-    'size allowances contain duplicate node keys');
 }
 
 if (lifecycleTestSource) {

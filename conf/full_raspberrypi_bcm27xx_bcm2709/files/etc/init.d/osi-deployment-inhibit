@@ -1,0 +1,15 @@
+#!/bin/sh /etc/rc.common
+# Dormant commit-1 startup-inhibit candidate. It has no /etc/rc.d link in
+# this slice; the guard-bootstrap controller installs S01 in a later commit.
+START=1
+STOP=99
+
+start() {
+    /usr/libexec/osi-deployment-inhibit.sh enforce \
+        --root / \
+        --state-cli /usr/libexec/osi-deployment-state-cli.js \
+        --deployment-root /data/osi-deploy \
+        --guard-marker /data/osi-deploy/guard-installed.json \
+        --state /data/osi-deploy/deployment-state.json \
+        --receipts /data/osi-deploy/receipts
+}

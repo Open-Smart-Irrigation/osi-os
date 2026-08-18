@@ -41,6 +41,33 @@ def ssh(gw: GatewayConfig, cmd: str, timeout: int = 60) -> subprocess.CompletedP
     )
 
 
+def gateway_utc_now(gw: GatewayConfig) -> tuple[str | None, str | None]:
+    """Read the gateway's own UTC clock over SSH. This is the ISO-8601
+    `verification_started_at` boundary every post-deploy check correlates
+    against — it must be read from the gateway (never the runner's clock,
+    which can skew from it) and only after the deployed payload's GUI health
+    probe has already passed (see controller.run_pipeline).
+
+    Returns (iso_stamp, None) on success or (None, error_detail). A timeout,
+    a failed ssh process start, a nonzero exit, or output that is not exactly
+    the 20-character `YYYY-MM-DDThh:mm:ssZ` shape is a hard failure — the
+    caller must restore and halt rather than fabricate a boundary.
+    """
+    try:
+        r = ssh(gw, "date -u +%Y-%m-%dT%H:%M:%SZ", timeout=30)
+    except subprocess.TimeoutExpired:
+        return None, "gateway clock read timed out"
+    except OSError as e:
+        return None, f"ssh could not start for gateway clock read: {e}"
+    if r.returncode != 0:
+        err = (r.stderr or "").strip() or (r.stdout or "").strip() or "no output"
+        return None, f"gateway clock read failed (exit {r.returncode}): {err[:300]}"
+    stamp = (r.stdout or "").strip()
+    if len(stamp) != 20 or not stamp.endswith("Z"):
+        return None, f"gateway clock returned unexpected output: {stamp[:80]!r}"
+    return stamp, None
+
+
 def pre_deploy_backup(gw: GatewayConfig, timestamp: str) -> BackupResult:
     ssh(gw, f"mkdir -p {gw.backup_dir}")
     scp_to_pi(gw, PI_SCRIPTS / "backup-pre-deploy.sh", f"{gw.backup_dir}/backup-pre-deploy.sh")

@@ -1,6 +1,7 @@
 """Verification check framework. Each check returns a CheckResult."""
 from __future__ import annotations
 from dataclasses import dataclass
+import shlex
 import subprocess
 import time
 
@@ -19,17 +20,36 @@ class CheckResult:
 
 @dataclass
 class VerifyContext:
-    """Passed to every check — the shared state for this verification run."""
+    """Passed to every check — the shared state for this verification run.
+
+    `verification_started_at` is an ISO-8601 UTC boundary (`YYYY-MM-DDThh:mm:ssZ`)
+    read from the gateway's own clock after the deployed payload passes its GUI
+    health probe (see `deploy.gateway_utc_now` / `controller.run_pipeline`) — it
+    is never the compact `backup_stamp` filename timestamp and never the
+    runner's own clock. Every post-deploy check compares against this boundary
+    with real datetime parsing, not lexical string comparison, so a row
+    written by the old payload during backup/deploy can never satisfy a
+    post-deploy check.
+    """
     gateway_host: str
     ssh_user: str
     ssh_key: str
     db_path: str
     gui_url: str
-    deploy_timestamp: str
+    verification_started_at: str
     expected_schema_sig: str | None = None
     pre_deploy_baselines: dict | None = None
     canary_gate_available: bool = False
     is_extraction_bundle: bool = False
+    # Ingest correlation policy (see checks/ingest.py). Defaults are the
+    # inactive/demo-gateway shape so existing fixtures that never set these
+    # keep working: a short window and require_ingest=False never blocks.
+    ingest_wait_seconds: int = 120
+    ingest_quiet_seconds: int = 10
+    require_ingest: bool = False
+    # ChirpStack-vs-edge clock/serialization skew tolerance in either
+    # direction. Bounded tolerance, not a substitute for a correlated row.
+    ingest_max_clock_skew_seconds: int = 30
 
 
 def ssh_cmd(ctx: VerifyContext, cmd: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -75,22 +95,27 @@ def remote(ctx: VerifyContext, cmd: str, timeout: int = 30):
     return r, None
 
 
-def remote_sql(ctx: VerifyContext, sql: str, timeout: int = 30, extra_args: str = ""):
-    """Run a sqlite3 query against the gateway DB. Returns (stdout, None) or
-    (None, error_detail).
+def remote_sql(ctx: VerifyContext, sql: str, timeout: int = 30, extra_args: str = "",
+                db_path: str | None = None):
+    """Run a sqlite3 query against a gateway DB. Defaults to the farming
+    database (`ctx.db_path`); pass `db_path` to query another database on the
+    same gateway explicitly (e.g. the ChirpStack SQLite store). Returns
+    (stdout, None) or (None, error_detail).
 
     sqlite3 reports missing tables and SQL errors on stderr with a nonzero
     exit while stdout stays empty — never interpret a failed query as an
     empty (zero) result.
     """
+    path = shlex.quote(db_path or ctx.db_path)
+    sql_arg = shlex.quote(sql)
     args = f"{extra_args} " if extra_args else ""
-    r, err = remote(ctx, f'sqlite3 {args}{ctx.db_path} "{sql}"', timeout)
-    if err:
-        return None, err
-    stderr = filtered_stderr(r.stderr)
+    result, error = remote(ctx, f"sqlite3 {args}{path} {sql_arg}", timeout)
+    if error:
+        return None, error
+    stderr = filtered_stderr(result.stderr)
     if stderr:
         return None, f"sqlite reported errors despite exit 0: {stderr[:300]}"
-    return r.stdout.strip(), None
+    return result.stdout.strip(), None
 
 
 def parse_count(value, what: str):

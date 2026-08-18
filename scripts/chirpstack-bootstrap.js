@@ -432,27 +432,37 @@ async function main() {
 
   const client = chirpstack.createClient({ apiUrl: CFG.url, apiKey });
 
-  console.log('\n[ 2/5 ] Tenant');
-  const tenantId = await getOrCreateTenant(client);
+  let tenantId, sensorsAppId, actuatorsAppId, fieldTesterAppId;
+  let kiwiProfileId, stregaProfileId, lsn50ProfileId, rak10701ProfileId, s2120ProfileId, lorainProfileId, uc512ProfileId;
+  try {
+    console.log('\n[ 2/5 ] Tenant');
+    tenantId = await getOrCreateTenant(client);
 
-  console.log('\n[ 3/5 ] Applications');
-  const sensorsAppId = await getOrCreateApp(client, tenantId, CFG.appSensorsName, 'KIWI soil sensors and Dragino LSN50 dendrometers');
-  const actuatorsAppId = await getOrCreateApp(client, tenantId, CFG.appActuatorsName, 'STREGA smart irrigation valves');
-  const fieldTesterAppId = await getOrCreateApp(client, tenantId, CFG.appFieldTesterName, 'RAK10701 field coverage testing');
+    console.log('\n[ 3/5 ] Applications');
+    sensorsAppId = await getOrCreateApp(client, tenantId, CFG.appSensorsName, 'KIWI soil sensors and Dragino LSN50 dendrometers');
+    actuatorsAppId = await getOrCreateApp(client, tenantId, CFG.appActuatorsName, 'STREGA smart irrigation valves');
+    fieldTesterAppId = await getOrCreateApp(client, tenantId, CFG.appFieldTesterName, 'RAK10701 field coverage testing');
 
-  console.log('\n[ 4/5 ] Device profiles');
-  const kiwiProfileId = await getOrCreateProfile(client, tenantId, CFG.profileKiwiName, 'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
-  const stregaCodecScript = readCodecScript(CFG.stregaCodecPath, 'STREGA');
-  const stregaProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaName, 'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)', stregaCodecScript);
-  const lsn50CodecScript = readCodecScript(CFG.lsn50CodecPath, 'LSN50');
-  const lsn50ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name, 'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)', lsn50CodecScript);
-  const rak10701ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileRakName, 'RAK10701 LoRaWAN coverage field tester');
-  const s2120CodecScript = readCodecScript(CFG.s2120CodecPath, 'S2120');
-  const s2120ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileS2120Name, 'SenseCAP S2120 8-in-1 weather station (LoRaWAN 1.0.3 OTAA)', s2120CodecScript);
-  const lorainCodecScript = readCodecScript(CFG.lorainCodecPath, 'LoRain');
-  const lorainProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLorainName, 'Aqua-Scope LoRain RANLWE01 rain gauge (LoRaWAN 1.0.3 OTAA)', lorainCodecScript);
-  const uc512CodecScript = readCodecScript(CFG.uc512CodecPath, 'UC512');
-  const uc512ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileUc512Name, 'Milesight UC512 dual-valve controller (LoRaWAN 1.0.3 OTAA)', uc512CodecScript);
+    console.log('\n[ 4/5 ] Device profiles');
+    kiwiProfileId = await getOrCreateProfile(client, tenantId, CFG.profileKiwiName, 'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
+    const stregaCodecScript = readCodecScript(CFG.stregaCodecPath, 'STREGA');
+    stregaProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaName, 'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)', stregaCodecScript);
+    const lsn50CodecScript = readCodecScript(CFG.lsn50CodecPath, 'LSN50');
+    lsn50ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name, 'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)', lsn50CodecScript);
+    rak10701ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileRakName, 'RAK10701 LoRaWAN coverage field tester');
+    const s2120CodecScript = readCodecScript(CFG.s2120CodecPath, 'S2120');
+    s2120ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileS2120Name, 'SenseCAP S2120 8-in-1 weather station (LoRaWAN 1.0.3 OTAA)', s2120CodecScript);
+    const lorainCodecScript = readCodecScript(CFG.lorainCodecPath, 'LoRain');
+    lorainProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLorainName, 'Aqua-Scope LoRain RANLWE01 rain gauge (LoRaWAN 1.0.3 OTAA)', lorainCodecScript);
+    const uc512CodecScript = readCodecScript(CFG.uc512CodecPath, 'UC512');
+    uc512ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileUc512Name, 'Milesight UC512 dual-valve controller (LoRaWAN 1.0.3 OTAA)', uc512CodecScript);
+  } finally {
+    try {
+      client.close();
+    } catch (closeError) {
+      console.warn('  ⚠ ChirpStack provisioning client close failed: ' + closeError.message);
+    }
+  }
 
   console.log('\n[ 5/5 ] Writing configuration');
   const gatewayEui = detectGatewayEui();

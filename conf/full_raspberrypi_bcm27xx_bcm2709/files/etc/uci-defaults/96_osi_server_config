@@ -36,4 +36,14 @@ set osi-server.cloud.openagri_weather_current_cache_minutes=30
 set osi-server.cloud.openagri_weather_forecast_cache_minutes=120
 commit osi-server
 EOF
+
+# lsn50-writer-disable-default begin
+# LSN50 writer runtime recovery kill switch (Train A, 2026-07-15 plan Task 3):
+# absent-only default outside the unconditional batch above. A rerun of this
+# provisioning step must never reset an operator-enabled override.
+uci -q get osi-server.cloud.lsn50_writer_disable >/dev/null 2>&1 || \
+  uci set osi-server.cloud.lsn50_writer_disable='0'
+uci commit osi-server
+# lsn50-writer-disable-default end
+
 exit 0

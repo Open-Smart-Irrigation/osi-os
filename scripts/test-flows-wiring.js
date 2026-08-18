@@ -836,6 +836,39 @@ if (leaks.length > 0) {
 }
 console.log('OK  osiDb.Database: every opening node closes it');
 
+// === ChirpStack provisioning client close audit (Task 4 rewiring) ===
+// Every node that opens a ChirpStack provisioning client must hoist the
+// binding (`let client = null;` outside its try block, not a `const`
+// declared inside it) so a `finally` can close it on every path, must
+// create exactly one client, and must call `client.close()` somewhere in
+// its body.
+const CS_CLIENT_OPEN_RX = /chirpstack\.createProvisioningClientFromEnv\s*\(/;
+const CS_CLIENT_LET_RX = /let\s+client\s*=\s*null;/;
+const CS_CLIENT_CLOSE_RX = /\bclient\.close\s*\(/;
+
+let csClientIssues = [];
+for (const node of flows) {
+    if (node.type !== 'function' || typeof node.func !== 'string') continue;
+    if (!CS_CLIENT_OPEN_RX.test(node.func)) continue;
+    const label = (node.name || '(unnamed)') + ' [' + node.id + ']';
+    const openCount = (node.func.match(/createProvisioningClientFromEnv/g) || []).length;
+    if (openCount > 1) {
+        csClientIssues.push(label + ' creates ' + openCount + ' ChirpStack clients (must create exactly one)');
+    }
+    if (!CS_CLIENT_LET_RX.test(node.func)) {
+        csClientIssues.push(label + ' does not hoist `let client = null;` outside its try block');
+    }
+    if (!CS_CLIENT_CLOSE_RX.test(node.func)) {
+        csClientIssues.push(label + ' opens a ChirpStack provisioning client without calling client.close()');
+    }
+}
+if (csClientIssues.length > 0) {
+    console.error('FAIL: ' + csClientIssues.length + ' ChirpStack client wiring issue(s):');
+    csClientIssues.forEach((l) => console.error('  - ' + l));
+    process.exit(1);
+}
+console.log('OK  ChirpStack provisioning clients: every opening node hoists one client and closes it');
+
 // === Function-node library declaration audit ===
 
 const helperGlobals = [

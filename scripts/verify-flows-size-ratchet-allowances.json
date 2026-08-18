@@ -1,38 +1,981 @@
 {
-  "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
+  "_comment": "Absolute ceilings for every maintained function node. Inherited f50950b1 entries stay at exact measured size; later growth requires a specific owner reason.",
   "node_allowances": {
-    "062a0f9bf66d9789": { "delta": 850, "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)" },
-    "sys-stats-fn": { "delta": 4862, "reason": "filtered restartPending status (Option C Slice 1b), including explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (+4862)" },
-    "2a4f142e3e9b6d80": { "delta": 400, "reason": "sync outbox eviction index guard (1.A5)" },
-    "prune-sync-outbox": { "delta": 3000, "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)" },
-    "history-api-router-fn": { "delta": 462, "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312)" },
-    "sync-pending-split": { "delta": 401, "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields" },
-    "command-dedupe-dispatch": { "delta": 823, "reason": "Field Journal Task 10: shared command-ledger replay; PR #141 hardening: guarded osiLib loading and protected-type routing keep generic commands independent from optional journal hooks (+823 exact final delta vs origin/main)" },
-    "cmd-type-registry": { "delta": 3100, "reason": "1.C: expanded command-type registry from 8 to 33 types" },
-    "reject-indefinite-open": { "delta": 3100, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
-    "write-strega-expectation": { "delta": 3300, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
-    "9b3afb405207302e": { "delta": 800, "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest" },
-    "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return" },
-    "dendro-compute-fn": { "delta": 2304, "reason": "issue #10: INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version (dendrometer_daily + zone_daily_recommendations); PR #140 review finding: add sync_version to the three inline fallback CREATE TABLE statements (+104)" },
-    "sim-dendro-fn-setup": { "delta": 950, "reason": "issue #10: sim INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version" },
-    "sync-init-fn": { "delta": 1019, "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)" },
-    "sync-bootstrap-build": { "delta": 5709, "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); Field Journal Task 12 plus final review: fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper in normal bootstrap (+4078); PR #141 hardening: object-only outbox payload parser and rollback propagation (+139); live identity restart sentinel (Option C Slice 1), including caught-error source marking and preservation (+1311)" },
-    "sync-outbox-build": { "delta": 1597, "reason": "retryable backoff: pending-events SELECT gains a last_retryable_failure_at/retry_count cooldown-exclusion clause (Task J); PR #141 hardening: object-only payload parser, rollback propagation, strict delivery mapping, and visible cleanup catches (+397 vs current origin/main); live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors (+1200)" },
-    "sync-pending-build": { "delta": 1344, "reason": "live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors" },
-    "sync-outbox-mark": { "delta": 294, "reason": "retryable backoff: RETRYABLE_ERROR results now collect event uuids and persist retry_count/last_retryable_failure_at instead of only counting them (Task J)" },
-    "sync-force-build": { "delta": 6697, "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); retryable backoff: same cooldown-exclusion SELECT clause + retry_count/last_retryable_failure_at UPDATE as sync-outbox-mark (+280, Task J); Field Journal Tasks 11-12 plus final review: preserve trusted envelopes, fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper, and exposeEmptyCatches over main's Task J catches (+4936); PR #141 hardening: object-only outbox payload parser, rollback propagation, and strict delivery mapping (+100); live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors (+1200)" },
-    "command-ack-build-batch": { "delta": 975, "reason": "live identity restart sentinel (Option C Slice 1)" },
-    "sync-state-build": { "delta": 1072, "reason": "live identity restart sentinel (Option C Slice 1)" },
-    "al-link-build-req": { "delta": 969, "reason": "live identity restart sentinel (Option C Slice 1)" },
-    "al-link-restart-node-red": { "delta": 1761, "reason": "live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1761)" },
-    "al-unlink-restart-node-red": { "delta": 1773, "reason": "live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1773)" },
-    "put-chameleon-enabled-auth-fn": { "delta": 46, "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud" },
-    "dendro-ref-tree-fn": { "delta": 46, "reason": "issue #15: UPDATE bumps sync_version so a reference-tree toggle after the first delivered DEVICE event does not hit equal_version_payload_conflict, matching the put-chameleon-enabled-auth-fn / dendro_enabled / temp_enabled / rain_gauge_enabled / flow_meter_enabled precedent" },
-    "lsn50-zone-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
-    "s2120-rain-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
-    "lorain-rain-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
-    "device-api-http500": { "delta": 45, "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder" },
-    "dendro-raw-fn": { "delta": 10, "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all" }
+    "062a0f9bf66d9789": {
+      "max_chars": 4242,
+      "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)"
+    },
+    "sys-stats-fn": {
+      "max_chars": 7070,
+      "reason": "filtered restartPending status (Option C Slice 1b), including explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (+4862)"
+    },
+    "2a4f142e3e9b6d80": {
+      "max_chars": 546,
+      "reason": "sync outbox eviction index guard (1.A5)"
+    },
+    "prune-sync-outbox": {
+      "max_chars": 4298,
+      "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)"
+    },
+    "history-api-router-fn": {
+      "max_chars": 60554,
+      "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312)"
+    },
+    "sync-pending-split": {
+      "max_chars": 3083,
+      "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields; sync-failclosed-20260719: explicit isHttpSuccess integer-2xx gate replaces the truthy/negative statusCode check so status 0, missing, string '200', and non-2xx never advance lastPendingCommandPollSuccessAt (+118)"
+    },
+    "command-dedupe-dispatch": {
+      "max_chars": 2890,
+      "reason": "Field Journal Task 10: shared command-ledger replay; PR #141 hardening: guarded osiLib loading and protected-type routing keep generic commands independent from optional journal hooks"
+    },
+    "cmd-type-registry": {
+      "max_chars": 4976,
+      "reason": "1.C: expanded command-type registry from 8 to 33 types"
+    },
+    "reject-indefinite-open": {
+      "max_chars": 6696,
+      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry; sync-failclosed-20260719: durable REJECTED_PERMANENT ack builder (rejectionAck) replaces the silent null drop for bare OPEN, unknown command types, and OPEN_FOR_DURATION without a duration (+632); PR #149 review: second output routes terminal rejection ACKs directly to the durable queue (+40)"
+    },
+    "write-strega-expectation": {
+      "max_chars": 10197,
+      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
+    },
+    "9b3afb405207302e": {
+      "max_chars": 3315,
+      "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest"
+    },
+    "5f0d2b7e9b9b1b3a": {
+      "max_chars": 16900,
+      "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return"
+    },
+    "dendro-compute-fn": {
+      "max_chars": 42927,
+      "reason": "issue #10: INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version (dendrometer_daily + zone_daily_recommendations); PR #140 review finding: add sync_version to the three inline fallback CREATE TABLE statements (+104)"
+    },
+    "sim-dendro-fn-setup": {
+      "max_chars": 16699,
+      "reason": "issue #10: sim INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version"
+    },
+    "sync-init-fn": {
+      "max_chars": 74217,
+      "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
+    },
+    "sync-bootstrap-build": {
+      "max_chars": 34126,
+      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); Field Journal Task 12 plus final review: fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper in normal bootstrap (+4078); PR #141 hardening: object-only outbox payload parser and rollback propagation (+139); live identity restart sentinel (Option C Slice 1), including caught-error source marking and preservation (+1311)"
+    },
+    "sync-outbox-build": {
+      "max_chars": 18056,
+      "reason": "retryable backoff: pending-events SELECT gains a last_retryable_failure_at/retry_count cooldown-exclusion clause (Task J); PR #141 hardening: object-only payload parser, rollback propagation, strict delivery mapping, and visible cleanup catches (+397 vs current origin/main); live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors (+1200)"
+    },
+    "sync-pending-build": {
+      "max_chars": 17062,
+      "reason": "live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors"
+    },
+    "sync-outbox-mark": {
+      "max_chars": 5776,
+      "reason": "sync stop-loss delivery consumer: fail-closed HTTP status/result validation, per-event terminal classification, duplicate/malformed/unrequested-result rejection, and bounded protocol errors (Plan 3 Tasks 1-2)"
+    },
+    "sync-force-build": {
+      "max_chars": 52929,
+      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); retryable backoff: same cooldown-exclusion SELECT clause + retry_count/last_retryable_failure_at UPDATE as sync-outbox-mark (+280, Task J); Field Journal Tasks 11-12 plus final review: preserve trusted envelopes, fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper, and exposeEmptyCatches over main's Task J catches (+4936); PR #141 hardening: object-only outbox payload parser, rollback propagation, and strict delivery mapping (+100); live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors (+1200)"
+    },
+    "command-ack-build-batch": {
+      "max_chars": 4687,
+      "reason": "live identity restart sentinel (Option C Slice 1); sync-failclosed-20260719: groups local command_ack_outbox rows by parsed commandId, collapses byte-identical canonical duplicates into one outgoing ACK with _localAckCorrelation, and withholds delivery with a token-free warning on conflicting rows (+1028)"
+    },
+    "sync-state-build": {
+      "max_chars": 10119,
+      "reason": "live identity restart sentinel (Option C Slice 1)"
+    },
+    "al-link-build-req": {
+      "max_chars": 4142,
+      "reason": "live identity restart sentinel (Option C Slice 1)"
+    },
+    "al-link-restart-node-red": {
+      "max_chars": 2288,
+      "reason": "live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1761)"
+    },
+    "al-unlink-restart-node-red": {
+      "max_chars": 2305,
+      "reason": "live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1773)"
+    },
+    "put-chameleon-enabled-auth-fn": {
+      "max_chars": 5611,
+      "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "dendro-ref-tree-fn": {
+      "max_chars": 1491,
+      "reason": "issue #15: UPDATE bumps sync_version so a reference-tree toggle after the first delivered DEVICE event does not hit equal_version_payload_conflict, matching the put-chameleon-enabled-auth-fn / dendro_enabled / temp_enabled / rain_gauge_enabled / flow_meter_enabled precedent"
+    },
+    "lsn50-zone-agg-fn": {
+      "max_chars": 2633,
+      "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
+    },
+    "s2120-rain-agg-fn": {
+      "max_chars": 2452,
+      "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
+    },
+    "lorain-rain-agg-fn": {
+      "max_chars": 2304,
+      "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
+    },
+    "device-api-http500": {
+      "max_chars": 2202,
+      "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "dendro-raw-fn": {
+      "max_chars": 5345,
+      "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all"
+    },
+    "auth-register-func": {
+      "max_chars": 644,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "auth-login-func": {
+      "max_chars": 472,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "auth-db-query": {
+      "max_chars": 1332,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "auth-process-result": {
+      "max_chars": 5234,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "auth-db-insert": {
+      "max_chars": 1114,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "auth-insert-complete": {
+      "max_chars": 66,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "a85523a4041eb6f4": {
+      "max_chars": 145,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "get-devices-auth": {
+      "max_chars": 3522,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "get-devices-query": {
+      "max_chars": 1499,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "format-devices": {
+      "max_chars": 3903,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "merge-device-data": {
+      "max_chars": 10392,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "catalog-response": {
+      "max_chars": 482,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-devices-auth": {
+      "max_chars": 4252,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "check-existing-device": {
+      "max_chars": 404,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-devices-insert": {
+      "max_chars": 4558,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-devices-response": {
+      "max_chars": 933,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "delete-device-auth": {
+      "max_chars": 3661,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "delete-device-unlink": {
+      "max_chars": 712,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "delete-device-response": {
+      "max_chars": 277,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-zone-auth": {
+      "max_chars": 3723,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "post-zone-insert": {
+      "max_chars": 1080,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-zone-get-id": {
+      "max_chars": 392,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-zone-response": {
+      "max_chars": 521,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "get-zones-auth": {
+      "max_chars": 3510,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "get-zones-query": {
+      "max_chars": 3564,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "get-zones-response": {
+      "max_chars": 1807,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "delete-zone-auth": {
+      "max_chars": 3522,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "delete-zone-verify": {
+      "max_chars": 634,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "delete-zone-unassign": {
+      "max_chars": 801,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "delete-zone-delete": {
+      "max_chars": 442,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "delete-zone-response": {
+      "max_chars": 89,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "assign-device-auth": {
+      "max_chars": 3534,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "assign-device-verify-zone": {
+      "max_chars": 855,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "assign-device-verify-device": {
+      "max_chars": 751,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "assign-device-update": {
+      "max_chars": 1042,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "assign-device-response": {
+      "max_chars": 512,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "unassign-device-auth": {
+      "max_chars": 3546,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "unassign-device-update": {
+      "max_chars": 1018,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "unassign-device-response": {
+      "max_chars": 416,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "70fcbea336401bd1": {
+      "max_chars": 3550,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "22cc64fa2a899cea": {
+      "max_chars": 4256,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "d7e5c762c820aa16": {
+      "max_chars": 1979,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "636ed15f34fa99c4": {
+      "max_chars": 657,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "settings-disable-schedules-fn": {
+      "max_chars": 4896,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "8180476b6ab55d6e": {
+      "max_chars": 756,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "83bb4a452dd9ae37": {
+      "max_chars": 6452,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "9ad895844533fb35": {
+      "max_chars": 470,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "dde8e1ef265e96d7": {
+      "max_chars": 3531,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "a0a61f4b7dca1c2e": {
+      "max_chars": 882,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "d0b2b1c1a937e16d": {
+      "max_chars": 2177,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "49d2332890472f7f": {
+      "max_chars": 81,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "b8b8a676fdeea7cb": {
+      "max_chars": 48,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "81c98fb07344a787": {
+      "max_chars": 5675,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "cdbaa3891d40d7a1": {
+      "max_chars": 10221,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "f1f87b77d04f8fc5": {
+      "max_chars": 231,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "e01035a07bf9590a": {
+      "max_chars": 393,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "5c45136f382d501c": {
+      "max_chars": 1047,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "3301d5ea9863f66b": {
+      "max_chars": 199,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "67096d013eec5005": {
+      "max_chars": 9223,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "48273b576d5b1b93": {
+      "max_chars": 4888,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "fn_build_sql_params": {
+      "max_chars": 1587,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "fn_rows_to_csv": {
+      "max_chars": 1213,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "fn_build_sensor_sql_params": {
+      "max_chars": 1348,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "fn_rows_to_csv_sensordata": {
+      "max_chars": 882,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "fn_http500": {
+      "max_chars": 230,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "crash-loop-register-fn": {
+      "max_chars": 213,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "8809bb5239dfb3d4": {
+      "max_chars": 12175,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "934bf2bc19a8ce22": {
+      "max_chars": 22347,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "4f4a765f36cee6f3": {
+      "max_chars": 17943,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "e2e139678c3ddded": {
+      "max_chars": 1196,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "c8628cffe45f64f7": {
+      "max_chars": 1499,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "lsn50-decode-fn": {
+      "max_chars": 7536,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "dendro-history-fn": {
+      "max_chars": 4720,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "dendro-history-format": {
+      "max_chars": 520,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "lsn50-config-query-fn": {
+      "max_chars": 1076,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "lsn50-apply-config": {
+      "max_chars": 17408,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-dendro-auth-fn": {
+      "max_chars": 3954,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-dendro-format": {
+      "max_chars": 88,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-temp-auth-fn": {
+      "max_chars": 3938,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-temp-format": {
+      "max_chars": 84,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sensor-history-fn": {
+      "max_chars": 4868,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "sensor-history-format": {
+      "max_chars": 161,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "rain-history-fn": {
+      "max_chars": 4883,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "sys-reboot-fn": {
+      "max_chars": 3117,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sys-fan-fn": {
+      "max_chars": 5125,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sys-cors-fn": {
+      "max_chars": 51,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-migrate-func": {
+      "max_chars": 375,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-status-decode": {
+      "max_chars": 3714,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-status-format": {
+      "max_chars": 1122,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-link-validate": {
+      "max_chars": 8062,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-link-server-auth": {
+      "max_chars": 887,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-link-handle-auth": {
+      "max_chars": 4513,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-link-success": {
+      "max_chars": 312,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-unlink-func": {
+      "max_chars": 2963,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-unlink-db": {
+      "max_chars": 1565,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-unlink-format": {
+      "max_chars": 66,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-options-func": {
+      "max_chars": 51,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "dendro-readings-insert-fn": {
+      "max_chars": 1529,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "dendro-daily-fn": {
+      "max_chars": 5384,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "dendro-zone-rec-fn": {
+      "max_chars": 4617,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "dendro-tz-fn": {
+      "max_chars": 1249,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "dendro-cors-fn": {
+      "max_chars": 214,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sim-dendro-fn-live": {
+      "max_chars": 5573,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "cs-register-device-fn": {
+      "max_chars": 1913,
+      "reason": "chirpstack-slice-20260719: rewired to the reconciling helper's new contract (deviceAction/keysAction/keysVerified/verifiedApplicationId/verifiedDeviceProfileId + normalized error.code, dropping deviceCreated/grpcStatus/details); hoisted a single ChirpStack client with client.close() + DB close in one finally, removing the second cleanup client, and surfaced an unexpected close() throw via a bounded node.warn (+36); PR #149 review: guarded compensation covers updated devices when the local save fails (+199)"
+    },
+    "cs-reg-cloud-fn": {
+      "max_chars": 11883,
+      "reason": "chirpstack-slice-20260719: minimal contract rewrite (deviceAction/error.code) preserving the existing commit/ACK path exactly, plus client.close() + DB close in one finally around the REGISTER_DEVICE branch, surfacing an unexpected close() throw via a bounded node.warn (+75); PR #149 review: guarded compensation covers updated devices when the local save fails (+258)"
+    },
+    "cs-reg-cloud-ack-fn": {
+      "max_chars": 1888,
+      "reason": "chirpstack-slice-20260719: forwards the normalized error.code instead of the retired numeric grpcStatus field; nine-field lease-token-bound cloud ACK contract otherwise byte-stable (-18)"
+    },
+    "dendro-location-fn": {
+      "max_chars": 4130,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "zone-config-fn": {
+      "max_chars": 8051,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-bootstrap-http": {
+      "max_chars": 861,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-bootstrap-mark": {
+      "max_chars": 4028,
+      "reason": "sync stop-loss bootstrap consumer: require successful HTTP status and payload.success before cursor/token/migration advancement (Plan 3 Task 2)"
+    },
+    "sync-outbox-http": {
+      "max_chars": 861,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-history-build": {
+      "max_chars": 5913,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-history-http": {
+      "max_chars": 907,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-history-mark": {
+      "max_chars": 5387,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-history-manifest-build": {
+      "max_chars": 3431,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-history-manifest-http": {
+      "max_chars": 800,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-history-manifest-mark": {
+      "max_chars": 685,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-pending-http": {
+      "max_chars": 861,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-refresh-build": {
+      "max_chars": 1738,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-refresh-http": {
+      "max_chars": 861,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "sync-refresh-mark": {
+      "max_chars": 2582,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-lsn50-mode-auth-fn": {
+      "max_chars": 4764,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-lsn50-mode-authorize-fn": {
+      "max_chars": 933,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-lsn50-mode-format": {
+      "max_chars": 300,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-lsn50-interval-auth-fn": {
+      "max_chars": 4947,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-lsn50-interval-authorize-fn": {
+      "max_chars": 889,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-lsn50-interval-format": {
+      "max_chars": 325,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "lsn50-mode-downlink-fn": {
+      "max_chars": 5889,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-kiwi-interval-auth-fn": {
+      "max_chars": 4848,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-kiwi-interval-authorize-fn": {
+      "max_chars": 908,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-kiwi-interval-format": {
+      "max_chars": 321,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-kiwi-enable-auth-fn": {
+      "max_chars": 4817,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "post-kiwi-enable-authorize-fn": {
+      "max_chars": 912,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-kiwi-enable-format": {
+      "max_chars": 317,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-strega-interval-auth-fn": {
+      "max_chars": 5478,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-strega-interval-authorize-fn": {
+      "max_chars": 1111,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-strega-interval-format": {
+      "max_chars": 407,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-lsn50-interrupt-auth-fn": {
+      "max_chars": 4821,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-lsn50-5v-auth-fn": {
+      "max_chars": 4773,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-lsn50-advanced-authorize-fn": {
+      "max_chars": 1292,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-lsn50-advanced-format": {
+      "max_chars": 740,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-strega-model-auth-fn": {
+      "max_chars": 4311,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-strega-timed-auth-fn": {
+      "max_chars": 5505,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-strega-magnet-auth-fn": {
+      "max_chars": 4544,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-strega-partial-auth-fn": {
+      "max_chars": 4945,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-strega-flush-auth-fn": {
+      "max_chars": 4972,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-strega-advanced-authorize-fn": {
+      "max_chars": 4071,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-strega-advanced-format": {
+      "max_chars": 1788,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "get-gateway-location-auth-fn": {
+      "max_chars": 4681,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "get-gateway-location-format-fn": {
+      "max_chars": 949,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "zone-env-fn": {
+      "max_chars": 39231,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-rain-gauge-auth-fn": {
+      "max_chars": 3986,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-rain-gauge-resp-fn": {
+      "max_chars": 96,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-flow-meter-auth-fn": {
+      "max_chars": 3986,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-flow-meter-resp-fn": {
+      "max_chars": 96,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "s2120-process-fn": {
+      "max_chars": 7628,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "s2120-sql-fn": {
+      "max_chars": 1256,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "s2120-zones-get-fn": {
+      "max_chars": 3380,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "s2120-zones-put-auth-fn": {
+      "max_chars": 5138,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "al-link-store-mqtt": {
+      "max_chars": 2715,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-unlink-clear-mqtt": {
+      "max_chars": 1463,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-link-finalize": {
+      "max_chars": 3076,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-link-clear-state": {
+      "max_chars": 662,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-link-rollback-mqtt": {
+      "max_chars": 1335,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "al-unlink-restore-mqtt": {
+      "max_chars": 1329,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "put-soil-depth-fn": {
+      "max_chars": 6314,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-dendro-config-auth-fn": {
+      "max_chars": 10201,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "put-dendro-config-format": {
+      "max_chars": 709,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "post-dendro-baseline-reset-auth-fn": {
+      "max_chars": 5252,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "post-dendro-baseline-reset-format": {
+      "max_chars": 327,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "strega-process-fn": {
+      "max_chars": 5776,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "strega-sql-fn": {
+      "max_chars": 2112,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "chameleon-readings-insert-fn": {
+      "max_chars": 3384,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "command-ack-queue-rest": {
+      "max_chars": 1480,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "command-ack-http": {
+      "max_chars": 868,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "command-ack-mark-delivered": {
+      "max_chars": 4408,
+      "reason": "sync-failclosed-20260719: per-entry ACK result handling - only a single unambiguous ACKED+accepted result delivers a command_ack_outbox row; missing/duplicate/malformed entries, statusCode 0, non-200, and HTTP 500 leave the row pending with a bounded retry error (+1493); command-ack join fix: fixed the business-commandId -> outbox-row-id join (grouped results are now keyed by String(commandId) and resolved through msg._localAckCorrelation with a fallback to id-as-commandId when correlation is absent) so a non-numeric server commandId like 'cmd-900' no longer silently matches nothing (+1704)"
+    },
+    "gateway-health-persist-fn": {
+      "max_chars": 4331,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "gateway-health-rollup-fn": {
+      "max_chars": 4195,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "strega-reconciliation-monitor": {
+      "max_chars": 2876,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "cancel-strega-actuation-fn": {
+      "max_chars": 7788,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2); chirpstack-slice-20260719: hoisted the ChirpStack client, closed it in the same finally as the DB close on every path (success/missing-expectation/queue-flush-failure/DB-failure), and surface bounded close() cleanup failures via node.warn without leaking key/token sentinels (+470)"
+    },
+    "strega-today-liters-fn": {
+      "max_chars": 1494,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "a8267d5391e7bad0": {
+      "max_chars": 1050,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "9443f279758ee186": {
+      "max_chars": 1503,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "51c0ae3799c97131": {
+      "max_chars": 2371,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "d20948dd9120a3d2": {
+      "max_chars": 2242,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "44e7d74ff3668e01": {
+      "max_chars": 3484,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "cc34104ef33b76fd": {
+      "max_chars": 1418,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "287c82fcf06bcda4": {
+      "max_chars": 1421,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "bcae891b14ec4604": {
+      "max_chars": 2413,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "8b93fa005d78e25f": {
+      "max_chars": 3484,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "bf93cd55db0eb57f": {
+      "max_chars": 3486,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "get-actuations-auth": {
+      "max_chars": 4256,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+    },
+    "get-actuations-query": {
+      "max_chars": 2957,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "get-actuations-response": {
+      "max_chars": 2538,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "zone-calibration-fn": {
+      "max_chars": 6187,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "lorain-process-fn": {
+      "max_chars": 7105,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "lorain-sql-fn": {
+      "max_chars": 898,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "history-rollup-tick-fn": {
+      "max_chars": 3709,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "analysis-api-router-fn": {
+      "max_chars": 7532,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "record-error-fn": {
+      "max_chars": 1035,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "agroscope-forward-fn": {
+      "max_chars": 1218,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "improvement-requests-api-router": {
+      "max_chars": 18025,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "support-delivery-worker": {
+      "max_chars": 6999,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "work-request-status-apply": {
+      "max_chars": 5079,
+      "reason": "sync-failclosed-20260719 idempotent-replay fix: SELECT applied_commands WHERE command_id=? guards a replay of the same commandId from re-UPDATE-ing improvement_requests, rebuilding and returning the original terminal ACK verbatim; a first-time APPLIED result also INSERTs the same 'initial' result_detail shape osi-command-ledger.queueCommandAck writes, so the downstream command-ack-queue-rest call reproduces the identical command_ack_outbox row via its persistReplayAck branch (+2089)"
+    },
+    "6b28e0d879808dd9": {
+      "max_chars": 2576,
+      "reason": "LSN50 writer runtime recovery (2026-07-15 plan Task 3): awaits the asynchronous osi-device-writer contract, adds a fixed loader/manifest/identity/normalize/db-open/writer/db-close stage-code table (reportFailure) so every UC512 write failure reaches record-error-catch-uc512 with only a bounded message, and adds deferred-close handling that never claims a failed write succeeded (+938, temporary until the 14-day-or-500-uplink fallback cleanup threshold)."
+    },
+    "460e0bfd95f89e67": {
+      "max_chars": 4196,
+      "reason": "LSN50 writer runtime recovery (2026-07-15 plan Task 3): awaits the asynchronous osi-device-writer contract, adds the LSN50_WRITER_DISABLE UCI kill-switch check, and adds the useFallback stage/code helper (normalizer_load/writer_load/manifest_load/normalize_run/db_open/writer_run) that routes every writer failure through output 2 into the observable fallback marker chain instead of silently dropping the message, plus deferred-close handling for a post-success DB_CLOSE_FAILED (+1596, temporary until the 14-day-or-500-uplink fallback cleanup threshold)."
+    },
+    "lsn50-fallback-marker-fn": {
+      "max_chars": 731,
+      "reason": "LSN50 writer runtime recovery (2026-07-15 plan Task 3): new node -- records an ingest_quarantine writer_fallback marker row (deveui, '__writer__', 'writer_fallback', stage) before every forced or automatic LSN50 legacy fallback insert, rejecting an unknown/missing stage. Temporary until the 14-day-or-500-uplink fallback cleanup threshold."
+    },
+    "lsn50-fallback-evict-fn": {
+      "max_chars": 173,
+      "reason": "LSN50 writer runtime recovery (2026-07-15 plan Task 3): new node -- emits the writer's existing ingest_quarantine eviction cap (LIMIT 1000, matching osi-device-writer's QUARANTINE_CAP) ahead of the restored legacy insert. Temporary until the 14-day-or-500-uplink fallback cleanup threshold."
+    },
+    "lsn50-sql-fn": {
+      "max_chars": 3594,
+      "reason": "LSN50 writer runtime recovery (2026-07-15 plan Task 3): restored verbatim from historical commit cf68c5e8 (pre-cutover legacy 'Build SQL INSERT' node) as the tail of the observable fallback chain; commit e5852033 deleted this node 13m35s after cutover with no replacement fallback. Temporary until the 14-day-or-500-uplink fallback cleanup threshold."
+    },
+    "journal-api-router-fn": {
+      "max_chars": 1020,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    },
+    "journal-command-apply-fn": {
+      "max_chars": 2272,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+    }
   },
-  "total_allowance": { "delta": 41034, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862)" }
+  "total_allowance": {
+    "max_total": 1112671,
+    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862); Device API auth/status repair exact total ceiling (Plan 6 Tasks 1-2) + sync-failclosed-20260719 Train A ack/commands fail-closed slice: command-ack-mark-delivered +1493, command-ack-build-batch +1028, sync-pending-split +118, reject-indefinite-open +632 (+3271 total) + sync-failclosed-20260719 command-ack join fix: command-ack-mark-delivered +1704 (commandId->rowId correlation join) + sync-failclosed-20260719 work-request-status-apply idempotent replay: +2089 (applied_commands dedup guard + queueCommandAck-identical initial-shape ledger write) + lsn50-writer-runtime-recovery-20260715 Task 3 (async writer/UC512 await + fixed stage-code Catch wiring + restored observable legacy fallback chain, temporary until the 14-day-or-500-uplink cleanup threshold): 460e0bfd95f89e67 +1596, 6b28e0d879808dd9 +938, new nodes lsn50-fallback-marker-fn +731, lsn50-fallback-evict-fn +173, restored lsn50-sql-fn +3594 (+7032 total) + chirpstack-slice-20260719 helper contract rewiring: cs-register-device-fn +36, cs-reg-cloud-fn +75, cs-reg-cloud-ack-fn -18, cancel-strega-actuation-fn +470 (+563 net total); PR #149 review fixes: rejection ACK bypass and guarded provisioning compensation (+497)"
+  }
 }

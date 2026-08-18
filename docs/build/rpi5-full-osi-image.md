@@ -117,6 +117,28 @@ scripts/check-mqtt-topics.sh
 
 Do not proceed if any verifier fails.
 
+## Factory image guard inputs
+
+Generate the read-only provenance anchor before OpenWrt consumes the profile
+files. The generator hashes the six boot links, the UCI order, the seed, and
+the ROM helpers; `--check` is read-only and must pass in CI.
+
+```bash
+BUILD_DATE="$(date -u +%Y%m%d)"
+IMAGE_BUILD_ID="${BUILD_DATE}-factory-bcm2712"
+node scripts/generate-factory-image-provenance.js --write \
+  --profile bcm2712 --image-build-id "$IMAGE_BUILD_ID"
+node scripts/generate-factory-image-provenance.js --write \
+  --profile bcm2709 --image-build-id "${BUILD_DATE}-factory-bcm2709"
+node scripts/generate-factory-image-provenance.js --check
+node scripts/verify-factory-image-provenance.js
+sh scripts/test-image-guard-bootstrap.sh
+```
+
+Do not build from a commit that has not passed these checks. The initializer
+creates no authority on a previously provisioned `/data` tree; the first boot
+fixture must fail closed while the later image-baseline verb is absent.
+
 If the React GUI changed, rebuild it and copy the build output into the feed
 before the OpenWrt build:
 
@@ -191,6 +213,16 @@ Generated factory image:
 openwrt/bin/targets/bcm27xx/bcm2712/chirpstack-gateway-os-4.9.0-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz
 ```
 
+After extracting the generated rootfs, verify the lower-layer anchors. The
+verifier rejects a nested `<rootfs>/rom`; `/rom` is a runtime alias, not an
+image directory.
+
+```bash
+node scripts/verify-built-factory-image-provenance.js \
+  --rootfs openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx \
+  --profile bcm2712
+```
+
 ## Build Pi 4 / 400 / 3 / 2
 
 Run only after the Pi 5 image has built and verified:
@@ -237,6 +269,15 @@ Generated factory image:
 
 ```text
 openwrt/bin/targets/bcm27xx/bcm2709/chirpstack-gateway-os-4.9.0-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz
+```
+
+Verify the Pi 4/2 rootfs with the same lower-layer check before publishing the
+image.
+
+```bash
+node scripts/verify-built-factory-image-provenance.js \
+  --rootfs openwrt/build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx \
+  --profile bcm2709
 ```
 
 The calibration row count may be `0` when the image is configured to fetch

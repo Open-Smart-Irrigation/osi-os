@@ -14,7 +14,7 @@ def run(ctx: VerifyContext) -> CheckResult:
     out, err = checks.remote_sql(
         ctx,
         "SELECT COUNT(*) FROM dendrometer_daily "
-        f"WHERE computed_at > '{ctx.deploy_timestamp}'")
+        f"WHERE computed_at > '{ctx.verification_started_at}'")
     if err:
         return CheckResult("daily", False, err)
     count, err = checks.parse_count(out, "dendrometer_daily new-row count")

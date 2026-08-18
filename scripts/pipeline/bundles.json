@@ -143,7 +143,11 @@
       "ssh_key": "~/.ssh/id_ed25519",
       "db_path": "/data/db/farming.db",
       "backup_dir": "/data/backups",
-      "gui_url": "http://100.93.68.86:1880/gui"
+      "gui_url": "http://100.93.68.86:1880/gui",
+      "require_ingest": true,
+      "ingest_wait_seconds": 1500,
+      "ingest_quiet_seconds": 60,
+      "ingest_max_clock_skew_seconds": 30
     },
     "silvan": {
       "host": "100.81.220.8",
@@ -166,7 +170,6 @@
   "limits": {
     "max_fix_iterations": 3,
     "budget_per_bundle_usd": 50,
-    "soak_heartbeat_interval_s": 1800,
-    "verification_timeout_s": 900
+    "soak_heartbeat_interval_s": 1800
   }
 }

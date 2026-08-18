@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .config import load_bundles, load_state, save_state, PipelineState
 from .checks import VerifyContext, run_all_checks
-from .deploy import pre_deploy_backup, deploy_to_gateway
+from .deploy import pre_deploy_backup, deploy_to_gateway, gateway_utc_now
 from .restore import restore_gateway
 from .alert import send_alert, PipelineHeartbeat
 from .evidence import collect_evidence
@@ -101,9 +101,10 @@ def run_pipeline(dry_run: bool = False) -> None:
                 state.status = "deploying"
                 save_state(state)
 
-                ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+                backup_epoch = time.time()
+                backup_stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(backup_epoch))
 
-                backup = pre_deploy_backup(kaba100, ts)
+                backup = pre_deploy_backup(kaba100, backup_stamp)
                 if not backup.ok:
                     _halt(f"Pre-deploy backup failed: {backup.detail}", bundle, state)
                     return
@@ -114,16 +115,31 @@ def run_pipeline(dry_run: bool = False) -> None:
                     _halt(f"Deploy failed + restored: {result.detail}", bundle, state)
                     return
 
+                # Verification boundary is read from the gateway's own clock
+                # only after the deployed payload's GUI health probe has
+                # already passed — a row written by the old payload during
+                # backup/deploy must never satisfy a post-deploy check.
+                verification_started_at, clock_error = gateway_utc_now(kaba100)
+                if clock_error:
+                    restore_gateway(kaba100, backup.backup_path)
+                    _halt(f"Gateway clock read failed + restored: {clock_error}",
+                          bundle, state)
+                    return
+
                 ctx = VerifyContext(
                     gateway_host=kaba100.host,
                     ssh_user=kaba100.ssh_user,
                     ssh_key=kaba100.ssh_key,
                     db_path=kaba100.db_path,
                     gui_url=kaba100.gui_url,
-                    deploy_timestamp=ts,
+                    verification_started_at=verification_started_at,
                     pre_deploy_baselines=backup.baselines,
                     canary_gate_available=(i >= 1),
                     is_extraction_bundle=bundle.id in ("B8", "B10"),
+                    ingest_wait_seconds=kaba100.ingest_wait_seconds,
+                    ingest_quiet_seconds=kaba100.ingest_quiet_seconds,
+                    require_ingest=kaba100.require_ingest,
+                    ingest_max_clock_skew_seconds=kaba100.ingest_max_clock_skew_seconds,
                 )
                 results = run_all_checks(ctx)
                 evidence = collect_evidence(bundle.id, results,
