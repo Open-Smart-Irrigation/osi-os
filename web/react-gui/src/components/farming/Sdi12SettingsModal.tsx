@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { Device, Sdi12Profile } from '../../types/farming';
 import {
   fetchSdi12Profiles,
+  getApiErrorMessage,
   postSdi12Identify,
   putSdi12Config,
 } from '../../services/api';
@@ -134,8 +135,8 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
       await putSdi12Config(device.deveui, request);
       setInfo('SDI-12 configuration saved.');
       onUpdate();
-    } catch {
-      setError('Failed to save SDI-12 configuration.');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to save SDI-12 configuration.'));
     } finally {
       setBusy(null);
     }
@@ -150,8 +151,8 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
       setIdentifyPending(true);
       setInfo('Identification requested; waiting for the next uplink.');
       onUpdate();
-    } catch {
-      setError('Failed to request SDI-12 probe identification.');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to request SDI-12 probe identification.'));
     } finally {
       setBusy(null);
     }

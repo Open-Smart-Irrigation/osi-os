@@ -6,11 +6,15 @@ import type { Device } from '../../../types/farming';
 import { fetchSdi12Profiles, postSdi12Identify, putSdi12Config } from '../../../services/api';
 import { Sdi12SettingsModal } from '../Sdi12SettingsModal';
 
-vi.mock('../../../services/api', () => ({
-  fetchSdi12Profiles: vi.fn(),
-  postSdi12Identify: vi.fn(),
-  putSdi12Config: vi.fn(),
-}));
+vi.mock('../../../services/api', async () => {
+  const actual = await vi.importActual<typeof import('../../../services/api')>('../../../services/api');
+  return {
+    ...actual,
+    fetchSdi12Profiles: vi.fn(),
+    postSdi12Identify: vi.fn(),
+    putSdi12Config: vi.fn(),
+  };
+});
 
 const device: Device = {
   deveui: '70B3D5E75E004202',
@@ -73,5 +77,30 @@ describe('Sdi12SettingsModal', () => {
 
     await waitFor(() => expect(postSdi12Identify).toHaveBeenCalledWith(device.deveui));
     expect(screen.getByText(/identification requested|pending/i)).toBeInTheDocument();
+  });
+
+  it('surfaces the server message on a failed identify request', async () => {
+    vi.mocked(postSdi12Identify).mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { data: { message: 'device is missing ChirpStack registration data; cannot identify' } },
+    });
+    render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Detect probe' }));
+    await waitFor(() =>
+      expect(screen.getByText('device is missing ChirpStack registration data; cannot identify')).toBeInTheDocument(),
+    );
+  });
+
+  it('surfaces the server message on a failed save', async () => {
+    vi.mocked(putSdi12Config).mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { data: { message: 'Depths must be whole centimeters between 0 and 500.' } },
+    });
+    render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    await screen.findByRole('option', { name: /ecoTech Tensiomark.*unverified/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(screen.getByText('Depths must be whole centimeters between 0 and 500.')).toBeInTheDocument(),
+    );
   });
 });
