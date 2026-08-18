@@ -338,10 +338,18 @@ const localRestartReader = [
 ].join('\n');
 const protectedNodeHashes = {
   'al-link-validate': 'a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc',
-  // Re-pinned 2026-08-14: trg_dp_device_data_outbox_ai's payload json_object was split
+  // Re-pinned 2026-08-18 (task A6 review fix, walkthrough fix wave 1): trg_sync_devices_outbox_au's
+  // boot-owned literal gains sdi12_value_count in its WHEN clause and payload_json, matching
+  // migration 0047__sdi12_value_count.sql and seed-blank.sql byte-for-byte (fingerprint-drift
+  // correction -- see 0047's header comment; verified via a lib/osi-migrate rehearsal that this
+  // exact drop+recreate is a no-op relative to the migration's own trigger stamp). This is a
+  // sanctioned "keep the boot literal in parity with a migration-owned trigger" edit, the same
+  // class of change as commit bdaa6faf (migration 0016) and migration 0046, not new schema
+  // behavior added to the frozen node. Previous pin: e7c2cbb10c8e3117dc5c059cb5f5b2f7db1b88763f53e3d2f04edd3456e395e4
+  // (itself re-pinned 2026-08-14: trg_dp_device_data_outbox_ai's payload json_object was split
   // into json_insert(json_object(...), ...) so no single call exceeds the gateway's
-  // SQLITE_MAX_FUNCTION_ARG=127. Previous pin: 2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222
-  'sync-init-fn': 'e7c2cbb10c8e3117dc5c059cb5f5b2f7db1b88763f53e3d2f04edd3456e395e4',
+  // SQLITE_MAX_FUNCTION_ARG=127. Pin before that: 2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222)
+  'sync-init-fn': 'd8084b6316892301fb1d41c1828c312b5707c7ee43bc6354b34805052f12da2c',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],

@@ -2005,16 +2005,7 @@ BEGIN
 END;
 
 -- Device outbox on update
-CREATE TRIGGER trg_sync_devices_outbox_au
-AFTER UPDATE ON devices
-FOR EACH ROW
-WHEN
-  EXISTS (
-    SELECT 1 FROM sync_link_state
-     WHERE peer_node = 'cloud' AND linked = 1
-  )
-  AND (
-    COALESCE(NEW.user_id,'') <> COALESCE(OLD.user_id,'') OR
+CREATE TRIGGER trg_sync_devices_outbox_au AFTER UPDATE ON devices FOR EACH ROW WHEN EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node='cloud' AND linked=1) AND (COALESCE(NEW.user_id,'') <> COALESCE(OLD.user_id,'') OR
     COALESCE(NEW.irrigation_zone_id,'') <> COALESCE(OLD.irrigation_zone_id,'') OR
     COALESCE(NEW.dendro_enabled,0) <> COALESCE(OLD.dendro_enabled,0) OR
     COALESCE(NEW.temp_enabled,0) <> COALESCE(OLD.temp_enabled,0) OR
@@ -2032,55 +2023,7 @@ WHEN
     COALESCE(NEW.chameleon_swt2_depth_cm,-1) <> COALESCE(OLD.chameleon_swt2_depth_cm,-1) OR
     COALESCE(NEW.chameleon_swt3_depth_cm,-1) <> COALESCE(OLD.chameleon_swt3_depth_cm,-1) OR
     COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
-  )
-BEGIN
-  INSERT INTO sync_outbox(
-    event_uuid, aggregate_type, aggregate_key, op, payload_json,
-    sync_version, occurred_at, gateway_device_eui
-  ) VALUES (
-    lower(hex(randomblob(16))),
-    'DEVICE',
-    NEW.deveui,
-    CASE
-      WHEN OLD.user_id IS NOT NULL AND NEW.user_id IS NULL THEN 'DEVICE_UNCLAIMED'
-      WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NULL THEN 'DEVICE_UNASSIGNED'
-      WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NOT NULL THEN 'DEVICE_ASSIGNED'
-      ELSE 'DEVICE_FLAGS_UPDATED'
-    END,
-    json_object(
-      'contract_version', 1,
-      'device_eui',                        NEW.deveui,
-      'name',                              NEW.name,
-      'type',                              NEW.type_id,
-      'claimed_user_uuid',                 (SELECT user_uuid FROM users WHERE id = NEW.user_id),
-      'claimed_by_username',               (SELECT COALESCE(server_username,username) FROM users WHERE id = NEW.user_id),
-      'zone_uuid',                         (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
-      'dendro_enabled',                    NEW.dendro_enabled,
-      'temp_enabled',                      NEW.temp_enabled,
-      'rain_gauge_enabled',                NEW.rain_gauge_enabled,
-      'flow_meter_enabled',                NEW.flow_meter_enabled,
-      'is_reference_tree',                 NEW.is_reference_tree,
-      'current_state',                     NEW.current_state,
-      'target_state',                      NEW.target_state,
-      'strega_model',                      NEW.strega_model,
-      'sdi12_probe_profile',               NEW.sdi12_probe_profile,
-      'sdi12_value_count',                 NEW.sdi12_value_count,
-      'soil_moisture_probe_depths_json',   json(COALESCE(NEW.soil_moisture_probe_depths_json,'{}')),
-      'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured,0),
-      'chameleon_enabled',                 NEW.chameleon_enabled,
-      'chameleon_swt1_depth_cm',           NEW.chameleon_swt1_depth_cm,
-      'chameleon_swt2_depth_cm',           NEW.chameleon_swt2_depth_cm,
-      'chameleon_swt3_depth_cm',           NEW.chameleon_swt3_depth_cm,
-      'gateway_device_eui',                COALESCE(NEW.gateway_device_eui,'0016C001F11715E2'),
-      'sync_version',                      NEW.sync_version,
-      'deleted_at',                        NEW.deleted_at
-    ),
-    NEW.sync_version,
-    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE(NEW.gateway_device_eui,'0016C001F11715E2')
-  );
-END;
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)) BEGIN INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, gateway_device_eui) VALUES (lower(hex(randomblob(16))), 'DEVICE', NEW.deveui, CASE WHEN OLD.user_id IS NOT NULL AND NEW.user_id IS NULL THEN 'DEVICE_UNCLAIMED' WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NULL THEN 'DEVICE_UNASSIGNED' WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NOT NULL THEN 'DEVICE_ASSIGNED' ELSE 'DEVICE_FLAGS_UPDATED' END, json_object('contract_version', 1, 'device_eui', NEW.deveui, 'name', NEW.name, 'type', NEW.type_id, 'claimed_user_uuid', (SELECT user_uuid FROM users WHERE id = NEW.user_id), 'claimed_by_username', (SELECT COALESCE(server_username, username) FROM users WHERE id = NEW.user_id), 'zone_uuid', (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL), 'dendro_enabled', NEW.dendro_enabled, 'temp_enabled', NEW.temp_enabled, 'rain_gauge_enabled', NEW.rain_gauge_enabled, 'flow_meter_enabled', NEW.flow_meter_enabled, 'is_reference_tree', NEW.is_reference_tree, 'current_state', NEW.current_state, 'target_state', NEW.target_state, 'strega_model', NEW.strega_model, 'sdi12_probe_profile', NEW.sdi12_probe_profile, 'sdi12_value_count', NEW.sdi12_value_count, 'soil_moisture_probe_depths_json', json(COALESCE(NEW.soil_moisture_probe_depths_json, '{}')), 'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured, 0), 'chameleon_enabled', NEW.chameleon_enabled, 'chameleon_swt1_depth_cm', NEW.chameleon_swt1_depth_cm, 'chameleon_swt2_depth_cm', NEW.chameleon_swt2_depth_cm, 'chameleon_swt3_depth_cm', NEW.chameleon_swt3_depth_cm, 'gateway_device_eui', COALESCE(NEW.gateway_device_eui, '0016C001F11715E2'), 'sync_version', NEW.sync_version, 'deleted_at', NEW.deleted_at), NEW.sync_version, strftime('%Y-%m-%dT%H:%M:%fZ','now'), COALESCE(NEW.gateway_device_eui, '0016C001F11715E2')); END;
 
 -- Schedule defaults on insert
 CREATE TRIGGER trg_sync_schedules_defaults_ai
