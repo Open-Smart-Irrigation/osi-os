@@ -106,6 +106,12 @@ test('every fixed-cardinality profile fits the 51-byte DR0 uplink budget', () =>
   }
 });
 
+test('uplinkBudgetOk: single-uplink (k=1) vs multi-segment (k=2) envelopes', () => {
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 5 }), true);              // 3 + 5*9 = 48 <= 51
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 8 }), false);             // 3 + 8*9 = 75 > 51
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 8, maxUplinks: 2 }), true); // 5*2 + 8*9 = 82 <= 102
+});
+
 test('A6: SENTEK_ENVIROSCAN with a learned sdi12ValueCount enforces strict atomic cardinality', () => {
   const ok = m.normalize(
     { BatV: 3.3, data_sum: '+12.3+14.1+18.7+22.0+9.5' },

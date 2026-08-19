@@ -28,7 +28,7 @@ AT+DATAUP=0
 AT+TDC=1200000
 ```
 
-`AT+TDC=1200000` is a 20-minute interval in milliseconds. Keep `AT+DATAUP=0` for v1 so the codec receives one battery/version header followed by one compact ASCII value string. `AT+DATAUP=1` is reserved for the phase-2 multi-segment implementation.
+`AT+TDC=1200000` is a 20-minute interval in milliseconds. Keep `AT+DATAUP=0` here: a single probe response at this depth count fits one uplink, so the codec receives one battery/version header followed by one compact ASCII value string. See [Multi-segment uplinks](#multi-segment-uplinks) below for the `AT+DATAUP=1` contract, needed once a profile's value count exceeds the single-uplink budget.
 
 For each probe, first issue `0I!`, `0M!`, and `0D0!` from the console and save the complete response bytes, including the address byte, carriage return, line feed, and any CRC. The periodic command can use the converter's automatic `D0!` follow-up:
 
@@ -47,6 +47,23 @@ AT+DATACUT1=13,2,2~11
 ```
 
 The cut keeps bytes 2 through 11, producing `+2.48+21.5`. For any other response, calculate the first and last kept byte from the captured byte count. Do not copy the 13-byte line into a probe with a different response layout.
+
+## Multi-segment uplinks
+
+`AT+DATAUP=1` splits one probe response across up to 15 LoRaWAN frames instead of one, for profiles whose value count would otherwise exceed the 51-byte DR0 uplink budget. The 8-depth EnviroSCAN recipe below is the first case that needs it; the registry marks that profile `maxUplinks: 2` to document the intent — every other profile stays single-uplink until it has its own reviewed reason to change.
+
+A device set to `AT+DATAUP=1` must also be set `AT+PAYVER=2`. The codec reads the header layout from the `payver` byte, never from frame length:
+
+- `payver=1`: 3-byte header, `[bat_hi][bat_lo][payver][ascii...]`.
+- `payver=2`: 5-byte header, `[bat_hi][bat_lo][payver][count][index][ascii-slice...]` — `count` is the total segment count (1–15), `index` is zero-based, and each segment carries at most 46 data bytes (6 in 11-byte dwell-limited regions). The full sequence is capped at 1500 bytes across 15 segments.
+
+Leaving `AT+PAYVER=1` while `AT+DATAUP=1` is set is a misconfiguration, not a silent failure: the codec reads a 5-byte header as a 3-byte one, so the count and index bytes land inside the ASCII slice as garbage. That garbage fails the normalizer's strict `^([+-]\d+(?:\.\d+)?)+$` grammar and quarantines as `unparseable_sdi12` — it is never mis-assembled into a plausible-looking reading.
+
+The edge buffers segments per device in Node-RED flow context and reassembles them into the single ASCII string the normalizer already consumes. Everything downstream — the normalizer, schema, channels, identify path, GUI, and cloud — never learns that segments existed.
+
+Reassembly uses a 10-minute lazy window: the window is checked only when the next segment for that device arrives, never by a background timer. A device that goes silent mid-sequence leaves its partial buffer in memory (bounded to one buffer, at most `count` slices) until it speaks again or Node-RED restarts. A duplicate index, a count mismatch, an out-of-range index, or the window being exceeded all reset the sequence the same way: one row is dead-lettered as channel `sdi12_segments_incomplete`, reason `unknown_channel`, with `raw_value` in the form `<count>:[<seen indices>]` — for example `3:[0,2]` for a 3-segment sequence missing index 1. No `device_data` row is written for that sequence.
+
+Frames carry no sequence id, so a late-delivered tail segment of one sequence can in principle land in the next sequence's buffer and, if its index and count happen to line up, complete a mixed string that still parses. This is bounded, not excluded: the 10-minute window is well under the default 20-minute `TDC`, so genuine interleaving cannot occur at default timing, and the normalizer's exact-cardinality check still rejects a fixed-count profile whose merged string has the wrong number of values. "Atomic" here means never a partial write and never a cross-sequence merge at default timing — not a cryptographic guarantee.
 
 ## Probe recipes
 
@@ -69,7 +86,17 @@ AT+COMMAND1=0M!,10,1,1
 AT+DATACUT1=0,2,2~46
 ```
 
-Eight-depth EnviroSCAN support is phase 2 because it requires multi-segment uplinks (`AT+DATAUP=1`).
+#### Eight-depth EnviroSCAN (multi-segment)
+
+Eight depths exceed the single-uplink budget (worst case 3 + 8×9 = 75 bytes against the 51-byte DR0 limit), so the 8-sensor recipe needs [multi-segment uplinks](#multi-segment-uplinks):
+
+```text
+AT+PAYVER=2
+AT+DATAUP=1
+AT+COMMAND1=0M!,10,1,1
+```
+
+The Sentek manual's `aM!`/`aD0!` pair returns the first three values; a continuation `aD1!` (and `aD2!` for probes wider than six sensors) reads the remaining values. The exact `AT+COMMAND2` cut that issues the `aD1!` continuation on this converter is **unverified — confirm at bench** before shipping an 8-sensor deployment.
 
 ### Delta-T PR2/4
 
@@ -128,7 +155,7 @@ AT+COMMAND1=0M!,10,1,1
 AT+DATACUT1=35,2,2~33
 ```
 
-The six-value order and EC conversion are **unverified until bench capture**. More than two HydraScout depths waits for `AT+DATAUP=1` support.
+The six-value order and EC conversion are **unverified until bench capture**. More than two HydraScout depths would need [multi-segment uplinks](#multi-segment-uplinks); that stays gated on a HydraScout bench capture, not on missing reassembly support — its six-value order and interleave are unverified at any depth count.
 
 ## Identify and downlink frames
 
