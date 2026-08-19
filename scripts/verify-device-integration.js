@@ -99,6 +99,7 @@ describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', ()
   const codec = loadCodecViaVm(path.join(NR_ROOT, 'codecs', 'dragino_sdi12_decoder.js'));
   const normalizer = require(path.join(NR_ROOT, 'osi-sdi12-normalize'));
   const writer = require(path.join(NR_ROOT, 'osi-device-writer'));
+  const reassemble = require(path.join(NR_ROOT, 'osi-sdi12-reassemble'));
   const manifest = loadEdgeManifest();
   const sdi12Columns = [
     'swt_1', 'swt_2', 'swt_3',
@@ -111,15 +112,72 @@ describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', ()
 
   for (const vector of vectors) {
     it(`round-trip: ${vector.name}`, async () => {
-      const decoded = codec.decodeUplink({
-        fPort: vector.fPort,
-        bytes: vector.bytes,
-      });
-      assert.ok(decoded && typeof decoded === 'object', 'codec must return an object');
-      assert.ok(decoded.data && typeof decoded.data === 'object', 'codec must return data');
+      let decodedData;
+      let lastCount;
+
+      if (vector.segments) {
+        const st = {};
+        let last;
+        for (let i = 0; i < vector.segments.length; i++) {
+          const decoded = codec.decodeUplink({ fPort: vector.fPort, bytes: vector.segments[i] });
+          assert.ok(decoded && typeof decoded === 'object', 'codec must return an object');
+          assert.ok(decoded.data && typeof decoded.data === 'object', 'codec must return data');
+          lastCount = decoded.data.SegCount;
+          last = reassemble.step(st, TEST_DEVEUI, {
+            count: decoded.data.SegCount,
+            index: decoded.data.SegIndex,
+            ascii: decoded.data.data_sum,
+            batV: decoded.data.BatV,
+            extiTrigger: decoded.data.EXTI_Trigger,
+            recordedAt: '2026-07-12T10:00:00Z',
+            nowMs: i * 1000,
+          });
+        }
+
+        if (vector.expectedNoRow === true) {
+          assert.notEqual(last.action, 'complete', 'incomplete-sequence vector must not complete');
+          // Force the lazy window closed with a same-count segment: whether
+          // this lands as a duplicate-index or window-elapsed reset, the
+          // quarantined index set captured from the stale buffer is the same.
+          const forced = reassemble.step(st, TEST_DEVEUI, {
+            count: lastCount, index: 0, ascii: '', batV: 0, extiTrigger: 'FALSE',
+            recordedAt: null, nowMs: reassemble.WINDOW_MS + 100000,
+          });
+          assert.equal(forced.action, 'reset');
+          assert.equal(forced.quarantine.raw, vector.expectedQuarantineRaw);
+
+          const syncDb = createTestDb('DRAGINO_SDI12');
+          const writerDb = createAsyncDatabaseFacade(syncDb);
+          try {
+            await writer.quarantineOnly(writerDb, TEST_DEVEUI, forced.quarantine.channel, forced.quarantine.raw);
+
+            const quarantineRows = syncDb.prepare(
+              'SELECT channel, reason FROM ingest_quarantine ORDER BY id'
+            ).all().map(({ channel, reason }) => ({ channel, reason }));
+            assert.deepEqual(quarantineRows, [{ channel: 'sdi12_segments_incomplete', reason: 'unknown_channel' }]);
+
+            const rowCount = syncDb.prepare('SELECT COUNT(*) AS n FROM device_data').get().n;
+            assert.equal(rowCount, 0);
+          } finally {
+            syncDb.close();
+          }
+          return; // incomplete-sequence vector: no normalize/write/row assertions
+        }
+
+        assert.equal(last.action, 'complete', 'complete-sequence vector must reassemble to completion');
+        decodedData = last.message;
+      } else {
+        const decoded = codec.decodeUplink({
+          fPort: vector.fPort,
+          bytes: vector.bytes,
+        });
+        assert.ok(decoded && typeof decoded === 'object', 'codec must return an object');
+        assert.ok(decoded.data && typeof decoded.data === 'object', 'codec must return data');
+        decodedData = decoded.data;
+      }
 
       const normalizeResult = normalizer.normalize(
-        decoded.data,
+        decodedData,
         vector.deviceConfig ?? { probeProfile: vector.probeProfile },
         { recordedAt: '2026-07-12T10:00:00Z' }
       );
