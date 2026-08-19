@@ -297,9 +297,9 @@ module.exports = { step: step, WINDOW_MS: WINDOW_MS, MAX_COUNT: MAX_COUNT };
 
 **Interfaces — Produces:** `quarantineOnly(db, deveui, channel, rawValue) -> Promise<void>` — inserts one `ingest_quarantine` row with reason `'unknown_channel'` (the same reason string the writer uses for all normalizer unknowns, so existing troubleshooting queries filter on channel, per the v1 spec) and applies the existing 1000-row eviction.
 
-- [ ] **Step 1 — failing test** in `index.test.js` (copy the file's existing db-fixture pattern): calling `quarantineOnly(db, 'E', 'sdi12_segments_incomplete', '3:[0,2]')` yields exactly one quarantine row with that channel/raw and reason `unknown_channel`, and NO `device_data` row.
-- [ ] **Step 2 — implement** in `index.js`: `async function quarantineOnly(db, deveui, channel, rawValue) { await deadLetter(db, String(deveui||'').toUpperCase().trim(), channel, 'unknown_channel', rawValue); await evictQuarantine(db); }` and add it to `module.exports`.
-- [ ] **Step 3** — tests PASS; mirror; parity. Commit: `feat(device-writer): quarantineOnly export for pre-normalize dead-letters`.
+- [x] **Step 1 — failing test** in `index.test.js` (copy the file's existing db-fixture pattern): calling `quarantineOnly(db, 'E', 'sdi12_segments_incomplete', '3:[0,2]')` yields exactly one quarantine row with that channel/raw and reason `unknown_channel`, and NO `device_data` row.
+- [x] **Step 2 — implement** in `index.js`: `async function quarantineOnly(db, deveui, channel, rawValue) { await deadLetter(db, String(deveui||'').toUpperCase().trim(), channel, 'unknown_channel', rawValue); await evictQuarantine(db); }` and add it to `module.exports`.
+- [x] **Step 3** — tests PASS; mirror; parity. Commit: `feat(device-writer): quarantineOnly export for pre-normalize dead-letters`.
 
 ---
 

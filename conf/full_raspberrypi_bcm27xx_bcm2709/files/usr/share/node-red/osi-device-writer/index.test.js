@@ -6,7 +6,7 @@ const { DatabaseSync } = require('node:sqlite');
 const fs = require('fs');
 const path = require('path');
 
-const { writeDeviceData, clampRecordedAt, resetColumnCache } = require('./index.js');
+const { writeDeviceData, quarantineOnly, clampRecordedAt, resetColumnCache } = require('./index.js');
 
 const seedPath = path.resolve(__dirname, '../../../../../../..', 'database', 'seed-blank.sql');
 const seedSql = fs.readFileSync(seedPath, 'utf8');
@@ -212,6 +212,23 @@ describe('osi-device-writer', () => {
 
     assert.equal(result.inserted, false);
     assert.ok(node.errors.length > 0);
+  });
+
+  describe('quarantineOnly', () => {
+    it('inserts exactly one quarantine row with reason unknown_channel and writes no device_data row', () => {
+      quarantineOnly(db, TEST_DEVEUI, 'sdi12_segments_incomplete', '3:[0,2]');
+
+      const q = db.prepare(
+        "SELECT * FROM ingest_quarantine WHERE channel = 'sdi12_segments_incomplete'"
+      ).get();
+      assert.ok(q, 'exactly one sdi12_segments_incomplete quarantine row must exist');
+      assert.equal(q.reason, 'unknown_channel');
+      assert.equal(q.raw_value, '3:[0,2]');
+      assert.equal(q.deveui, TEST_DEVEUI);
+
+      const count = db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n;
+      assert.equal(count, 0);
+    });
   });
 });
 
