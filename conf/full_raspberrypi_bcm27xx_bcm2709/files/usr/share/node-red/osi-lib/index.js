@@ -32,6 +32,7 @@ const NAME_TO_PATH = {
   'uc512-normalize': 'osi-uc512-normalize',
   'lsn50-normalize': 'osi-lsn50-normalize',
   'sdi12-normalize': 'osi-sdi12-normalize',
+  'sdi12-reassemble': 'osi-sdi12-reassemble',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
 };
 

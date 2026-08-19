@@ -107,7 +107,7 @@ step(state, deveui, segment) -> { action, message?, quarantine?, status }
 WINDOW_MS = 600000
 ```
 
-- [ ] **Step 1 — failing tests** (`index.test.js`, `node --test`):
+- [x] **Step 1 — failing tests** (`index.test.js`, `node --test`):
 
 ```js
 'use strict';
@@ -199,7 +199,7 @@ test('invalid segment shape is rejected without touching state', () => {
 ```
 Run `node --test` in the module dir → FAIL (module missing).
 
-- [ ] **Step 2 — implement `index.js`:**
+- [x] **Step 2 — implement `index.js`:**
 
 ```js
 'use strict';
@@ -286,8 +286,8 @@ module.exports = { step: step, WINDOW_MS: WINDOW_MS, MAX_COUNT: MAX_COUNT };
 ```
 `package.json`: copy `osi-sdi12-normalize/package.json`, name `osi-sdi12-reassemble`.
 
-- [ ] **Step 3** — `node --test` → all PASS. Fix any test/impl mismatch in the implementation, not by weakening tests.
-- [ ] **Step 4 — registration** (all surfaces listed in the header) + `cp -r` the module dir to bcm2709 + `node scripts/verify-helper-registration.js && node scripts/verify-profile-parity.js`. Commit: `feat(sdi12): reassembly state machine for multi-segment uplinks`.
+- [x] **Step 3** — `node --test` → all PASS. Fix any test/impl mismatch in the implementation, not by weakening tests.
+- [x] **Step 4 — registration** (all surfaces listed in the header) + `cp -r` the module dir to bcm2709 + `node scripts/verify-helper-registration.js && node scripts/verify-profile-parity.js`. Commit: `feat(sdi12): reassembly state machine for multi-segment uplinks`.
 
 ---
 
