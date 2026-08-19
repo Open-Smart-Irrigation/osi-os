@@ -64,6 +64,22 @@ function worstCaseUplinkBytes(profile) {
   return UPLINK_HEADER_BYTES + n * WORST_CHARS_PER_VALUE;
 }
 
+// Multi-segment (AT+DATAUP=1, payver 2) budget check: k segments carry a
+// 5-byte header each instead of the single-uplink 3-byte header, so the
+// worst case is 5*k + n*WORST_CHARS_PER_VALUE against a k*51-byte envelope.
+// k defaults to 1 (today's single-uplink budget, matching worstCaseUplinkBytes
+// exactly). This does not change what the fixed-cardinality budget test
+// evaluates -- it stays profile.maxUplinks-unaware and still skips variable
+// profiles -- it only lets a profile document its multi-segment intent via
+// maxUplinks for callers (e.g. the device doc, future config UI) that want
+// the k>1 form.
+function uplinkBudgetOk(profile) {
+  var n = profile.expectedValues == null ? profile.values.length : profile.expectedValues;
+  var k = profile.maxUplinks || 1;
+  if (k === 1) return UPLINK_HEADER_BYTES + n * WORST_CHARS_PER_VALUE <= 51;
+  return 5 * k + n * WORST_CHARS_PER_VALUE <= 51 * k;
+}
+
 function seq(prefix, n, opts) {
   var out = [];
   var startIndex = (opts && opts.startIndex) || 0;
@@ -106,9 +122,12 @@ var PROFILES = [
     // Variable: no fixed depth count on the wire. Per-device count is learned
     // via devices.sdi12_value_count (task A6, option b) and enforced by
     // resolveCount()/resolvedCount below, not by a static expectedValues here.
-    // 8 depths needs AT+DATAUP=1 (phase 2): 8*9+3 > 51-byte DR0 budget either
-    // way -- the phase-2 gating note stays valid with the corrected constant.
+    // 8 depths requires AT+DATAUP=1 + AT+PAYVER=2 on the device (multi-segment
+    // reassembly shipped; see the 2026-08-19 spec). maxUplinks documents that
+    // intent for uplinkBudgetOk()/callers -- the fixed-cardinality budget
+    // test above does not evaluate variable profiles either way.
     expectedValues: null,
+    maxUplinks: 2,
     values: seq('vwc', 8),
     defaultDepthsCm: []
   },
@@ -336,6 +355,7 @@ module.exports = {
   listProfiles: listProfiles,
   getProfile: getProfile,
   worstCaseUplinkBytes: worstCaseUplinkBytes,
+  uplinkBudgetOk: uplinkBudgetOk,
   TRANSFORMS: TRANSFORMS,
   PROFILES: PROFILES
 };
