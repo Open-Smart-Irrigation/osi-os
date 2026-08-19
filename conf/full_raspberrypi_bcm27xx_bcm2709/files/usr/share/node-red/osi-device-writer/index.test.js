@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const writer = require('./index.js');
-const { writeDeviceData, clampRecordedAt, resetColumnCache } = writer;
+const { writeDeviceData, quarantineOnly, clampRecordedAt, resetColumnCache } = writer;
 
 const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const { createAsyncDatabaseFacade } = require(
@@ -314,6 +314,23 @@ describe('osi-device-writer', () => {
       assert.equal(retried.inserted, true);
       assert.equal(getSchemaReadCount(), 2);
       assert.equal(syncDb.prepare('SELECT COUNT(*) AS n FROM device_data').get().n, 1);
+    });
+  });
+
+  describe('quarantineOnly', () => {
+    it('inserts exactly one quarantine row with reason unknown_channel and writes no device_data row', async () => {
+      await quarantineOnly(writerDb, TEST_DEVEUI, 'sdi12_segments_incomplete', '3:[0,2]');
+
+      const q = syncDb.prepare(
+        "SELECT * FROM ingest_quarantine WHERE channel = 'sdi12_segments_incomplete'"
+      ).get();
+      assert.ok(q, 'exactly one sdi12_segments_incomplete quarantine row must exist');
+      assert.equal(q.reason, 'unknown_channel');
+      assert.equal(q.raw_value, '3:[0,2]');
+      assert.equal(q.deveui, TEST_DEVEUI);
+
+      const count = syncDb.prepare('SELECT COUNT(*) AS n FROM device_data').get().n;
+      assert.equal(count, 0);
     });
   });
 });

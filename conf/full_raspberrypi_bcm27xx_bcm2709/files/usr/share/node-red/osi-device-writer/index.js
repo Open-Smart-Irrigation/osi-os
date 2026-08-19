@@ -141,4 +141,9 @@ async function writeDeviceData(db, manifest, normalizeResult, meta, options) {
   return { inserted: true, deadLettered, columns: cols.slice() };
 }
 
-module.exports = { writeDeviceData, clampRecordedAt, resetColumnCache };
+async function quarantineOnly(db, deveui, channel, rawValue) {
+  await deadLetter(db, String(deveui || '').toUpperCase().trim(), channel, 'unknown_channel', rawValue);
+  await evictQuarantine(db);
+}
+
+module.exports = { writeDeviceData, quarantineOnly, clampRecordedAt, resetColumnCache };
