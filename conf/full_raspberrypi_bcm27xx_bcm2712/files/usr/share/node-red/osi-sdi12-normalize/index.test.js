@@ -79,8 +79,9 @@ test('parseIdentity extracts vendor/model/firmware for storage and display', () 
   assert.strictEqual(m.parseIdentity('NULL'), null);   // too short / not an identity
 });
 
-test('v1 ships no auto-matchers; matchProfile works only with bench-enabled patterns', () => {
-  // Every shipped profile is provisional with identityMatch null:
+test('auto-matchers: only bench-verified profiles match; unverified strings stay null', () => {
+  // SENTEK_ENVIROSCAN is bench-verified (2026-08-19) and auto-matches its
+  // model family; a SENTEK frame with an unknown model token still does not:
   assert.strictEqual(m.matchProfile('013SENTEK  ES2   101serial'), null);
   // The matcher machinery itself works when a bench-verified pattern exists:
   const benchProfiles = [{ id: 'X', identityMatch: /SENTEK/i }];
@@ -196,4 +197,42 @@ test('listProfiles is GUI-serializable and slot-aware', () => {
   }
   const tensio = list.find((p) => p.id === 'TENSIOMARK');
   assert.deepStrictEqual(tensio.depthSlots, [1]);    // 2 channels, 1 physical depth
+});
+
+test('bench 2026-08-19: SENTEK_ENVIROSCAN live identity auto-matches, foreign vendor with same model does not', () => {
+  // Live aI! captured on agrolink-test-01 (device A8404161D1886837).
+  const hit = m.matchProfile('012SENTEK  XEPI  139D938D7150000');
+  assert.strictEqual(hit.profileId, 'SENTEK_ENVIROSCAN');
+  assert.strictEqual(hit.vendor.trim(), 'SENTEK');
+  assert.strictEqual(hit.model.trim(), 'XEPI');
+  assert.strictEqual(hit.firmware, '139');
+  // EasyAG (IPI, per the Sentek SDI-12 manual) is the same value layout.
+  assert.strictEqual(m.matchProfile('012SENTEK  IPI   101XXXXXXXXXXXX').profileId, 'SENTEK_ENVIROSCAN');
+  // Model token alone must not match -- vendor is part of the identity.
+  assert.strictEqual(m.matchProfile('013ACME    XEPI  001'), null);
+});
+
+test('bench 2026-08-19: SENTEK_ENVIROSCAN live 5-value frame maps mm/10cm straight onto vwc_N (no scaling)', () => {
+  // Live aM!/aD0! frame from the same device; unit per the Sentek manual is
+  // mm water per 10 cm soil == VWC percent numerically, so no transform.
+  const r = m.normalize(
+    { BatV: 3.528, data_sum: '+0.000000+0.000000+0.000000+0.104748+0.339201' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ValueCount: 5 },
+    {}
+  );
+  assert.deepStrictEqual(r.unknown, {});
+  assert.strictEqual(r.channels.bat_v, 3.528);
+  assert.deepStrictEqual(
+    [r.channels.vwc_1, r.channels.vwc_2, r.channels.vwc_3, r.channels.vwc_4, r.channels.vwc_5],
+    [0, 0, 0, 0.1, 0.34]
+  );
+  assert.strictEqual(r.channels.vwc_6, undefined);
+  // Same frame with no learned count yet must NOT quarantine either (variable profile).
+  const r2 = m.normalize(
+    { BatV: 3.528, data_sum: '+0.000000+0.000000+0.000000+0.104748+0.339201' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ValueCount: null },
+    {}
+  );
+  assert.deepStrictEqual(r2.unknown, {});
+  assert.strictEqual(r2.channels.vwc_5, 0.34);
 });

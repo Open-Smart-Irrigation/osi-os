@@ -89,8 +89,20 @@ var PROFILES = [
   {
     id: 'SENTEK_ENVIROSCAN',
     label: 'Sentek EnviroSCAN (VWC, up to 8 depths, variable count)',
-    provisional: true,
-    identityMatch: null,
+    // Bench-verified 2026-08-19 on agrolink-test-01 (A8404161D1886837):
+    // live aI! = "012SENTEK  XEPI  139D938D7150000" (vendor SENTEK, model XEPI,
+    // fw 1.3.9); live aM!/aD0! frame = 5 values, e.g.
+    // "+0.000000+0.000000+0.000000+0.104748+0.339201". Unit per the Sentek
+    // SDI-12 Probe Interface Manual v3.4: volumetric water content in
+    // mm per 10 cm of soil -- numerically identical to VWC-percent
+    // (1 mm / 100 mm = 1 %), so values map to vwc_N with NO scaling.
+    // Model family per the manual: XPI = EnviroSMART, IPI = EasyAG; XEPI is
+    // the EnviroSCAN variant observed live. aM!/aD0! also accepts 1..9 values
+    // per measurement command (aM1! for sensors 10-16), consistent with the
+    // variable count below. Salinity rides aM2!/aM3! (separate recipe slot,
+    // not mapped in v1).
+    provisional: false,
+    identityMatch: /\bSENTEK\b.*\b(XEPI|XPI|IPI)\b/i,
     // Variable: no fixed depth count on the wire. Per-device count is learned
     // via devices.sdi12_value_count (task A6, option b) and enforced by
     // resolveCount()/resolvedCount below, not by a static expectedValues here.

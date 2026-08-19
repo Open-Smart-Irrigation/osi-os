@@ -54,16 +54,22 @@ Each section gives a concrete starting command and a cut for the sample response
 
 ### Sentek EnviroSCAN
 
-The v1 registry supports up to six VWC values because the single-uplink budget is limited. TriSCAN salinity values need a separate bench decision; do not map them into `soil_ec_*` until their unit and order are captured.
+**Bench-verified 2026-08-19** on agrolink-test-01 (device `A8404161D1886837`), so this section is fact, not hypothesis.
 
-Sample six-value response: `0+30.5+28.1+25.9+20.0+19.0+18.0\r\n`.
+- Identity (`0I!`): `012SENTEK  XEPI  139D938D7150000` — address 0, SDI-12 v1.2, vendor `SENTEK`, model `XEPI` (the EnviroSCAN variant; the Sentek manual names `XPI` for EnviroSMART and `IPI` for EasyAG — all three auto-match `SENTEK_ENVIROSCAN`), firmware 1.3.9, then the serial.
+- Measurement: `0M!` answers `0tttn` then needs `0D0!` (and `0D1!` above 3 values) — the Dragino's `aD0!` flag (third `AT+COMMANDx` field = `1`) handles that. Live response with the sensor count learned as 5: `+0.000000+0.000000+0.000000+0.104748+0.339201`.
+- **Unit:** per the *Sentek SDI-12 Probe Interface Manual v3.4*, soil-moisture values are volumetric water content in **mm per 10 cm of soil**. That is numerically identical to VWC percent (1 mm / 100 mm = 1 %), so values map straight onto `vwc_N` with no transform. Three leading `+0.000000` values are sensors not yet in soil, not a fault.
+- Value count is variable per probe build (1–9 per `aM!`, `aM1!` for 10–16): the system learns it per device (`devices.sdi12_value_count`) from the settings modal; frames with a different count quarantine as `sdi12_value_count` until the count is saved.
+- Salinity (TriSCAN) rides `0M2!`/`0M3!` — a separate recipe slot, not mapped in v1.
+
+Recipe as deployed (five sensors, cut keeps the sign-delimited values and drops the address):
 
 ```text
 AT+COMMAND1=0M!,10,1,1
-AT+DATACUT1=33,2,2~31
+AT+DATACUT1=0,2,2~46
 ```
 
-The `DATACUT` output is expected to be six signed numeric values with no address or CRC. Confirm whether the probe needs concurrent `aC!`/`aD0!` or a longer measurement timeout before enabling a production recipe. Eight-depth EnviroSCAN support is phase 2 because it requires multi-segment uplinks.
+Eight-depth EnviroSCAN support is phase 2 because it requires multi-segment uplinks (`AT+DATAUP=1`).
 
 ### Delta-T PR2/4
 
