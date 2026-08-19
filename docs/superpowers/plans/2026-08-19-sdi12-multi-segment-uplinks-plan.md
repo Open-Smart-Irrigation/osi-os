@@ -24,9 +24,9 @@
 
 ### Task 0: Baseline + commit spec/plan
 
-- [ ] `git status -s` clean apart from the two new docs; `git log --oneline -1` is `19ca945e` or a descendant.
-- [ ] `node scripts/verify-sdi12-codec.js && (cd conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize && node --test) && node scripts/verify-device-integration.js 2>&1 | tail -3` — all green before you change anything; if not, STOP.
-- [ ] `git add docs/superpowers/specs/2026-08-19-sdi12-multi-segment-uplinks-design.md docs/superpowers/plans/2026-08-19-sdi12-multi-segment-uplinks-plan.md && git commit -m "docs(sdi12): multi-segment uplink spec + plan"`
+- [x] `git status -s` clean apart from the two new docs; `git log --oneline -1` is `19ca945e` or a descendant.
+- [x] `node scripts/verify-sdi12-codec.js && (cd conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize && node --test) && node scripts/verify-device-integration.js 2>&1 | tail -3` — all green before you change anything; if not, STOP.
+- [x] `git add docs/superpowers/specs/2026-08-19-sdi12-multi-segment-uplinks-design.md docs/superpowers/plans/2026-08-19-sdi12-multi-segment-uplinks-plan.md && git commit -m "docs(sdi12): multi-segment uplink spec + plan"` — already committed at HEAD `fb7bfbe1` ("docs(sdi12): multi-segment uplink spec + plan (post-review)"), a descendant of `19ca945e`.
 
 ---
 
@@ -36,7 +36,7 @@
 
 **Interfaces — Produces:** FPort 2 `payver===2` → `{ BatV, EXTI_Trigger, Payver: 2, SegCount, SegIndex, data_sum, Node_type: 'SDI12' }`; `payver===1` unchanged; `payver===2` with `bytes.length < 5` → `{ unsupported_payload: 'payver2_short' }`; other payver → `{ unsupported_payload: 'payver_<n>' }`.
 
-- [ ] **Step 1 — failing tests.** Append to `scripts/verify-sdi12-codec.js` (it is assert-style, not node:test; follow its existing shape):
+- [x] **Step 1 — failing tests.** Append to `scripts/verify-sdi12-codec.js` (it is assert-style, not node:test; follow its existing shape):
 
 ```js
 // payver 2: 3.300 V, count 3, index 1, slice "+28.1+25.9"
@@ -58,7 +58,7 @@ assert.strictEqual(ctx.decodeUplink({ fPort: 2, bytes: [0x0C, 0xE4, 0x07, 0x01] 
 ```
 Run `node scripts/verify-sdi12-codec.js` → expect FAIL on `SegCount`.
 
-- [ ] **Step 2 — implement.** In the codec's FPort 2 branch (currently: `if (bytes.length < 3) return {}; var batRaw = ...; return { BatV, EXTI_Trigger, Payver: bytes[2], data_sum: asciiFromBytes(bytes, 3), Node_type }`), replace with:
+- [x] **Step 2 — implement.** In the codec's FPort 2 branch (currently: `if (bytes.length < 3) return {}; var batRaw = ...; return { BatV, EXTI_Trigger, Payver: bytes[2], data_sum: asciiFromBytes(bytes, 3), Node_type }`), replace with:
 
 ```js
   if (bytes.length < 3) return {};
@@ -86,8 +86,8 @@ Run `node scripts/verify-sdi12-codec.js` → expect FAIL on `SegCount`.
 ```
 (Keep the existing header comment; extend it with the payver-2 layout line.)
 
-- [ ] **Step 3** — `node scripts/verify-sdi12-codec.js` → PASS. Add a payver-2 representative frame to the sdi12 entry's robustness coverage if the table supports multiple frames (read the table's schema; if single-frame only, leave it — the fuzz pass still covers the branch).
-- [ ] **Step 4** — `cp` codec to bcm2709; `node scripts/verify-profile-parity.js`; `node scripts/verify-codec-robustness.js`. Commit: `feat(sdi12): codec decodes payver-2 multi-segment header`.
+- [x] **Step 3** — `node scripts/verify-sdi12-codec.js` → PASS. Add a payver-2 representative frame to the sdi12 entry's robustness coverage if the table supports multiple frames (read the table's schema; if single-frame only, leave it — the fuzz pass still covers the branch). (Table is single-frame only; left unchanged.)
+- [x] **Step 4** — `cp` codec to bcm2709; `node scripts/verify-profile-parity.js`; `node scripts/verify-codec-robustness.js`. Commit: `feat(sdi12): codec decodes payver-2 multi-segment header`.
 
 ---
 
