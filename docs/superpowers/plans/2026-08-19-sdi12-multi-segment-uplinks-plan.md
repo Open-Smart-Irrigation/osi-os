@@ -309,7 +309,7 @@ Read `.claude/skills/osi-flows-json-editing/SKILL.md` first. One-shot script in 
 
 **Files:** both `flows.json`; `scripts/verify-flows-size-ratchet-allowances.json` (measure-and-raise for `sdi12-gate-fn` and `sdi12-write-fn`, reasons appended).
 
-- [ ] **Step 1 — `sdi12-gate-fn` func** (replace the function body with this; it is the current body plus the payver-2 branch):
+- [x] **Step 1 — `sdi12-gate-fn` func** (replace the function body with this; it is the current body plus the payver-2 branch):
 
 ```js
 // Output 1: FPort 2 periodic sensor payload -> config query chain.
@@ -372,7 +372,7 @@ return [msg, null];
 ```
 `sdi12-gate-fn`'s `libs` is currently `null` (flows.json ~L13093) — set it to `[{"var":"osiLib","module":"osi-lib"}]` in the same mutation script (copy the exact object shape from `sdi12-write-fn`'s libs entry for osi-lib).
 
-- [ ] **Step 2 — `sdi12-write-fn`.** The current body (read it in full first) is: `row` → `reportFailure` def → async IIFE: `normRes` → `writerRes` → manifest → `normalize()` → `var db = new osiDb.Database(...)` → `try { writeDeviceData } catch` → `try { await db.close() }`. There is NO finally and the db opens AFTER normalize, so the quarantine-only branch must come BEFORE normalize, own its own db handle, and close it itself. Insert this immediately after the `writerRes` load check (`if (!writerRes.ok) return reportFailure('writer_load');`) and before the manifest load:
+- [x] **Step 2 — `sdi12-write-fn`.** The current body (read it in full first) is: `row` → `reportFailure` def → async IIFE: `normRes` → `writerRes` → manifest → `normalize()` → `var db = new osiDb.Database(...)` → `try { writeDeviceData } catch` → `try { await db.close() }`. There is NO finally and the db opens AFTER normalize, so the quarantine-only branch must come BEFORE normalize, own its own db handle, and close it itself. Insert this immediately after the `writerRes` load check (`if (!writerRes.ok) return reportFailure('writer_load');`) and before the manifest load:
 
 ```js
   if (info.quarantineOnly) {
@@ -398,7 +398,7 @@ return [msg, null];
 ```
 Use the exact `osiDb` constructor/path expression the node already uses for `db` (copy it; do not guess). The `finally` guarantees the handle closes on every path.
 
-- [ ] **Step 3 — gates:** `node scripts/verify-flows-fn-parse.js && node scripts/test-flows-wiring.js && node scripts/verify-no-new-silent-catch.js && node scripts/flows-bare-require-scan.js && node scripts/verify-flows-size-ratchet.js` (raise per procedure) `&& node --test scripts/migrate-flows-journal-v2-replication.test.js && node scripts/verify-live-gateway-identity.js && node scripts/verify-profile-parity.js && node scripts/verify-sync-flow.js`. Commit: `feat(sdi12): gate reassembles payver-2 multi-segment uplinks; write node records incomplete sequences`.
+- [x] **Step 3 — gates:** `node scripts/verify-flows-fn-parse.js && node scripts/test-flows-wiring.js && node scripts/verify-no-new-silent-catch.js && node scripts/flows-bare-require-scan.js && node scripts/verify-flows-size-ratchet.js` (raise per procedure) `&& node --test scripts/migrate-flows-journal-v2-replication.test.js && node scripts/verify-live-gateway-identity.js && node scripts/verify-profile-parity.js && node scripts/verify-sync-flow.js`. Commit: `feat(sdi12): gate reassembles payver-2 multi-segment uplinks; write node records incomplete sequences`.
 
 ---
 
