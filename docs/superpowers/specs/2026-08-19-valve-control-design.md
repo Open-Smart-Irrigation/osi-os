@@ -252,8 +252,10 @@ that has no active expectation, insert an expectation row with
 compiled window of that valve (`commanded_at` = window start,
 `commanded_duration_seconds` = window length, `expected_close_at` = window
 end + 120 s, `reconciliation_state='OBSERVED_RUNNING'`, `observed_open_at` =
-uplink time, `volume_source` per §5.7), else with `trigger='unexplained'`
-and `commanded_duration_seconds NULL`. The existing close-observation logic
+uplink time, `volume_source` per §5.7), else with `trigger='unexplained'`,
+`commanded_duration_seconds = 0` (the column is `NOT NULL`; 0 means "unknown"
+and the GUI shows no duration), `expected_close_at` = uplink time + 24 h, and
+`volume_source='unknown'`. The existing close-observation logic
 then completes it. Recent irrigations and the history timeline show
 "Scheduled (on valve)" / "Opened on valve" accordingly.
 
