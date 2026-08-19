@@ -706,6 +706,14 @@ fetch_required "osi-sdi12-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.js" \
     "/srv/node-red/osi-sdi12-normalize/index.js"
 
+fetch_required "osi-sdi12-reassemble package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/package.json" \
+    "/srv/node-red/osi-sdi12-reassemble/package.json"
+
+fetch_required "osi-sdi12-reassemble index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.js" \
+    "/srv/node-red/osi-sdi12-reassemble/index.js"
+
 fetch_required "osi-valve-control package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/package.json" \
     "/srv/node-red/osi-valve-control/package.json"
