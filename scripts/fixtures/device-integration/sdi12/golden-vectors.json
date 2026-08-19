@@ -544,5 +544,103 @@
       "vwc_5": 0.34
     },
     "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek EnviroSCAN 8 values over 2 segments (payver 2)",
+    "fPort": 2,
+    "segments": [
+      [
+        13,
+        200,
+        2,
+        2,
+        0,
+        43,
+        48,
+        46,
+        49,
+        43,
+        48,
+        46,
+        50,
+        43,
+        48,
+        46,
+        51,
+        43,
+        48,
+        46,
+        52
+      ],
+      [
+        13,
+        200,
+        2,
+        2,
+        1,
+        43,
+        48,
+        46,
+        53,
+        43,
+        48,
+        46,
+        54,
+        43,
+        48,
+        46,
+        55,
+        43,
+        48,
+        46,
+        56
+      ]
+    ],
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 8
+    },
+    "expected": {
+      "bat_v": 3.528,
+      "vwc_1": 0.1,
+      "vwc_2": 0.2,
+      "vwc_3": 0.3,
+      "vwc_4": 0.4,
+      "vwc_5": 0.5,
+      "vwc_6": 0.6,
+      "vwc_7": 0.7,
+      "vwc_8": 0.8
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "3 segments, middle missing -> incomplete, quarantine only",
+    "fPort": 2,
+    "segments": [
+      [
+        12,
+        228,
+        2,
+        3,
+        0,
+        43,
+        49,
+        46,
+        48
+      ],
+      [
+        12,
+        228,
+        2,
+        3,
+        2,
+        43,
+        51,
+        46,
+        48
+      ]
+    ],
+    "expectedNoRow": true,
+    "expectedQuarantineRaw": "3:[0,2]"
   }
 ]
