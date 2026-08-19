@@ -2,6 +2,9 @@
 // Derived from dragino/dragino-end-node-decoder SDI12_ChirpstackV4_decode.
 // FPort 2: [0..1] battery mV (bit15 = EXTI flag), [2] payload version,
 //          [3..] ASCII extracted from SDI-12 responses per AT+DATACUTx.
+//          payver 2 (AT+DATAUP=1 multi-segment): [3] SegCount [4] SegIndex
+//          [5..] ASCII slice for this segment; reassembled by
+//          osi-sdi12-reassemble before it reaches the normalizer.
 // FPort 5: device status. FPort 100: debug echo of an ad-hoc SDI-12 command.
 function decodeUplink(input) {
   return { data: Decode(input.fPort, input.bytes, input.variables) };
@@ -45,11 +48,24 @@ function Decode(fPort, bytes) {
   // FPort 2: periodic sensor payload.
   if (bytes.length < 3) return {};
   var batRaw = (bytes[0] << 8) | bytes[1];
-  return {
+  var payver = bytes[2];
+  var common = {
     BatV: (batRaw & 0x7FFF) / 1000,
     EXTI_Trigger: (batRaw & 0x8000) ? 'TRUE' : 'FALSE',
-    Payver: bytes[2],
-    data_sum: asciiFromBytes(bytes, 3),
+    Payver: payver,
     Node_type: 'SDI12'
   };
+  if (payver === 1) {
+    common.data_sum = asciiFromBytes(bytes, 3);
+    return common;
+  }
+  if (payver === 2) {
+    // AT+DATAUP=1 multi-segment: [bat][bat][payver=2][count][index][ascii slice]
+    if (bytes.length < 5) return { unsupported_payload: 'payver2_short' };
+    common.SegCount = bytes[3];
+    common.SegIndex = bytes[4];
+    common.data_sum = asciiFromBytes(bytes, 5);
+    return common;
+  }
+  return { unsupported_payload: 'payver_' + payver };
 }

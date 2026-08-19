@@ -55,4 +55,22 @@ assert.strictEqual(fctl.data_sum, '+2.5');   // the '1' (0x31) after 0xF4 must n
 // Short/garbage frames must not throw.
 ctx.decodeUplink({ fPort: 2, bytes: [] });
 ctx.decodeUplink({ fPort: 2, bytes: [0x01] });
+
+// payver 2: 3.300 V, count 3, index 1, slice "+28.1+25.9"
+const s2 = ctx.decodeUplink({ fPort: 2, bytes: [0x0C, 0xE4, 0x02, 0x03, 0x01].concat(ascii('+28.1+25.9')) }).data;
+assert.strictEqual(s2.BatV, 3.3);
+assert.strictEqual(s2.Payver, 2);
+assert.strictEqual(s2.SegCount, 3);
+assert.strictEqual(s2.SegIndex, 1);
+assert.strictEqual(s2.data_sum, '+28.1+25.9');
+assert.strictEqual(s2.Node_type, 'SDI12');
+// payver 1 is byte-for-byte unchanged (no Seg* fields)
+const s1 = ctx.decodeUplink({ fPort: 2, bytes: [0x0C, 0xE4, 0x01].concat(ascii('+2.48+21.5')) }).data;
+assert.strictEqual(s1.SegCount, undefined);
+assert.strictEqual(s1.data_sum, '+2.48+21.5');
+// payver 2 too short
+assert.strictEqual(ctx.decodeUplink({ fPort: 2, bytes: [0x0C, 0xE4, 0x02, 0x03] }).data.unsupported_payload, 'payver2_short');
+// unknown payver
+assert.strictEqual(ctx.decodeUplink({ fPort: 2, bytes: [0x0C, 0xE4, 0x07, 0x01] }).data.unsupported_payload, 'payver_7');
+
 console.log('verify-sdi12-codec: PASS');
