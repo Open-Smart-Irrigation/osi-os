@@ -65,9 +65,9 @@ function formatWaterAction(code: string | null | undefined): string {
 function formatDisplayMode(mode: string | null | undefined): string {
   switch (mode) {
     case 'shared_server':
-      return 'OSI Server';
+      return 'Bovey Cloud';
     case 'shared_server_stale':
-      return 'OSI Server stale';
+      return 'Bovey Cloud stale';
     case 'local_fallback':
       return 'Local fallback';
     case 'unlinked_local':

@@ -1,50 +1,50 @@
 {
-  "title": "Yungibwa ku OSI Server",
-  "navLink": "OSI Server",
+  "title": "Yungibwa ku Bovey Cloud",
+  "navLink": "Bovey Cloud",
   "backToDashboard": "Ddayo ku Dashboard",
   "status": {
-    "linked": "Akawunti ya ku OSI Server eyungibbwa",
-    "notLinked": "Tewali kugyungibbwa ku OSI Server",
+    "linked": "Akawunti ya ku Bovey Cloud eyungibbwa",
+    "notLinked": "Tewali kugyungibbwa ku Bovey Cloud",
     "linkedAs": "Eyungibbwa nga: {{username}}",
     "linkedSince": "Okuva: {{date}}"
   },
   "form": {
-    "serverUrl": "Endabirwamu ya OSI Server",
+    "serverUrl": "Endabirwamu ya Bovey Cloud",
     "actionLabel": "Kola",
     "actionLogin": "Yunga akawunti eyaliwo",
     "actionRegister": "Tonda akawunti empya",
     "username": "Erinnya ery'omukozesa ku server",
     "email": "Email",
     "password": "Ekigambo ky'okulinda",
-    "submit": "Yungibwa ku OSI Server",
+    "submit": "Yungibwa ku Bovey Cloud",
     "submitting": "Kiyungibwa...",
     "cancel": "Sazaamu"
   },
   "warning": {
     "title": "Kigambiddwa",
-    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
+    "message": "After linking, you must use your Bovey Cloud credentials to log in. Bovey stores a gateway-specific offline verifier for linked login.",
     "proceed": "Komezagana"
   },
   "success": {
     "title": "Kiyungibwa bulungi",
-    "message": "Akawunti yo kati eyungiddwa nga {{username}} ku OSI Server.",
+    "message": "Akawunti yo kati eyungiddwa nga {{username}} ku Bovey Cloud.",
     "claimedDevices": "Ebikozesebwa ebyategekebwa ku server: {{count}}",
     "skippedDevices": "Ebikozesebwa ebyasazibwaawo (byali byatengeddwa): {{count}}"
   },
   "unlink": {
-    "button": "Gyamu ku OSI Server",
+    "button": "Gyamu ku Bovey Cloud",
     "confirm": "Oli mukakafu? Oluvannyuma lw'okugyamu, oteekwa okozesa ekigambo kyo ky'okulinda eky'omu bitundu ekya mazima.",
-    "success": "Bagyiddwa ku OSI Server"
+    "success": "Bagyiddwa ku Bovey Cloud"
   },
   "errors": {
-    "networkError": "Teyinziddwa kutuuka ku OSI Server. Kebera endabirwamu n'okuteekateeka kwo kw'omukutu.",
-    "authFailed": "Ebintu by'okuyingira by'OSI Server si bya mazima.",
+    "networkError": "Teyinziddwa kutuuka ku Bovey Cloud. Kebera endabirwamu n'okuteekateeka kwo kw'omukutu.",
+    "authFailed": "Ebintu by'okuyingira by'Bovey Cloud si bya mazima.",
     "generic": "Waliwo ensobi. Gezaako nate.",
     "forceSyncFailed": "Manual sync failed. Please try again."
   },
   "sync": {
     "title": "Manual sync",
-    "description": "Run an immediate recovery sync with OSI Server.",
+    "description": "Run an immediate recovery sync with Bovey Cloud.",
     "button": "Force sync now",
     "running": "Syncing...",
     "successTitle": "Manual sync completed",
@@ -59,10 +59,10 @@
   },
   "reauth": {
     "title": "Sync token expired",
-    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
+    "description": "Re-authenticate with Bovey Cloud to mint a fresh sync token for this gateway.",
     "button": "Re-authenticate",
     "username": "Server Username",
-    "password": "OSI Server Password",
+    "password": "Bovey Cloud Password",
     "submit": "Refresh connection",
     "running": "Refreshing..."
   }

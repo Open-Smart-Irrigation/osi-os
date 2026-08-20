@@ -14,9 +14,9 @@
   --primary: #055E92;
   --primary-hover: #04486F;
   --secondary-bg: #E2E8F0;
-  --header-bg: #1D1D1B;
-  --header-text: #FFFFFF;
-  --header-subtext: #C9CDD1;
+  --header-bg: #D7DADD;
+  --header-text: #1D1D1B;
+  --header-subtext: #4F555B;
   --success-bg: #DCFCE7;
   --success-text: #14532D;
   --success-border: #16A34A;
@@ -71,6 +71,25 @@ html[data-theme='dark'] {
   --toggle-on: #22C55E;
   --toggle-off: #4B5560;
   --overlay: #050607;
+}
+
+/* Brushed-aluminium chrome for top-level headers (iTunes-era Aqua look).
+   Dark theme falls back to the flat --header-bg token. */
+.brushed-header {
+  background-color: var(--header-bg);
+  background-image: linear-gradient(
+    180deg,
+    #eceef0 0%,
+    #d7dadd 50%,
+    #c5c9cd 51%,
+    #d2d6d9 100%
+  );
+  border-bottom: 1px solid #9ba1a7;
+}
+
+html[data-theme='dark'] .brushed-header {
+  background-image: none;
+  border-bottom: 1px solid var(--border);
 }
 
 /* Custom base styles */

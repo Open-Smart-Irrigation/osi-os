@@ -242,7 +242,7 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
             <h2 className="high-contrast-text text-2xl font-bold text-[var(--header-text)]">Wind</h2>
             <p className="mt-0.5 text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
           </div>
-          <button onClick={onClose} className="px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-white">×</button>
+          <button onClick={onClose} className="px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:opacity-70">×</button>
         </div>
 
         <div className="flex flex-wrap gap-2 px-6 pt-4">

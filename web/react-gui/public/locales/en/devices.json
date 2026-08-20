@@ -83,7 +83,7 @@
     "settings": "SETTINGS",
     "intervalLabel": "Closed-box interval (minutes)",
     "intervalPlaceholder": "e.g. 10",
-    "intervalNote": "OSI sets the normal closed-box interval on FPort 11. The opened interval stays fixed at 2 minutes and tamper remains enabled.",
+    "intervalNote": "Bovey sets the normal closed-box interval on FPort 11. The opened interval stays fixed at 2 minutes and tamper remains enabled.",
     "invalidInterval": "Enter a whole number of minutes between 1 and 255.",
     "applyInterval": "Apply interval",
     "applyingInterval": "Applying interval...",

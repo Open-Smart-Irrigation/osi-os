@@ -397,7 +397,7 @@ export const HistoryDashboard: React.FC = () => {
       {isMobileViewport ? (
         <HistoryMobileHeader onLogout={logout} />
       ) : (
-        <header className="bg-[var(--header-bg)] shadow-xl">
+        <header className="brushed-header shadow-md">
           <div className="mx-auto max-w-7xl px-4 py-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>

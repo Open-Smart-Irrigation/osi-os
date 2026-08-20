@@ -12,7 +12,7 @@ export const HistoryMobileHeader: React.FC<HistoryMobileHeaderProps> = ({ onLogo
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="border-b border-[var(--border)] bg-[var(--header-bg)] px-4 py-3 shadow-sm lg:hidden">
+    <header className="brushed-header px-4 py-3 shadow-sm lg:hidden">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-[var(--header-text)] high-contrast-text">
           {t('history.shell.title')}
