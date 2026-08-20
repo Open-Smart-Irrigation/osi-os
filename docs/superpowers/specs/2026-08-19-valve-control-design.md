@@ -98,8 +98,8 @@ CREATE TABLE valve_schedules (
   deleted_at       TEXT,
   created_at       TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
-  CHECK ((kind='WEEKLY' AND weekdays_mask BETWEEN 1 AND 127 AND start_time IS NOT NULL
-          AND duration_minutes BETWEEN 1 AND 1439)
+  CHECK ((kind='WEEKLY' AND weekdays_mask IS NOT NULL AND weekdays_mask BETWEEN 1 AND 127
+          AND start_time IS NOT NULL AND duration_minutes BETWEEN 1 AND 1439)
       OR (kind='ONCE' AND fire_at IS NOT NULL AND duration_minutes BETWEEN 1 AND 255))
 );
 CREATE INDEX idx_valve_schedules_device ON valve_schedules(device_eui, deleted_at);
