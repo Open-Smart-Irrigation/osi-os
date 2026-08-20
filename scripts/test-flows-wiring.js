@@ -813,6 +813,40 @@ for (const id of ['strega-today-liters-http-in', 'strega-today-liters-fn', 'stre
     console.log(`OK  M8: ${id} present`);
 }
 
+// Valve control (2026-08): one-time opens enter the actuator path through their own link-out.
+const valveLinkOut = byId['valve-once-link-out'];
+if (!valveLinkOut || valveLinkOut.type !== 'link out' || !Array.isArray(valveLinkOut.links) || !valveLinkOut.links.includes('5974306566e99a92')) {
+    failures.push('valve-once-link-out must target the actuator link-in 5974306566e99a92');
+} else {
+    console.log('OK  valve-once-link-out → actuator link-in 5974306566e99a92');
+}
+if (!byId['5974306566e99a92'] || !Array.isArray(byId['5974306566e99a92'].links) || !byId['5974306566e99a92'].links.includes('valve-once-link-out')) {
+    failures.push('actuator link-in 5974306566e99a92 must list valve-once-link-out as a source');
+} else {
+    console.log('OK  actuator link-in 5974306566e99a92 lists valve-once-link-out as a source');
+}
+
+// Valve control: /api/valves HTTP routes must all wire to the router
+for (const id of [
+    'valve-list-get-http', 'valve-schedules-get-http', 'valve-schedules-post-http',
+    'valve-schedule-put-http', 'valve-schedule-delete-http', 'valve-plan-resend-post-http',
+    'valve-scheduler-status-post-http', 'valve-settings-put-http',
+]) {
+    assertWires(id, [['valve-api-router-fn']], `Valve control: ${id} → valve-api-router-fn`);
+}
+
+// Valve control: router outputs are [http response, mqtt out] in that order
+assertWires('valve-api-router-fn',
+    [['valve-api-response'], ['valve-push-mqtt-out']],
+    'Valve control: valve-api-router-fn outputs (response, mqtt out)');
+
+// Valve control: ACK ingest must use the standard wildcard uplink topic, not a UUID-pinned one
+if (!byId['valve-ack-mqtt-in'] || byId['valve-ack-mqtt-in'].topic !== 'application/+/device/+/event/up') {
+    failures.push('valve-ack-mqtt-in must use the wildcard uplink topic application/+/device/+/event/up');
+} else {
+    console.log('OK  valve-ack-mqtt-in uses the wildcard uplink topic');
+}
+
 // === WS2/WS3 osiDb.Database close audit ===
 
 const OPEN_RX = /new\s+osiDb\.Database/;

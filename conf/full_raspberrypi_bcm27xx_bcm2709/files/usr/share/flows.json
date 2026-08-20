@@ -2707,7 +2707,8 @@
     "links": [
       "1ef83e7d26a33d6c",
       "b64b9e8c1a0e2c77",
-      "745b6db588017e56"
+      "745b6db588017e56",
+      "valve-once-link-out"
     ],
     "x": 155,
     "y": 160,
@@ -11446,6 +11447,416 @@
       ],
       [
         "9d5e3035c3d069c4"
+      ]
+    ]
+  },
+  {
+    "id": "valve-control-tab",
+    "type": "tab",
+    "label": "Valve Control",
+    "disabled": false,
+    "info": "Valve control module: /api/valves routes, STREGA on-valve scheduler pushes, ACK ledger, one-time opens, observed runs, clock sync (spec docs/superpowers/specs/2026-08-19-valve-control-design.md)",
+    "env": []
+  },
+  {
+    "id": "valve-list-get-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "GET /api/valves",
+    "url": "/api/valves",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 80,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-schedules-get-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "GET /api/valves/:deveui/schedules",
+    "url": "/api/valves/:deveui/schedules",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 130,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-schedules-post-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "POST /api/valves/:deveui/schedules",
+    "url": "/api/valves/:deveui/schedules",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 180,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-schedule-put-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "PUT /api/valves/:deveui/schedules/:uuid",
+    "url": "/api/valves/:deveui/schedules/:uuid",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 230,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-schedule-delete-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "DELETE /api/valves/:deveui/schedules/:uuid",
+    "url": "/api/valves/:deveui/schedules/:uuid",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 280,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-plan-resend-post-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "POST /api/valves/:deveui/plan/resend",
+    "url": "/api/valves/:deveui/plan/resend",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 330,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-scheduler-status-post-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "POST /api/valves/:deveui/scheduler-status",
+    "url": "/api/valves/:deveui/scheduler-status",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 380,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-settings-put-http",
+    "type": "http in",
+    "z": "valve-control-tab",
+    "name": "PUT /api/valves/:deveui/settings",
+    "url": "/api/valves/:deveui/settings",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 430,
+    "wires": [
+      [
+        "valve-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-api-router-fn",
+    "type": "function",
+    "z": "valve-control-tab",
+    "name": "Valve API Router",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return [msg, null];\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\nconst appId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();\nlet flushQueue = null;\ntry { const client = chirpstack.createProvisioningClientFromEnv(env); flushQueue = function(eui) { return client.flushDeviceQueue(eui); }; }\ncatch (e) { node.warn('valve-api: chirpstack client unavailable, plan pushes will not flush the queue: ' + (e && e.message ? e.message : e)); }\nreturn VC.handleHttpRequest({\n  msg: msg, Database: dbHelper.Database, appId: appId, flushQueue: flushQueue,\n  environment: { authTokenSecret: env.get('AUTH_TOKEN_SECRET'), jwtSecret: env.get('JWT_SECRET'), deviceEui: env.get('DEVICE_EUI') },\n  warn: function(m) { node.warn(m); }\n}).then(function(out) {\n  const pushes = Array.isArray(out.valvePushMessages) ? out.valvePushMessages : [];\n  delete out.valvePushMessages;\n  if (!appId && pushes.length) node.warn('valve-api: CHIRPSTACK_APP_ACTUATORS missing; ' + pushes.length + ' downlink(s) not sent');\n  const downlinks = appId ? pushes.map(function(p) { return { topic: p.topic, payload: p.payload }; }) : [];\n  return [out, downlinks];\n});",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "chirpstack",
+        "module": "osi-chirpstack-helper"
+      }
+    ],
+    "x": 560,
+    "y": 250,
+    "wires": [
+      [
+        "valve-api-response"
+      ],
+      [
+        "valve-push-mqtt-out"
+      ]
+    ]
+  },
+  {
+    "id": "valve-api-response",
+    "type": "http response",
+    "z": "valve-control-tab",
+    "name": "Valve API Response",
+    "statusCode": "",
+    "headers": {},
+    "x": 860,
+    "y": 230,
+    "wires": []
+  },
+  {
+    "id": "valve-push-mqtt-out",
+    "type": "mqtt out",
+    "z": "valve-control-tab",
+    "name": "Valve plan downlinks → ChirpStack",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "b0b19352dac3fb34",
+    "x": 880,
+    "y": 290,
+    "wires": []
+  },
+  {
+    "id": "valve-ack-mqtt-in",
+    "type": "mqtt in",
+    "z": "valve-control-tab",
+    "name": "STREGA ACK IN",
+    "topic": "application/+/device/+/event/up",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "b0b19352dac3fb34",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 200,
+    "y": 520,
+    "wires": [
+      [
+        "valve-ack-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-ack-fn",
+    "type": "function",
+    "z": "valve-control-tab",
+    "name": "Valve ACK ledger",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return null;\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\n// STREGA uplinks: feed decoded ACK frames to the valve-control push ledger.\nconst p = msg.payload || {};\nconst devEui = String((p.deviceInfo && p.deviceInfo.devEui) || p.devEui || '').toUpperCase();\n// Profile codecs are unreliable in this fleet: p.object may be {} — fall back to the local Gen1 codec (same rule as strega-process-fn).\nconst raw0 = p.data ? Buffer.from(String(p.data), 'base64') : null;\nconst maybeRawGen2 = !!(raw0 && raw0.length >= 8 && raw0[5] === 0x06);\nconst decoded = (p.object && typeof p.object === 'object' && Object.keys(p.object).length > 0) ? p.object : VC.decodeGen1Fallback(global.get('fs'), p.data, Number(p.fPort));\nconst hasDecodedAck = !!(decoded && ('Schl_Port' in decoded || 'Schl_status_Port' in decoded || 'RTC_Port' in decoded || 'Ack_Port' in decoded));\nif (!devEui || (!hasDecodedAck && !maybeRawGen2)) return null;\nreturn (async () => {\n  const db = new dbHelper.Database('/data/db/farming.db');\n  try {\n    const r = await VC.handleUplink({ db: db, deviceEui: devEui, decoded: decoded || {}, fPort: Number(p.fPort), rawBytes: raw0, receivedAt: p.time || new Date().toISOString(), warn: function(m) { node.warn(m); } });\n    node.status({ fill: 'green', shape: 'dot', text: devEui + ' acked ' + r.acked });\n  } catch (e) { node.error('valve-ack: ' + (e && e.message ? e.message : e), msg); }\n  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }\n  return null;\n})();",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 480,
+    "y": 520,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "valve-once-tick",
+    "type": "inject",
+    "z": "valve-control-tab",
+    "name": "One-time opens tick (60s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 20,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 220,
+    "y": 620,
+    "wires": [
+      [
+        "valve-once-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-once-fn",
+    "type": "function",
+    "z": "valve-control-tab",
+    "name": "Fire due one-time opens",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return null;\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\nreturn (async () => {\n  const db = new dbHelper.Database('/data/db/farming.db');\n  try {\n    const r = await VC.runOnceTick({ db: db, now: new Date(), warn: function(m) { node.warn(m); } });\n    if (r.fired.length || r.skipped.length) node.status({ fill: 'green', shape: 'dot', text: 'fired ' + r.fired.length + ' skipped ' + r.skipped.length });\n    return r.fired.map(function(f) { return { payload: f.actuator_command, _stregaExpectationCommand: { command_type: 'OPEN_FOR_DURATION', device_eui: f.device_eui, duration_seconds: f.duration_minutes * 60, duration_minutes: f.duration_minutes, commandId: f.command_id, trigger: 'one_time' } }; });\n  } catch (e) { node.error('valve-once: ' + (e && e.message ? e.message : e)); return null; }\n  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }\n})().then(function(msgs) { return msgs && msgs.length ? [msgs] : null; });",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 500,
+    "y": 620,
+    "wires": [
+      [
+        "valve-once-link-out"
+      ]
+    ]
+  },
+  {
+    "id": "valve-once-link-out",
+    "type": "link out",
+    "z": "valve-control-tab",
+    "name": "To Actuator (one-time opens)",
+    "mode": "link",
+    "links": [
+      "5974306566e99a92"
+    ],
+    "x": 760,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "valve-observe-tick",
+    "type": "inject",
+    "z": "valve-control-tab",
+    "name": "Observe on-valve runs (60s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 35,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 220,
+    "y": 700,
+    "wires": [
+      [
+        "valve-observe-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-observe-fn",
+    "type": "function",
+    "z": "valve-control-tab",
+    "name": "Observe valve-fired opens + trigger backfill",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return null;\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\nreturn (async () => {\n  const db = new dbHelper.Database('/data/db/farming.db');\n  try {\n    const o = await VC.runObserveTick({ db: db, now: new Date(), warn: function(m) { node.warn(m); } });\n    const b = await VC.runTriggerBackfill({ db: db, warn: function(m) { node.warn(m); } });\n    if (o.created || b.updated) node.status({ fill: 'green', shape: 'dot', text: 'observed ' + o.created + ' backfilled ' + b.updated });\n  } catch (e) { node.error('valve-observe: ' + (e && e.message ? e.message : e)); }\n  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }\n  return null;\n})();",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 540,
+    "y": 700,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "valve-clock-tick",
+    "type": "inject",
+    "z": "valve-control-tab",
+    "name": "Valve clock sync tick (10m)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "600",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 90,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 220,
+    "y": 780,
+    "wires": [
+      [
+        "valve-clock-fn"
+      ]
+    ]
+  },
+  {
+    "id": "valve-clock-fn",
+    "type": "function",
+    "z": "valve-control-tab",
+    "name": "Valve clock sync + stale pushes",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return null;\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\nconst appId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();\nreturn (async () => {\n  const db = new dbHelper.Database('/data/db/farming.db');\n  try {\n    const h = await VC.runHousekeeping({ db: db, now: new Date(), appId: appId, warn: function(m) { node.warn(m); } });\n    const r = await VC.runClockTick({ db: db, now: new Date(), appId: appId, warn: function(m) { node.warn(m); } });\n    const all = h.messages.concat(r.messages);\n    if (all.length) node.status({ fill: 'green', shape: 'dot', text: 'clock/housekeeping pushes ' + all.length });\n    return appId ? all.map(function(m) { return { topic: m.topic, payload: m.payload }; }) : [];\n  } catch (e) { node.error('valve-clock: ' + (e && e.message ? e.message : e)); return []; }\n  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }\n})().then(function(msgs) { return msgs.length ? [msgs] : null; });",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 520,
+    "y": 780,
+    "wires": [
+      [
+        "valve-push-mqtt-out"
       ]
     ]
   }
