@@ -1,157 +1,220 @@
-# OSI Odoo test environment design
+# Odoo Test Environment Design
 
 **Date:** 2026-08-21
-
-**Status:** Approved in chat; awaiting review of this written specification
-
-**Target:** `https://odoo.opensmartirrigation.org` on the OSI test VPS
+**Status:** Approved; amended after adversarial review
+**Target host:** 157.180.43.235 (ubuntu-4gb-nbg1-1)
+**Public name:** odoo-test.opensmartirrigation.org
+**Source repository:** /home/phil/Repos/osi-odoo locally, /opt/osi-odoo on the VPS
 
 ## Purpose
 
-Open Smart Irrigation needs an Odoo 19 Community environment for customer delivery and internal operations. The first deployment will cover CRM, quotations, Swiss invoicing, procurement, serialized hardware stock, projects, timesheets, expenses, repairs, and maintenance. Project management receives the deepest configuration because OSI coordinates site surveys, hardware preparation, field installation, validation, training, and handover across each customer deployment.
+Build a disposable but operationally credible Odoo 19 Community environment for OSI's Swiss irrigation business. The environment must demonstrate the sales, inventory, accounting, CRM, project-template, and research workflows that OSI expects to use. It must also be safe to operate beside the existing osi-server deployment on the same VPS.
 
-The environment will run independently from `osi-server`. Operators enter Odoo business records manually. No farm, gateway, user, sensor, telemetry, or billing data will synchronize between the systems in this phase.
+The environment is a test system. It is not the production system of record, and no real customer or credential data belongs in it.
 
-## Ground truth
+## Fixed decisions
 
-The authorized target is `server.opensmartirrigation.org`, not the restricted production host `osicloud.ch`. A read-only inspection on 2026-08-21 found:
+- Odoo 19 Community runs from the official odoo:19.0-20260817 image.
+- PostgreSQL 17 runs from postgres:17.6-bookworm.
+- Odoo and PostgreSQL use distinct login roles. The Odoo role cannot create databases, roles, schemas, or extensions.
+- Odoo's filestore, PostgreSQL data, and rendered Odoo configuration use Docker named volumes.
+- The rendered configuration volume is populated by a one-shot root container, then owned by the image's odoo user with mode 0600. The runtime container mounts it read-only.
+- Secrets live in an operator-owned mode-0600 environment file on the VPS and are passed by environment-variable name. They are never embedded in Compose, committed files, generated command lines, or test fixtures.
+- The master and database passwords are generated with openssl rand -hex 32. Values containing NUL, CR, or LF are rejected; punctuation is otherwise valid.
+- Compose files do not set container_name.
+- The deployed Odoo service joins the external caddy-net network with the unique alias osi-odoo. Disposable projects use only their project-scoped internal network and never claim that alias.
+- Caddy terminates TLS. It sends /websocket and /websocket/* to Odoo port 8072, and all other traffic to port 8069.
+- DNS must have one normalized address set for the public name. A divergent AAAA or conflicting CNAME is a deployment blocker.
+- Odoo is configured for one HTTP worker, one cron worker, and one gevent worker. Per-process hard limits keep the three children within 1.5 GiB, leaving at least 512 MiB in the 2 GiB container limit for the master and transient overhead.
+- The database selector and database manager are disabled.
+- Odoo module tests run in disposable databases restored from a backup or created under a disposable Compose project. They never run against the live test database.
+- The implementation branch is feat/initial-odoo-environment; main is not used for development commits.
 
-| Resource | Test VPS state |
-|---|---|
-| Architecture | x86_64 |
-| CPU | 6 logical CPUs |
-| Memory | 11 GiB total, 6.9 GiB available |
-| Swap | 8 GiB total, 37 MiB used |
-| Root filesystem | 99 GiB total, 33 GiB free |
-| Container runtime | Docker 29.2.1, Compose 5.1.0 |
-| Reverse proxy | `caddy:2-alpine` on ports 80 and 443 |
-| Shared proxy network | `caddy-net` |
-| Caddy configuration | `/home/rocky/caddy/Caddyfile` |
+## Repository layout
 
-`odoo.opensmartirrigation.org` does not resolve as of the inspection. DNS must point that name to the same test VPS address as `server.opensmartirrigation.org` before Caddy can obtain a public certificate.
+    osi-odoo/
+    ├── .env.example
+    ├── .gitignore
+    ├── README.md
+    ├── compose.yaml
+    ├── compose.test-vps.yaml
+    ├── config/
+    │   └── odoo.conf.template
+    ├── postgres-init/
+    │   └── 010-odoo.sql.sh
+    ├── addons/
+    │   ├── osi_business_setup/
+    │   │   ├── __init__.py
+    │   │   ├── __manifest__.py
+    │   │   ├── hooks.py
+    │   │   ├── data/
+    │   │   │   ├── business_data.xml
+    │   │   │   └── project_data.xml
+    │   │   └── tests/
+    │   │       ├── __init__.py
+    │   │       ├── test_business_setup.py
+    │   │       └── test_projects.py
+    │   └── osi_business_demo/
+    │       ├── __init__.py
+    │       ├── __manifest__.py
+    │       ├── hooks.py
+    │       └── tests/
+    │           ├── __init__.py
+    │           └── test_demo.py
+    ├── scripts/
+    │   ├── lib.sh
+    │   ├── test-env
+    │   ├── render_config.py
+    │   ├── render-config
+    │   ├── init-database
+    │   ├── backup
+    │   ├── restore-rehearsal
+    │   ├── restore-production
+    │   ├── update-modules
+    │   ├── validate-backup
+    │   ├── check-dns
+    │   ├── test-bootstrap
+    │   ├── test-module
+    │   ├── test-business-setup
+    │   ├── test-projects
+    │   ├── test-demo
+    │   ├── test-demo-lifecycle
+    │   ├── test-init-database
+    │   ├── test-coexistence
+    │   ├── test-backup-restore
+    │   └── deploy
+    ├── systemd/
+    │   ├── osi-odoo-backup.service
+    │   └── osi-odoo-backup.timer
+    └── deploy/
+        └── Caddyfile.fragment
 
-## Repository and deployment layout
+Runtime files such as .env, .env.test, backup archives, restore staging directories, and rendered configuration do not belong in Git.
 
-The source will live in a new sibling repository at `/home/phil/Repos/osi-odoo`. The deployed copy will live at `/home/rocky/docker/osi-odoo` on the test VPS.
+## Runtime architecture
 
-```text
-osi-odoo/
-├── .env.example
-├── .gitignore
-├── README.md
-├── compose.yaml
-├── config/
-│   └── odoo.conf.template
-├── addons/
-│   ├── osi_business_setup/
-│   └── osi_business_demo/
-├── postgres-init/
-│   └── 10-create-odoo-role.sh
-├── scripts/
-│   ├── backup
-│   ├── deploy-test
-│   ├── init-database
-│   ├── restore
-│   └── update-modules
-└── tests/
-    ├── test_compose_config.sh
-    └── test_seed.py
-```
+### Containers and networks
 
-The repository will not vendor or fork `odoo/odoo`. It will use the official `odoo:19.0-20260817` image and mount OSI modules at `/mnt/extra-addons`. PostgreSQL will use the `postgres:16-alpine` series. Odoo publishes dated image tags, while the PostgreSQL tag deliberately follows patch releases within major version 16.
+The base Compose file defines:
 
-## Container topology
+- db, reachable only through the project-scoped internal network;
+- odoo, reachable only through the project-scoped internal network;
+- config-init, behind a tools profile, which renders /etc/odoo/odoo.conf into the configuration volume as root and gives it to the odoo user.
 
-Compose will define `odoo` and `db` services, an internal network, and two named volumes:
+The production override adds only the deployed odoo service to caddy-net with alias osi-odoo. Production commands always use both Compose files. Disposable verification commands use only the base file, a unique COMPOSE_PROJECT_NAME, and a unique database name.
 
-- `odoo_data` stores attachments and the filestore mounted at `/var/lib/odoo`.
-- `odoo_db` stores PostgreSQL at `/var/lib/postgresql/data`.
-- `odoo-internal` carries Odoo-to-PostgreSQL traffic and is not externally reachable.
-- Only the Odoo service joins the existing external `caddy-net` network.
-- Neither service publishes a host port. Caddy is the only ingress path.
+No service publishes host ports. Caddy reaches Odoo over caddy-net.
 
-Odoo will have a 2 CPU and 2 GiB container limit. PostgreSQL will have a 1 CPU and 1 GiB limit. Odoo will start with two HTTP workers and one cron worker; memory soft and hard limits will keep those workers inside the container allowance. These limits reserve capacity for the existing OSI backend, prediction services, Mosquitto, MongoDB, Jenkins, and their databases.
+### Named volumes
 
-Compose health checks will use `pg_isready` for PostgreSQL and an unauthenticated Odoo web endpoint for Odoo. The Odoo service will wait for a healthy database. Both services will use `restart: unless-stopped`.
-
-## Database and credential model
-
-The database name is `osi_odoo_test`. A shell-based PostgreSQL initializer will pass generated credentials to `psql` variables without writing them into SQL or logs. It will create a non-superuser, no-createdb application role and grant it the schema privileges Odoo needs. The bootstrap owner remains separate from the application role, which prevents the Odoo process from creating or dropping databases.
-
-The remote `.env` will be mode `0600` and will contain generated values for:
-
-- PostgreSQL bootstrap password
-- Odoo application database password
-- Odoo database-manager master password
-- Odoo administrator login and password
-
-`.env.example` contains names and safe descriptions only. A render script will read `.env` and write the database-manager password into an ignored, mode-`0600` runtime configuration file. No deployed value enters Git, the container command line, shell history, documentation, or command output.
-
-The initialization command will create the fixed database without standard Odoo demo data, install `osi_business_setup` and `osi_business_demo`, set the administrator login from the environment, and stop. Public routing is enabled only after initialization succeeds. Normal runtime sets the exact database name and filter, disables the database list and manager, and enables proxy mode. Odoo's deployment guide requires this shape for an internet-facing single-database service.
-
-## Reverse proxy and DNS
-
-Caddy will receive a new site block in `/home/rocky/caddy/Caddyfile`:
-
-```caddyfile
-odoo.opensmartirrigation.org {
-    handle /websocket* {
-        reverse_proxy osi-odoo:8072
-    }
-
-    handle {
-        reverse_proxy osi-odoo:8069
-    }
-}
-```
-
-The container name or network alias will be `osi-odoo`. Odoo proxy mode will trust Caddy's forwarded scheme, host, and client address. Caddy redirects HTTP to HTTPS and manages the certificate after DNS resolves. The deployment will back up the current Caddyfile, validate the amended file with `caddy validate`, and reload Caddy without restarting unrelated services.
-
-If DNS is not ready, the Odoo containers may start and pass internal health checks, but the deployment remains incomplete. It must not expose port 8069 as a workaround.
-
-## Installed Community modules
-
-`osi_business_setup` will depend on the following Odoo Community modules and install their dependencies:
-
-| Area | Modules | OSI use |
+| Volume | Mount | Owner and access |
 |---|---|---|
-| Relationships | `contacts`, `crm` | Farms, partners, suppliers, opportunities |
-| Commercial | `sale_management`, `account` | Quotations, sales orders, CHF invoices |
-| Procurement | `purchase` | Requests for quotation and purchase orders |
-| Hardware | `stock` | Warehouses, receipts, deliveries, serial tracking |
-| Delivery work | `project`, `hr_timesheet`, `sale_project`, `sale_timesheet` | Projects, tasks, milestones, planned and billable work |
-| People and costs | `hr`, `hr_expense` | Employees and project-related expenses |
-| After-sales | `repair`, `maintenance` | Customer returns and internal preventive maintenance |
-| Coordination | `calendar`, `mail` | Activities, meetings, discussions, notifications |
-| Localization | `l10n_ch` | Switzerland and CHF accounting defaults |
+| odoo_db | PostgreSQL data directory | PostgreSQL image default |
+| odoo_data | /var/lib/odoo | odoo image user, runtime read/write |
+| odoo_config | /etc/odoo | populated as root, file owned by odoo:odoo, mode 0600, runtime read-only |
 
-Enterprise-only Helpdesk, Field Service, Planning, Subscriptions, Documents, Sign, and Studio are excluded. Project tasks will cover support and field-service work until a measured need justifies an additional Community module or an Enterprise subscription.
+The configuration renderer writes to a temporary file in the named volume, calls fsync, changes ownership and mode, and atomically replaces odoo.conf. It rejects unresolved template markers and NUL, CR, or LF in substituted values.
 
-## Company and catalog setup
+### PostgreSQL ownership
 
-The main company will be `Open Smart Irrigation`, with country Switzerland, currency CHF, and time zone Europe/Zurich. The setup will not invent a street address, VAT number, bank account, legal registration number, or tax rate. An administrator must enter and validate those facts before issuing a real invoice.
+odoo_admin is the bootstrap and recovery login. odoo_owner is a separate NOLOGIN database owner. odoo_app owns the public schema and is Odoo's login role. The runtime Odoo container receives only odoo_app credentials.
 
-One warehouse named `OSI Warehouse` will contain a stock location and standard receipt and delivery operations. These stocked products will use individual serial tracking:
+Bootstrap performs these operations from the official PostgreSQL initialization hook:
 
-| Internal reference | Product |
+1. create or alter odoo_owner as NOLOGIN, NOSUPERUSER, NOCREATEDB, and NOCREATEROLE;
+2. create or alter odoo_app with LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+3. create the application database owned by odoo_owner;
+4. revoke public database and schema creation rights;
+5. change the public schema owner to odoo_app;
+6. grant odoo_app connect and temporary-database rights;
+7. create pg_trgm as odoo_admin;
+8. grant odoo_app use and create rights on public.
+
+The bootstrap probe must prove that odoo_app can create and drop an application table and cannot create a database, role, schema, or extension.
+
+unaccent is not enabled in this environment. If a later Odoo configuration enables it, its extension must be added to the privileged bootstrap first.
+
+## Odoo process and memory budget
+
+The runtime uses:
+
+    workers = 1
+    max_cron_threads = 1
+    limit_memory_soft = 402653184
+    limit_memory_hard = 536870912
+    limit_memory_soft_gevent = 402653184
+    limit_memory_hard_gevent = 536870912
+
+Odoo's prefork mode creates an HTTP child, a cron child, and a gevent child. Three hard limits total 1,610,612,736 bytes (1.5 GiB). The Compose memory limit is 2 GiB, leaving 512 MiB for the master and overhead. Deployment stops if the rendered values differ from this budget or the host lacks enough free memory to start the service safely.
+
+## Database lifecycle
+
+Configuration rendering and PostgreSQL bootstrap happen before either custom module exists.
+
+Final database initialization happens only after both modules and their tests exist. scripts/init-database implements this state machine:
+
+| Observed module state | Action |
 |---|---|
-| `OSI-GATEWAY` | OSI Gateway |
-| `OSI-KIWI` | KIWI Sensor |
-| `OSI-CLOVER` | Tektelic Clover Sensor |
-| `OSI-LSN50` | Dragino LSN50 Sensor Node |
-| `OSI-S2120` | SenseCAP S2120 Weather Sensor |
-| `OSI-LORAIN` | Aqua-Scope LoRain Gauge |
-| `OSI-STREGA` | STREGA Valve |
+| Odoo registry absent | install osi_business_setup,osi_business_demo |
+| Registry present; both modules absent or uninstalled | install both |
+| Both modules installed | upgrade both |
+| Only one installed, either pending install/removal/upgrade, or any other mixed state | fail with ERROR: partial OSI module state; operator action required |
 
-The serial-number field will hold the physical unit identifier used by operations. This phase will not add an Odoo device model or copy OSI gateway and sensor records from `osi-server`.
+The command passes OSI_ODOO_ADMIN_LOGIN and OSI_ODOO_ADMIN_PASSWORD by environment-variable name. It never prints their values. It exits before starting the long-running Odoo service if configuration validation, database health, or module initialization fails.
 
-Service products will include site assessment, installation and commissioning, operator training, and maintenance and support. Confirming installation and commissioning on a sales order will create the customer deployment project from the OSI template.
+## osi_business_setup
 
-## Project-management configuration
+The module depends on:
 
-Odoo is the source of truth for commercial delivery, field work, training, maintenance, and grant work. GitHub remains the source of truth for product issues, source changes, pull requests, and software releases. Staff may link a GitHub issue URL in a task description, but the setup will not synchronize or duplicate engineering tickets.
+- base
+- contacts
+- crm
+- sale_management
+- purchase
+- stock
+- account
+- project
+- hr
+- hr_expense
+- repair
+- maintenance
+- calendar
+- hr_timesheet
+- sale_project
+- sale_timesheet
+- l10n_ch
 
-The add-on will create five project templates:
+### Company and accounting
+
+The module configures the main company as:
+
+- Name: Open Smart Irrigation
+- Country: Switzerland
+- Currency: CHF
+- Company calendar timezone: Europe/Zurich
+- Administrator timezone: Europe/Zurich
+
+It explicitly loads the Swiss chart with:
+
+    env["account.chart.template"].try_loading(
+        "ch", company=company, install_demo=False
+    )
+
+The hook fails closed if the company already has a non-Swiss chart. Tests verify the ch template, Swiss fiscal country, CHF currency, a sales journal, active Swiss taxes, and receivable, payable, income, and expense accounts. Locale alone is not accepted as proof of accounting setup.
+
+### Warehouse
+
+The module does not create a second warehouse. stock creates the default warehouse with the company. The hook requires exactly one warehouse for the main company, renames it OSI Warehouse, changes its code to OSI, and registers osi_business_setup.warehouse_osi for that existing record. Zero or multiple warehouses cause an explicit failure.
+
+### Catalog
+
+The module creates seven stockable, serial-tracked products with stable XML IDs and references: OSI Gateway (OSI-GATEWAY), KIWI Sensor (OSI-KIWI), Tektelic Clover Sensor (OSI-CLOVER), Dragino LSN50 Sensor Node (OSI-LSN50), SenseCAP S2120 Weather Sensor (OSI-S2120), Aqua-Scope LoRain Gauge (OSI-LORAIN), and STREGA Valve (OSI-STREGA).
+
+It also creates four services: Site Assessment, Installation and Commissioning, Operator Training, and Maintenance and Support. Services use ordered-quantity invoicing. Installation and Commissioning creates a project from the customer deployment template.
+
+### Project templates
+
+The module creates five project templates:
 
 1. Customer irrigation deployment
 2. Gateway and sensor commissioning
@@ -159,92 +222,141 @@ The add-on will create five project templates:
 4. Training and handover
 5. Research or grant work package
 
-Projects use the stages Backlog, Ready, In Progress, Field Validation, Blocked, and Done. Tags cover hardware, firmware, edge OS, cloud, agronomy, deployment, training, and support.
+Only these five project.project records have is_template=True. Their contained project.task records are ordinary tasks with is_template=False, matching Odoo's own project-template fixtures. Stage, tag, milestone, dependency, assignee, and allocated-hours relationships are explicit in XML.
 
-The customer deployment template contains these tasks and dependencies:
+The Installation and Commissioning service uses service_tracking="project_only" and links to the customer deployment template. Confirming a sales order for it must create a normal project and copied tasks, milestones, dependencies, stages, tags, and allocated hours.
 
-1. Confirm scope and customer contacts
-2. Complete site survey
-3. Prepare gateway and devices
-4. Configure connectivity
-5. Install gateway
-6. Install and assign sensors or valves
-7. Validate uplinks and measurements
-8. Train operators
-9. Complete handover
+## osi_business_demo
 
-Tasks will support assignees, deadlines, planned hours, timesheets, subtasks, milestones, dependencies, recurring work, chatter, and attachments. Customer-facing projects may enable portal visibility. Internal research and grant projects remain private.
+The demo module depends on osi_business_setup. Its post_init_hook calls a single ensure_demo(env) function. Calling ensure_demo twice must return the same root records and create no duplicates.
 
-Milestones for a deployment are Site ready, Hardware installed, Data validated, and Handover accepted. Timesheets recorded against a billable installation project flow to the related sales order through standard `sale_timesheet` behavior.
+The hook creates:
 
-## Demonstration data
+- one demo customer;
+- one demo supplier;
+- one CRM opportunity;
+- one draft quotation;
+- one confirmed sales order;
+- one completed inbound receipt that puts one serial-numbered OSI Gateway in stock;
+- one completed delivery that consumes that serial without negative stock;
+- one draft customer invoice;
+- one generated customer project copied from the Customer irrigation deployment template.
 
-Odoo's standard demo data will be disabled because the service is internet-facing. `osi_business_demo` will instead create OSI-specific business records without users or passwords:
+The stock workflow uses Odoo inventory records, lot/serial tracking, move lines, and Odoo 19's stock.move.line.quantity field. The delivery must be reserved before validation.
 
-- Fictional customer `Demo Farm Zürich`
-- Fictional supplier `Demo Sensor Supplier AG`
-- One CRM opportunity
-- One draft quotation
-- One confirmed order with serialized hardware
-- One completed demonstration delivery
-- One draft customer invoice
-- One customer deployment project populated from the template
+Every demo-owned root and generated child has a stable external ID or belongs to a registered root through an asserted cascade. The inventory includes CRM, quotations and lines, confirmed sales and lines, invoice and lines, receipt and delivery pickings, moves, move lines, lot, quants, procurement group, generated project, tasks, milestones, and every demo external ID.
 
-Every demonstration partner and transaction will carry a `DEMO` marker in its reference or name. Records created through an initialization hook will receive explicit `ir.model.data` identifiers. Uninstalling `osi_business_demo` can therefore remove its records through Odoo's module ownership mechanism without removing the setup module.
+Uninstalling osi_business_demo must remove all demo-owned records and external IDs while leaving osi_business_setup records intact. Reinstalling it must recreate exactly one clean workflow. Tests exercise ensure_demo twice, module upgrade, uninstall, absence checks, reinstall, and count checks.
 
-## Backups and recovery
+## Backup and recovery
 
-The deployment will create `/home/rocky/backups/osi-odoo` with mode `0700`. A daily host timer will call the backup script and retain 14 successful daily sets. Each set contains:
+### Backup contract
 
-- a custom-format `pg_dump` of `osi_odoo_test`;
-- a compressed archive of the Odoo filestore;
-- a manifest with UTC timestamp, image references, database dump checksum, and filestore checksum.
+A backup is one quiesced, paired unit:
 
-The script writes into a temporary directory and renames it only after both artifacts and checksums succeed. Failed or partial backups do not count toward retention.
+- PostgreSQL custom-format dump;
+- archive of the matching odoo_data volume;
+- manifest.json;
+- SHA256SUMS.
 
-The restore script requires an explicit backup path and typed confirmation. It stops Odoo, restores PostgreSQL and the matching filestore as a pair, starts Odoo, then runs the health and login-page checks. The deployment will perform one restore rehearsal into a disposable database and filestore before reporting backup readiness.
+The manifest records:
 
-## Failure behavior
+- schema version;
+- UTC start and completion timestamps;
+- database name;
+- database dump filename;
+- filestore archive filename;
+- Git commit;
+- both configured image references;
+- both resolved image digests;
+- source volume names;
+- whether Odoo was running before backup;
+- SHA-256 of each payload.
 
-Initialization is idempotent. It checks database and module state before creating records, and it uses stable external identifiers for every configured object. Re-running initialization updates the OSI modules; it does not create duplicate stages, tags, products, or templates.
+The backup script stops Odoo before the database dump and volume archive. A trap restarts it only when it was running before the backup. PostgreSQL stays running for pg_dump. All Compose execs use -T. A failed dump, archive, digest calculation, or manifest validation leaves no directory that can be mistaken for a complete backup.
 
-Deployment stops on any failed preflight, Compose validation, module installation, health check, Caddy validation, or HTTPS check. It does not remove old volumes, prune Docker images, restart the existing OSI stack, or alter the `osi-server` PostgreSQL container.
+### Timer
 
-The deploy script backs up the previous deployed repository and Caddyfile before replacement. A failed Odoo update rolls back the code and image reference while preserving the database and filestore for diagnosis. A database-changing module upgrade requires a fresh paired backup; rollback then restores both database and filestore from that backup.
+osi-odoo-backup.service is a root system service that executes /opt/osi-odoo/scripts/backup as user rocky from /opt/osi-odoo. osi-odoo-backup.timer runs daily with Persistent=true. Deployment installs both units, calls systemctl daemon-reload, enables and starts the timer, verifies the next trigger, and invokes the service once non-interactively.
 
-## Verification
+### Restore modes
 
-Local verification must pass before transfer:
+There are two separate commands:
 
-1. Python syntax and Odoo module manifest checks.
-2. Shell syntax checks for every script.
-3. `docker compose config` with non-secret test values.
-4. A clean ephemeral startup with `--without-demo=all`.
-5. Installation tests for both OSI modules.
-6. Assertions for Switzerland, CHF, module set, warehouse, serial-tracked products, stages, tags, templates, task dependencies, milestones, and demo records.
-7. A second module upgrade with no duplicate configuration or records.
-8. Backup creation and restore into disposable volumes.
+- restore-rehearsal BACKUP_DIR creates a unique disposable Compose project, database volume, filestore volume, and target database. It never stops or joins the live runtime. It restores, starts one-off Odoo, runs functional assertions, and removes the explicitly validated disposable project and volumes.
+- restore-production BACKUP_DIR --confirm-replace-live validates the pair through an isolated staged rehearsal, takes and retains a fresh paired backup of the previous live state, then stops Odoo and replaces the live database and filestore. It starts the replacement only after registry checks and prints the retained recovery backup after health checks pass.
 
-Test-VPS verification must pass without disrupting existing containers:
+Neither command accepts a manifest whose database name, image metadata, payload names, or checksums are missing or inconsistent.
 
-1. Existing container inventory recorded before and after deployment.
-2. Odoo and its PostgreSQL service healthy within their resource limits.
-3. Existing `server.opensmartirrigation.org`, MQTT, and Jenkins routes still respond as before.
-4. `https://odoo.opensmartirrigation.org/web/login` returns 200 over a valid TLS certificate.
-5. HTTP redirects to HTTPS.
-6. `/web/database/manager` and database listing are unavailable.
-7. PostgreSQL has no published port, and the Odoo application role is neither superuser nor createdb.
-8. Login succeeds with the generated administrator account.
-9. Core apps, Swiss company settings, project templates, catalog, and marked demonstration workflow are visible.
-10. A backup completes, its checksums validate, and the disposable restore rehearsal succeeds.
+### Upgrade failure contract
 
-## Non-goals
+scripts/update-modules takes a paired backup, pulls the configured images, restores that pair into a disposable project, and runs both module updates and all named module tests there. Only after that rehearsal passes does it stop live Odoo and run the live module update. It restarts only after the live update and health checks pass.
 
-This phase does not provide production hosting, high availability, outbound email delivery, payment providers, Swiss tax or payroll sign-off, SSO, GitHub integration, `osi-server` synchronization, customer migration, real inventory import, or an Odoo Enterprise subscription. It also does not modify either existing OSI database.
+If a module update fails:
+
+- Odoo remains stopped;
+- the command records the exit code, candidate image references and digests, Git commit, and backup directory;
+- code or image rollback is not automatic;
+- the operator first runs restore-production BACKUP_DIR --confirm-replace-live;
+- only after the paired restore succeeds may the operator check out prior code or images and restart.
+
+Tests inject a failing module update and prove that Odoo stays stopped and that the recorded backup restores in rehearsal mode.
+
+## Caddy, DNS, and coexistence
+
+Caddy uses a named path matcher:
+
+    odoo-test.opensmartirrigation.org {
+        encode zstd gzip
+
+        @websocket path /websocket /websocket/*
+        reverse_proxy @websocket osi-odoo:8072
+        reverse_proxy osi-odoo:8069
+    }
+
+Deployment validates the full host Caddyfile before reload. It proves HTTPS login, dbfilter, disabled database-manager routes, the WebSocket health route, asset loading, and logs without proxy-loop or upstream-resolution errors.
+
+DNS validation normalizes every A and AAAA response. The only accepted address set is the VPS's actual public address set. Any conflicting CNAME, divergent IPv6 target, or unexpected additional address stops deployment before Caddy reload.
+
+Coexistence is proved by starting two distinct disposable base-Compose projects simultaneously and showing unique containers, networks, and volumes. Neither may have a caddy-net attachment or the osi-odoo alias.
+
+## Verification and stop conditions
+
+Work stops rather than proceeding when any of these conditions occurs:
+
+- repository or branch does not match the expected target;
+- required environment variables are missing or contain NUL, CR, or LF;
+- rendered configuration is not readable by the runtime odoo user at mode 0600;
+- PostgreSQL privilege probes do not fail and pass exactly as specified;
+- module test discovery does not include the named test classes;
+- accounting, warehouse, project-template, demo-stock, cleanup, or idempotence assertions fail;
+- a live database is selected for a destructive or module-test command;
+- backup halves, image metadata, manifest, or checksums do not match;
+- DNS has a conflicting record;
+- Caddy validation fails;
+- the production alias is present in a disposable project;
+- an update failure has not been repaired with a paired restore.
+
+Acceptance requires fresh evidence for every item above, a successful rehearsal restore, a successful timer invocation, and a clean git diff --check.
+
+## Review rulings
+
+All eighteen required adversarial-review findings are incorporated in the implementation plan and this specification.
+
+Optional rulings:
+
+- O1: incorporated by recording configured image references and resolved digests in every backup and deployment report. Source Compose remains pinned to immutable version tags because digest pinning across host architectures is an operator-maintenance decision.
+- O2: incorporated with exact /websocket and /websocket/* matchers.
+- O3: incorporated with normalized A, AAAA, and CNAME validation.
+- O4: incorporated with hex-generated secrets and rejection limited to NUL, CR, and LF.
+- O5: pg_trgm is created by privileged bootstrap. unaccent is intentionally not created because it is not enabled.
+- O6: incorporated with deterministic file-map checks, a required shellcheck preflight, and the repo-local anti-slop checker command.
 
 ## References
 
-- [Odoo source repository](https://github.com/odoo/odoo)
-- [Official Odoo Docker image](https://hub.docker.com/_/odoo)
-- [Odoo 19 source installation](https://www.odoo.com/documentation/19.0/administration/on_premise/source.html)
-- [Odoo 19 deployment and security](https://www.odoo.com/documentation/19.0/administration/on_premise/deploy.html)
+- Odoo 19 deployment guidance: <https://www.odoo.com/documentation/19.0/administration/on_premise/deploy.html>
+- Odoo 19 project templates: <https://www.odoo.com/documentation/19.0/applications/services/project/project_management/project_templates.html>
+- Odoo 19 service invoicing and project creation: <https://www.odoo.com/documentation/19.0/applications/sales/sales/invoicing/configured_milestones.html>
+- Official Odoo image: <https://github.com/odoo/docker/tree/master/19.0>
+- Docker Compose project isolation: <https://docs.docker.com/compose/how-tos/project-name/>
+- Caddy request matchers: <https://caddyserver.com/docs/caddyfile/matchers>
