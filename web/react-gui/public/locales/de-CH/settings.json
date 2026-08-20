@@ -18,6 +18,7 @@
   "predictionAdvisoryWarning": "Experimentell, nicht für Produktion verwenden!",
   "waterCard": "Wasserbilanz",
   "irrigationSchedule": "Bewässerungsplan",
+  "valveControl": "Ventilsteuerung",
   "environmentCard": "Umgebung & Wettervorhersage",
   "schedulerDisableConfirm": "Alle aktiven Bewässerungspläne deaktivieren, bevor dieses Modul ausgeblendet wird?",
   "schedulerDisableSuccess_one": "{{count}} aktiver Plan deaktiviert.",

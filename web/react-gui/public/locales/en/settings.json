@@ -18,6 +18,7 @@
   "predictionAdvisoryWarning": "Experimental, do not use for production!",
   "waterCard": "Water balance",
   "irrigationSchedule": "Irrigation schedule",
+  "valveControl": "Valve control",
   "environmentCard": "Environment & weather forecast",
   "schedulerDisableConfirm": "Disable all active irrigation schedules before hiding this module?",
   "schedulerDisableSuccess_one": "Disabled {{count}} active schedule.",

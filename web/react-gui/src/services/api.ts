@@ -62,6 +62,13 @@ import type {
   SupportRequest,
   SupportRequestCreateRequest,
   SupportRequestCreateResponse,
+  StregaGeneration,
+  ValveSummary,
+  ValveSchedule,
+  ValveSchedulesResponse,
+  ValveScheduleInput,
+  ValveSchedulerStatus,
+  ValvePlanError,
 } from '../types/farming';
 
 type ApiErrorPayload = {
@@ -1061,6 +1068,219 @@ export const accountLinkAPI = {
 export const environmentAPI = {
   getSummary: (zoneId: number): Promise<ZoneEnvironmentSummary> =>
     api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
+};
+
+// ---- Valve control ----
+
+function normaliseValvePushState(row: any): ValveSummary['pushState'] {
+  return {
+    queued: Number(row?.queued ?? 0),
+    acked: Number(row?.acked ?? 0),
+    failed: Number(row?.failed ?? 0),
+    lastPlanQueuedAt: row?.last_plan_queued_at ?? null,
+    lastPlanAckedAt: row?.last_plan_acked_at ?? null,
+  };
+}
+
+function normaliseValveActiveActuation(row: any): ValveSummary['activeActuation'] {
+  if (!row) return null;
+  return {
+    expectationId: String(row.expectation_id ?? ''),
+    reconciliationState: String(row.reconciliation_state ?? ''),
+    commandedAt: row.commanded_at,
+    expectedCloseAt: row.expected_close_at,
+    durationSeconds: row.duration_seconds ?? null,
+    trigger: row.trigger ?? null,
+  };
+}
+
+function normaliseValveNextRun(row: any): ValveSummary['nextRun'] {
+  if (!row) return null;
+  return {
+    at: row.at,
+    kind: row.kind,
+    minutes: Number(row.minutes),
+    scheduleUuid: String(row.scheduleUuid ?? row.schedule_uuid ?? ''),
+  };
+}
+
+function normaliseValveSummary(row: any): ValveSummary {
+  return {
+    deviceEui: String(row?.device_eui ?? '').toUpperCase(),
+    name: row?.name ?? '',
+    zoneId: row?.zone_id ?? null,
+    zoneName: row?.zone_name ?? null,
+    zoneUuid: row?.zone_uuid ?? null,
+    timezone: row?.timezone ?? 'UTC',
+    currentState: row?.current_state ?? null,
+    targetState: row?.target_state ?? null,
+    stregaGeneration: row?.strega_generation ?? 'GEN1',
+    flowRateLpm: row?.flow_rate_lpm ?? null,
+    flowRateSource: row?.flow_rate_source ?? null,
+    defaultOpenMinutes: row?.default_open_minutes ?? null,
+    schedulerStatus: row?.scheduler_status ?? 'ACTIVE',
+    skipTodayDate: row?.skip_today_date ?? null,
+    lastUplinkAt: row?.last_uplink_at ?? null,
+    activeActuation: normaliseValveActiveActuation(row?.active_actuation),
+    recentStaleState: row?.recent_stale_state ?? null,
+    nextRun: normaliseValveNextRun(row?.next_run),
+    scheduleCount: Number(row?.schedule_count ?? 0),
+    pushState: normaliseValvePushState(row?.push_state),
+    lastClockSyncAckedAt: row?.last_clock_sync_acked_at ?? null,
+  };
+}
+
+function normaliseValveSchedule(row: any): ValveSchedule {
+  return {
+    scheduleUuid: String(row?.schedule_uuid ?? row?.scheduleUuid ?? ''),
+    deviceEui: String(row?.device_eui ?? row?.deviceEui ?? '').toUpperCase(),
+    kind: row?.kind,
+    label: row?.label ?? null,
+    weekdaysMask: row?.weekdays_mask ?? row?.weekdaysMask ?? null,
+    startTime: row?.start_time ?? row?.startTime ?? null,
+    fireAt: row?.fire_at ?? row?.fireAt ?? null,
+    durationMinutes: Number(row?.duration_minutes ?? row?.durationMinutes ?? 0),
+    timezone: row?.timezone ?? '',
+    enabled: Boolean(row?.enabled),
+    onceState: row?.once_state ?? row?.onceState ?? null,
+  };
+}
+
+function normaliseValveCompiledWindow(w: any) {
+  return {
+    onH: Number(w?.onH ?? 0),
+    onM: Number(w?.onM ?? 0),
+    offH: Number(w?.offH ?? 0),
+    offM: Number(w?.offM ?? 0),
+    scheduleUuid: String(w?.scheduleUuid ?? ''),
+    label: w?.label ?? null,
+  };
+}
+
+function normaliseValvePlanError(e: any): ValvePlanError {
+  return {
+    code: e?.code,
+    weekday: e?.weekday ?? null,
+    conflicts: Array.isArray(e?.conflicts) ? e.conflicts.map(String) : [],
+    labels: Array.isArray(e?.labels) ? e.labels.map((l: unknown) => (l == null ? null : String(l))) : [],
+  };
+}
+
+function normaliseValveWeekdayPush(row: any) {
+  return {
+    purpose: row?.purpose ?? '',
+    weekday: row?.weekday ?? null,
+    state: row?.state,
+    queuedAt: row?.queued_at ?? row?.queuedAt,
+    ackedAt: row?.acked_at ?? row?.ackedAt ?? null,
+    error: row?.error ?? null,
+  };
+}
+
+function normaliseValveSchedules(data: any): ValveSchedulesResponse {
+  return {
+    schedules: Array.isArray(data?.schedules) ? data.schedules.map(normaliseValveSchedule) : [],
+    compiled: {
+      days: Array.isArray(data?.compiled?.days)
+        ? data.compiled.days.map((day: any[]) => (Array.isArray(day) ? day.map(normaliseValveCompiledWindow) : []))
+        : [[], [], [], [], [], [], []],
+      errors: Array.isArray(data?.compiled?.errors) ? data.compiled.errors.map(normaliseValvePlanError) : [],
+    },
+    pushState: Array.isArray(data?.push_state) ? data.push_state.map(normaliseValveWeekdayPush) : [],
+    settings: {
+      stregaGeneration: data?.settings?.strega_generation ?? 'GEN1',
+      flowRateLpm: data?.settings?.flow_rate_lpm ?? null,
+      flowRateSource: data?.settings?.flow_rate_source ?? null,
+      defaultOpenMinutes: data?.settings?.default_open_minutes ?? null,
+    },
+  };
+}
+
+function toScheduleBody(input: Partial<ValveScheduleInput>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (input.kind !== undefined) body.kind = input.kind;
+  if (input.label !== undefined) body.label = input.label;
+  if (input.weekdaysMask !== undefined) body.weekdays_mask = input.weekdaysMask;
+  if (input.startTime !== undefined) body.start_time = input.startTime;
+  if (input.fireAt !== undefined) body.fire_at = input.fireAt;
+  if (input.durationMinutes !== undefined) body.duration_minutes = input.durationMinutes;
+  if (input.enabled !== undefined) body.enabled = input.enabled;
+  return body;
+}
+
+/** A 422 `plan_conflict` response from a schedule create/update, carrying the compiled
+ * conflict details (with schedule labels attached server-side) so the GUI can show which
+ * existing windows collide instead of a bare error string. */
+export class ValvePlanConflictError extends Error {
+  details: ValvePlanError[];
+  constructor(details: ValvePlanError[]) {
+    super('Schedule conflicts with an existing window');
+    this.name = 'ValvePlanConflictError';
+    this.details = details;
+  }
+}
+
+function rethrowValveError(error: unknown): never {
+  if (
+    axios.isAxiosError<{ error?: string; details?: unknown }>(error)
+    && error.response?.status === 422
+    && error.response.data?.error === 'plan_conflict'
+  ) {
+    const details = Array.isArray(error.response.data?.details)
+      ? error.response.data.details.map(normaliseValvePlanError)
+      : [];
+    throw new ValvePlanConflictError(details);
+  }
+  throw error;
+}
+
+export const valvesAPI = {
+  list: async (): Promise<ValveSummary[]> => {
+    const r = await api.get<{ valves: unknown[] }>('/api/valves');
+    return (r.data?.valves ?? []).map(normaliseValveSummary);
+  },
+  schedules: async (eui: string): Promise<ValveSchedulesResponse> => {
+    const r = await api.get(`/api/valves/${eui}/schedules`);
+    return normaliseValveSchedules(r.data);
+  },
+  createSchedule: async (eui: string, input: ValveScheduleInput): Promise<{ schedule: ValveSchedule; pushesQueued: number }> => {
+    try {
+      const r = await api.post(`/api/valves/${eui}/schedules`, toScheduleBody(input));
+      return { schedule: normaliseValveSchedule(r.data.schedule), pushesQueued: Number(r.data.pushes_queued ?? 0) };
+    } catch (error) {
+      return rethrowValveError(error);
+    }
+  },
+  updateSchedule: async (eui: string, uuid: string, patch: Partial<ValveScheduleInput>): Promise<{ pushesQueued: number }> => {
+    try {
+      const r = await api.put(`/api/valves/${eui}/schedules/${uuid}`, toScheduleBody(patch));
+      return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+    } catch (error) {
+      return rethrowValveError(error);
+    }
+  },
+  deleteSchedule: async (eui: string, uuid: string): Promise<{ pushesQueued: number }> => {
+    const r = await api.delete(`/api/valves/${eui}/schedules/${uuid}`);
+    return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+  },
+  resendPlan: async (eui: string): Promise<{ pushesQueued: number }> => {
+    const r = await api.post(`/api/valves/${eui}/plan/resend`, {});
+    return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+  },
+  setSchedulerStatus: async (eui: string, status: ValveSchedulerStatus): Promise<void> => {
+    await api.post(`/api/valves/${eui}/scheduler-status`, { status });
+  },
+  updateSettings: async (
+    eui: string,
+    patch: { stregaGeneration?: StregaGeneration; flowRateLpm?: number | null; flowRateSource?: 'measured' | 'estimated'; defaultOpenMinutes?: number },
+  ): Promise<void> => {
+    await api.put(`/api/valves/${eui}/settings`, {
+      strega_generation: patch.stregaGeneration,
+      flow_rate_lpm: patch.flowRateLpm,
+      flow_rate_source: patch.flowRateSource,
+      default_open_minutes: patch.defaultOpenMinutes,
+    });
+  },
 };
 
 export const analysisAPI = {

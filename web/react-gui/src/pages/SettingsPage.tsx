@@ -411,6 +411,13 @@ export function SettingsPage() {
               offLabel={t('off')}
             />
             <ModuleRow
+              label={t('valveControl')}
+              enabled={preferences.modules.valveControl}
+              onChange={(enabled) => updateModule('valveControl', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
+            <ModuleRow
               label={t('environmentCard')}
               enabled={preferences.modules.environment}
               onChange={(enabled) => updateModule('environment', enabled)}

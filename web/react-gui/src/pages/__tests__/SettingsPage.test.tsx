@@ -62,6 +62,7 @@ vi.mock('react-i18next', () => ({
         waterCard: 'Water balance',
         environmentCard: 'Environment & weather forecast',
         irrigationSchedule: 'Irrigation schedule',
+        valveControl: 'Valve control',
         schedulerDisableConfirm: 'Disable all active irrigation schedules before hiding this module?',
         schedulerDisableSuccess_one: 'Disabled {{count}} active schedule.',
         schedulerDisableSuccess_other: 'Disabled {{count}} active schedules.',
@@ -201,17 +202,19 @@ describe('SettingsPage', () => {
     expect(within(modules).getByText('Prediction advisory')).toBeInTheDocument();
     expect(within(modules).getByText('Experimental, do not use for production!')).toBeInTheDocument();
     const moduleRows = within(modules).getAllByRole('group');
-    expect(moduleRows).toHaveLength(4);
+    expect(moduleRows).toHaveLength(5);
     expect(moduleRows.map((row) => row.textContent)).toEqual([
       expect.stringContaining('Prediction advisory'),
       expect.stringContaining('Water balance'),
       expect.stringContaining('Irrigation schedule'),
+      expect.stringContaining('Valve control'),
       expect.stringContaining('Environment & weather forecast'),
     ]);
     expect(within(moduleRows[0]).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[1]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[2]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[3]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(moduleRows[4]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('persists display-only module toggles locally', () => {
@@ -221,13 +224,14 @@ describe('SettingsPage', () => {
     const moduleRows = within(modules).getAllByRole('group');
     fireEvent.click(within(moduleRows[0]).getByRole('button', { name: 'On' }));
     fireEvent.click(within(moduleRows[1]).getByRole('button', { name: 'Off' }));
-    fireEvent.click(within(moduleRows[3]).getByRole('button', { name: 'Off' }));
+    fireEvent.click(within(moduleRows[4]).getByRole('button', { name: 'Off' }));
 
     expect(readDisplayPreferences().modules).toEqual({
       predictionAdvisory: true,
       waterCard: false,
       environment: false,
       schedulerUi: true,
+      valveControl: true,
     });
     expect(irrigationZonesAPI.disableAllSchedules).not.toHaveBeenCalled();
   });

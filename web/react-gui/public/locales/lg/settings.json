@@ -18,6 +18,7 @@
   "predictionAdvisoryWarning": "Kigezesa, togikozesa mu production!",
   "waterCard": "Water balance",
   "irrigationSchedule": "Enteekateeka y'okufukirira",
+  "valveControl": "Valve control",
   "environmentCard": "Environment & weather forecast",
   "schedulerDisableConfirm": "Ggyako enteekateeka z'okufukirira zonna ezikola nga tonnakweka modulu eno?",
   "schedulerDisableSuccess_one": "Enteekateeka {{count}} eggyiddwako.",

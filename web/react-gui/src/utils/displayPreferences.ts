@@ -12,6 +12,7 @@ const MODULE_KEYS = {
   environment: 'osi.modules.environment',
   waterCard: 'osi.modules.waterCard',
   schedulerUi: 'osi.modules.schedulerUi',
+  valveControl: 'osi.modules.valveControl',
 } as const;
 const PREFERENCES_EVENT = 'osi-display-preferences';
 
@@ -23,6 +24,7 @@ export interface ModulePreferences {
   environment: boolean;
   waterCard: boolean;
   schedulerUi: boolean;
+  valveControl: boolean;
 }
 
 export interface DisplayPreferences {
@@ -39,6 +41,7 @@ const DEFAULT_MODULES: ModulePreferences = {
   environment: true,
   waterCard: true,
   schedulerUi: true,
+  valveControl: true,
 };
 
 function readStorage(key: string): string | null {
@@ -106,6 +109,7 @@ export function readDisplayPreferences(): DisplayPreferences {
       environment: readBooleanPreference(MODULE_KEYS.environment, DEFAULT_MODULES.environment),
       waterCard: readBooleanPreference(MODULE_KEYS.waterCard, DEFAULT_MODULES.waterCard),
       schedulerUi: readBooleanPreference(MODULE_KEYS.schedulerUi, DEFAULT_MODULES.schedulerUi),
+      valveControl: readBooleanPreference(MODULE_KEYS.valveControl, DEFAULT_MODULES.valveControl),
     },
   };
 }
@@ -127,6 +131,7 @@ export function writeDisplayPreferences(next: Partial<DisplayPreferences>): void
     writeStorage(MODULE_KEYS.environment, String(next.modules.environment));
     writeStorage(MODULE_KEYS.waterCard, String(next.modules.waterCard));
     writeStorage(MODULE_KEYS.schedulerUi, String(next.modules.schedulerUi));
+    writeStorage(MODULE_KEYS.valveControl, String(next.modules.valveControl));
   }
   dispatchPreferencesEvent();
 }

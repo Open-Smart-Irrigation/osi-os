@@ -18,6 +18,7 @@
   "predictionAdvisoryWarning": "Experimental, no usar en producción.",
   "waterCard": "Balance hídrico",
   "irrigationSchedule": "Programa de riego",
+  "valveControl": "Valve control",
   "environmentCard": "Entorno y previsión meteorológica",
   "schedulerDisableConfirm": "¿Desactivar todos los programas de riego activos antes de ocultar este módulo?",
   "schedulerDisableSuccess_one": "{{count}} programa activo desactivado.",
