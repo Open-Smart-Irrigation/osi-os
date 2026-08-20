@@ -93,7 +93,7 @@ function describeConflict(details: ValvePlanError[], t: Translate): string {
   const weekdayLabel = first.weekday !== null ? t(`weekdays.${first.weekday}`) : '';
   if (first.code === 'too_many_windows') return t('scheduleDialog.conflictTooMany', { weekday: weekdayLabel });
   if (first.code === 'overlap') return t('scheduleDialog.conflictOverlap', { weekday: weekdayLabel });
-  return 'That start time is not valid.';
+  return t('scheduleDialog.conflictInvalidStart');
 }
 
 function latestPush(rows: ValveWeekdayPush[]): ValveWeekdayPush | null {
@@ -208,7 +208,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       setWeekly(EMPTY_WEEKLY);
       await afterMutation();
     } catch (err) {
-      setWeeklyError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : 'Failed to save the schedule.');
+      setWeeklyError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
       setSavingWeekly(false);
     }
@@ -231,7 +231,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       setOnce(EMPTY_ONCE);
       await afterMutation();
     } catch (err) {
-      setOnceError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : 'Failed to save the schedule.');
+      setOnceError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
       setSavingOnce(false);
     }
@@ -244,7 +244,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
       await afterMutation();
     } catch (err) {
-      setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : 'Failed to update the schedule.');
+      setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.updateFailed'));
     } finally {
       setRowBusyUuid(null);
     }
@@ -257,7 +257,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       await valvesAPI.deleteSchedule(valve.deviceEui, schedule.scheduleUuid);
       await afterMutation();
     } catch (err) {
-      setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : 'Failed to delete the schedule.');
+      setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.deleteFailed'));
     } finally {
       setRowBusyUuid(null);
     }

@@ -74,7 +74,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   if (glyph.state === 'pending') {
     statusDetails.push(t('pendingHint'));
     if (valve.lastUplinkAt) {
-      statusDetails.push(`${formatRelativePast(valve.lastUplinkAt, nowMs)} ago`);
+      statusDetails.push(t('lastContact', { when: formatRelativePast(valve.lastUplinkAt, nowMs) }));
     }
   }
 

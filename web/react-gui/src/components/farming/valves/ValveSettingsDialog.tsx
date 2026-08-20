@@ -62,7 +62,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
       onChanged();
       onClose();
     } catch {
-      setError('Failed to save valve settings.');
+      setError(t('settingsDialog.saveFailed'));
     } finally {
       setBusy(false);
     }

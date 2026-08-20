@@ -166,15 +166,53 @@ async function failStalePushes(db, olderThanIso) {
   return db.run("UPDATE valve_schedule_pushes SET state='FAILED', error='no_ack_24h' WHERE state='QUEUED' AND datetime(queued_at) < datetime(?)", [olderThanIso]);
 }
 
+// (final-fix-wave IMPORTANT 1) The naive SUM(...)-over-30-days form counted every ACKED/QUEUED
+// row across every purpose, so a plan re-edit within the window left the OLD (now-superseded-
+// by-newer-row, but not state-SUPERSEDED because it was already ACKED) rows in the tally
+// alongside the new ones, inflating "{{acked}} of {{total}}" (e.g. 7 acked + 7 queued = "7 of
+// 14" instead of "0 of 7"), and mixed in CLOCK_SYNC/SCHEDULER_STATUS pushes that have nothing
+// to do with the weekday plan. Fixed to latest-per-slot semantics, matching how the schedule
+// dialog's own per-weekday badges are derived (latestPush() in ValveScheduleDialog.tsx): group
+// rows by weekday slot (GEN1: the row's own `weekday`; GEN2: every weekday bit set in the
+// row's decoded daymask, via the same daymaskOf() used by lastPushHashes), keep only the
+// newest row per slot, and count states from that reduced set. last_plan_queued_at/
+// last_plan_acked_at are unrelated to the per-slot ratio and keep their prior semantics.
 async function pushSummary(db, deviceEui) {
-  const row = await db.get(`SELECT
-      SUM(CASE WHEN state='QUEUED' THEN 1 ELSE 0 END) AS queued,
-      SUM(CASE WHEN state='ACKED' THEN 1 ELSE 0 END) AS acked,
-      SUM(CASE WHEN state='FAILED' THEN 1 ELSE 0 END) AS failed,
+  const rows = await db.all(
+    "SELECT purpose, weekday, payload_hex, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') AND queued_at > datetime('now','-30 day') ORDER BY queued_at DESC",
+    [deviceEui]
+  );
+  const latestStateBySlot = {};
+  for (const r of rows) {
+    if (r.purpose === 'WEEKDAY_PLAN') {
+      const key = 'WEEKDAY_PLAN:' + r.weekday;
+      if (!(key in latestStateBySlot)) latestStateBySlot[key] = r.state;
+      continue;
+    }
+    // Same per-weekday expansion as lastPushHashes: a DAYMASK_PLAN row covers every weekday
+    // bit set in its decoded mask, and the newest row wins each of those slots individually.
+    const mask = daymaskOf(r.payload_hex);
+    for (let d = 0; d < 7; d += 1) {
+      if (!((mask >> d) & 1)) continue;
+      const key = 'GEN2DAY:' + d;
+      if (!(key in latestStateBySlot)) latestStateBySlot[key] = r.state;
+    }
+  }
+  let queued = 0, acked = 0, failed = 0;
+  for (const state of Object.values(latestStateBySlot)) {
+    if (state === 'QUEUED') queued += 1;
+    else if (state === 'ACKED') acked += 1;
+    else if (state === 'FAILED') failed += 1;
+  }
+  const meta = await db.get(`SELECT
       MAX(CASE WHEN purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') THEN queued_at END) AS last_plan_queued_at,
       MAX(CASE WHEN purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state='ACKED' THEN acked_at END) AS last_plan_acked_at
     FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND queued_at > datetime('now','-30 day')`, [deviceEui]);
-  return row || { queued: 0, acked: 0, failed: 0, last_plan_queued_at: null, last_plan_acked_at: null };
+  return {
+    queued, acked, failed,
+    last_plan_queued_at: (meta && meta.last_plan_queued_at) || null,
+    last_plan_acked_at: (meta && meta.last_plan_acked_at) || null,
+  };
 }
 
 async function hasPendingObservation(db, deviceEui) {

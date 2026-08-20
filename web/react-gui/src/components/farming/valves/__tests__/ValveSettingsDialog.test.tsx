@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ValveSettingsDialog } from '../ValveSettingsDialog';
+import { valvesAPI } from '../../../../services/api';
 import type { ValveSummary } from '../../../../types/farming';
 
 const { translateForTest } = vi.hoisted(() => {
@@ -17,6 +18,7 @@ const { translateForTest } = vi.hoisted(() => {
     'settingsDialog.estimated': 'Estimated',
     'settingsDialog.clear': 'Clear',
     'settingsDialog.save': 'Save',
+    'settingsDialog.saveFailed': 'Could not save valve settings.',
     cancel: 'Cancel',
   };
   return {
@@ -81,5 +83,13 @@ describe('ValveSettingsDialog', () => {
 
     expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
     expect(screen.queryByText('Enter a rate above 0 L/min.')).not.toBeInTheDocument();
+  });
+
+  it('labels a save failure via the settingsDialog.saveFailed i18n key, not a hardcoded literal', async () => {
+    vi.mocked(valvesAPI.updateSettings).mockRejectedValueOnce(new Error('network down'));
+    render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Could not save valve settings.')).toBeInTheDocument();
   });
 });

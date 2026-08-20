@@ -84,3 +84,79 @@ test('listValvesForUser recent_stale_state (minor a): an ISO-stamped STALE_* exp
   assert.equal(rows[0].recent_stale_state, 'STALE_NO_OBSERVATION');
   db.close();
 });
+
+test('pushSummary (final-fix-wave IMPORTANT 1): GEN1 re-edit within the window counts the CURRENT plan slots, never the cumulative row count', async () => {
+  const { db } = await tempDb();
+  // Original plan: all 7 weekdays pushed and acked.
+  const original = [];
+  for (let d = 0; d < 7; d += 1) {
+    original.push({ push_id: 'orig' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '00', plan_hash: 'h1' });
+  }
+  await store.insertPushes(db, original);
+  // Backdate so the re-edit below is unambiguously newer (queued_at has 1s resolution).
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime(queued_at, '-1 minute') WHERE plan_hash='h1'");
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at=datetime('now') WHERE plan_hash='h1'");
+
+  // The user edits the schedule: every weekday is recompiled and re-queued under a new hash.
+  // supersedeQueued only touches QUEUED rows, so the old ACKED rows are left as history —
+  // exactly the shape that produced the inflated "of 14" bug.
+  const edited = [];
+  for (let d = 0; d < 7; d += 1) {
+    edited.push({ push_id: 'edit' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '01', plan_hash: 'h2' });
+  }
+  await store.insertPushes(db, edited);
+
+  const summary = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(summary.queued, 7, 'the current (edited) plan is 7 fresh QUEUED rows, one per weekday slot');
+  assert.equal(summary.acked, 0, 'the superseded ACKED rows from before the edit must not count');
+  assert.equal(summary.failed, 0);
+  assert.equal(summary.queued + summary.acked, 7, 'total must equal the current plan slot count (7), never the cumulative 14 rows across the edit');
+  db.close();
+});
+
+test('pushSummary (final-fix-wave IMPORTANT 1): GEN2 daymask rows expand per-weekday-bit; only the latest row per weekday slot counts, mixed states allowed', async () => {
+  const { db } = await tempDb();
+  // Group A: all 7 days (0x7F), QUEUED then ACKED.
+  await store.insertPushes(db, [{ push_id: 'g1', device_eui: '0016C001F1000001', purpose: 'DAYMASK_PLAN', weekday: null, fport: 25, payload_hex: '7f99151930', plan_hash: 'h1' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime(queued_at, '-1 minute') WHERE plan_hash='h1'");
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at=datetime('now') WHERE plan_hash='h1'");
+  // A partial regroup re-pushes only Sun+Mon (mask 0x03) under a new hash — newer queued_at.
+  await store.insertPushes(db, [{ push_id: 'g2', device_eui: '0016C001F1000001', purpose: 'DAYMASK_PLAN', weekday: null, fport: 25, payload_hex: '0399151930', plan_hash: 'h2' }]);
+
+  const summary = await store.pushSummary(db, '0016C001F1000001');
+  // Slots 0,1 (Sun,Mon): latest row is g2, QUEUED. Slots 2-6: latest row is still g1, ACKED.
+  assert.equal(summary.queued, 2, 'only the two regrouped weekday slots are QUEUED');
+  assert.equal(summary.acked, 5, 'the five untouched weekday slots are still ACKED under the original group');
+  assert.equal(summary.failed, 0);
+  assert.equal(summary.queued + summary.acked, 7, 'exactly 7 weekday slots total, matching the schedule-dialog badge grouping');
+  db.close();
+});
+
+test('pushSummary (final-fix-wave IMPORTANT 1): CLOCK_SYNC/SCHEDULER_STATUS pushes never count toward the plan-delivery ratio', async () => {
+  const { db } = await tempDb();
+  const plan = [];
+  for (let d = 0; d < 7; d += 1) {
+    plan.push({ push_id: 'plan' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '00', plan_hash: 'h1' });
+  }
+  await store.insertPushes(db, plan);
+  await store.insertPushes(db, [
+    { push_id: 'clock1', device_eui: '0016C001F1000001', purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null },
+    { push_id: 'status1', device_eui: '0016C001F1000001', purpose: 'SCHEDULER_STATUS', weekday: null, fport: 21, payload_hex: '01', plan_hash: null },
+  ]);
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at=datetime('now') WHERE purpose IN ('CLOCK_SYNC','SCHEDULER_STATUS')");
+
+  const summary = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(summary.queued, 7, 'the 7 WEEKDAY_PLAN slots are still QUEUED');
+  assert.equal(summary.acked, 0, 'CLOCK_SYNC/SCHEDULER_STATUS pushes must not be mixed into the plan-delivery count');
+  db.close();
+});
+
+test('pushSummary (final-fix-wave IMPORTANT 1): last_plan_queued_at/last_plan_acked_at keep their prior (unfiltered-by-slot) semantics', async () => {
+  const { db } = await tempDb();
+  await store.insertPushes(db, [{ push_id: 'a', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 0, fport: 30, payload_hex: '00', plan_hash: 'h1' }]);
+  await store.ackPush(db, '0016C001F1000001', 'WEEKDAY_PLAN', 30, 0, 'OK', new Date().toISOString());
+  const summary = await store.pushSummary(db, '0016C001F1000001');
+  assert.ok(summary.last_plan_queued_at, 'last_plan_queued_at must still be populated');
+  assert.ok(summary.last_plan_acked_at, 'last_plan_acked_at must still be populated');
+  db.close();
+});

@@ -15,6 +15,7 @@ const { translateForTest } = vi.hoisted(() => {
     subtitle: 'All valves, all zones. Weekly plans run on the valve itself.',
     empty: 'No STREGA valves registered yet.',
     actionFailed: 'The action could not be completed.',
+    loadFailed: 'Could not load valves.',
     'openDialog.error': 'Could not send the open command.',
     loading: 'Loading...',
     retry: 'Retry',

@@ -25,6 +25,8 @@
   "planFailed": "{{count}} Downlink(s) seit 24 h nicht bestätigt",
   "lastSent": "Zuletzt gesendet {{when}}",
   "actionFailed": "Die Aktion konnte nicht ausgeführt werden.",
+  "lastContact": "Letzter Kontakt vor {{when}}",
+  "loadFailed": "Ventile konnten nicht geladen werden.",
   "bluetoothNote": "Änderungen direkt am Ventil (Bluetooth) sind hier nicht sichtbar.",
   "openDialog": { "title": "{{name}} öffnen", "duration": "Dauer (Min.)", "durationHint": "1–255 Minuten eingeben.", "custom": "Individuell", "summary": "schliesst ≈ {{time}}", "liters": "≈ {{liters}} L", "confirm": "Für {{minutes}} Min. öffnen", "error": "Öffnungsbefehl konnte nicht gesendet werden." },
   "scheduleDialog": {
@@ -34,10 +36,10 @@
     "preview": "{{days}} {{start}}–{{end}} · {{minutes}} Min.", "previewLiters": "≈ {{liters}} L",
     "onceNote": "Einmalige Öffnungen werden vom Gateway zu diesem Zeitpunkt gesendet; das Gateway muss online sein.",
     "save": "Speichern", "saving": "Speichert…", "delete": "Löschen", "enabled": "Aktiviert",
-    "conflictTooMany": "{{weekday}} hätte mehr als 4 Fenster.", "conflictOverlap": "Überschneidet sich mit einem anderen Fenster am {{weekday}}.", "conflictGeneric": "Der Zeitplan steht im Konflikt mit dem Plan.",
+    "conflictTooMany": "{{weekday}} hätte mehr als 4 Fenster.", "conflictOverlap": "Überschneidet sich mit einem anderen Fenster am {{weekday}}.", "conflictGeneric": "Der Zeitplan steht im Konflikt mit dem Plan.", "conflictInvalidStart": "Ein Zeitplan hat eine ungültige Startzeit.", "invalidStartTime": "Diese Startzeit ist ungültig.", "saveFailed": "Zeitplan konnte nicht gespeichert werden.", "updateFailed": "Zeitplan konnte nicht aktualisiert werden.", "deleteFailed": "Zeitplan konnte nicht gelöscht werden.",
     "push": { "QUEUED": "wartet auf Ventil", "ACKED": "bestätigt {{when}}", "FAILED": "fehlgeschlagen" }
   },
-  "settingsDialog": { "title": "Ventileinstellungen", "generation": "Ventilgeneration", "gen2Untested": "GEN2 (SV2, an Hardware ungetestet)", "flowRate": "Durchflussrate (L/Min.)", "flowRateHint": "Wert über 0 L/min eingeben.", "flowSource": "Quelle", "measured": "Gemessen", "estimated": "Geschätzt", "clear": "Löschen", "save": "Speichern" },
+  "settingsDialog": { "title": "Ventileinstellungen", "generation": "Ventilgeneration", "gen2Untested": "GEN2 (SV2, an Hardware ungetestet)", "flowRate": "Durchflussrate (L/Min.)", "flowRateHint": "Wert über 0 L/min eingeben.", "flowSource": "Quelle", "measured": "Gemessen", "estimated": "Geschätzt", "clear": "Löschen", "save": "Speichern", "saveFailed": "Ventileinstellungen konnten nicht gespeichert werden." },
   "weekdays": { "0": "So", "1": "Mo", "2": "Di", "3": "Mi", "4": "Do", "5": "Fr", "6": "Sa" },
   "trigger": { "manual": "Manuell", "cloud_command": "Cloud", "trigger_based": "Sensorgesteuert", "one_time": "Einmalig", "on_valve_schedule": "Zeitplan (auf Ventil)", "unexplained": "Am Ventil geöffnet" }
 }

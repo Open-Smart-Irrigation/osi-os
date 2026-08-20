@@ -31,6 +31,11 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.conflictTooMany': '{{weekday}} would have more than 4 windows.',
     'scheduleDialog.conflictOverlap': 'Overlaps another window on {{weekday}}.',
     'scheduleDialog.conflictGeneric': 'The schedule conflicts with the plan.',
+    'scheduleDialog.conflictInvalidStart': 'A schedule has an invalid start time.',
+    'scheduleDialog.invalidStartTime': 'That start time is not valid.',
+    'scheduleDialog.saveFailed': 'Could not save the schedule.',
+    'scheduleDialog.updateFailed': 'Could not update the schedule.',
+    'scheduleDialog.deleteFailed': 'Could not delete the schedule.',
     'scheduleDialog.loadFailed': 'Could not load schedules.',
     'scheduleDialog.push.QUEUED': 'waiting for valve',
     'scheduleDialog.push.ACKED': 'acknowledged {{when}}',
@@ -249,6 +254,32 @@ describe('ValveScheduleDialog', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
 
     expect(await screen.findByText('The schedule conflicts with the plan.')).toBeInTheDocument();
+  });
+
+  it('renders the invalid-start-time conflict message (i18n key, not a hardcoded literal) for an invalid_start_time conflict', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    createScheduleMock.mockRejectedValueOnce(new ValvePlanConflictError([
+      { code: 'invalid_start_time', weekday: null, conflicts: [], labels: [] },
+    ]));
+    renderDialog(makeValve());
+
+    await screen.findByText('Schedules');
+    fireEvent.click(screen.getByRole('button', { name: 'Tue' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
+
+    expect(await screen.findByText('A schedule has an invalid start time.')).toBeInTheDocument();
+  });
+
+  it('labels a plain (non-conflict) weekly save failure via the scheduleDialog.saveFailed i18n key, not a hardcoded literal', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    createScheduleMock.mockRejectedValueOnce(new Error('network down'));
+    renderDialog(makeValve());
+
+    await screen.findByText('Schedules');
+    fireEvent.click(screen.getByRole('button', { name: 'Tue' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
+
+    expect(await screen.findByText('Could not save the schedule.')).toBeInTheDocument();
   });
 
   it('guards a null WEEKLY startTime instead of rendering the literal "null"', async () => {

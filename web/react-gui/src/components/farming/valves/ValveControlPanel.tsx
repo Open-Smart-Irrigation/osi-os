@@ -135,7 +135,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }
 
       {error && (
         <div className="mt-4 flex items-center gap-3 text-sm text-[var(--warn-text)]">
-          <span>Could not load valves.</span>
+          <span>{t('loadFailed')}</span>
           <button
             type="button"
             onClick={() => mutate()}
