@@ -53,8 +53,8 @@ function step(state, deveui, segment) {
   if (buf) {
     if (buf.count !== segment.count) resetReason = 'count';
     else if (segment.index >= buf.count) resetReason = 'range';
-    else if (buf.segments[segment.index]) resetReason = 'duplicate';
     else if (segment.nowMs - buf.firstAtMs > WINDOW_MS) resetReason = 'window';
+    else if (buf.segments[segment.index]) resetReason = 'duplicate';
   } else if (segment.index >= segment.count) {
     // first segment we see is already out of range: nothing to reset, just refuse
     return { action: 'reset', quarantine: { channel: 'sdi12_segments_incomplete', raw: segment.count + ':[]' }, status: 'reset range' };
