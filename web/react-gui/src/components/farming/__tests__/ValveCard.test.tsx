@@ -80,6 +80,7 @@ function actuationFixture(overrides: Partial<IrrigationActuation> = {}): Irrigat
         flowRateLpm: null,
         reconciliationState: 'PENDING_OBSERVATION',
         cancelReason: null,
+        trigger: null,
         commandResult: null,
         commandResultDetail: null,
         commandAppliedAt: null,

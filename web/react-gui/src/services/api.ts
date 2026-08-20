@@ -1241,6 +1241,14 @@ export type IrrigationActuationStatus =
   | 'CLOSE_TIMEOUT'
   | 'UNKNOWN';
 
+export type IrrigationTrigger =
+  | 'manual'
+  | 'cloud_command'
+  | 'trigger_based'
+  | 'one_time'
+  | 'on_valve_schedule'
+  | 'unexplained';
+
 export interface IrrigationActuation {
   expectationId: string;
   deviceEui: string;
@@ -1257,6 +1265,7 @@ export interface IrrigationActuation {
   flowRateLpm: number | null;
   reconciliationState: string;
   cancelReason: string | null;
+  trigger: IrrigationTrigger | null;
   commandResult: string | null;
   commandResultDetail: string | null;
   commandAppliedAt: string | null;
