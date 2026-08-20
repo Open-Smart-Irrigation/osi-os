@@ -567,6 +567,38 @@ fetch_required "osi-uc512-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/index.js" \
     "/srv/node-red/osi-uc512-normalize/index.js"
 
+fetch_required "osi-valve-control package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/package.json" \
+    "/srv/node-red/osi-valve-control/package.json"
+
+fetch_required "osi-valve-control index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js" \
+    "/srv/node-red/osi-valve-control/index.js"
+
+fetch_required "osi-valve-control plan.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/plan.js" \
+    "/srv/node-red/osi-valve-control/plan.js"
+
+fetch_required "osi-valve-control ack.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/ack.js" \
+    "/srv/node-red/osi-valve-control/ack.js"
+
+fetch_required "osi-valve-control store.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/store.js" \
+    "/srv/node-red/osi-valve-control/store.js"
+
+fetch_required "osi-valve-control push.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.js" \
+    "/srv/node-red/osi-valve-control/push.js"
+
+fetch_required "osi-valve-control api.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/api.js" \
+    "/srv/node-red/osi-valve-control/api.js"
+
+fetch_required "osi-valve-control workers.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers.js" \
+    "/srv/node-red/osi-valve-control/workers.js"
+
 fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
     "/srv/node-red/edge-channels.json"
