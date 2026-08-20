@@ -265,15 +265,17 @@ The STREGA on-valve weekly scheduler: compile, push, and ACK, plus
 gateway-timed one-time opens (spec
 [2026-08-19-valve-control-design.md](../../superpowers/specs/2026-08-19-valve-control-design.md)).
 Logic lives in the `osi-valve-control` helper module; the flow nodes are thin
-adapters. **Valve API Router** serves `GET/POST/PUT/DELETE /api/valves*`
-(list, per-valve schedules, plan re-send, scheduler status, settings) and
-queues the compiled downlinks. **Valve ACK ledger** consumes STREGA uplinks
-(`Schl_Port` 14–20/25, `Schl_status_Port` 21, `RTC_Port` 12/13) behind a
-STREGA-profile gate and marks `valve_schedule_pushes` rows `ACKED`. **Fire
-due one-time opens**, **Observe valve-fired opens + trigger backfill**, and
-**Valve clock sync + stale pushes** are the module's own ticks (see Timers
-below). Plan and clock pushes leave through a dedicated MQTT out node,
-**Valve plan downlinks → ChirpStack**, kept separate from the STREGA
+adapters. **Valve API Router** serves `GET/POST/PUT/DELETE /api/valves*` (list,
+per-valve schedules, plan re-send, scheduler status, settings) and queues the
+compiled downlinks. **Valve ACK ledger** consumes STREGA uplinks behind a
+STREGA-profile gate and marks `valve_schedule_pushes` rows `ACKED`. Gen1
+weekday ACKs arrive on `Schl_Port` 14–20; Gen2 daymask ACKs arrive on
+`Ack_Port` 25 (or the raw-byte fallback); scheduler-status ACKs arrive on
+`Schl_status_Port`/`Ack_Port` 21; clock ACKs arrive on `RTC_Port`/`Ack_Port`
+12/13. **Fire due one-time opens**, **Observe valve-fired opens + trigger
+backfill**, and **Valve clock sync + stale pushes** are the module's own ticks
+(see Timers below). Plan and clock pushes leave through a dedicated MQTT out
+node, **Valve plan downlinks → ChirpStack**, kept separate from the STREGA
 manual-open builder in Actuator_STREGA so a plan edit can never collide with
 a manual open in flight.
 

@@ -179,7 +179,7 @@ Logic lives in `osi-valve-control` (`plan.js`, `push.js`, `ack.js`,
 | Concern | Nodes | Cadence |
 |---|---|---|
 | REST API | "Valve API Router" (`GET/POST/PUT/DELETE /api/valves*`: list, per-valve schedules, plan resend, scheduler-status, settings) | on request |
-| ACK ledger | "STREGA ACK IN" (`mqtt in`) → "Valve ACK ledger" (`Schl_Port` 14–20/25, `Schl_status_Port` 21, `RTC_Port` 12/13; STREGA-profile gated, same rule as `strega-process-fn`) | per uplink |
+| ACK ledger | "STREGA ACK IN" (`mqtt in`) → "Valve ACK ledger": Gen1 weekday via `Schl_Port` 14–20, Gen2 daymask via `Ack_Port` 25 (or the raw-byte fallback), status via `Schl_status_Port`/`Ack_Port` 21, clock via `RTC_Port`/`Ack_Port` 12/13; STREGA-profile gated, same rule as `strega-process-fn` | per uplink |
 | One-time opens | "Fire due one-time opens" (`valve-once-tick`); fires `PENDING` rows due within the last 10 min, marks the rest `SKIPPED` | 60 s |
 | Observed runs | "Observe valve-fired opens + trigger backfill" (`valve-observe-tick`) | 60 s |
 | Clock sync + housekeeping | "Valve clock sync + stale pushes" (`valve-clock-tick`): FPort 12 resync, 24 h `QUEUED`→`FAILED` sweep | 600 s (10 min) |

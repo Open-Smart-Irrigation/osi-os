@@ -407,12 +407,12 @@
                     "$ref": "#/definitions/NullableCanonicalUtcTimestamp",
                     "description": "ONCE only. UTC instant."
                 },
-                "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1439},
+                "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1439, "description": "WEEKLY: 1-1439. ONCE: 1-255 (STREGA duration byte)."},
                 "timezone": {"type": "string", "minLength": 1, "description": "IANA timezone name."},
                 "enabled": {"type": "integer", "enum": [0, 1]},
                 "once_state": {"type": ["string", "null"], "enum": ["PENDING", "FIRED", "SKIPPED", "CANCELLED", null]},
                 "sync_version": {"type": "integer", "minimum": 0},
-                "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
             }
         }
     }
