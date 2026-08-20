@@ -102,7 +102,7 @@
     }
   },
   "schedule": {
-    "irrigationSchedule": "Programa de rega",
+    "irrigationSchedule": "Irrigação acionada por sensor",
     "triggerMetric": "Métrica de ativação",
     "soilWaterTension1": "Tensão hídrica do solo 1",
     "soilWaterTension2": "Tensão hídrica do solo 2",
@@ -120,7 +120,7 @@
     "reload": "Recarregar",
     "reloadFailed": "Falha ao recarregar programa",
     "saved": "Guardado.",
-    "triggerHint": "Ativar se {{metric}} ≥ {{threshold}} kPa (uma vez/dia, 06:00)."
+    "triggerHint": "Aciona se {{metric}} ≥ {{threshold}} kPa (verificado uma vez por dia às 06:00)."
   },
   "environment": {
     "sectionTitle": "Ambiente e previsão do tempo",

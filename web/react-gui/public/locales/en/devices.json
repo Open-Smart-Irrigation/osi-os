@@ -131,7 +131,7 @@
     }
   },
   "schedule": {
-    "irrigationSchedule": "Irrigation Schedule",
+    "irrigationSchedule": "Trigger-based irrigation",
     "triggerMetric": "Trigger Metric",
     "soilWaterTension1": "Soil Water Tension 1",
     "soilWaterTension2": "Soil Water Tension 2",
@@ -149,7 +149,7 @@
     "reload": "Reload",
     "reloadFailed": "Failed to reload schedule",
     "saved": "Saved.",
-    "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (once/day, 06:00)."
+    "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (checked once a day at 06:00)."
   },
   "environment": {
     "sectionTitle": "Environment & weather forecast",

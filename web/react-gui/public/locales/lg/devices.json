@@ -102,7 +102,7 @@
     }
   },
   "schedule": {
-    "irrigationSchedule": "Nteekateeka y'okusukkulirira",
+    "irrigationSchedule": "Okufukirira okusinziira ku ssensa",
     "triggerMetric": "Kigendererwa ky'okutandika",
     "soilWaterTension1": "Okuzika kw'amazzi mu butaka 1",
     "soilWaterTension2": "Okuzika kw'amazzi mu butaka 2",

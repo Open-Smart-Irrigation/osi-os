@@ -17,7 +17,7 @@
   "predictionAdvisory": "Bewässerungsempfehlung",
   "predictionAdvisoryWarning": "Experimentell, nicht für Produktion verwenden!",
   "waterCard": "Wasserbilanz",
-  "irrigationSchedule": "Bewässerungsplan",
+  "irrigationSchedule": "Sensorgesteuerte Bewässerung",
   "valveControl": "Ventilsteuerung",
   "environmentCard": "Umgebung & Wettervorhersage",
   "schedulerDisableConfirm": "Alle aktiven Bewässerungspläne deaktivieren, bevor dieses Modul ausgeblendet wird?",

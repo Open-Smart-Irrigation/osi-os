@@ -102,7 +102,7 @@
     }
   },
   "schedule": {
-    "irrigationSchedule": "Planning d'irrigation",
+    "irrigationSchedule": "Irrigation déclenchée par capteur",
     "triggerMetric": "Métrique de déclenchement",
     "soilWaterTension1": "Tension hydrique du sol 1",
     "soilWaterTension2": "Tension hydrique du sol 2",
@@ -120,7 +120,7 @@
     "reload": "Recharger",
     "reloadFailed": "Impossible de recharger le planning",
     "saved": "Sauvegardé.",
-    "triggerHint": "Déclencher si {{metric}} ≥ {{threshold}} kPa (une fois/jour, 06h00)."
+    "triggerHint": "Déclenche si {{metric}} ≥ {{threshold}} kPa (vérifié une fois par jour à 06:00)."
   },
   "environment": {
     "sectionTitle": "Environnement et prévisions météo",

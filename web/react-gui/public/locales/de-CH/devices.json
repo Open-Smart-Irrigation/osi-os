@@ -102,7 +102,7 @@
     }
   },
   "schedule": {
-    "irrigationSchedule": "Bewässerungsplan",
+    "irrigationSchedule": "Sensorgesteuerte Bewässerung",
     "triggerMetric": "Auslösemessgrösse",
     "soilWaterTension1": "Bodenwasserspannung 1",
     "soilWaterTension2": "Bodenwasserspannung 2",
@@ -120,7 +120,7 @@
     "reload": "Neu laden",
     "reloadFailed": "Plan konnte nicht neu geladen werden",
     "saved": "Gespeichert.",
-    "triggerHint": "Auslösen wenn {{metric}} ≥ {{threshold}} kPa (einmal/Tag, 06:00)."
+    "triggerHint": "Auslösen, wenn {{metric}} ≥ {{threshold}} kPa (Prüfung einmal täglich um 06:00)."
   },
   "environment": {
     "sectionTitle": "Umgebung & Wettervorhersage",

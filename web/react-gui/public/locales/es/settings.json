@@ -17,7 +17,7 @@
   "predictionAdvisory": "Aviso predictivo",
   "predictionAdvisoryWarning": "Experimental, no usar en producción.",
   "waterCard": "Balance hídrico",
-  "irrigationSchedule": "Programa de riego",
+  "irrigationSchedule": "Riego activado por sensor",
   "valveControl": "Valve control",
   "environmentCard": "Entorno y previsión meteorológica",
   "schedulerDisableConfirm": "¿Desactivar todos los programas de riego activos antes de ocultar este módulo?",

@@ -202,10 +202,13 @@
       "eventsCount": "{{count}} events",
       "eventLabel": {
         "irrigation": "Irrigation event",
-        "scheduled": "Scheduled irrigation",
+        "scheduled": "Riego activado por sensor",
         "manualOverride": "Manual override",
         "possibleIneffective": "Possible ineffective irrigation",
-        "responseWindow": "Response window"
+        "responseWindow": "Response window",
+        "onValveSchedule": "Programado (en la válvula)",
+        "oneTime": "Apertura única",
+        "unexplained": "Abierta en la válvula"
       },
       "detail": {
         "duration": "Duration: {{value}}",

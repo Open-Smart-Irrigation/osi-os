@@ -202,10 +202,13 @@
       "eventsCount": "{{count}} events",
       "eventLabel": {
         "irrigation": "Irrigation event",
-        "scheduled": "Scheduled irrigation",
+        "scheduled": "Sensorgesteuerte Bewässerung",
         "manualOverride": "Manual override",
         "possibleIneffective": "Possible ineffective irrigation",
-        "responseWindow": "Response window"
+        "responseWindow": "Response window",
+        "onValveSchedule": "Zeitplan (auf Ventil)",
+        "oneTime": "Einmalige Öffnung",
+        "unexplained": "Am Ventil geöffnet"
       },
       "detail": {
         "duration": "Duration: {{value}}",

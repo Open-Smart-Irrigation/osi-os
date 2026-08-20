@@ -102,7 +102,7 @@
     }
   },
   "schedule": {
-    "irrigationSchedule": "Programa de riego",
+    "irrigationSchedule": "Riego activado por sensor",
     "triggerMetric": "Métrica de activación",
     "soilWaterTension1": "Tensión hídrica del suelo 1",
     "soilWaterTension2": "Tensión hídrica del suelo 2",
@@ -120,7 +120,7 @@
     "reload": "Recargar",
     "reloadFailed": "Error al recargar el programa",
     "saved": "Guardado.",
-    "triggerHint": "Activar si {{metric}} ≥ {{threshold}} kPa (una vez/día, 06:00)."
+    "triggerHint": "Activa si {{metric}} ≥ {{threshold}} kPa (se comprueba una vez al día a las 06:00)."
   },
   "environment": {
     "sectionTitle": "Entorno y previsión meteorológica",
