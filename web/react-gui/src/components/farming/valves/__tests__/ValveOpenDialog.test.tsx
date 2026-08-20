@@ -9,6 +9,7 @@ const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
     'openDialog.title': 'Open {{name}}',
     'openDialog.duration': 'Duration (min)',
+    'openDialog.durationHint': 'Enter 1–255 minutes.',
     'openDialog.custom': 'Custom',
     'openDialog.summary': 'closes ≈ {{time}}',
     'openDialog.liters': '≈ {{liters}} L',
@@ -88,9 +89,11 @@ describe('ValveOpenDialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it('disables the confirm button for an out-of-range duration', () => {
+  it('disables the confirm button for an out-of-range duration and shows the range hint', () => {
     render(<ValveOpenDialog valve={makeValve()} open onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} />);
     fireEvent.change(screen.getByLabelText('Duration (min)'), { target: { value: '300' } });
     expect(screen.getByRole('button', { name: /Open for/ })).toBeDisabled();
+    // Regression: the hint used to just repeat the field label ("Duration (min)").
+    expect(screen.getByText('Enter 1–255 minutes.')).toBeInTheDocument();
   });
 });

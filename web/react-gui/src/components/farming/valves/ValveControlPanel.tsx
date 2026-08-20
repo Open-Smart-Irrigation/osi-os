@@ -64,7 +64,14 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }
   const handleOpenSubmit = async (minutes: number) => {
     if (!selectedValve) return;
     await devicesAPI.controlValve(selectedValve.deviceEui, { action: 'OPEN_FOR_DURATION', duration_seconds: minutes * 60 });
-    await valvesAPI.updateSettings(selectedValve.deviceEui, { defaultOpenMinutes: minutes });
+    // The open command already succeeded at this point — a failure saving the "remember this
+    // duration" preference is not worth surfacing as an open failure (which would keep the
+    // dialog open and imply the valve didn't actually open).
+    try {
+      await valvesAPI.updateSettings(selectedValve.deviceEui, { defaultOpenMinutes: minutes });
+    } catch (err) {
+      console.warn('Failed to save the default open-minutes preference', err);
+    }
     await refresh();
   };
 
@@ -75,7 +82,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }
       await action();
       await refresh();
     } catch {
-      setActionError(t('openDialog.error'));
+      setActionError(t('actionFailed'));
     } finally {
       setActionBusyEui(null);
     }

@@ -101,17 +101,21 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
           strokeDasharray={dashArray}
         />
 
-        {/* Droplets at the outlet */}
+        {/* Droplets at the outlet. The per-droplet x/y offset lives on this wrapping <g> —
+            the CSS keyframes below set the inner <path>'s `transform` (translateY) while
+            animating, and a CSS transform completely replaces an SVG transform *attribute*
+            rather than composing with it, so the offset must not sit on the animated node
+            itself or all droplets collapse to the same x position while dripping. */}
         {isOpen && [0, 1, 2].map((i) => (
-          <path
-            key={i}
-            d="M47 39c-2.1 2.5-3.3 4.4-3.3 6a3.3 3.3 0 1 0 6.6 0c0-1.6-1.2-3.5-3.3-6Z"
-            fill="currentColor"
-            opacity={animateDroplets ? undefined : 0.85}
-            className={animateDroplets ? 'valve-drip' : undefined}
-            style={animateDroplets ? { animationDelay: `${i * 0.35}s` } : undefined}
-            transform={`translate(${(i - 1) * 7}, ${i * 3})`}
-          />
+          <g key={i} transform={`translate(${(i - 1) * 7}, ${i * 3})`}>
+            <path
+              d="M47 39c-2.1 2.5-3.3 4.4-3.3 6a3.3 3.3 0 1 0 6.6 0c0-1.6-1.2-3.5-3.3-6Z"
+              fill="currentColor"
+              opacity={animateDroplets ? undefined : 0.85}
+              className={animateDroplets ? 'valve-drip' : undefined}
+              style={animateDroplets ? { animationDelay: `${i * 0.35}s` } : undefined}
+            />
+          </g>
         ))}
 
         {/* Status badge */}

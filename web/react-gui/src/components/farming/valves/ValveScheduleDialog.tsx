@@ -65,7 +65,14 @@ function timeZoneOffsetMinutes(timeZone: string, at: Date): number {
   return (asIfUtc - at.getTime()) / 60_000;
 }
 
-/** Converts a local wall-clock date + time in `timeZone` to the UTC ISO instant. */
+/**
+ * Converts a local wall-clock date + time in `timeZone` to the UTC ISO instant.
+ *
+ * Two-pass: the offset guessed from the naive "as if UTC" instant can be wrong on a DST
+ * transition day (the real instant lands on the other side of the transition than the
+ * guess did). Recompute the offset at the first candidate and, if it differs, use that
+ * second offset instead — the standard two-pass zoned-time conversion.
+ */
 function zonedTimeToUtcIso(dateStr: string, timeStr: string, timeZone: string): string | null {
   const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   const timeMatch = /^(\d{2}):(\d{2})$/.exec(timeStr);
@@ -73,13 +80,16 @@ function zonedTimeToUtcIso(dateStr: string, timeStr: string, timeZone: string): 
   const [, y, m, d] = dateMatch;
   const [, hh, mm] = timeMatch;
   const naiveUtc = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), 0);
-  const offset = timeZoneOffsetMinutes(timeZone, new Date(naiveUtc));
-  return new Date(naiveUtc - offset * 60_000).toISOString();
+  const offset1 = timeZoneOffsetMinutes(timeZone, new Date(naiveUtc));
+  const candidate1 = naiveUtc - offset1 * 60_000;
+  const offset2 = timeZoneOffsetMinutes(timeZone, new Date(candidate1));
+  const finalOffset = offset2 !== offset1 ? offset2 : offset1;
+  return new Date(naiveUtc - finalOffset * 60_000).toISOString();
 }
 
 function describeConflict(details: ValvePlanError[], t: Translate): string {
   const first = details[0];
-  if (!first) return t('scheduleDialog.save');
+  if (!first) return t('scheduleDialog.conflictGeneric');
   const weekdayLabel = first.weekday !== null ? t(`weekdays.${first.weekday}`) : '';
   if (first.code === 'too_many_windows') return t('scheduleDialog.conflictTooMany', { weekday: weekdayLabel });
   if (first.code === 'overlap') return t('scheduleDialog.conflictOverlap', { weekday: weekdayLabel });
@@ -116,6 +126,7 @@ const EMPTY_ONCE: OnceFormState = { date: '', time: '06:00', duration: '15', lab
 
 export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve, open, onClose, onChanged }) => {
   const { t } = useTranslation('valves');
+  const { t: tc } = useTranslation('common');
   // i18next's typed `t` only accepts the literal key union derived from valves.json, so any
   // dynamically-built key (weekday index, push-badge lookups) goes through this permissive alias.
   const td = t as Translate;
@@ -293,7 +304,22 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
         </div>
 
         <div className="overflow-y-auto px-5 py-4">
-          {error && <p className="text-sm text-[var(--warn-text)]">{t('scheduleDialog.title', { name: valve.name })}</p>}
+          {!data && !error && (
+            <p className="text-sm text-[var(--text-tertiary)]">{tc('loading')}</p>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-3 text-sm text-[var(--warn-text)]">
+              <span>{t('scheduleDialog.loadFailed')}</span>
+              <button
+                type="button"
+                onClick={() => mutate()}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)]"
+              >
+                {tc('retry')}
+              </button>
+            </div>
+          )}
 
           {data && (
             <>
@@ -348,7 +374,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           </p>
                           <p className="truncate text-xs text-[var(--text-tertiary)]">
                             {schedule.kind === 'WEEKLY'
-                              ? `${weekdaysFromMask(schedule.weekdaysMask ?? 0).map((d) => td(`weekdays.${d}`)).join(', ')} · ${schedule.startTime}–${windowEnd(schedule.startTime ?? '00:00', schedule.durationMinutes)} · ${schedule.durationMinutes} min`
+                              ? `${weekdaysFromMask(schedule.weekdaysMask ?? 0).map((d) => td(`weekdays.${d}`)).join(', ')} · ${schedule.startTime ? `${schedule.startTime}–${windowEnd(schedule.startTime, schedule.durationMinutes)}` : '—'} · ${schedule.durationMinutes} min`
                               : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone) : '—'} · ${schedule.durationMinutes} min`}
                           </p>
                         </div>

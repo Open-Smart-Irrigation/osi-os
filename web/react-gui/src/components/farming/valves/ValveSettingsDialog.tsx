@@ -121,7 +121,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
             </button>
           </div>
           {!isFlowRateValid && (
-            <p className="mt-1 text-xs text-[var(--warn-text)]">{t('settingsDialog.flowRate')}</p>
+            <p className="mt-1 text-xs text-[var(--warn-text)]">{t('settingsDialog.flowRateHint')}</p>
           )}
         </div>
 

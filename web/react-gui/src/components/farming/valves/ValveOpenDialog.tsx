@@ -124,7 +124,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
             aria-label={t('openDialog.duration')}
           />
           {!isValid && (
-            <p className="mt-1 text-xs text-[var(--warn-text)]">{t('openDialog.duration')}: {MIN_MINUTES}–{MAX_MINUTES}</p>
+            <p className="mt-1 text-xs text-[var(--warn-text)]">{t('openDialog.durationHint')}</p>
           )}
         </div>
 

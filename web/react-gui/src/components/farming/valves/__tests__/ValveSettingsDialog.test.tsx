@@ -1,0 +1,85 @@
+import '@testing-library/jest-dom/vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { ValveSettingsDialog } from '../ValveSettingsDialog';
+import type { ValveSummary } from '../../../../types/farming';
+
+const { translateForTest } = vi.hoisted(() => {
+  const table: Record<string, string> = {
+    'settingsDialog.title': 'Valve settings',
+    'settingsDialog.generation': 'Valve generation',
+    'settingsDialog.gen2Untested': 'GEN2 (SV2, untested on hardware)',
+    'settingsDialog.flowRate': 'Flow rate (L/min)',
+    'settingsDialog.flowRateHint': 'Enter a rate above 0 L/min.',
+    'settingsDialog.flowSource': 'Source',
+    'settingsDialog.measured': 'Measured',
+    'settingsDialog.estimated': 'Estimated',
+    'settingsDialog.clear': 'Clear',
+    'settingsDialog.save': 'Save',
+    cancel: 'Cancel',
+  };
+  return {
+    translateForTest: (key: string, options?: Record<string, unknown>): string => {
+      const template = table[key] ?? key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, name) => String(options?.[name] ?? ''));
+    },
+  };
+});
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: translateForTest, i18n: { language: 'en' } }),
+}));
+
+vi.mock('../../../../services/api', () => ({
+  valvesAPI: {
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+function makeValve(overrides: Partial<ValveSummary> = {}): ValveSummary {
+  return {
+    deviceEui: '0016C001F1000001',
+    name: 'North Valve',
+    zoneId: 1,
+    zoneName: 'North Block',
+    zoneUuid: 'uuid-1',
+    timezone: 'Europe/Zurich',
+    currentState: 'CLOSED',
+    targetState: null,
+    stregaGeneration: 'GEN1',
+    flowRateLpm: null,
+    flowRateSource: null,
+    defaultOpenMinutes: null,
+    schedulerStatus: 'ACTIVE',
+    skipTodayDate: null,
+    lastUplinkAt: null,
+    activeActuation: null,
+    recentStaleState: null,
+    nextRun: null,
+    scheduleCount: 0,
+    pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    lastClockSyncAckedAt: null,
+    ...overrides,
+  };
+}
+
+describe('ValveSettingsDialog', () => {
+  it('disables save and shows a rate-specific hint for an invalid flow rate, not the field label', () => {
+    render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Flow rate (L/min)'), { target: { value: '0' } });
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    // Regression: the hint used to just repeat the field label ("Flow rate (L/min)").
+    expect(screen.getByText('Enter a rate above 0 L/min.')).toBeInTheDocument();
+    expect(screen.queryAllByText('Flow rate (L/min)')).toHaveLength(1);
+  });
+
+  it('allows an empty flow rate (clears it) without showing the hint', () => {
+    render(<ValveSettingsDialog valve={makeValve({ flowRateLpm: 5 })} open onClose={vi.fn()} onChanged={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Flow rate (L/min)'), { target: { value: '' } });
+
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+    expect(screen.queryByText('Enter a rate above 0 L/min.')).not.toBeInTheDocument();
+  });
+});

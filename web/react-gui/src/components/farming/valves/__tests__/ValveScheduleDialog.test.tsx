@@ -30,12 +30,16 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.enabled': 'Enabled',
     'scheduleDialog.conflictTooMany': '{{weekday}} would have more than 4 windows.',
     'scheduleDialog.conflictOverlap': 'Overlaps another window on {{weekday}}.',
+    'scheduleDialog.conflictGeneric': 'The schedule conflicts with the plan.',
+    'scheduleDialog.loadFailed': 'Could not load schedules.',
     'scheduleDialog.push.QUEUED': 'waiting for valve',
     'scheduleDialog.push.ACKED': 'acknowledged {{when}}',
     'scheduleDialog.push.FAILED': 'failed',
     bluetoothNote: 'Changes made on the valve over Bluetooth are not visible here.',
     noSchedule: 'No schedule',
     cancel: 'Cancel',
+    loading: 'Loading...',
+    retry: 'Retry',
     'weekdays.0': 'Sun',
     'weekdays.1': 'Mon',
     'weekdays.2': 'Tue',
@@ -147,12 +151,61 @@ function responseWithTuesdayWindows(): ValveSchedulesResponse {
   };
 }
 
+function responseWithNullStartTime(): ValveSchedulesResponse {
+  return {
+    schedules: [
+      {
+        scheduleUuid: 'sched-null-start',
+        deviceEui: '0016C001F1000001',
+        kind: 'WEEKLY',
+        label: null,
+        weekdaysMask: 0b0000010,
+        startTime: null,
+        fireAt: null,
+        durationMinutes: 20,
+        timezone: 'Europe/Zurich',
+        enabled: true,
+        onceState: null,
+      },
+    ],
+    compiled: { days: [[], [], [], [], [], [], []], errors: [] },
+    pushState: [],
+    settings: { stregaGeneration: 'GEN1', flowRateLpm: null, flowRateSource: null, defaultOpenMinutes: null },
+  };
+}
+
 function renderDialog(valve: ValveSummary, onChanged = vi.fn()) {
   return render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
       <ValveScheduleDialog valve={valve} open onClose={vi.fn()} onChanged={onChanged} />
     </SWRConfig>,
   );
+}
+
+/** Formats a UTC ISO instant back to local HH:MM in `timeZone`, for DST round-trip assertions. */
+function localHHMM(iso: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(new Date(iso)).reduce<Record<string, string>>((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const hour = parts.hour === '24' ? '00' : parts.hour;
+  return `${hour}:${parts.minute}`;
+}
+
+async function saveOnceAndCaptureFireAt(date: string, time: string): Promise<string> {
+  await screen.findByText('Schedules');
+  fireEvent.change(screen.getByLabelText('Date'), { target: { value: date } });
+  fireEvent.change(screen.getByLabelText('Time'), { target: { value: time } });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[1]);
+  await waitFor(() => expect(createScheduleMock).toHaveBeenCalled());
+  const [, input] = createScheduleMock.mock.calls[0];
+  expect(input.kind).toBe('ONCE');
+  return input.fireAt as string;
 }
 
 describe('ValveScheduleDialog', () => {
@@ -186,20 +239,92 @@ describe('ValveScheduleDialog', () => {
     expect(await screen.findByText('Overlaps another window on Tue.')).toBeInTheDocument();
   });
 
-  it('builds a one-time fireAt as the UTC instant of the chosen local date+time in the valve timezone', async () => {
+  it('renders a generic conflict message when the API rejects without weekday details', async () => {
     schedulesMock.mockResolvedValueOnce(emptyResponse());
-    createScheduleMock.mockResolvedValueOnce({ schedule: {}, pushesQueued: 1 });
-    renderDialog(makeValve({ timezone: 'Europe/Zurich' }));
+    createScheduleMock.mockRejectedValueOnce(new ValvePlanConflictError([]));
+    renderDialog(makeValve());
 
     await screen.findByText('Schedules');
-    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-01-15' } });
-    fireEvent.change(screen.getByLabelText('Time'), { target: { value: '07:00' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Tue' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
 
-    await waitFor(() => expect(createScheduleMock).toHaveBeenCalled());
-    const [, input] = createScheduleMock.mock.calls[0];
-    expect(input.kind).toBe('ONCE');
-    // Zurich is UTC+1 in mid-January (no DST) -> 07:00 local == 06:00 UTC.
-    expect(input.fireAt).toBe('2026-01-15T06:00:00.000Z');
+    expect(await screen.findByText('The schedule conflicts with the plan.')).toBeInTheDocument();
+  });
+
+  it('guards a null WEEKLY startTime instead of rendering the literal "null"', async () => {
+    schedulesMock.mockResolvedValueOnce(responseWithNullStartTime());
+    renderDialog(makeValve());
+
+    await screen.findByText('Schedules');
+    expect(screen.getByText('Mon · — · 20 min')).toBeInTheDocument();
+    expect(screen.queryByText(/null/)).not.toBeInTheDocument();
+  });
+
+  it('shows a loading state before the schedules request resolves', async () => {
+    let resolveSchedules: (value: ValveSchedulesResponse) => void = () => {};
+    schedulesMock.mockReturnValueOnce(new Promise((resolve) => { resolveSchedules = resolve; }));
+    renderDialog(makeValve());
+
+    expect(await screen.findByText('Loading...')).toBeInTheDocument();
+    expect(screen.queryByText('Schedules')).not.toBeInTheDocument();
+
+    resolveSchedules(emptyResponse());
+    await screen.findByText('Schedules');
+  });
+
+  it('shows a load-failure message with a retry that re-fetches the schedules', async () => {
+    schedulesMock.mockRejectedValueOnce(new Error('network down'));
+    renderDialog(makeValve());
+
+    expect(await screen.findByText('Could not load schedules.')).toBeInTheDocument();
+    // The dialog header (title + Cancel) is unconditional chrome, not part of the data view.
+    expect(screen.queryByText('Schedules')).not.toBeInTheDocument();
+
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await screen.findByText('Schedules');
+    expect(schedulesMock).toHaveBeenCalledTimes(2);
+  });
+
+  describe('one-time fireAt: local date+time in the valve timezone -> UTC instant', () => {
+    it('mid-January (no DST): 07:00 local -> 06:00Z', async () => {
+      schedulesMock.mockResolvedValueOnce(emptyResponse());
+      createScheduleMock.mockResolvedValueOnce({ schedule: {}, pushesQueued: 1 });
+      renderDialog(makeValve({ timezone: 'Europe/Zurich' }));
+
+      const fireAt = await saveOnceAndCaptureFireAt('2026-01-15', '07:00');
+      expect(fireAt).toBe('2026-01-15T06:00:00.000Z');
+    });
+
+    it('mid-July (DST in effect): 06:00 local -> 04:00Z', async () => {
+      schedulesMock.mockResolvedValueOnce(emptyResponse());
+      createScheduleMock.mockResolvedValueOnce({ schedule: {}, pushesQueued: 1 });
+      renderDialog(makeValve({ timezone: 'Europe/Zurich' }));
+
+      const fireAt = await saveOnceAndCaptureFireAt('2026-07-15', '06:00');
+      expect(fireAt).toBe('2026-07-15T04:00:00.000Z');
+    });
+
+    it('spring-forward transition day: 01:30 local (before the 02:00 gap) -> 00:30Z', async () => {
+      schedulesMock.mockResolvedValueOnce(emptyResponse());
+      createScheduleMock.mockResolvedValueOnce({ schedule: {}, pushesQueued: 1 });
+      renderDialog(makeValve({ timezone: 'Europe/Zurich' }));
+
+      const fireAt = await saveOnceAndCaptureFireAt('2026-03-29', '01:30');
+      expect(fireAt).toBe('2026-03-29T00:30:00.000Z');
+    });
+
+    it('fall-back transition day: ambiguous 01:30 local round-trips back to 01:30 local', async () => {
+      schedulesMock.mockResolvedValueOnce(emptyResponse());
+      createScheduleMock.mockResolvedValueOnce({ schedule: {}, pushesQueued: 1 });
+      renderDialog(makeValve({ timezone: 'Europe/Zurich' }));
+
+      const fireAt = await saveOnceAndCaptureFireAt('2026-10-25', '01:30');
+      // 01:30 occurs twice on this day (CEST then CET); a single-pass offset guess picks
+      // the wrong one and round-trips to 02:30. Assert self-consistency instead of a fixed
+      // instant: whichever occurrence the two-pass conversion picks must format back to 01:30.
+      expect(localHHMM(fireAt, 'Europe/Zurich')).toBe('01:30');
+    });
   });
 });
