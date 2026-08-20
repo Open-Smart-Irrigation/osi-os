@@ -41,7 +41,7 @@ osi-odoo/
 ├── README.md
 ├── compose.yaml
 ├── config/
-│   └── odoo.conf
+│   └── odoo.conf.template
 ├── addons/
 │   ├── osi_business_setup/
 │   └── osi_business_demo/
@@ -85,7 +85,7 @@ The remote `.env` will be mode `0600` and will contain generated values for:
 - Odoo database-manager master password
 - Odoo administrator login and password
 
-`.env.example` contains names and safe descriptions only. No deployed value enters Git, shell history, documentation, or command output.
+`.env.example` contains names and safe descriptions only. A render script will read `.env` and write the database-manager password into an ignored, mode-`0600` runtime configuration file. No deployed value enters Git, the container command line, shell history, documentation, or command output.
 
 The initialization command will create the fixed database without standard Odoo demo data, install `osi_business_setup` and `osi_business_demo`, set the administrator login from the environment, and stop. Public routing is enabled only after initialization succeeds. Normal runtime sets the exact database name and filter, disables the database list and manager, and enables proxy mode. Odoo's deployment guide requires this shape for an internet-facing single-database service.
 
