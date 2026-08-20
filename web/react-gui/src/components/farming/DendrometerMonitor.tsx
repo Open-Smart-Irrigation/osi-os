@@ -169,7 +169,7 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
             </div>
             <button
               onClick={onClose}
-              className="px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-white"
+              className="px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:opacity-70"
             >
               ×
             </button>

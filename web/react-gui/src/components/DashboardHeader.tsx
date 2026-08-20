@@ -22,7 +22,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   const showDesktopData = isDesktopBrowser();
 
   return (
-    <header className="bg-[var(--header-bg)] shadow-xl">
+    <header className="brushed-header shadow-md">
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-center gap-5">
@@ -60,7 +60,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
             <Link
               to="/settings"
-              className="w-[calc(50%-4px)] sm:w-auto rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] shadow-lg transition-colors hover:bg-[var(--border)]"
+              className="w-[calc(50%-4px)] sm:w-auto rounded-lg border border-[var(--border)] bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] shadow-lg transition-colors hover:bg-[var(--border)]"
             >
               {t('settings:entryPoint')}
             </Link>

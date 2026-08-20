@@ -144,7 +144,7 @@ export function CrossZoneAnalysisPage() {
 
   return (
     <div className="analysis-page flex h-screen flex-col bg-[var(--bg)] text-[var(--text)]">
-      <header className="shrink-0 border-b border-[var(--border)] bg-[var(--header-bg)] text-[var(--header-text)]">
+      <header className="shrink-0 brushed-header text-[var(--header-text)]">
         <div className="mx-auto max-w-[1600px] px-4 py-4">
           <div>
             <Link to="/dashboard" className="text-sm font-medium text-[var(--header-subtext)] hover:text-[var(--header-text)]">{t('analysis.backToDashboard')}</Link>

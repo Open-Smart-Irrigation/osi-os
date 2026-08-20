@@ -19,7 +19,7 @@ const SENSOR_OPTIONS: Array<{
 ];
 
 const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
-  { value: 'MOD1', description: 'Default OSI mode with temperature probe and ADC support.' },
+  { value: 'MOD1', description: 'Default Bovey mode with temperature probe and ADC support.' },
   { value: 'MOD2', description: 'Distance mode.' },
   { value: 'MOD3', description: 'Three ADC channels plus I2C mode.' },
   { value: 'MOD4', description: 'Three DS18B20 temperature channels mode.' },

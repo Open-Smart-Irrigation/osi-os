@@ -1,50 +1,50 @@
 {
-  "title": "Connetti a OSI Server",
-  "navLink": "OSI Server",
+  "title": "Connetti a Bovey Cloud",
+  "navLink": "Bovey Cloud",
   "backToDashboard": "Torna alla Dashboard",
   "status": {
-    "linked": "Account collegato a OSI Server",
-    "notLinked": "Non connesso a OSI Server",
+    "linked": "Account collegato a Bovey Cloud",
+    "notLinked": "Non connesso a Bovey Cloud",
     "linkedAs": "Collegato come: {{username}}",
     "linkedSince": "Dal: {{date}}"
   },
   "form": {
-    "serverUrl": "URL del server OSI",
+    "serverUrl": "URL del server Bovey Cloud",
     "actionLabel": "Azione",
     "actionLogin": "Collega account esistente",
     "actionRegister": "Crea nuovo account",
     "username": "Nome utente server",
     "email": "Email",
     "password": "Password",
-    "submit": "Connetti a OSI Server",
+    "submit": "Connetti a Bovey Cloud",
     "submitting": "Connessione in corso...",
     "cancel": "Annulla"
   },
   "warning": {
     "title": "Importante",
-    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
+    "message": "After linking, you must use your Bovey Cloud credentials to log in. Bovey stores a gateway-specific offline verifier for linked login.",
     "proceed": "Procedi"
   },
   "success": {
     "title": "Connesso con successo",
-    "message": "Il tuo account è ora collegato come {{username}} su OSI Server.",
+    "message": "Il tuo account è ora collegato come {{username}} su Bovey Cloud.",
     "claimedDevices": "Dispositivi reclamati sul server: {{count}}",
     "skippedDevices": "Dispositivi saltati (già reclamati): {{count}}"
   },
   "unlink": {
-    "button": "Disconnetti da OSI Server",
+    "button": "Disconnetti da Bovey Cloud",
     "confirm": "Sei sicuro? Dopo la disconnessione, devi usare la tua password locale originale.",
-    "success": "Disconnesso da OSI Server"
+    "success": "Disconnesso da Bovey Cloud"
   },
   "errors": {
-    "networkError": "Impossibile raggiungere OSI Server. Controlla l'URL e la connessione Internet.",
-    "authFailed": "Credenziali OSI Server non valide.",
+    "networkError": "Impossibile raggiungere Bovey Cloud. Controlla l'URL e la connessione Internet.",
+    "authFailed": "Credenziali Bovey Cloud non valide.",
     "generic": "Si è verificato un errore. Riprova.",
     "forceSyncFailed": "Manual sync failed. Please try again."
   },
   "sync": {
     "title": "Manual sync",
-    "description": "Run an immediate recovery sync with OSI Server.",
+    "description": "Run an immediate recovery sync with Bovey Cloud.",
     "button": "Force sync now",
     "running": "Syncing...",
     "successTitle": "Manual sync completed",
@@ -59,10 +59,10 @@
   },
   "reauth": {
     "title": "Sync token expired",
-    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
+    "description": "Re-authenticate with Bovey Cloud to mint a fresh sync token for this gateway.",
     "button": "Re-authenticate",
     "username": "Server Username",
-    "password": "OSI Server Password",
+    "password": "Bovey Cloud Password",
     "submit": "Refresh connection",
     "running": "Refreshing..."
   }

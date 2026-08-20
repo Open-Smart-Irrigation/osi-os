@@ -53,8 +53,8 @@ function OnlineCacheBadge({ data }: { data: ZoneEnvironmentSummary }) {
 function DisplayBadge({ data }: { data: ZoneEnvironmentSummary }) {
   if (!data.display) return null;
   const label =
-    data.display.mode === 'shared_server' ? 'OSI Server' :
-    data.display.mode === 'shared_server_stale' ? 'OSI Server stale' :
+    data.display.mode === 'shared_server' ? 'Bovey Cloud' :
+    data.display.mode === 'shared_server_stale' ? 'Bovey Cloud stale' :
     data.display.mode === 'local_fallback' ? 'Local fallback' :
     data.display.mode === 'unlinked_local' ? 'Local only' :
     data.display.sourceLabel;
