@@ -292,7 +292,7 @@ push if the jump exceeds 5 min, so the valve does not inherit a wrong time.
 
 | Method + path | Purpose |
 |---|---|
-| `GET /api/valves` | All STREGA valves of the user with zone id + **zone name**, `strega_generation`, flow rate, `scheduler_status`, active expectation summary, next run (`next_run_at`, `next_run_kind`, `next_run_minutes`), pending/failed push counts, `last_plan_sent_at`, `last_plan_acked_at`, `reporting_interval_min`. One query, the tile's whole data. |
+| `GET /api/valves` | All STREGA valves of the user with zone id + **zone name**, `strega_generation`, flow rate, `scheduler_status`, active expectation summary, next run (`next_run_at`, `next_run_kind`, `next_run_minutes`), pending/failed push counts, `last_plan_sent_at`, `last_plan_acked_at`. One query, the tile's whole data. (`reporting_interval_min` was cut at plan review: no edge column carries it, and the tile's pending hint no longer shows a minutes estimate.) |
 | `GET /api/valves/:deveui/schedules` | Schedules of a valve (WEEKLY + ONCE), plus the compiled weekday table (≤4 windows/day) and per-weekday push state. |
 | `POST /api/valves/:deveui/schedules` | Create; validates §3; compiles and queues pushes; 422 with `weekday` and `conflicts[]` on violation. |
 | `PUT /api/valves/:deveui/schedules/:uuid` | Update (same validation). |
