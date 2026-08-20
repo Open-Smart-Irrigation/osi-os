@@ -14,7 +14,7 @@ SELECT d.deveui, d.name, d.type_id, d.irrigation_zone_id, d.current_state, d.tar
        (SELECT vae.expected_close_at FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY vae.commanded_at DESC LIMIT 1) AS active_expected_close_at,
        (SELECT vae.commanded_duration_seconds FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY vae.commanded_at DESC LIMIT 1) AS active_duration_seconds,
        (SELECT vae.trigger FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY vae.commanded_at DESC LIMIT 1) AS active_trigger,
-       (SELECT vae.reconciliation_state FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state LIKE 'STALE_%' AND vae.commanded_at > datetime('now','-1 day') ORDER BY vae.commanded_at DESC LIMIT 1) AS recent_stale_state
+       (SELECT vae.reconciliation_state FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state LIKE 'STALE_%' AND datetime(vae.commanded_at) > datetime('now','-1 day') ORDER BY vae.commanded_at DESC LIMIT 1) AS recent_stale_state
   FROM devices d
   LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
   LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui
@@ -42,7 +42,10 @@ async function upsertSettings(db, deviceEui, patch) {
   if (!cols.length) return;
   const eui = String(deviceEui).toUpperCase();
   await db.run('INSERT OR IGNORE INTO valve_settings(device_eui) VALUES (?)', [eui]);
-  await db.run('UPDATE valve_settings SET ' + cols.map((c) => c + '=?').join(', ') + ", updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE device_eui=?", cols.map((c) => patch[c]).concat([eui]));
+  // datetime('now') (space-separated), not a hand-rolled ISO strftime: this matches the
+  // column's own DEFAULT (datetime('now')) so every write to valve_settings.updated_at is the
+  // same format, regardless of whether the row was just INSERTed or is being UPDATEd here.
+  await db.run('UPDATE valve_settings SET ' + cols.map((c) => c + '=?').join(', ') + ", updated_at=datetime('now') WHERE device_eui=?", cols.map((c) => patch[c]).concat([eui]));
 }
 
 // node:sqlite's DatabaseSync/StatementSync rejects `undefined` bind params (must be `null`);
@@ -65,11 +68,12 @@ const SCHEDULE_COLUMNS = ['label', 'weekdays_mask', 'start_time', 'fire_at', 'du
 async function updateSchedule(db, scheduleUuid, patch) {
   const cols = SCHEDULE_COLUMNS.filter((c) => Object.prototype.hasOwnProperty.call(patch || {}, c));
   if (!cols.length) return;
-  await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE schedule_uuid=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid]));
+  // datetime('now'), matching valve_schedules.updated_at/created_at's own DEFAULT (datetime('now')).
+  await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid]));
 }
 
 async function softDeleteSchedule(db, scheduleUuid) {
-  await db.run("UPDATE valve_schedules SET deleted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE schedule_uuid=? AND deleted_at IS NULL", [scheduleUuid]);
+  await db.run("UPDATE valve_schedules SET deleted_at=datetime('now'), sync_version=COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND deleted_at IS NULL", [scheduleUuid]);
 }
 
 // A DAYMASK_PLAN row's mask, decoded from its payload's first hex byte, with the 0x80
@@ -152,7 +156,14 @@ async function ackPush(db, deviceEui, purpose, fport, weekdayOrNull, status, atI
 }
 
 async function failStalePushes(db, olderThanIso) {
-  return db.run("UPDATE valve_schedule_pushes SET state='FAILED', error='no_ack_24h' WHERE state='QUEUED' AND queued_at < ?", [olderThanIso]);
+  // (C2) queued_at is the DB's own datetime('now') default (space-separated); olderThanIso is
+  // an ISO instant built by the caller. A raw string comparison mixes formats: at the
+  // date/time separator, ' ' (0x20) always sorts below 'T' (0x54) — below every digit, in fact
+  // — so on any day the two values happen to share, a genuinely-fresh space-form queued_at
+  // reads as "less than" the ISO cutoff regardless of the actual clock time, failing healthy
+  // pushes early. Wrapping both sides in datetime() normalizes them to the same canonical form
+  // before comparing.
+  return db.run("UPDATE valve_schedule_pushes SET state='FAILED', error='no_ack_24h' WHERE state='QUEUED' AND datetime(queued_at) < datetime(?)", [olderThanIso]);
 }
 
 async function pushSummary(db, deviceEui) {

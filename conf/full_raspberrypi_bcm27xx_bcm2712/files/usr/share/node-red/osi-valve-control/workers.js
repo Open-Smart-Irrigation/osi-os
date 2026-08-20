@@ -30,9 +30,12 @@ function actuatorCommand(deviceEui, zoneId, minutes, commandId, reason) {
   return { type: 'actuator_command', device: { devEui: deviceEui, zone_id: zoneId }, data: { action: 'OPEN_FOR_DURATION', duration_minutes: minutes, reason, commandId, commandType: 'OPEN_FOR_DURATION', deviceEui, trigger: 'one_time' } };
 }
 
-async function runOnceTick({ db, now, gatewayEui, warn }) {
+async function runOnceTick({ db, now, warn }) {
   const nowMs = (now || new Date()).getTime();
-  const rows = await db.all("SELECT vs.*, d.irrigation_zone_id, d.user_id FROM valve_schedules vs JOIN devices d ON d.deveui = vs.device_eui WHERE vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND vs.fire_at <= ? ORDER BY vs.fire_at", [new Date(nowMs).toISOString()]);
+  // (I3) AND d.deleted_at IS NULL: a soft-deleted device's PENDING ONCE rows must be left
+  // completely untouched (not fired, not skipped) rather than logging a phantom SKIP against a
+  // device that no longer exists to the operator.
+  const rows = await db.all("SELECT vs.*, d.irrigation_zone_id, d.user_id FROM valve_schedules vs JOIN devices d ON d.deveui = vs.device_eui WHERE vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL AND vs.fire_at <= ? ORDER BY vs.fire_at", [new Date(nowMs).toISOString()]);
   const fired = []; const skipped = [];
   for (const r of rows) {
     const fireMs = Date.parse(r.fire_at);
@@ -41,11 +44,13 @@ async function runOnceTick({ db, now, gatewayEui, warn }) {
     // OMITTED so trg_sync_irrigation_events_uuid_ai mints the canonical 'irrig-<gwEui>-<seq>' key
     // (a hand-rolled UUID would ship a non-conforming aggregate_key to the cloud). A zone-less or
     // unclaimed valve gets no event row; the schedule row's once_state stays the source of truth.
+    // created_at is likewise OMITTED (DB default datetime('now')), consistent with every other
+    // scheduler-triggered irrigation_events writer in flows.json (minor b).
     const canLog = r.user_id != null && r.irrigation_zone_id != null;
     if (nowMs - fireMs > ONCE_GRACE_MS) {
       await db.transaction(async (tx) => {
         await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'SKIPPED' });
-        if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json, created_at) VALUES (?,?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'SKIP', 'one_time_missed', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, fire_at: r.fire_at }), nowIso]);
+        if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'SKIP', 'one_time_missed', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, fire_at: r.fire_at })]);
       });
       if (!canLog) warn && warn('[valve-control] one_time_missed not logged for ' + r.device_eui + ' (no zone/user)');
       skipped.push({ schedule_uuid: r.schedule_uuid, device_eui: r.device_eui });
@@ -54,7 +59,7 @@ async function runOnceTick({ db, now, gatewayEui, warn }) {
     const commandId = crypto.randomUUID();
     await db.transaction(async (tx) => {
       await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'FIRED', once_fired_at: nowIso });
-      if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json, created_at) VALUES (?,?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'IRRIGATE', 'one_time_open', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, command_id: commandId }), nowIso]);
+      if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'IRRIGATE', 'one_time_open', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, command_id: commandId })]);
     });
     if (!canLog) warn && warn('[valve-control] one_time_open not logged for ' + r.device_eui + ' (no zone/user)');
     fired.push({ schedule_uuid: r.schedule_uuid, device_eui: r.device_eui, duration_minutes: r.duration_minutes, command_id: commandId, actuator_command: actuatorCommand(r.device_eui, r.irrigation_zone_id, r.duration_minutes, commandId, 'one_time_open') });
@@ -72,7 +77,10 @@ async function runObserveTick({ db, now, warn }) {
     LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui
     LEFT JOIN zone_irrigation_calibration zic ON zic.zone_id = d.irrigation_zone_id
     WHERE d.type_id='STREGA_VALVE' AND d.deleted_at IS NULL AND d.current_state='OPEN'
-      AND NOT EXISTS (SELECT 1 FROM valve_actuation_expectations v WHERE v.device_eui = d.deveui AND v.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING'))`);
+      AND NOT EXISTS (SELECT 1 FROM valve_actuation_expectations v WHERE v.device_eui = d.deveui AND v.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING','STALE_OPEN_OBSERVED'))`);
+  // (I1) STALE_OPEN_OBSERVED (the reconciliation monitor's own next state after
+  // OBSERVED_RUNNING sits stale past expected_close_at + grace) must still block a duplicate:
+  // the valve is still reporting OPEN and the row hasn't been explained by a CLOSED uplink yet.
   let created = 0;
   for (const d of open) {
     if (!d.last_uplink_at) continue;
@@ -113,10 +121,27 @@ async function runObserveTick({ db, now, warn }) {
 async function runClockTick({ db, now, appId, warn }) {
   const nowDate = now || new Date();
   await store.failStalePushes(db, new Date(nowDate.getTime() - STALE_PUSH_MS).toISOString());
-  const valves = await db.all("SELECT d.deveui, iz.timezone AS zone_timezone, vs.strega_generation, vs.last_clock_sync_queued_at FROM devices d LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.type_id='STREGA_VALVE' AND d.deleted_at IS NULL AND EXISTS (SELECT 1 FROM valve_schedules s WHERE s.device_eui = d.deveui AND s.deleted_at IS NULL)");
+  // (I2, spec §5.4): FPort 12 must encode local wall-clock digits in the SCHEDULE's timezone,
+  // not the zone's. schedule_timezone picks, per valve, the first enabled WEEKLY schedule's
+  // timezone (an enabled WEEKLY row sorts first), falling back to any other schedule's
+  // timezone if none is enabled-WEEKLY. The JS fallback chain below then falls further back to
+  // the zone timezone, then 'UTC' — never the gateway process's own Intl timezone, which has no
+  // relationship to the valve at all and was silently wrong for the common case of a gateway
+  // running in a different tz than every zone it serves.
+  // (M6) AND iz.deleted_at IS NULL: don't inherit a timezone from a soft-deleted zone.
+  const valves = await db.all(`SELECT d.deveui, iz.timezone AS zone_timezone, vs.strega_generation, vs.last_clock_sync_queued_at,
+      (SELECT s.timezone FROM valve_schedules s
+         WHERE s.device_eui = d.deveui AND s.deleted_at IS NULL AND s.timezone IS NOT NULL
+         ORDER BY (s.kind='WEEKLY' AND s.enabled=1) DESC, s.kind='WEEKLY' DESC, s.id ASC
+         LIMIT 1) AS schedule_timezone
+    FROM devices d
+    LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
+    LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui
+    WHERE d.type_id='STREGA_VALVE' AND d.deleted_at IS NULL
+      AND EXISTS (SELECT 1 FROM valve_schedules s WHERE s.device_eui = d.deveui AND s.deleted_at IS NULL)`);
   const messages = [];
   for (const v of valves) {
-    const tz = v.zone_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const tz = v.schedule_timezone || v.zone_timezone || 'UTC';
     const last = v.last_clock_sync_queued_at ? Date.parse(v.last_clock_sync_queued_at) : 0;
     const due = nowDate.getTime() - last >= CLOCK_PERIOD_MS;
     const dst = last && P.isDstTransitionWithin(tz, last, nowDate.getTime());
@@ -128,12 +153,31 @@ async function runClockTick({ db, now, appId, warn }) {
   return { messages };
 }
 
-// Hourly housekeeping that rides on the clock tick:
+// Housekeeping that rides on the clock tick (the tick itself runs every 10 minutes, not hourly):
 //  (a) SKIP_TODAY resets to ACTIVE once the valve's local date has moved past skip_today_date;
-//  (b) a gateway clock jump > 5 min since the previous tick forces a GEN1 clock re-sync for every scheduled valve;
-//  (c) decommission sweep: a STREGA device soft-deleted (deleted_at set) that still has an ACKED non-empty plan
-//      gets seven empty weekday pushes (GEN1) / an all-days empty FPort 25 (GEN2) plus FPort 21 '2'.
+//  (b) (C1) a gateway clock jump forces a GEN1 clock re-sync for every scheduled valve. The
+//      clock tick actually runs every 10 minutes (not hourly, despite the name/original 1h
+//      assumption below), so the detector must tolerate that real cadence: it now trips only on
+//      a genuine anomaly — the clock moving BACKWARD at all (delta < -60s, allowing a little
+//      slack for tick-to-tick jitter) or a FORWARD gap too large for any normal tick delay or
+//      brief restart to explain (> 6h). A naive "must be ~1h since last tick" comparison tripped
+//      on every single real 10-minute tick, nulling last_clock_sync_queued_at and re-queuing a
+//      clock push per valve every 10 minutes instead of the intended weekly cadence.
+//  (c) (C4) decommission sweep: a STREGA device soft-deleted (deleted_at set) that still has an
+//      ACKED non-empty plan gets seven empty weekday pushes (GEN1) / an all-days empty FPort 25
+//      (GEN2) plus FPort 21 '2'. The "already swept" guard compares p2.queued_at (DB default
+//      datetime('now'), space-separated) against d.deleted_at (written as an ISO instant
+//      everywhere in production) — wrapped in datetime() so the comparison is apples-to-apples;
+//      unwrapped, the sweep could silently repeat on every tick for the rest of the day (see
+//      failStalePushes above for the same class of bug in detail).
 let lastClockTickMs = null;
+// Test-only: the clock-jump detector's "delta since the previous tick" state is deliberately
+// module-scoped (production wants it to persist across ticks within one Node-RED runtime; the
+// first tick after every redeploy just seeds it and never trips). Tests in the same file share
+// that module instance, so each housekeeping test must reset it first to stay order-independent.
+function _resetHousekeepingForTests() { lastClockTickMs = null; }
+const CLOCK_JUMP_BACKWARD_MS = -60 * 1000;
+const CLOCK_JUMP_FORWARD_MS = 6 * 3600 * 1000;
 async function runHousekeeping({ db, now, appId, warn }) {
   const nowDate = now || new Date();
   const out = { resets: 0, clockJump: false, decommissioned: 0, messages: [] };
@@ -143,13 +187,14 @@ async function runHousekeeping({ db, now, appId, warn }) {
     const today = `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}`;
     if (!s.skip_today_date || today > s.skip_today_date) { await store.upsertSettings(db, s.device_eui, { scheduler_status: 'ACTIVE', skip_today_date: null }); out.resets += 1; }
   }
-  if (lastClockTickMs != null && Math.abs(nowDate.getTime() - lastClockTickMs - 3600000) > 5 * 60000) {
+  const tickDeltaMs = lastClockTickMs != null ? nowDate.getTime() - lastClockTickMs : null;
+  if (tickDeltaMs != null && (tickDeltaMs < CLOCK_JUMP_BACKWARD_MS || tickDeltaMs > CLOCK_JUMP_FORWARD_MS)) {
     out.clockJump = true;
     await db.run("UPDATE valve_settings SET last_clock_sync_queued_at = NULL WHERE device_eui IN (SELECT device_eui FROM valve_schedules WHERE deleted_at IS NULL)");
     warn && warn('[valve-control] gateway clock jump detected; forcing valve clock re-sync');
   }
   lastClockTickMs = nowDate.getTime();
-  const gone = await db.all("SELECT d.deveui, COALESCE(vs.strega_generation,'GEN1') AS gen FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.type_id='STREGA_VALVE' AND d.deleted_at IS NOT NULL AND EXISTS (SELECT 1 FROM valve_schedule_pushes p WHERE p.device_eui = d.deveui AND p.purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND p.state='ACKED' AND p.plan_hash <> ?) AND NOT EXISTS (SELECT 1 FROM valve_schedule_pushes p2 WHERE p2.device_eui = d.deveui AND p2.purpose='SCHEDULER_STATUS' AND p2.payload_hex='32' AND p2.queued_at > d.deleted_at)", [P.planHash([])]);
+  const gone = await db.all("SELECT d.deveui, COALESCE(vs.strega_generation,'GEN1') AS gen FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.type_id='STREGA_VALVE' AND d.deleted_at IS NOT NULL AND EXISTS (SELECT 1 FROM valve_schedule_pushes p WHERE p.device_eui = d.deveui AND p.purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND p.state='ACKED' AND p.plan_hash <> ?) AND NOT EXISTS (SELECT 1 FROM valve_schedule_pushes p2 WHERE p2.device_eui = d.deveui AND p2.purpose='SCHEDULER_STATUS' AND p2.payload_hex='32' AND datetime(p2.queued_at) > datetime(d.deleted_at))", [P.planHash([])]);
   for (const g of gone) {
     const days = Array.from({ length: 7 }, () => []);
     const pushes = push.buildPlanPushes({ generation: g.gen, days, lastHashes: {}, force: true }).concat([push.buildStatusPush('2')]);
@@ -174,7 +219,12 @@ async function runTriggerBackfill({ db, warn }) {
       else if (await db.get('SELECT 1 AS x FROM applied_commands WHERE command_id=? LIMIT 1', [r.command_id])) trigger = 'cloud_command';
     }
     if (trigger === 'manual') {
-      const log = await db.get("SELECT reason FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND created_at BETWEEN datetime(?, '-2 minutes') AND datetime(?, '+2 minutes') ORDER BY created_at DESC LIMIT 1", [r.device_eui, r.commanded_at, r.commanded_at]);
+      // (C3) actuator_log.created_at is always written as an ISO instant in production (every
+      // writer in flows.json uses `new Date().toISOString()`); wrap it in datetime() too so it
+      // compares on equal footing with the datetime(...)-computed window bounds — an
+      // unwrapped ISO created_at never falls inside a bound built from SQLite's own
+      // space-separated datetime() output, so this lookup silently never matched.
+      const log = await db.get("SELECT reason FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND datetime(created_at) BETWEEN datetime(?, '-2 minutes') AND datetime(?, '+2 minutes') ORDER BY created_at DESC LIMIT 1", [r.device_eui, r.commanded_at, r.commanded_at]);
       if (log && /^scheduler_/.test(String(log.reason || ''))) trigger = 'trigger_based';
     }
     await db.run('UPDATE valve_actuation_expectations SET trigger=? WHERE expectation_id=? AND trigger IS NULL', [trigger, r.expectation_id]);
@@ -200,4 +250,4 @@ async function runTriggerBackfill({ db, warn }) {
   return { updated };
 }
 
-module.exports = { handleUplink, runOnceTick, runObserveTick, runClockTick, runHousekeeping, runTriggerBackfill, ONCE_GRACE_MS };
+module.exports = { handleUplink, runOnceTick, runObserveTick, runClockTick, runHousekeeping, runTriggerBackfill, ONCE_GRACE_MS, _resetHousekeepingForTests };
