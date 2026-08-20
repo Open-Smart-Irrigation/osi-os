@@ -21,6 +21,8 @@ const codecPath = path.resolve(
   'strega_gen1_decoder.js',
 );
 const fixturePath = path.resolve(__dirname, 'fixtures', 'strega-gen1', 'valve-white-fport4-sample.json');
+const schedulerAckFixturePath = path.resolve(__dirname, 'fixtures', 'strega-gen1', 'scheduler-ack-schlport16-fport2-sample.json');
+const clockSyncAckFixturePath = path.resolve(__dirname, 'fixtures', 'strega-gen1', 'clock-sync-ack-rtcport12-fport2-sample.json');
 const flowPath = path.resolve(
   __dirname,
   '..',
@@ -125,6 +127,24 @@ function verifyDecodeContract(decodeUplink, fixture) {
   assert.equal(decoded.data.Hygrometry, null, 'fixture should normalize the sentinel hygrometry to null');
   console.log('OK managed STREGA codec decodes the Uganda Gen1 fixture with null environmental telemetry');
   return decoded;
+}
+
+// Extended per spec §11 ("verify-strega-gen1.js extended with ACK fixtures (Schl_Port,
+// RTC_Port)"): confirms the managed Gen1 codec still emits the exact ACK field names
+// osi-valve-control/ack.js's interpretUplink() consumes (Schl_Port/Schl_status for weekday
+// scheduler ACKs, RTC_Port/RTC_status for clock-sync ACKs). A drift here would silently break
+// ACK-driven push-state transitions without any osi-valve-control test noticing, since those
+// tests exercise ack.js in isolation from the real vendor decoder.
+function verifyAckDecodeContract(decodeUplink, fixture) {
+  const bytes = Array.from(Buffer.from(fixture.base64, 'base64'));
+  const decoded = decodeUplink({ fPort: fixture.fPort, bytes });
+
+  assert.ok(decoded && decoded.data, `decodeUplink must return a data object for ${fixture.deviceName}`);
+  for (const [key, value] of Object.entries(fixture.expected)) {
+    assert.ok(Object.prototype.hasOwnProperty.call(decoded.data, key), `decodeUplink must expose ${key} for the ${fixture.deviceName} ACK fixture`);
+    assert.equal(decoded.data[key], value, `${key} should decode to ${JSON.stringify(value)} for the ${fixture.deviceName} ACK fixture`);
+  }
+  console.log(`OK managed STREGA codec decodes the ${fixture.deviceName} ACK fixture (${Object.keys(fixture.expected).join(', ')})`);
 }
 
 async function verifyStregaNormalizationContract(flows, fixture, object, label, expected = {}) {
@@ -269,6 +289,12 @@ async function main() {
     },
   );
   verifyCommandMatrix(flows, fixture);
+
+  const schedulerAckFixture = loadJson(schedulerAckFixturePath);
+  const clockSyncAckFixture = loadJson(clockSyncAckFixturePath);
+  verifyAckDecodeContract(decodeUplink, schedulerAckFixture);
+  verifyAckDecodeContract(decodeUplink, clockSyncAckFixture);
+
   console.log('OK Strega Gen1 smoke checks passed');
 }
 
