@@ -52,7 +52,15 @@
 | `docs/contracts/sync-schema/{resources,events}.schema.json`, `canonicalization.md` | `ValveSchedule` resource + `VALVE_SCHEDULE_UPSERTED` op. |
 | `AGENTS.md`, `docs/architecture/system-map/03-edge-backend-flows.md` | Module + rename documentation. |
 
-Phase B (osi-server mirror, AgroLink panel, cloud→edge `UPSERT_VALVE_SCHEDULE` command routing) is a separate plan in osi-server plus a small edge follow-up; it is not in this file.
+Phase B (osi-server mirror, AgroLink panel, cloud→edge `UPSERT_VALVE_SCHEDULE` command routing, sync-outbox triggers via edge migration `0023` + `MIGRATION_OWNED_TRIGGERS` entries in `scripts/verify-runtime-schema-parity.js`) is a separate plan in osi-server plus a small edge follow-up; it is not in this file.
+
+## Deviations from the spec (agreed at plan review)
+
+1. **§5.1 step 4** routed scheduler downlinks through the builder `cdbaa3891d40d7a1` via new actions. This plan builds the frames in `push.js` and sends them through a dedicated `valve-push-mqtt-out` instead: the builder is a hot node under the size ratchet, and plan pushes have their own ledger (`valve_schedule_pushes`) — `actuator_log` stays actuation-only.
+2. **§4** sync-outbox triggers are deferred to Phase B (lockstep): every live gateway is cloud-linked and an unknown aggregate produces terminally-rejected outbox rows.
+3. **§5.6** wanted the reconciliation monitor to gain a step; the plan adds a separate 60 s observe node at the same cadence instead. The monitor still completes the rows the observe node creates.
+4. **§5.4** DST re-sync within 10 min is honoured by a 10-minute clock tick.
+The spec is amended in the same commit as this plan revision.
 
 ---
 
@@ -64,7 +72,7 @@ Phase B (osi-server mirror, AgroLink panel, cloud→edge `UPSERT_VALVE_SCHEDULE`
 - Regenerate: the 7 bundled `farming.db` copies
 
 **Interfaces:**
-- Produces: tables `valve_schedules`, `valve_settings`, `valve_schedule_pushes`; column `valve_actuation_expectations.trigger`; triggers `trg_sync_valve_schedules_outbox_ai`, `trg_sync_valve_schedules_outbox_au` emitting aggregate `VALVE_SCHEDULE`, op `VALVE_SCHEDULE_UPSERTED`, key `schedule_uuid`.
+- Produces: tables `valve_schedules`, `valve_settings`, `valve_schedule_pushes`; column `valve_actuation_expectations.trigger`. Sync-outbox triggers are Phase B (see Step 2 note).
 
 - [ ] **Step 1: Confirm the next migration number and baseline verifiers are green**
 
@@ -146,94 +154,20 @@ CREATE INDEX IF NOT EXISTS idx_valve_schedule_pushes_device_state ON valve_sched
 
 ALTER TABLE valve_actuation_expectations ADD COLUMN trigger TEXT;
 
--- Sync: valve schedules are a cloud-visible aggregate (VALVE_SCHEDULE).
-CREATE TRIGGER IF NOT EXISTS trg_sync_valve_schedules_outbox_ai
-AFTER INSERT ON valve_schedules
-FOR EACH ROW
-BEGIN
-  UPDATE valve_schedules
-  SET sync_version = CASE WHEN COALESCE(sync_version,0)=0 THEN 1 ELSE sync_version END
-  WHERE id = NEW.id;
-  INSERT INTO sync_outbox(
-    event_uuid, aggregate_type, aggregate_key, op, payload_json,
-    sync_version, occurred_at, gateway_device_eui
-  )
-  SELECT
-    lower(hex(randomblob(16))), 'VALVE_SCHEDULE', NEW.schedule_uuid, 'VALVE_SCHEDULE_UPSERTED',
-    json_object(
-      'contract_version', 1,
-      'schedule_uuid',    NEW.schedule_uuid,
-      'device_eui',       NEW.device_eui,
-      'kind',             NEW.kind,
-      'label',            NEW.label,
-      'weekdays_mask',    NEW.weekdays_mask,
-      'start_time',       NEW.start_time,
-      'fire_at',          NEW.fire_at,
-      'duration_minutes', NEW.duration_minutes,
-      'timezone',         NEW.timezone,
-      'enabled',          NEW.enabled,
-      'once_state',       NEW.once_state,
-      'sync_version',     CASE WHEN COALESCE(NEW.sync_version,0)=0 THEN 1 ELSE NEW.sync_version END,
-      'deleted_at',       NEW.deleted_at
-    ),
-    CASE WHEN COALESCE(NEW.sync_version,0)=0 THEN 1 ELSE NEW.sync_version END,
-    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    (SELECT gateway_device_eui FROM devices WHERE deveui = NEW.device_eui)
-  WHERE EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1);
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_sync_valve_schedules_outbox_au
-AFTER UPDATE ON valve_schedules
-FOR EACH ROW
-WHEN
-  EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1)
-  AND (
-    COALESCE(NEW.kind,'') <> COALESCE(OLD.kind,'') OR
-    COALESCE(NEW.label,'') <> COALESCE(OLD.label,'') OR
-    COALESCE(NEW.weekdays_mask,0) <> COALESCE(OLD.weekdays_mask,0) OR
-    COALESCE(NEW.start_time,'') <> COALESCE(OLD.start_time,'') OR
-    COALESCE(NEW.fire_at,'') <> COALESCE(OLD.fire_at,'') OR
-    COALESCE(NEW.duration_minutes,0) <> COALESCE(OLD.duration_minutes,0) OR
-    COALESCE(NEW.timezone,'') <> COALESCE(OLD.timezone,'') OR
-    COALESCE(NEW.enabled,0) <> COALESCE(OLD.enabled,0) OR
-    COALESCE(NEW.once_state,'') <> COALESCE(OLD.once_state,'') OR
-    COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
-  )
-BEGIN
-  INSERT INTO sync_outbox(
-    event_uuid, aggregate_type, aggregate_key, op, payload_json,
-    sync_version, occurred_at, gateway_device_eui
-  ) VALUES (
-    lower(hex(randomblob(16))), 'VALVE_SCHEDULE', NEW.schedule_uuid, 'VALVE_SCHEDULE_UPSERTED',
-    json_object(
-      'contract_version', 1,
-      'schedule_uuid',    NEW.schedule_uuid,
-      'device_eui',       NEW.device_eui,
-      'kind',             NEW.kind,
-      'label',            NEW.label,
-      'weekdays_mask',    NEW.weekdays_mask,
-      'start_time',       NEW.start_time,
-      'fire_at',          NEW.fire_at,
-      'duration_minutes', NEW.duration_minutes,
-      'timezone',         NEW.timezone,
-      'enabled',          NEW.enabled,
-      'once_state',       NEW.once_state,
-      'sync_version',     NEW.sync_version,
-      'deleted_at',       NEW.deleted_at
-    ),
-    NEW.sync_version,
-    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    (SELECT gateway_device_eui FROM devices WHERE deveui = NEW.device_eui)
-  );
-END;
 ```
 
-Before committing, open `database/seed-blank.sql` around the `trg_sync_schedules_outbox_au` trigger (≈ line 1364) and confirm the `sync_outbox` column list used there is exactly `event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, gateway_device_eui`; if the seed's column list differs, match the seed, not this plan.
+**Deliberately absent (Phase B):** the `trg_sync_valve_schedules_outbox_ai`/`_au` sync triggers from spec §4 do NOT ship in 0022. Every live gateway is cloud-linked; emitting a `VALVE_SCHEDULE` aggregate the cloud has never seen produces terminally-rejected `sync_outbox` rows (the known edge→cloud bootstrap gap). The table carries `schedule_uuid`/`sync_version`/`deleted_at` from day one, so Phase B's lockstep migration (`0023`) is trigger-only; Phase B must also add both trigger names to `MIGRATION_OWNED_TRIGGERS` in `scripts/verify-runtime-schema-parity.js` (migration-delivered triggers absent from the frozen boot node — the `0005` precedent).
 
 - [ ] **Step 3: Mirror the DDL into `database/seed-blank.sql`**
 
-Append the three `CREATE TABLE` + index statements right after the `idx_valve_act_exp_effect_key` index (≈ line 1014), and add `trigger TEXT` as the last column of `CREATE TABLE valve_actuation_expectations` (after `valve_channel INTEGER`, keep the odd `, valve_channel INTEGER);` formatting by turning it into `, valve_channel INTEGER, trigger TEXT);`). Append the two triggers after `trg_sync_schedules_outbox_au`.
+Append the three `CREATE TABLE` + index statements right after the `idx_valve_act_exp_effect_key` index (≈ line 1014), and add `trigger TEXT` as the last column of `CREATE TABLE valve_actuation_expectations` (after `valve_channel INTEGER`, keep the odd `, valve_channel INTEGER);` formatting by turning it into `, valve_channel INTEGER, trigger TEXT);`). No triggers ship in Phase A (see above).
+
+- [ ] **Step 3b: Update the checksum manifest**
+
+`database/migrations/ordered/CHECKSUMS.json` is required by `verify-migrations.js` (a missing entry is a hard fail; the `0021` landing commit `3655e9fd` shows the shape). Compute the hash and merge the `0022__valve_control.sql` entry in, following the file's existing format:
+```bash
+node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync('database/migrations/ordered/0022__valve_control.sql')).digest('hex'))"
+```
 
 - [ ] **Step 4: Regenerate the 7 bundled DBs**
 
@@ -260,9 +194,9 @@ In `scripts/verify-db-schema-consistency.js`, add to the hand-maintained contrac
 valve_schedules: ['id','schedule_uuid','device_eui','kind','label','weekdays_mask','start_time','fire_at','duration_minutes','timezone','enabled','once_state','once_fired_at','sync_version','deleted_at','created_at','updated_at'],
 valve_settings: ['device_eui','strega_generation','flow_rate_lpm','flow_rate_source','flow_rate_updated_at','default_open_minutes','scheduler_status','skip_today_date','last_clock_sync_queued_at','last_clock_sync_acked_at','updated_at'],
 valve_schedule_pushes: ['push_id','device_eui','purpose','weekday','fport','payload_hex','plan_hash','state','ack_status','queued_at','acked_at','error'],
-valve_actuation_expectations: ['expectation_id','device_eui','zone_id','command_id','effect_key','commanded_at','commanded_duration_seconds','expected_close_at','reconciliation_state','trigger'],
+valve_actuation_expectations: ['expectation_id','device_eui','zone_id','command_id','effect_key','commanded_at','commanded_duration_seconds','expected_close_at','flow_rate_lpm','flow_rate_source','estimated_gross_liters','volume_source','observed_open_at','observed_close_at','reconciliation_state','cancel_reason','created_at','valve_channel','trigger'],
 ```
-and `idx_valve_schedules_device`, `idx_valve_schedules_once_due`, `idx_valve_schedule_pushes_device_state` to the required-index list; add `trg_sync_valve_schedules_outbox_au` to the required-trigger-fragment list (fragment `'VALVE_SCHEDULE_UPSERTED'`).
+The comparison is an EXACT set (missing AND extra both fail), so `valve_actuation_expectations` must list all 18 existing columns plus `trigger` — verify with `sqlite3 database/farming.db "PRAGMA table_info(valve_actuation_expectations)"` after Step 4 and match exactly. `requiredIndexes` is keyed by table name: add `valve_schedules: ['idx_valve_schedules_device','idx_valve_schedules_once_due']` and `valve_schedule_pushes: ['idx_valve_schedule_pushes_device_state']`. No trigger fragments (Phase B).
 
 - [ ] **Step 6: Run the verifier set**
 
@@ -275,14 +209,14 @@ node scripts/verify-no-stray-ddl.js
 node scripts/verify-profile-parity.js
 node scripts/test-journal-schema.js
 ```
-Expected: each prints its OK line (`verify-seed-replay: OK`, all 7 paths `OK` + `DB schema consistency verification passed`, `All parity checks passed.`). If `verify-runtime-schema-parity.js` complains that the boot node lacks the new triggers, read its message: it compares the boot node's trigger SET against the seed — new sync triggers that only exist in the seed are the established precedent for migration-delivered triggers (check how `0019`/`0020` handled their triggers and follow that precedent; do NOT add DDL to `sync-init-fn`).
+Expected: each prints its OK line (`verify-seed-replay: OK`, all 7 paths `OK` + `DB schema consistency verification passed`, `All parity checks passed.`). 0022 creates no triggers, so `verify-runtime-schema-parity.js` is unaffected.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add database/migrations/ordered/0022__valve_control.sql database/seed-blank.sql scripts/verify-db-schema-consistency.js \
+git add database/migrations/ordered/0022__valve_control.sql database/migrations/ordered/CHECKSUMS.json database/seed-blank.sql scripts/verify-db-schema-consistency.js \
   conf/*/files/usr/share/db/farming.db database/farming.db web/react-gui/farming.db
-git commit -m "schema: valve control tables, expectation trigger column, VALVE_SCHEDULE sync triggers (0022)"
+git commit -m "schema: valve control tables + expectation trigger column (0022; sync triggers deferred to Phase B)"
 ```
 
 ---
@@ -393,8 +327,9 @@ test('gen2Groups merges identical weekdays and uses 0x80 for all-days', () => {
   const w = [{ onH: 6, onM: 0, offH: 6, offM: 30 }];
   const all = P.gen2Groups([w, w, w, w, w, w, w]);
   assert.deepEqual(all.map((g) => g.daymask), [0x80]);
+  // Empty weekdays form their own group on purpose (spec §5.1 step 3: cleared days get an explicit empty push).
   const some = P.gen2Groups([[], w, [], [], [], [], w]);
-  assert.deepEqual(some.map((g) => g.daymask).sort(), [(1 << 1) | (1 << 6)]);
+  assert.deepEqual(some.map((g) => g.daymask).sort((a, b) => a - b), [(1 << 1) | (1 << 6), 0x3D]);
 });
 
 test('planHash is order-independent for equal windows and differs for different windows', () => {
@@ -621,8 +556,8 @@ function nextRun(schedules, now, timeZoneFallback) {
     if (at && (!best || at < best.atDate)) best = { atDate: at, at: at.toISOString(), kind: s.kind, minutes: Number(s.duration_minutes), scheduleUuid: s.schedule_uuid };
   }
   if (!best) return null;
-  delete best.atDate;
-  return best;
+  const { atDate, ...rest } = best;
+  return rest;
 }
 
 function validateScheduleInput(body) {
@@ -767,14 +702,21 @@ module.exports = { interpretUplink };
 ```
 Adjust the Gen2 field names (`Ack_Port`, `Ack_Value`, `Ack`) to whatever the vendor Gen2 decoder actually emits (Step 1); keep tests and implementation in agreement and note the mapping in a comment.
 
-- [ ] **Step 5: Export from `index.js`, run tests, commit**
+- [ ] **Step 5: Fallback decode + `verify-strega-gen1.js` ACK fixtures**
+
+Add to `ack.js` a `decodeGen1Fallback(fsModule, base64Data, fPort)` mirroring `strega-process-fn`'s `decodeStregaFallback`: read `/srv/node-red/codecs/strega_gen1_decoder.js` when it exists, else the repo-relative `path.resolve(__dirname, '../codecs/strega_gen1_decoder.js')`, wrap with `new Function` exactly the way the flow node does (copy that wrapping code from the node body — do not retype it), return the decoded object or `null` on any failure (warn, never throw). Export it (the ACK flow node calls it when `payload.object` is empty). Test: garbage base64 returns `null`; a Gen1 ACK frame built per the vendor decoder's ACK format decodes to an object containing `Schl_Port`.
+
+Extend `scripts/verify-strega-gen1.js` with ACK fixtures (spec §11): a `Schl_Port` frame and an `RTC_Port` frame run through the vendor decoder produce the fields `ack.js` consumes. Follow the script's existing fixture pattern (`scripts/fixtures/strega-gen1/`).
+
+- [ ] **Step 6: Export from `index.js`, run tests, commit**
 
 `index.js`: `module.exports = { ...require('./plan'), ...require('./ack') };`
 
 ```bash
 node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/*.test.js
 git add conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/
-git commit -m "feat(valve-control): STREGA ACK interpretation + Gen2 hint"
+git add scripts/verify-strega-gen1.js scripts/fixtures/strega-gen1
+git commit -m "feat(valve-control): STREGA ACK interpretation, Gen1 fallback decode, Gen2 hint + decoder ACK fixtures"
 ```
 
 ---
@@ -1047,10 +989,15 @@ async function supersedeQueued(db, deviceEui, purpose, weekdayOrMask) {
   return db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND state='QUEUED'", [deviceEui, purpose]);
 }
 
+// The live osi-db-helper facade's run() resolves undefined (no change count), so ackPush
+// counts via SELECT-then-UPDATE instead of trusting run()'s return value.
 async function ackPush(db, deviceEui, purpose, fport, weekdayOrNull, status, atIso) {
   const where = weekdayOrNull == null ? '' : ' AND weekday=?';
-  const params = [status, atIso, deviceEui, purpose, fport].concat(weekdayOrNull == null ? [] : [weekdayOrNull]);
-  return db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=? WHERE push_id = (SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state='QUEUED'" + where + ' ORDER BY queued_at DESC LIMIT 1)', params);
+  const selParams = [deviceEui, purpose, fport].concat(weekdayOrNull == null ? [] : [weekdayOrNull]);
+  const row = await db.get("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state='QUEUED'" + where + ' ORDER BY queued_at DESC LIMIT 1', selParams);
+  if (!row) return 0;
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=? WHERE push_id=?", [status, atIso, row.push_id]);
+  return 1;
 }
 
 async function failStalePushes(db, olderThanIso) {
@@ -1088,27 +1035,51 @@ Adjust the JOIN if the column is named differently.
 
 - [ ] **Step 4: Integration test of `compileAndQueue` against a real SQLite file**
 
-Append to `push.test.js` (uses the bundled dev DB schema copied to a temp file and the `osi-db-helper` facade):
+**Do NOT `require('../osi-db-helper')` in tests.** Its `sqlite3` binary dependency is not installed in the repo checkout, the facade is a process-wide singleton (a second `new Database(path)` silently reuses the first file), and its `run()` resolves `undefined`, never a change count. Tests use Node's built-in `node:sqlite` behind the same duck-typed interface the modules are written against (`{get, all, run, transaction, close}`, `run` resolving `{changes}`); the flow nodes pass the real facade, whose `run()` return value the modules must never rely on.
+
+Create `test-helpers.js`:
 ```js
+'use strict';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Database } = require('../osi-db-helper');
-const store = require('./store');
-const { compileAndQueue } = require('./push');
+const { DatabaseSync } = require('node:sqlite');
+
+function facade(raw) {
+  return {
+    get: (sql, params) => Promise.resolve(raw.prepare(sql).get(...(params || []))),
+    all: (sql, params) => Promise.resolve(raw.prepare(sql).all(...(params || []))),
+    run: (sql, params) => { const r = raw.prepare(sql).run(...(params || [])); return Promise.resolve({ changes: Number(r.changes) }); },
+    async transaction(executor) {
+      raw.exec('BEGIN IMMEDIATE');
+      try { const out = await executor(facade(raw)); raw.exec('COMMIT'); return out; }
+      catch (e) { try { raw.exec('ROLLBACK'); } catch (_) { /* already rolled back */ } throw e; }
+    },
+    close: (cb) => { try { raw.close(); } catch (_) { /* closed */ } if (cb) cb(); },
+  };
+}
 
 async function tempDb() {
   const src = path.resolve(__dirname, '../../db/farming.db');
-  const dst = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vc-')), 'farming.db');
-  fs.copyFileSync(src, dst);
-  const db = new Database(dst);
-  await db.run("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))").catch(() => {});
-  await db.run("INSERT INTO devices(deveui, name, type_id, user_id) VALUES ('0016C001F1000001','Valve A','STREGA_VALVE',1)");
-  return db;
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vc-')), 'farming.db');
+  fs.copyFileSync(src, dbPath);
+  const raw = new DatabaseSync(dbPath);
+  const db = facade(raw);
+  await db.run("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))");
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000001','Valve A','STREGA_VALVE',1,datetime('now'),datetime('now'))");
+  return { db, path: dbPath, raw };
 }
 
+module.exports = { tempDb, facade };
+```
+Adjust the two inserts to whatever NOT NULL columns the seed's `CREATE TABLE users` / `CREATE TABLE devices` actually require (verified: users = username, password_hash, created_at; devices = deveui, name, type_id, created_at, updated_at). Then append to `push.test.js`:
+```js
+const { tempDb } = require('./test-helpers');
+const store = require('./store');
+const { compileAndQueue } = require('./push');
+
 test('compileAndQueue: first save pushes 7 weekdays + clock, second identical save pushes nothing, change pushes one day', async () => {
-  const db = await tempDb();
+  const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'u1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
   const flushes = [];
   const r1 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async (e) => flushes.push(e), warn: () => {} });
@@ -1123,14 +1094,14 @@ test('compileAndQueue: first save pushes 7 weekdays + clock, second identical sa
   assert.deepEqual(r3.rows.map((r) => r.weekday), [1]);
   const superseded = await db.all("SELECT state FROM valve_schedule_pushes WHERE weekday=1 ORDER BY queued_at");
   assert.deepEqual(superseded.map((s) => s.state), ['SUPERSEDED', 'QUEUED']);
-  await new Promise((res) => db.close(() => res()));
+  db.close();
 });
 
 test('compileAndQueue rejects >4 windows with a 422 plan_conflict', async () => {
-  const db = await tempDb();
+  const { db } = await tempDb();
   for (let i = 1; i <= 5; i += 1) await store.insertSchedule(db, { schedule_uuid: 'x' + i, device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 4, start_time: '0' + i + ':00', duration_minutes: 10, timezone: 'UTC', enabled: 1 });
   await assert.rejects(() => compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', flushQueue: async () => {}, warn: () => {} }), (e) => e.statusCode === 422 && e.details[0].weekday === 2);
-  await new Promise((res) => db.close(() => res()));
+  db.close();
 });
 ```
 If the `users` table columns differ, read `database/seed-blank.sql` `CREATE TABLE users` and fix the insert; the `devices` insert needs whatever `NOT NULL` columns the seed requires (check `CREATE TABLE devices`).
@@ -1140,7 +1111,7 @@ If the `users` table columns differ, read `database/seed-blank.sql` `CREATE TABL
 ```bash
 node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/*.test.js
 ```
-Expected: all pass (the integration tests need `database/farming.db` regenerated in Task 1 — that path is `../../db/farming.db` relative to the module? No: the module lives under `files/usr/share/node-red/`, the bundled DB under `files/usr/share/db/farming.db`, so `path.resolve(__dirname, '../../db/farming.db')` is correct).
+Expected: all pass. (`path.resolve(__dirname, '../../db/farming.db')` resolves from `files/usr/share/node-red/osi-valve-control/` to the bundled `files/usr/share/db/farming.db` regenerated in Task 1.)
 
 ```bash
 git add conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/
@@ -1171,9 +1142,11 @@ Copy `apiError`, `unauthorized`, `verifyBearer`, `resolveAuthSecret`, `requestBo
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { tempDb } = require('./test-helpers');
+const { tempDb, facade } = require('./test-helpers');
 const { handleHttpRequest } = require('./api');
-const { Database } = require('../osi-db-helper');
+const { DatabaseSync } = require('node:sqlite');
+// The router takes a Database constructor; hand it one backed by node:sqlite.
+function TestDatabase(dbPath) { return facade(new DatabaseSync(dbPath)); }
 
 const SECRET = 'test-secret';
 function token(userId) {
@@ -1184,7 +1157,7 @@ function req(method, url, body, auth) {
   return { req: { method, url, headers: { authorization: auth === undefined ? token(1) : auth }, body, params: {} }, payload: body };
 }
 async function call(dbPath, msg, extra) {
-  return handleHttpRequest(Object.assign({ msg, Database, environment: { authTokenSecret: SECRET, dbPath }, warn: () => {}, flushQueue: async () => {}, appId: 'app' }, extra || {}));
+  return handleHttpRequest(Object.assign({ msg, Database: TestDatabase, environment: { authTokenSecret: SECRET, dbPath }, warn: () => {}, flushQueue: async () => {}, appId: 'app' }, extra || {}));
 }
 
 test('GET /api/valves returns the user valves with zone name and defaults', async () => {
@@ -1298,7 +1271,7 @@ async function handleHttpRequest(options) {
   const tzFallback = environment.gatewayTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const respond = (statusCode, payload) => { msg.statusCode = statusCode; msg.payload = payload; msg.headers = HEADERS; return msg; };
   const method = String(msg.req && msg.req.method || '').toUpperCase();
-  const requestPath = String(msg.req && msg.req.url || '').split('?')[0];
+  const requestPath = String((msg.req && (msg.req.path || msg.req.originalUrl || msg.req.url)) || '').split('?')[0]; // journal-api precedent: req.path first
   let db = null;
   try {
     const secret = resolveAuthSecret(environment, warn);
@@ -1533,7 +1506,7 @@ async function handleUplink({ db, deviceEui, decoded, fPort, receivedAt, warn })
   const at = receivedAt || new Date().toISOString();
   let acked = 0;
   for (const a of acks) {
-    acked += Number(await store.ackPush(db, deviceEui, a.purpose, a.fport, a.weekday, a.status, at)) || 0;
+    acked += await store.ackPush(db, deviceEui, a.purpose, a.fport, a.weekday, a.status, at);
     if (a.purpose === 'CLOCK_SYNC') await store.upsertSettings(db, deviceEui, { last_clock_sync_acked_at: at });
   }
   let generationPromoted = false;
@@ -1555,19 +1528,26 @@ async function runOnceTick({ db, now, gatewayEui, warn }) {
   for (const r of rows) {
     const fireMs = Date.parse(r.fire_at);
     const nowIso = new Date(nowMs).toISOString();
+    // irrigation_events: user_id and irrigation_zone_id are NOT NULL, and event_uuid must be
+    // OMITTED so trg_sync_irrigation_events_uuid_ai mints the canonical 'irrig-<gwEui>-<seq>' key
+    // (a hand-rolled UUID would ship a non-conforming aggregate_key to the cloud). A zone-less or
+    // unclaimed valve gets no event row; the schedule row's once_state stays the source of truth.
+    const canLog = r.user_id != null && r.irrigation_zone_id != null;
     if (nowMs - fireMs > ONCE_GRACE_MS) {
       await db.transaction(async (tx) => {
         await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'SKIPPED' });
-        await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json, event_uuid, created_at) VALUES (?,?,?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'SKIP', 'one_time_missed', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, fire_at: r.fire_at }), crypto.randomUUID(), nowIso]).catch((e) => warn && warn('[valve-control] irrigation_events insert failed: ' + e.message));
+        if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json, created_at) VALUES (?,?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'SKIP', 'one_time_missed', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, fire_at: r.fire_at }), nowIso]);
       });
+      if (!canLog) warn && warn('[valve-control] one_time_missed not logged for ' + r.device_eui + ' (no zone/user)');
       skipped.push({ schedule_uuid: r.schedule_uuid, device_eui: r.device_eui });
       continue;
     }
     const commandId = crypto.randomUUID();
     await db.transaction(async (tx) => {
       await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'FIRED', once_fired_at: nowIso });
-      await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json, event_uuid, created_at) VALUES (?,?,?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'IRRIGATE', 'one_time_open', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, command_id: commandId }), crypto.randomUUID(), nowIso]).catch((e) => warn && warn('[valve-control] irrigation_events insert failed: ' + e.message));
+      if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json, created_at) VALUES (?,?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'IRRIGATE', 'one_time_open', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, command_id: commandId }), nowIso]);
     });
+    if (!canLog) warn && warn('[valve-control] one_time_open not logged for ' + r.device_eui + ' (no zone/user)');
     fired.push({ schedule_uuid: r.schedule_uuid, device_eui: r.device_eui, duration_minutes: r.duration_minutes, command_id: commandId, actuator_command: actuatorCommand(r.device_eui, r.irrigation_zone_id, r.duration_minutes, commandId, 'one_time_open') });
   }
   return { fired, skipped };
@@ -1768,7 +1748,7 @@ const loaderPrefix = [
   "  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };",
   "  return [msg, null];",
   "}",
-  "const osiDb = dbLoad.value; const VC = vcLoad.value;",
+  "const dbHelper = dbLoad.value; const VC = vcLoad.value;",
 ].join('\n');
 
 const routerFunc = loaderPrefix + '\n' + [
@@ -1777,7 +1757,7 @@ const routerFunc = loaderPrefix + '\n' + [
   "try { const client = chirpstack.createProvisioningClientFromEnv(env); flushQueue = function(eui) { return client.flushDeviceQueue(eui); }; }",
   "catch (e) { node.warn('valve-api: chirpstack client unavailable, plan pushes will not flush the queue: ' + (e && e.message ? e.message : e)); }",
   "return VC.handleHttpRequest({",
-  "  msg: msg, Database: osiDb.Database, appId: appId, flushQueue: flushQueue,",
+  "  msg: msg, Database: dbHelper.Database, appId: appId, flushQueue: flushQueue,",
   "  environment: { authTokenSecret: env.get('AUTH_TOKEN_SECRET'), jwtSecret: env.get('JWT_SECRET'), deviceEui: env.get('DEVICE_EUI') },",
   "  warn: function(m) { node.warn(m); }",
   "}).then(function(out) {",
@@ -1793,11 +1773,12 @@ const ackFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '\
   "// STREGA uplinks: feed decoded ACK frames to the valve-control push ledger.",
   "const p = msg.payload || {};",
   "const devEui = String((p.deviceInfo && p.deviceInfo.devEui) || p.devEui || '').toUpperCase();",
-  "const decoded = p.object || null;",
+  "// Profile codecs are unreliable in this fleet: p.object may be {} — fall back to the local Gen1 codec (same rule as strega-process-fn).",
+  "const decoded = (p.object && typeof p.object === 'object' && Object.keys(p.object).length > 0) ? p.object : VC.decodeGen1Fallback(global.get('fs'), p.data, Number(p.fPort));",
   "if (!devEui || !decoded) return null;",
   "if (!('Schl_Port' in decoded || 'Schl_status_Port' in decoded || 'RTC_Port' in decoded || decoded.Ack === true)) return null;",
   "return (async () => {",
-  "  const db = new osiDb.Database('/data/db/farming.db');",
+  "  const db = new dbHelper.Database('/data/db/farming.db');",
   "  try {",
   "    const r = await VC.handleUplink({ db: db, deviceEui: devEui, decoded: decoded, fPort: Number(p.fPort), receivedAt: p.time || new Date().toISOString(), warn: function(m) { node.warn(m); } });",
   "    node.status({ fill: 'green', shape: 'dot', text: devEui + ' acked ' + r.acked });",
@@ -1809,7 +1790,7 @@ const ackFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '\
 
 const onceFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '\n' + [
   "return (async () => {",
-  "  const db = new osiDb.Database('/data/db/farming.db');",
+  "  const db = new dbHelper.Database('/data/db/farming.db');",
   "  try {",
   "    const r = await VC.runOnceTick({ db: db, now: new Date(), gatewayEui: env.get('DEVICE_EUI'), warn: function(m) { node.warn(m); } });",
   "    if (r.fired.length || r.skipped.length) node.status({ fill: 'green', shape: 'dot', text: 'fired ' + r.fired.length + ' skipped ' + r.skipped.length });",
@@ -1821,7 +1802,7 @@ const onceFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '
 
 const observeFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '\n' + [
   "return (async () => {",
-  "  const db = new osiDb.Database('/data/db/farming.db');",
+  "  const db = new dbHelper.Database('/data/db/farming.db');",
   "  try {",
   "    const o = await VC.runObserveTick({ db: db, now: new Date(), warn: function(m) { node.warn(m); } });",
   "    const b = await VC.runTriggerBackfill({ db: db, warn: function(m) { node.warn(m); } });",
@@ -1835,7 +1816,7 @@ const observeFunc = loaderPrefix.replace('return [msg, null];', 'return null;') 
 const clockFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '\n' + [
   "const appId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();",
   "return (async () => {",
-  "  const db = new osiDb.Database('/data/db/farming.db');",
+  "  const db = new dbHelper.Database('/data/db/farming.db');",
   "  try {",
   "    const h = await VC.runHousekeeping({ db: db, now: new Date(), appId: appId, warn: function(m) { node.warn(m); } });",
   "    const r = await VC.runClockTick({ db: db, now: new Date(), appId: appId, warn: function(m) { node.warn(m); } });",
@@ -1878,7 +1859,7 @@ nodes.push({ id: 'valve-once-link-out', type: 'link out', z: TAB, name: 'To Actu
 nodes.push({ id: 'valve-observe-tick', type: 'inject', z: TAB, name: 'Observe on-valve runs (60s)', props: [{ p: 'payload' }], repeat: '60', crontab: '', once: true, onceDelay: 35, topic: '', payload: '', payloadType: 'date', x: 220, y: 700, wires: [['valve-observe-fn']] });
 nodes.push({ id: 'valve-observe-fn', type: 'function', z: TAB, name: 'Observe valve-fired opens + trigger backfill', func: observeFunc, outputs: 1, timeout: 0, noerr: 0, initialize: '', finalize: '', libs: LIBS, x: 540, y: 700, wires: [[]] });
 
-nodes.push({ id: 'valve-clock-tick', type: 'inject', z: TAB, name: 'Valve clock sync tick (1h)', props: [{ p: 'payload' }], repeat: '3600', crontab: '', once: true, onceDelay: 90, topic: '', payload: '', payloadType: 'date', x: 220, y: 780, wires: [['valve-clock-fn']] });
+nodes.push({ id: 'valve-clock-tick', type: 'inject', z: TAB, name: 'Valve clock sync tick (10m)', props: [{ p: 'payload' }], repeat: '600', crontab: '', once: true, onceDelay: 90, topic: '', payload: '', payloadType: 'date', x: 220, y: 780, wires: [['valve-clock-fn']] });
 nodes.push({ id: 'valve-clock-fn', type: 'function', z: TAB, name: 'Valve clock sync + stale pushes', func: clockFunc, outputs: 1, timeout: 0, noerr: 0, initialize: '', finalize: '', libs: LIBS, x: 520, y: 780, wires: [['valve-push-mqtt-out']] });
 
 for (const n of nodes) if (n.type === 'function' && n.func.length > 4000) throw new Error(n.id + ' too large: ' + n.func.length);
@@ -1892,7 +1873,7 @@ guard(CANONICAL); guard(MIRROR);
 console.log('added', nodes.length, 'nodes; total', flows.length);
 ```
 
-Add `runTriggerBackfill` to `workers.js` before running (Task 9 defines it; implement Task 9 Step 1 first, or temporarily make Task 8 and 9 one commit — do Task 9 Step 1 now, then continue here).
+(`runTriggerBackfill` ships in Task 6 alongside the other workers, so this task has no forward dependency.)
 
 - [ ] **Step 3: Run the script and the full flows checklist**
 
@@ -1908,7 +1889,7 @@ node scripts/verify-flows-size-ratchet.js
 node scripts/flows-bare-require-scan.js
 node scripts/verify-flows-fn-parse.js
 ```
-Expected: all green. If `test-flows-wiring.js` pins `5974306566e99a92`'s `links` (it pins `wires`; check), update the pin in the same commit with the reason "one-time opens feed the actuator path".
+Expected: all green. `test-flows-wiring.js` pins `5974306566e99a92`'s `.wires` only, not `.links`, so appending the new link-out source does not break the existing pin.
 
 - [ ] **Step 4: Add wiring pins**
 
@@ -1943,9 +1924,9 @@ git commit -m "feat(flows): valve-control tab — /api/valves router, plan downl
 **Interfaces:**
 - Produces: `runTriggerBackfill({db, warn}) -> {updated}`; `IrrigationActuation.trigger: 'manual'|'cloud_command'|'trigger_based'|'one_time'|'on_valve_schedule'|'unexplained'|null`.
 
-- [ ] **Step 1: `runTriggerBackfill` + test**
+- [ ] **Step 1: `runTriggerBackfill` — implement in Task 6's `workers.js` if not already present, plus its test**
 
-Append to `workers.js`:
+The function (belongs in `workers.js`, exported with the other workers):
 ```js
 // Fill trigger on expectation rows written by the legacy writer (which does not know the column).
 async function runTriggerBackfill({ db, warn }) {
@@ -1962,7 +1943,8 @@ async function runTriggerBackfill({ db, warn }) {
       const log = await db.get("SELECT reason FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND created_at BETWEEN datetime(?, '-2 minutes') AND datetime(?, '+2 minutes') ORDER BY created_at DESC LIMIT 1", [r.device_eui, r.commanded_at, r.commanded_at]);
       if (log && /^scheduler_/.test(String(log.reason || ''))) trigger = 'trigger_based';
     }
-    updated += Number(await db.run('UPDATE valve_actuation_expectations SET trigger=? WHERE expectation_id=? AND trigger IS NULL', [trigger, r.expectation_id])) || 0;
+    await db.run('UPDATE valve_actuation_expectations SET trigger=? WHERE expectation_id=? AND trigger IS NULL', [trigger, r.expectation_id]);
+    updated += 1;
   }
   return { updated };
 }
@@ -1975,7 +1957,7 @@ One-shot script: find node `get-actuations-query`, replace the substring `      
 ```json
 "get-actuations-query": { "delta": 20, "reason": "valve control: recent-actuations SELECT exposes valve_actuation_expectations.trigger" }
 ```
-and raise `total_allowance.delta` by 20 with the reason appended. Run the flows checklist from Task 8 Step 3.
+inside the existing `node_allowances` object, and raise `total_allowance.delta` by 20 with the reason appended. (The substring `      vae.cancel_reason,\n` occurs exactly once in the node; assert that in the edit script.) Run the flows checklist from Task 8 Step 3.
 
 - [ ] **Step 3: Pass `trigger` through `api.ts`**
 
@@ -2147,7 +2129,7 @@ export const valvesAPI = {
   "resendPlan": "Re-send plan to valve",
   "settings": "Valve settings",
   "state": { "closed": "Closed", "pending": "Waiting for valve", "open": "Open", "closing": "Closing", "failed": "Attention" },
-  "pendingHint": "Next contact ≤ {{minutes}} min",
+  "pendingHint": "Waiting for the valve's next contact",
   "closesAt": "closes ≈ {{time}}",
   "remaining": "{{minutes}} min left",
   "nextRun": "Next: {{when}} · {{minutes}} min",
@@ -2156,7 +2138,6 @@ export const valvesAPI = {
   "schedulerPaused": "Schedules paused",
   "skippedToday": "Skipped today",
   "planDelivery": "Plan delivery: {{acked}} of {{total}} days acknowledged",
-  "planDeliveryEta": "≈ {{minutes}} min remaining",
   "planFailed": "{{count}} downlink(s) not acknowledged in 24 h",
   "lastSent": "Last sent {{when}}",
   "bluetoothNote": "Changes made on the valve over Bluetooth are not visible here.",
@@ -2208,7 +2189,7 @@ Export also `valveGlyphLabel(state, t)` for `aria-label`.
 
 - [ ] **Step 2: `ValveTile.tsx`**
 
-Props: `{ valve: ValveSummary; nowMs: number; onOpen(): void; onSchedule(): void; onCancel(): void; onSkipToday(): void; onPause(): void; onResume(): void; onResend(): void; onSettings(): void; busy: boolean }`. Layout (Tailwind, matches the unassigned-device tiles): card `rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 flex flex-col gap-3`; header row = glyph (48 px) + name (`font-semibold`) + zone chip (`text-xs rounded-full px-2 py-0.5 bg-[var(--card)]`); status line from `deriveValveGlyphState` (`t('state.*')`, plus `pendingHint` when pending and `reportingIntervalMin` known — derive from `lastUplinkAt`? no: show `pendingHint` only when `valve.lastUplinkAt` exists, minutes = `Math.max(1, Math.ceil(…))` using the device's interval if exposed, else omit the number — keep it honest); next-run line (`nextRun` / `nextRunOnce` / `noSchedule` / `schedulerPaused` / `skippedToday`); plan-delivery line when `pushState.queued > 0` (`planDelivery` with `acked`/`total` = acked + queued) or `planFailed` when `failed > 0`; buttons row `grid grid-cols-2 gap-2`: **Open** (becomes **Cancel** when `activeActuation?.reconciliationState === 'PENDING_OBSERVATION'`) and **Schedule**; overflow `⋯` button opening a small menu (`useDismissOnPointerDown`) with Skip today / Pause or Resume / Re-send plan / Settings.
+Props: `{ valve: ValveSummary; nowMs: number; onOpen(): void; onSchedule(): void; onCancel(): void; onSkipToday(): void; onPause(): void; onResume(): void; onResend(): void; onSettings(): void; busy: boolean }`. Layout (Tailwind, matches the unassigned-device tiles): card `rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 flex flex-col gap-3`; header row = glyph (48 px) + name (`font-semibold`) + zone chip (`text-xs rounded-full px-2 py-0.5 bg-[var(--card)]`); status line from `deriveValveGlyphState` (`t('state.*')`; when pending, add `pendingHint` — no minutes estimate, the reporting interval is not exposed in v1 — plus a relative "last contact" time from `lastUplinkAt` when present); next-run line (`nextRun` / `nextRunOnce` / `noSchedule` / `schedulerPaused` / `skippedToday`); plan-delivery line when `pushState.queued > 0` (`planDelivery` with `acked`/`total` = acked + queued) or `planFailed` when `failed > 0`; buttons row `grid grid-cols-2 gap-2`: **Open** (becomes **Cancel** when `activeActuation?.reconciliationState === 'PENDING_OBSERVATION'`) and **Schedule**; overflow `⋯` button opening a small menu (`useDismissOnPointerDown`) with Skip today / Pause or Resume / Re-send plan / Settings.
 
 - [ ] **Step 3: `ValveOpenDialog.tsx` + test**
 
@@ -2225,7 +2206,7 @@ Generation select (GEN1 / `gen2Untested`), flow rate number + source radio + Cle
 - [ ] **Step 6: `ValveControlPanel.tsx` and dashboard mount**
 
 `ValveControlPanel` = `<section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">` with `h2 {t('title')}` + subtitle, SWR `valvesAPI.list` (`refreshInterval: 10_000`), a 1-second `nowMs` ticker only while any valve is `open`/`pending`, grid `grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4` of `ValveTile`, the three dialogs keyed by selected EUI, `empty` state. Actions: Open → `devicesAPI.controlValve(eui, { action: 'OPEN_FOR_DURATION', duration_seconds: minutes * 60 })` then `valvesAPI.updateSettings(eui, { defaultOpenMinutes: minutes })`, then `mutate()` + `onUpdate()`; Cancel → `devicesAPI.cancelIrrigation`; Skip today / Pause / Resume → `setSchedulerStatus`; Re-send → `resendPlan`.
-`FarmingDashboard.tsx`: after the zones section (line ≈ 206) and before the unassigned-devices box: `{modules.valveControl && (<div className="mt-8"><ValveControlPanel onUpdate={handleUpdate} /></div>)}` — read how `modules` is obtained in `IrrigationZoneCard` (`useDisplayPreferences` or prop) and do the same.
+`FarmingDashboard.tsx`: after the zones section (line ≈ 206) and before the unassigned-devices box: `{modules.valveControl && (<div className="mt-8"><ValveControlPanel onUpdate={handleUpdate} /></div>)}`. `FarmingDashboard` does not read module preferences today — add the hook `IrrigationZoneCard.tsx:91` uses (`useDisplayPreferences`) and take `modules` from it.
 `IrrigationOutcomesPanel.tsx`: next to the status badge render `t('valves:trigger.<trigger>')` as a muted chip when `actuation.trigger` is set.
 
 - [ ] **Step 7: Verify and commit**
@@ -2309,7 +2290,8 @@ git commit -m "feat(i18n): rename threshold scheduler to Trigger-based irrigatio
 - [ ] **Step 3: Verify + commit**
 
 ```bash
-node scripts/verify-sync-contract.js 2>/dev/null || ls scripts | grep -i contract   # run whichever contract verifier exists
+node scripts/verify-sync-contract.js
+node scripts/test-contract-schemas.js
 node .claude/skills/anti-slop-writing/slop-check.js docs/contracts/sync-schema/canonicalization.md docs/contracts/sync-schema/README.md
 git add docs/contracts/sync-schema
 git commit -m "docs(contract): VALVE_SCHEDULE resource + VALVE_SCHEDULE_UPSERTED op"
@@ -2357,6 +2339,8 @@ git diff --check
 ```
 
 - [ ] **Step 2: Deploy to Silvan (`100.81.220.8`) per `osi-live-ops-runbook`**
+
+Silvan is cloud-linked; 0022 ships no sync triggers, so creating schedules must NOT grow the outbox. Evidence query for the report: `SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='VALVE_SCHEDULE';` — expected 0 before and after the gates.
 
 Pre-repair backup of `/data/db/farming.db`; safe deploy flow (build GUI → tar → http.server → `ssh -R` → `deploy.sh` which runs migration 0022 with writers stopped → Node-RED restart). Post-checks: `/api/valves` returns 401 without token and the valve list with a token; `schema_migrations` shows 0022 applied; `flows` log shows the `Valve Control` tab nodes started.
 

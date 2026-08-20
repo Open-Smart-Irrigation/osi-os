@@ -145,8 +145,13 @@ possible, else `manual`. `irrigation_events.reason` gains values
 Sync triggers on `valve_schedules` mirror the `irrigation_schedules` pair
 (`_ai`, `_au`), aggregate type `VALVE_SCHEDULE`, aggregate key
 `schedule_uuid`, op `VALVE_SCHEDULE_UPSERTED`; `_au` fires only when linked
-and only when a synced column changed. `valve_settings` and
-`valve_schedule_pushes` have no sync triggers.
+and only when a synced column changed. **The triggers ship with Phase B**
+(edge migration `0023`, lockstep with the osi-server release), not with the
+Phase A tables: every live gateway is cloud-linked, and emitting an
+aggregate the cloud has never seen produces terminally-rejected outbox rows.
+Phase A carries `schedule_uuid`/`sync_version`/`deleted_at` from day one so
+0023 is trigger-only. `valve_settings` and `valve_schedule_pushes` have no
+sync triggers.
 
 ## 5. Gateway behaviour
 
@@ -171,11 +176,14 @@ schedule and by the explicit "Re-send plan" action. Never by a timer.
    firmware accepts it as "clear" is part of hardware gate 4, the fallback
    being FPort 21 `'3'` followed by a full re-push, used only for GEN2 and
    only in this case). Same hash rule as GEN1.
-4. Each push is emitted through the existing STREGA downlink builder
-   `cdbaa3891d40d7a1` via a new action `SET_SCHEDULER_PLAN` carrying
-   `fport` and `payload_hex` as-is (the builder's switch gains cases
-   `SET_SCHEDULER_PLAN`, `SET_SCHEDULER_STATUS`, `SET_CLOCK`; it keeps
-   validating fport/length). `confirmed: false`, as today.
+4. Each push is emitted as a ChirpStack MQTT downlink
+   (`application/<actuators-app>/device/<eui>/command/down`,
+   `confirmed: false`) built in the valve-control module and sent through a
+   dedicated mqtt-out node. The existing builder `cdbaa3891d40d7a1` is not
+   touched: it is a hot node under the flows size ratchet, and plan pushes
+   have their own ledger (`valve_schedule_pushes`) — `actuator_log` records
+   actuations only. (Amended at plan review; the first draft routed through
+   the builder.)
 5. An older `QUEUED` push for the same `(device, purpose, weekday|daymask)`
    becomes `SUPERSEDED` when a newer one is queued. Before enqueueing the new
    set the ChirpStack device queue is flushed **unless** the device has an
@@ -217,7 +225,8 @@ inhibition state untouched.
   for a valve is saved, on "Re-send plan", once every 7 days per valve, and
   within 10 min after a DST transition in that timezone. The weekly cadence
   is a `CLOCK_SYNC` push and does not touch the plan (it does not violate the
-  "no timer re-push" rule, which is about the plan). Because FPort 12 is
+  "no timer re-push" rule, which is about the plan). The clock tick runs
+  every 10 minutes so the DST re-sync lands within the 10-minute bound. Because FPort 12 is
   local time, the valve's RTC is correct only for the timezone it was set
   with; a valve moved between zones with different timezones gets a fresh
   sync on the next save.
@@ -245,8 +254,9 @@ minute.
 
 ### 5.6 Observing valve-fired opens
 
-The reconciliation monitor (`strega-reconciliation-monitor`, 60 s) gains a
-step: for each STREGA device whose latest uplink reports `Valve = OPEN` and
+A dedicated 60 s observe worker (same cadence as the reconciliation
+monitor, in its own node so the existing monitor does not grow): for each
+STREGA device whose latest uplink reports `Valve = OPEN` and
 that has no active expectation, insert an expectation row with
 `trigger='on_valve_schedule'` when the current local time falls inside a
 compiled window of that valve (`commanded_at` = window start,
