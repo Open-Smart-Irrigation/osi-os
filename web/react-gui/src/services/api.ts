@@ -1084,6 +1084,10 @@ function normaliseValvePushState(row: any): ValveSummary['pushState'] {
 
 function normaliseValveActiveActuation(row: any): ValveSummary['activeActuation'] {
   if (!row) return null;
+  // An actuation without both timestamps can't be reasoned about (deriveValveGlyphState
+  // parses them with Date.parse() and does arithmetic on the result) — treat it as no
+  // active actuation rather than let a partial row produce NaN durations/progress in the UI.
+  if (!row.commanded_at || !row.expected_close_at) return null;
   return {
     expectationId: String(row.expectation_id ?? ''),
     reconciliationState: String(row.reconciliation_state ?? ''),
@@ -1260,12 +1264,20 @@ export const valvesAPI = {
     }
   },
   deleteSchedule: async (eui: string, uuid: string): Promise<{ pushesQueued: number }> => {
-    const r = await api.delete(`/api/valves/${eui}/schedules/${uuid}`);
-    return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+    try {
+      const r = await api.delete(`/api/valves/${eui}/schedules/${uuid}`);
+      return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+    } catch (error) {
+      return rethrowValveError(error);
+    }
   },
   resendPlan: async (eui: string): Promise<{ pushesQueued: number }> => {
-    const r = await api.post(`/api/valves/${eui}/plan/resend`, {});
-    return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+    try {
+      const r = await api.post(`/api/valves/${eui}/plan/resend`, {});
+      return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+    } catch (error) {
+      return rethrowValveError(error);
+    }
   },
   setSchedulerStatus: async (eui: string, status: ValveSchedulerStatus): Promise<void> => {
     await api.post(`/api/valves/${eui}/scheduler-status`, { status });
