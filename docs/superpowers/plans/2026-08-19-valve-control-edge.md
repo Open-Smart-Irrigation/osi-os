@@ -1405,7 +1405,7 @@ git commit -m "feat(valve-control): /api/valves HTTP router (schedules, plan res
 
 **Interfaces (produces):**
 ```js
-handleUplink({ db, deviceEui, decoded, fPort, receivedAt, warn })  // -> { acked: n, generationPromoted: bool }
+handleUplink({ db, deviceEui, decoded, fPort, rawBytes, receivedAt, warn })  // rawBytes: Buffer|null (base64-decoded uplink payload; enables raw GEN2 detection) -> { acked: n, generationPromoted: bool }
 runOnceTick({ db, now, gatewayEui, warn })   // -> { fired: [{schedule_uuid, device_eui, duration_minutes, command_id}], skipped: [...] }  — also writes irrigation_events and sets once_state; returns actuator_command payloads for the caller to emit
 runObserveTick({ db, now, warn })            // -> { created: n } — inserts on_valve_schedule / unexplained expectations
 runClockTick({ db, now, appId, warn })       // -> { messages: [...] } — weekly + DST-triggered clock pushes, and fails stale pushes
@@ -1426,7 +1426,7 @@ const { Database } = require('../osi-db-helper');
 test('handleUplink acks the newest queued weekday push and records RTC ack', async () => {
   const { db } = await tempDb();
   await store.insertPushes(db, [{ push_id: 'p1', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 2, fport: 16, payload_hex: 'FF'.repeat(24), plan_hash: 'h' }, { push_id: 'p2', device_eui: '0016C001F1000001', purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null }]);
-  const r = await W.handleUplink({ db, deviceEui: '0016C001F1000001', decoded: { Schl_Port: 16, Schl_status: '00' }, fPort: 2, receivedAt: '2026-08-19T10:00:00.000Z', warn: () => {} });
+  const r = await W.handleUplink({ db, deviceEui: '0016C001F1000001', decoded: { Schl_Port: 16, Schl_status: '00' }, fPort: 2, rawBytes: null, receivedAt: '2026-08-19T10:00:00.000Z', warn: () => {} });
   assert.equal(r.acked, 1);
   await W.handleUplink({ db, deviceEui: '0016C001F1000001', decoded: { RTC_Port: 12, RTC_status: '00' }, fPort: 2, receivedAt: '2026-08-19T10:01:00.000Z', warn: () => {} });
   const rows = await db.all('SELECT push_id, state FROM valve_schedule_pushes ORDER BY push_id');
@@ -1501,8 +1501,8 @@ const STALE_PUSH_MS = 24 * 3600 * 1000;
 const CLOCK_PERIOD_MS = 7 * 86400000;
 const DOWNLINK_LATENCY_BUDGET_SEC = 120;
 
-async function handleUplink({ db, deviceEui, decoded, fPort, receivedAt, warn }) {
-  const { acks, generationHint } = interpretUplink(decoded, fPort);
+async function handleUplink({ db, deviceEui, decoded, fPort, rawBytes, receivedAt, warn }) {
+  const { acks, generationHint } = interpretUplink(decoded, fPort, rawBytes || null);
   const at = receivedAt || new Date().toISOString();
   let acked = 0;
   for (const a of acks) {
@@ -1776,11 +1776,15 @@ const ackFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '\
   "// Profile codecs are unreliable in this fleet: p.object may be {} — fall back to the local Gen1 codec (same rule as strega-process-fn).",
   "const decoded = (p.object && typeof p.object === 'object' && Object.keys(p.object).length > 0) ? p.object : VC.decodeGen1Fallback(global.get('fs'), p.data, Number(p.fPort));",
   "if (!devEui || !decoded) return null;",
-  "if (!('Schl_Port' in decoded || 'Schl_status_Port' in decoded || 'RTC_Port' in decoded || 'Ack_Port' in decoded)) return null;",
+  "const raw0 = p.data ? Buffer.from(String(p.data), 'base64') : null;",
+  "const hasDecodedAck = decoded && ('Schl_Port' in decoded || 'Schl_status_Port' in decoded || 'RTC_Port' in decoded || 'Ack_Port' in decoded);",
+  "const maybeRawGen2 = raw0 && raw0.length >= 8 && raw0[5] === 0x06;",
+  "if (!hasDecodedAck && !maybeRawGen2) return null;",
   "return (async () => {",
   "  const db = new dbHelper.Database('/data/db/farming.db');",
   "  try {",
-  "    const r = await VC.handleUplink({ db: db, deviceEui: devEui, decoded: decoded, fPort: Number(p.fPort), receivedAt: p.time || new Date().toISOString(), warn: function(m) { node.warn(m); } });",
+  "    const raw = p.data ? Buffer.from(String(p.data), 'base64') : null;",
+  "    const r = await VC.handleUplink({ db: db, deviceEui: devEui, decoded: decoded, fPort: Number(p.fPort), rawBytes: raw, receivedAt: p.time || new Date().toISOString(), warn: function(m) { node.warn(m); } });",
   "    node.status({ fill: 'green', shape: 'dot', text: devEui + ' acked ' + r.acked });",
   "  } catch (e) { node.error('valve-ack: ' + (e && e.message ? e.message : e), msg); }",
   "  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }",
