@@ -1,2 +1,2 @@
 'use strict';
-module.exports = { ...require('./plan'), ...require('./ack'), ...require('./store'), ...require('./push') };
+module.exports = { ...require('./plan'), ...require('./ack'), ...require('./store'), ...require('./push'), ...require('./api') };
