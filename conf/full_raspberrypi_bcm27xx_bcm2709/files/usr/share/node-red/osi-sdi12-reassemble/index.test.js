@@ -84,3 +84,19 @@ test('invalid segment shape is rejected without touching state', () => {
   assert.throws(() => m.step(st, 'E', { count: 16, index: 0 }));
   assert.deepStrictEqual(st, {});
 });
+
+test('first segment already out of range refuses with empty indices and no buffer', () => {
+  const st = {};
+  const r = m.step(st, 'E', seg({ index: 5 }));
+  assert.strictEqual(r.action, 'reset');
+  assert.strictEqual(r.quarantine.raw, '3:[]');
+  assert.deepStrictEqual(st, {});
+});
+
+test('an expired window is reported as window even when the index would also be a duplicate', () => {
+  const st = {};
+  m.step(st, 'E', seg({ index: 0, nowMs: 0 }));
+  const r = m.step(st, 'E', seg({ index: 0, nowMs: m.WINDOW_MS + 1 }));
+  assert.strictEqual(r.action, 'reset');
+  assert.strictEqual(r.status, 'reset window');
+});
