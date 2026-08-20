@@ -23,6 +23,21 @@ test('Login page uses the Bovey logo, not the retired OSI logo asset', () => {
   assert.equal(fs.existsSync(path.join(guiRoot, 'src/assets/osi_logo.png')), false);
 });
 
+test('Login states only the Bovey brand — no OSI OS name, version, or Alpha tag', () => {
+  const source = readText('src/pages/Login.tsx');
+  assert.doesNotMatch(source, /OSI OS/);
+  assert.doesNotMatch(source, /v0\.\d/);
+  assert.doesNotMatch(source, /Alpha/);
+});
+
+test('browser title is Bovey and dashboard titles carry no OSI product name', () => {
+  assert.match(readText('index.html'), /<title>Bovey<\/title>/);
+  for (const locale of ['de-CH', 'en', 'es', 'fr', 'it', 'lg', 'pt']) {
+    const dashboard = readText(`public/locales/${locale}/dashboard.json`);
+    assert.doesNotMatch(dashboard, /Open Smart Irrigation|OSI OS/, `${locale} dashboard.json`);
+  }
+});
+
 test('dashboard header renders the Bovey logo', () => {
   const source = readText('src/components/DashboardHeader.tsx');
   assert.match(source, /<BoveyLogo/);
