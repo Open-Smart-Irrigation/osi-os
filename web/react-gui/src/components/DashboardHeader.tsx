@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { BoveyLogo } from './BoveyLogo';
 import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 
@@ -24,11 +25,14 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     <header className="bg-[var(--header-bg)] shadow-xl">
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-              {t('title')}
-            </h1>
-            <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
+          <div className="flex items-center gap-5">
+            <BoveyLogo className="h-9 w-auto shrink-0 text-[var(--header-text)]" />
+            <div className="border-l border-[var(--header-subtext)] pl-5">
+              <h1 className="text-3xl font-bold text-[var(--header-text)] high-contrast-text">
+                {t('title')}
+              </h1>
+              <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
@@ -64,7 +68,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             <HeaderMenu
               label={t('account')}
               className="w-[calc(50%-4px)] sm:w-auto"
-              triggerClassName="bg-slate-900 hover:bg-slate-800 text-white text-lg px-6 py-3"
+              triggerClassName="bg-slate-700 hover:bg-slate-600 text-white text-lg px-6 py-3"
               items={[
                 { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
                 { key: 'logout', label: t('logout'), onSelect: onLogout },
