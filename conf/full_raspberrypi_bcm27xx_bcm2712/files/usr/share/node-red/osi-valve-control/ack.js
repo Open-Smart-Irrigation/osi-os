@@ -27,13 +27,13 @@ function statusInt(v) { const n = parseInt(String(v == null ? '' : v), 16); retu
 // what marks a decoded object as a Gen2 ACK. There is NO boolean `Ack` field in the real decoder
 // output (the Task 3 brief's `Ack: true` placeholder does not exist on the wire and is not used
 // here).
-function interpretUplink(decoded, fPort) {
+function interpretUplink(decoded, fPort, rawBytes) {
   const d = decoded || {};
   const acks = [];
   let generationHint = null;
 
   const schl = Number(d.Schl_Port);
-  if (schl >= WEEKDAY_FPORT_BASE && schl <= WEEKDAY_FPORT_BASE + 6) {
+  if (Number.isInteger(schl) && schl >= WEEKDAY_FPORT_BASE && schl <= WEEKDAY_FPORT_BASE + 6) {
     acks.push({ purpose: 'WEEKDAY_PLAN', fport: schl, weekday: schl - WEEKDAY_FPORT_BASE, status: statusInt(d.Schl_status) });
     generationHint = 'GEN1';
   }
@@ -47,16 +47,82 @@ function interpretUplink(decoded, fPort) {
     generationHint = generationHint || 'GEN1';
   }
 
-  const g2port = Number(d.Ack_Port);
-  if (Number.isFinite(g2port)) {
+  // Fix round 1: `Ack_Port` can legitimately be `NaN` in the real decoder (a truncated/short
+  // Gen2 ACK frame with no port bytes -- `parseInt("", 16)` -- see the vendor decoder's
+  // `payload.substr(6,2)` when `str_len` is too short) and `NaN` round-trips through JSON as
+  // `null`. `Number(null)` is `0` and `Number.isFinite(0)` is true, so a bare `Number.isFinite`
+  // guard would misread that as a real "port 0" ACK and falsely promote to GEN2. Require an
+  // actual positive integer on the raw field (not coerced) instead.
+  if (Number.isInteger(d.Ack_Port) && d.Ack_Port > 0) {
     generationHint = 'GEN2';
+    const g2port = d.Ack_Port;
     const status = Number.isFinite(Number(d.Ack_Value)) ? Number(d.Ack_Value) : null;
     if (g2port === GEN2_SCHEDULER_FPORT) acks.push({ purpose: 'DAYMASK_PLAN', fport: g2port, weekday: null, status });
     else if (g2port === STATUS_FPORT) acks.push({ purpose: 'SCHEDULER_STATUS', fport: g2port, weekday: null, status });
     else if (g2port === CLOCK_FPORT || g2port === CLOCK_REQ_FPORT) acks.push({ purpose: 'CLOCK_SYNC', fport: g2port, weekday: null, status });
   }
 
+  // Fix round 1: the decoded-object Gen2 path above is unreachable in production. ChirpStack
+  // provisions exactly one STREGA device profile, wired to the Gen1 codec, for every valve
+  // (chirpstack-bootstrap.js ~line 445) -- so a real SV2's ACK frames always arrive here already
+  // decoded as plain Gen1 telemetry (no `Ack_Port` ever appears), and this is the only reachable
+  // Gen2-detection path on real hardware. Spec §3 anticipates exactly this and specifies raw-byte
+  // detection instead: "the Gen2 ACK marker 0x06 and a 3-char battery field". Only consulted when
+  // the decoded object produced nothing at all, so it can never override a real Gen1 ack.
+  if (acks.length === 0 && generationHint === null && rawBytes) {
+    const raw = interpretRawGen2Ack(rawBytes);
+    if (raw) {
+      generationHint = raw.generationHint;
+      acks.push(...raw.acks);
+    }
+  }
+
   return { acks, generationHint };
+}
+
+function isAsciiDigit(byte) { return byte >= 0x30 && byte <= 0x39; }
+function isAsciiHexChar(byte) {
+  return (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x46) || (byte >= 0x61 && byte <= 0x66);
+}
+function parseAsciiHexPair(hiByte, loByte) {
+  if (!isAsciiHexChar(hiByte) || !isAsciiHexChar(loByte)) return null;
+  const n = parseInt(String.fromCharCode(hiByte) + String.fromCharCode(loByte), 16);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Raw-byte Gen2 ACK detection, used only as a fallback when the codec-decoded object yielded no
+// acks and no generation hint (see the call site above). Per
+// docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up: `payload =
+// String.fromCharCode.apply(null, bytes)` reads the raw bytes directly as char codes (unlike
+// Gen1, which hex-decodes an ASCII sub-string first), so:
+//   bytes[0..2] : 3 ASCII hex-digit characters -> battery, `parseInt(payload.substr(0,3), 16)`
+//   bytes[3..4] : 2 ASCII hex-digit characters -> status
+//   bytes[5]    : the literal byte 0x06 (ASCII "ACK" control code) -- `ACKStr.charCodeAt(0) ===
+//                 6` -- marks the frame as an ACK; a Gen1 ACK frame carries '@' (0x40) at this
+//                 same offset instead (see ack.test.js), so this cannot false-positive on Gen1.
+//   bytes[6..7] : 2 ASCII hex-digit characters -> echoed port, `parseInt(payload.substr(6,2),
+//                 16)` (e.g. "19" -> 0x19 -> decimal 25, matching how the Gen1 decoder also
+//                 encodes the fport as an ASCII-hex pair)
+//   bytes[8..9] : 2 ASCII hex-digit characters -> ack value (only present/meaningful for ports
+//                 outside the decoder's special-cased 1/10/13/24 branches; 12/21/25 all use it)
+// Verified end-to-end by round-tripping a hand-built frame through the real Gen2 decoder script
+// (see task-3-report.md fix-round-1 section for the captured output).
+function interpretRawGen2Ack(rawBytes) {
+  if (!rawBytes || rawBytes.length <= 5) return null;
+  if (rawBytes[5] !== 0x06) return null;
+  if (!isAsciiDigit(rawBytes[0]) || !isAsciiDigit(rawBytes[1]) || !isAsciiDigit(rawBytes[2])) return null;
+
+  const acks = [];
+  if (rawBytes.length >= 8) {
+    const port = parseAsciiHexPair(rawBytes[6], rawBytes[7]);
+    if (Number.isInteger(port) && port > 0) {
+      const status = rawBytes.length >= 10 ? parseAsciiHexPair(rawBytes[8], rawBytes[9]) : null;
+      if (port === GEN2_SCHEDULER_FPORT) acks.push({ purpose: 'DAYMASK_PLAN', fport: port, weekday: null, status });
+      else if (port === STATUS_FPORT) acks.push({ purpose: 'SCHEDULER_STATUS', fport: port, weekday: null, status });
+      else if (port === CLOCK_FPORT || port === CLOCK_REQ_FPORT) acks.push({ purpose: 'CLOCK_SYNC', fport: port, weekday: null, status });
+    }
+  }
+  return { generationHint: 'GEN2', acks };
 }
 
 // Mirrors the `decodeStregaFallback` helper inside the flows.json "Process STREGA" function node
