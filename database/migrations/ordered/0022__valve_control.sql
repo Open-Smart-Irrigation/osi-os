@@ -9,9 +9,9 @@ CREATE TABLE IF NOT EXISTS valve_schedules (
   device_eui       TEXT NOT NULL REFERENCES devices(deveui) ON DELETE CASCADE,
   kind             TEXT NOT NULL CHECK (kind IN ('WEEKLY','ONCE')),
   label            TEXT,
-  weekdays_mask    INTEGER,
-  start_time       TEXT,
-  fire_at          TEXT,
+  weekdays_mask    INTEGER, -- WEEKLY: 1..127, bit0=Sun..bit6=Sat
+  start_time       TEXT, -- WEEKLY: 'HH:MM'
+  fire_at          TEXT, -- ONCE: ISO instant (UTC)
   duration_minutes INTEGER NOT NULL,
   timezone         TEXT NOT NULL,
   enabled          INTEGER NOT NULL DEFAULT 1,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS valve_schedules (
   created_at       TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK (
-    (kind = 'WEEKLY' AND weekdays_mask BETWEEN 1 AND 127 AND start_time IS NOT NULL
+    (kind = 'WEEKLY' AND weekdays_mask IS NOT NULL AND weekdays_mask BETWEEN 1 AND 127 AND start_time IS NOT NULL
       AND duration_minutes BETWEEN 1 AND 1439)
     OR
     (kind = 'ONCE' AND fire_at IS NOT NULL AND duration_minutes BETWEEN 1 AND 255)

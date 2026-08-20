@@ -812,6 +812,10 @@ const requiredIndexSqlFragments = {
   idx_device_data_deveui_recorded_at: [
     'on device_data(deveui, recorded_at)',
   ],
+  idx_valve_schedules_once_due: [
+    'on valve_schedules(fire_at)',
+    "where kind = 'once' and once_state = 'pending' and deleted_at is null",
+  ],
   idx_gateway_health_samples_eui_time: [
     'on gateway_health_samples(gateway_device_eui, sampled_at)',
   ],
