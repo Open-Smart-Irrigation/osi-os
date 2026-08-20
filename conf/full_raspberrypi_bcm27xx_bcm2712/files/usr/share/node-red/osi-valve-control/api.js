@@ -103,6 +103,16 @@ function labelizeDetails(details, scheduleList) {
   }));
 }
 
+// Pushed rows are QUEUED in the DB (by push.queuePushes/compileAndQueue) before this function
+// hands their MQTT messages back to the caller for the flow to emit; a failure between the DB
+// write and the flow actually forwarding these messages leaves QUEUED rows with no downlink
+// ever sent. Accepted: those rows are reaped by store.failStalePushes after 24h with no ack.
+// Only set the key when there's something to send, so callers/tests can tell "nothing queued"
+// (e.g. a ONCE-schedule mutation) apart from "queued but empty" by simple presence.
+function assignPushMessages(msg, q) {
+  if (q && Array.isArray(q.messages) && q.messages.length) msg.valvePushMessages = q.messages;
+}
+
 function shapeValve(row, schedules, now, tzFallback, pushes) {
   const flowRate = row.flow_rate_lpm != null ? Number(row.flow_rate_lpm) : (row.zone_flow_rate_lpm != null ? Number(row.zone_flow_rate_lpm) : null);
   return {
@@ -123,6 +133,7 @@ function shapeValve(row, schedules, now, tzFallback, pushes) {
 }
 
 async function ownedValve(db, eui, userId) {
+  // defense-in-depth; route regex normally guards this
   if (!EUI_RE.test(eui)) throw apiError(400, 'invalid_eui', 'device EUI must be 16 hex chars');
   const row = await db.get("SELECT deveui, user_id, type_id, irrigation_zone_id, (SELECT timezone FROM irrigation_zones WHERE id = devices.irrigation_zone_id) AS zone_timezone FROM devices WHERE UPPER(deveui)=? AND deleted_at IS NULL", [eui]);
   if (!row) throw apiError(404, 'not_found', 'Valve not found');
@@ -181,7 +192,7 @@ async function handleHttpRequest(options) {
       }
       await store.insertSchedule(db, row);
       const q = row.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
-      msg.valvePushMessages = q.messages;
+      assignPushMessages(msg, q);
       return respond(201, { schedule: row, pushes_queued: q.rows.length });
     }
 
@@ -203,8 +214,13 @@ async function handleHttpRequest(options) {
         if (trial.errors.length) return respond(422, { error: 'plan_conflict', details: labelizeDetails(trial.errors, trialSchedules) });
         await store.updateSchedule(db, uuid, v.value);
       }
-      const q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, warn, timeZoneFallback: tzFallback });
-      msg.valvePushMessages = q.messages;
+      // Only a WEEKLY schedule feeds compileWindows()/the on-valve plan; compiling and pushing
+      // after a ONCE mutation would otherwise send an empty all-FF weekday plan (silently
+      // wiping any Bluetooth-configured on-valve schedule) as a side effect of editing a
+      // one-time open. Spec §5.1: compile only on WEEKLY create/update/delete/enable-toggle or
+      // explicit re-send.
+      const q = current.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
+      assignPushMessages(msg, q);
       return respond(200, { ok: true, pushes_queued: q.rows.length });
     }
 
@@ -213,7 +229,7 @@ async function handleHttpRequest(options) {
       currentEui = eui;
       await ownedValve(db, eui, auth.userId);
       const q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: true, now, flushQueue: options.flushQueue, warn, timeZoneFallback: tzFallback });
-      msg.valvePushMessages = q.messages;
+      assignPushMessages(msg, q);
       return respond(202, { ok: true, pushes_queued: q.rows.length });
     }
 
@@ -228,7 +244,7 @@ async function handleHttpRequest(options) {
       const tz = device.zone_timezone || tzFallback;
       const lp = P.localParts(now, tz);
       await store.upsertSettings(db, eui, { scheduler_status: status, skip_today_date: status === 'SKIP_TODAY' ? `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}` : null });
-      msg.valvePushMessages = q.messages;
+      assignPushMessages(msg, q);
       return respond(202, { ok: true, status });
     }
 

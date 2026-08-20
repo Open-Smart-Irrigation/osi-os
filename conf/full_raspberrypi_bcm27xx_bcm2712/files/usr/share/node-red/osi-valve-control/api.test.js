@@ -87,3 +87,70 @@ test('another user -> 403 on schedules', async () => {
   const { path } = await tempDb();
   assert.equal((await call(path, req('GET', '/api/valves/0016C001F1000001/schedules', undefined, token(2)))).statusCode, 403);
 });
+
+test('PUT a ONCE schedule with no WEEKLY rows does not compile/push a plan', async () => {
+  const { path, db } = await tempDb();
+  const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 10 }));
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.payload.pushes_queued, 0);
+  const uuid = created.payload.schedule.schedule_uuid;
+  const out = await call(path, req('PUT', `/api/valves/0016C001F1000001/schedules/${uuid}`, { duration_minutes: 15 }));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.pushes_queued, 0);
+  assert.equal(out.valvePushMessages, undefined);
+  const rows = await db.all('SELECT * FROM valve_schedule_pushes');
+  assert.equal(rows.length, 0, 'a ONCE-only valve must never get an all-FF weekday plan pushed as a side effect');
+});
+
+test('DELETE a ONCE schedule does not compile/push a plan', async () => {
+  const { path, db } = await tempDb();
+  const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 10 }));
+  const uuid = created.payload.schedule.schedule_uuid;
+  const out = await call(path, req('DELETE', `/api/valves/0016C001F1000001/schedules/${uuid}`));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.pushes_queued, 0);
+  assert.equal(out.valvePushMessages, undefined);
+  const rows = await db.all('SELECT * FROM valve_schedule_pushes');
+  assert.equal(rows.length, 0);
+});
+
+test('PUT a WEEKLY schedule into a conflict -> 422 with labels; the row is not modified', async () => {
+  const { path } = await tempDb();
+  const a = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, label: 'A' }));
+  const b = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:00', duration_minutes: 30, label: 'B' }));
+  const bUuid = b.payload.schedule.schedule_uuid;
+  const out = await call(path, req('PUT', `/api/valves/0016C001F1000001/schedules/${bUuid}`, { start_time: '06:10' }));
+  assert.equal(out.statusCode, 422);
+  assert.equal(out.payload.error, 'plan_conflict');
+  assert.equal(out.payload.details[0].labels.length, out.payload.details[0].conflicts.length);
+  assert.ok(out.payload.details[0].labels.includes('A'));
+  const list = await call(path, req('GET', '/api/valves/0016C001F1000001/schedules'));
+  const bRow = list.payload.schedules.find((s) => s.schedule_uuid === bUuid);
+  assert.equal(bRow.start_time, '07:00', 'rejected update must not be persisted');
+});
+
+test('PUT {enabled:0} on a WEEKLY schedule disables it, leaves other fields untouched, and recompiles the plan', async () => {
+  const { path } = await tempDb();
+  const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, label: 'A' }));
+  const uuid = created.payload.schedule.schedule_uuid;
+  const out = await call(path, req('PUT', `/api/valves/0016C001F1000001/schedules/${uuid}`, { enabled: 0 }));
+  assert.equal(out.statusCode, 200);
+  assert.ok(out.payload.pushes_queued > 0, 'disabling a WEEKLY schedule changes the compiled plan and must push');
+  const list = await call(path, req('GET', '/api/valves/0016C001F1000001/schedules'));
+  const row = list.payload.schedules.find((s) => s.schedule_uuid === uuid);
+  assert.equal(row.enabled, 0);
+  assert.equal(row.start_time, '06:00');
+  assert.equal(row.duration_minutes, 30);
+  assert.equal(row.label, 'A');
+});
+
+test('PUT cannot change a schedule\'s kind; it stays pinned to the original', async () => {
+  const { path } = await tempDb();
+  const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 30 }));
+  const uuid = created.payload.schedule.schedule_uuid;
+  const out = await call(path, req('PUT', `/api/valves/0016C001F1000001/schedules/${uuid}`, { kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString() }));
+  assert.equal(out.statusCode, 200);
+  const list = await call(path, req('GET', '/api/valves/0016C001F1000001/schedules'));
+  const row = list.payload.schedules.find((s) => s.schedule_uuid === uuid);
+  assert.equal(row.kind, 'WEEKLY');
+});
