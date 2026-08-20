@@ -1776,7 +1776,7 @@ const ackFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '\
   "// Profile codecs are unreliable in this fleet: p.object may be {} — fall back to the local Gen1 codec (same rule as strega-process-fn).",
   "const decoded = (p.object && typeof p.object === 'object' && Object.keys(p.object).length > 0) ? p.object : VC.decodeGen1Fallback(global.get('fs'), p.data, Number(p.fPort));",
   "if (!devEui || !decoded) return null;",
-  "if (!('Schl_Port' in decoded || 'Schl_status_Port' in decoded || 'RTC_Port' in decoded || decoded.Ack === true)) return null;",
+  "if (!('Schl_Port' in decoded || 'Schl_status_Port' in decoded || 'RTC_Port' in decoded || 'Ack_Port' in decoded)) return null;",
   "return (async () => {",
   "  const db = new dbHelper.Database('/data/db/farming.db');",
   "  try {",
