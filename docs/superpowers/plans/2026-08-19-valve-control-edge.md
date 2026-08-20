@@ -1794,7 +1794,7 @@ const onceFunc = loaderPrefix.replace('return [msg, null];', 'return null;') + '
   "return (async () => {",
   "  const db = new dbHelper.Database('/data/db/farming.db');",
   "  try {",
-  "    const r = await VC.runOnceTick({ db: db, now: new Date(), gatewayEui: env.get('DEVICE_EUI'), warn: function(m) { node.warn(m); } });",
+  "    const r = await VC.runOnceTick({ db: db, now: new Date(), warn: function(m) { node.warn(m); } });",
   "    if (r.fired.length || r.skipped.length) node.status({ fill: 'green', shape: 'dot', text: 'fired ' + r.fired.length + ' skipped ' + r.skipped.length });",
   "    return r.fired.map(function(f) { return { payload: f.actuator_command, _stregaExpectationCommand: { command_type: 'OPEN_FOR_DURATION', device_eui: f.device_eui, duration_seconds: f.duration_minutes * 60, duration_minutes: f.duration_minutes, commandId: f.command_id, trigger: 'one_time' } }; });",
   "  } catch (e) { node.error('valve-once: ' + (e && e.message ? e.message : e)); return null; }",
