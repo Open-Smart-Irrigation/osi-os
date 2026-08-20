@@ -33,10 +33,7 @@ export const Login: React.FC = () => {
     <div className="relative min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
       <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-6">
         <div className="text-center mb-5">
-          <BoveyLogo className="mx-auto mb-5 h-10 w-auto text-[var(--text)]" />
-          <h1 className="text-2xl font-bold text-[var(--text)] mb-2 high-contrast-text">
-            OSI OS v0.7.0 (Alpha)
-          </h1>
+          <BoveyLogo className="mx-auto mb-5 h-12 w-auto text-[var(--text)]" />
           <p className="text-[var(--text-secondary)] text-base">{t('login.subtitle')}</p>
         </div>
 
