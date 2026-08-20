@@ -383,6 +383,37 @@
                     }
                 }
             ]
+        },
+        "ValveSchedule": {
+            "type": "object",
+            "required": ["schedule_uuid", "device_eui", "kind", "duration_minutes", "timezone"],
+            "properties": {
+                "schedule_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "device_eui": {"$ref": "#/definitions/Eui64"},
+                "kind": {"type": "string", "enum": ["WEEKLY", "ONCE"]},
+                "label": {"type": ["string", "null"]},
+                "weekdays_mask": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 127,
+                    "description": "WEEKLY only. bit0=Sunday … bit6=Saturday (STREGA order)."
+                },
+                "start_time": {
+                    "type": ["string", "null"],
+                    "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                    "description": "WEEKLY only. Zero-padded local HH:MM."
+                },
+                "fire_at": {
+                    "$ref": "#/definitions/NullableCanonicalUtcTimestamp",
+                    "description": "ONCE only. UTC instant."
+                },
+                "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1439},
+                "timezone": {"type": "string", "minLength": 1, "description": "IANA timezone name."},
+                "enabled": {"type": "integer", "enum": [0, 1]},
+                "once_state": {"type": ["string", "null"], "enum": ["PENDING", "FIRED", "SKIPPED", "CANCELLED", null]},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+            }
         }
     }
 }

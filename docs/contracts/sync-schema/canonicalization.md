@@ -138,6 +138,20 @@ Golden vectors (all implementations - edge JS, GUI TS, server Java - must match)
 | -5 | null | null | null |
 | null | null | null | null |
 
+## Valve schedule
+
+`ValveSchedule` (`docs/contracts/sync-schema/resources.schema.json`) fields
+with a canonical form beyond the general rules above:
+
+- `weekdays_mask` — bit0=Sunday … bit6=Saturday, the same bit order the
+  STREGA on-valve scheduler uses. Golden vector: `weekdays_mask 3` =
+  Sunday + Monday (bit0 | bit1).
+- `start_time` — local time, zero-padded `HH:MM` (`06:05`, not `6:5`).
+- `fire_at` — UTC instant, canonical millisecond-precision ISO
+  (`YYYY-MM-DDTHH:MM:SS.sssZ`) per the Timestamps rule above.
+- `timezone` — IANA timezone name (`Europe/Zurich`), never a fixed UTC
+  offset.
+
 ## Conformance
 
 A new runtime must pass every test vector before its hashes are accepted by other systems. Hashes computed by a non-conformant runtime are discarded.
