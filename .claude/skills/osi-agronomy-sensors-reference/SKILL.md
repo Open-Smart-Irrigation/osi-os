@@ -396,6 +396,33 @@ reserved for actually-measured flow-meter data — the two must never be
 merged into one column, so a farm without a flow meter never gets a
 volume number that looks measured but isn't.
 
+### STREGA on-valve scheduler
+
+Separate from `OPEN_FOR_DURATION` above: STREGA valves also carry their own
+weekly scheduler in firmware, which the gateway compiles and pushes
+(`osi-valve-control`, spec
+`docs/superpowers/specs/2026-08-19-valve-control-design.md`). FPorts:
+
+- **14–20** — Gen1 weekday plans, one FPort per weekday (`14 + weekday`,
+  `weekday` 0=Sunday…6=Saturday); each downlink carries that weekday's whole
+  window list, up to 4 on/off pairs.
+- **25** — Gen2 day-mask plan: one payload can target several weekdays that
+  share the same window list.
+- **21** — scheduler status: resume, skip-today, pause, or (never sent by
+  this gateway except a documented Gen2 fallback) delete-all.
+- **12** — clock set (Gen1): local wall-clock digits in the schedule's
+  timezone.
+- **13** — clock request (Gen2): triggers ChirpStack's `DeviceTimeReq`.
+
+Every weekday is capped at 4 windows; a push that would exceed that is
+refused before it is queued. **The valve never reports its on-board
+scheduler back over LoRaWAN** — there is no read-back FPort — so the gateway
+cannot reconcile drift by asking the valve what it currently holds; it can
+only re-push. This is also why a Bluetooth edit made directly on an SV2 is
+invisible to the gateway until the next gateway-initiated push. Vendor
+encoder/decoder references for both generations are vendored at
+`docs/hardware/strega-codecs/`.
+
 ## Common mistakes
 
 - Assuming SWT is negative or that lower kPa means drier — it is the
@@ -468,10 +495,14 @@ grep -n "VWC" web/react-gui/src/types/farming.ts docs/channel-manifest.md
 # STREGA cancel endpoint + expectation table
 grep -n "valves/:deveui/cancel" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
 grep -n "CREATE TABLE valve_actuation_expectations" -A 20 database/seed-blank.sql
+
+# STREGA on-valve scheduler FPorts + window cap
+grep -n "Schl_Port\|Schl_status_Port\|RTC_Port" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/ack.js
+sed -n '1,40p' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/plan.js
 ```
 
 Cross-reference AGENTS.md's "Device catalog", "Chameleon calibration global
-table", "Aqua-Scope LoRain", and "STREGA timed irrigation" sections — this
-skill expands on those, it does not override them. If this skill and
-AGENTS.md ever disagree, AGENTS.md wins; file an issue to reconcile rather
-than silently trusting either.
+table", "Aqua-Scope LoRain", "STREGA timed irrigation", and "Valve control"
+sections — this skill expands on those, it does not override them. If this
+skill and AGENTS.md ever disagree, AGENTS.md wins; file an issue to
+reconcile rather than silently trusting either.

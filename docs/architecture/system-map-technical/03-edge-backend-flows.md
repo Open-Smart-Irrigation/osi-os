@@ -76,8 +76,10 @@ The primary REST surface for the GUI. Functional groups:
 
 ### Scheduler (6 function nodes)
 
-Cron `00 06 * * *` ("Schedule time") drives "Build zones query (enabled
-schedules)" → "Build mean query (last hour, all datapoints)" → "Decide +
+Threshold-based irrigation, labelled "Trigger-based irrigation" in the GUI
+since 2026-08 to distinguish it from the STREGA on-valve weekly scheduler in
+Valve Control below. Cron `00 06 * * *` ("Schedule time") drives "Build zones
+query (enabled schedules)" → "Build mean query (last hour, all datapoints)" → "Decide +
 build actuator cmd + build DB logs". Decision rule: `irrigate = meanKpa >=
 threshold`. Output feeds the STREGA tab and writes `irrigation_events`. The
 tab also carries one-time DB bootstrap injects ("Init DB", "Migrate users
@@ -165,6 +167,27 @@ data/advanced/preferences, `GET /api/history/zones/:zoneId/export.csv` with
 derived pF row pairing, `GET /api/system/features`), "History Rollup Tick"
 (cron `0 2 * * *` plus `POST /api/history/rollups/run`), and "Analysis API
 Router" (`/api/analysis/channels|series|views`).
+
+### Valve Control (5 function nodes)
+
+STREGA weekly on-valve scheduler compile/push/ACK plus gateway-timed
+one-time opens; spec `docs/superpowers/specs/2026-08-19-valve-control-design.md`.
+Logic lives in `osi-valve-control` (`plan.js`, `push.js`, `ack.js`,
+`store.js`, `workers.js`, `api.js`), loaded via
+`osiLib.require('osi-valve-control')`.
+
+| Concern | Nodes | Cadence |
+|---|---|---|
+| REST API | "Valve API Router" (`GET/POST/PUT/DELETE /api/valves*`: list, per-valve schedules, plan resend, scheduler-status, settings) | on request |
+| ACK ledger | "STREGA ACK IN" (`mqtt in`) → "Valve ACK ledger" (`Schl_Port` 14–20/25, `Schl_status_Port` 21, `RTC_Port` 12/13; STREGA-profile gated, same rule as `strega-process-fn`) | per uplink |
+| One-time opens | "Fire due one-time opens" (`valve-once-tick`); fires `PENDING` rows due within the last 10 min, marks the rest `SKIPPED` | 60 s |
+| Observed runs | "Observe valve-fired opens + trigger backfill" (`valve-observe-tick`) | 60 s |
+| Clock sync + housekeeping | "Valve clock sync + stale pushes" (`valve-clock-tick`): FPort 12 resync, 24 h `QUEUED`→`FAILED` sweep | 600 s (10 min) |
+
+Plan and clock pushes leave through a dedicated `mqtt out` node, "Valve plan
+downlinks → ChirpStack" (`valve-push-mqtt-out`), separate from the STREGA
+manual-open builder in Actuator_STREGA (`cdbaa3891d40d7a1`) — plan pushes
+have their own delivery ledger, `valve_schedule_pushes`.
 
 ### Field testing, Download Sensor Data, Simulations, Dendro Live Sim
 
