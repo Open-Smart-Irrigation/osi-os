@@ -55,9 +55,11 @@ to the weekday of its start.
 
 **Compiled plan** of a valve: for each weekday, the ordered list of windows
 from every enabled WEEKLY schedule of that valve. Validation at save time:
-no weekday may exceed 4 windows; windows on the same weekday may not overlap
-(the valve would receive a second ON during an ON; the firmware would restart
-its timer, which silently extends irrigation). Both are 422 errors naming the
+no weekday may exceed 4 windows; windows may not overlap, including a window
+that wraps past midnight overlapping the next weekday's early windows (the
+valve would receive a second ON during an ON; the firmware would restart its
+timer, which silently extends irrigation). A wrapped window is still encoded
+on its start weekday; the wrap matters only for conflict detection. Both are 422 errors naming the
 weekday and the conflicting schedule label.
 
 **Generation** (`valve_settings.strega_generation`): `GEN1` or `GEN2`. Default
@@ -396,7 +398,7 @@ Request and response shapes are JSON snake_case like the rest of flows.json;
 ## 11. Testing
 
 - Pure functions extracted into a new local module
-  `conf/.../node-red/osi-valve-plan/` (compile windows, validate, encode
+  `conf/.../node-red/osi-valve-control/` (compile windows, validate, encode
   GEN1/GEN2, decode ACK, hash, next-run computation, DST-aware local time),
   with Node unit tests and golden vectors copied from
   `docs/hardware/strega-codecs/` (e.g. Sunday 08:30–08:45 + 23:05–00:10 →
