@@ -13,10 +13,12 @@ import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
+import { ValveControlPanel } from '../components/farming/valves/ValveControlPanel';
 import {
   IrrigationOutcomesPanel,
   type IrrigationOutcomeZoneContext,
 } from '../components/farming/IrrigationOutcomesPanel';
+import { useDisplayPreferences } from '../utils/displayPreferences';
 import type { Device, IrrigationZone } from '../types/farming';
 import type { IrrigationActuationsResponse } from '../services/api';
 
@@ -28,6 +30,7 @@ export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
+  const { modules } = useDisplayPreferences();
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
 
@@ -202,6 +205,13 @@ export const FarmingDashboard: React.FC = () => {
                     irrigationActuations={irrigationActuations}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* Valve control panel */}
+            {modules.valveControl && (
+              <div className="mt-8">
+                <ValveControlPanel onUpdate={handleUpdate} />
               </div>
             )}
 

@@ -176,6 +176,15 @@ const StatusBadge: React.FC<{ status: IrrigationActuationStatus }> = ({ status }
   );
 };
 
+const TriggerChip: React.FC<{ trigger: NonNullable<IrrigationActuation['trigger']> }> = ({ trigger }) => {
+  const { t } = useTranslation('valves');
+  return (
+    <span className="inline-flex items-center rounded-md bg-[var(--card)] px-2 py-0.5 text-xs text-[var(--text-tertiary)]">
+      {t(`trigger.${trigger}`)}
+    </span>
+  );
+};
+
 const TimestampDetail: React.FC<{
   label: string;
   iso: string | null;
@@ -241,7 +250,10 @@ const AdvancedActuationRow: React.FC<{
           <span className="text-[var(--text-tertiary)]">·</span>
           <span className="text-[var(--text-secondary)]">{row.deviceName ?? row.deviceEui}</span>
         </div>
-        <StatusBadge status={row.status} />
+        <div className="flex shrink-0 items-center gap-2">
+          <StatusBadge status={row.status} />
+          {row.trigger && <TriggerChip trigger={row.trigger} />}
+        </div>
       </div>
       <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-3 gap-y-0.5">
         <span>

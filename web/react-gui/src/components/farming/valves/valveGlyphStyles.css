@@ -1,0 +1,20 @@
+/* ── Valve glyph animation ──────────────────────────────────────────────── */
+
+@keyframes valve-drip {
+  0%   { transform: translateY(-4px); opacity: 0; }
+  30%  { opacity: 1; }
+  100% { transform: translateY(11px); opacity: 0; }
+}
+
+.valve-drip {
+  animation: valve-drip 1.4s ease-in infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .valve-drip {
+    animation: none !important;
+    opacity: 0.85;
+  }
+}
