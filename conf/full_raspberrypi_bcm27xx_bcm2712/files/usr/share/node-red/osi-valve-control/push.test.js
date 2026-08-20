@@ -73,3 +73,60 @@ test('compileAndQueue rejects >4 windows with a 422 plan_conflict', async () => 
   await assert.rejects(() => compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', flushQueue: async () => {}, warn: () => {} }), (e) => e.statusCode === 422 && e.details[0].weekday === 2);
   db.close();
 });
+
+test('GEN2 per-weekday hash diffing: regroup then revert re-pushes the original 0x80 group, not nothing (CRITICAL 2)', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' });
+  await store.insertSchedule(db, { schedule_uuid: 'g1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 127, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+
+  const r1 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  const gen2_1 = r1.rows.filter((r) => r.purpose === 'DAYMASK_PLAN');
+  assert.equal(gen2_1.length, 1);
+  assert.equal(gen2_1[0].payload_hex.slice(0, 2), '80');
+  const originalPayload = gen2_1[0].payload_hex;
+
+  // Move Monday (bit1) to its own 09:00 window -> regroups into {Mon} + {rest}.
+  await store.updateSchedule(db, 'g1', { weekdays_mask: 127 & ~0x02 });
+  await store.insertSchedule(db, { schedule_uuid: 'g2', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 0x02, start_time: '09:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const r2 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+  const gen2_2 = r2.rows.filter((r) => r.purpose === 'DAYMASK_PLAN');
+  assert.equal(gen2_2.length, 1, 'only the Monday group actually changed');
+
+  // Revert Monday back into the original all-days window.
+  await store.updateSchedule(db, 'g1', { weekdays_mask: 127 });
+  await store.softDeleteSchedule(db, 'g2');
+  const r3 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+  const gen2_3 = r3.rows.filter((r) => r.purpose === 'DAYMASK_PLAN');
+  assert.equal(gen2_3.length, 1, 'revert must re-push the all-days group, not nothing (stale per-group hash bug)');
+  assert.equal(gen2_3[0].payload_hex, originalPayload);
+  db.close();
+});
+
+test('GEN2 forced re-push: exactly one QUEUED row per group, old intersecting rows superseded (CRITICAL 2)', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' });
+  await store.insertSchedule(db, { schedule_uuid: 'g1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 125, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await store.insertSchedule(db, { schedule_uuid: 'g2', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 2, start_time: '09:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+
+  const r1 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r1.rows.filter((r) => r.purpose === 'DAYMASK_PLAN').length, 2);
+
+  const r2 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: true, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r2.rows.filter((r) => r.purpose === 'DAYMASK_PLAN').length, 2);
+
+  const allRows = await db.all("SELECT push_id, state FROM valve_schedule_pushes WHERE purpose='DAYMASK_PLAN' ORDER BY queued_at");
+  assert.equal(allRows.filter((r) => r.state === 'QUEUED').length, 2);
+  assert.equal(allRows.filter((r) => r.state === 'SUPERSEDED').length, 2);
+  db.close();
+});
+
+test('compileAndQueue: clock-sync timezone prefers the first enabled WEEKLY schedule over a ONCE schedule (MINOR 5)', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'o1', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, fire_at: '2026-08-20T00:00:00.000Z', duration_minutes: 5, timezone: 'Pacific/Auckland', enabled: 1 });
+  await store.insertSchedule(db, { schedule_uuid: 'w1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
+  const r = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T23:03:44Z'), flushQueue: async () => {}, warn: () => {} });
+  const clock = r.rows.find((row) => row.purpose === 'CLOCK_SYNC');
+  assert.ok(clock);
+  assert.equal(clock.payload_hex, '0001000304040004020000080206');
+  db.close();
+});

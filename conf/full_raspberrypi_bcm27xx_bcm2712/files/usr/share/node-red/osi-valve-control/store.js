@@ -4,8 +4,8 @@
 const VALVE_LIST_SQL = `
 SELECT d.deveui, d.name, d.type_id, d.irrigation_zone_id, d.current_state, d.target_state, d.user_id,
        iz.name AS zone_name, iz.zone_uuid, iz.timezone AS zone_timezone,
-       vs.strega_generation, vs.flow_rate_lpm, vs.flow_rate_source, vs.default_open_minutes,
-       vs.scheduler_status, vs.skip_today_date, vs.last_clock_sync_queued_at, vs.last_clock_sync_acked_at,
+       COALESCE(vs.strega_generation,'GEN1') AS strega_generation, vs.flow_rate_lpm, vs.flow_rate_source, vs.default_open_minutes,
+       COALESCE(vs.scheduler_status,'ACTIVE') AS scheduler_status, vs.skip_today_date, vs.last_clock_sync_queued_at, vs.last_clock_sync_acked_at,
        zic.measured_flow_rate_lpm AS zone_flow_rate_lpm,
        (SELECT MAX(dd.recorded_at) FROM device_data dd WHERE dd.deveui = d.deveui) AS last_uplink_at,
        (SELECT vae.expectation_id FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY vae.commanded_at DESC LIMIT 1) AS active_expectation_id,
@@ -59,22 +59,48 @@ async function insertSchedule(db, r) {
 
 const SCHEDULE_COLUMNS = ['label', 'weekdays_mask', 'start_time', 'fire_at', 'duration_minutes', 'timezone', 'enabled', 'once_state', 'once_fired_at'];
 
+// Callers cannot rely on a change count here: the live osi-db-helper facade's run() resolves
+// undefined, so these deliberately return nothing. Whether the row existed/was updated is the
+// caller's job to check (e.g. re-SELECT), not something this function can report.
 async function updateSchedule(db, scheduleUuid, patch) {
   const cols = SCHEDULE_COLUMNS.filter((c) => Object.prototype.hasOwnProperty.call(patch || {}, c));
-  if (!cols.length) return 0;
-  return db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE schedule_uuid=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid]));
+  if (!cols.length) return;
+  await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE schedule_uuid=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid]));
 }
 
 async function softDeleteSchedule(db, scheduleUuid) {
-  return db.run("UPDATE valve_schedules SET deleted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE schedule_uuid=? AND deleted_at IS NULL", [scheduleUuid]);
+  await db.run("UPDATE valve_schedules SET deleted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE schedule_uuid=? AND deleted_at IS NULL", [scheduleUuid]);
+}
+
+// A DAYMASK_PLAN row's mask, decoded from its payload's first hex byte, with the 0x80
+// "all-days" sentinel normalized to the literal 7-bit mask (0x7F) it represents.
+function daymaskOf(payloadHex) {
+  const raw = parseInt(String(payloadHex).slice(0, 2), 16);
+  return raw === 0x80 ? 0x7F : raw;
 }
 
 async function lastPushHashes(db, deviceEui) {
   const rows = await db.all("SELECT purpose, weekday, payload_hex, plan_hash, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED') ORDER BY queued_at DESC", [deviceEui]);
   const out = {};
   for (const r of rows) {
-    const key = r.purpose === 'WEEKDAY_PLAN' ? 'WEEKDAY_PLAN:' + r.weekday : 'DAYMASK_PLAN:' + parseInt(r.payload_hex.slice(0, 2), 16);
-    if (!(key in out)) out[key] = r.plan_hash;
+    if (r.purpose === 'WEEKDAY_PLAN') {
+      const key = 'WEEKDAY_PLAN:' + r.weekday;
+      if (!(key in out)) out[key] = r.plan_hash;
+      continue;
+    }
+    // GEN2 diffing is per-weekday, not per-group (CRITICAL 2, review round 1): a group's
+    // daymask can legitimately change across compiles (windows re-split/re-merge across
+    // weekdays) while a given weekday's own compiled window stays identical or reverts to an
+    // earlier value. Keying the diff on the group's mask made a reverted plan look "already
+    // pushed" under a stale per-group key and silently skip the re-push. Expanding each row
+    // to the individual weekdays it covers, newest-first-wins, makes the diff correct
+    // regardless of how groups are drawn on either side of the comparison.
+    const mask = daymaskOf(r.payload_hex);
+    for (let d = 0; d < 7; d += 1) {
+      if (!((mask >> d) & 1)) continue;
+      const key = 'GEN2DAY:' + d;
+      if (!(key in out)) out[key] = r.plan_hash;
+    }
   }
   return out;
 }
@@ -85,12 +111,31 @@ async function insertPushes(db, rows) {
   }
 }
 
+// CRITICAL 1 (review round 1): SQLite's CAST does not parse hex text — CAST(('0x'||'80') AS
+// INTEGER) is 0, not 128 — so the old SQL-side mask-equality WHERE clause here never matched
+// and the DAYMASK_PLAN branch was dead code: a forced GEN2 re-push left two QUEUED rows for
+// the same plan, which failStalePushes later turned into a spurious FAILED entry. Separately,
+// exact-mask equality would have been the wrong comparison anyway (CRITICAL 2): regrouping
+// means a new push's mask can legitimately differ from an old QUEUED row's mask while still
+// covering some of the same weekdays, so a row must be superseded whenever its mask
+// *intersects* the new push's mask, not only when it matches exactly. Both are fixed by
+// decoding masks and intersecting them in JS, then superseding by push_id.
+async function supersedeQueuedGen2(db, deviceEui, daymask) {
+  const rows = await db.all("SELECT push_id, payload_hex FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose='DAYMASK_PLAN' AND state='QUEUED'", [deviceEui]);
+  const newMask = daymask === 0x80 ? 0x7F : daymask;
+  for (const r of rows) {
+    if ((daymaskOf(r.payload_hex) & newMask) !== 0) {
+      await db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE push_id=?", [r.push_id]);
+    }
+  }
+}
+
 async function supersedeQueued(db, deviceEui, purpose, weekdayOrMask) {
   if (purpose === 'WEEKDAY_PLAN') {
     return db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE UPPER(device_eui)=UPPER(?) AND purpose='WEEKDAY_PLAN' AND weekday=? AND state='QUEUED'", [deviceEui, weekdayOrMask]);
   }
   if (purpose === 'DAYMASK_PLAN') {
-    return db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE UPPER(device_eui)=UPPER(?) AND purpose='DAYMASK_PLAN' AND state='QUEUED' AND CAST(('0x' || substr(payload_hex,1,2)) AS INTEGER) = ?", [deviceEui, weekdayOrMask]);
+    return supersedeQueuedGen2(db, deviceEui, weekdayOrMask);
   }
   return db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND state='QUEUED'", [deviceEui, purpose]);
 }
