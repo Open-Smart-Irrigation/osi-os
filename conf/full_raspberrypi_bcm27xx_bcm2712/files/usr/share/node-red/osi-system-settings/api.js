@@ -114,7 +114,7 @@ async function handleHttpRequest(options) {
   let db = null;
   try {
     const secret = resolveAuthSecret(environment, warn);
-    verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization, secret);
+    const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization, secret);
     db = new Database(environment.dbPath || '/data/db/farming.db');
 
     if (method === 'GET') {
@@ -145,16 +145,33 @@ async function handleHttpRequest(options) {
         }
         throw error;
       }
-      // Count before mutating: the shared osi-db-helper facade's run() resolves undefined (no
-      // change count) in production, so the affected-row count must come from a SELECT, not
-      // from the UPDATE's own return value.
+      // Own-zones-only, deleted_at IS NULL, sync_version/updated_at bump: the exact
+      // predicate + write shape zone-config-fn uses for every other zone mutation (FW-T5
+      // review R1, M1-M3). Scoping by auth.userId keeps this PUT from reaching another
+      // user's zones (verifyBearer only proves *some* valid session, not ownership);
+      // deleted_at IS NULL keeps a soft-deleted zone from being resurrected into the sync
+      // outbox as a spurious ZONE_DELETED re-emission and from inflating the reported
+      // count; the sync_version bump matches every sibling writer so a cloud-side zone
+      // whose version has moved ahead of the edge's does not silently drop this change
+      // (the trigger only emits an op the cloud accepts, no sync-table writes here).
+      // Count-then-update runs inside one transaction so a concurrent zone edit between
+      // the two statements cannot desync the reported count from what was actually written.
       let zonesUpdated = 0;
       if (applyToAllZones) {
-        const countRow = await db.get('SELECT COUNT(*) AS c FROM irrigation_zones WHERE timezone <> ?', [gatewayTimezone]);
-        zonesUpdated = Number(countRow && countRow.c) || 0;
-        // Plain UPDATE, no sync-table writes here: the existing trigger on irrigation_zones'
-        // timezone change fires per row and keeps the cloud mirror in sync on its own.
-        await db.run('UPDATE irrigation_zones SET timezone = ? WHERE timezone <> ?', [gatewayTimezone, gatewayTimezone]);
+        zonesUpdated = await db.transaction(async (tx) => {
+          const countRow = await tx.get(
+            'SELECT COUNT(*) AS c FROM irrigation_zones WHERE user_id = ? AND deleted_at IS NULL AND timezone <> ?',
+            [auth.userId, gatewayTimezone]
+          );
+          const count = Number(countRow && countRow.c) || 0;
+          if (count > 0) {
+            await tx.run(
+              'UPDATE irrigation_zones SET timezone = ?, updated_at = ?, sync_version = COALESCE(sync_version,0)+1 WHERE user_id = ? AND deleted_at IS NULL AND timezone <> ?',
+              [gatewayTimezone, now, auth.userId, gatewayTimezone]
+            );
+          }
+          return count;
+        });
       }
       return respond(200, { gatewayTimezone, zonesUpdated });
     }

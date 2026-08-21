@@ -180,3 +180,15 @@ test('getGatewaySetting (FW-T5): table-missing-safe — returns null instead of 
   assert.equal(await store.getGatewaySetting(db, 'gateway_timezone'), null);
   db.close();
 });
+
+test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read error too, warning instead of throwing', async () => {
+  // Unified policy: a scheduled worker tick (runObserveTick/runClockTick/runHousekeeping)
+  // has no enclosing try/catch around this one call, so ANY read failure — not just a
+  // missing table — must resolve to null instead of aborting the whole tick.
+  const warnings = [];
+  const fakeDb = { get: async () => { throw new Error('SQLITE_BUSY: database is locked'); } };
+  const result = await store.getGatewaySetting(fakeDb, 'gateway_timezone', (m) => warnings.push(m));
+  assert.equal(result, null);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /gateway_timezone read failed:.*SQLITE_BUSY/);
+});

@@ -71,7 +71,7 @@ async function runObserveTick({ db, now, warn }) {
   const nowDate = now || new Date();
   // (FW-T5) Read once per tick: the gateway-level default timezone joins the fallback chain
   // between a zoneless/unassigned valve and the hard 'UTC' floor.
-  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone');
+  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
   const open = await db.all(`SELECT d.deveui, d.irrigation_zone_id, iz.timezone AS zone_timezone,
       (SELECT MAX(recorded_at) FROM device_data dd WHERE dd.deveui = d.deveui) AS last_uplink_at,
       zic.measured_flow_rate_lpm AS zone_flow_rate_lpm, vs.flow_rate_lpm, vs.flow_rate_source
@@ -124,7 +124,7 @@ async function runObserveTick({ db, now, warn }) {
 async function runClockTick({ db, now, appId, warn }) {
   const nowDate = now || new Date();
   // (FW-T5) Read once per tick, same rationale as runObserveTick above.
-  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone');
+  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
   await store.failStalePushes(db, new Date(nowDate.getTime() - STALE_PUSH_MS).toISOString());
   // (I2, spec §5.4): FPort 12 must encode local wall-clock digits in the SCHEDULE's timezone,
   // not the zone's. schedule_timezone picks, per valve, the first enabled WEEKLY schedule's
@@ -186,7 +186,7 @@ const CLOCK_JUMP_FORWARD_MS = 6 * 3600 * 1000;
 async function runHousekeeping({ db, now, appId, warn }) {
   const nowDate = now || new Date();
   // (FW-T5) Read once per tick, same rationale as runObserveTick above.
-  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone');
+  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
   const out = { resets: 0, clockJump: false, decommissioned: 0, messages: [] };
   const skips = await db.all("SELECT vs.device_eui, vs.skip_today_date, iz.timezone AS zone_timezone FROM valve_settings vs JOIN devices d ON d.deveui = vs.device_eui LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id WHERE vs.scheduler_status='SKIP_TODAY'");
   for (const s of skips) {

@@ -225,17 +225,26 @@ async function weekdayPushStates(db, deviceEui) {
 }
 
 // Gateway-level default timezone (FW-T5), read from app_settings(key='gateway_timezone').
-// Table-missing-safe: a pre-migration DB (deploys are staged) has no app_settings table yet,
-// so this returns null (never throws) exactly like an absent row, letting every caller fall
-// back to 'UTC' the same way it always has.
-async function getGatewaySetting(db, key) {
+// Swallow-with-default everywhere (FW-T5 review R1, m6): this is called once per scheduled
+// worker tick (runObserveTick/runClockTick/runHousekeeping), none of which touched
+// app_settings before FW-T5 and none of which has any enclosing try/catch around this one
+// call — a rethrown error would abort the entire tick over a single non-critical setting
+// read, not just this lookup. No caller anywhere discriminates on the specific error (the
+// generic 500-catch in an HTTP handler is not "genuine handling" of this read failing), so
+// every failure mode — missing table, transient read error, anything else — resolves to
+// null (never throws), exactly like an absent row, letting every caller fall back to 'UTC'
+// the same way it always has. Matches osi-system-settings/api.js's readGatewayTimezone,
+// which uses the same policy.
+async function getGatewaySetting(db, key, warn) {
   try {
     const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [key]);
     return row ? row.value : null;
   } catch (error) {
     const detail = String(error && error.message ? error.message : error);
-    if (/no such table:\s*app_settings\b/i.test(detail)) return null;
-    throw error;
+    if (!/no such table:\s*app_settings\b/i.test(detail) && typeof warn === 'function') {
+      warn('[valve-control] gateway_timezone read failed: ' + detail);
+    }
+    return null;
   }
 }
 

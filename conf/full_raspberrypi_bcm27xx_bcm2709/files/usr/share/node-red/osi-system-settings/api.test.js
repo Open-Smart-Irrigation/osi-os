@@ -13,6 +13,11 @@ function facade(raw) {
     get: (sql, params) => Promise.resolve(raw.prepare(sql).get(...(params || []))),
     all: (sql, params) => Promise.resolve(raw.prepare(sql).all(...(params || []))),
     run: (sql, params) => { raw.prepare(sql).run(...(params || [])); return Promise.resolve(undefined); }, // matches the live osi-db-helper facade: run() resolves undefined
+    async transaction(executor) {
+      raw.exec('BEGIN IMMEDIATE');
+      try { const out = await executor(facade(raw)); raw.exec('COMMIT'); return out; }
+      catch (e) { try { raw.exec('ROLLBACK'); } catch (_) { /* already rolled back */ } throw e; }
+    },
     close: (cb) => { try { raw.close(); } catch (_) { /* closed */ } if (cb) cb(); },
   };
 }
@@ -100,7 +105,7 @@ test('PUT /api/system/settings upserts the value and a subsequent GET reflects i
   assert.equal(rows[0].value, 'America/New_York');
 });
 
-test('PUT applyToAllZones updates only zones whose timezone differs and reports the count', async () => {
+test('PUT applyToAllZones updates only the caller\'s zones whose timezone differs and reports the count', async () => {
   const dbPath = await tempDb();
   const raw = new DatabaseSync(dbPath);
   raw.prepare("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))").run();
@@ -114,6 +119,61 @@ test('PUT applyToAllZones updates only zones whose timezone differs and reports 
   const rows = raw2.prepare('SELECT name, timezone FROM irrigation_zones ORDER BY name').all();
   raw2.close();
   assert.deepEqual(rows.map((r) => ({ ...r })), [{ name: 'A', timezone: 'Europe/Zurich' }, { name: 'B', timezone: 'Europe/Zurich' }]);
+});
+
+test('PUT applyToAllZones (FW-T5 review R1, M1) never touches another user\'s zones', async () => {
+  const dbPath = await tempDb();
+  const raw = new DatabaseSync(dbPath);
+  raw.prepare("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))").run();
+  raw.prepare("INSERT INTO users(id, username, password_hash, created_at) VALUES (2,'other','x',datetime('now'))").run();
+  raw.prepare("INSERT INTO irrigation_zones(name, user_id, timezone) VALUES ('Mine', 1, 'UTC')").run();
+  raw.prepare("INSERT INTO irrigation_zones(name, user_id, timezone) VALUES ('OtherUser', 2, 'UTC')").run();
+  raw.close();
+  // token(1) (the default auth() helper below) authenticates as user 1.
+  const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
+  assert.equal(out.statusCode, 200);
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1 }, 'must count only the caller\'s own zone');
+  const raw2 = new DatabaseSync(dbPath);
+  const rows = raw2.prepare('SELECT name, user_id, timezone FROM irrigation_zones ORDER BY name').all();
+  raw2.close();
+  assert.deepEqual(rows.map((r) => ({ ...r })), [
+    { name: 'Mine', user_id: 1, timezone: 'Europe/Zurich' },
+    { name: 'OtherUser', user_id: 2, timezone: 'UTC' },
+  ]);
+});
+
+test('PUT applyToAllZones (FW-T5 review R1, M2) excludes soft-deleted zones from both the count and the write', async () => {
+  const dbPath = await tempDb();
+  const raw = new DatabaseSync(dbPath);
+  raw.prepare("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))").run();
+  raw.prepare("INSERT INTO irrigation_zones(name, user_id, timezone) VALUES ('Live', 1, 'UTC')").run();
+  raw.prepare("INSERT INTO irrigation_zones(name, user_id, timezone, deleted_at) VALUES ('Gone', 1, 'UTC', datetime('now'))").run();
+  raw.close();
+  const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
+  assert.equal(out.statusCode, 200);
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1 }, 'the soft-deleted zone must not be counted');
+  const raw2 = new DatabaseSync(dbPath);
+  const rows = raw2.prepare('SELECT name, timezone FROM irrigation_zones ORDER BY name').all();
+  raw2.close();
+  assert.deepEqual(rows.map((r) => ({ ...r })), [
+    { name: 'Gone', timezone: 'UTC' },
+    { name: 'Live', timezone: 'Europe/Zurich' },
+  ], 'the soft-deleted zone\'s timezone must be left untouched (and so must never re-fire its sync trigger)');
+});
+
+test('PUT applyToAllZones (FW-T5 review R1, M3) bumps sync_version and updated_at on every zone it touches', async () => {
+  const dbPath = await tempDb();
+  const raw = new DatabaseSync(dbPath);
+  raw.prepare("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))").run();
+  raw.prepare("INSERT INTO irrigation_zones(name, user_id, timezone, sync_version, updated_at) VALUES ('A', 1, 'UTC', 4, '2020-01-01T00:00:00.000Z')").run();
+  raw.close();
+  const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
+  assert.equal(out.payload.zonesUpdated, 1);
+  const raw2 = new DatabaseSync(dbPath);
+  const row = raw2.prepare("SELECT sync_version, updated_at FROM irrigation_zones WHERE name='A'").get();
+  raw2.close();
+  assert.equal(row.sync_version, 5, 'sync_version must be bumped exactly like every other zone writer (zone-config-fn precedent)');
+  assert.notEqual(row.updated_at, '2020-01-01T00:00:00.000Z', 'updated_at must be refreshed, not left stale');
 });
 
 test('PUT without applyToAllZones leaves existing zone timezones untouched', async () => {
@@ -138,4 +198,14 @@ test('PUT /api/system/settings: no token -> 401, no write happens', async () => 
   const row = raw.prepare("SELECT value FROM app_settings WHERE key='gateway_timezone'").get();
   raw.close();
   assert.equal(row, undefined);
+});
+
+test('PUT /api/system/settings: table-missing-safe, returns 503 schema_pending instead of 500 on a pre-migration DB', async () => {
+  const dbPath = await tempDb();
+  const raw = new DatabaseSync(dbPath);
+  raw.exec('DROP TABLE app_settings');
+  raw.close();
+  const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich' }));
+  assert.equal(out.statusCode, 503);
+  assert.equal(out.payload.error, 'schema_pending');
 });

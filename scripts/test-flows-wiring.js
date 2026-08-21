@@ -974,6 +974,14 @@ if (!byId['valve-ack-mqtt-in'] || byId['valve-ack-mqtt-in'].topic !== 'applicati
     console.log('OK  valve-ack-mqtt-in uses the wildcard uplink topic');
 }
 
+// System settings: /api/system/settings GET+PUT HTTP routes must both wire to the thin router
+// (FW-T5 review R1, M4), which itself has exactly one output wired to the shared sys-admin
+// response node.
+for (const id of ['sys-settings-get-in', 'sys-settings-put-in']) {
+    assertWires(id, [['sys-settings-router-fn']], `System settings: ${id} → sys-settings-router-fn`);
+}
+assertWires('sys-settings-router-fn', [['sys-resp']], 'System settings: sys-settings-router-fn → sys-resp');
+
 // === WS2/WS3 osiDb.Database close audit ===
 
 const OPEN_RX = /new\s+osiDb\.Database/;

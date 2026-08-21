@@ -161,7 +161,7 @@ async function handleHttpRequest(options) {
     // then 'UTC' — never the gateway process's own Intl timezone (same rationale as the
     // schedule/zone fallback chain in workers.js: it has no relationship to the valve or its
     // zone and was silently wrong whenever the gateway ran in a different tz than its zones).
-    const tzFallback = environment.gatewayTimezone || (await store.getGatewaySetting(db, 'gateway_timezone')) || 'UTC';
+    const tzFallback = environment.gatewayTimezone || (await store.getGatewaySetting(db, 'gateway_timezone', warn)) || 'UTC';
     const m = (re) => re.exec(requestPath);
     let match;
 
