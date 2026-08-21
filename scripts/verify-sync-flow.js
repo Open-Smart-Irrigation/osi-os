@@ -4147,4 +4147,7 @@ Promise.all(pendingChecks).finally(() => {
     console.error('verify-profile-parity.js failed');
     process.exitCode = parityResult.status || 1;
   }
+  if (process.exitCode) {
+    console.error('FAILED: sync flow verification (exit ' + process.exitCode + ') - see FAIL lines above');
+  }
 });
