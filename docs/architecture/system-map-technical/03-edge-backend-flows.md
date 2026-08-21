@@ -168,6 +168,18 @@ derived pF row pairing, `GET /api/system/features`), "History Rollup Tick"
 (cron `0 2 * * *` plus `POST /api/history/rollups/run`), and "Analysis API
 Router" (`/api/analysis/channels|series|views`).
 
+### System Settings (1 function node)
+
+Gateway-level settings, currently the default timezone. Logic lives in
+`osi-system-settings` (`api.js`), loaded via
+`osiLib.require('osi-system-settings')`; storage is the `app_settings`
+key/value table (migration 0023). "System Settings API Router" serves
+`GET/PUT /api/system/settings`; PUT validates the IANA zone, upserts
+`gateway_timezone`, and with `applyToAllZones` rewrites the caller's own
+non-deleted zones (sync_version bumped so the existing zone triggers emit
+`ZONE_UPSERTED`). Valve timing falls back schedule -> zone -> gateway -> UTC;
+zone creation defaults to the gateway zone.
+
 ### Valve Control (5 function nodes)
 
 STREGA weekly on-valve scheduler compile/push/ACK plus gateway-timed

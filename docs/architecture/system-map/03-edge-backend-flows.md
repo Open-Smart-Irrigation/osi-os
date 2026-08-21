@@ -259,6 +259,14 @@ into `history_channel_rollups`, plus `POST /api/history/rollups/run` for manual
 runs); **Analysis API Router** (cross-zone analysis: channel catalog, series
 data, saved views) delegating to `osi-history-helper/analysis.js`.
 
+### System Settings (1 function node)
+
+Gateway-wide defaults, today just the time zone. **System Settings API
+Router** (`GET/PUT /api/system/settings`, `osi-system-settings` module)
+stores `gateway_timezone` in the `app_settings` table; new zones inherit
+it, valve scheduling uses it when a device has no zone, and the Settings
+page can push it to all of the user's existing zones explicitly.
+
 ### Valve Control (5 function nodes)
 
 The STREGA on-valve weekly scheduler: compile, push, and ACK, plus
