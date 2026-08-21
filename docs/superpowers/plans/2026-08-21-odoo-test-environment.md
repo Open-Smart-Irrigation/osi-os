@@ -21,7 +21,7 @@
 7. Commit only the files named by the current task.
 8. Before each commit, run the task's focused tests and git diff --check.
 9. A failed module upgrade leaves Odoo stopped. Recovery is operator-driven: first reactivate the prior Git release and its recorded image references, then use that prior code to validate and restore its paired backup.
-10. scripts/backup, scripts/restore-rehearsal, scripts/restore-production, scripts/update-modules, and scripts/deploy use the one operation-lock interface in scripts/lib.sh. A nested call is valid only when it inherits the already-locked file descriptor.
+10. scripts/backup, scripts/restore-rehearsal, scripts/restore-production, scripts/update-modules, and scripts/deploy use the one operation-lock interface in scripts/lib.sh. A nested-flag call validates fd 9's path and calls flock on it; an inherited holder succeeds, an unlocked fd acquires when uncontended, and a forged fd fails while another holder is active.
 
 ## Task and review map
 
@@ -57,7 +57,7 @@ Optional findings are ruled as follows:
 
 ## Task 1: Historical Compose scaffold — completed
 
-Task 1 is the scaffold at commit 59b1f4b. Do not replay it, amend its commit, or claim its original Compose and configuration choices are final. At that commit the repository contains exactly .env.example, .gitignore, compose.yaml, config/odoo.conf.template, tests/fixtures/test.env, and tests/test_static.py. Task 2 amends or removes every incompatible Task 1 assertion and fixture in a new commit. This preserves Task 1 history while applying the security and operability corrections from review.
+Task 1 is the scaffold at commit 59b1f4b5c2713cbaa6b860d9c85fcdbc8518c30c. Do not replay it, amend its commit, or claim its original Compose and configuration choices are final. At that commit the repository contains exactly .env.example, .gitignore, compose.yaml, config/odoo.conf.template, tests/fixtures/test.env, and tests/test_static.py. Task 2 amends or removes every incompatible Task 1 assertion and fixture in a new commit. This preserves Task 1 history while applying the security and operability corrections from review.
 
 Execution begins at Task 2.
 
@@ -70,8 +70,9 @@ This task does only configuration rendering and PostgreSQL bootstrap/privilege v
 Before editing, run:
 
     cd /home/phil/Repos/osi-odoo
-    test "$(git rev-parse HEAD)" = 59b1f4b || {
-      echo "ERROR: Task 2 requires completed Task 1 commit 59b1f4b" >&2
+    test "$(git rev-parse HEAD)" = \
+      59b1f4b5c2713cbaa6b860d9c85fcdbc8518c30c || {
+      echo "ERROR: Task 2 requires completed Task 1 commit 59b1f4b5c2713cbaa6b860d9c85fcdbc8518c30c" >&2
       exit 1
     }
     install -d -m 0755 scripts postgres-init addons tests/fixtures
@@ -934,7 +935,7 @@ Expected final line:
 
 Stop if the configuration cannot be read by the runtime odoo user, any forbidden SQL succeeds, or the test invokes an Odoo module.
 
-Stop if the inherited Task 1 unittest suite, rendered Compose gates, configuration ownership, or any privilege probe fails. This gate is required against the actual 59b1f4b starting commit.
+Stop if the inherited Task 1 unittest suite, rendered Compose gates, configuration ownership, or any privilege probe fails. This gate is required against the actual 59b1f4b5c2713cbaa6b860d9c85fcdbc8518c30c starting commit.
 
 ### Step 13: Commit
 
@@ -2544,9 +2545,11 @@ Run one read-only SQL assertion block:
         WHERE d.module='osi_business_setup'
           AND d.name IN (
             'product_gateway','product_kiwi','product_clover',
-            'product_lsn50','product_s2120','product_lorain','product_strega'
+            'product_lsn50','product_s2120','product_lorain','product_strega',
+            'service_site_assessment','service_installation',
+            'service_operator_training','service_maintenance_support'
           )
-      ) != 7 THEN RAISE EXCEPTION 'one of seven setup products was removed';
+      ) != 11 THEN RAISE EXCEPTION 'one of eleven setup products was removed';
       END IF;
       IF (
         SELECT count(*)
@@ -2773,7 +2776,7 @@ scripts/test-init-database starts with this complete prologue:
     create_test_environment bootstrap i
     sampler_pid=""
     cleanup_init_test() {
-      touch "${TEST_ROOT}/stop-rss-sampler" 2>/dev/null || true
+      touch "${TEST_ROOT}/stop-memory-sampler" 2>/dev/null || true
       if [[ "$sampler_pid" =~ ^[0-9]+$ ]]; then
         kill "$sampler_pid" 2>/dev/null || true
         wait "$sampler_pid" 2>/dev/null || true
@@ -2795,22 +2798,38 @@ Append this exact body:
 
     export OSI_ENV_FILE="$env_file"
     export OSI_RUNTIME_MODE=base
-    printf '0\n' >"$test_root/db.peak-rss"
-    printf '0\n' >"$test_root/odoo.peak-rss"
-    sample_peak_rss() {
-      while [[ ! -e "$test_root/stop-rss-sampler" ]]; do
-        local service container_id pid rss peak
+    [[ -f /sys/fs/cgroup/cgroup.controllers ]] ||
+      die "aggregate memory gate requires host cgroup v2"
+    printf '0\n' >"$test_root/db.peak-bytes"
+    printf '0\n' >"$test_root/odoo.peak-bytes"
+    container_cgroup_memory() {
+      local container_id="$1" pid cgroup_path metric value
+      pid="$(docker inspect -f '{{.State.Pid}}' "$container_id")"
+      [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+      cgroup_path="$(awk -F: '$1 == "0" {print $3}' \
+        "/proc/$pid/cgroup" 2>/dev/null || true)"
+      [[ "$cgroup_path" == /* ]] || return 1
+      for metric in memory.peak memory.current; do
+        [[ -r "/sys/fs/cgroup${cgroup_path}/$metric" ]] || continue
+        value="$(<"/sys/fs/cgroup${cgroup_path}/$metric")"
+        if [[ "$value" =~ ^[0-9]+$ ]]; then
+          printf '%s\n' "$value"
+          return 0
+        fi
+      done
+      return 1
+    }
+    sample_container_memory() {
+      while [[ ! -e "$test_root/stop-memory-sampler" ]]; do
+        local service container_id memory_bytes peak
         for service in db odoo; do
           while read -r container_id; do
             [[ -n "$container_id" ]] || continue
-            pid="$(docker inspect -f '{{.State.Pid}}' "$container_id")"
-            [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
-            rss="$(awk '$1 == "VmRSS:" {printf "%.0f\\n", $2 * 1024}' \
-              "/proc/$pid/status" 2>/dev/null || true)"
-            [[ "$rss" =~ ^[0-9]+$ ]] || continue
-            peak="$(<"$test_root/$service.peak-rss")"
-            if (( rss > peak )); then
-              printf '%s\n' "$rss" >"$test_root/$service.peak-rss"
+            memory_bytes="$(container_cgroup_memory "$container_id" || true)"
+            [[ "$memory_bytes" =~ ^[0-9]+$ ]] || continue
+            peak="$(<"$test_root/$service.peak-bytes")"
+            if (( memory_bytes > peak )); then
+              printf '%s\n' "$memory_bytes" >"$test_root/$service.peak-bytes"
             fi
           done < <(docker ps -q \
             --filter "label=com.docker.compose.project=$project" \
@@ -2819,10 +2838,10 @@ Append this exact body:
         sleep 0.2
       done
     }
-    sample_peak_rss &
+    sample_container_memory &
     sampler_pid=$!
     "$SCRIPT_DIR/init-database" | tee "$test_root/first.log"
-    touch "$test_root/stop-rss-sampler"
+    touch "$test_root/stop-memory-sampler"
     wait "$sampler_pid"
     sampler_pid=""
     grep -q 'PASS: module state machine completed init' \
@@ -2831,13 +2850,13 @@ Append this exact body:
     db_id="$(compose_base ps -q db)"
     [[ "$(docker inspect -f '{{.HostConfig.Memory}}' "$db_id")" == 1073741824 ]]
     [[ "$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$db_id")" == 1000000000 ]]
-    db_peak="$(<"$test_root/db.peak-rss")"
-    odoo_peak="$(<"$test_root/odoo.peak-rss")"
+    db_peak="$(<"$test_root/db.peak-bytes")"
+    odoo_peak="$(<"$test_root/odoo.peak-bytes")"
     (( db_peak > 0 && db_peak <= 1073741824 )) ||
-      die "PostgreSQL peak RSS is absent or exceeds 1 GiB: $db_peak"
+      die "PostgreSQL aggregate cgroup peak is absent or exceeds 1 GiB: $db_peak"
     (( odoo_peak > 0 && odoo_peak <= 2147483648 )) ||
-      die "Odoo peak RSS is absent or exceeds 2 GiB: $odoo_peak"
-    printf 'PASS: peak RSS db=%s odoo=%s within Compose caps\n' \
+      die "Odoo aggregate cgroup peak is absent or exceeds 2 GiB: $odoo_peak"
+    printf 'PASS: aggregate cgroup memory db=%s odoo=%s within Compose caps\n' \
       "$db_peak" "$odoo_peak"
 
     first_counts="$(docker compose --env-file "$env_file" \
@@ -2965,7 +2984,7 @@ Only after scripts/test-coexistence exists, run:
     shellcheck scripts/lib.sh scripts/init-database \
       scripts/test-init-database scripts/test-coexistence
     scripts/test-init-database | tee /tmp/osi-odoo-init-gate.log
-    grep -Eq '^PASS: peak RSS db=[1-9][0-9]* odoo=[1-9][0-9]* within Compose caps$' \
+    grep -Eq '^PASS: aggregate cgroup memory db=[1-9][0-9]* odoo=[1-9][0-9]* within Compose caps$' \
       /tmp/osi-odoo-init-gate.log
     scripts/test-coexistence
 
@@ -2975,7 +2994,7 @@ Expected:
     PASS: module state machine completed update
     PASS: two isolated Compose projects coexist
 
-The peak-RSS line must match the exact regular expression in the gate; both byte counts must be positive integers.
+The aggregate-cgroup line must match the exact regular expression in the gate; both byte counts must be positive integers. On cgroup v2, memory.peak and memory.current include the init process and every worker in the container cgroup, unlike process-only samples.
 
 ### Step 6: Replace README and commit
 
@@ -3062,6 +3081,7 @@ Append to scripts/lib.sh:
           die "nested operation did not inherit lock fd 9"
         [[ "$(readlink "/proc/$$/fd/9")" == "$lock_file" ]] ||
           die "nested operation inherited the wrong lock fd"
+        flock -n 9 || die "nested operation lock is held elsewhere"
         return 0
       fi
       exec 9>"$lock_file"
@@ -3217,7 +3237,7 @@ Append to scripts/lib.sh:
       done
     }
 
-Every top-level operational script calls operation_lock_enter immediately after load_env. Nested calls inherit fd 9 and the two exported lock facts. Setting OSI_ODOO_LOCK_HELD without inheriting that exact open descriptor fails closed; no script reacquires the lock and no nested flock can deadlock. Only deploy calls operation_lock_leave_outer, after all deployment mutations, so the separately launched systemd backup service can acquire the same lock for its required first run.
+Every top-level operational script calls operation_lock_enter immediately after load_env. Nested calls inherit fd 9 and the two exported lock facts. The nested branch verifies the path and calls `flock -n 9`: the inherited open description succeeds without deadlock, an unlocked descriptor acquires the lock when uncontended, and a forged descriptor fails against a real holder. Only deploy calls operation_lock_leave_outer, after all deployment mutations, so the separately launched systemd backup service can acquire the same lock for its required first run.
 
 ### Step 2: Create strict backup validation
 
@@ -3560,9 +3580,26 @@ scripts/restore-production:
     enter_repo
     load_env
     operation_lock_enter
-    [[ "$COMPOSE_PROJECT_NAME" == osi-odoo ]] ||
-      die "production restore requires COMPOSE_PROJECT_NAME=osi-odoo"
-    export OSI_RUNTIME_MODE=production
+    if [[ "$COMPOSE_PROJECT_NAME" == osi-odoo ]]; then
+      export OSI_RUNTIME_MODE=production
+    elif [[ "${OSI_TEST_ALLOW_PRODUCTION_RESTORE:-0}" == 1 ]]; then
+      require_disposable_project
+      [[ "${OSI_RUNTIME_MODE:-base}" == base ]] ||
+        die "disposable production-restore gate requires base mode"
+      export OSI_RUNTIME_MODE=base
+    else
+      die "production restore requires the live project or explicit disposable gate"
+    fi
+    if [[ -n "${OSI_TEST_RESTORE_FAIL_AFTER:-}" ]]; then
+      [[ "${OSI_TEST_ALLOW_PRODUCTION_RESTORE:-0}" == 1 ]] ||
+        die "restore failure injection requires the disposable gate"
+      require_disposable_project
+      case "$OSI_TEST_RESTORE_FAIL_AFTER" in
+        database-live-to-retained|database-candidate-to-live|\
+        filestore-live-to-retained|filestore-candidate-to-live) ;;
+        *) die "invalid restore failure point" ;;
+      esac
+    fi
     "$SCRIPT_DIR/validate-backup" "$backup_dir"
     [[ "$(jq -r .database_name "$backup_dir/manifest.json")" == \
       "$ODOO_DB_NAME" ]] ||
@@ -3570,8 +3607,11 @@ scripts/restore-production:
     OSI_SOURCE_ENV_FILE="$ENV_FILE" \
       "$SCRIPT_DIR/restore-rehearsal" "$backup_dir"
 
-    pre_restore_backup="$("$SCRIPT_DIR/backup" | tail -n 1)"
-    compose_prod stop -t 90 odoo
+    backup_output="$("$SCRIPT_DIR/backup")"
+    pre_restore_backup="$(printf '%s\n' "$backup_output" | tail -n 1)"
+    [[ -d "$pre_restore_backup" ]] ||
+      die "pre-restore backup path is absent"
+    compose_runtime stop -t 90 odoo
     report_staging_failure() {
       local status=$?
       if (( status != 0 )); then
@@ -3582,7 +3622,7 @@ scripts/restore-production:
     }
     trap report_staging_failure EXIT
     source_database="$(jq -r .database_name "$backup_dir/manifest.json")"
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)_$$_${RANDOM}"
     candidate_database="${ODOO_DB_NAME}__candidate_${stamp}"
     retained_database="${ODOO_DB_NAME}__retained_${stamp}"
     (( ${#candidate_database} <= 63 && ${#retained_database} <= 63 )) ||
@@ -3594,11 +3634,11 @@ scripts/restore-production:
       "$backup_dir" "$candidate_database" "$work_dir"
     stage_filestore "$backup_dir" "$source_database" "$candidate_database"
 
-    compose_prod run --rm --no-deps odoo \
+    compose_runtime run --rm --no-deps odoo \
       odoo --config=/etc/odoo/odoo.conf \
       --database="$candidate_database" \
       --db-filter="^${candidate_database}$" --no-http --stop-after-init
-    compose_prod exec -T db psql -U odoo_admin -d "$candidate_database" \
+    compose_runtime exec -T db psql -U odoo_admin -d "$candidate_database" \
       -v ON_ERROR_STOP=1 <<'SQL'
     DO $$
     BEGIN
@@ -3619,43 +3659,134 @@ scripts/restore-production:
     SQL
 
     filestore_volume="$(project_volume odoo_data)"
-    db_live_moved=false
-    db_swapped=false
-    filestore_live_moved=false
-    filestore_swapped=false
+    database_exists() {
+      local database_name="$1" result
+      result="$(compose_runtime exec -T db psql -U odoo_admin -d postgres \
+        -Atv ON_ERROR_STOP=1 -v database_name="$database_name" \
+        -c "SELECT count(*) FROM pg_database
+            WHERE datname=:'database_name'")" || return 1
+      [[ "$result" == 1 ]]
+    }
+    filestore_exists() {
+      local database_name="$1"
+      docker run --rm --network none \
+        -e DATABASE_NAME="$database_name" \
+        -v "$filestore_volume:/target:ro" alpine:3.22 sh -ceu '
+          case "$DATABASE_NAME" in *[!A-Za-z0-9_]*) exit 64 ;; esac
+          test -d "/target/filestore/$DATABASE_NAME"
+        ' >/dev/null
+    }
+    rename_database() {
+      local source_name="$1" target_name="$2"
+      compose_runtime exec -T db psql -U odoo_admin -d postgres \
+        -v ON_ERROR_STOP=1 \
+        -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+            WHERE datname='$source_name' AND pid <> pg_backend_pid()" \
+        -c "ALTER DATABASE \"$source_name\" RENAME TO \"$target_name\""
+    }
+    rename_filestore() {
+      local source_name="$1" target_name="$2"
+      docker run --rm --network none \
+        -e SOURCE_NAME="$source_name" -e TARGET_NAME="$target_name" \
+        -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
+          case "$SOURCE_NAME:$TARGET_NAME" in
+            *[!A-Za-z0-9_:]*) exit 64 ;;
+          esac
+          test -d "/target/filestore/$SOURCE_NAME"
+          test ! -e "/target/filestore/$TARGET_NAME"
+          mv "/target/filestore/$SOURCE_NAME" \
+            "/target/filestore/$TARGET_NAME"
+        '
+    }
+    pair_name_state() {
+      local label="$1" name
+      printf '%s database:' "$label" >&2
+      for name in "$ODOO_DB_NAME" "$candidate_database" "$retained_database"; do
+        if database_exists "$name"; then printf ' %s' "$name" >&2; fi
+      done
+      printf '\n%s filestore:' "$label" >&2
+      for name in "$ODOO_DB_NAME" "$candidate_database" "$retained_database"; do
+        if filestore_exists "$name"; then printf ' %s' "$name" >&2; fi
+      done
+      printf '\n' >&2
+    }
+    reconcile_database_to_old() {
+      local live=false candidate=false retained=false
+      database_exists "$ODOO_DB_NAME" && live=true
+      database_exists "$candidate_database" && candidate=true
+      database_exists "$retained_database" && retained=true
+      if [[ "$retained" == true ]]; then
+        if [[ "$live" == true ]]; then
+          [[ "$candidate" == false ]] || {
+            printf 'ERROR: three database swap names exist\n' >&2
+            return 1
+          }
+          rename_database "$ODOO_DB_NAME" "$candidate_database" || return 1
+        fi
+        rename_database "$retained_database" "$ODOO_DB_NAME" || return 1
+      else
+        [[ "$live" == true ]] || {
+          printf 'ERROR: old database has no live or retained name\n' >&2
+          return 1
+        }
+      fi
+      database_exists "$ODOO_DB_NAME" &&
+        database_exists "$candidate_database" &&
+        ! database_exists "$retained_database"
+    }
+    reconcile_filestore_to_old() {
+      local live=false candidate=false retained=false
+      filestore_exists "$ODOO_DB_NAME" && live=true
+      filestore_exists "$candidate_database" && candidate=true
+      filestore_exists "$retained_database" && retained=true
+      if [[ "$retained" == true ]]; then
+        if [[ "$live" == true ]]; then
+          [[ "$candidate" == false ]] || {
+            printf 'ERROR: three filestore swap names exist\n' >&2
+            return 1
+          }
+          rename_filestore "$ODOO_DB_NAME" "$candidate_database" || return 1
+        fi
+        rename_filestore "$retained_database" "$ODOO_DB_NAME" || return 1
+      else
+        [[ "$live" == true ]] || {
+          printf 'ERROR: old filestore has no live or retained name\n' >&2
+          return 1
+        }
+      fi
+      filestore_exists "$ODOO_DB_NAME" &&
+        filestore_exists "$candidate_database" &&
+        ! filestore_exists "$retained_database"
+    }
+    run_restore_mutation() {
+      local failure_point="$1"
+      shift
+      "$@"
+      if [[ "${OSI_TEST_RESTORE_FAIL_AFTER:-}" == "$failure_point" ]]; then
+        require_disposable_project
+        printf 'INJECT: mutation completed before nonzero: %s\n' \
+          "$failure_point" >&2
+        return 98
+      fi
+    }
     rollback_candidate_swap() {
       local status=$?
       (( status != 0 )) || return 0
       set +e
-      compose_prod stop -t 90 odoo >/dev/null 2>&1
-      if [[ "$filestore_swapped" == true ]]; then
-        docker run --rm --network none \
-          -e LIVE="$ODOO_DB_NAME" -e CANDIDATE="$candidate_database" \
-          -e RETAINED="$retained_database" \
-          -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
-            mv "/target/filestore/$LIVE" "/target/filestore/$CANDIDATE"
-            mv "/target/filestore/$RETAINED" "/target/filestore/$LIVE"
-          '
-      elif [[ "$filestore_live_moved" == true ]]; then
-        docker run --rm --network none \
-          -e LIVE="$ODOO_DB_NAME" -e RETAINED="$retained_database" \
-          -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
-            mv "/target/filestore/$RETAINED" "/target/filestore/$LIVE"
-          '
-      fi
-      if [[ "$db_swapped" == true ]]; then
-        compose_prod exec -T db psql -U odoo_admin -d postgres \
-          -v ON_ERROR_STOP=1 \
-          -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-              WHERE datname='$ODOO_DB_NAME' AND pid <> pg_backend_pid()" \
-          -c "ALTER DATABASE \"$ODOO_DB_NAME\" RENAME TO \"$candidate_database\"" \
-          -c "ALTER DATABASE \"$retained_database\" RENAME TO \"$ODOO_DB_NAME\""
-      elif [[ "$db_live_moved" == true ]]; then
-        compose_prod exec -T db psql -U odoo_admin -d postgres \
-          -v ON_ERROR_STOP=1 \
-          -c "ALTER DATABASE \"$retained_database\" RENAME TO \"$ODOO_DB_NAME\""
-      fi
+      compose_runtime stop -t 90 odoo >/dev/null 2>&1
+      pair_name_state 'OBSERVED-FAILURE'
+      database_reconciled=false
+      filestore_reconciled=false
+      reconcile_database_to_old && database_reconciled=true
+      reconcile_filestore_to_old && filestore_reconciled=true
+      pair_name_state 'OBSERVED-RECONCILED'
       rm -rf -- "$work_dir"
+      if [[ "$database_reconciled" != true ||
+            "$filestore_reconciled" != true ]]; then
+        printf 'ERROR: restore rollback could not reconcile one old live pair\n' >&2
+        return 96
+      fi
+      printf 'PASS: restore rollback reconciled one old live pair\n' >&2
       printf 'ERROR: production restore failed; Odoo remains stopped\n' >&2
       printf 'Recovery backup: %s\n' "$pre_restore_backup" >&2
       printf 'Candidate database/filestore: %s\n' "$candidate_database" >&2
@@ -3663,35 +3794,29 @@ scripts/restore-production:
     }
     trap rollback_candidate_swap EXIT
 
-    compose_prod exec -T db psql -U odoo_admin -d postgres \
-      -v ON_ERROR_STOP=1 \
-      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-          WHERE datname IN ('$ODOO_DB_NAME','$candidate_database')
-            AND pid <> pg_backend_pid()" \
-      -c "ALTER DATABASE \"$ODOO_DB_NAME\" RENAME TO \"$retained_database\""
-    db_live_moved=true
-    compose_prod exec -T db psql -U odoo_admin -d postgres \
-      -v ON_ERROR_STOP=1 \
-      -c "ALTER DATABASE \"$candidate_database\" RENAME TO \"$ODOO_DB_NAME\""
-    db_swapped=true
-    docker run --rm --network none \
-      -e LIVE="$ODOO_DB_NAME" -e CANDIDATE="$candidate_database" \
-      -e RETAINED="$retained_database" \
-      -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
-        test -d "/target/filestore/$LIVE"
-        test -d "/target/filestore/$CANDIDATE"
-        test ! -e "/target/filestore/$RETAINED"
-        mv "/target/filestore/$LIVE" "/target/filestore/$RETAINED"
-      '
-    filestore_live_moved=true
-    docker run --rm --network none \
-      -e LIVE="$ODOO_DB_NAME" -e CANDIDATE="$candidate_database" \
-      -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
-        mv "/target/filestore/$CANDIDATE" "/target/filestore/$LIVE"
-      '
-    filestore_swapped=true
+    database_exists "$ODOO_DB_NAME"
+    database_exists "$candidate_database"
+    ! database_exists "$retained_database"
+    filestore_exists "$ODOO_DB_NAME"
+    filestore_exists "$candidate_database"
+    ! filestore_exists "$retained_database"
 
-    compose_prod up -d odoo
+    run_restore_mutation database-live-to-retained \
+      rename_database "$ODOO_DB_NAME" "$retained_database"
+    run_restore_mutation database-candidate-to-live \
+      rename_database "$candidate_database" "$ODOO_DB_NAME"
+    run_restore_mutation filestore-live-to-retained \
+      rename_filestore "$ODOO_DB_NAME" "$retained_database"
+    run_restore_mutation filestore-candidate-to-live \
+      rename_filestore "$candidate_database" "$ODOO_DB_NAME"
+
+    database_exists "$ODOO_DB_NAME"
+    database_exists "$retained_database"
+    ! database_exists "$candidate_database"
+    filestore_exists "$ODOO_DB_NAME"
+    filestore_exists "$retained_database"
+    ! filestore_exists "$candidate_database"
+    compose_runtime up -d odoo
     wait_for_odoo
     trap - EXIT
     rm -rf -- "$work_dir"
@@ -3699,7 +3824,7 @@ scripts/restore-production:
     printf 'Retained pre-restore backup: %s\n' "$pre_restore_backup"
     printf 'Retained prior database/filestore name: %s\n' "$retained_database"
 
-The live database and filestore are never dropped or emptied. A unique candidate pair is restored and verified first. With the long-running Odoo service stopped, database renames and same-volume filestore renames switch the pair. The EXIT handler reverses every completed rename if a later step or health check fails. On success the prior pair remains under the same retained suffix and the fresh paired pre-restore backup remains available; cleanup is a separate operator decision.
+The live database and filestore are never dropped or emptied. A unique candidate pair is restored and verified first. With the long-running Odoo service stopped, four individually injectable mutations switch the names. On any nonzero return, including mutation-then-nonzero, the EXIT handler queries PostgreSQL and the volume for the three possible names and reconciles each side to the old pair under the live name. It does not infer state from a client-success Boolean. On success the prior pair remains under the same retained suffix and the fresh paired pre-restore backup remains available; cleanup is a separate operator decision. OSI_TEST_ALLOW_PRODUCTION_RESTORE and OSI_TEST_RESTORE_FAIL_AFTER work only with a validated disposable project.
 
 ### Step 6: Create failed-upgrade behavior
 
@@ -3713,7 +3838,9 @@ scripts/update-modules:
     enter_repo
     load_env
     operation_lock_enter
-    backup_dir="$("$SCRIPT_DIR/backup" | tail -n 1)"
+    backup_output="$("$SCRIPT_DIR/backup")"
+    backup_dir="$(printf '%s\n' "$backup_output" | tail -n 1)"
+    [[ -d "$backup_dir" ]] || die "module-update backup path is absent"
     compose_runtime pull db odoo
     OSI_SOURCE_ENV_FILE="$ENV_FILE" \
       "$SCRIPT_DIR/restore-rehearsal" "$backup_dir"
@@ -3853,7 +3980,9 @@ Append this exact body:
         odoo shell --config=/etc/odoo/odoo.conf \
         --database="$ODOO_DB_NAME" --no-http
 
-    seed_backup="$("$SCRIPT_DIR/backup" | tail -n 1)"
+    seed_backup_output="$("$SCRIPT_DIR/backup")"
+    seed_backup="$(printf '%s\n' "$seed_backup_output" | tail -n 1)"
+    [[ -d "$seed_backup" ]]
     control_dir="$test_root/lock-control"
     export OSI_TEST_CONTROL_DIR="$control_dir"
     export OSI_TEST_PAUSE_AT=backup-after-odoo-stop
@@ -3895,6 +4024,18 @@ Append this exact body:
     fi
     grep -q 'ERROR: another Odoo operation is active' \
       "$test_root/concurrent-restore.log"
+    if OSI_ODOO_LOCK_HELD=1 \
+       OSI_ODOO_LOCK_FILE="$OSI_ODOO_LOCK_DIR/operation.lock" \
+       bash -ceu '
+         exec 9>"$OSI_ODOO_LOCK_FILE"
+         . "$1"
+         operation_lock_enter
+       ' bash "$SCRIPT_DIR/lib.sh" \
+       >"$test_root/forged-lock.log" 2>&1; then
+      die "forged unlocked descriptor bypassed the operation lock"
+    fi
+    grep -q 'ERROR: nested operation lock is held elsewhere' \
+      "$test_root/forged-lock.log"
     echo "PASS: quiesced boundary and shared operation lock"
 
     touch "$control_dir/backup-after-odoo-stop.release"
@@ -3904,6 +4045,107 @@ Append this exact body:
     backup_dir="$(tail -n 1 "$test_root/paused-backup.out")"
     "$SCRIPT_DIR/validate-backup" "$backup_dir"
     "$SCRIPT_DIR/restore-rehearsal" "$backup_dir"
+
+    rollback_attachment="PAIR-ROLLBACK-$$"
+    export OSI_ROLLBACK_ATTACHMENT="$rollback_attachment"
+    printf '%s\n' \
+      'import base64, os' \
+      'record = env["ir.attachment"].create({' \
+      '    "name": os.environ["OSI_ROLLBACK_ATTACHMENT"],' \
+      '    "type": "binary",' \
+      '    "datas": base64.b64encode((' \
+      '        "old-live-only:" + os.environ["OSI_ROLLBACK_ATTACHMENT"]' \
+      '    ).encode()),' \
+      '    "mimetype": "application/octet-stream",' \
+      '})' \
+      'env.cr.commit()' \
+      'assert record.store_fname' |
+      compose_base run --rm --no-deps \
+        -e OSI_ROLLBACK_ATTACHMENT odoo \
+        odoo shell --config=/etc/odoo/odoo.conf \
+        --database="$ODOO_DB_NAME" --no-http
+    rollback_store_fname="$(compose_base exec -T db psql -U odoo_admin \
+      -d "$ODOO_DB_NAME" -Atv ON_ERROR_STOP=1 \
+      -v attachment_name="$rollback_attachment" \
+      -c "SELECT store_fname FROM ir_attachment
+          WHERE name=:'attachment_name'")"
+    [[ -n "$rollback_store_fname" ]]
+    filestore_volume="$(project_volume odoo_data)"
+    assert_old_attachment_pair() {
+      local database_name="$1" filestore_name="$2" count
+      count="$(compose_base exec -T db psql -U odoo_admin \
+        -d "$database_name" -Atv ON_ERROR_STOP=1 \
+        -v attachment_name="$rollback_attachment" \
+        -c "SELECT count(*) FROM ir_attachment
+            WHERE name=:'attachment_name'")"
+      [[ "$count" == 1 ]] ||
+        die "old rollback attachment row is not in $database_name"
+      docker run --rm --network none \
+        -e FILESTORE_NAME="$filestore_name" \
+        -e STORE_FNAME="$rollback_store_fname" \
+        -v "$filestore_volume:/target:ro" alpine:3.22 sh -ceu '
+          test -s "/target/filestore/$FILESTORE_NAME/$STORE_FNAME"
+        '
+    }
+
+    [[ "$COMPOSE_PROJECT_NAME" != osi-odoo ]] ||
+      die "production-restore gate selected the live project"
+    export OSI_TEST_ALLOW_PRODUCTION_RESTORE=1
+    restore_points=(
+      database-live-to-retained
+      database-candidate-to-live
+      filestore-live-to-retained
+      filestore-candidate-to-live
+    )
+    for restore_point in "${restore_points[@]}"; do
+      export OSI_TEST_RESTORE_FAIL_AFTER="$restore_point"
+      sleep 1
+      set +e
+      "$SCRIPT_DIR/restore-production" "$backup_dir" \
+        --confirm-replace-live \
+        >"$test_root/restore-$restore_point.log" 2>&1
+      restore_status=$?
+      set -e
+      [[ "$restore_status" == 98 ]] ||
+        die "$restore_point returned $restore_status instead of 98"
+      grep -q "INJECT: mutation completed before nonzero: $restore_point" \
+        "$test_root/restore-$restore_point.log"
+      grep -q 'PASS: restore rollback reconciled one old live pair' \
+        "$test_root/restore-$restore_point.log"
+      assert_old_attachment_pair "$ODOO_DB_NAME" "$ODOO_DB_NAME"
+      stopped_id="$(compose_base ps -a -q odoo)"
+      [[ -n "$stopped_id" ]]
+      [[ "$(docker inspect -f '{{.State.Running}}' "$stopped_id")" == false ]]
+      compose_base up -d odoo
+      wait_for_odoo
+    done
+    unset OSI_TEST_RESTORE_FAIL_AFTER
+
+    sleep 1
+    "$SCRIPT_DIR/restore-production" "$backup_dir" \
+      --confirm-replace-live >"$test_root/restore-success.log" 2>&1
+    grep -q 'PASS: production pair replaced' \
+      "$test_root/restore-success.log"
+    retained_name="$(sed -n \
+      's/^Retained prior database\/filestore name: //p' \
+      "$test_root/restore-success.log")"
+    [[ "$retained_name" =~ ^${ODOO_DB_NAME}__retained_[A-Za-z0-9_]+$ ]]
+    live_rollback_count="$(compose_base exec -T db psql -U odoo_admin \
+      -d "$ODOO_DB_NAME" -Atv ON_ERROR_STOP=1 \
+      -v attachment_name="$rollback_attachment" \
+      -c "SELECT count(*) FROM ir_attachment
+          WHERE name=:'attachment_name'")"
+    [[ "$live_rollback_count" == 0 ]] ||
+      die "successful restore did not activate the candidate database"
+    docker run --rm --network none \
+      -e DATABASE_NAME="$ODOO_DB_NAME" \
+      -e STORE_FNAME="$rollback_store_fname" \
+      -v "$filestore_volume:/target:ro" alpine:3.22 sh -ceu '
+        test ! -e "/target/filestore/$DATABASE_NAME/$STORE_FNAME"
+      '
+    assert_old_attachment_pair "$retained_name" "$retained_name"
+    unset OSI_TEST_ALLOW_PRODUCTION_RESTORE
+    echo "PASS: four restore mutations reconcile and successful swap retains old pair"
 
     export OSI_TEST_FORCE_UPDATE_FAILURE=1
     if "$SCRIPT_DIR/update-modules" >"$test_root/update.log" 2>&1; then
@@ -3963,8 +4205,9 @@ Expected:
     PASS: isolated rehearsal restore
     PASS: quiesced boundary and shared operation lock
     PASS: attachment database row and filestore object are paired
+    PASS: four restore mutations reconcile and successful swap retains old pair
 
-The gate creates an Odoo attachment backed by the filestore, stops Odoo at the exact pre-dump boundary, proves the stopped service cannot accept the boundary command, proves concurrent backup and restore calls cannot enter, and then proves both the attachment row and stored file survive the same restored pair.
+The gate creates an Odoo attachment backed by the filestore, stops Odoo at the exact pre-dump boundary, proves the stopped service cannot accept the boundary command, and proves concurrent and forged-descriptor callers cannot enter. It restores the paired attachment in rehearsal. It then creates an old-live-only attachment, invokes restore-production against the disposable project after each of the four mutation-then-nonzero points, and verifies that the old database row and old stored object share the live name after every rollback. A final successful invocation proves the candidate becomes live and the old pair survives under one retained name.
 
 ### Step 9: Commit
 
@@ -4067,8 +4310,8 @@ scripts/deploy:
     mem_available_kib="$(awk '$1 == "MemAvailable:" {print $2}' /proc/meminfo)"
     [[ "$mem_available_kib" =~ ^[0-9]+$ ]] ||
       die "cannot read host MemAvailable"
-    (( mem_available_kib >= 2097152 )) ||
-      die "host MemAvailable is below 2 GiB"
+    (( mem_available_kib >= 4194304 )) ||
+      die "host MemAvailable is below 4 GiB"
     install -d -m 0700 "$BACKUP_ROOT"
     for path in /opt/osi-odoo "$BACKUP_ROOT"; do
       available_bytes="$(df -PB1 --output=avail "$path" | tail -n 1 | tr -d ' ')"
@@ -4202,8 +4445,10 @@ Replace README.md with this complete content:
 
     Copy `.env.example` to `.env`, replace every password placeholder with
     `openssl rand -hex 32`, and set mode 0600. Never print or commit `.env`.
-    `scripts/deploy` requires `/opt/osi-odoo`, user `rocky`, at least 2 GiB
+    `scripts/deploy` requires `/opt/osi-odoo`, user `rocky`, at least 4 GiB
     MemAvailable, and at least 10 GiB free for both the repository and backup path.
+    The memory floor covers the 3 GiB combined Odoo/PostgreSQL caps plus 1 GiB
+    for the host, Docker, Caddy, and the existing service workload.
 
     After DNS points to the VPS and `caddy-net` exists, deploy with:
 
@@ -4504,7 +4749,9 @@ Do not add --test-enable or --test-tags to any live command.
     set -Eeuo pipefail
     cd /opt/osi-odoo
     export OSI_RUNTIME_MODE=production
-    backup_dir="$(scripts/backup | tail -n 1)"
+    backup_output="$(scripts/backup)"
+    backup_dir="$(printf '%s\n' "$backup_output" | tail -n 1)"
+    test -d "$backup_dir"
     scripts/validate-backup "$backup_dir"
     scripts/restore-rehearsal "$backup_dir"
     sudo systemctl is-active osi-odoo-backup.timer
@@ -4586,6 +4833,7 @@ Stop and report without rollback if:
 | Init state machine | scripts/test-init-database | init, update, named partial-state failure |
 | Compose isolation | Task 6 coexistence gate | two healthy stacks, six distinct volumes |
 | Backup/recovery | scripts/test-backup-restore | boundary write blocked, shared lock excludes concurrency, attachment row/file pair restores |
+| Production swap | scripts/test-backup-restore | four mutation-then-nonzero rollbacks reconcile old pair; successful disposable swap retains old pair |
 | Update failure | scripts/test-backup-restore | exit 97, Odoo stopped, backup restorable |
 | Timer | systemctl list-timers | next trigger and successful manual invocation |
 | DNS/Caddy | scripts/deploy | normalized DNS, full-config validation, HTTPS |
