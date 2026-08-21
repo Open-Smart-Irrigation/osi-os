@@ -196,30 +196,30 @@
       }
     },
     "irrigationTimeline": {
-      "title": "Irrigation event timeline",
-      "emptyTitle": "No irrigation events",
-      "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
-      "eventsCount": "{{count}} events",
+      "title": "Chronologie des irrigations",
+      "emptyTitle": "Aucun événement d'irrigation",
+      "emptyBody": "Les irrigations et les fenêtres de réponse apparaîtront ici dès que des données d'historique seront disponibles.",
+      "eventsCount": "Événements : {{count}}",
       "eventLabel": {
-        "irrigation": "Irrigation event",
+        "irrigation": "Événement d'irrigation",
         "scheduled": "Irrigation déclenchée par capteur",
-        "manualOverride": "Manual override",
-        "possibleIneffective": "Possible ineffective irrigation",
-        "responseWindow": "Response window",
-        "onValveSchedule": "Programmé (sur la vanne)",
-        "oneTime": "Ouverture unique",
-        "unexplained": "Ouvert sur la vanne"
+        "manualOverride": "Commande manuelle",
+        "possibleIneffective": "Irrigation peut-être inefficace",
+        "responseWindow": "Fenêtre de réponse",
+        "onValveSchedule": "Programme sur la vanne",
+        "oneTime": "Ouverture ponctuelle",
+        "unexplained": "Ouverture manuelle sur la vanne"
       },
       "detail": {
-        "duration": "Duration: {{value}}",
-        "responseWindow": "Response window: {{value}}",
-        "observedResponse": "Observed response: {{value}}"
+        "duration": "Durée : {{value}}",
+        "responseWindow": "Fenêtre de réponse : {{value}}",
+        "observedResponse": "Réponse observée : {{value}}"
       },
       "severity": {
         "info": "Info",
-        "warning": "Warning",
-        "critical": "Critical",
-        "success": "Success",
+        "warning": "Avertissement",
+        "critical": "Critique",
+        "success": "Réussite",
         "unknown": "Info"
       }
     },
