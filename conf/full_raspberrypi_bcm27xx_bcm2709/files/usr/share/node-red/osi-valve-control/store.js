@@ -224,4 +224,19 @@ async function weekdayPushStates(db, deviceEui) {
   return db.all("SELECT purpose, weekday, payload_hex, state, queued_at, acked_at, error FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') ORDER BY queued_at DESC", [deviceEui]);
 }
 
-module.exports = { listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, pushSummary, hasPendingObservation, weekdayPushStates, SETTINGS_DEFAULTS };
+// Gateway-level default timezone (FW-T5), read from app_settings(key='gateway_timezone').
+// Table-missing-safe: a pre-migration DB (deploys are staged) has no app_settings table yet,
+// so this returns null (never throws) exactly like an absent row, letting every caller fall
+// back to 'UTC' the same way it always has.
+async function getGatewaySetting(db, key) {
+  try {
+    const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [key]);
+    return row ? row.value : null;
+  } catch (error) {
+    const detail = String(error && error.message ? error.message : error);
+    if (/no such table:\s*app_settings\b/i.test(detail)) return null;
+    throw error;
+  }
+}
+
+module.exports = { listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, pushSummary, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

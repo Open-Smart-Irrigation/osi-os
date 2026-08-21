@@ -160,3 +160,23 @@ test('pushSummary (final-fix-wave IMPORTANT 1): last_plan_queued_at/last_plan_ac
   assert.ok(summary.last_plan_acked_at, 'last_plan_acked_at must still be populated');
   db.close();
 });
+
+test('getGatewaySetting (FW-T5): returns the stored value when the key is present', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO app_settings(key, value) VALUES ('gateway_timezone', 'Europe/Zurich')");
+  assert.equal(await store.getGatewaySetting(db, 'gateway_timezone'), 'Europe/Zurich');
+  db.close();
+});
+
+test('getGatewaySetting (FW-T5): returns null when the table exists but the key is absent', async () => {
+  const { db } = await tempDb();
+  assert.equal(await store.getGatewaySetting(db, 'gateway_timezone'), null);
+  db.close();
+});
+
+test('getGatewaySetting (FW-T5): table-missing-safe — returns null instead of throwing on a pre-migration DB', async () => {
+  const { db, raw } = await tempDb();
+  raw.exec('DROP TABLE app_settings');
+  assert.equal(await store.getGatewaySetting(db, 'gateway_timezone'), null);
+  db.close();
+});

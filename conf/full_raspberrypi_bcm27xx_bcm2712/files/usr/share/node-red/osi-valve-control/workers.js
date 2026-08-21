@@ -69,6 +69,9 @@ async function runOnceTick({ db, now, warn }) {
 
 async function runObserveTick({ db, now, warn }) {
   const nowDate = now || new Date();
+  // (FW-T5) Read once per tick: the gateway-level default timezone joins the fallback chain
+  // between a zoneless/unassigned valve and the hard 'UTC' floor.
+  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone');
   const open = await db.all(`SELECT d.deveui, d.irrigation_zone_id, iz.timezone AS zone_timezone,
       (SELECT MAX(recorded_at) FROM device_data dd WHERE dd.deveui = d.deveui) AS last_uplink_at,
       zic.measured_flow_rate_lpm AS zone_flow_rate_lpm, vs.flow_rate_lpm, vs.flow_rate_source
@@ -84,7 +87,7 @@ async function runObserveTick({ db, now, warn }) {
   let created = 0;
   for (const d of open) {
     if (!d.last_uplink_at) continue;
-    const tz = d.zone_timezone || 'UTC';
+    const tz = d.zone_timezone || gatewayTimezone || 'UTC';
     const schedules = await store.listSchedules(db, d.deveui);
     const { days } = P.compileWindows(schedules);
     const lp = P.localParts(nowDate, tz);
@@ -120,6 +123,8 @@ async function runObserveTick({ db, now, warn }) {
 
 async function runClockTick({ db, now, appId, warn }) {
   const nowDate = now || new Date();
+  // (FW-T5) Read once per tick, same rationale as runObserveTick above.
+  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone');
   await store.failStalePushes(db, new Date(nowDate.getTime() - STALE_PUSH_MS).toISOString());
   // (I2, spec §5.4): FPort 12 must encode local wall-clock digits in the SCHEDULE's timezone,
   // not the zone's. schedule_timezone picks, per valve, the first enabled WEEKLY schedule's
@@ -141,7 +146,7 @@ async function runClockTick({ db, now, appId, warn }) {
       AND EXISTS (SELECT 1 FROM valve_schedules s WHERE s.device_eui = d.deveui AND s.deleted_at IS NULL)`);
   const messages = [];
   for (const v of valves) {
-    const tz = v.schedule_timezone || v.zone_timezone || 'UTC';
+    const tz = v.schedule_timezone || v.zone_timezone || gatewayTimezone || 'UTC';
     const last = v.last_clock_sync_queued_at ? Date.parse(v.last_clock_sync_queued_at) : 0;
     const due = nowDate.getTime() - last >= CLOCK_PERIOD_MS;
     const dst = last && P.isDstTransitionWithin(tz, last, nowDate.getTime());
@@ -180,10 +185,12 @@ const CLOCK_JUMP_BACKWARD_MS = -60 * 1000;
 const CLOCK_JUMP_FORWARD_MS = 6 * 3600 * 1000;
 async function runHousekeeping({ db, now, appId, warn }) {
   const nowDate = now || new Date();
+  // (FW-T5) Read once per tick, same rationale as runObserveTick above.
+  const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone');
   const out = { resets: 0, clockJump: false, decommissioned: 0, messages: [] };
   const skips = await db.all("SELECT vs.device_eui, vs.skip_today_date, iz.timezone AS zone_timezone FROM valve_settings vs JOIN devices d ON d.deveui = vs.device_eui LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id WHERE vs.scheduler_status='SKIP_TODAY'");
   for (const s of skips) {
-    const lp = P.localParts(nowDate, s.zone_timezone || 'UTC');
+    const lp = P.localParts(nowDate, s.zone_timezone || gatewayTimezone || 'UTC');
     const today = `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}`;
     if (!s.skip_today_date || today > s.skip_today_date) { await store.upsertSettings(db, s.device_eui, { scheduler_status: 'ACTIVE', skip_today_date: null }); out.resets += 1; }
   }

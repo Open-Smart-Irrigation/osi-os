@@ -958,7 +958,7 @@
     "type": "function",
     "z": "device-api-tab",
     "name": "Auth & Validate",
-    "func": "function getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized');\n    err.statusCode = 401;\n    throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  let payload;\n  try {\n    payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  } catch (_) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  if (exp && Date.now() > exp) {\n    const err = new Error('Token expired');\n    err.statusCode = 401;\n    throw err;\n  }\n  return { userId, username };\n}\nconst auth = verifyBearer(msg.req?.headers?.authorization);\nmsg.authUserId = auth.userId;\nmsg.authUsername = auth.username;\nconst { name } = msg.payload || {};\nif (!name || name.trim() === '') {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Zone name is required' };\n  return [null, msg];\n}\nflow.set('new_zone_name', name.trim());\nmsg.topic = `SELECT id FROM users WHERE id = ${auth.userId} AND username = '${auth.username.replace(/'/g, \"''\")}'`;\nreturn [msg, null];",
+    "func": "function getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized');\n    err.statusCode = 401;\n    throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  let payload;\n  try {\n    payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  } catch (_) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  if (exp && Date.now() > exp) {\n    const err = new Error('Token expired');\n    err.statusCode = 401;\n    throw err;\n  }\n  return { userId, username };\n}\nconst auth = verifyBearer(msg.req?.headers?.authorization);\nmsg.authUserId = auth.userId;\nmsg.authUsername = auth.username;\nconst { name, timezone } = msg.payload || {};\nif (!name || name.trim() === '') {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Zone name is required' };\n  return [null, msg];\n}\nflow.set('new_zone_name', name.trim());\n// (FW-T5) Optional client-supplied timezone; post-zone-insert falls back to the\n// gateway-level app_settings default (then 'UTC') when this is absent.\nflow.set('new_zone_timezone', (typeof timezone === 'string' && timezone.trim()) ? timezone.trim() : null);\nmsg.topic = `SELECT id FROM users WHERE id = ${auth.userId} AND username = '${auth.username.replace(/'/g, \"''\")}'`;\nreturn [msg, null];",
     "outputs": 2,
     "x": 370,
     "y": 700,
@@ -998,7 +998,7 @@
     "type": "function",
     "z": "device-api-tab",
     "name": "Insert Zone",
-    "func": "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n\nconst userId = Number(msg.payload[0].id);\nconst zoneName = String(flow.get('new_zone_name') || '').trim();\nconst now = new Date().toISOString();\nconst gateway = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();\nfunction uuidv4() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : ((r & 0x3) | 0x8);\n    return v.toString(16);\n  });\n}\nconst zoneUuid = uuidv4();\n\nflow.set('new_zone_user_id', userId);\nflow.set('new_zone_uuid', zoneUuid);\nflow.set('new_zone_gateway_device_eui', gateway);\nflow.set('new_zone_sync_version', 1);\n\nmsg.topic = \"INSERT INTO irrigation_zones (name, user_id, zone_uuid, gateway_device_eui, sync_version, created_at, updated_at) VALUES ('\" + zoneName.replace(/'/g, \"''\") + \"', \" + userId + \", '\" + zoneUuid + \"', '\" + gateway.replace(/'/g, \"''\") + \"', 1, '\" + now + \"', '\" + now + \"')\";\nreturn [msg, null];",
+    "func": "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n\nreturn (async () => {\n  try {\n    const userId = Number(msg.payload[0].id);\n    const zoneName = String(flow.get('new_zone_name') || '').trim();\n    const requestedTimezone = flow.get('new_zone_timezone');\n    const now = new Date().toISOString();\n    const gateway = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();\n    function uuidv4() {\n      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {\n        const r = Math.random() * 16 | 0;\n        const v = c === 'x' ? r : ((r & 0x3) | 0x8);\n        return v.toString(16);\n      });\n    }\n    const zoneUuid = uuidv4();\n\n    // (FW-T5) A missing request timezone defaults to the gateway-level app_settings\n    // setting, then 'UTC'; table-missing-safe (deploys are staged, this migration may\n    // not have run yet on this gateway).\n    let timezone = requestedTimezone;\n    if (!timezone) {\n      const db = new osiDb.Database('/data/db/farming.db');\n      try {\n        const row = await db.get(\"SELECT value FROM app_settings WHERE key = 'gateway_timezone'\");\n        timezone = (row && row.value) || 'UTC';\n      } catch (e) {\n        const detail = String(e && e.message ? e.message : e);\n        if (!/no such table:\\s*app_settings\\b/i.test(detail)) {\n          node.warn('post-zone-insert: gateway_timezone read failed: ' + detail);\n        }\n        timezone = 'UTC';\n      } finally {\n        await new Promise((res) => db.close(() => res()));\n      }\n    }\n\n    flow.set('new_zone_user_id', userId);\n    flow.set('new_zone_uuid', zoneUuid);\n    flow.set('new_zone_gateway_device_eui', gateway);\n    flow.set('new_zone_sync_version', 1);\n\n    msg.topic = \"INSERT INTO irrigation_zones (name, user_id, zone_uuid, gateway_device_eui, sync_version, timezone, created_at, updated_at) VALUES ('\" + zoneName.replace(/'/g, \"''\") + \"', \" + userId + \", '\" + zoneUuid + \"', '\" + gateway.replace(/'/g, \"''\") + \"', 1, '\" + String(timezone).replace(/'/g, \"''\") + \"', '\" + now + \"', '\" + now + \"')\";\n    return [msg, null];\n  } catch (error) {\n    node.error('post-zone-insert failed: ' + (error && error.stack || error), msg);\n    msg.statusCode = 500;\n    msg.payload = { message: 'Failed to create zone' };\n    return [null, msg];\n  }\n})();",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
@@ -1008,6 +1008,10 @@
       {
         "var": "crypto",
         "module": "crypto"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
       }
     ],
     "x": 780,
@@ -4476,7 +4480,7 @@
     "statusCode": "",
     "headers": {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type,Authorization"
     },
     "x": 580,
@@ -4491,7 +4495,7 @@
     "statusCode": "",
     "headers": {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type,Authorization"
     },
     "x": 580,
@@ -11857,6 +11861,57 @@
     "wires": [
       [
         "valve-push-mqtt-out"
+      ]
+    ]
+  },
+  {
+    "id": "sys-settings-get-in",
+    "type": "http in",
+    "z": "sys-admin-tab",
+    "name": "GET /api/system/settings",
+    "url": "/api/system/settings",
+    "method": "get",
+    "x": 140,
+    "y": 400,
+    "wires": [
+      [
+        "sys-settings-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "sys-settings-put-in",
+    "type": "http in",
+    "z": "sys-admin-tab",
+    "name": "PUT /api/system/settings",
+    "url": "/api/system/settings",
+    "method": "put",
+    "x": 140,
+    "y": 480,
+    "wires": [
+      [
+        "sys-settings-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "sys-settings-router-fn",
+    "type": "function",
+    "z": "sys-admin-tab",
+    "name": "System Settings Router",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst ssLoad = osiLib.require('osi-system-settings');\nif (!dbLoad.ok || !ssLoad.ok) {\n  const detail = [dbLoad, ssLoad].filter(function (l) { return !l.ok; }).map(function (l) { return l.error; }).join('; ');\n  node.error('System settings helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'system_settings_unavailable', message: detail };\n  return msg;\n}\nconst dbHelper = dbLoad.value; const SS = ssLoad.value;\nreturn SS.handleHttpRequest({\n  msg: msg, Database: dbHelper.Database,\n  environment: { authTokenSecret: env.get('AUTH_TOKEN_SECRET'), jwtSecret: env.get('JWT_SECRET') },\n  warn: function (m) { node.warn(m); }\n}).catch(function (error) {\n  node.error('sys-settings: ' + (error && error.message ? error.message : error), msg);\n  msg.statusCode = 500; msg.payload = { error: 'internal_error', message: 'System settings request failed' };\n  return msg;\n});",
+    "outputs": 1,
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 400,
+    "y": 440,
+    "wires": [
+      [
+        "sys-resp"
       ]
     ]
   }

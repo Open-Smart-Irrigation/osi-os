@@ -30,6 +30,21 @@ test('GET /api/valves returns the user valves with zone name and defaults', asyn
   assert.equal(out.payload.valves[0].next_run, null);
 });
 
+test('GET /api/valves (FW-T5): a zoneless valve surfaces the gateway_timezone default, not UTC', async () => {
+  const { path, db } = await tempDb();
+  await db.run("INSERT INTO app_settings(key, value) VALUES ('gateway_timezone', 'Europe/Zurich')");
+  const out = await call(path, req('GET', '/api/valves'));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.valves[0].timezone, 'Europe/Zurich');
+});
+
+test('GET /api/valves (FW-T5): a zoneless valve with no gateway_timezone set falls back to UTC', async () => {
+  const { path } = await tempDb();
+  const out = await call(path, req('GET', '/api/valves'));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.valves[0].timezone, 'UTC');
+});
+
 test('no token -> 401', async () => {
   const { path } = await tempDb();
   assert.equal((await call(path, req('GET', '/api/valves', undefined, null))).statusCode, 401);

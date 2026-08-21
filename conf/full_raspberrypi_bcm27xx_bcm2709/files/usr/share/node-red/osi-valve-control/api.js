@@ -147,7 +147,6 @@ async function handleHttpRequest(options) {
   const environment = options.environment || {};
   const warn = typeof options.warn === 'function' ? options.warn : function () {};
   const now = options.now || new Date();
-  const tzFallback = environment.gatewayTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const respond = (statusCode, payload) => { msg.statusCode = statusCode; msg.payload = payload; msg.headers = HEADERS; return msg; };
   const method = String(msg.req && msg.req.method || '').toUpperCase();
   const requestPath = String((msg.req && (msg.req.path || msg.req.originalUrl || msg.req.url)) || '').split('?')[0]; // journal-api precedent: req.path first
@@ -157,6 +156,12 @@ async function handleHttpRequest(options) {
     const secret = resolveAuthSecret(environment, warn);
     const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization, secret);
     db = new Database(environment.dbPath || '/data/db/farming.db');
+    // (FW-T5) Gateway-level default timezone, read once per request: an explicit override on
+    // `environment` wins (test/precedent seam), then the app_settings-backed gateway default,
+    // then 'UTC' — never the gateway process's own Intl timezone (same rationale as the
+    // schedule/zone fallback chain in workers.js: it has no relationship to the valve or its
+    // zone and was silently wrong whenever the gateway ran in a different tz than its zones).
+    const tzFallback = environment.gatewayTimezone || (await store.getGatewaySetting(db, 'gateway_timezone')) || 'UTC';
     const m = (re) => re.exec(requestPath);
     let match;
 

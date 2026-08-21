@@ -599,6 +599,18 @@ fetch_required "osi-valve-control workers.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers.js" \
     "/srv/node-red/osi-valve-control/workers.js"
 
+fetch_required "osi-system-settings package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
+    "/srv/node-red/osi-system-settings/package.json"
+
+fetch_required "osi-system-settings index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/index.js" \
+    "/srv/node-red/osi-system-settings/index.js"
+
+fetch_required "osi-system-settings api.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/api.js" \
+    "/srv/node-red/osi-system-settings/api.js"
+
 fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
     "/srv/node-red/edge-channels.json"

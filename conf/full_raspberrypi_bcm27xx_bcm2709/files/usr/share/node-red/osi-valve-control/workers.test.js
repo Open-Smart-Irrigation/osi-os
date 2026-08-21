@@ -86,6 +86,51 @@ test('runObserveTick (I1): a STALE_OPEN_OBSERVED expectation still blocks a dupl
   assert.equal(r.created, 0);
 });
 
+// (FW-T5) Fallback chain: zone timezone || gateway_timezone (app_settings) || 'UTC'.
+// All three cases use the same Wed 06:00-06:30 window and a device_data uplink at 04:10 UTC
+// so only the timezone resolution differs: 04:10 UTC is 06:10 in Europe/Zurich (a window hit)
+// but not a window hit if wrongly read as plain UTC (04:10, outside the window).
+test('runObserveTick (FW-T5): a device with its own zone timezone ignores a conflicting gateway_timezone', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO app_settings(key, value) VALUES ('gateway_timezone', 'UTC')");
+  await db.run("INSERT INTO irrigation_zones(name, user_id, timezone) VALUES ('Zone Z', 1, 'Europe/Zurich')");
+  const zone = await db.get("SELECT id FROM irrigation_zones WHERE name='Zone Z'");
+  await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, '0016C001F1000001']);
+  await store.insertSchedule(db, { schedule_uuid: 'w', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1 << 3, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T04:10:00.000Z')");
+  const r = await W.runObserveTick({ db, now: new Date('2026-08-19T04:10:30Z'), warn: () => {} });
+  assert.equal(r.created, 1, 'the zone timezone (Europe/Zurich) must win over the conflicting gateway_timezone (UTC)');
+  const e = await db.get("SELECT trigger FROM valve_actuation_expectations WHERE device_eui='0016C001F1000001'");
+  assert.equal(e.trigger, 'on_valve_schedule');
+});
+
+test('runObserveTick (FW-T5): a zoneless device falls back to gateway_timezone', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO app_settings(key, value) VALUES ('gateway_timezone', 'Europe/Zurich')");
+  // device is left zoneless (no irrigation_zone_id) — the default shape from tempDb().
+  await store.insertSchedule(db, { schedule_uuid: 'w', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1 << 3, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T04:10:00.000Z')");
+  const r = await W.runObserveTick({ db, now: new Date('2026-08-19T04:10:30Z'), warn: () => {} });
+  assert.equal(r.created, 1, 'gateway_timezone (Europe/Zurich) must resolve the window for a zoneless device');
+  const e = await db.get("SELECT trigger FROM valve_actuation_expectations WHERE device_eui='0016C001F1000001'");
+  assert.equal(e.trigger, 'on_valve_schedule');
+});
+
+test('runObserveTick (FW-T5): a zoneless device with no gateway_timezone set falls back to UTC', async () => {
+  const { db } = await tempDb();
+  // No app_settings row at all: getGatewaySetting must return null (table exists, key absent),
+  // not throw, leaving 'UTC' as the final fallback.
+  await store.insertSchedule(db, { schedule_uuid: 'w', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1 << 3, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T06:10:00.000Z')");
+  const r = await W.runObserveTick({ db, now: new Date('2026-08-19T06:10:30Z'), warn: () => {} });
+  assert.equal(r.created, 1, 'plain UTC window hit with no zone and no gateway setting');
+  const e = await db.get("SELECT trigger FROM valve_actuation_expectations WHERE device_eui='0016C001F1000001'");
+  assert.equal(e.trigger, 'on_valve_schedule');
+});
+
 test('runClockTick queues a weekly GEN1 clock push and fails >24h queued pushes', async () => {
   const { db } = await tempDb();
   // runClockTick only considers valves with at least one active schedule (its valves query joins
