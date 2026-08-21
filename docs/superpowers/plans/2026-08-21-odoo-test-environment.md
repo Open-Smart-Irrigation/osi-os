@@ -13,14 +13,15 @@
 ## Execution rules
 
 1. Work only in /home/phil/Repos/osi-odoo until the remote-deployment task.
-2. The branch must be feat/initial-odoo-environment. If it is not, stop with ERROR: unexpected implementation branch.
+2. Implementation commits require feat/initial-odoo-environment. A detached runtime is accepted only when OSI_RECOVERY_REPORT names an existing failed-update report whose prior_release.git_commit equals HEAD.
 3. Never run module tests against the deployed database osi_odoo_test. Test commands require a disposable project and database name.
 4. Never put a secret value in a command argument, committed file, fixture, log, or report.
 5. Use mode 0700 for executable scripts and mode 0600 for .env files.
 6. Use the exact expected-failure messages and count gates in this plan.
 7. Commit only the files named by the current task.
 8. Before each commit, run the task's focused tests and git diff --check.
-9. A failed module upgrade leaves Odoo stopped. Recovery is operator-driven and restores the paired database and filestore before code or image rollback.
+9. A failed module upgrade leaves Odoo stopped. Recovery is operator-driven: first reactivate the prior Git release and its recorded image references, then use that prior code to validate and restore its paired backup.
+10. scripts/backup, scripts/restore-rehearsal, scripts/restore-production, scripts/update-modules, and scripts/deploy use the one operation-lock interface in scripts/lib.sh. A nested call is valid only when it inherits the already-locked file descriptor.
 
 ## Task and review map
 
@@ -47,16 +48,16 @@ The execution ledger is applied directly:
 
 Optional findings are ruled as follows:
 
-- O1 is incorporated by recording configured image references and resolved image digests in backups and failed-update reports. Source Compose is not digest-pinned because cross-architecture digest selection and update ownership need a separate operator decision.
+- O1 is incorporated by recording configured image references and resolved RepoDigests in backups and failed-update reports. Source Compose is not digest-pinned because cross-architecture digest selection and update ownership need a separate operator decision.
 - O2 is incorporated with exact /websocket and /websocket/* Caddy paths.
-- O3 is incorporated with normalized A, AAAA, and CNAME checks.
-- O4 is incorporated with hex-generated secrets and rejection of NUL, CR, and LF rather than punctuation.
+- O3 is incorporated with Python ipaddress normalization of the final A/AAAA set. A CNAME is allowed when its fully resolved final set is exact.
+- O4 is incorporated with a 64-character lowercase hexadecimal alphabet for every generated password. load_env enforces that sourcing contract.
 - O5 is incorporated for pg_trgm. unaccent is not created because it is not enabled; enabling it requires a bootstrap amendment first.
 - O6 is incorporated through the exact repository map, required shellcheck command, fixed anti-slop checker path, and git diff --check gates.
 
 ## Task 1: Historical Compose scaffold — completed
 
-Task 1 is the scaffold already recorded in the execution ledger. Do not replay it, amend its commit, or claim its original Compose and configuration choices are final. Task 2 replaces the affected file contents in a new commit. This preserves Task 1 history while applying the security and operability corrections from review.
+Task 1 is the scaffold at commit 59b1f4b. Do not replay it, amend its commit, or claim its original Compose and configuration choices are final. At that commit the repository contains exactly .env.example, .gitignore, compose.yaml, config/odoo.conf.template, tests/fixtures/test.env, and tests/test_static.py. Task 2 amends or removes every incompatible Task 1 assertion and fixture in a new commit. This preserves Task 1 history while applying the security and operability corrections from review.
 
 Execution begins at Task 2.
 
@@ -64,7 +65,18 @@ Execution begins at Task 2.
 
 This task does only configuration rendering and PostgreSQL bootstrap/privilege verification. It must not install, import, or test either custom Odoo module.
 
-**Files:**
+**Starting point and files:**
+
+Before editing, run:
+
+    cd /home/phil/Repos/osi-odoo
+    test "$(git rev-parse HEAD)" = 59b1f4b || {
+      echo "ERROR: Task 2 requires completed Task 1 commit 59b1f4b" >&2
+      exit 1
+    }
+    install -d -m 0755 scripts postgres-init addons tests/fixtures
+
+The install command creates every missing parent before a child file is written. Then apply this complete map:
 
 - Replace: compose.yaml
 - Create: compose.test-vps.yaml
@@ -74,10 +86,14 @@ This task does only configuration rendering and PostgreSQL bootstrap/privilege v
 - Create: scripts/lib.sh
 - Create: scripts/test-env
 - Create: scripts/render_config.py
-- Replace: scripts/render-config
-- Replace: postgres-init/010-odoo.sql.sh
+- Create: scripts/render-config
+- Create: postgres-init/010-odoo.sql.sh
 - Create: scripts/test-bootstrap
-- Modify: README.md only to state that module initialization is deferred to Task 6
+- Replace: tests/test_static.py
+- Replace: tests/fixtures/test.env
+- Create: README.md with the exact Task 2 content below
+
+No Task 1 file is left with an obsolete assertion. Nothing is removed in Task 2.
 
 ### Step 1: Confirm the branch and toolchain
 
@@ -121,6 +137,8 @@ Use this complete content:
           retries: 30
         networks:
           - odoo-internal
+        mem_limit: 1g
+        cpus: "1.0"
 
       odoo:
         image: odoo:19.0-20260817
@@ -231,6 +249,7 @@ The base file remains the only file used by disposable projects.
     OSI_ODOO_ADMIN_LOGIN=admin
     OSI_ODOO_ADMIN_PASSWORD=replace-with-openssl-rand-hex-32
     BACKUP_ROOT=/home/rocky/backups/osi-odoo
+    OSI_ODOO_LOCK_DIR=/home/rocky/.local/state/osi-odoo
     EXPECTED_PUBLIC_IPV4=157.180.43.235
     EXPECTED_PUBLIC_IPV6=
 
@@ -399,19 +418,29 @@ scripts/lib.sh:
         die "invalid ODOO_DB_USER"
       local name value
       for name in ODOO_DB_PASSWORD ODOO_POSTGRES_ADMIN_PASSWORD \
-        ODOO_MASTER_PASSWORD OSI_ODOO_ADMIN_LOGIN \
-        OSI_ODOO_ADMIN_PASSWORD; do
+        ODOO_MASTER_PASSWORD OSI_ODOO_ADMIN_PASSWORD; do
         value="${!name}"
-        [[ -n "$value" ]] || die "empty $name"
-        [[ "$value" != *$'\r'* && "$value" != *$'\n'* ]] ||
-          die "control character in $name"
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] ||
+          die "$name must be 64 lowercase hexadecimal characters"
       done
+      [[ "$OSI_ODOO_ADMIN_LOGIN" =~ ^[A-Za-z0-9._@+-]+$ ]] ||
+        die "invalid OSI_ODOO_ADMIN_LOGIN"
     }
 
     enter_repo() {
       cd "$REPO_ROOT"
-      [[ "$(git branch --show-current)" == feat/initial-odoo-environment ]] ||
+      if [[ "$(git branch --show-current)" == feat/initial-odoo-environment ]]; then
+        return 0
+      fi
+      [[ -n "${OSI_RECOVERY_REPORT:-}" && -f "$OSI_RECOVERY_REPORT" ]] ||
         die "unexpected implementation branch"
+      local expected_recovery_commit
+      expected_recovery_commit="$(jq -r '.prior_release.git_commit' \
+        "$OSI_RECOVERY_REPORT")"
+      [[ "$expected_recovery_commit" =~ ^[0-9a-f]{40}$ ]] ||
+        die "invalid recovery report commit"
+      [[ "$(git rev-parse HEAD)" == "$expected_recovery_commit" ]] ||
+        die "recovery checkout does not match recovery report"
     }
 
     compose_base() {
@@ -473,6 +502,7 @@ Create scripts/test-env as the shared disposable-project fixture:
         printf 'OSI_ODOO_ADMIN_LOGIN=admin\n'
         printf 'OSI_ODOO_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)"
         printf 'BACKUP_ROOT=%s\n' "$TEST_ROOT/backups"
+        printf 'OSI_ODOO_LOCK_DIR=%s\n' "$TEST_ROOT/operation-lock"
         printf 'EXPECTED_PUBLIC_IPV4=127.0.0.1\n'
         printf 'EXPECTED_PUBLIC_IPV6=\n'
       } >"$TEST_ENV_FILE"
@@ -642,7 +672,8 @@ scripts/test-bootstrap:
       printf 'ODOO_MASTER_PASSWORD=%s\n' "$master_password"
       printf 'OSI_ODOO_ADMIN_LOGIN=admin\n'
       printf 'OSI_ODOO_ADMIN_PASSWORD=%s\n' "$admin_password"
-      printf 'BACKUP_ROOT=%s\n' "$test_root/backups"
+        printf 'BACKUP_ROOT=%s\n' "$test_root/backups"
+        printf 'OSI_ODOO_LOCK_DIR=%s\n' "$test_root/operation-lock"
     } >"$env_file"
     chmod 0600 "$env_file"
     unset db_password postgres_admin_password master_password admin_password
@@ -656,6 +687,19 @@ scripts/test-bootstrap:
 
     shellcheck scripts/lib.sh scripts/test-env scripts/render-config \
       postgres-init/010-odoo.sql.sh scripts/test-bootstrap
+
+    bad_env="$test_root/bad-secret.env"
+    sed 's/^ODOO_MASTER_PASSWORD=.*/ODOO_MASTER_PASSWORD=not-hex/' \
+      "$env_file" >"$bad_env"
+    chmod 0600 "$bad_env"
+    if OSI_ENV_FILE="$bad_env" bash -ceu \
+      '. scripts/lib.sh; load_env' \
+      >"$test_root/bad-secret.log" 2>&1; then
+      die "non-hex sourced password unexpectedly succeeded"
+    fi
+    grep -q 'ERROR: ODOO_MASTER_PASSWORD must be 64 lowercase hexadecimal characters' \
+      "$test_root/bad-secret.log" ||
+      die "non-hex sourced password lacked the named failure"
 
     compose_base config >"$test_root/compose.rendered.yaml"
     if grep -q 'container_name:' "$test_root/compose.rendered.yaml"; then
@@ -717,8 +761,11 @@ scripts/test-bootstrap:
 
     extension="$(compose_base exec -T db psql -U odoo_admin \
       -d "$ODOO_DB_NAME" -Atqc \
-      "SELECT extname FROM pg_extension WHERE extname='pg_trgm'")"
-    [[ "$extension" == pg_trgm ]] || die "pg_trgm is absent"
+      "SELECT e.extname || '|' || r.rolname
+       FROM pg_extension e JOIN pg_roles r ON r.oid=e.extowner
+       WHERE e.extname='pg_trgm'")"
+    [[ "$extension" == 'pg_trgm|odoo_admin' ]] ||
+      die "pg_trgm is absent or not owned by odoo_admin"
 
     app_psql() {
       compose_base exec -T db sh -ceu '
@@ -748,7 +795,122 @@ scripts/test-bootstrap:
 
 The four expected failures are named create_database, create_role, create_schema, and create_extension. Any success is a test failure.
 
-### Step 11: Apply executable modes and run the task gate
+### Step 11: Reconcile the completed Task 1 test, fixture, and README
+
+Replace tests/test_static.py with:
+
+    """Static contract checks for the amended Odoo Compose environment."""
+    from pathlib import Path
+    import re
+    import unittest
+
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+
+    class ComposeContractTests(unittest.TestCase):
+        def test_compose_contract(self):
+            compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+            for expected in (
+                "image: postgres:17.6-bookworm",
+                "image: odoo:19.0-20260817",
+                "mem_limit: 1g",
+                'cpus: "1.0"',
+                "mem_limit: 2g",
+                "odoo_config:/etc/odoo:ro",
+                "internal: true",
+            ):
+                self.assertIn(expected, compose)
+            self.assertNotIn("container_name:", compose)
+            self.assertNotIn("caddy-net", compose)
+            self.assertNotRegex(compose, r"(?m)^\s*ports:\s*$")
+            override = (ROOT / "compose.test-vps.yaml").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("caddy-net:", override)
+            self.assertIn("- osi-odoo", override)
+
+        def test_config_and_repository_contract(self):
+            config = (ROOT / "config/odoo.conf.template").read_text(
+                encoding="utf-8"
+            )
+            for expected in (
+                "workers = 1",
+                "max_cron_threads = 1",
+                "without_demo = all",
+                "db_name = @ODOO_DB_NAME@",
+                "dbfilter = ^@ODOO_DB_NAME@$",
+                "list_db = False",
+            ):
+                self.assertIn(expected, config)
+            for path in (
+                "scripts/lib.sh",
+                "scripts/test-env",
+                "scripts/render_config.py",
+                "scripts/render-config",
+                "scripts/test-bootstrap",
+                "postgres-init/010-odoo.sql.sh",
+                "tests/fixtures/test.env",
+            ):
+                self.assertTrue((ROOT / path).is_file(), path)
+            ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
+            for expected in (".env", "backups/", "restore-staging/"):
+                self.assertIn(expected, ignored)
+
+        def test_fixture_uses_the_sourceable_hex_contract(self):
+            fixture = ROOT / "tests/fixtures/test.env"
+            values = {}
+            for line in fixture.read_text(encoding="utf-8").splitlines():
+                key, value = line.split("=", 1)
+                values[key] = value
+            for key in (
+                "ODOO_DB_PASSWORD",
+                "ODOO_POSTGRES_ADMIN_PASSWORD",
+                "ODOO_MASTER_PASSWORD",
+                "OSI_ODOO_ADMIN_PASSWORD",
+            ):
+                self.assertRegex(values[key], r"^[0-9a-f]{64}$")
+            self.assertEqual(values["ODOO_DB_OWNER"], "odoo_owner")
+            self.assertIn("OSI_ODOO_LOCK_DIR", values)
+
+
+    if __name__ == "__main__":
+        unittest.main()
+
+Replace tests/fixtures/test.env with these non-secret disposable values:
+
+    COMPOSE_PROJECT_NAME=osi-odoo-bootstrap-999-a
+    ODOO_DB_NAME=osi_odoo_bootstrap_999
+    ODOO_DB_OWNER=odoo_owner
+    ODOO_DB_USER=odoo_app
+    ODOO_DB_PASSWORD=1111111111111111111111111111111111111111111111111111111111111111
+    ODOO_POSTGRES_ADMIN_PASSWORD=2222222222222222222222222222222222222222222222222222222222222222
+    ODOO_MASTER_PASSWORD=3333333333333333333333333333333333333333333333333333333333333333
+    OSI_ODOO_ADMIN_LOGIN=admin
+    OSI_ODOO_ADMIN_PASSWORD=4444444444444444444444444444444444444444444444444444444444444444
+    BACKUP_ROOT=/tmp/osi-odoo-task2-fixture/backups
+    OSI_ODOO_LOCK_DIR=/tmp/osi-odoo-task2-fixture/operation-lock
+    EXPECTED_PUBLIC_IPV4=127.0.0.1
+    EXPECTED_PUBLIC_IPV6=
+
+Create README.md with this complete Task 2 content; Task 6 and Task 8 replace it with their own complete versions:
+
+    # OSI Odoo test environment
+
+    This repository currently provides configuration rendering and PostgreSQL
+    bootstrap only. It does not yet contain the OSI business modules and must not
+    be deployed.
+
+    Run `scripts/test-bootstrap` to create an isolated disposable PostgreSQL
+    volume, render the mode-0600 Odoo configuration, and exercise the restricted
+    `odoo_app` role. Full Odoo database initialization is deliberately deferred to
+    Task 6, after both custom modules and their tests exist.
+
+    Copy `.env.example` to `.env` only for local operator work. Replace every
+    password placeholder with `openssl rand -hex 32`, keep the file at mode 0600,
+    and never commit or print it.
+
+### Step 12: Apply modes and run the complete Task 1 plus Task 2 gate
 
 Run:
 
@@ -756,7 +918,13 @@ Run:
       scripts/test-bootstrap postgres-init/010-odoo.sql.sh
     chmod 0644 scripts/test-env
     chmod 0644 scripts/render_config.py config/odoo.conf.template \
-      compose.yaml compose.test-vps.yaml .env.example .gitignore
+      compose.yaml compose.test-vps.yaml .env.example .gitignore \
+      tests/test_static.py tests/fixtures/test.env README.md
+    python3 -m unittest -v tests/test_static.py
+    docker compose --env-file tests/fixtures/test.env -f compose.yaml config \
+      > /tmp/osi-odoo-task2-compose.yaml
+    ! grep -q 'container_name:' /tmp/osi-odoo-task2-compose.yaml
+    ! grep -q 'caddy-net' /tmp/osi-odoo-task2-compose.yaml
     scripts/test-bootstrap
     git diff --check
 
@@ -766,14 +934,16 @@ Expected final line:
 
 Stop if the configuration cannot be read by the runtime odoo user, any forbidden SQL succeeds, or the test invokes an Odoo module.
 
-### Step 12: Commit
+Stop if the inherited Task 1 unittest suite, rendered Compose gates, configuration ownership, or any privilege probe fails. This gate is required against the actual 59b1f4b starting commit.
+
+### Step 13: Commit
 
 Run:
 
     git add compose.yaml compose.test-vps.yaml .env.example .gitignore \
       config/odoo.conf.template postgres-init/010-odoo.sql.sh \
       scripts/lib.sh scripts/test-env scripts/render_config.py scripts/render-config \
-      scripts/test-bootstrap README.md
+      scripts/test-bootstrap tests/test_static.py tests/fixtures/test.env README.md
     git commit -m "feat: secure Odoo bootstrap and configuration"
 
 ## Task 3: Add Swiss company, accounting, catalog, and default-warehouse setup
@@ -964,12 +1134,13 @@ scripts/test-module:
     #!/usr/bin/env bash
     set -Eeuo pipefail
 
-    if (( $# != 2 )); then
-      echo "usage: scripts/test-module MODULE EXPECTED_TEST_CLASS" >&2
+    if (( $# < 2 || $# > 3 )); then
+      echo "usage: scripts/test-module MODULE EXPECTED_TEST_CLASS [EXPECTED_TEST_METHOD]" >&2
       exit 64
     fi
     module="$1"
     expected_class="$2"
+    expected_method="${3:-}"
     [[ "$module" =~ ^osi_[a-z_]+$ ]] || {
       echo "ERROR: invalid module name" >&2
       exit 1
@@ -978,6 +1149,15 @@ scripts/test-module:
       echo "ERROR: invalid test class" >&2
       exit 1
     }
+    if [[ -n "$expected_method" &&
+          ! "$expected_method" =~ ^test_[A-Za-z0-9_]+$ ]]; then
+      echo "ERROR: invalid test method" >&2
+      exit 1
+    fi
+    test_tag="/$module:$expected_class"
+    if [[ -n "$expected_method" ]]; then
+      test_tag="${test_tag}.${expected_method}"
+    fi
 
     SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
     test_root="$(mktemp -d)"
@@ -1006,7 +1186,8 @@ scripts/test-module:
       printf 'ODOO_MASTER_PASSWORD=%s\n' "$(openssl rand -hex 32)"
       printf 'OSI_ODOO_ADMIN_LOGIN=admin\n'
       printf 'OSI_ODOO_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)"
-      printf 'BACKUP_ROOT=%s\n' "$test_root/backups"
+        printf 'BACKUP_ROOT=%s\n' "$test_root/backups"
+        printf 'OSI_ODOO_LOCK_DIR=%s\n' "$test_root/operation-lock"
     } >"$env_file"
     chmod 0600 "$env_file"
 
@@ -1028,7 +1209,7 @@ scripts/test-module:
       --database="$ODOO_DB_NAME" \
       --init="$module" \
       --test-enable \
-      --test-tags="/$module" \
+      --test-tags="$test_tag" \
       --log-level=test \
       --stop-after-init 2>&1 | tee "$test_root/odoo-tests.log"
     status="${PIPESTATUS[0]}"
@@ -1038,6 +1219,17 @@ scripts/test-module:
       echo "ERROR: expected test class was not discovered: $expected_class" >&2
       exit 1
     }
+    if [[ -n "$expected_method" ]]; then
+      discovery_count="$(grep -Ec \
+        "Starting .*${expected_class}\\.${expected_method}([^A-Za-z0-9_]|$)" \
+        "$test_root/odoo-tests.log")"
+      [[ "$discovery_count" == 1 ]] || {
+        echo "ERROR: expected exactly one runtime discovery of ${expected_class}.${expected_method}; found $discovery_count" >&2
+        exit 1
+      }
+      printf 'PASS: discovered %s.%s exactly once\n' \
+        "$expected_class" "$expected_method"
+    fi
 
 scripts/test-business-setup:
 
@@ -1454,7 +1646,11 @@ scripts/test-projects:
     #!/usr/bin/env bash
     set -Eeuo pipefail
     SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-    exec "$SCRIPT_DIR/test-module" osi_business_setup TestOsiProjects
+    "$SCRIPT_DIR/test-module" osi_business_setup TestOsiProjects \
+      test_exact_template_configuration
+    "$SCRIPT_DIR/test-module" osi_business_setup TestOsiProjects \
+      test_sale_creates_non_template_project_copy
+    echo "PASS: both TestOsiProjects methods discovered exactly once"
 
 Run:
 
@@ -1817,9 +2013,13 @@ Run:
     scripts/test-projects
     git diff --check
 
-Expected: TestOsiProjects appears at least once and all assertions pass. The test has two methods; if the Odoo summary does not report at least two tests for TestOsiProjects, stop.
+Expected runtime signals:
 
-Also run this static gate:
+    PASS: discovered TestOsiProjects.test_exact_template_configuration exactly once
+    PASS: discovered TestOsiProjects.test_sale_creates_non_template_project_copy exactly once
+    PASS: both TestOsiProjects methods discovered exactly once
+
+Absence, duplication, or failure of either individually selected method is a stop condition. Also run this structural gate; it does not substitute for the runtime gate:
 
     test "$(grep -c 'def test_' \
       addons/osi_business_setup/tests/test_projects.py)" -eq 2
@@ -2336,16 +2536,54 @@ Run one read-only SQL assertion block:
       IF EXISTS (
         SELECT 1 FROM stock_lot WHERE name LIKE 'DEMO-%'
       ) THEN RAISE EXCEPTION 'demo lots remain'; END IF;
-      IF NOT EXISTS (
-        SELECT 1 FROM ir_model_data
-        WHERE module='osi_business_setup'
-          AND name='product_gateway'
-      ) THEN RAISE EXCEPTION 'setup product was removed'; END IF;
-      IF NOT EXISTS (
-        SELECT 1 FROM ir_model_data
-        WHERE module='osi_business_setup'
-          AND name='project_template_customer_deployment'
-      ) THEN RAISE EXCEPTION 'setup template was removed'; END IF;
+      IF (
+        SELECT count(*)
+        FROM ir_model_data d
+        JOIN product_template p
+          ON d.model='product.template' AND p.id=d.res_id
+        WHERE d.module='osi_business_setup'
+          AND d.name IN (
+            'product_gateway','product_kiwi','product_clover',
+            'product_lsn50','product_s2120','product_lorain','product_strega'
+          )
+      ) != 7 THEN RAISE EXCEPTION 'one of seven setup products was removed';
+      END IF;
+      IF (
+        SELECT count(*)
+        FROM ir_model_data d
+        JOIN project_project p
+          ON d.model='project.project' AND p.id=d.res_id
+        WHERE d.module='osi_business_setup'
+          AND d.name IN (
+            'project_template_customer_deployment',
+            'project_template_gateway_commissioning',
+            'project_template_preventive_maintenance',
+            'project_template_training_handover',
+            'project_template_research_grant'
+          )
+          AND p.is_template
+      ) != 5 THEN RAISE EXCEPTION 'one of five setup templates was removed';
+      END IF;
+      IF (
+        SELECT count(*)
+        FROM ir_model_data d
+        JOIN project_task_type s
+          ON d.model='project.task.type' AND s.id=d.res_id
+        WHERE d.module='osi_business_setup'
+          AND d.name IN (
+            'stage_backlog','stage_ready','stage_in_progress',
+            'stage_field_validation','stage_blocked','stage_done'
+          )
+      ) != 6 THEN RAISE EXCEPTION 'one of six setup stages was removed';
+      END IF;
+      IF (
+        SELECT count(*)
+        FROM ir_model_data d
+        JOIN stock_warehouse w
+          ON d.model='stock.warehouse' AND w.id=d.res_id
+        WHERE d.module='osi_business_setup' AND d.name='warehouse_osi'
+      ) != 1 THEN RAISE EXCEPTION 'setup warehouse was removed';
+      END IF;
     END $$;
     SQL
 
@@ -2508,7 +2746,7 @@ scripts/init-database:
       "SELECT string_agg(name || '=' || state, ',' ORDER BY name)
        FROM ir_module_module
        WHERE name IN ('osi_business_setup','osi_business_demo')")"
-    [[ "$final_state" ==
+    [[ "$final_state" == \
       'osi_business_demo=installed,osi_business_setup=installed' ]] ||
       die "module initialization ended in unexpected state: $final_state"
 
@@ -2533,7 +2771,16 @@ scripts/test-init-database starts with this complete prologue:
     # shellcheck source=scripts/test-env
     . "$SCRIPT_DIR/test-env"
     create_test_environment bootstrap i
-    trap destroy_test_environment EXIT
+    sampler_pid=""
+    cleanup_init_test() {
+      touch "${TEST_ROOT}/stop-rss-sampler" 2>/dev/null || true
+      if [[ "$sampler_pid" =~ ^[0-9]+$ ]]; then
+        kill "$sampler_pid" 2>/dev/null || true
+        wait "$sampler_pid" 2>/dev/null || true
+      fi
+      destroy_test_environment
+    }
+    trap cleanup_init_test EXIT
     test_root="$TEST_ROOT"
     project="$TEST_PROJECT"
     database="$TEST_DATABASE"
@@ -2548,9 +2795,50 @@ Append this exact body:
 
     export OSI_ENV_FILE="$env_file"
     export OSI_RUNTIME_MODE=base
+    printf '0\n' >"$test_root/db.peak-rss"
+    printf '0\n' >"$test_root/odoo.peak-rss"
+    sample_peak_rss() {
+      while [[ ! -e "$test_root/stop-rss-sampler" ]]; do
+        local service container_id pid rss peak
+        for service in db odoo; do
+          while read -r container_id; do
+            [[ -n "$container_id" ]] || continue
+            pid="$(docker inspect -f '{{.State.Pid}}' "$container_id")"
+            [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+            rss="$(awk '$1 == "VmRSS:" {printf "%.0f\\n", $2 * 1024}' \
+              "/proc/$pid/status" 2>/dev/null || true)"
+            [[ "$rss" =~ ^[0-9]+$ ]] || continue
+            peak="$(<"$test_root/$service.peak-rss")"
+            if (( rss > peak )); then
+              printf '%s\n' "$rss" >"$test_root/$service.peak-rss"
+            fi
+          done < <(docker ps -q \
+            --filter "label=com.docker.compose.project=$project" \
+            --filter "label=com.docker.compose.service=$service")
+        done
+        sleep 0.2
+      done
+    }
+    sample_peak_rss &
+    sampler_pid=$!
     "$SCRIPT_DIR/init-database" | tee "$test_root/first.log"
+    touch "$test_root/stop-rss-sampler"
+    wait "$sampler_pid"
+    sampler_pid=""
     grep -q 'PASS: module state machine completed init' \
       "$test_root/first.log"
+
+    db_id="$(compose_base ps -q db)"
+    [[ "$(docker inspect -f '{{.HostConfig.Memory}}' "$db_id")" == 1073741824 ]]
+    [[ "$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$db_id")" == 1000000000 ]]
+    db_peak="$(<"$test_root/db.peak-rss")"
+    odoo_peak="$(<"$test_root/odoo.peak-rss")"
+    (( db_peak > 0 && db_peak <= 1073741824 )) ||
+      die "PostgreSQL peak RSS is absent or exceeds 1 GiB: $db_peak"
+    (( odoo_peak > 0 && odoo_peak <= 2147483648 )) ||
+      die "Odoo peak RSS is absent or exceeds 2 GiB: $odoo_peak"
+    printf 'PASS: peak RSS db=%s odoo=%s within Compose caps\n' \
+      "$db_peak" "$odoo_peak"
 
     first_counts="$(docker compose --env-file "$env_file" \
       --project-name "$project" -f "$REPO_ROOT/compose.yaml" \
@@ -2591,20 +2879,6 @@ Append this exact body:
     grep -q 'ERROR: partial OSI module state; operator action required' \
       "$test_root/partial.log" ||
       die "partial-state failure message is absent"
-
-Set the file to mode 0700. Run:
-
-    chmod 0700 scripts/init-database scripts/test-init-database \
-      scripts/test-coexistence
-    shellcheck scripts/lib.sh scripts/init-database \
-      scripts/test-init-database scripts/test-coexistence
-    scripts/test-init-database
-    scripts/test-coexistence
-
-Expected:
-
-    PASS: module state machine completed init
-    PASS: module state machine completed update
 
 ### Step 4: Prove two full disposable projects coexist
 
@@ -2682,9 +2956,56 @@ scripts/test-coexistence:
 
 Expected: both Odoo health checks become healthy, six volumes are distinct, and neither project has the production alias or caddy-net.
 
-### Step 5: Update README and commit
+### Step 5: Apply modes and run both integration gates
 
-Document the state table verbatim. State that Task 2 does not initialize Odoo and that this command is the first supported full initialization entrypoint.
+Only after scripts/test-coexistence exists, run:
+
+    chmod 0700 scripts/init-database scripts/test-init-database \
+      scripts/test-coexistence
+    shellcheck scripts/lib.sh scripts/init-database \
+      scripts/test-init-database scripts/test-coexistence
+    scripts/test-init-database | tee /tmp/osi-odoo-init-gate.log
+    grep -Eq '^PASS: peak RSS db=[1-9][0-9]* odoo=[1-9][0-9]* within Compose caps$' \
+      /tmp/osi-odoo-init-gate.log
+    scripts/test-coexistence
+
+Expected:
+
+    PASS: module state machine completed init
+    PASS: module state machine completed update
+    PASS: two isolated Compose projects coexist
+
+The peak-RSS line must match the exact regular expression in the gate; both byte counts must be positive integers.
+
+### Step 6: Replace README and commit
+
+Replace README.md with this complete interim content; Task 8 replaces it with the final operator contract:
+
+    # OSI Odoo test environment
+
+    This repository runs Odoo 19 Community and PostgreSQL 17 for OSI test and
+    demonstration work. It is not a production accounting system and must contain
+    no real customer data or credentials.
+
+    ## Database initialization
+
+    Task 2 rendered configuration and bootstrapped PostgreSQL only. Both custom
+    modules now exist, so `scripts/init-database` is the first supported full Odoo
+    initialization entrypoint. Its state machine is:
+
+    | Observed state | Action |
+    |---|---|
+    | Registry absent | Install both OSI modules |
+    | Both modules absent or uninstalled | Install both OSI modules |
+    | Both modules installed | Upgrade both OSI modules |
+    | Any mixed or pending state | Stop for operator action |
+
+    For a disposable base-Compose project, set `OSI_ENV_FILE` to its mode-0600
+    environment file and run `OSI_RUNTIME_MODE=base scripts/init-database`.
+    The deployed project will use `OSI_RUNTIME_MODE=production` after Task 8.
+
+    Never run Odoo module test tags against `osi_odoo_test`. Use the disposable
+    module-test scripts. Generate every password with `openssl rand -hex 32`.
 
 Run:
 
@@ -2707,7 +3028,7 @@ Run:
 - Create: systemd/osi-odoo-backup.service
 - Create: systemd/osi-odoo-backup.timer
 
-### Step 1: Add exact volume and health helpers
+### Step 1: Add the one operation lock plus exact restore, volume, and health helpers
 
 Append to scripts/lib.sh:
 
@@ -2722,6 +3043,161 @@ Append to scripts/lib.sh:
       (( ${#matches[@]} == 1 )) ||
         die "expected one $logical_name volume; found ${#matches[@]}"
       printf '%s\n' "${matches[0]}"
+    }
+
+    operation_lock_enter() {
+      : "${OSI_ODOO_LOCK_DIR:?missing OSI_ODOO_LOCK_DIR}"
+      [[ "$OSI_ODOO_LOCK_DIR" == /* ]] ||
+        die "OSI_ODOO_LOCK_DIR must be absolute"
+      install -d -m 0700 "$OSI_ODOO_LOCK_DIR"
+      [[ "$(stat -c %u "$OSI_ODOO_LOCK_DIR")" == "$UID" ]] ||
+        die "operation lock directory is not owned by the caller"
+      [[ "$(stat -c %a "$OSI_ODOO_LOCK_DIR")" == 700 ]] ||
+        die "operation lock directory must have mode 0700"
+      local lock_file="$OSI_ODOO_LOCK_DIR/operation.lock"
+      if [[ "${OSI_ODOO_LOCK_HELD:-0}" == 1 ]]; then
+        [[ "${OSI_ODOO_LOCK_FILE:-}" == "$lock_file" ]] ||
+          die "nested operation lock path differs"
+        [[ -e /proc/$$/fd/9 ]] ||
+          die "nested operation did not inherit lock fd 9"
+        [[ "$(readlink "/proc/$$/fd/9")" == "$lock_file" ]] ||
+          die "nested operation inherited the wrong lock fd"
+        return 0
+      fi
+      exec 9>"$lock_file"
+      chmod 0600 "$lock_file"
+      flock -n 9 || die "another Odoo operation is active"
+      export OSI_ODOO_LOCK_HELD=1 OSI_ODOO_LOCK_FILE="$lock_file"
+    }
+
+    operation_lock_leave_outer() {
+      [[ "${OSI_ODOO_LOCK_HELD:-0}" == 1 && -e /proc/$$/fd/9 ]] ||
+        die "cannot release an operation lock that is not held"
+      [[ "$(readlink "/proc/$$/fd/9")" == "$OSI_ODOO_LOCK_FILE" ]] ||
+        die "operation lock fd changed before release"
+      flock -u 9
+      exec 9>&-
+      unset OSI_ODOO_LOCK_HELD OSI_ODOO_LOCK_FILE
+    }
+
+    operation_test_pause() {
+      local point="$1" attempt
+      [[ "${OSI_TEST_PAUSE_AT:-}" == "$point" ]] || return 0
+      require_disposable_project
+      : "${OSI_TEST_CONTROL_DIR:?missing OSI_TEST_CONTROL_DIR}"
+      [[ "$OSI_TEST_CONTROL_DIR" == /tmp/osi-odoo-test.*/* ]] ||
+        die "unsafe test control directory"
+      install -d -m 0700 "$OSI_TEST_CONTROL_DIR"
+      : >"$OSI_TEST_CONTROL_DIR/$point.ready"
+      for attempt in $(seq 1 300); do
+        [[ -e "$OSI_TEST_CONTROL_DIR/$point.release" ]] && return 0
+        sleep 0.1
+      done
+      die "test pause timed out: $point"
+    }
+
+    resolved_repo_digest() {
+      local reference="$1" repository digest
+      repository="${reference%%:*}"
+      digest="$(docker image inspect "$reference" -f '{{range .RepoDigests}}{{println .}}{{end}}' |
+        awk -v prefix="$repository@sha256:" 'index($0, prefix) == 1 {print; exit}')"
+      [[ "$digest" == "$repository"@sha256:* ]] ||
+        die "image has no RepoDigest for $reference"
+      printf '%s\n' "$digest"
+    }
+
+    record_current_release() {
+      [[ "${OSI_ODOO_LOCK_HELD:-0}" == 1 ]] ||
+        die "current release may be recorded only under the operation lock"
+      local target="$OSI_ODOO_LOCK_DIR/current-release.json" temporary
+      temporary="$(mktemp "$OSI_ODOO_LOCK_DIR/.current-release.XXXXXX")"
+      chmod 0600 "$temporary"
+      jq -n \
+        --arg commit "$(git rev-parse HEAD)" \
+        --arg odoo "$(resolved_repo_digest odoo:19.0-20260817)" \
+        --arg postgres "$(resolved_repo_digest postgres:17.6-bookworm)" \
+        '{git_commit:$commit,images:{
+          odoo:{reference:"odoo:19.0-20260817",repo_digest:$odoo},
+          postgres:{reference:"postgres:17.6-bookworm",repo_digest:$postgres}
+        }}' >"$temporary"
+      mv -f -- "$temporary" "$target"
+    }
+
+    create_restore_database() {
+      local target="$1"
+      [[ "$target" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && ${#target} -le 63 ]] ||
+        die "invalid restore database name"
+      compose_runtime exec -T db psql -U odoo_admin -d postgres \
+        -v ON_ERROR_STOP=1 \
+        -c "CREATE DATABASE \"$target\" OWNER odoo_owner" \
+        -c "REVOKE ALL ON DATABASE \"$target\" FROM PUBLIC" \
+        -c "GRANT CONNECT, TEMPORARY ON DATABASE \"$target\" TO odoo_app"
+      compose_runtime exec -T db psql -U odoo_admin -d "$target" \
+        -v ON_ERROR_STOP=1 \
+        -c 'REVOKE CREATE ON SCHEMA public FROM PUBLIC' \
+        -c 'ALTER SCHEMA public OWNER TO odoo_app' \
+        -c 'GRANT USAGE, CREATE ON SCHEMA public TO odoo_app' \
+        -c 'CREATE EXTENSION pg_trgm'
+      [[ "$(compose_runtime exec -T db psql -U odoo_admin -d "$target" -Atqc \
+        "SELECT e.extname || '|' || r.rolname FROM pg_extension e
+         JOIN pg_roles r ON r.oid=e.extowner WHERE e.extname='pg_trgm'")" == \
+        'pg_trgm|odoo_admin' ]] || die "candidate pg_trgm owner is not odoo_admin"
+    }
+
+    restore_dump_without_bootstrap_extensions() {
+      local backup_dir="$1" target="$2" work_dir="$3"
+      docker run --rm --network none -v "$backup_dir:/backup:ro" \
+        postgres:17.6-bookworm pg_restore --list /backup/database.dump \
+        >"$work_dir/restore.list"
+      awk '
+        / EXTENSION - pg_trgm$/ {next}
+        / COMMENT - EXTENSION pg_trgm$/ {next}
+        {print}
+      ' "$work_dir/restore.list" >"$work_dir/restore.filtered.list"
+      ! grep -Eq ' (EXTENSION - pg_trgm|COMMENT - EXTENSION pg_trgm)$' \
+        "$work_dir/restore.filtered.list" ||
+        die "pg_trgm archive entries were not filtered"
+      compose_runtime exec -T db sh -ceu \
+        'cat > /tmp/osi-odoo-restore.list' \
+        <"$work_dir/restore.filtered.list"
+      compose_runtime exec -T db sh -ceu \
+        'cat > /tmp/osi-odoo-restore.dump' \
+        <"$backup_dir/database.dump"
+      compose_runtime exec -T db pg_restore -U odoo_admin -d "$target" \
+        --exit-on-error --no-owner --role=odoo_app \
+        --use-list=/tmp/osi-odoo-restore.list \
+        /tmp/osi-odoo-restore.dump
+      compose_runtime exec -T db rm -f \
+        /tmp/osi-odoo-restore.list /tmp/osi-odoo-restore.dump
+      [[ "$(compose_runtime exec -T db psql -U odoo_admin -d "$target" -Atqc \
+        "SELECT e.extname || '|' || r.rolname FROM pg_extension e
+         JOIN pg_roles r ON r.oid=e.extowner WHERE e.extname='pg_trgm'")" == \
+        'pg_trgm|odoo_admin' ]] || die "restored pg_trgm owner changed"
+    }
+
+    stage_filestore() {
+      local backup_dir="$1" source_database="$2" target_database="$3"
+      local filestore_volume
+      filestore_volume="$(project_volume odoo_data)"
+      docker run --rm --network none \
+        -e SOURCE_DATABASE="$source_database" \
+        -e TARGET_DATABASE="$target_database" \
+        -v "$filestore_volume:/target" \
+        -v "$backup_dir:/backup:ro" alpine:3.22 sh -ceu '
+          case "$SOURCE_DATABASE:$TARGET_DATABASE" in
+            *[!A-Za-z0-9_]*|:*) exit 64 ;;
+          esac
+          test ! -e "/target/filestore/$TARGET_DATABASE"
+          staging="/target/.restore-$TARGET_DATABASE"
+          test ! -e "$staging"
+          mkdir -p "$staging"
+          trap '\''rm -rf -- "$staging"'\'' EXIT
+          tar -C "$staging" -xzf /backup/filestore.tar.gz \
+            "./filestore/$SOURCE_DATABASE"
+          mkdir -p /target/filestore
+          mv "$staging/filestore/$SOURCE_DATABASE" \
+            "/target/filestore/$TARGET_DATABASE"
+        '
     }
 
     wait_for_odoo() {
@@ -2740,6 +3216,8 @@ Append to scripts/lib.sh:
         sleep 2
       done
     }
+
+Every top-level operational script calls operation_lock_enter immediately after load_env. Nested calls inherit fd 9 and the two exported lock facts. Setting OSI_ODOO_LOCK_HELD without inheriting that exact open descriptor fails closed; no script reacquires the lock and no nested flock can deadlock. Only deploy calls operation_lock_leave_outer, after all deployment mutations, so the separately launched systemd backup service can acquire the same lock for its required first run.
 
 ### Step 2: Create strict backup validation
 
@@ -2771,9 +3249,9 @@ scripts/validate-backup:
       .filestore_archive == "filestore.tar.gz" and
       (.git_commit | type == "string" and length == 40) and
       (.images.odoo.reference | type == "string" and length > 0) and
-      (.images.odoo.digest | startswith("sha256:")) and
+      (.images.odoo.repo_digest | test("@sha256:[0-9a-f]{64}$")) and
       (.images.postgres.reference | type == "string" and length > 0) and
-      (.images.postgres.digest | startswith("sha256:")) and
+      (.images.postgres.repo_digest | test("@sha256:[0-9a-f]{64}$")) and
       (.volumes.database | type == "string" and length > 0) and
       (.volumes.filestore | type == "string" and length > 0) and
       (.was_running | type == "boolean") and
@@ -2811,6 +3289,7 @@ scripts/backup:
     . "$SCRIPT_DIR/lib.sh"
     enter_repo
     load_env
+    operation_lock_enter
     require_command jq
     require_command sha256sum
     : "${BACKUP_ROOT:?missing BACKUP_ROOT}"
@@ -2845,6 +3324,7 @@ scripts/backup:
     if [[ "$was_running" == true ]]; then
       compose_runtime stop -t 90 odoo
     fi
+    operation_test_pause backup-after-odoo-stop
     compose_runtime up -d db
     wait_for_db
 
@@ -2871,16 +3351,17 @@ scripts/backup:
     )
     database_sha="$(sha256sum "$temporary/database.dump" | cut -d' ' -f1)"
     filestore_sha="$(sha256sum "$temporary/filestore.tar.gz" | cut -d' ' -f1)"
-    odoo_digest="$(docker image inspect odoo:19.0-20260817 \
-      -f '{{.Id}}')"
-    postgres_digest="$(docker image inspect postgres:17.6-bookworm \
-      -f '{{.Id}}')"
-    [[ "$odoo_digest" == sha256:* ]] ||
-      die "missing resolved Odoo image digest"
-    [[ "$postgres_digest" == sha256:* ]] ||
-      die "missing resolved PostgreSQL image digest"
+    odoo_digest="$(resolved_repo_digest odoo:19.0-20260817)"
+    postgres_digest="$(resolved_repo_digest postgres:17.6-bookworm)"
     completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    git_commit="$(git rev-parse HEAD)"
+    release_state="$OSI_ODOO_LOCK_DIR/current-release.json"
+    if [[ -f "$release_state" ]]; then
+      jq -e '.git_commit | test("^[0-9a-f]{40}$")' \
+        "$release_state" >/dev/null || die "invalid current release state"
+      git_commit="$(jq -r .git_commit "$release_state")"
+    else
+      git_commit="$(git rev-parse HEAD)"
+    fi
 
     jq -n \
       --arg started "$started_at" \
@@ -2905,11 +3386,11 @@ scripts/backup:
         images: {
           odoo: {
             reference: "odoo:19.0-20260817",
-            digest: $odoo_digest
+            repo_digest: $odoo_digest
           },
           postgres: {
             reference: "postgres:17.6-bookworm",
-            digest: $postgres_digest
+            repo_digest: $postgres_digest
           }
         },
         volumes: {
@@ -2955,17 +3436,15 @@ scripts/restore-rehearsal:
     SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
     REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
     backup_dir="$(realpath -e -- "$1")"
+    source_env="${OSI_SOURCE_ENV_FILE:-${OSI_ENV_FILE:-$REPO_ROOT/.env}}"
+    export OSI_ENV_FILE="$source_env"
+    # shellcheck source=scripts/lib.sh
+    . "$SCRIPT_DIR/lib.sh"
+    enter_repo
+    load_env
+    operation_lock_enter
     "$SCRIPT_DIR/validate-backup" "$backup_dir"
     source_database="$(jq -r .database_name "$backup_dir/manifest.json")"
-    source_env="${OSI_SOURCE_ENV_FILE:-${OSI_ENV_FILE:-$REPO_ROOT/.env}}"
-    [[ -f "$source_env" ]] || {
-      echo "ERROR: source environment file is absent" >&2
-      exit 1
-    }
-    set -a
-    # shellcheck disable=SC1090
-    . "$source_env"
-    set +a
     source_admin_login="${OSI_ODOO_ADMIN_LOGIN:?missing source admin login}"
     source_admin_password="${OSI_ODOO_ADMIN_PASSWORD:?missing source admin password}"
 
@@ -2995,43 +3474,22 @@ scripts/restore-rehearsal:
       printf 'OSI_ODOO_ADMIN_LOGIN=%s\n' "$source_admin_login"
       printf 'OSI_ODOO_ADMIN_PASSWORD=%s\n' "$source_admin_password"
       printf 'BACKUP_ROOT=%s\n' "$test_root/backups"
+      printf 'OSI_ODOO_LOCK_DIR=%s\n' "$OSI_ODOO_LOCK_DIR"
     } >"$env_file"
     chmod 0600 "$env_file"
 
-    export OSI_ENV_FILE="$env_file" OSI_RUNTIME_MODE=base
-    # shellcheck source=scripts/lib.sh
-    . "$SCRIPT_DIR/lib.sh"
-    enter_repo
-    load_env
+    export OSI_ENV_FILE="$env_file" ENV_FILE="$env_file" OSI_RUNTIME_MODE=base
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
     require_disposable_project
     "$SCRIPT_DIR/render-config"
     compose_base up -d db
     wait_for_db
-    compose_base exec -T db pg_restore \
-      -U odoo_admin -d "$ODOO_DB_NAME" \
-      --clean --if-exists --no-owner --role=odoo_app \
-      <"$backup_dir/database.dump"
-
-    filestore_volume="$(project_volume odoo_data)"
-    docker run --rm --network none \
-      -v "$filestore_volume:/target" \
-      -v "$backup_dir:/backup:ro" \
-      alpine:3.22 sh -ceu '
-        find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-        tar -C /target -xzf /backup/filestore.tar.gz
-      '
-    docker run --rm --network none \
-      -e SOURCE_DATABASE="$source_database" \
-      -e TARGET_DATABASE="$ODOO_DB_NAME" \
-      -v "$filestore_volume:/target" \
-      alpine:3.22 sh -ceu '
-        if [ "$SOURCE_DATABASE" != "$TARGET_DATABASE" ] &&
-           [ -d "/target/filestore/$SOURCE_DATABASE" ]; then
-          test ! -e "/target/filestore/$TARGET_DATABASE"
-          mv "/target/filestore/$SOURCE_DATABASE" \
-             "/target/filestore/$TARGET_DATABASE"
-        fi
-      '
+    restore_dump_without_bootstrap_extensions \
+      "$backup_dir" "$ODOO_DB_NAME" "$test_root"
+    stage_filestore "$backup_dir" "$source_database" "$ODOO_DB_NAME"
 
     compose_base run --rm --no-deps \
       -e OSI_ODOO_ADMIN_LOGIN -e OSI_ODOO_ADMIN_PASSWORD odoo \
@@ -3065,6 +3523,22 @@ scripts/restore-rehearsal:
       ) THEN RAISE EXCEPTION 'project templates are absent'; END IF;
     END $$;
     SQL
+    if [[ -n "${OSI_EXPECT_ATTACHMENT_NAME:-}" ]]; then
+      store_fname="$(compose_base exec -T db psql -U odoo_admin \
+        -d "$ODOO_DB_NAME" -Atv ON_ERROR_STOP=1 \
+        -v expected_name="$OSI_EXPECT_ATTACHMENT_NAME" \
+        -c "SELECT store_fname FROM ir_attachment
+            WHERE name=:'expected_name' AND store_fname IS NOT NULL")"
+      [[ -n "$store_fname" ]] ||
+        die "paired attachment row is absent after rehearsal"
+      filestore_volume="$(project_volume odoo_data)"
+      docker run --rm --network none \
+        -e DATABASE="$ODOO_DB_NAME" -e STORE_FNAME="$store_fname" \
+        -v "$filestore_volume:/target:ro" alpine:3.22 sh -ceu '
+          test -s "/target/filestore/$DATABASE/$STORE_FNAME"
+        '
+      echo "PASS: attachment database row and filestore object are paired"
+    fi
     echo "PASS: isolated rehearsal restore"
 
 The script never uses compose.test-vps.yaml, never stops the live service, and deletes only its validated disposable project.
@@ -3085,6 +3559,7 @@ scripts/restore-production:
     . "$SCRIPT_DIR/lib.sh"
     enter_repo
     load_env
+    operation_lock_enter
     [[ "$COMPOSE_PROJECT_NAME" == osi-odoo ]] ||
       die "production restore requires COMPOSE_PROJECT_NAME=osi-odoo"
     export OSI_RUNTIME_MODE=production
@@ -3092,69 +3567,139 @@ scripts/restore-production:
     [[ "$(jq -r .database_name "$backup_dir/manifest.json")" == \
       "$ODOO_DB_NAME" ]] ||
       die "backup database name does not match live database"
-    "$SCRIPT_DIR/restore-rehearsal" "$backup_dir"
+    OSI_SOURCE_ENV_FILE="$ENV_FILE" \
+      "$SCRIPT_DIR/restore-rehearsal" "$backup_dir"
 
-    pre_restore_backup="$("$SCRIPT_DIR/backup")"
+    pre_restore_backup="$("$SCRIPT_DIR/backup" | tail -n 1)"
     compose_prod stop -t 90 odoo
-    failure() {
+    report_staging_failure() {
       local status=$?
       if (( status != 0 )); then
-        printf 'ERROR: production restore failed; Odoo remains stopped\n' >&2
+        printf 'ERROR: candidate staging failed; live pair is unchanged and Odoo remains stopped\n' >&2
         printf 'Recovery backup: %s\n' "$pre_restore_backup" >&2
       fi
       return "$status"
     }
-    trap failure EXIT
-
+    trap report_staging_failure EXIT
     source_database="$(jq -r .database_name "$backup_dir/manifest.json")"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    candidate_database="${ODOO_DB_NAME}__candidate_${stamp}"
+    retained_database="${ODOO_DB_NAME}__retained_${stamp}"
+    (( ${#candidate_database} <= 63 && ${#retained_database} <= 63 )) ||
+      die "live database name is too long for candidate restore"
+    work_dir="$(mktemp -d /tmp/osi-odoo-production-restore.XXXXXX)"
+    chmod 0700 "$work_dir"
+    create_restore_database "$candidate_database"
+    restore_dump_without_bootstrap_extensions \
+      "$backup_dir" "$candidate_database" "$work_dir"
+    stage_filestore "$backup_dir" "$source_database" "$candidate_database"
+
+    compose_prod run --rm --no-deps odoo \
+      odoo --config=/etc/odoo/odoo.conf \
+      --database="$candidate_database" \
+      --db-filter="^${candidate_database}$" --no-http --stop-after-init
+    compose_prod exec -T db psql -U odoo_admin -d "$candidate_database" \
+      -v ON_ERROR_STOP=1 <<'SQL'
+    DO $$
+    BEGIN
+      IF (SELECT count(*) FROM ir_module_module
+          WHERE name IN ('osi_business_setup','osi_business_demo')
+            AND state='installed') != 2
+      THEN RAISE EXCEPTION 'candidate modules are not installed'; END IF;
+      IF NOT EXISTS (SELECT 1 FROM res_company
+                     WHERE name='Open Smart Irrigation')
+      THEN RAISE EXCEPTION 'candidate OSI company is absent'; END IF;
+      IF (SELECT count(*) FROM project_project WHERE is_template) != 5
+      THEN RAISE EXCEPTION 'candidate template count is not five'; END IF;
+      IF (SELECT e.extname || '|' || r.rolname FROM pg_extension e
+          JOIN pg_roles r ON r.oid=e.extowner WHERE e.extname='pg_trgm')
+          IS DISTINCT FROM 'pg_trgm|odoo_admin'
+      THEN RAISE EXCEPTION 'candidate pg_trgm ownership changed'; END IF;
+    END $$;
+    SQL
+
+    filestore_volume="$(project_volume odoo_data)"
+    db_live_moved=false
+    db_swapped=false
+    filestore_live_moved=false
+    filestore_swapped=false
+    rollback_candidate_swap() {
+      local status=$?
+      (( status != 0 )) || return 0
+      set +e
+      compose_prod stop -t 90 odoo >/dev/null 2>&1
+      if [[ "$filestore_swapped" == true ]]; then
+        docker run --rm --network none \
+          -e LIVE="$ODOO_DB_NAME" -e CANDIDATE="$candidate_database" \
+          -e RETAINED="$retained_database" \
+          -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
+            mv "/target/filestore/$LIVE" "/target/filestore/$CANDIDATE"
+            mv "/target/filestore/$RETAINED" "/target/filestore/$LIVE"
+          '
+      elif [[ "$filestore_live_moved" == true ]]; then
+        docker run --rm --network none \
+          -e LIVE="$ODOO_DB_NAME" -e RETAINED="$retained_database" \
+          -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
+            mv "/target/filestore/$RETAINED" "/target/filestore/$LIVE"
+          '
+      fi
+      if [[ "$db_swapped" == true ]]; then
+        compose_prod exec -T db psql -U odoo_admin -d postgres \
+          -v ON_ERROR_STOP=1 \
+          -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+              WHERE datname='$ODOO_DB_NAME' AND pid <> pg_backend_pid()" \
+          -c "ALTER DATABASE \"$ODOO_DB_NAME\" RENAME TO \"$candidate_database\"" \
+          -c "ALTER DATABASE \"$retained_database\" RENAME TO \"$ODOO_DB_NAME\""
+      elif [[ "$db_live_moved" == true ]]; then
+        compose_prod exec -T db psql -U odoo_admin -d postgres \
+          -v ON_ERROR_STOP=1 \
+          -c "ALTER DATABASE \"$retained_database\" RENAME TO \"$ODOO_DB_NAME\""
+      fi
+      rm -rf -- "$work_dir"
+      printf 'ERROR: production restore failed; Odoo remains stopped\n' >&2
+      printf 'Recovery backup: %s\n' "$pre_restore_backup" >&2
+      printf 'Candidate database/filestore: %s\n' "$candidate_database" >&2
+      return "$status"
+    }
+    trap rollback_candidate_swap EXIT
+
     compose_prod exec -T db psql -U odoo_admin -d postgres \
       -v ON_ERROR_STOP=1 \
       -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-          WHERE datname='$ODOO_DB_NAME' AND pid <> pg_backend_pid()" \
-      -c "DROP DATABASE IF EXISTS \"$ODOO_DB_NAME\"" \
-      -c "CREATE DATABASE \"$ODOO_DB_NAME\" OWNER odoo_owner" \
-      -c "REVOKE ALL ON DATABASE \"$ODOO_DB_NAME\" FROM PUBLIC" \
-      -c "GRANT CONNECT, TEMPORARY ON DATABASE \"$ODOO_DB_NAME\" TO odoo_app"
-    compose_prod exec -T db psql -U odoo_admin -d "$ODOO_DB_NAME" \
+          WHERE datname IN ('$ODOO_DB_NAME','$candidate_database')
+            AND pid <> pg_backend_pid()" \
+      -c "ALTER DATABASE \"$ODOO_DB_NAME\" RENAME TO \"$retained_database\""
+    db_live_moved=true
+    compose_prod exec -T db psql -U odoo_admin -d postgres \
       -v ON_ERROR_STOP=1 \
-      -c 'REVOKE CREATE ON SCHEMA public FROM PUBLIC' \
-      -c 'ALTER SCHEMA public OWNER TO odoo_app' \
-      -c 'GRANT USAGE, CREATE ON SCHEMA public TO odoo_app' \
-      -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
-    compose_prod exec -T db pg_restore \
-      -U odoo_admin -d "$ODOO_DB_NAME" \
-      --no-owner --role=odoo_app <"$backup_dir/database.dump"
+      -c "ALTER DATABASE \"$candidate_database\" RENAME TO \"$ODOO_DB_NAME\""
+    db_swapped=true
+    docker run --rm --network none \
+      -e LIVE="$ODOO_DB_NAME" -e CANDIDATE="$candidate_database" \
+      -e RETAINED="$retained_database" \
+      -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
+        test -d "/target/filestore/$LIVE"
+        test -d "/target/filestore/$CANDIDATE"
+        test ! -e "/target/filestore/$RETAINED"
+        mv "/target/filestore/$LIVE" "/target/filestore/$RETAINED"
+      '
+    filestore_live_moved=true
+    docker run --rm --network none \
+      -e LIVE="$ODOO_DB_NAME" -e CANDIDATE="$candidate_database" \
+      -v "$filestore_volume:/target" alpine:3.22 sh -ceu '
+        mv "/target/filestore/$CANDIDATE" "/target/filestore/$LIVE"
+      '
+    filestore_swapped=true
 
-    filestore_volume="$(project_volume odoo_data)"
-    docker run --rm --network none \
-      -v "$filestore_volume:/target" \
-      -v "$backup_dir:/backup:ro" \
-      alpine:3.22 sh -ceu '
-        find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-        tar -C /target -xzf /backup/filestore.tar.gz
-      '
-    docker run --rm --network none \
-      -e SOURCE_DATABASE="$source_database" \
-      -e TARGET_DATABASE="$ODOO_DB_NAME" \
-      -v "$filestore_volume:/target" \
-      alpine:3.22 sh -ceu '
-        if [ "$SOURCE_DATABASE" != "$TARGET_DATABASE" ] &&
-           [ -d "/target/filestore/$SOURCE_DATABASE" ]; then
-          test ! -e "/target/filestore/$TARGET_DATABASE"
-          mv "/target/filestore/$SOURCE_DATABASE" \
-             "/target/filestore/$TARGET_DATABASE"
-        fi
-      '
-    compose_prod run --rm --no-deps odoo \
-      odoo --config=/etc/odoo/odoo.conf \
-      --database="$ODOO_DB_NAME" --stop-after-init
     compose_prod up -d odoo
     wait_for_odoo
     trap - EXIT
+    rm -rf -- "$work_dir"
     printf 'PASS: production pair replaced\n'
     printf 'Retained pre-restore backup: %s\n' "$pre_restore_backup"
+    printf 'Retained prior database/filestore name: %s\n' "$retained_database"
 
-The two -c SQL strings interpolate only ODOO_DB_NAME, which load_env restricts to a PostgreSQL identifier. The fresh paired pre-restore backup is retained through the health check.
+The live database and filestore are never dropped or emptied. A unique candidate pair is restored and verified first. With the long-running Odoo service stopped, database renames and same-volume filestore renames switch the pair. The EXIT handler reverses every completed rename if a later step or health check fails. On success the prior pair remains under the same retained suffix and the fresh paired pre-restore backup remains available; cleanup is a separate operator decision.
 
 ### Step 6: Create failed-upgrade behavior
 
@@ -3167,7 +3712,8 @@ scripts/update-modules:
     . "$SCRIPT_DIR/lib.sh"
     enter_repo
     load_env
-    backup_dir="$("$SCRIPT_DIR/backup")"
+    operation_lock_enter
+    backup_dir="$("$SCRIPT_DIR/backup" | tail -n 1)"
     compose_runtime pull db odoo
     OSI_SOURCE_ENV_FILE="$ENV_FILE" \
       "$SCRIPT_DIR/restore-rehearsal" "$backup_dir"
@@ -3192,14 +3738,24 @@ scripts/update-modules:
         --argjson exit_code "$update_status" \
         --arg backup "$backup_dir" \
         --arg commit "$(git rev-parse HEAD)" \
-        --arg odoo_image "$(docker image inspect odoo:19.0-20260817 -f '{{.Id}}')" \
-        --arg postgres_image "$(docker image inspect postgres:17.6-bookworm -f '{{.Id}}')" \
-        '{exit_code:$exit_code,backup:$backup,git_commit:$commit,
+        --arg odoo_image "$(resolved_repo_digest odoo:19.0-20260817)" \
+        --arg postgres_image "$(resolved_repo_digest postgres:17.6-bookworm)" \
+        --slurpfile prior "$backup_dir/manifest.json" \
+        '{exit_code:$exit_code,backup:$backup,candidate_git_commit:$commit,
           candidate_images:{
-            odoo:{reference:"odoo:19.0-20260817",digest:$odoo_image},
-            postgres:{reference:"postgres:17.6-bookworm",digest:$postgres_image}
+            odoo:{reference:"odoo:19.0-20260817",repo_digest:$odoo_image},
+            postgres:{reference:"postgres:17.6-bookworm",repo_digest:$postgres_image}
           },
-          recovery:"run scripts/restore-production BACKUP_DIR --confirm-replace-live before code or image rollback"}' \
+          prior_release:{
+            git_commit:$prior[0].git_commit,
+            images:$prior[0].images
+          },
+          recovery_order:[
+            "keep Odoo stopped",
+            "check out prior_release.git_commit",
+            "pull and tag each prior_release.images.*.repo_digest as its recorded reference",
+            "using that prior code, run scripts/restore-production BACKUP_DIR --confirm-replace-live"
+          ]}' \
         >"$report"
       printf 'ERROR: module update failed with exit %d; Odoo remains stopped\n' \
         "$update_status" >&2
@@ -3208,9 +3764,10 @@ scripts/update-modules:
     fi
     compose_runtime up -d odoo
     wait_for_odoo
+    record_current_release
     echo "PASS: modules updated"
 
-No trap restarts Odoo on failure. An operator must restore the pair before checking out old code or selecting old images.
+No trap restarts Odoo on failure. The operator must keep Odoo stopped, reactivate the report's prior Git commit and immutable RepoDigests, and only then use that prior release's scripts/restore-production to validate and restore its paired backup. Candidate code never starts against restored prior data.
 
 ### Step 7: Add the systemd timer
 
@@ -3258,7 +3815,15 @@ scripts/test-backup-restore starts with this complete prologue:
     # shellcheck source=scripts/test-env
     . "$SCRIPT_DIR/test-env"
     create_test_environment bootstrap b
-    trap destroy_test_environment EXIT
+    backup_pid=""
+    cleanup_backup_test() {
+      if [[ "$backup_pid" =~ ^[0-9]+$ ]]; then
+        kill "$backup_pid" 2>/dev/null || true
+        wait "$backup_pid" 2>/dev/null || true
+      fi
+      destroy_test_environment
+    }
+    trap cleanup_backup_test EXIT
     test_root="$TEST_ROOT"
     # shellcheck source=scripts/lib.sh
     . "$SCRIPT_DIR/lib.sh"
@@ -3271,7 +3836,72 @@ scripts/test-backup-restore starts with this complete prologue:
 
 Append this exact body:
 
-    backup_dir="$("$SCRIPT_DIR/backup")"
+    attachment_name="PAIR-BOUNDARY-$$"
+    export OSI_EXPECT_ATTACHMENT_NAME="$attachment_name"
+    printf '%s\n' \
+      'import base64, os' \
+      'record = env["ir.attachment"].create({' \
+      '    "name": os.environ["OSI_EXPECT_ATTACHMENT_NAME"],' \
+      '    "type": "binary",' \
+      '    "datas": base64.b64encode(b"paired-boundary-content"),' \
+      '    "mimetype": "application/octet-stream",' \
+      '})' \
+      'env.cr.commit()' \
+      'assert record.store_fname' |
+      compose_base run --rm --no-deps \
+        -e OSI_EXPECT_ATTACHMENT_NAME odoo \
+        odoo shell --config=/etc/odoo/odoo.conf \
+        --database="$ODOO_DB_NAME" --no-http
+
+    seed_backup="$("$SCRIPT_DIR/backup" | tail -n 1)"
+    control_dir="$test_root/lock-control"
+    export OSI_TEST_CONTROL_DIR="$control_dir"
+    export OSI_TEST_PAUSE_AT=backup-after-odoo-stop
+    "$SCRIPT_DIR/backup" >"$test_root/paused-backup.out" \
+      2>"$test_root/paused-backup.err" &
+    backup_pid=$!
+    for attempt in $(seq 1 300); do
+      [[ -e "$control_dir/backup-after-odoo-stop.ready" ]] && break
+      kill -0 "$backup_pid" 2>/dev/null ||
+        die "paused backup exited before its boundary"
+      (( attempt < 300 )) || die "paused backup did not reach boundary"
+      sleep 0.1
+    done
+
+    stopped_id="$(compose_base ps -a -q odoo)"
+    [[ -n "$stopped_id" ]]
+    [[ "$(docker inspect -f '{{.State.Running}}' "$stopped_id")" == false ]]
+    if printf '%s\n' \
+      'env["ir.config_parameter"].sudo().set_param("osi.backup.boundary", "forbidden")' |
+      compose_base exec -T odoo \
+        odoo shell --config=/etc/odoo/odoo.conf \
+        --database="$ODOO_DB_NAME" --no-http \
+        >"$test_root/boundary-write.log" 2>&1; then
+      die "Odoo accepted a write boundary command while backup was quiesced"
+    fi
+    [[ "$(compose_base exec -T db psql -U odoo_admin \
+      -d "$ODOO_DB_NAME" -Atqc \
+      "SELECT count(*) FROM ir_config_parameter
+       WHERE key='osi.backup.boundary'")" == 0 ]] ||
+      die "boundary write reached PostgreSQL"
+    if "$SCRIPT_DIR/backup" >"$test_root/concurrent-backup.log" 2>&1; then
+      die "concurrent backup unexpectedly acquired the operation lock"
+    fi
+    grep -q 'ERROR: another Odoo operation is active' \
+      "$test_root/concurrent-backup.log"
+    if "$SCRIPT_DIR/restore-rehearsal" "$seed_backup" \
+      >"$test_root/concurrent-restore.log" 2>&1; then
+      die "concurrent restore unexpectedly acquired the operation lock"
+    fi
+    grep -q 'ERROR: another Odoo operation is active' \
+      "$test_root/concurrent-restore.log"
+    echo "PASS: quiesced boundary and shared operation lock"
+
+    touch "$control_dir/backup-after-odoo-stop.release"
+    wait "$backup_pid"
+    backup_pid=""
+    unset OSI_TEST_PAUSE_AT OSI_TEST_CONTROL_DIR
+    backup_dir="$(tail -n 1 "$test_root/paused-backup.out")"
     "$SCRIPT_DIR/validate-backup" "$backup_dir"
     "$SCRIPT_DIR/restore-rehearsal" "$backup_dir"
 
@@ -3288,6 +3918,10 @@ Append this exact body:
     test -f "$failure_report"
     test "$(jq -r .exit_code "$failure_report")" -eq 97
     recovery_backup="$(jq -r .backup "$failure_report")"
+    test "$(jq -r '.prior_release.images.odoo.repo_digest' \
+      "$failure_report")" = \
+      "$(jq -r '.images.odoo.repo_digest' \
+        "$recovery_backup/manifest.json")"
     "$SCRIPT_DIR/restore-rehearsal" "$recovery_backup"
 
     cp -a -- "$backup_dir" "$test_root/corrupt-payload"
@@ -3327,6 +3961,10 @@ Expected:
 
     PASS: backup manifest and payloads
     PASS: isolated rehearsal restore
+    PASS: quiesced boundary and shared operation lock
+    PASS: attachment database row and filestore object are paired
+
+The gate creates an Odoo attachment backed by the filestore, stops Odoo at the exact pre-dump boundary, proves the stopped service cannot accept the boundary command, proves concurrent backup and restore calls cannot enter, and then proves both the attachment row and stored file survive the same restored pair.
 
 ### Step 9: Commit
 
@@ -3369,24 +4007,36 @@ scripts/check-dns:
     load_env
     : "${EXPECTED_PUBLIC_IPV4:?missing EXPECTED_PUBLIC_IPV4}"
     host=odoo-test.opensmartirrigation.org
-    mapfile -t a_records < <(dig +short A "$host" | sort -u)
-    mapfile -t aaaa_records < <(dig +short AAAA "$host" | sort -u)
-    mapfile -t cname_records < <(dig +short CNAME "$host" | sort -u)
-    (( ${#cname_records[@]} == 0 )) ||
-      die "conflicting CNAME for $host"
-    (( ${#a_records[@]} == 1 )) ||
-      die "expected one normalized A record for $host"
-    [[ "${a_records[0]}" == "$EXPECTED_PUBLIC_IPV4" ]] ||
-      die "A record does not match expected VPS address"
-    if [[ -n "${EXPECTED_PUBLIC_IPV6:-}" ]]; then
-      (( ${#aaaa_records[@]} == 1 )) ||
-        die "expected one normalized AAAA record for $host"
-      [[ "${aaaa_records[0]}" == "$EXPECTED_PUBLIC_IPV6" ]] ||
-        die "AAAA record does not match expected VPS address"
-    else
-      (( ${#aaaa_records[@]} == 0 )) ||
-        die "unexpected AAAA record for IPv4-only deployment"
-    fi
+    python3 - "$host" "$EXPECTED_PUBLIC_IPV4" \
+      "${EXPECTED_PUBLIC_IPV6:-}" <<'PY'
+    import ipaddress
+    import socket
+    import sys
+
+    host, expected_v4, expected_v6 = sys.argv[1:]
+    expected = {ipaddress.ip_address(expected_v4)}
+    if expected_v6:
+        expected.add(ipaddress.ip_address(expected_v6))
+    try:
+        answers = {
+            ipaddress.ip_address(item[4][0])
+            for item in socket.getaddrinfo(
+                host, 443, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+            )
+        }
+    except socket.gaierror as error:
+        raise SystemExit(f"ERROR: DNS resolution failed for {host}: {error}")
+    if answers != expected:
+        normalized_answers = ",".join(sorted(map(str, answers)))
+        normalized_expected = ",".join(sorted(map(str, expected)))
+        raise SystemExit(
+            "ERROR: final normalized DNS address set differs: "
+            f"expected={normalized_expected} actual={normalized_answers}"
+        )
+    PY
+    # A CNAME is permitted. socket.getaddrinfo follows its chain, and the exact
+    # normalized final IPv4/IPv6 set above is the acceptance boundary.
+    dig +short CNAME "$host" >/dev/null
     echo "PASS: normalized DNS address set"
 
 ### Step 3: Create the deploy entrypoint
@@ -3411,9 +4061,22 @@ scripts/deploy:
     for command_name in docker curl dig jq shellcheck sudo flock; do
       require_command "$command_name"
     done
-    exec 9>/run/lock/osi-odoo-deploy.lock
-    flock -n 9 || die "another Odoo deploy is running"
+    operation_lock_enter
     export OSI_RUNTIME_MODE=production
+
+    mem_available_kib="$(awk '$1 == "MemAvailable:" {print $2}' /proc/meminfo)"
+    [[ "$mem_available_kib" =~ ^[0-9]+$ ]] ||
+      die "cannot read host MemAvailable"
+    (( mem_available_kib >= 2097152 )) ||
+      die "host MemAvailable is below 2 GiB"
+    install -d -m 0700 "$BACKUP_ROOT"
+    for path in /opt/osi-odoo "$BACKUP_ROOT"; do
+      available_bytes="$(df -PB1 --output=avail "$path" | tail -n 1 | tr -d ' ')"
+      [[ "$available_bytes" =~ ^[0-9]+$ ]] ||
+        die "cannot read available disk for $path"
+      (( available_bytes >= 10737418240 )) ||
+        die "available disk is below 10 GiB for $path"
+    done
 
     "$SCRIPT_DIR/check-dns"
     docker network inspect caddy-net >/dev/null ||
@@ -3479,6 +4142,8 @@ scripts/deploy:
       /etc/systemd/system/osi-odoo-backup.timer
     sudo systemctl daemon-reload
     sudo systemctl enable --now osi-odoo-backup.timer
+    record_current_release
+    operation_lock_leave_outer
     sudo systemctl start osi-odoo-backup.service
     sudo systemctl is-active osi-odoo-backup.timer
     sudo systemctl list-timers osi-odoo-backup.timer --no-pager |
@@ -3520,31 +4185,119 @@ This script does not run Odoo test tags against osi_odoo_test. Its live checks a
 
 ### Step 4: Write the operator contract in README
 
-README.md must include these exact commands and their meanings:
+Replace README.md with this complete content:
 
-    # Initial or idempotent module initialization
-    OSI_RUNTIME_MODE=production scripts/init-database
+    # OSI Odoo test environment
 
-    # Manual paired backup
-    OSI_RUNTIME_MODE=production scripts/backup
+    This repository deploys Odoo 19 Community and PostgreSQL 17 at
+    `odoo-test.opensmartirrigation.org`. It is a test and demonstration system.
+    Do not enter real customer data or reuse real customer credentials.
 
-    # Non-disruptive restore proof
-    scripts/restore-rehearsal /home/rocky/backups/osi-odoo/TIMESTAMP
+    ## Runtime boundary
 
-    # Explicit live replacement after an update failure
-    OSI_RUNTIME_MODE=production scripts/restore-production \
-      /home/rocky/backups/osi-odoo/TIMESTAMP \
-      --confirm-replace-live
+    `compose.yaml` is the base file for disposable projects. It has no published
+    ports, global container names, or Caddy attachment. The deployed project also
+    uses `compose.test-vps.yaml`, which gives Odoo the unique `osi-odoo` alias on
+    `caddy-net`. PostgreSQL remains internal.
 
-It must state:
+    Copy `.env.example` to `.env`, replace every password placeholder with
+    `openssl rand -hex 32`, and set mode 0600. Never print or commit `.env`.
+    `scripts/deploy` requires `/opt/osi-odoo`, user `rocky`, at least 2 GiB
+    MemAvailable, and at least 10 GiB free for both the repository and backup path.
 
-- no real data or real customer credentials;
-- legal address, VAT, banking, registration, and Swiss taxes require operator validation before invoicing;
-- update failure leaves Odoo stopped;
-- restore the paired backup before code/image rollback;
-- never run module test tags against osi_odoo_test;
-- the base Compose file is for disposable projects and the override is for the deployed Caddy attachment;
-- backups retain 14 completed sets and the timer is persistent.
+    After DNS points to the VPS and `caddy-net` exists, deploy with:
+
+        cd /opt/osi-odoo
+        scripts/deploy
+
+    The command validates DNS and full Caddy configuration, initializes or updates
+    the database, installs the persistent backup timer, records the accepted
+    release identity, and checks HTTPS without printing credentials.
+
+    ## Initialize or upgrade
+
+        OSI_RUNTIME_MODE=production scripts/init-database
+
+    The command installs both OSI modules when the registry is empty or both are
+    uninstalled, upgrades both when both are installed, and stops on every mixed
+    or pending state. Never run `--test-enable` or `--test-tags` against
+    `osi_odoo_test`; the test scripts use disposable projects.
+
+    For an intentional module update, run:
+
+        OSI_RUNTIME_MODE=production scripts/update-modules
+
+    The backup, restore, update, and deploy commands share one non-blocking
+    operation lock. A concurrent invocation exits with `ERROR: another Odoo
+    operation is active`.
+
+    ## Paired backups
+
+        OSI_RUNTIME_MODE=production scripts/backup
+
+    Each completed directory contains a quiesced PostgreSQL custom dump, its
+    matching filestore archive, `manifest.json`, and `SHA256SUMS`. The manifest
+    records the Git commit and immutable image RepoDigests. The daily persistent
+    systemd timer retains the newest 14 completed sets.
+
+    Validate and restore a backup into an isolated disposable project without
+    stopping the deployed service:
+
+        scripts/validate-backup /home/rocky/backups/osi-odoo/TIMESTAMP
+        scripts/restore-rehearsal /home/rocky/backups/osi-odoo/TIMESTAMP
+
+    For an operator-confirmed live replacement:
+
+        OSI_RUNTIME_MODE=production scripts/restore-production \
+          /home/rocky/backups/osi-odoo/TIMESTAMP \
+          --confirm-replace-live
+
+    Production restore verifies a uniquely named candidate database and filestore
+    before switching names while Odoo is stopped. It retains the prior database
+    and filestore under the printed shared suffix and retains a fresh pre-restore
+    backup. It never drops or empties the live pair first.
+
+    ## Failed-update recovery
+
+    A failed update leaves Odoo stopped and writes `failed-update.json` in its
+    paired backup. Do not start candidate code against prior data. Recovery order
+    is mandatory:
+
+    1. Keep Odoo stopped.
+    2. Read `prior_release.git_commit` and the two immutable
+       `prior_release.images.*.repo_digest` values from the report.
+    3. Check out that prior Git commit, pull each recorded RepoDigest, and tag it
+       with the recorded image reference.
+    4. From that prior release, run `scripts/restore-production BACKUP_DIR
+       --confirm-replace-live`.
+    5. Restart only after its candidate verification and health check pass.
+
+    Run the sequence without printing secret values:
+
+        report=/home/rocky/backups/osi-odoo/TIMESTAMP/failed-update.json
+        test -f "$report"
+        backup_dir="$(jq -r .backup "$report")"
+        prior_commit="$(jq -r .prior_release.git_commit "$report")"
+        export OSI_RECOVERY_REPORT="$report"
+        git switch --detach "$prior_commit"
+        for image in odoo postgres; do
+          reference="$(jq -r ".prior_release.images.$image.reference" "$report")"
+          repo_digest="$(jq -r ".prior_release.images.$image.repo_digest" "$report")"
+          docker pull "$repo_digest"
+          docker tag "$repo_digest" "$reference"
+        done
+        OSI_RUNTIME_MODE=production scripts/restore-production \
+          "$backup_dir" --confirm-replace-live
+
+    Retained database, filestore, and backup cleanup is a separate, deliberate
+    operator action after acceptance.
+
+    ## Business-data warnings
+
+    Before issuing any real invoice, an authorized operator must validate the
+    legal address, VAT number, banking details, registration details, Swiss chart,
+    and every applicable tax. Demo identifiers start with `DEMO-`; they are not
+    operational records.
 
 Use literal TIMESTAMP only in README examples; scripts reject it because realpath requires an existing backup.
 
@@ -3585,9 +4338,19 @@ This task mutates the authorized test host only. It must not connect to osicloud
 
 Run:
 
-    ssh rocky@157.180.43.235 \
-      'docker ps --format "{{.Names}}|{{.Image}}|{{.Status}}" | sort' \
+    ssh rocky@157.180.43.235 'bash -se' <<'REMOTE' \
       | tee /tmp/osi-odoo-containers.before
+    set -Eeuo pipefail
+    while read -r container_id; do
+      project="$(docker inspect -f \
+        '{{index .Config.Labels "com.docker.compose.project"}}' \
+        "$container_id")"
+      [[ "$project" == osi-odoo ]] && continue
+      docker inspect -f \
+        '{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{index .Config.Labels "com.docker.compose.project"}}' \
+        "$container_id"
+    done < <(docker ps -aq) | sort
+    REMOTE
     ssh rocky@157.180.43.235 \
       'curl -fsS https://server.opensmartirrigation.org/actuator/health' \
       >/tmp/osi-server-health.before
@@ -3604,10 +4367,15 @@ From /home/phil/Repos/osi-odoo:
       --exclude .env \
       --exclude backups \
       ./ rocky@157.180.43.235:/opt/osi-odoo/
+    local_commit="$(git rev-parse HEAD)"
+    [[ "$local_commit" =~ ^[0-9a-f]{40}$ ]]
+    remote_commit="$(ssh rocky@157.180.43.235 \
+      'git -C /opt/osi-odoo rev-parse HEAD')"
+    test "$remote_commit" = "$local_commit"
 
 The --delete target is the explicit application directory /opt/osi-odoo, never /opt or a home directory.
 
-The transfer includes .git. Confirm that /opt/osi-odoo resolves to the exact deployed commit before scripts/deploy runs because the backup manifest records git rev-parse HEAD.
+The transfer includes .git. The exact comparison above is mandatory because release state and backup manifests record the deployed commit.
 
 ### Step 3: Create the mode-0600 host environment without printing secrets
 
@@ -3633,13 +4401,66 @@ Run this only when /opt/osi-odoo/.env is absent:
       echo 'OSI_ODOO_ADMIN_LOGIN=admin'
       printf 'OSI_ODOO_ADMIN_PASSWORD=%s\n' "$admin_password"
       echo 'BACKUP_ROOT=/home/rocky/backups/osi-odoo'
+      echo 'OSI_ODOO_LOCK_DIR=/home/rocky/.local/state/osi-odoo'
       echo 'EXPECTED_PUBLIC_IPV4=157.180.43.235'
       echo 'EXPECTED_PUBLIC_IPV6='
     } >/opt/osi-odoo/.env
     chmod 0600 /opt/osi-odoo/.env
     REMOTE
 
-If .env already exists, do not replace or display it. Validate its required key names with grep -q and its mode/owner with stat.
+Whether the file was created now or already existed, run this exact validation. It reads values inside the remote Python process and prints nothing:
+
+    ssh rocky@157.180.43.235 'python3 -' <<'PY'
+    import os
+    import pathlib
+    import re
+
+    path = pathlib.Path("/opt/osi-odoo/.env")
+    stat = path.stat()
+    if stat.st_mode & 0o777 != 0o600:
+        raise SystemExit("ERROR: .env mode is not 0600")
+    if stat.st_uid != os.getuid():
+        raise SystemExit("ERROR: .env owner is not rocky")
+    required = {
+        "COMPOSE_PROJECT_NAME",
+        "ODOO_DB_NAME",
+        "ODOO_DB_OWNER",
+        "ODOO_DB_USER",
+        "ODOO_DB_PASSWORD",
+        "ODOO_POSTGRES_ADMIN_PASSWORD",
+        "ODOO_MASTER_PASSWORD",
+        "OSI_ODOO_ADMIN_LOGIN",
+        "OSI_ODOO_ADMIN_PASSWORD",
+        "BACKUP_ROOT",
+        "OSI_ODOO_LOCK_DIR",
+        "EXPECTED_PUBLIC_IPV4",
+        "EXPECTED_PUBLIC_IPV6",
+    }
+    values = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise SystemExit("ERROR: invalid .env assignment")
+        key, value = line.split("=", 1)
+        if key in values:
+            raise SystemExit("ERROR: duplicate .env key")
+        values[key] = value
+    if required - values.keys():
+        raise SystemExit("ERROR: required .env key is absent")
+    for key in (
+        "ODOO_DB_PASSWORD",
+        "ODOO_POSTGRES_ADMIN_PASSWORD",
+        "ODOO_MASTER_PASSWORD",
+        "OSI_ODOO_ADMIN_PASSWORD",
+    ):
+        if not re.fullmatch(r"[0-9a-f]{64}", values[key]):
+            raise SystemExit(f"ERROR: {key} violates the hex contract")
+    if values["COMPOSE_PROJECT_NAME"] != "osi-odoo":
+        raise SystemExit("ERROR: wrong Compose project")
+    if values["ODOO_DB_NAME"] != "osi_odoo_test":
+        raise SystemExit("ERROR: wrong live database")
+    PY
 
 ### Step 4: Run deployment and read-only live assertions
 
@@ -3683,7 +4504,7 @@ Do not add --test-enable or --test-tags to any live command.
     set -Eeuo pipefail
     cd /opt/osi-odoo
     export OSI_RUNTIME_MODE=production
-    backup_dir="$(scripts/backup)"
+    backup_dir="$(scripts/backup | tail -n 1)"
     scripts/validate-backup "$backup_dir"
     scripts/restore-rehearsal "$backup_dir"
     sudo systemctl is-active osi-odoo-backup.timer
@@ -3698,20 +4519,39 @@ Expected:
 
 ### Step 6: Verify existing services and isolation
 
-    ssh rocky@157.180.43.235 \
-      'docker ps --format "{{.Names}}|{{.Image}}|{{.Status}}" | sort' \
+    ssh rocky@157.180.43.235 'bash -se' <<'REMOTE' \
       | tee /tmp/osi-odoo-containers.after
+    set -Eeuo pipefail
+    while read -r container_id; do
+      project="$(docker inspect -f \
+        '{{index .Config.Labels "com.docker.compose.project"}}' \
+        "$container_id")"
+      [[ "$project" == osi-odoo ]] && continue
+      docker inspect -f \
+        '{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{index .Config.Labels "com.docker.compose.project"}}' \
+        "$container_id"
+    done < <(docker ps -aq) | sort
+    REMOTE
     ssh rocky@157.180.43.235 \
       'curl -fsS https://server.opensmartirrigation.org/actuator/health' \
       >/tmp/osi-server-health.after
     cmp /tmp/osi-server-health.before /tmp/osi-server-health.after
+    cmp /tmp/osi-odoo-containers.before \
+      /tmp/osi-odoo-containers.after
+    ssh rocky@157.180.43.235 'bash -se' <<'REMOTE'
+    set -Eeuo pipefail
+    mapfile -t db_ids < <(docker ps -q \
+      --filter label=com.docker.compose.project=osi-odoo \
+      --filter label=com.docker.compose.service=db)
+    test "${#db_ids[@]}" -eq 1
+    test -z "$(docker port "${db_ids[0]}")"
+    test "$(docker inspect -f '{{.HostConfig.Memory}}' "${db_ids[0]}")" \
+      = 1073741824
+    test "$(docker inspect -f '{{.HostConfig.NanoCpus}}' "${db_ids[0]}")" \
+      = 1000000000
+    REMOTE
 
-Compare the before/after container lists. Existing container names must still be present and running; only project-scoped osi-odoo services may be new. Verify PostgreSQL has no published port:
-
-    ssh rocky@157.180.43.235 \
-      'docker port osi-odoo-db-1 | test ! -s /dev/stdin'
-
-If Compose chose a different generated db container name, resolve it through the com.docker.compose.project=osi-odoo and com.docker.compose.service=db labels; do not guess or add container_name.
+The sorted tuples exclude only the osi-odoo Compose project and are compared byte-for-byte. The database container is resolved through both Compose labels; no generated name is guessed.
 
 ### Step 7: Manual acceptance and stop conditions
 
@@ -3731,7 +4571,7 @@ Stop and report without rollback if:
 - a backup half or checksum is missing;
 - rehearsal restore fails;
 - Odoo module state is partial;
-- an update failed and the paired production restore has not completed.
+- an update failed and the prior release/images have not been reactivated before its paired production restore.
 
 ## Final verification matrix
 
@@ -3745,7 +4585,7 @@ Stop and report without rollback if:
 | Demo lifecycle | Task 5 lifecycle gate | upgrade, uninstall absence, reinstall counts |
 | Init state machine | scripts/test-init-database | init, update, named partial-state failure |
 | Compose isolation | Task 6 coexistence gate | two healthy stacks, six distinct volumes |
-| Backup/recovery | scripts/test-backup-restore | paired validation and isolated restore |
+| Backup/recovery | scripts/test-backup-restore | boundary write blocked, shared lock excludes concurrency, attachment row/file pair restores |
 | Update failure | scripts/test-backup-restore | exit 97, Odoo stopped, backup restorable |
 | Timer | systemctl list-timers | next trigger and successful manual invocation |
 | DNS/Caddy | scripts/deploy | normalized DNS, full-config validation, HTTPS |

@@ -20,15 +20,15 @@ The environment is a test system. It is not the production system of record, and
 - Odoo's filestore, PostgreSQL data, and rendered Odoo configuration use Docker named volumes.
 - The rendered configuration volume is populated by a one-shot root container, then owned by the image's odoo user with mode 0600. The runtime container mounts it read-only.
 - Secrets live in an operator-owned mode-0600 environment file on the VPS and are passed by environment-variable name. They are never embedded in Compose, committed files, generated command lines, or test fixtures.
-- The master and database passwords are generated with openssl rand -hex 32. Values containing NUL, CR, or LF are rejected; punctuation is otherwise valid.
+- Every database, master, and administrator password is generated with openssl rand -hex 32. The environment loader accepts exactly 64 lowercase hexadecimal characters for those values; this is the contract that makes the mode-0600 file safe to source as Bash.
 - Compose files do not set container_name.
 - The deployed Odoo service joins the external caddy-net network with the unique alias osi-odoo. Disposable projects use only their project-scoped internal network and never claim that alias.
 - Caddy terminates TLS. It sends /websocket and /websocket/* to Odoo port 8072, and all other traffic to port 8069.
-- DNS must have one normalized address set for the public name. A divergent AAAA or conflicting CNAME is a deployment blocker.
+- DNS must have one normalized final address set for the public name. A CNAME is allowed when resolution of its chain produces exactly the expected normalized IPv4/IPv6 set; a divergent or additional final address is a deployment blocker.
 - Odoo is configured for one HTTP worker, one cron worker, and one gevent worker. Per-process hard limits keep the three children within 1.5 GiB, leaving at least 512 MiB in the 2 GiB container limit for the master and transient overhead.
 - The database selector and database manager are disabled.
 - Odoo module tests run in disposable databases restored from a backup or created under a disposable Compose project. They never run against the live test database.
-- The implementation branch is feat/initial-odoo-environment; main is not used for development commits.
+- Implementation commits use feat/initial-odoo-environment; main is not used. Runtime recovery may use a detached prior commit only when OSI_RECOVERY_REPORT points to a failed-update report whose prior_release.git_commit exactly equals HEAD.
 
 ## Repository layout
 
@@ -38,6 +38,10 @@ The environment is a test system. It is not the production system of record, and
     ├── README.md
     ├── compose.yaml
     ├── compose.test-vps.yaml
+    ├── tests/
+    │   ├── test_static.py
+    │   └── fixtures/
+    │       └── test.env
     ├── config/
     │   └── odoo.conf.template
     ├── postgres-init/
@@ -113,7 +117,7 @@ No service publishes host ports. Caddy reaches Odoo over caddy-net.
 | odoo_data | /var/lib/odoo | odoo image user, runtime read/write |
 | odoo_config | /etc/odoo | populated as root, file owned by odoo:odoo, mode 0600, runtime read-only |
 
-The configuration renderer writes to a temporary file in the named volume, calls fsync, changes ownership and mode, and atomically replaces odoo.conf. It rejects unresolved template markers and NUL, CR, or LF in substituted values.
+The configuration renderer writes to a temporary file in the named volume, calls fsync, changes ownership and mode, and atomically replaces odoo.conf. It rejects unresolved template markers and control characters. The shared environment loader separately enforces the exact hexadecimal password alphabet before any runtime command.
 
 ### PostgreSQL ownership
 
@@ -130,7 +134,7 @@ Bootstrap performs these operations from the official PostgreSQL initialization 
 7. create pg_trgm as odoo_admin;
 8. grant odoo_app use and create rights on public.
 
-The bootstrap probe must prove that odoo_app can create and drop an application table and cannot create a database, role, schema, or extension.
+The bootstrap probe must prove that odoo_app can create and drop an application table and cannot create a database, role, schema, or extension. It also proves pg_trgm is owned by odoo_admin. Restore filters the pg_trgm EXTENSION and COMMENT archive-list entries, preserves the administrator-created candidate extension, and reasserts its owner after pg_restore.
 
 unaccent is not enabled in this environment. If a later Odoo configuration enables it, its extension must be added to the privileged bootstrap first.
 
@@ -145,7 +149,7 @@ The runtime uses:
     limit_memory_soft_gevent = 402653184
     limit_memory_hard_gevent = 536870912
 
-Odoo's prefork mode creates an HTTP child, a cron child, and a gevent child. Three hard limits total 1,610,612,736 bytes (1.5 GiB). The Compose memory limit is 2 GiB, leaving 512 MiB for the master and overhead. Deployment stops if the rendered values differ from this budget or the host lacks enough free memory to start the service safely.
+Odoo's prefork mode creates an HTTP child, a cron child, and a gevent child. Three hard limits total 1,610,612,736 bytes (1.5 GiB). The Compose memory limit is 2 GiB, leaving 512 MiB for the master and overhead. PostgreSQL retains its 1 GiB and one-CPU Compose limits. The disposable full-initialization gate samples host-visible RSS for every Odoo and PostgreSQL container in its project and requires observed peaks to remain inside those caps. Deployment stops before initialization unless MemAvailable is at least 2 GiB and at least 10 GiB is free on both the repository and backup filesystems.
 
 ## Database lifecycle
 
@@ -246,7 +250,7 @@ The stock workflow uses Odoo inventory records, lot/serial tracking, move lines,
 
 Every demo-owned root and generated child has a stable external ID or belongs to a registered root through an asserted cascade. The inventory includes CRM, quotations and lines, confirmed sales and lines, invoice and lines, receipt and delivery pickings, moves, move lines, lot, quants, procurement group, generated project, tasks, milestones, and every demo external ID.
 
-Uninstalling osi_business_demo must remove all demo-owned records and external IDs while leaving osi_business_setup records intact. Reinstalling it must recreate exactly one clean workflow. Tests exercise ensure_demo twice, module upgrade, uninstall, absence checks, reinstall, and count checks.
+Uninstalling osi_business_demo must remove all demo-owned records and external IDs while leaving osi_business_setup records intact. The survival gate resolves all seven stockable products, all five project templates, all six project stages, and the reused warehouse through their setup external IDs. Reinstalling the demo must recreate exactly one clean workflow. Tests exercise ensure_demo twice, module upgrade, uninstall, absence checks, reinstall, and count checks.
 
 ## Backup and recovery
 
@@ -268,12 +272,14 @@ The manifest records:
 - filestore archive filename;
 - Git commit;
 - both configured image references;
-- both resolved image digests;
+- both resolved immutable RepoDigests;
 - source volume names;
 - whether Odoo was running before backup;
 - SHA-256 of each payload.
 
-The backup script stops Odoo before the database dump and volume archive. A trap restarts it only when it was running before the backup. PostgreSQL stays running for pg_dump. All Compose execs use -T. A failed dump, archive, digest calculation, or manifest validation leaves no directory that can be mistaken for a complete backup.
+The backup script stops Odoo before the database dump and volume archive. A trap restarts it only when it was running before the backup. PostgreSQL stays running for pg_dump. All Compose execs use -T. A failed dump, archive, RepoDigest lookup, or manifest validation leaves no directory that can be mistaken for a complete backup.
+
+Backup, both restore modes, module update, and deploy use one non-blocking flock contract. A top-level operation opens fd 9 and exports the exact lock path; a nested backup or rehearsal is accepted only when it inherits that open descriptor. An environment flag without the descriptor cannot bypass the lock. The same protected state directory stores mode-0600 current-release.json after a successful deployment or update. A pre-update backup records that prior successful commit even when the working tree already contains candidate code. Deploy releases the lock only after its mutations and release-state update so the required systemd backup invocation can acquire it. The integration gate pauses a backup after Odoo stops, proves an application boundary command cannot run, rejects concurrent backup and restore entry, then restores an attachment row and its matching stored file from the resulting pair.
 
 ### Timer
 
@@ -283,8 +289,8 @@ osi-odoo-backup.service is a root system service that executes /opt/osi-odoo/scr
 
 There are two separate commands:
 
-- restore-rehearsal BACKUP_DIR creates a unique disposable Compose project, database volume, filestore volume, and target database. It never stops or joins the live runtime. It restores, starts one-off Odoo, runs functional assertions, and removes the explicitly validated disposable project and volumes.
-- restore-production BACKUP_DIR --confirm-replace-live validates the pair through an isolated staged rehearsal, takes and retains a fresh paired backup of the previous live state, then stops Odoo and replaces the live database and filestore. It starts the replacement only after registry checks and prints the retained recovery backup after health checks pass.
+- restore-rehearsal BACKUP_DIR creates a unique disposable Compose project, database volume, filestore volume, and target database. It never stops or joins the live runtime. It restores with bootstrap-owned extension entries filtered, starts one-off Odoo, runs functional assertions, and removes the explicitly validated disposable project and volumes.
+- restore-production BACKUP_DIR --confirm-replace-live first completes the isolated rehearsal and retains a fresh paired backup. It then stops Odoo, restores the database and filestore under one unique candidate name, and verifies that candidate before touching the live names. It renames the live database and filestore to one retained suffix and renames the candidate pair to the live name. The database and same-volume directory renames are ordered, failure-tracked, and reversed if a later rename or health check fails. It never drops a live database or empties a live filestore first, and it retains the old named pair plus the pre-restore backup after success.
 
 Neither command accepts a manifest whose database name, image metadata, payload names, or checksums are missing or inconsistent.
 
@@ -295,10 +301,11 @@ scripts/update-modules takes a paired backup, pulls the configured images, resto
 If a module update fails:
 
 - Odoo remains stopped;
-- the command records the exit code, candidate image references and digests, Git commit, and backup directory;
+- the command records the exit code, candidate references and RepoDigests, candidate Git commit, backup directory, and the prior backup's commit, references, and RepoDigests;
 - code or image rollback is not automatic;
-- the operator first runs restore-production BACKUP_DIR --confirm-replace-live;
-- only after the paired restore succeeds may the operator check out prior code or images and restart.
+- the operator keeps Odoo stopped and first reactivates the recorded prior Git release and immutable images;
+- that prior release, not candidate code, validates and runs restore-production BACKUP_DIR --confirm-replace-live against its paired backup;
+- only after the paired candidate-and-swap restore succeeds may Odoo restart.
 
 Tests inject a failing module update and prove that Odoo stays stopped and that the recorded backup restores in rehearsal mode.
 
@@ -316,7 +323,7 @@ Caddy uses a named path matcher:
 
 Deployment validates the full host Caddyfile before reload. It proves HTTPS login, dbfilter, disabled database-manager routes, the WebSocket health route, asset loading, and logs without proxy-loop or upstream-resolution errors.
 
-DNS validation normalizes every A and AAAA response. The only accepted address set is the VPS's actual public address set. Any conflicting CNAME, divergent IPv6 target, or unexpected additional address stops deployment before Caddy reload.
+DNS validation uses Python ipaddress to normalize the final IPv4/IPv6 answers. The only accepted set is the VPS's configured public address set. A CNAME is permitted when its resolved final set is exact; a divergent IPv6 target or any unexpected address stops deployment before Caddy reload.
 
 Coexistence is proved by starting two distinct disposable base-Compose projects simultaneously and showing unique containers, networks, and volumes. Neither may have a caddy-net attachment or the osi-odoo alias.
 
@@ -325,17 +332,17 @@ Coexistence is proved by starting two distinct disposable base-Compose projects 
 Work stops rather than proceeding when any of these conditions occurs:
 
 - repository or branch does not match the expected target;
-- required environment variables are missing or contain NUL, CR, or LF;
+- required password variables are missing or are not exactly 64 lowercase hexadecimal characters;
 - rendered configuration is not readable by the runtime odoo user at mode 0600;
 - PostgreSQL privilege probes do not fail and pass exactly as specified;
-- module test discovery does not include the named test classes;
+- runtime module-test discovery does not include each named class and method exactly once;
 - accounting, warehouse, project-template, demo-stock, cleanup, or idempotence assertions fail;
 - a live database is selected for a destructive or module-test command;
 - backup halves, image metadata, manifest, or checksums do not match;
-- DNS has a conflicting record;
+- DNS's normalized final address set differs, including through a CNAME chain;
 - Caddy validation fails;
 - the production alias is present in a disposable project;
-- an update failure has not been repaired with a paired restore.
+- an update failure has not first returned to the prior release/images and then been repaired by that code's paired restore.
 
 Acceptance requires fresh evidence for every item above, a successful rehearsal restore, a successful timer invocation, and a clean git diff --check.
 
@@ -345,12 +352,12 @@ All eighteen required adversarial-review findings are incorporated in the implem
 
 Optional rulings:
 
-- O1: incorporated by recording configured image references and resolved digests in every backup and deployment report. Source Compose remains pinned to immutable version tags because digest pinning across host architectures is an operator-maintenance decision.
+- O1: incorporated by recording configured image references and resolved RepoDigests in every backup and update report. Source Compose remains version-tagged because digest pinning across host architectures is an operator-maintenance decision.
 - O2: incorporated with exact /websocket and /websocket/* matchers.
-- O3: incorporated with normalized A, AAAA, and CNAME validation.
-- O4: incorporated with hex-generated secrets and rejection limited to NUL, CR, and LF.
-- O5: pg_trgm is created by privileged bootstrap. unaccent is intentionally not created because it is not enabled.
-- O6: incorporated with deterministic file-map checks, a required shellcheck preflight, and the repo-local anti-slop checker command.
+- O3: incorporated by allowing a CNAME only when its Python-normalized final A/AAAA set is exact.
+- O4: incorporated with the 64-character lowercase hexadecimal generation and sourcing contract.
+- O5: pg_trgm is created and remains owned by odoo_admin; its extension and comment archive entries are omitted during restore. unaccent is intentionally not created because it is not enabled.
+- O6: incorporated with the actual Task 1 test and fixture in the file map, a required full inherited unittest gate, shellcheck, and the repo-local anti-slop checker command.
 
 ## References
 
