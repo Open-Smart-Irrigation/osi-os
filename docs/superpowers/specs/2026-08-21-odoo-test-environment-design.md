@@ -2,7 +2,9 @@
 
 **Date:** 2026-08-21
 **Status:** Approved; amended after adversarial review
-**Target host:** 157.180.43.235 (ubuntu-4gb-nbg1-1)
+**Target host:** 157.180.43.235
+**Verified host capacity (2026-08-21):** 11 GiB total memory, 6.9 GiB
+MemAvailable, and 33 GiB free disk
 **Public name:** odoo-test.opensmartirrigation.org
 **Source repository:** /home/phil/Repos/osi-odoo locally, /opt/osi-odoo on the VPS
 
@@ -149,7 +151,7 @@ The runtime uses:
     limit_memory_soft_gevent = 402653184
     limit_memory_hard_gevent = 536870912
 
-Odoo's prefork mode creates an HTTP child, a cron child, and a gevent child. Three hard limits total 1,610,612,736 bytes (1.5 GiB). The Compose memory limit is 2 GiB, leaving 512 MiB for the master and overhead. PostgreSQL retains its 1 GiB and one-CPU Compose limits. The disposable full-initialization gate locates each container's cgroup v2 path from its init PID, samples memory.peak with memory.current as the aggregate fallback, and requires the Odoo and PostgreSQL values to remain inside their respective caps. These cgroup files include every child process. Deployment stops before initialization unless MemAvailable is at least 4 GiB and at least 10 GiB is free on both the repository and backup filesystems. The memory floor covers the 3 GiB combined container caps plus 1 GiB for the host, Docker, Caddy, and the existing workload.
+Odoo's prefork mode creates an HTTP child, a cron child, and a gevent child. Three hard limits total 1,610,612,736 bytes (1.5 GiB). The Compose memory limit is 2 GiB, leaving 512 MiB for the master and overhead. PostgreSQL retains its 1 GiB and one-CPU Compose limits. The disposable full-initialization gate locates each container's cgroup v2 path from its init PID, samples memory.peak with memory.current as the aggregate fallback, and requires the Odoo and PostgreSQL values to remain inside their respective caps. These cgroup files include every child process. Deployment stops before initialization unless MemAvailable is at least 4 GiB and at least 10 GiB is free on both the repository and backup filesystems. The memory floor covers the 3 GiB combined container caps plus 1 GiB for the host, Docker, Caddy, and the existing workload. The verified 2026-08-21 readings of 11 GiB total memory, 6.9 GiB MemAvailable, and 33 GiB free disk satisfy both floors. The runtime preflight remains mandatory because host load and free disk change.
 
 ## Database lifecycle
 
@@ -290,7 +292,7 @@ osi-odoo-backup.service is a root system service that executes /opt/osi-odoo/scr
 There are two separate commands:
 
 - restore-rehearsal BACKUP_DIR creates a unique disposable Compose project, database volume, filestore volume, and target database. It never stops or joins the live runtime. It restores with bootstrap-owned extension entries filtered, starts one-off Odoo, runs functional assertions, and removes the explicitly validated disposable project and volumes.
-- restore-production BACKUP_DIR --confirm-replace-live first completes the isolated rehearsal and retains a fresh paired backup. It then stops Odoo, restores the database and filestore under one unique candidate name, and verifies that candidate before touching the live names. It renames the live database and filestore to one retained suffix and renames the candidate pair to the live name. After any failure, it queries PostgreSQL and the volume for the actual live, candidate, and retained names; it never trusts whether the Docker client returned success. It moves a candidate component away from the live name when necessary, restores each retained old component to the live name, and verifies that the database and filestore both resolve to the old pair before returning the original failure. It never drops a live database or empties a live filestore first, and it retains the old named pair plus the pre-restore backup after success.
+- restore-production BACKUP_DIR --confirm-replace-live first completes the isolated rehearsal and retains a fresh paired backup. It then stops Odoo, restores the database and filestore under one unique candidate name, and verifies that candidate before touching the live names. A shared 16-hex-character random nonce produces `osi_candidate_<nonce>` and `osi_retained_<nonce>`, which are 30 and 29 ASCII bytes. The disposable production-restore gate uses a 16-byte base database name, and rehearsal uses a 23-byte name. A structural gate fixes the longest generated identifier at 30 bytes, below PostgreSQL's 63-byte limit. Restore renames the live database and filestore to the retained name and renames the candidate pair to the live name. After any failure, it queries PostgreSQL and the volume for the actual live, candidate, and retained names; it never trusts whether the Docker client returned success. It moves a candidate component away from the live name when necessary, restores each retained old component to the live name, and verifies that the database and filestore both resolve to the old pair before returning the original failure. It never drops a live database or empties a live filestore first, and it retains the old named pair plus the pre-restore backup after success.
 
 Neither command accepts a manifest whose database name, image metadata, payload names, or checksums are missing or inconsistent.
 

@@ -10,6 +10,11 @@
 
 **Source spec:** docs/superpowers/specs/2026-08-21-odoo-test-environment-design.md
 
+**Verified target capacity (2026-08-21):** 11 GiB total memory, 6.9 GiB
+MemAvailable, and 33 GiB free disk. These observations clear the deployment
+floors, but scripts/deploy checks current memory and disk before every run
+because both values change with host load.
+
 ## Execution rules
 
 1. Work only in /home/phil/Repos/osi-odoo until the remote-deployment task.
@@ -482,14 +487,25 @@ Create scripts/test-env as the shared disposable-project fixture:
     create_test_environment() {
       local category="$1"
       local suffix="$2"
+      local database_prefix database_nonce
       [[ "$category" =~ ^(bootstrap|restore|coexist)$ ]] ||
         { echo "ERROR: invalid test category" >&2; return 1; }
-      [[ "$suffix" =~ ^[A-Za-z0-9]+$ ]] ||
+      [[ "$suffix" =~ ^[A-Za-z0-9]$ ]] ||
         { echo "ERROR: invalid test suffix" >&2; return 1; }
+      case "$category" in
+        bootstrap) database_prefix=osi_b ;;
+        restore) database_prefix=osi_r ;;
+        coexist) database_prefix=osi_c ;;
+      esac
+      database_nonce="$(openssl rand -hex 4)"
+      [[ "$database_nonce" =~ ^[0-9a-f]{8}$ ]] ||
+        { echo "ERROR: invalid test database nonce" >&2; return 1; }
+      TEST_DATABASE="${database_prefix}_${database_nonce}_${suffix}"
+      [[ ${#TEST_DATABASE} -eq 16 ]] ||
+        { echo "ERROR: test database name budget changed" >&2; return 1; }
       TEST_ROOT="$(mktemp -d /tmp/osi-odoo-test.XXXXXX)"
       chmod 0700 "$TEST_ROOT"
       TEST_PROJECT="osi-odoo-$category-$$-$suffix"
-      TEST_DATABASE="osi_odoo_${category}_$$_${suffix}"
       TEST_ENV_FILE="$TEST_ROOT/test.env"
       {
         printf 'COMPOSE_PROJECT_NAME=%s\n' "$TEST_PROJECT"
@@ -3471,7 +3487,12 @@ scripts/restore-rehearsal:
     test_root="$(mktemp -d)"
     chmod 0700 "$test_root"
     project="osi-odoo-restore-$$-r"
-    database="osi_odoo_restore_$$"
+    restore_nonce="$(openssl rand -hex 8)"
+    [[ "$restore_nonce" =~ ^[0-9a-f]{16}$ ]] ||
+      die "invalid rehearsal database nonce"
+    database="osi_rr_${restore_nonce}"
+    [[ ${#database} -eq 23 ]] ||
+      die "rehearsal database name budget changed"
     env_file="$test_root/restore.env"
     cleanup() {
       if [[ "$project" =~ ^osi-odoo-restore-[0-9]+-r$ ]]; then
@@ -3622,11 +3643,18 @@ scripts/restore-production:
     }
     trap report_staging_failure EXIT
     source_database="$(jq -r .database_name "$backup_dir/manifest.json")"
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)_$$_${RANDOM}"
-    candidate_database="${ODOO_DB_NAME}__candidate_${stamp}"
-    retained_database="${ODOO_DB_NAME}__retained_${stamp}"
-    (( ${#candidate_database} <= 63 && ${#retained_database} <= 63 )) ||
-      die "live database name is too long for candidate restore"
+    restore_nonce="$(openssl rand -hex 8)"
+    [[ "$restore_nonce" =~ ^[0-9a-f]{16}$ ]] ||
+      die "invalid production restore nonce"
+    candidate_database="osi_candidate_${restore_nonce}"
+    retained_database="osi_retained_${restore_nonce}"
+    longest_restore_identifier=osi_candidate_ffffffffffffffff
+    [[ ${#candidate_database} -eq 30 &&
+       ${#retained_database} -eq 29 &&
+       ${#longest_restore_identifier} -eq 30 ]] ||
+      die "restore database name budget changed"
+    (( ${#longest_restore_identifier} <= 63 )) ||
+      die "restore database name exceeds PostgreSQL's 63-byte limit"
     work_dir="$(mktemp -d /tmp/osi-odoo-production-restore.XXXXXX)"
     chmod 0700 "$work_dir"
     create_restore_database "$candidate_database"
@@ -3941,7 +3969,7 @@ scripts/test-backup-restore starts with this complete prologue:
     export TEST_REPO_ROOT
     # shellcheck source=scripts/test-env
     . "$SCRIPT_DIR/test-env"
-    create_test_environment bootstrap b
+    create_test_environment restore b
     backup_pid=""
     cleanup_backup_test() {
       if [[ "$backup_pid" =~ ^[0-9]+$ ]]; then
@@ -3957,6 +3985,15 @@ scripts/test-backup-restore starts with this complete prologue:
     enter_repo
     load_env
     require_disposable_project
+    [[ "$TEST_DATABASE" =~ ^osi_r_[0-9a-f]{8}_b$ ]] ||
+      die "production-restore gate does not use its short database name"
+    longest_restore_identifier=osi_candidate_ffffffffffffffff
+    [[ ${#TEST_DATABASE} -eq 16 &&
+       ${#longest_restore_identifier} -eq 30 ]] ||
+      die "restore identifier structure changed"
+    (( ${#longest_restore_identifier} <= 63 )) ||
+      die "restore identifier exceeds PostgreSQL's 63-byte limit"
+    echo "PASS: longest restore identifier is 30 of 63 bytes"
     "$SCRIPT_DIR/init-database"
     compose_base up -d odoo
     wait_for_odoo
@@ -4129,7 +4166,7 @@ Append this exact body:
     retained_name="$(sed -n \
       's/^Retained prior database\/filestore name: //p' \
       "$test_root/restore-success.log")"
-    [[ "$retained_name" =~ ^${ODOO_DB_NAME}__retained_[A-Za-z0-9_]+$ ]]
+    [[ "$retained_name" =~ ^osi_retained_[0-9a-f]{16}$ ]]
     live_rollback_count="$(compose_base exec -T db psql -U odoo_admin \
       -d "$ODOO_DB_NAME" -Atv ON_ERROR_STOP=1 \
       -v attachment_name="$rollback_attachment" \
@@ -4201,6 +4238,7 @@ Run:
 
 Expected:
 
+    PASS: longest restore identifier is 30 of 63 bytes
     PASS: backup manifest and payloads
     PASS: isolated rehearsal restore
     PASS: quiesced boundary and shared operation lock
@@ -4449,6 +4487,9 @@ Replace README.md with this complete content:
     MemAvailable, and at least 10 GiB free for both the repository and backup path.
     The memory floor covers the 3 GiB combined Odoo/PostgreSQL caps plus 1 GiB
     for the host, Docker, Caddy, and the existing service workload.
+    On 2026-08-21 the target reported 11 GiB total memory, 6.9 GiB MemAvailable,
+    and 33 GiB free disk. Those readings clear the floors; the deploy preflight
+    remains mandatory because current availability can fall below them.
 
     After DNS points to the VPS and `caddy-net` exists, deploy with:
 
