@@ -95,7 +95,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
               type="button"
               onClick={() => setMinutesInput(String(chip))}
               disabled={busy}
-              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`flex min-h-[44px] flex-1 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                 minutes === chip
                   ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
                   : 'border-[var(--border)] bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
@@ -120,7 +120,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
             value={minutesInput}
             disabled={busy}
             onChange={(event) => setMinutesInput(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+            className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
             aria-label={t('openDialog.duration')}
           />
           {!isValid && (
@@ -142,7 +142,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {t('cancel')}
           </button>
@@ -150,7 +150,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
             type="button"
             onClick={handleSubmit}
             disabled={!isValid || busy}
-            className="flex items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
             {t('openDialog.confirm', { minutes: isValid ? minutes : minutesInput })}

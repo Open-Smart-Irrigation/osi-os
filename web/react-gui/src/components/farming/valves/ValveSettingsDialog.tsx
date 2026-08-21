@@ -88,7 +88,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
             value={generation}
             disabled={busy}
             onChange={(event) => setGeneration(event.target.value as StregaGeneration)}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+            className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
           >
             <option value="GEN1">GEN1</option>
             <option value="GEN2">{t('settingsDialog.gen2Untested')}</option>
@@ -109,13 +109,13 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
               value={flowRateInput}
               disabled={busy}
               onChange={(event) => setFlowRateInput(event.target.value)}
-              className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+              className="min-h-[44px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
             />
             <button
               type="button"
               onClick={() => setFlowRateInput('')}
               disabled={busy || trimmed === ''}
-              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {t('settingsDialog.clear')}
             </button>
@@ -128,8 +128,8 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
         {parsedFlowRate !== null && (
           <div className="mt-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('settingsDialog.flowSource')}</p>
-            <div className="mt-1 flex gap-4">
-              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+            <div className="mt-1 flex gap-2">
+              <label className="flex min-h-[44px] items-center gap-2 px-1 text-sm text-[var(--text)] sm:min-h-0 sm:px-0">
                 <input
                   type="radio"
                   name={`valve-flow-source-${valve.deviceEui}`}
@@ -140,7 +140,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
                 />
                 {t('settingsDialog.measured')}
               </label>
-              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+              <label className="flex min-h-[44px] items-center gap-2 px-1 text-sm text-[var(--text)] sm:min-h-0 sm:px-0">
                 <input
                   type="radio"
                   name={`valve-flow-source-${valve.deviceEui}`}
@@ -162,7 +162,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {t('cancel')}
           </button>
@@ -170,7 +170,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
             type="button"
             onClick={() => void handleSave()}
             disabled={!isFlowRateValid || busy}
-            className="flex items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
             {t('settingsDialog.save')}

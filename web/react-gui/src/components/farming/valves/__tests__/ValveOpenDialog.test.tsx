@@ -96,4 +96,12 @@ describe('ValveOpenDialog', () => {
     // Regression: the hint used to just repeat the field label ("Duration (min)").
     expect(screen.getByText('Enter 1–255 minutes.')).toBeInTheDocument();
   });
+
+  it('gives every interactive control a >=44px effective touch target', () => {
+    render(<ValveOpenDialog valve={makeValve()} open onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} />);
+    expect(screen.getByRole('button', { name: '30' })).toHaveClass('min-h-[44px]');
+    expect(screen.getByLabelText('Duration (min)')).toHaveClass('min-h-[44px]');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('min-h-[44px]');
+    expect(screen.getByRole('button', { name: /Open for/ })).toHaveClass('min-h-[44px]');
+  });
 });

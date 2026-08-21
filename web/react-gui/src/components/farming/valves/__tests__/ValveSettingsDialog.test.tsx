@@ -92,4 +92,15 @@ describe('ValveSettingsDialog', () => {
 
     expect(await screen.findByText('Could not save valve settings.')).toBeInTheDocument();
   });
+
+  it('gives every interactive control a >=44px effective touch target', () => {
+    render(<ValveSettingsDialog valve={makeValve({ flowRateLpm: 5 })} open onClose={vi.fn()} onChanged={vi.fn()} />);
+    expect(screen.getByLabelText('Valve generation')).toHaveClass('min-h-[44px]');
+    expect(screen.getByLabelText('Flow rate (L/min)')).toHaveClass('min-h-[44px]');
+    expect(screen.getByRole('button', { name: 'Clear' })).toHaveClass('min-h-[44px]');
+    expect(screen.getByLabelText('Measured').closest('label')).toHaveClass('min-h-[44px]');
+    expect(screen.getByLabelText('Estimated').closest('label')).toHaveClass('min-h-[44px]');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('min-h-[44px]');
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveClass('min-h-[44px]');
+  });
 });

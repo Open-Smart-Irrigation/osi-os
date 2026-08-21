@@ -135,7 +135,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
           type="button"
           onClick={primaryAction.onClick}
           disabled={busy}
-          className="flex items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy && <Spinner />}
           {primaryAction.label}
@@ -145,7 +145,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             type="button"
             onClick={onSchedule}
             disabled={busy}
-            className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {t('schedule')}
           </button>
@@ -156,7 +156,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
               disabled={busy}
               aria-label={t('more')}
               title={t('more')}
-              className={`rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                 menuOpen ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
               }`}
             >
@@ -200,7 +200,7 @@ const MenuItem: React.FC<{ label: string; onClick: () => void; disabled?: boolea
     role="menuitem"
     onClick={onClick}
     disabled={disabled}
-    className="block w-full rounded-md px-3 py-2 text-left text-sm text-[var(--text)] transition-colors hover:bg-[var(--card)] disabled:cursor-not-allowed disabled:opacity-50"
+    className="flex min-h-[44px] w-full items-center rounded-md px-3 py-2 text-left text-sm text-[var(--text)] transition-colors hover:bg-[var(--card)] disabled:cursor-not-allowed disabled:opacity-50"
   >
     {label}
   </button>

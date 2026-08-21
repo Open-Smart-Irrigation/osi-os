@@ -299,7 +299,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)]"
+            className="flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] sm:min-h-0"
           >
             {t('cancel')}
           </button>
@@ -316,7 +316,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
               <button
                 type="button"
                 onClick={() => mutate()}
-                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)]"
+                className="flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] sm:min-h-0"
               >
                 {tc('retry')}
               </button>
@@ -327,28 +327,36 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
             <>
               <section>
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('scheduleDialog.week')}</p>
-                <div className="mt-2 grid grid-cols-7 gap-1.5">
+                <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-7">
                   {WEEKDAYS.map((d) => {
                     const windows = data.compiled.days[d] ?? [];
                     const badge = valve.stregaGeneration === 'GEN1'
                       ? pushBadgeLabel(latestPush(data.pushState.filter((p) => p.weekday === d)), valve.timezone, td)
                       : null;
+                    const dayLabel = td(`weekdays.${d}`);
                     return (
-                      <div key={d} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2">
-                        <p className="text-xs font-semibold text-[var(--text-tertiary)]">{td(`weekdays.${d}`)}</p>
-                        {windows.length === 0 ? (
-                          <p className="mt-1 text-xs text-[var(--text-tertiary)]">{t('scheduleDialog.noWindows')}</p>
-                        ) : (
-                          <ul className="mt-1 space-y-0.5">
-                            {windows.map((w) => (
-                              <li key={w.scheduleUuid} className="text-[11px] leading-tight text-[var(--text)]">
-                                {pad(w.onH)}:{pad(w.onM)}–{pad(w.offH)}:{pad(w.offM)}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{t('scheduleDialog.windows', { count: windows.length })}</p>
-                        {badge && <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{badge}</p>}
+                      <div
+                        key={d}
+                        role="group"
+                        aria-label={dayLabel}
+                        className="min-w-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
+                      >
+                        <div className="flex min-w-0 items-baseline gap-2 sm:block sm:gap-0">
+                          <p className="max-w-[40%] shrink-0 truncate text-xs font-semibold text-[var(--text-tertiary)] sm:max-w-none sm:shrink">{dayLabel}</p>
+                          {windows.length === 0 ? (
+                            <p className="min-w-0 truncate text-xs text-[var(--text-tertiary)] sm:mt-1">{t('scheduleDialog.noWindows')}</p>
+                          ) : (
+                            <ul className="min-w-0 flex-1 space-y-0.5 sm:mt-1 sm:flex-none">
+                              {windows.map((w) => (
+                                <li key={w.scheduleUuid} className="whitespace-nowrap text-xs leading-tight text-[var(--text)]">
+                                  {pad(w.onH)}:{pad(w.onM)}–{pad(w.offH)}:{pad(w.offM)}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                        <p className="mt-1 truncate text-xs text-[var(--text-tertiary)]">{t('scheduleDialog.windows', { count: windows.length })}</p>
+                        {badge && <p className="mt-1 truncate text-xs text-[var(--text-tertiary)]">{badge}</p>}
                       </div>
                     );
                   })}
@@ -380,8 +388,8 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                               : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone) : '—'} · ${schedule.durationMinutes} min`}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          <label className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
+                        <div className="flex shrink-0 items-center gap-1">
+                          <label className="flex min-h-[44px] items-center gap-1.5 px-1.5 text-xs text-[var(--text-secondary)] sm:min-h-0 sm:px-0">
                             <input
                               type="checkbox"
                               checked={schedule.enabled}
@@ -395,7 +403,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                             type="button"
                             onClick={() => void deleteRow(schedule)}
                             disabled={rowBusyUuid === schedule.scheduleUuid}
-                            className="text-xs font-semibold text-[var(--warn-text)] underline disabled:cursor-not-allowed disabled:opacity-60"
+                            className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--warn-text)] underline disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
                           >
                             {t('scheduleDialog.delete')}
                           </button>
@@ -415,7 +423,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         key={d}
                         type="button"
                         onClick={() => toggleWeekday(d)}
-                        className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                        className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors sm:min-h-0 sm:min-w-0 sm:px-2.5 ${
                           weekly.days.includes(d)
                             ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
                             : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)]'
@@ -433,7 +441,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         type="time"
                         value={weekly.startTime}
                         onChange={(e) => setWeekly((prev) => ({ ...prev, startTime: e.target.value }))}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] sm:min-h-0"
                       />
                     </div>
                     <div>
@@ -446,7 +454,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         inputMode="numeric"
                         value={weekly.duration}
                         onChange={(e) => setWeekly((prev) => ({ ...prev, duration: e.target.value }))}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] sm:min-h-0"
                       />
                     </div>
                   </div>
@@ -457,7 +465,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                       type="text"
                       value={weekly.label}
                       onChange={(e) => setWeekly((prev) => ({ ...prev, label: e.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]"
+                      className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] sm:min-h-0"
                     />
                   </div>
                   {weeklyPreview && (
@@ -470,7 +478,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                     type="button"
                     onClick={() => void saveWeekly()}
                     disabled={!isWeeklyValid || savingWeekly}
-                    className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="mt-3 min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {savingWeekly ? t('scheduleDialog.saving') : t('scheduleDialog.save')}
                   </button>
@@ -486,7 +494,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         type="date"
                         value={once.date}
                         onChange={(e) => setOnce((prev) => ({ ...prev, date: e.target.value }))}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] sm:min-h-0"
                       />
                     </div>
                     <div>
@@ -496,7 +504,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         type="time"
                         value={once.time}
                         onChange={(e) => setOnce((prev) => ({ ...prev, time: e.target.value }))}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] sm:min-h-0"
                       />
                     </div>
                   </div>
@@ -511,7 +519,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         inputMode="numeric"
                         value={once.duration}
                         onChange={(e) => setOnce((prev) => ({ ...prev, duration: e.target.value }))}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] sm:min-h-0"
                       />
                     </div>
                     <div>
@@ -521,7 +529,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         type="text"
                         value={once.label}
                         onChange={(e) => setOnce((prev) => ({ ...prev, label: e.target.value }))}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] sm:min-h-0"
                       />
                     </div>
                   </div>
@@ -536,7 +544,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                     type="button"
                     onClick={() => void saveOnce()}
                     disabled={!isOnceValid || savingOnce}
-                    className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="mt-3 min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {savingOnce ? t('scheduleDialog.saving') : t('scheduleDialog.save')}
                   </button>

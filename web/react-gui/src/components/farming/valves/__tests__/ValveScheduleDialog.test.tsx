@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
 
@@ -265,13 +265,79 @@ describe('ValveScheduleDialog', () => {
 
   it('renders the compiled week grid columns Monday-first', async () => {
     schedulesMock.mockResolvedValueOnce(emptyResponse());
-    const { container } = renderDialog(makeValve());
+    renderDialog(makeValve());
     await screen.findByText('Schedules');
 
-    const headers = Array.from(
-      container.querySelectorAll('.grid-cols-7 p.text-xs.font-semibold.text-\\[var\\(--text-tertiary\\)\\]'),
-    ).map((el) => el.textContent);
-    expect(headers).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+    const dayGroups = screen.getAllByRole('group');
+    expect(dayGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
+    ]);
+  });
+
+  it('pairs each compiled-week header with its own day\'s window data, not a neighbour\'s', async () => {
+    // A distinguishable window per weekday (encoded via a unique minute) so a header/data
+    // swap between adjacent columns/rows would be caught, not just a shuffled overall order.
+    const response = emptyResponse();
+    response.compiled.days = response.compiled.days.map((_, dayIndex) => [
+      { onH: dayIndex, onM: 0, offH: dayIndex, offM: dayIndex + 1, scheduleUuid: `day-${dayIndex}`, label: null },
+    ]);
+    schedulesMock.mockResolvedValueOnce(response);
+    renderDialog(makeValve());
+    await screen.findByText('Schedules');
+
+    const expectedWindowText = (dayIndex: number) => {
+      const pad2 = (n: number) => String(n).padStart(2, '0');
+      return `${pad2(dayIndex)}:00–${pad2(dayIndex)}:${pad2(dayIndex + 1)}`;
+    };
+    // WEEKDAYS (Monday-first display order) maps display position -> underlying weekday index.
+    const displayOrder = [1, 2, 3, 4, 5, 6, 0];
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    for (const dayIndex of displayOrder) {
+      const group = screen.getByRole('group', { name: dayLabels[dayIndex] });
+      expect(within(group).getByText(expectedWindowText(dayIndex))).toBeInTheDocument();
+    }
+  });
+
+  it('lays out the compiled week as a single-column stacked list below sm: and a 7-column grid from sm: up (structural markers, not pixels)', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    renderDialog(makeValve());
+    await screen.findByText('Schedules');
+
+    const weekGrid = screen.getAllByRole('group')[0].parentElement;
+    expect(weekGrid).toHaveClass('grid-cols-1');
+    expect(weekGrid).toHaveClass('sm:grid-cols-7');
+  });
+
+  it('never wraps a compiled-week time range mid-range and truncates long day labels instead of overflowing', async () => {
+    const response = responseWithTuesdayWindows();
+    schedulesMock.mockResolvedValueOnce(response);
+    renderDialog(makeValve());
+    await screen.findByText('Schedules');
+
+    const tueGroup = screen.getByRole('group', { name: 'Tue' });
+    expect(within(tueGroup).getByText('06:00–06:30')).toHaveClass('whitespace-nowrap');
+    expect(within(tueGroup).getByText('Tue')).toHaveClass('truncate');
+  });
+
+  it('gives the add-weekly weekday chips a >=44px effective touch target', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    renderDialog(makeValve());
+    await screen.findByText('Schedules');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sun' }));
+    // Two "Sun" buttons exist once a schedule row lists it; here only the toggle chip exists.
+    const chip = screen.getAllByRole('button', { name: 'Sun' })[0];
+    expect(chip).toHaveClass('min-h-[44px]');
+  });
+
+  it('gives the enabled checkbox and delete control on a saved schedule row a >=44px effective touch target', async () => {
+    schedulesMock.mockResolvedValueOnce(responseWithTuesdayWindows());
+    renderDialog(makeValve());
+
+    await screen.findByText('Morning soak');
+    expect(screen.getByLabelText('Enabled').closest('label')).toHaveClass('min-h-[44px]');
+    expect(screen.getByRole('button', { name: 'Delete' })).toHaveClass('min-h-[44px]');
   });
 
   it('joins the weekly preview summary Monday-first regardless of click order', async () => {

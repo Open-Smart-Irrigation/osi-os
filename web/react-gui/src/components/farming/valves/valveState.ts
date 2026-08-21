@@ -53,7 +53,7 @@ export function maskFromWeekdays(days: number[]): number {
  * only reorders how a set of weekday indices is presented on screen (Swiss convention:
  * Monday-first). Never use this for encoding/decoding the STREGA mask.
  */
-export const WEEKDAY_DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+export const WEEKDAY_DISPLAY_ORDER: ReadonlyArray<number> = [1, 2, 3, 4, 5, 6, 0];
 
 /** Orders a set of weekday indices (0=Sunday…6=Saturday) for Monday-first display only. */
 export function sortWeekdaysForDisplay(days: number[]): number[] {

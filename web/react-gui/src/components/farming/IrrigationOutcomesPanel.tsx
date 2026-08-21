@@ -176,6 +176,16 @@ const StatusBadge: React.FC<{ status: IrrigationActuationStatus }> = ({ status }
   );
 };
 
+/**
+ * Compact view stays terse for the steady-state cases (an irrigation that ran and finished,
+ * or one currently running on schedule) but must never let a not-yet-completed actuation
+ * that needs attention — still pending open, cancelled, or failed — look identical to a
+ * normal completed row (see FW-T4: "Pending open" was previously indistinguishable).
+ */
+function needsCompactStatusFlag(status: IrrigationActuationStatus): boolean {
+  return status !== 'COMPLETED' && status !== 'RUNNING';
+}
+
 const TriggerChip: React.FC<{ trigger: NonNullable<IrrigationActuation['trigger']> }> = ({ trigger }) => {
   const { t } = useTranslation('valves');
   return (
@@ -218,8 +228,16 @@ const CompactActuationRow: React.FC<{
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex flex-col gap-1">
-        <div className="text-sm font-semibold text-[var(--text)]">
-          {row.zoneName ?? t('irrigationOutcomes.zoneUnknown', { defaultValue: 'Zone ?' })}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--text)]">
+            <span className="truncate">{row.zoneName ?? t('irrigationOutcomes.zoneUnknown', { defaultValue: 'Zone ?' })}</span>
+            <span className="shrink-0 text-[var(--text-tertiary)]">·</span>
+            <span className="truncate font-normal text-[var(--text-secondary)]">{row.deviceName ?? row.deviceEui}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {needsCompactStatusFlag(row.status) && <StatusBadge status={row.status} />}
+            {row.trigger && <TriggerChip trigger={row.trigger} />}
+          </div>
         </div>
         <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-3 gap-y-0.5">
           <span>
