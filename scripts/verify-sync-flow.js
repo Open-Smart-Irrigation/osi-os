@@ -1889,7 +1889,7 @@ expectIncludes('Get Zone Environment Summary', 'LEFT JOIN gateway_locations gl O
 expectIncludes('Get Zone Environment Summary', 'SELECT date,rainfall_mm,flow_liters,rain_source,computed_at FROM zone_daily_environment', 'uses daily zone environment totals for water summary');
 expectIncludes('Get Zone Environment Summary', 'estimatedByDate[localDate] = ZE.round((estimatedByDate[localDate] || 0) + liters, 2);', 'sums STREGA expectation liters separately from measured flow meter totals');
 expectIncludes('Get Zone Environment Summary', 'ZE.localDateIso(row.commanded_at, zone && zone.timezone, Date.now())', 'buckets STREGA estimated liters by zone-local date');
-expectIncludes('Get Zone Environment Summary', "COALESCE(reconciliation_state,'') <> 'CANCELLED'", 'excludes cancelled STREGA expectations from estimated irrigation totals');
+expectIncludes('Get Zone Environment Summary', "COALESCE(reconciliation_state,'') NOT IN ('CANCELLED','STALE_NO_OBSERVATION')", 'excludes cancelled and stale-unobserved STREGA expectations from estimated irrigation totals');
 expectExcludes('Get Zone Environment Summary', 'substr(commanded_at,1,10)', 'UTC date slicing for STREGA estimated liters');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayMeasuredLiters', 'returns measured flow-meter liters under an honest field name');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayEstimatedLiters', 'returns estimated valve-time liters under an honest field name');

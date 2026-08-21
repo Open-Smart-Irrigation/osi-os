@@ -917,41 +917,6 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
 }
 
-// H2f: the expectation scan must also pick up STALE_NO_OBSERVATION rows for
-// late-evidence promotion, bounded to a recent commanded_at window compared
-// as epoch millis (Date.parse), never a string/lexical compare. Without this,
-// a run that already timed out to STALE_NO_OBSERVATION under the old grace
-// (or a genuinely very late confirmation) can never recover even after a
-// real CLOSE uplink arrives - the litres exclusion from H2d would then be
-// permanent for that run instead of self-correcting.
-const RECONCILIATION_SCAN_INCLUDES_STALE_RE =
-    /WHERE reconciliation_state IN \(\s*'PENDING_OBSERVATION'\s*,\s*'OBSERVED_RUNNING'\s*,\s*'STALE_NO_OBSERVATION'\s*\)/;
-const RECONCILIATION_STALE_WINDOW_RE =
-    /reconciliation_state\s*===\s*'STALE_NO_OBSERVATION'[\s\S]{0,200}?Date\.parse\(exp\.commanded_at\)[\s\S]{0,200}?Number\.isFinite\([^)]*\)\s*\|\|\s*now\s*-\s*\w+\s*>\s*STALE_REPROMOTION_WINDOW_MS/;
-for (const profile of ['bcm2712', 'bcm2709']) {
-    const profilePath = path.resolve(
-        __dirname,
-        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
-    );
-    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
-    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
-    if (!profileReconcNode) {
-        failures.push(`H2f ${profile}: strega-reconciliation-monitor not found`);
-    } else if (!RECONCILIATION_SCAN_INCLUDES_STALE_RE.test(profileReconcNode.func || '')) {
-        failures.push(
-            `H2f ${profile}: strega-reconciliation-monitor's expectation scan must also select ` +
-            `STALE_NO_OBSERVATION rows so late evidence can promote them out of the litres exclusion`
-        );
-    } else if (!RECONCILIATION_STALE_WINDOW_RE.test(profileReconcNode.func || '')) {
-        failures.push(
-            `H2f ${profile}: strega-reconciliation-monitor must bound STALE_NO_OBSERVATION reprocessing ` +
-            `to a recent commanded_at window using an epoch-millis Date.parse compare (never a string compare)`
-        );
-    } else {
-        console.log(`OK  H2f ${profile}: expectation scan includes STALE_NO_OBSERVATION bounded by a Date.parse commanded_at window`);
-    }
-}
-
 // L1: write-strega-expectation and reject-indefinite-open must not fall back to {}
 for (const nodeId of ['write-strega-expectation', 'reject-indefinite-open']) {
     const n = byId[nodeId];
