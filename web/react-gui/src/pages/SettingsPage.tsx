@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import useSWR from 'swr';
 
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
-import { getApiErrorMessage, irrigationZonesAPI, supportRequestsAPI } from '../services/api';
+import { TimezoneInput } from '../components/farming/TimezoneInput';
+import { getApiErrorMessage, irrigationZonesAPI, supportRequestsAPI, systemSettingsAPI } from '../services/api';
 import type {
   SupportRequestArea,
   SupportRequestCreateRequest,
@@ -193,12 +195,34 @@ function FieldLabel({
   );
 }
 
+const systemSettingsFetcher = () => systemSettingsAPI.get();
+
+function isValidTimeZone(value: string): boolean {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function SettingsPage() {
   const { t } = useTranslation('settings');
   const preferences = useDisplayPreferences();
   const [moduleNotice, setModuleNotice] = useState<string | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
+
+  const { data: systemSettings, mutate: mutateSystemSettings, error: systemSettingsError } = useSWR(
+    '/api/system/settings',
+    systemSettingsFetcher,
+    { revalidateOnFocus: false },
+  );
+  const [gatewayTimezoneInput, setGatewayTimezoneInput] = useState<string | null>(null);
+  const [timezoneSaving, setTimezoneSaving] = useState(false);
+  const [applyingAllZones, setApplyingAllZones] = useState(false);
+  const [timezoneNotice, setTimezoneNotice] = useState<string | null>(null);
+  const [timezoneError, setTimezoneError] = useState<string | null>(null);
   const [requestType, setRequestType] = useState<UserRequestType>('improvement');
   const [requestTitle, setRequestTitle] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -278,6 +302,49 @@ export function SettingsPage() {
       setModuleError(getApiErrorMessage(error, t('schedulerDisableError')));
     } finally {
       setSchedulerBusy(false);
+    }
+  };
+
+  const gatewayTimezone = gatewayTimezoneInput ?? systemSettings?.gatewayTimezone ?? '';
+  const gatewayTimezoneValid = isValidTimeZone(gatewayTimezone.trim());
+  const canSaveTimezone = gatewayTimezone.trim().length > 0 && gatewayTimezoneValid && !timezoneSaving && !applyingAllZones;
+
+  const saveGatewayTimezone = async () => {
+    if (!canSaveTimezone) return;
+    setTimezoneNotice(null);
+    setTimezoneError(null);
+    setTimezoneSaving(true);
+    try {
+      const result = await systemSettingsAPI.update({ gatewayTimezone: gatewayTimezone.trim() });
+      setGatewayTimezoneInput(result.gatewayTimezone);
+      await mutateSystemSettings({ gatewayTimezone: result.gatewayTimezone }, { revalidate: false });
+      setTimezoneNotice(t('timeZoneSaved'));
+    } catch (error) {
+      setTimezoneError(getApiErrorMessage(error, t('timeZoneSaveError')));
+    } finally {
+      setTimezoneSaving(false);
+    }
+  };
+
+  const applyTimezoneToAllZones = async () => {
+    if (!canSaveTimezone) return;
+    if (!window.confirm(t('timeZoneApplyAllConfirm', { timezone: gatewayTimezone.trim() }))) return;
+    setTimezoneNotice(null);
+    setTimezoneError(null);
+    setApplyingAllZones(true);
+    try {
+      const result = await systemSettingsAPI.update({ gatewayTimezone: gatewayTimezone.trim(), applyToAllZones: true });
+      setGatewayTimezoneInput(result.gatewayTimezone);
+      await mutateSystemSettings({ gatewayTimezone: result.gatewayTimezone }, { revalidate: false });
+      const count = result.zonesUpdated;
+      setTimezoneNotice(t(
+        count === 1 ? 'timeZoneApplyAllSuccess_one' : 'timeZoneApplyAllSuccess_other',
+        { count, timezone: result.gatewayTimezone },
+      ));
+    } catch (error) {
+      setTimezoneError(getApiErrorMessage(error, t('timeZoneApplyAllError')));
+    } finally {
+      setApplyingAllZones(false);
     }
   };
 
@@ -381,6 +448,55 @@ export function SettingsPage() {
               </p>
             </div>
           </div>
+        </Section>
+
+        <Section title={t('timeZoneTitle')}>
+          <p className="text-sm text-[var(--text-secondary)]">{t('timeZoneDescription')}</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,20rem)_auto_auto] sm:items-end">
+            <TimezoneInput
+              id="gateway-timezone"
+              label={t('timeZoneLabel')}
+              value={gatewayTimezone}
+              onChange={setGatewayTimezoneInput}
+              disabled={timezoneSaving || applyingAllZones}
+            />
+            <button
+              type="button"
+              onClick={() => { void saveGatewayTimezone(); }}
+              disabled={!canSaveTimezone}
+              className="min-h-11 rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-bold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {timezoneSaving ? t('timeZoneSaving') : t('timeZoneSave')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void applyTimezoneToAllZones(); }}
+              disabled={!canSaveTimezone}
+              className="min-h-11 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-5 py-2 text-sm font-bold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {applyingAllZones ? t('timeZoneApplying') : t('timeZoneApplyAll')}
+            </button>
+          </div>
+          {gatewayTimezone.trim().length > 0 && !gatewayTimezoneValid && (
+            <p role="alert" className="mt-3 rounded-lg border border-[var(--error-bg)] bg-[var(--error-bg)] px-4 py-3 text-sm font-semibold text-[var(--error-text)]">
+              {t('timeZoneInvalid')}
+            </p>
+          )}
+          {systemSettingsError && (
+            <p role="alert" className="mt-3 rounded-lg border border-[var(--error-bg)] bg-[var(--error-bg)] px-4 py-3 text-sm font-semibold text-[var(--error-text)]">
+              {t('timeZoneLoadError')}
+            </p>
+          )}
+          {timezoneNotice && (
+            <p role="status" className="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-900">
+              {timezoneNotice}
+            </p>
+          )}
+          {timezoneError && (
+            <p role="alert" className="mt-3 rounded-lg border border-[var(--error-bg)] bg-[var(--error-bg)] px-4 py-3 text-sm font-semibold text-[var(--error-text)]">
+              {timezoneError}
+            </p>
+          )}
         </Section>
 
         <Section title={t('modulesTitle')}>

@@ -11,6 +11,7 @@ import {
 } from '../../services/deviceLocation';
 import { CROP_GROUPS } from './cropKc';
 import { DataExportSection } from './DataExportSection';
+import { TimezoneInput } from './TimezoneInput';
 
 interface Props {
   isOpen: boolean;
@@ -414,16 +415,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
           </div>
 
           {/* Timezone */}
-          <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Timezone</p>
-            <input
-              type="text"
-              value={timezone}
-              onChange={e => setTimezone(e.target.value)}
-              placeholder="e.g. Europe/Rome"
-              className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
-            />
-          </div>
+          <TimezoneInput label="Timezone" value={timezone} onChange={setTimezone} />
 
           <div>
             <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Zone location</p>

@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { irrigationZonesAPI, supportRequestsAPI } from '../../services/api';
@@ -11,6 +12,8 @@ import { SettingsPage } from '../SettingsPage';
 const apiMocks = vi.hoisted(() => ({
   disableAllSchedules: vi.fn(),
   createSupportRequest: vi.fn(),
+  getSystemSettings: vi.fn(),
+  updateSystemSettings: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -19,6 +22,10 @@ vi.mock('../../services/api', () => ({
   },
   supportRequestsAPI: {
     create: apiMocks.createSupportRequest,
+  },
+  systemSettingsAPI: {
+    get: apiMocks.getSystemSettings,
+    update: apiMocks.updateSystemSettings,
   },
   getApiErrorMessage: (error: unknown, fallback: string) => (
     error instanceof Error && error.message ? error.message : fallback
@@ -41,7 +48,7 @@ vi.mock('react-i18next', () => ({
   },
   useTranslation: () => ({
     i18n: i18nMock,
-    t: (key: string, options?: { count?: number } | string) => {
+    t: (key: string, options?: Record<string, unknown> | string) => {
       const map: Record<string, string> = {
         title: 'Settings',
         backToDashboard: 'Back to dashboard',
@@ -56,6 +63,21 @@ vi.mock('react-i18next', () => ({
         kpa: 'kPa',
         pf: 'pF',
         swtSample: 'SWT sample',
+        timeZoneTitle: 'Time zone',
+        timeZoneDescription: 'Sets the default time zone for newly created zones and the fallback used when a zone has none. Existing zones keep their own time zone unless you apply this one to all of them.',
+        timeZoneLabel: 'Gateway time zone',
+        timeZoneSave: 'Save',
+        timeZoneSaving: 'Saving...',
+        timeZoneSaved: 'Time zone saved',
+        timeZoneInvalid: 'Enter a valid IANA time zone (e.g. Europe/Rome)',
+        timeZoneSaveError: 'Could not save the time zone',
+        timeZoneLoadError: 'Could not load the time zone setting',
+        timeZoneApplyAll: 'Apply to all zones',
+        timeZoneApplying: 'Applying...',
+        timeZoneApplyAllConfirm: "Set every zone's time zone to {{timezone}}? Zones with a different time zone will be overridden.",
+        timeZoneApplyAllSuccess_one: 'Updated {{count}} zone to {{timezone}}.',
+        timeZoneApplyAllSuccess_other: 'Updated {{count}} zones to {{timezone}}.',
+        timeZoneApplyAllError: 'Could not apply the time zone to all zones',
         modulesTitle: 'Modules',
         predictionAdvisory: 'Prediction advisory',
         predictionAdvisoryWarning: 'Experimental, do not use for production!',
@@ -99,17 +121,24 @@ vi.mock('react-i18next', () => ({
         on: 'On',
         off: 'Off',
       };
-      const template = map[key] ?? key;
-      return template.replace('{{count}}', String(typeof options === 'object' ? options.count ?? '' : ''));
+      let result = map[key] ?? key;
+      if (typeof options === 'object' && options) {
+        for (const [placeholder, value] of Object.entries(options)) {
+          result = result.split(`{{${placeholder}}}`).join(String(value));
+        }
+      }
+      return result;
     },
   }),
 }));
 
 function renderSettings() {
   render(
-    <MemoryRouter>
-      <SettingsPage />
-    </MemoryRouter>,
+    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    </SWRConfig>,
   );
 }
 
@@ -122,6 +151,9 @@ beforeEach(() => {
   apiMocks.disableAllSchedules.mockResolvedValue({ disabledSchedules: 0 });
   apiMocks.createSupportRequest.mockReset();
   apiMocks.createSupportRequest.mockResolvedValue({ request_id: 'local-1', local_status: 'QUEUED' });
+  apiMocks.getSystemSettings.mockReset();
+  apiMocks.getSystemSettings.mockResolvedValue({ gatewayTimezone: 'UTC' });
+  apiMocks.updateSystemSettings.mockReset();
 });
 
 afterEach(() => {
@@ -136,6 +168,7 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('heading', { name: 'Language' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Appearance' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Units & Display' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Time zone' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Modules' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Data & Refresh' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'User request' })).toBeInTheDocument();
@@ -332,5 +365,82 @@ describe('SettingsPage', () => {
       current_route: '/settings',
     }));
     expect(await within(userRequest).findByText('Saved, waiting for internet')).toBeInTheDocument();
+  });
+
+  it('loads the gateway time zone into the field', async () => {
+    apiMocks.getSystemSettings.mockResolvedValue({ gatewayTimezone: 'Europe/Zurich' });
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    await waitFor(() => {
+      expect((within(timeZone).getByLabelText('Gateway time zone') as HTMLInputElement).value).toBe('Europe/Zurich');
+    });
+  });
+
+  it('saves the gateway time zone and shows success feedback', async () => {
+    apiMocks.updateSystemSettings.mockResolvedValueOnce({ gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0 });
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    const input = await within(timeZone).findByLabelText('Gateway time zone');
+    fireEvent.change(input, { target: { value: 'Europe/Zurich' } });
+    fireEvent.click(within(timeZone).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(apiMocks.updateSystemSettings).toHaveBeenCalledWith({ gatewayTimezone: 'Europe/Zurich' }));
+    expect(await within(timeZone).findByText('Time zone saved')).toBeInTheDocument();
+  });
+
+  it('shows a validation message for a malformed time zone instead of saving', async () => {
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    const input = await within(timeZone).findByLabelText('Gateway time zone');
+    fireEvent.change(input, { target: { value: 'Not/A_Real_Zone' } });
+
+    expect(await within(timeZone).findByText('Enter a valid IANA time zone (e.g. Europe/Rome)')).toBeInTheDocument();
+    expect(within(timeZone).getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(apiMocks.updateSystemSettings).not.toHaveBeenCalled();
+  });
+
+  it('shows the save error message when the backend rejects the update', async () => {
+    apiMocks.updateSystemSettings.mockRejectedValueOnce(new Error('edge offline'));
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    const input = await within(timeZone).findByLabelText('Gateway time zone');
+    fireEvent.change(input, { target: { value: 'Europe/Zurich' } });
+    fireEvent.click(within(timeZone).getByRole('button', { name: 'Save' }));
+
+    expect(await within(timeZone).findByText('edge offline')).toBeInTheDocument();
+  });
+
+  it('does not apply to all zones when the confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    const input = await within(timeZone).findByLabelText('Gateway time zone');
+    fireEvent.change(input, { target: { value: 'Europe/Zurich' } });
+    fireEvent.click(within(timeZone).getByRole('button', { name: 'Apply to all zones' }));
+
+    expect(window.confirm).toHaveBeenCalledWith("Set every zone's time zone to Europe/Zurich? Zones with a different time zone will be overridden.");
+    expect(apiMocks.updateSystemSettings).not.toHaveBeenCalled();
+  });
+
+  it('applies the time zone to all zones after confirmation and reports the count', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    apiMocks.updateSystemSettings.mockResolvedValueOnce({ gatewayTimezone: 'Europe/Zurich', zonesUpdated: 3 });
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    const input = await within(timeZone).findByLabelText('Gateway time zone');
+    fireEvent.change(input, { target: { value: 'Europe/Zurich' } });
+    fireEvent.click(within(timeZone).getByRole('button', { name: 'Apply to all zones' }));
+
+    await waitFor(() => expect(apiMocks.updateSystemSettings).toHaveBeenCalledWith({
+      gatewayTimezone: 'Europe/Zurich',
+      applyToAllZones: true,
+    }));
+    expect(await within(timeZone).findByText('Updated 3 zones to Europe/Zurich.')).toBeInTheDocument();
   });
 });

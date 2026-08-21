@@ -989,6 +989,31 @@ export const systemAPI = {
   },
 };
 
+export interface SystemSettings {
+  gatewayTimezone: string;
+}
+
+export interface UpdateSystemSettingsRequest {
+  gatewayTimezone: string;
+  applyToAllZones?: boolean;
+}
+
+export interface UpdateSystemSettingsResult {
+  gatewayTimezone: string;
+  zonesUpdated: number;
+}
+
+export const systemSettingsAPI = {
+  get: async (): Promise<SystemSettings> => {
+    const res = await api.get<SystemSettings>('/api/system/settings');
+    return res.data;
+  },
+  update: async (body: UpdateSystemSettingsRequest): Promise<UpdateSystemSettingsResult> => {
+    const res = await api.put<UpdateSystemSettingsResult>('/api/system/settings', body);
+    return res.data;
+  },
+};
+
 export interface AccountLinkRequest {
   serverUrl: string;
   action: 'login' | 'register';
