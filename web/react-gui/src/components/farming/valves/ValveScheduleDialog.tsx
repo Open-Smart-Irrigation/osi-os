@@ -348,7 +348,11 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           ) : (
                             <ul className="min-w-0 flex-1 space-y-0.5 sm:mt-1 sm:flex-none">
                               {windows.map((w) => (
-                                <li key={w.scheduleUuid} className="whitespace-nowrap text-xs leading-tight text-[var(--text)]">
+                                <li
+                                  key={w.scheduleUuid}
+                                  className="truncate whitespace-nowrap text-xs leading-tight text-[var(--text)]"
+                                  title={`${pad(w.onH)}:${pad(w.onM)}–${pad(w.offH)}:${pad(w.offM)}`}
+                                >
                                   {pad(w.onH)}:{pad(w.onM)}–{pad(w.offH)}:{pad(w.offM)}
                                 </li>
                               ))}
@@ -388,7 +392,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                               : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone) : '—'} · ${schedule.durationMinutes} min`}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-2">
                           <label className="flex min-h-[44px] items-center gap-1.5 px-1.5 text-xs text-[var(--text-secondary)] sm:min-h-0 sm:px-0">
                             <input
                               type="checkbox"
