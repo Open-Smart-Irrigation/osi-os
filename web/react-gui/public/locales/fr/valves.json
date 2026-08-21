@@ -12,7 +12,7 @@
   "resumeSchedules": "Reprendre les programmes",
   "resendPlan": "Renvoyer le programme à la vanne",
   "settings": "Réglages de la vanne",
-  "state": { "closed": "Fermée", "pending": "En attente de la vanne", "open": "Ouverte", "closing": "Fermeture en cours", "failed": "Pas de réponse" },
+  "state": { "closed": "Fermée", "pending": "En attente de la vanne", "open": "Ouverte", "closing": "Fermeture en cours", "failed": "À vérifier" },
   "pendingHint": "En attente du prochain contact de la vanne",
   "closesAt": "fermeture ≈ {{time}}",
   "remaining": "encore {{minutes}} min",
@@ -24,11 +24,11 @@
   "planDelivery": "Envoi du programme : {{acked}}/{{total}} confirmés",
   "planFailed": "Programme non confirmé par la vanne depuis 24 h ({{count}} en attente)",
   "lastSent": "Dernier envoi {{when}}",
-  "actionFailed": "Rien n'a été envoyé. Vérifiez la passerelle, puis réessayez.",
+  "actionFailed": "L'action n'a pas pu être confirmée. Vérifiez la passerelle, puis réessayez.",
   "lastContact": "Dernier contact il y a {{when}}",
   "loadFailed": "Impossible de charger les vannes.",
   "bluetoothNote": "Les modifications faites directement sur la vanne par Bluetooth ne sont pas visibles ici.",
-  "openDialog": { "title": "Ouvrir {{name}}", "duration": "Durée (min)", "durationHint": "Indiquez une durée entre 1 et 255 minutes.", "custom": "Autre", "summary": "fermeture ≈ {{time}}", "liters": "≈ {{liters}} L", "confirm": "Ouvrir pendant {{minutes}} min", "error": "La vanne n'a pas pu être ouverte. Rien n'a été envoyé." },
+  "openDialog": { "title": "Ouvrir {{name}}", "duration": "Durée (min)", "durationHint": "Indiquez une durée entre 1 et 255 minutes.", "custom": "Autre", "summary": "fermeture ≈ {{time}}", "liters": "≈ {{liters}} L", "confirm": "Ouvrir pendant {{minutes}} min", "error": "L'ouverture n'a pas pu être confirmée. Vérifiez l'état de la vanne avant de réessayer." },
   "scheduleDialog": {
     "title": "Programmes de {{name}}", "loadFailed": "Impossible de charger les programmes.", "week": "Cette semaine sur la vanne", "windows": "Plages : {{count}}/4", "noWindows": "—",
     "list": "Programmes", "addWeekly": "+ Hebdomadaire", "addOnce": "+ Ponctuel",
@@ -41,5 +41,5 @@
   },
   "settingsDialog": { "title": "Réglages de la vanne", "generation": "Génération de la vanne", "gen2Untested": "GEN2 (SV2 — pas encore testée sur une vanne réelle)", "flowRate": "Débit (L/min)", "flowRateHint": "Indiquez un débit supérieur à 0 L/min.", "flowSource": "Origine", "measured": "Mesuré", "estimated": "Estimé", "clear": "Effacer", "save": "Enregistrer", "saveFailed": "Impossible d'enregistrer les réglages de la vanne." },
   "weekdays": { "0": "Dim", "1": "Lun", "2": "Mar", "3": "Mer", "4": "Jeu", "5": "Ven", "6": "Sam" },
-  "trigger": { "manual": "Manuel", "cloud_command": "Depuis le cloud", "trigger_based": "Par capteur", "one_time": "Ponctuel", "on_valve_schedule": "Programme sur la vanne", "unexplained": "Ouverture manuelle sur la vanne" }
+  "trigger": { "manual": "Manuel", "cloud_command": "Depuis le cloud", "trigger_based": "Par capteur", "one_time": "Ponctuel", "on_valve_schedule": "Programme sur la vanne", "unexplained": "Ouverture hors programme" }
 }

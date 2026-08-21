@@ -208,7 +208,7 @@
         "responseWindow": "Fenêtre de réponse",
         "onValveSchedule": "Programme sur la vanne",
         "oneTime": "Ouverture ponctuelle",
-        "unexplained": "Ouverture manuelle sur la vanne"
+        "unexplained": "Ouverture hors programme"
       },
       "detail": {
         "duration": "Durée : {{value}}",
