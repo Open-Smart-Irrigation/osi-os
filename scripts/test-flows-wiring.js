@@ -790,6 +790,34 @@ if (!reconcNode) {
     console.log('OK  H2: STALE_OPEN_OBSERVED present in reconciliation monitor');
 }
 
+// H2b: reconciliation monitor must not treat a missing uplink as an observation.
+// The uplink query LEFT JOINs devices to device_data, so a device that has
+// never uplinked still returns one row with dd.recorded_at = NULL and
+// d.current_state = the stale devices.current_state default. State
+// derivation must be gated on a real uplink row (uplink.recorded_at truthy),
+// not just on `uplink` being non-null, or a never-uplinked valve gets
+// falsely marked OBSERVED_COMPLETE/OBSERVED_RUNNING with a null observed_*_at.
+const RECONCILIATION_UPLINK_GUARD_RE =
+    /if\s*\(\s*uplink\s*&&\s*uplink\.recorded_at\s*\)\s*\{\s*\n\s*const state\s*=\s*String\(uplink\.current_state/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
+    if (!profileReconcNode) {
+        failures.push(`H2b ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!RECONCILIATION_UPLINK_GUARD_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2b ${profile}: strega-reconciliation-monitor must gate state derivation on ` +
+            `'uplink && uplink.recorded_at' (a missing uplink must not be treated as an observation)`
+        );
+    } else {
+        console.log(`OK  H2b ${profile}: reconciliation monitor gates state derivation on uplink.recorded_at`);
+    }
+}
+
 // L1: write-strega-expectation and reject-indefinite-open must not fall back to {}
 for (const nodeId of ['write-strega-expectation', 'reject-indefinite-open']) {
     const n = byId[nodeId];
