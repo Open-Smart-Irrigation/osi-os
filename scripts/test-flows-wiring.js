@@ -798,7 +798,7 @@ if (!reconcNode) {
 // not just on `uplink` being non-null, or a never-uplinked valve gets
 // falsely marked OBSERVED_COMPLETE/OBSERVED_RUNNING with a null observed_*_at.
 const RECONCILIATION_UPLINK_GUARD_RE =
-    /if\s*\(\s*uplink\s*&&\s*uplink\.recorded_at\s*\)\s*\{\s*\n\s*const state\s*=\s*String\(uplink\.current_state/;
+    /if\s*\(\s*uplink\s*&&\s*uplink\.recorded_at\s*\)\s*\{\s*\n\s*const stateUpdatedMs\s*=\s*Date\.parse\(uplink\.state_updated_at\)/;
 for (const profile of ['bcm2712', 'bcm2709']) {
     const profilePath = path.resolve(
         __dirname,
@@ -815,6 +815,76 @@ for (const profile of ['bcm2712', 'bcm2709']) {
         );
     } else {
         console.log(`OK  H2b ${profile}: reconciliation monitor gates state derivation on uplink.recorded_at`);
+    }
+}
+
+// H2c: reconciliation monitor must also require the paired devices.current_state
+// to be FRESH (state_updated_at >= commanded_at) before treating it as an
+// observation. devices.current_state is a live column only rewritten by
+// strega-sql-fn when a state-bearing uplink CHANGES it; the FIRST uplink
+// after commanded_at for a real valve (Class A, still reporting the OLD
+// state) pairs a fresh dd.recorded_at with a stale current_state, which
+// without this gate falsely completes the expectation instantly. Comparison
+// must be epoch-millis (Date.parse + Number.isFinite), never a string/lexical
+// compare — devices.updated_at and commanded_at may differ in ISO-'T' vs
+// space-form and a lexical compare is a known repo bug class.
+const RECONCILIATION_FRESHNESS_GATE_RE =
+    /const\s+stateUpdatedMs\s*=\s*Date\.parse\(uplink\.state_updated_at\);\s*\n\s*const\s+commandedMs\s*=\s*Date\.parse\(exp\.commanded_at\);\s*\n\s*const\s+stateIsFresh\s*=\s*Number\.isFinite\(stateUpdatedMs\)\s*&&\s*Number\.isFinite\(commandedMs\)\s*&&\s*stateUpdatedMs\s*>=\s*commandedMs;/;
+const RECONCILIATION_STATE_UPDATED_COLUMN_RE = /d\.updated_at\s+AS\s+state_updated_at/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
+    if (!profileReconcNode) {
+        failures.push(`H2c ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!RECONCILIATION_STATE_UPDATED_COLUMN_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2c ${profile}: strega-reconciliation-monitor query must select d.updated_at AS state_updated_at`
+        );
+    } else if (!RECONCILIATION_FRESHNESS_GATE_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2c ${profile}: strega-reconciliation-monitor must gate state derivation on ` +
+            `state_updated_at (devices.updated_at) being >= commanded_at via epoch-millis comparison ` +
+            `(a stale current_state paired with a fresh uplink row must not be treated as an observation)`
+        );
+    } else {
+        console.log(`OK  H2c ${profile}: reconciliation monitor gates state derivation on state_updated_at >= commanded_at`);
+    }
+}
+
+// H2d: litres accounting must exclude STALE_NO_OBSERVATION (never-observed
+// commands) alongside CANCELLED, so a command that timed out unobserved does
+// not credit phantom litres to today's totals or the zone water balance.
+// get-actuations-query is intentionally NOT checked here: the GUI actuations
+// list should keep showing stale rows as a distinct, honest state.
+const TODAY_LITERS_EXCLUSION_RE = /reconciliation_state\s+NOT\s+IN\s*\(\s*'CANCELLED'\s*,\s*'STALE_NO_OBSERVATION'\s*\)/;
+const ZONE_ENV_EXCLUSION_RE = /COALESCE\(reconciliation_state,\s*''\)\s+NOT\s+IN\s*\(\s*'CANCELLED'\s*,\s*'STALE_NO_OBSERVATION'\s*\)/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+
+    const litersNode = profileFlows.find((node) => node.id === 'strega-today-liters-fn');
+    if (!litersNode) {
+        failures.push(`H2d ${profile}: strega-today-liters-fn not found`);
+    } else if (!TODAY_LITERS_EXCLUSION_RE.test(litersNode.func || '')) {
+        failures.push(`H2d ${profile}: strega-today-liters-fn must exclude STALE_NO_OBSERVATION rows from litres sums`);
+    } else {
+        console.log(`OK  H2d ${profile}: strega-today-liters-fn excludes STALE_NO_OBSERVATION from litres`);
+    }
+
+    const zoneEnvNode = profileFlows.find((node) => node.id === 'zone-env-fn');
+    if (!zoneEnvNode) {
+        failures.push(`H2d ${profile}: zone-env-fn not found`);
+    } else if (!ZONE_ENV_EXCLUSION_RE.test(zoneEnvNode.func || '')) {
+        failures.push(`H2d ${profile}: zone-env-fn must exclude STALE_NO_OBSERVATION rows from estimated irrigation litres`);
+    } else {
+        console.log(`OK  H2d ${profile}: zone-env-fn excludes STALE_NO_OBSERVATION from estimated irrigation litres`);
     }
 }
 
