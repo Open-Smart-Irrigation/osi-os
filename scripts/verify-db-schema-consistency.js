@@ -473,6 +473,11 @@ const schemaContract = {
     'acked_at',
     'error',
   ],
+  app_settings: [
+    'key',
+    'value',
+    'updated_at',
+  ],
   lsn50_shadow_diff: [
     'id',
     'deveui',

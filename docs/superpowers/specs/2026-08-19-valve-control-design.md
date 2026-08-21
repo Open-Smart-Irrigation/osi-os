@@ -148,12 +148,13 @@ Sync triggers on `valve_schedules` mirror the `irrigation_schedules` pair
 (`_ai`, `_au`), aggregate type `VALVE_SCHEDULE`, aggregate key
 `schedule_uuid`, op `VALVE_SCHEDULE_UPSERTED`; `_au` fires only when linked
 and only when a synced column changed. **The triggers ship with Phase B**
-(edge migration `0023`, lockstep with the osi-server release), not with the
-Phase A tables: every live gateway is cloud-linked, and emitting an
-aggregate the cloud has never seen produces terminally-rejected outbox rows.
-Phase A carries `schedule_uuid`/`sync_version`/`deleted_at` from day one so
-0023 is trigger-only. `valve_settings` and `valve_schedule_pushes` have no
-sync triggers.
+(edge migration `0024` (0023 taken by app_settings, 2026-08-21), lockstep with
+the osi-server release), not with the Phase A tables: every live gateway is
+cloud-linked, and emitting an aggregate the cloud has never seen produces
+terminally-rejected outbox rows. Phase A carries
+`schedule_uuid`/`sync_version`/`deleted_at` from day one so 0024 is
+trigger-only. `valve_settings` and `valve_schedule_pushes` have no sync
+triggers.
 
 ## 5. Gateway behaviour
 

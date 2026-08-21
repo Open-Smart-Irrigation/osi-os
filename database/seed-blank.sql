@@ -1077,6 +1077,15 @@ CREATE TABLE IF NOT EXISTS valve_schedule_pushes (
 CREATE INDEX IF NOT EXISTS idx_valve_schedule_pushes_device_state ON valve_schedule_pushes(device_eui, state);
 
 -- ---------------------------------------------------------------------------
+-- app_settings  (gateway-level key/value settings store; FW-T5, migration 0023)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+-- ---------------------------------------------------------------------------
 -- zone_valve_assignments  (3.1 channel-per-zone for multi-channel valves)
 -- ---------------------------------------------------------------------------
 CREATE TABLE zone_valve_assignments (
