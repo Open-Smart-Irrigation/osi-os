@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node-RED function nodes (thin call-outs only), CommonJS helper modules under `usr/share/node-red/`, `node:test` + `node:sqlite`, `lib/osi-migrate` ordered migrations.
 
-**Prerequisites (hard gate):** AgroLink scoped-access Phase A merged — migrations 0022–0023 present, `osi-scope-helper` registered with `assertFreshZoneAccess`, `users.role` live. **Not true of the current checkout (ordered migrations stop at 0021); do not start execution before that merge.** Migration numbering below assumes 0024 is then the next free slot; renumber if not.
+**Prerequisites (hard gate):** AgroLink scoped-access Phase A merged — migrations 0022 and 0024 present (0023 taken by app_settings, 2026-08-21; Phase A's backfill migration accordingly moved from 0023 to 0024), `osi-scope-helper` registered with `assertFreshZoneAccess`, `users.role` live. **Not true of the current checkout (ordered migrations stop at 0021); do not start execution before that merge.** Migration numbering below assumes 0024 is then the next free slot; renumber if not (Phase A landing at 0024 means this plan's migration is likely 0025 — confirm at Step 1 below).
 
 ## Global Constraints
 

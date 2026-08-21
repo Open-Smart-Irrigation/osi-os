@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node-RED function nodes (one-shot mutation scripts only), `node:test` + `node:sqlite`, `osi-scope-helper`.
 
-**Prerequisites:** Phase A complete (migrations 0022–0023 applied, `osi-scope-helper` registered, `/api/me` live, flag exists). Load `osi-flows-json-editing` before any flow task.
+**Prerequisites:** Phase A complete (migrations 0022 and 0024 applied — 0023 taken by app_settings, 2026-08-21 — `osi-scope-helper` registered, `/api/me` live, flag exists). Load `osi-flows-json-editing` before any flow task.
 
 **Endpoint families (from the verified 118-endpoint inventory):**
 
@@ -361,10 +361,19 @@ Devices with no zone (unassigned) appear only when `scopeZoneFilter === null` (a
 Extend `test-scoped-access-reads.js`:
 
 ```js
-test('F1: researcher sees own zone + weather device only; admin sees all; flag off unchanged', async () => {
+test('F1: researcher sees own zone + weather device only; admin has no zone-list bypass either; flag off unchanged', async () => {
   // execute both list chains as res1, admin1, and with OSI_SCOPED_ACCESS unset
   // res1 zones: exactly ['z-1']; res1 devices: DENDRO1? no (zone z-1) yes + WX1 (weather) yes, VALVE1 yes (zone z-1)
-  // admin1: all; flag off: all for res1 too
+  // admin1 zones: exactly ['z-2'] — admin1 owns z-2 and holds no grant on z-1, so
+  //   z-1 is absent from admin1's list too. Admin has no automatic all-zones
+  //   visibility anywhere in the union-scope resolver (spec §6: admin's zone
+  //   read/write access is "owned + granted", same as researcher); admin's
+  //   elevated capabilities are the F6 admin-only endpoints (Task B8) and R3
+  //   zone-delete (Task C4's isAdminScope), not zone-list visibility. Do not
+  //   "fix" a failing admin1 assertion here by adding a role bypass to
+  //   filterZoneUuids/listScopeZoneUuids — that reintroduces the read/write
+  //   inconsistency removed from assertFreshDeviceAccess in Phase C Task C1.
+  // flag off: all for res1 too
 });
 ```
 
@@ -475,16 +484,30 @@ git commit -m "feat(api): device-scope reads with weather-class exception"
 ## Task B6: F4 — history API scoping
 
 **Files:**
-- Modify: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/` (whichever module resolves card/data/export queries; inspect `history-api-router-fn`'s `osiLib.require` targets first) (+ mirror)
-- Modify: both `flows.json` profiles (thin call-out in `history-api-router-fn` passing the principal through)
+- Modify: both `flows.json` profiles (`history-api-router-fn`) — verified shipped shape: this is a single ~60KB function node that contains ALL routing and query logic inline as nested helper functions (`getOwnedZoneContext`, `loadWorkspaceRow`, `listWorkspaces`, etc. are declared directly in its own script, not in a separate module). It has zero `osiLib.require` calls today; it loads only `HR` (`osi-history-router`, a small formatting/error-helper module — `HR.httpError`, `HR.normalizeWorkspaceRow`, etc.) via the node's `libs` array, not the in-body `osiLib.require` pattern.
+- Modify: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/` only if `HR` itself needs a new formatting helper — expect no change here in the common case; the scope check is new inline logic in `history-api-router-fn`, not a change to `HR`.
 
-- [ ] **Step 1: Principal passthrough**
+- [ ] **Step 1: Load the scope module once, inline**
 
-`history-api-router-fn` already routes every `/api/history/**` call. Pass the authenticated identity into the router call (one added field on the message it builds): `msg.principal = { username: flow.get('status_username'), scoped: String(env.get('OSI_SCOPED_ACCESS') || '') === '1' }`. Add its allowance delta with reason `AgroLink Phase B: history principal passthrough`.
+`history-api-router-fn` already routes every `/api/history/**` call, entirely within its own script — there is no separate dispatch module to hand off to. Add the one `osiLib.require('scope')` load near the top of the function, the same pattern used everywhere else in this plan:
 
-- [ ] **Step 2: Scope resolution inside the history router module**
+```js
+const scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';
+msg.principal = { username: flow.get('status_username'), scoped: scopedOn };
+let S = null;
+if (scopedOn) {
+  const load = osiLib.require('scope');
+  if (!load.ok) { node.error('history-router: scope module unavailable: ' + load.error, msg);
+    msg.statusCode = 500; msg.payload = { message: 'scope resolver unavailable' }; return msg; }
+  S = load.value;
+}
+```
 
-In the seam module, before dispatch:
+This is not cosmetic: it is what makes `verify-scoped-access.js` (Task B9) actually see that this endpoint family enforces scope — the ratchet greps `flows.json` node text for the literal `require('scope')` call. Because all history routing genuinely lives inline in this one node (verified — not an assumption), this is simpler than the journal fix in Task B7: there is no seam-module boundary to cross, just one load site plus the inline helper below, called from each existing route branch before that branch's query runs.
+
+- [ ] **Step 2: `scopeCheckForRoute` as an inline helper in the same function body**
+
+Declare this alongside the function's existing helpers (same pattern as `getOwnedZoneContext`/`loadWorkspaceRow`), taking `S` from Step 1's single load site — never re-resolved per route:
 
 ```js
 async function scopeCheckForRoute(db, S, principal, route) {
@@ -498,13 +521,25 @@ async function scopeCheckForRoute(db, S, principal, route) {
   } else if (route.kind === 'gateway') {
     await S.assertRole(db, u.user_uuid, 'admin', { scopedMode: true });
   } else if (route.kind === 'workspace') {
-    // workspaces are per-user rows: the existing queries already key user_id;
-    // resolve the integer id here and reject cross-user workspace ids with 404.
+    // Deliberately a no-op, not an oversight: history_workspaces already
+    // carries owner_user_uuid and every existing query (listWorkspaces,
+    // loadWorkspaceRow, createWorkspace, clearWorkspaceDefault — all
+    // pre-existing, none of them part of this program) filters on
+    // `user_id = auth.userId`. That ownership filter is unconditional and
+    // predates OSI_SCOPED_ACCESS entirely; there is no grant concept for
+    // workspaces (they are not zones or plots), so there is nothing for the
+    // union-scope model to add here. A foreign workspace id already 404s via
+    // `loadWorkspaceRow`'s existing WHERE clause, flag on or off. Only the
+    // disabled-account check above this branch is new behavior.
   }
 }
 ```
 
 `GET /api/history/zones/:zoneId/**` → kind `zone`; `GET /api/history/gateways/:gatewayEui/**` → kind `gateway`; `GET/POST/PUT/DELETE /api/history/workspaces**` → kind `workspace`. Export.csv inherits the zone rule. Map `e.status` to the HTTP response in the router's error path.
+
+- [ ] **Step 2b: Regression test for the workspace no-op**
+
+Add one test alongside the others in Step 3 asserting that a request for another user's `history_workspaces` row still 404s with `OSI_SCOPED_ACCESS=1` set and the requester enabled — i.e. that scoped mode changed nothing about workspace isolation, since it was already correct. This locks in the "deliberate no-op" claim above against a future refactor accidentally removing the pre-existing `user_id` filter while "simplifying" this branch.
 
 - [ ] **Step 3: Tests**
 
@@ -523,25 +558,62 @@ git commit -m "feat(api): scope history API (zone scope, gateway admin, workspac
 
 **Files:**
 - Modify: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api.js` (+ mirror)
+- Modify: both `flows.json` profiles (`journal-api-router-fn`: load the scope module and thread it into `handleHttpRequest`)
 - Modify: its colocated tests (`scripts/test-journal-api.js` or the module's own test file — confirm which exists and extend it)
 
-- [ ] **Step 1: Extend `listPlots` to the union rule**
+**Do not hand-roll the union query again.** `osi-scope-helper` already implements owned∪granted (`resolveScope`, `assertPlotAccess` — both shipped in Phase A). Reimplementing the same rule as a second, independent SQL string here is the thing to avoid: two copies of "what counts as granted" drift the moment either one gets a fix the other doesn't (e.g. a future tombstone-timing correction). Compose the existing helper instead.
 
-The shipped query filters `p.owner_user_uuid=?` plus a zone-owner join. In scoped mode the plot set becomes `owner ∪ granted`, and the zone join constraint drops in favor of scope (zone ownership no longer limits plot visibility — grants decide):
+- [ ] **Step 1: Inject the scope module at the flow-node boundary**
+
+`journal-api-router-fn` is a thin dispatcher — verified shipped shape (`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json`, node id `journal-api-router-fn`): it loads `osi-db-helper` and `osi-journal` via `osiLib.require`, then calls `osiJournal.handleHttpRequest({ msg, Database, environment, warn })`. Extend it to also load the scope module and pass it through in the same options object:
 
 ```js
-async function listPlots(db, principal, opts) {
-  const scoped = opts && opts.scoped === true;
-  if (!scoped) return listPlotsLegacy(db, principal); // current query, byte-preserved
+const dbLoad = osiLib.require('osi-db-helper');
+const journalLoad = osiLib.require('osi-journal');
+const scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';
+const scopeLoad = scopedOn ? osiLib.require('scope') : { ok: true, value: null };
+if (!dbLoad.ok || !journalLoad.ok || !scopeLoad.ok) {
+  const detail = [dbLoad, journalLoad, scopeLoad]
+    .filter(function(load) { return !load.ok; })
+    .map(function(load) { return load.error; })
+    .join('; ');
+  node.error('Journal helpers unavailable: ' + detail, msg);
+  msg.statusCode = 503;
+  msg.payload = { error: 'journal_helpers_unavailable', message: detail };
+  return msg;
+}
+const osiDb = dbLoad.value;
+const osiJournal = journalLoad.value;
+return osiJournal.handleHttpRequest({
+  msg: msg,
+  Database: osiDb.Database,
+  scope: scopeLoad.value,
+  scopedMode: scopedOn,
+  environment: { /* unchanged */ },
+  warn: function(message) { node.warn(message); }
+});
+```
+
+This is the load-bearing part of this task, not a formality: `verify-scoped-access.js` (Task B9) greps `flows.json` node text for the literal `require('scope')` call — it cannot see enforcement logic living only inside `osi-journal/api.js`. Every prior family (B3–B6, and Phase C's W1–W9) satisfies the ratchet because the flow node itself calls `osiLib.require('scope')`; journal reads did not, before this step, and would have been invisible to the ratchet despite `listPlots` doing real filtering — the ratchet would have either false-failed every journal endpoint or, worse, been satisfied by an unrelated allowlist entry that silently stopped protecting exactly the endpoint family the ADR calls out as the highest-risk cluster of owner-filtered queries. Loading it here closes that gap with no change to the ratchet script itself.
+
+`handleHttpRequest` already threads `principal` through to route handlers, but the read functions this task touches do not share one signature today — verified shipped shapes: `listPlots(db, principal)`, `listPlotGroups(db, principal)`, but `listEntries(db, filters, principal)` (`principal` is 2nd, 2nd, and 3rd respectively). **Do not** positional-insert `S` as a new parameter into each of these — that repeats the exact hazard this fix exists to avoid, just at the function-signature level instead of the SQL level, and a wrong slot silently passes the scope module where a filter object was expected. Instead, attach the scope module to the `principal` object itself, at the single point `principal` is already built (wherever `handleHttpRequest` calls its own `resolvePrincipal`-equivalent, before dispatch): `principal.scope = options.scope; principal.scoped = options.scopedMode;`. Every downstream function then reads `principal.scope`/`principal.scoped` off the object it already receives — zero signature changes, zero positional-order risk, regardless of where `principal` sits in each function's argument list.
+
+- [ ] **Step 2: Extend `listPlots` to the union rule via `osi-scope-helper`**
+
+```js
+async function listPlots(db, principal) {
+  if (!principal.scoped) return listPlotsLegacy(db, principal); // current query, byte-preserved
+  const scope = await principal.scope.resolveScope(db, principal.owner_user_uuid, { scopedMode: true });
+  const plotUuids = [...scope.plotUuids];
+  if (!plotUuids.length) return { plots: [] }; // empty IN() is invalid SQL; short-circuit instead
+  const placeholders = plotUuids.map(() => '?').join(',');
   const rows = await dbAll(db,
     'SELECT p.*,s.layout_code,s.updated_at AS settings_updated_at,' +
       's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
     'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
-    'WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL AND (' +
-      'p.owner_user_uuid=? OR p.plot_uuid IN (' +
-        'SELECT plot_uuid FROM user_plot_assignments WHERE user_uuid=? AND deleted_at IS NULL)) ' +
+    `WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL AND p.plot_uuid IN (${placeholders}) ` +
     'ORDER BY p.plot_code,p.plot_uuid',
-    [principal.gateway_device_eui, principal.owner_user_uuid, principal.owner_user_uuid]
+    [principal.gateway_device_eui, ...plotUuids]
   );
   return { plots: rows.map((row) => plotAggregate(row, {
     layout_code: row.layout_code, updated_at: row.settings_updated_at,
@@ -551,23 +623,27 @@ async function listPlots(db, principal, opts) {
 }
 ```
 
-Rename the current body to `listPlotsLegacy` (verbatim move). The caller passes `scoped` from `OSI_SCOPED_ACCESS`. Apply the same union shape to `listPlotGroups`, `listEntries` (entries follow their plot's scope: entry visible when its plot is owned∪granted), and the four export endpoints (they must call the same scoped list functions, never a parallel unfiltered query).
+Rename the current body to `listPlotsLegacy` (verbatim move). `principal.scoped`/`principal.scope` arrive already attached, from Step 1's single assignment point — no new parameter on `listPlots` itself. This also means plot reads now share `resolveScope`'s existing 30 s cache (epoch-invalidated on grant/role/disable writes, spec §8) instead of re-joining `user_plot_assignments` on every list call — an incidental performance win from removing the duplication, not just a correctness one. Apply the identical `principal.scope.resolveScope(...).plotUuids` composition to `listPlotGroups` and `listEntries` (entries follow their plot's scope: entry visible when its plot's uuid is in `scope.plotUuids`; `listEntries(db, filters, principal)` keeps its existing 3-argument shape unchanged — only `principal` itself carries the new fields), and to the four export endpoints — they must call these same scoped list functions, never a parallel unfiltered query or a second hand-rolled `IN (SELECT ...)`.
 
-- [ ] **Step 2: Tests**
+- [ ] **Step 3: Tests**
 
 ```js
 // res1 owns p-1, holds no grant on p-2: sees p-1 only.
 // After INSERT a user_plot_assignments row (u-res1, p-2): sees both.
 // Flag off: legacy owner-only result byte-identical to before.
+// Regression: grep osi-journal/api.js for 'user_plot_assignments' after this
+// task — the only remaining reference should be inside osi-scope-helper's own
+// resolveScope, not a second hand-rolled query in the journal module.
 ```
 
-- [ ] **Step 3: Mirror, journal test suite, commit**
+- [ ] **Step 4: Mirror, journal test suite, ratchet, commit**
 
 ```bash
 node --test scripts/test-journal-api.js 2>/dev/null || node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/
+node scripts/verify-scoped-access.js
 node scripts/verify-profile-parity.js
 git add conf/ scripts/
-git commit -m "feat(journal): union-rule reads (owner ∪ granted) behind the flag"
+git commit -m "feat(journal): union-rule reads via osi-scope-helper (owner ∪ granted) behind the flag"
 ```
 
 ---

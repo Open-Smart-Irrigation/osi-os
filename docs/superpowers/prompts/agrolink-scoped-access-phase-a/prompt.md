@@ -32,13 +32,13 @@ If any baseline gate is red, stop and report; do not build on a red baseline.
 2. **All 7 new triggers are migration-owned**: registered in `scripts/verify-runtime-schema-parity.js` `MIGRATION_OWNED_TRIGGERS`, present in seed and bundled DBs, never referenced by the frozen `sync-init-fn` boot node. The boot-survival test (Task 6) pins the drop-list at 30.
 3. **Emission is gated** by the single-row `scoped_access_emit` table, default 0, baked into every trigger's WHEN clause. Phase A installs schema only.
 4. **Bootstrap is one conditional write** (`INSERT … SELECT 'admin' … WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='admin')`), counting admins in any state; the follow-up SELECT only shapes the 403 message. Registration closes after the first admin in scoped mode.
-5. **Scope = owned ∪ granted**, resolved via the `users.user_uuid → users.id` bridge (zone/device ownership is the integer id; grants and journal are the text uuid). Null `user_uuid` is a hard error, never an empty scope. Migration 0023 backfills legacy null uuids.
+5. **Scope = owned ∪ granted**, resolved via the `users.user_uuid → users.id` bridge (zone/device ownership is the integer id; grants and journal are the text uuid). Null `user_uuid` is a hard error, never an empty scope. Migration 0024 (0023 taken by app_settings, 2026-08-21) backfills legacy null uuids.
 6. **Thin-node rule**: flow logic lives in the seam module loaded via `osiLib.require('scope')`; new flow nodes stay within `verify-flows-size-ratchet.js`, and every intentional growth gets an allowance entry with a real reason and measured delta. Do not buy green with unexplained allowances.
 7. The `osi-scope-helper` is db-handle-injectable (osi-journal pattern), cached 30 s for reads with explicit `invalidateScope`, and exports exactly the interface in plan Task 7 Step 3.
 
 ## Slice order (plan Tasks → worker slices)
 
-1. **Migration core** (Tasks 1–3): rehearsal test red → 0022 → 0023 → green. The rehearsal drives everything; the three-arm USER trigger and emit gate must be proven here, not later.
+1. **Migration core** (Tasks 1–3): rehearsal test red → 0022 → 0024 (0023 taken by app_settings, 2026-08-21) → green. The rehearsal drives everything; the three-arm USER trigger and emit gate must be proven here, not later.
 2. **Parity surfaces** (Tasks 4–5): CHECKSUMS.json, seed-blank.sql, 7 bundled DBs + mirror, `MIGRATION_OWNED_TRIGGERS`, consistency contract, full migration gate set.
 3. **Boot survival** (Task 6): static guard test against shipped `sync-init-fn` text.
 4. **Scope helper** (Tasks 7–8): TDD the module, then all registration surfaces (osi-lib map, package.json, node_modules symlinks, deploy.sh fetch lines, bcm2709 mirror, `verify-helper-registration.js`).

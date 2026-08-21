@@ -917,6 +917,60 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
 }
 
+// H2f: the Recent-irrigations display grace (get-actuations-response) must match the
+// reconciler's RECONCILIATION_GRACE_SEC (1800s). The reconciler was widened to 1800s (H2e)
+// precisely because a Class-A STREGA valve's OPEN/CLOSE confirmation each ride the next uplink
+// cycle; a shorter display grace here badges a still-healthy, still-reconciling run
+// OPEN_TIMEOUT/CLOSE_TIMEOUT well before the reconciler itself would call it stale.
+const DISPLAY_GRACE_VALUE_RE = /const\s+GRACE_MS\s*=\s*1800\s*\*\s*1000\s*;/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileGetActuationsNode = profileFlows.find((node) => node.id === 'get-actuations-response');
+    if (!profileGetActuationsNode) {
+        failures.push(`H2f ${profile}: get-actuations-response not found`);
+    } else if (!DISPLAY_GRACE_VALUE_RE.test(profileGetActuationsNode.func || '')) {
+        failures.push(
+            `H2f ${profile}: get-actuations-response's GRACE_MS must be 1800 * 1000, matching ` +
+            `strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC (a healthy run must not be ` +
+            `badged OPEN_TIMEOUT/CLOSE_TIMEOUT before the reconciler itself would call it stale)`
+        );
+    } else {
+        console.log(`OK  H2f ${profile}: get-actuations-response GRACE_MS = 1800 * 1000`);
+    }
+}
+
+// H2g: write-strega-expectation must persist the trigger the command payload carries (the
+// one-time-open builder in workers.js sets data.trigger='one_time'; a cloud command may set
+// raw.trigger) so the FW-T4 TriggerChip can ever render for an operator/one-time open.
+const WRITE_EXPECTATION_TRIGGER_COLUMN_RE = /created_at,\s*trigger\)\s*'\s*\+\s*\n\s*'VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?\)'/;
+const WRITE_EXPECTATION_TRIGGER_VALUE_RE = /const\s+trigger\s*=\s*raw\.trigger\s*\|\|\s*data\.trigger\s*\|\|\s*null\s*;/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileWriteExpNode = profileFlows.find((node) => node.id === 'write-strega-expectation');
+    if (!profileWriteExpNode) {
+        failures.push(`H2g ${profile}: write-strega-expectation not found`);
+    } else if (!WRITE_EXPECTATION_TRIGGER_VALUE_RE.test(profileWriteExpNode.func || '')) {
+        failures.push(
+            `H2g ${profile}: write-strega-expectation must derive trigger from raw.trigger || data.trigger || null`
+        );
+    } else if (!WRITE_EXPECTATION_TRIGGER_COLUMN_RE.test(profileWriteExpNode.func || '')) {
+        failures.push(
+            `H2g ${profile}: write-strega-expectation's INSERT must include the trigger column ` +
+            `(command payload trigger, e.g. 'one_time', is otherwise silently dropped)`
+        );
+    } else {
+        console.log(`OK  H2g ${profile}: write-strega-expectation INSERT includes trigger, sourced from the payload`);
+    }
+}
+
 // L1: write-strega-expectation and reject-indefinite-open must not fall back to {}
 for (const nodeId of ['write-strega-expectation', 'reject-indefinite-open']) {
     const n = byId[nodeId];

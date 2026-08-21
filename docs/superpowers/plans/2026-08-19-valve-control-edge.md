@@ -52,7 +52,7 @@
 | `docs/contracts/sync-schema/{resources,events}.schema.json`, `canonicalization.md` | `ValveSchedule` resource + `VALVE_SCHEDULE_UPSERTED` op. |
 | `AGENTS.md`, `docs/architecture/system-map/03-edge-backend-flows.md` | Module + rename documentation. |
 
-Phase B (osi-server mirror, AgroLink panel, cloud→edge `UPSERT_VALVE_SCHEDULE` command routing, sync-outbox triggers via edge migration `0023` + `MIGRATION_OWNED_TRIGGERS` entries in `scripts/verify-runtime-schema-parity.js`) is a separate plan in osi-server plus a small edge follow-up; it is not in this file.
+Phase B (osi-server mirror, AgroLink panel, cloud→edge `UPSERT_VALVE_SCHEDULE` command routing, sync-outbox triggers via edge migration `0024` (0023 taken by app_settings, 2026-08-21) + `MIGRATION_OWNED_TRIGGERS` entries in `scripts/verify-runtime-schema-parity.js`) is a separate plan in osi-server plus a small edge follow-up; it is not in this file.
 
 ## Deviations from the spec (agreed at plan review)
 
@@ -156,7 +156,7 @@ ALTER TABLE valve_actuation_expectations ADD COLUMN trigger TEXT;
 
 ```
 
-**Deliberately absent (Phase B):** the `trg_sync_valve_schedules_outbox_ai`/`_au` sync triggers from spec §4 do NOT ship in 0022. Every live gateway is cloud-linked; emitting a `VALVE_SCHEDULE` aggregate the cloud has never seen produces terminally-rejected `sync_outbox` rows (the known edge→cloud bootstrap gap). The table carries `schedule_uuid`/`sync_version`/`deleted_at` from day one, so Phase B's lockstep migration (`0023`) is trigger-only; Phase B must also add both trigger names to `MIGRATION_OWNED_TRIGGERS` in `scripts/verify-runtime-schema-parity.js` (migration-delivered triggers absent from the frozen boot node — the `0005` precedent).
+**Deliberately absent (Phase B):** the `trg_sync_valve_schedules_outbox_ai`/`_au` sync triggers from spec §4 do NOT ship in 0022. Every live gateway is cloud-linked; emitting a `VALVE_SCHEDULE` aggregate the cloud has never seen produces terminally-rejected `sync_outbox` rows (the known edge→cloud bootstrap gap). The table carries `schedule_uuid`/`sync_version`/`deleted_at` from day one, so Phase B's lockstep migration (`0024`, 0023 taken by app_settings, 2026-08-21) is trigger-only; Phase B must also add both trigger names to `MIGRATION_OWNED_TRIGGERS` in `scripts/verify-runtime-schema-parity.js` (migration-delivered triggers absent from the frozen boot node — the `0005` precedent).
 
 - [ ] **Step 3: Mirror the DDL into `database/seed-blank.sql`**
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the scoped-access foundation on the edge: migrations 0022–0023 (schema + backfill), the `osi-scope-helper` seam module, the `OSI_SCOPED_ACCESS` feature flag, `/api/me`, and scoped-mode bootstrap registration, all behind the flag, with producers (sync events) gated off until Phase E.
+**Goal:** Land the scoped-access foundation on the edge: migrations 0022 (schema) and 0024 (backfill) (0023 taken by app_settings, 2026-08-21), the `osi-scope-helper` seam module, the `OSI_SCOPED_ACCESS` feature flag, `/api/me`, and scoped-mode bootstrap registration, all behind the flag, with producers (sync events) gated off until Phase E.
 
 **Architecture:** Per spec `docs/superpowers/specs/2026-07-19-agrolink-scoped-multiuser-design.md` v4 (§5 data model, §5.1 trigger constraint, §8 identifier bridge, §10 bootstrap). New triggers are migration-owned (never the boot node) and registered in `MIGRATION_OWNED_TRIGGERS`. All flow-node logic lives in the seam module loaded via `osiLib.require('scope')`; flow nodes stay thin to satisfy `verify-flows-size-ratchet.js`. Sync event emission is gated by a single-row SQL flag table (`scoped_access_emit`), default off, so Phase A cannot emit unknown aggregates at the cloud.
 
@@ -12,7 +12,7 @@
 
 ---
 
-## Task 1: Failing rehearsal test for migrations 0022–0023
+## Task 1: Failing rehearsal test for migrations 0022–0024
 
 **Files:**
 - Create: `scripts/rehearse-scoped-access-migration.test.js`
@@ -25,7 +25,7 @@ This test drives the two migration files. It uses `node:sqlite` (`DatabaseSync`)
 #!/usr/bin/env node
 'use strict';
 // Rehearsal for migrations 0022 (additive scoped-access schema) and
-// 0023 (data backfill). Drives: tables/indexes/triggers exist, emit gate
+// 0024 (data backfill). Drives: tables/indexes/triggers exist, emit gate
 // default-off, USER three-arm trigger emits non-null user_uuid, conditional
 // bootstrap insert semantics, uuid backfill, in-place admin promotion.
 const test = require('node:test');
@@ -36,7 +36,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = path.resolve(__dirname, '..');
 const MIG_0022 = fs.readFileSync(path.join(ROOT, 'database/migrations/ordered/0022__scoped_access_schema.sql'), 'utf8');
-const MIG_0023 = fs.readFileSync(path.join(ROOT, 'database/migrations/ordered/0023__scoped_access_backfill.sql'), 'utf8');
+const MIG_0024 = fs.readFileSync(path.join(ROOT, 'database/migrations/ordered/0024__scoped_access_backfill.sql'), 'utf8');
 
 const USERS_DDL = `CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,18 +128,18 @@ test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   db.close();
 });
 
-test('0023 backfills null user_uuid and promotes lowest-id admin; no-op on empty users', () => {
+test('0024 backfills null user_uuid and promotes lowest-id admin; no-op on empty users', () => {
   const db = freshDb();
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy1','h','2026-01-01')`);
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy2','h','2026-01-01')`);
   db.exec(`UPDATE users SET user_uuid=NULL`); // simulate pre-trigger-era rows
-  db.exec(MIG_0023);
+  db.exec(MIG_0024);
   const nulls = db.prepare(`SELECT COUNT(*) n FROM users WHERE user_uuid IS NULL OR user_uuid=''`).get().n;
   assert.equal(nulls, 0);
   const admins = db.prepare(`SELECT username FROM users WHERE role='admin'`).all().map(r => r.username);
   assert.deepEqual(admins, ['legacy1']); // lowest id promoted when no input
   const db2 = freshDb();
-  db2.exec(MIG_0023);
+  db2.exec(MIG_0024);
   assert.equal(db2.prepare('SELECT COUNT(*) n FROM users').get().n, 0); // fresh image: no crash, no rows
   db.close(); db2.close();
 });
@@ -449,20 +449,20 @@ Note: the rehearsal's in-memory DB creates `sync_outbox` itself; on real DBs the
 - [ ] **Step 2: Run rehearsal — expect progress, still failing**
 
 Run: `node --test scripts/rehearse-scoped-access-migration.test.js`
-Expected: first 4 tests PASS, last test FAILS (0023 file missing).
+Expected: first 4 tests PASS, last test FAILS (0024 file missing).
 
 ---
 
-## Task 3: Migration 0023 (data backfill)
+## Task 3: Migration 0024 (data backfill)
 
 **Files:**
-- Create: `database/migrations/ordered/0023__scoped_access_backfill.sql`
+- Create: `database/migrations/ordered/0024__scoped_access_backfill.sql`
 
 - [ ] **Step 1: Write the migration**
 
 ```sql
 -- risk: data
--- 0023: Scoped access backfill (AgroLink), two idempotent jobs (spec §5.3):
+-- 0024: Scoped access backfill (AgroLink), two idempotent jobs (spec §5.3):
 -- 1. Assign user_uuid to any legacy user row missing one (the shipped
 --    trg_sync_users_uuid_ai covers inserts; this closes the pre-trigger era).
 -- 2. In-place-upgrade admin promotion: when at least one user exists and no
@@ -500,7 +500,7 @@ node -e "
 const fs=require('fs'),crypto=require('crypto');
 const p='database/migrations/ordered/CHECKSUMS.json';
 const m=JSON.parse(fs.readFileSync(p,'utf8'));
-for (const f of ['0022__scoped_access_schema.sql','0023__scoped_access_backfill.sql']) {
+for (const f of ['0022__scoped_access_schema.sql','0024__scoped_access_backfill.sql']) {
   m[f]=crypto.createHash('sha256').update(fs.readFileSync('database/migrations/ordered/'+f)).digest('hex');
 }
 fs.writeFileSync(p, JSON.stringify(m,null,2)+'\n');
@@ -511,7 +511,7 @@ console.log('entries:', Object.keys(m).length);
 - [ ] **Step 2: Verify**
 
 Run: `node scripts/verify-migrations.js`
-Expected: exit 0 (well-formed, contiguous 0001–0023, checksum entries present).
+Expected: exit 0 (well-formed, contiguous 0001–0024, checksum entries present).
 
 ---
 
@@ -572,7 +572,7 @@ cp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
    conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db
 ```
 
-Note: 0023 is a data migration: do **not** apply it to bundled DBs (they ship zero users; the runner applies it at deploy).
+Note: 0024 is a data migration: do **not** apply it to bundled DBs (they ship zero users; the runner applies it at deploy).
 
 - [ ] **Step 4: Extend the consistency contract**
 
@@ -595,7 +595,7 @@ Expected: each prints its OK line; profile parity ends `All parity checks passed
 ```bash
 git add database/ scripts/verify-runtime-schema-parity.js scripts/verify-db-schema-consistency.js \
   conf/*/files/usr/share/db/farming.db web/react-gui/farming.db scripts/rehearse-scoped-access-migration.test.js
-git commit -m "feat(schema): scoped access migrations 0022-0023 with migration-owned triggers"
+git commit -m "feat(schema): scoped access migrations 0022-0024 with migration-owned triggers"
 ```
 
 ---
@@ -816,7 +816,7 @@ async function loadUser(db, userUuid) {
     [userUuid]
   );
   if (!row) throw httpError(403, 'unknown user');
-  if (!row.user_uuid) throw httpError(500, 'user row has null user_uuid (0023 backfill incomplete)');
+  if (!row.user_uuid) throw httpError(500, 'user row has null user_uuid (0024 backfill incomplete)');
   return row;
 }
 
@@ -1250,8 +1250,8 @@ Expected: every command exit 0 with its documented OK line.
 - [ ] **Step 2: Acceptance against spec §15 Phase A gate**
 
 - Migration + parity verifiers green: Step 1 output.
-- Fresh-image rehearsal: rehearsal test covers zero-users 0023 no-op + conditional bootstrap producing exactly one admin.
-- In-place rehearsal: rehearsal test covers 0023 uuid backfill + lowest-id promotion.
+- Fresh-image rehearsal: rehearsal test covers zero-users 0024 no-op + conditional bootstrap producing exactly one admin.
+- In-place rehearsal: rehearsal test covers 0024 uuid backfill + lowest-id promotion.
 - Restart-reversion: boot-survival test green.
 
 ---

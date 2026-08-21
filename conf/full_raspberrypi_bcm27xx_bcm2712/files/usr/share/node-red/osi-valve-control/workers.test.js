@@ -138,9 +138,12 @@ test('runClockTick queues a weekly GEN1 clock push and fails >24h queued pushes'
   await store.insertSchedule(db, { schedule_uuid: 's1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
   await store.upsertSettings(db, '0016C001F1000001', { last_clock_sync_queued_at: '2026-08-01T00:00:00.000Z' });
   await store.insertPushes(db, [{ push_id: 'stale', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 0, fport: 14, payload_hex: 'FF'.repeat(24), plan_hash: 'h' }]);
-  // queued_at is left at the DB's own datetime('now') default, then backdated with datetime()
-  // arithmetic — matching how failStalePushes' own comparison must read this column.
-  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime(queued_at, '-3 days') WHERE push_id='stale'");
+  // queued_at is backdated with SQLite datetime() arithmetic from the suite's own FIXED clock
+  // (not the real 'now') so this stays deterministic forever — using real wall-clock 'now' here
+  // made the assertion below true only while the real clock was within 48h of 2026-08-19T10:00Z,
+  // and would have inverted permanently once that window passed. The space-separated output of
+  // datetime() still matches how failStalePushes' own comparison reads this column (see store.test.js C2).
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime('2026-08-19 10:00:00', '-3 days') WHERE push_id='stale'");
   const r = await W.runClockTick({ db, now: new Date('2026-08-19T10:00:00Z'), appId: 'app', warn: () => {} });
   assert.equal(r.messages.length, 1); assert.equal(r.messages[0].payload.fPort, 12);
   assert.equal((await db.get("SELECT state FROM valve_schedule_pushes WHERE push_id='stale'")).state, 'FAILED');

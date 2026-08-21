@@ -87,7 +87,7 @@ The branch is merge-candidate pending: (a) hardware gates on a gateway with
 a valve, (b) the deferred-minor follow-ups in the SDD ledger (i18n literal
 batch already fixed; remaining: WEEKLY-DELETE recompile test, panel
 SWR-error test, unused spare i18n key), (c) Phase B (osi-server mirror +
-sync triggers via migration 0023, lockstep).
+sync triggers via migration 0023 (now 0024), lockstep).
 
 ## Follow-ups (ordered)
 
@@ -98,6 +98,6 @@ sync triggers via migration 0023, lockstep).
 4. Ask STREGA whether SV2 firmware can report its scheduler after a BLE edit
    (spec §13).
 5. Phase B plan (osi-server): `VALVE_SCHEDULE` mirror, commands, AgroLink
-   panel, edge migration 0023 + `MIGRATION_OWNED_TRIGGERS` entries.
+   panel, edge migration 0023 (now 0024) + `MIGRATION_OWNED_TRIGGERS` entries.
 6. i18n programme: lg placeholder copies of `valves.json` + the flagged
    `settings.json` key need the native pass (Uganda gate).
