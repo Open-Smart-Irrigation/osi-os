@@ -1,5 +1,8 @@
 # AgroLink Scoped Access — Phase A Implementation Plan
 
+> **Migration numbering is stale (2026-08-21):** `feat/valve-control` shipped `0022__valve_control.sql` and `0023__app_settings.sql`. This plan's `0022__scoped_access_schema.sql` collides; at execution time renumber to the next contiguous free versions (currently schema -> `0024`, backfill -> `0025`) and re-check `ls database/migrations/ordered/` first.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Land the scoped-access foundation on the edge: migrations 0022 (schema) and 0024 (backfill) (0023 taken by app_settings, 2026-08-21), the `osi-scope-helper` seam module, the `OSI_SCOPED_ACCESS` feature flag, `/api/me`, and scoped-mode bootstrap registration, all behind the flag, with producers (sync events) gated off until Phase E.
