@@ -58,9 +58,9 @@ afterEach(() => {
 });
 
 describe('DashboardHeader (osi-os)', () => {
-  it('renders the OSI OS title, welcome text, and Settings entry without a standalone language switcher', () => {
+  it('renders the welcome text (no product title) and Settings entry without a standalone language switcher', () => {
     renderHeader();
-    expect(screen.getByRole('heading', { name: 'Open Smart Irrigation Dashboard' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     expect(screen.getByText('Welcome farmer')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Lang/i })).not.toBeInTheDocument();
     expect(screen.queryByTitle('Change language')).not.toBeInTheDocument();
