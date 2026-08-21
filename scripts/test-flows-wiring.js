@@ -888,6 +888,70 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
 }
 
+// H2e: the reconciliation grace must be widened to 1800s (30 min). STREGA
+// valves are LoRaWAN Class A with a default 600s uplink interval: the OPEN
+// downlink itself only reaches the valve at the next uplink, and the
+// state-bearing CLOSE confirmation arrives at the uplink after the run ends,
+// so a genuine run can confirm 600-1500s after expected_close_at. The old
+// 300s grace turned real runs into the terminal STALE_NO_OBSERVATION, which
+// (per H2d above) is excluded from litres sums - i.e. real irrigation water
+// silently vanished from the zone water balance. Both STALE transitions
+// share the one constant, so a single change covers both.
+const RECONCILIATION_GRACE_VALUE_RE = /const\s+RECONCILIATION_GRACE_SEC\s*=\s*1800\s*;/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
+    if (!profileReconcNode) {
+        failures.push(`H2e ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!RECONCILIATION_GRACE_VALUE_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2e ${profile}: strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC must be 1800 ` +
+            `(a full Class-A uplink cycle plus margin on both the OPEN-delivery and CLOSE-confirmation legs)`
+        );
+    } else {
+        console.log(`OK  H2e ${profile}: RECONCILIATION_GRACE_SEC = 1800`);
+    }
+}
+
+// H2f: the expectation scan must also pick up STALE_NO_OBSERVATION rows for
+// late-evidence promotion, bounded to a recent commanded_at window compared
+// as epoch millis (Date.parse), never a string/lexical compare. Without this,
+// a run that already timed out to STALE_NO_OBSERVATION under the old grace
+// (or a genuinely very late confirmation) can never recover even after a
+// real CLOSE uplink arrives - the litres exclusion from H2d would then be
+// permanent for that run instead of self-correcting.
+const RECONCILIATION_SCAN_INCLUDES_STALE_RE =
+    /WHERE reconciliation_state IN \(\s*'PENDING_OBSERVATION'\s*,\s*'OBSERVED_RUNNING'\s*,\s*'STALE_NO_OBSERVATION'\s*\)/;
+const RECONCILIATION_STALE_WINDOW_RE =
+    /reconciliation_state\s*===\s*'STALE_NO_OBSERVATION'[\s\S]{0,200}?Date\.parse\(exp\.commanded_at\)[\s\S]{0,200}?Number\.isFinite\([^)]*\)\s*\|\|\s*now\s*-\s*\w+\s*>\s*STALE_REPROMOTION_WINDOW_MS/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
+    if (!profileReconcNode) {
+        failures.push(`H2f ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!RECONCILIATION_SCAN_INCLUDES_STALE_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2f ${profile}: strega-reconciliation-monitor's expectation scan must also select ` +
+            `STALE_NO_OBSERVATION rows so late evidence can promote them out of the litres exclusion`
+        );
+    } else if (!RECONCILIATION_STALE_WINDOW_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2f ${profile}: strega-reconciliation-monitor must bound STALE_NO_OBSERVATION reprocessing ` +
+            `to a recent commanded_at window using an epoch-millis Date.parse compare (never a string compare)`
+        );
+    } else {
+        console.log(`OK  H2f ${profile}: expectation scan includes STALE_NO_OBSERVATION bounded by a Date.parse commanded_at window`);
+    }
+}
+
 // L1: write-strega-expectation and reject-indefinite-open must not fall back to {}
 for (const nodeId of ['write-strega-expectation', 'reject-indefinite-open']) {
     const n = byId[nodeId];
