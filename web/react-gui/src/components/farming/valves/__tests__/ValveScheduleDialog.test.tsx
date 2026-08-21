@@ -179,6 +179,29 @@ function responseWithNullStartTime(): ValveSchedulesResponse {
   };
 }
 
+function responseWithSundayAndWednesdayMask(): ValveSchedulesResponse {
+  return {
+    schedules: [
+      {
+        scheduleUuid: 'sched-sun-wed',
+        deviceEui: '0016C001F1000001',
+        kind: 'WEEKLY',
+        label: null,
+        weekdaysMask: 0b0001001, // Sunday (bit 0) + Wednesday (bit 3)
+        startTime: '05:00',
+        fireAt: null,
+        durationMinutes: 15,
+        timezone: 'Europe/Zurich',
+        enabled: true,
+        onceState: null,
+      },
+    ],
+    compiled: { days: [[], [], [], [], [], [], []], errors: [] },
+    pushState: [],
+    settings: { stregaGeneration: 'GEN1', flowRateLpm: null, flowRateSource: null, defaultOpenMinutes: null },
+  };
+}
+
 function renderDialog(valve: ValveSummary, onChanged = vi.fn()) {
   return render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
@@ -228,6 +251,39 @@ describe('ValveScheduleDialog', () => {
     schedulesMock.mockResolvedValueOnce(responseWithTuesdayWindows());
     renderDialog(makeValve());
     expect(await screen.findByText('2 of 4 windows')).toBeInTheDocument();
+  });
+
+  it('renders the weekday selection chips Monday-first (STREGA mask stays Sunday=0 underneath)', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    renderDialog(makeValve());
+    await screen.findByText('Schedules');
+
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const chips = screen.getAllByRole('button').filter((btn) => dayLabels.includes(btn.textContent ?? ''));
+    expect(chips.map((btn) => btn.textContent)).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+  });
+
+  it('renders the compiled week grid columns Monday-first', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    const { container } = renderDialog(makeValve());
+    await screen.findByText('Schedules');
+
+    const headers = Array.from(
+      container.querySelectorAll('.grid-cols-7 p.text-xs.font-semibold.text-\\[var\\(--text-tertiary\\)\\]'),
+    ).map((el) => el.textContent);
+    expect(headers).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+  });
+
+  it('joins the weekly preview summary Monday-first regardless of click order', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    renderDialog(makeValve());
+    await screen.findByText('Schedules');
+
+    // Click Sunday first, then Tuesday — the preview must still read Tue before Sun.
+    fireEvent.click(screen.getByRole('button', { name: 'Sun' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tue' }));
+
+    expect(await screen.findByText(/^Tue, Sun 06:00–06:30 · 30 min$/)).toBeInTheDocument();
   });
 
   it('renders the conflict message when the API rejects a weekly save with a weekday-2 overlap', async () => {
@@ -289,6 +345,14 @@ describe('ValveScheduleDialog', () => {
     await screen.findByText('Schedules');
     expect(screen.getByText('Mon · — · 20 min')).toBeInTheDocument();
     expect(screen.queryByText(/null/)).not.toBeInTheDocument();
+  });
+
+  it('lists a saved weekly schedule\'s weekdays Monday-first even though the mask decodes ascending (Sunday=0)', async () => {
+    schedulesMock.mockResolvedValueOnce(responseWithSundayAndWednesdayMask());
+    renderDialog(makeValve());
+
+    await screen.findByText('Schedules');
+    expect(screen.getByText('Wed, Sun · 05:00–05:15 · 15 min')).toBeInTheDocument();
   });
 
   it('shows a loading state before the schedules request resolves', async () => {

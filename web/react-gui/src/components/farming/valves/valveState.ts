@@ -47,6 +47,19 @@ export function maskFromWeekdays(days: number[]): number {
   return days.reduce((m, d) => m | (1 << d), 0);
 }
 
+/**
+ * Display order for weekday indices (STREGA `weekdays_mask` bit order: 0=Sunday…6=Saturday).
+ * The mask encoding, weekday indices, and `weekdays.N` i18n keys stay 0=Sunday-based — this
+ * only reorders how a set of weekday indices is presented on screen (Swiss convention:
+ * Monday-first). Never use this for encoding/decoding the STREGA mask.
+ */
+export const WEEKDAY_DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+/** Orders a set of weekday indices (0=Sunday…6=Saturday) for Monday-first display only. */
+export function sortWeekdaysForDisplay(days: number[]): number[] {
+  return [...days].sort((a, b) => WEEKDAY_DISPLAY_ORDER.indexOf(a) - WEEKDAY_DISPLAY_ORDER.indexOf(b));
+}
+
 export function windowEnd(startTime: string, minutes: number): string {
   const [h, m] = startTime.split(':').map(Number);
   const end = (h * 60 + m + minutes) % 1440;

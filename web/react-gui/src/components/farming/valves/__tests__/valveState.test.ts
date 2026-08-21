@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveValveGlyphState, estimateLiters, weekdaysFromMask, maskFromWeekdays, windowEnd } from '../valveState';
+import { deriveValveGlyphState, estimateLiters, weekdaysFromMask, maskFromWeekdays, sortWeekdaysForDisplay, windowEnd } from '../valveState';
 import type { ValveSummary } from '../../../../types/farming';
 
 const base: ValveSummary = { deviceEui: '0016C001F1000001', name: 'A', zoneId: 1, zoneName: 'Z', zoneUuid: 'u', timezone: 'Europe/Zurich', currentState: 'CLOSED', targetState: null, stregaGeneration: 'GEN1', flowRateLpm: null, flowRateSource: null, defaultOpenMinutes: null, schedulerStatus: 'ACTIVE', skipTodayDate: null, lastUplinkAt: null, activeActuation: null, recentStaleState: null, nextRun: null, scheduleCount: 0, pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null }, lastClockSyncAckedAt: null };
@@ -34,4 +34,14 @@ describe('helpers', () => {
   it('estimateLiters rounds to 10 L and keeps null', () => { expect(estimateLiters(12.5, 30)).toBe(380); expect(estimateLiters(null, 30)).toBeNull(); });
   it('mask round trip', () => { expect(weekdaysFromMask(0b1000101)).toEqual([0, 2, 6]); expect(maskFromWeekdays([1, 3, 5])).toBe(0b0101010); });
   it('windowEnd wraps midnight', () => { expect(windowEnd('23:05', 65)).toBe('00:10'); expect(windowEnd('06:00', 90)).toBe('07:30'); });
+  it('sortWeekdaysForDisplay orders Monday-first while leaving STREGA indices untouched', () => {
+    expect(sortWeekdaysForDisplay([0, 3, 1])).toEqual([1, 3, 0]);
+    expect(sortWeekdaysForDisplay([0, 1, 2, 3, 4, 5, 6])).toEqual([1, 2, 3, 4, 5, 6, 0]);
+    expect(sortWeekdaysForDisplay([6, 0])).toEqual([6, 0]);
+    expect(sortWeekdaysForDisplay([])).toEqual([]);
+    // Does not mutate the input array.
+    const input = [0, 3, 1];
+    sortWeekdaysForDisplay(input);
+    expect(input).toEqual([0, 3, 1]);
+  });
 });

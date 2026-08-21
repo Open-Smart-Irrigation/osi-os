@@ -3,7 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
 import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
-import { estimateLiters, maskFromWeekdays, weekdaysFromMask, windowEnd } from './valveState';
+import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
 
 export interface ValveScheduleDialogProps {
   valve: ValveSummary;
@@ -14,7 +14,9 @@ export interface ValveScheduleDialogProps {
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+// Monday-first display order (Swiss convention). The STREGA mask/index encoding stays
+// 0=Sunday-based everywhere else — this constant is for rendering weekday lists only.
+const WEEKDAYS = WEEKDAY_DISPLAY_ORDER;
 const WEEKLY_MAX_MINUTES = 1439;
 const ONCE_MAX_MINUTES = 255;
 
@@ -266,7 +268,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const weeklyLiters = isWeeklyValid ? estimateLiters(valve.flowRateLpm, weeklyDurationNum) : null;
   const weeklyPreview = isWeeklyValid
     ? t('scheduleDialog.preview', {
-        days: weekly.days.map((d) => td(`weekdays.${d}`)).join(', '),
+        days: sortWeekdaysForDisplay(weekly.days).map((d) => td(`weekdays.${d}`)).join(', '),
         start: weekly.startTime,
         end: windowEnd(weekly.startTime, weeklyDurationNum),
         minutes: weeklyDurationNum,
@@ -374,7 +376,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           </p>
                           <p className="truncate text-xs text-[var(--text-tertiary)]">
                             {schedule.kind === 'WEEKLY'
-                              ? `${weekdaysFromMask(schedule.weekdaysMask ?? 0).map((d) => td(`weekdays.${d}`)).join(', ')} · ${schedule.startTime ? `${schedule.startTime}–${windowEnd(schedule.startTime, schedule.durationMinutes)}` : '—'} · ${schedule.durationMinutes} min`
+                              ? `${sortWeekdaysForDisplay(weekdaysFromMask(schedule.weekdaysMask ?? 0)).map((d) => td(`weekdays.${d}`)).join(', ')} · ${schedule.startTime ? `${schedule.startTime}–${windowEnd(schedule.startTime, schedule.durationMinutes)}` : '—'} · ${schedule.durationMinutes} min`
                               : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone) : '—'} · ${schedule.durationMinutes} min`}
                           </p>
                         </div>
