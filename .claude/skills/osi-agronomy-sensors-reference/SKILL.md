@@ -464,7 +464,10 @@ sentinel: the decoder itself tests `box_temp === 65535 && box_hum === 65535`
 in flows.json separately tests the decoded pair 125 °C / 100 %
 (`normalizeStregaEnvironment`) — the vendor codec at
 `docs/hardware/strega-codecs/ChirpStack-STREGA-CODEC-Decoder-Gen1` has no
-such guard, which is why the flows-level check exists at all. The values
+such guard. Both of ours landed together in `d261d2c7`, so treat them as one
+defence in two places rather than one compensating for the other — and note
+that ChirpStack is provisioned with our guarded decoder, not the vendor file
+(`chirpstack-bootstrap.js:97`). The values
 land in `device_data.ambient_temperature` and `relative_humidity`, the same
 columns sensor devices use.
 
@@ -473,7 +476,8 @@ them.** Confirmed three independent ways:
 1. The Gen2 vendor decoder
    (`docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up`)
    emits no temperature or humidity field in any of its four return shapes
-   (ack ports 10/13, 24, default, and the standard periodic uplink).
+   (ack port 10, ack port 24, the `default` ack branch, and the standard
+   periodic uplink).
 2. The SV2 manual's periodical uplink
    (`/home/phil/kDrive/OSI OS/Hardware/STREGA/Gen2/HHW_SV2_STREGA_Smart_valve_Manual.pdf`,
    payload format pp. 51-53) is 3 bytes of battery millivolts plus one
