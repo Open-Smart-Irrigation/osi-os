@@ -1201,7 +1201,7 @@ if (!stregaProcessFn) {
 // a profile decision that consults only the request field (never stored
 // state) would demote an already-promoted GEN2 valve's ChirpStack device back
 // to Gen1 the moment a caller re-registers it without the field.
-const PROMOTION_ONLY_VALVE_SETTINGS_RE = /ON CONFLICT\(device_eui\)\s*DO UPDATE SET\s*strega_generation[\s\S]*?excluded\.strega_generation\s*=\s*'GEN2'/;
+const PROMOTION_ONLY_VALVE_SETTINGS_RE = /ON CONFLICT\(device_eui\)\s*DO UPDATE SET\s*strega_generation[^;]*?WHERE[^;]*?\bAND\b[^;]*?excluded\.strega_generation\s*=\s*'GEN2'/;
 
 function assertPromotionOnlyValveSettingsUpsert(node, label) {
     if (!node) {
@@ -1216,6 +1216,18 @@ function assertPromotionOnlyValveSettingsUpsert(node, label) {
     } else {
         console.log('OK  ' + label + ' seeds valve_settings via a promotion-only (GEN1->GEN2 only) upsert');
     }
+}
+
+// The stickiness fix spans TWO nodes: post-devices-insert consults the stored
+// generation, but only because check-existing-device supplies it. Reverting the
+// upstream SELECT alone fully reinstates the demotion defect, so pin it too.
+const checkExistingDeviceFn = byId['check-existing-device'];
+if (!checkExistingDeviceFn) {
+    failures.push('check-existing-device not found');
+} else if (!/LEFT JOIN\s+valve_settings/.test(checkExistingDeviceFn.func || '')) {
+    failures.push('check-existing-device must LEFT JOIN valve_settings so the registration path can consult a stored STREGA generation; without it a re-registration silently demotes a stored GEN2 valve to the Gen1 ChirpStack profile');
+} else {
+    console.log('OK  check-existing-device supplies the stored STREGA generation to the registration path');
 }
 
 const postDevicesInsertFn = byId['post-devices-insert'];
