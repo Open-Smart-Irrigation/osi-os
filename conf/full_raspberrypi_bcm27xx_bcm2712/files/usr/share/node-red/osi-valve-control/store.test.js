@@ -213,6 +213,17 @@ test('listValvesForUser: a valve that reports temperature but not humidity keeps
   db.close();
 });
 
+test('listValvesForUser (review R1, MINOR-1/2): temperature from an older row and humidity from a newer row are both returned, each from its own row, and enclosure_measured_at is the newer of the two (MAX, not MIN)', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001','2026-08-20T09:00:00.000Z', 17.25, NULL)");
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001','2026-08-20T12:00:00.000Z', NULL, 61.5)");
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, 17.25, 'temperature subquery finds its own newest non-null row (09:00), independent of the humidity row');
+  assert.equal(valve.enclosure_humidity_pct, 61.5, 'humidity subquery finds its own newest non-null row (12:00), independent of the temperature row');
+  assert.equal(valve.enclosure_measured_at, '2026-08-20T12:00:00.000Z', 'MAX over either-column-non-null rows must pick the newer (12:00) row, not the older (09:00) one a MIN regression would report');
+  db.close();
+});
+
 test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read error too, warning instead of throwing', async () => {
   // Unified policy: a scheduled worker tick (runObserveTick/runClockTick/runHousekeeping)
   // has no enclosing try/catch around this one call, so ANY read failure — not just a
