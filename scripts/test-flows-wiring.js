@@ -1195,14 +1195,38 @@ if (!stregaProcessFn) {
 // paths must be able to route a Gen2 STREGA valve to the Gen2 ChirpStack
 // device profile, and the node that owns the local DB write must persist the
 // generation into valve_settings so the scheduler emits the right frame
-// format from its first push.
+// format from its first push. A stored GEN2 must also be sticky across a
+// generation-omitted re-registration: ensureDeviceProvisioned actively
+// re-points a device's ChirpStack profile to match the resolved profileId, so
+// a profile decision that consults only the request field (never stored
+// state) would demote an already-promoted GEN2 valve's ChirpStack device back
+// to Gen1 the moment a caller re-registers it without the field.
+const PROMOTION_ONLY_VALVE_SETTINGS_RE = /ON CONFLICT\(device_eui\)\s*DO UPDATE SET\s*strega_generation[\s\S]*?excluded\.strega_generation\s*=\s*'GEN2'/;
+
+function assertPromotionOnlyValveSettingsUpsert(node, label) {
+    if (!node) {
+        failures.push(label + ' not found');
+        return;
+    }
+    const func = node.func || '';
+    if (!/valve_settings/.test(func)) {
+        failures.push(label + ' must seed valve_settings.strega_generation after successful provisioning');
+    } else if (!PROMOTION_ONLY_VALVE_SETTINGS_RE.test(func)) {
+        failures.push(label + " valve_settings upsert must be promotion-only (ON CONFLICT ... WHERE ... excluded.strega_generation = 'GEN2'), not a plain upsert -- a plain upsert would silently demote an already-promoted GEN2 valve back to GEN1 on any re-registration");
+    } else {
+        console.log('OK  ' + label + ' seeds valve_settings via a promotion-only (GEN1->GEN2 only) upsert');
+    }
+}
+
 const postDevicesInsertFn = byId['post-devices-insert'];
 if (!postDevicesInsertFn) {
     failures.push('post-devices-insert not found');
 } else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(postDevicesInsertFn.func || '')) {
     failures.push('post-devices-insert must select CHIRPSTACK_PROFILE_STREGA_GEN2 for Gen2 STREGA registrations');
+} else if (!/storedStregaGeneration/.test(postDevicesInsertFn.func || '')) {
+    failures.push('post-devices-insert must consult the stored (not just requested) STREGA generation so a re-registration cannot demote a stored GEN2 valve\'s ChirpStack profile back to Gen1');
 } else {
-    console.log('OK  post-devices-insert references CHIRPSTACK_PROFILE_STREGA_GEN2');
+    console.log('OK  post-devices-insert references CHIRPSTACK_PROFILE_STREGA_GEN2 and keeps a stored GEN2 sticky');
 }
 
 const csRegCloudFn = byId['cs-reg-cloud-fn'];
@@ -1210,18 +1234,15 @@ if (!csRegCloudFn) {
     failures.push('cs-reg-cloud-fn not found');
 } else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(csRegCloudFn.func || '')) {
     failures.push('cs-reg-cloud-fn must select CHIRPSTACK_PROFILE_STREGA_GEN2 for Gen2 STREGA registrations (its own independent registration path)');
+} else if (!/SELECT strega_generation FROM valve_settings/.test(csRegCloudFn.func || '')) {
+    failures.push('cs-reg-cloud-fn carries no generation field in its cloud payload, so it must consult stored valve_settings.strega_generation instead of hardcoding GEN1 -- otherwise every cloud-issued re-registration demotes a stored GEN2 valve\'s ChirpStack profile back to Gen1');
 } else {
-    console.log('OK  cs-reg-cloud-fn references CHIRPSTACK_PROFILE_STREGA_GEN2');
+    console.log('OK  cs-reg-cloud-fn references CHIRPSTACK_PROFILE_STREGA_GEN2 and consults stored valve_settings generation');
 }
+assertPromotionOnlyValveSettingsUpsert(csRegCloudFn, 'cs-reg-cloud-fn');
 
 const csRegisterDeviceFn = byId['cs-register-device-fn'];
-if (!csRegisterDeviceFn) {
-    failures.push('cs-register-device-fn not found');
-} else if (!/valve_settings/.test(csRegisterDeviceFn.func || '')) {
-    failures.push('cs-register-device-fn must seed valve_settings.strega_generation after successful provisioning');
-} else {
-    console.log('OK  cs-register-device-fn references valve_settings');
-}
+assertPromotionOnlyValveSettingsUpsert(csRegisterDeviceFn, 'cs-register-device-fn');
 
 // STREGA Gen2 profile reconciliation: a valve registered as Gen1 that turns out to be Gen2
 // must have its ChirpStack profile re-pointed once the ACK path observes GEN2-shaped
