@@ -282,7 +282,17 @@ weekday ACKs arrive on `Schl_Port` 14–20; Gen2 daymask ACKs arrive on
 `Schl_status_Port`/`Ack_Port` 21; clock ACKs arrive on `RTC_Port`/`Ack_Port`
 12/13. **Fire due one-time opens**, **Observe valve-fired opens + trigger
 backfill**, and **Valve clock sync + stale pushes** are the module's own ticks
-(see Timers below). Plan and clock pushes leave through a dedicated MQTT out
+(see Timers below).
+
+STREGA valves register onto one of two ChirpStack device profiles, Gen1 or
+Gen2. Registration chooses the profile from the requested generation, and
+the choice self-corrects afterward: whenever **Valve ACK ledger** sees the
+valve's stored generation is Gen2, it re-points the ChirpStack profile and
+clears any Gen1-encoded downlink still sitting in the ChirpStack queue, so a
+valve mis-registered as Gen1 recovers on its first Gen2-shaped ACK without
+an operator re-registering it.
+
+Plan and clock pushes leave through a dedicated MQTT out
 node, **Valve plan downlinks → ChirpStack**, kept separate from the STREGA
 manual-open builder in Actuator_STREGA so a plan edit can never collide with
 a manual open in flight.

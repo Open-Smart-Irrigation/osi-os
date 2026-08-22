@@ -395,6 +395,19 @@ Request and response shapes are JSON snake_case like the rest of flows.json;
    `DeviceTimeReq`; until an SV2 is on the bench, GEN2 is implemented, unit
    tested against the vendor encoder's vectors, and labelled "untested on
    hardware" in the settings dropdown.
+5. STREGA Gen2 device profile, once an SV2 is on the bench:
+   - Register a valve as Gen2 explicitly: it lands on the
+     `CHIRPSTACK_PROFILE_STREGA_GEN2` device profile from the first
+     registration, no promotion needed.
+   - Register the same SV2 as Gen1 (the mis-registration case): its first
+     Gen2-shaped ACK both promotes `valve_settings.strega_generation` to
+     `GEN2` and re-points its ChirpStack device profile — verify both, not
+     just the row.
+   - After that re-point, Gen2 telemetry (valve state, battery) decodes
+     correctly — confirms the profile swap actually took effect, not only
+     the local ledger write.
+   - A Gen1 valve on the bench at the same time is unaffected throughout:
+     its profile, schedule pushes, and ACKs behave exactly as before.
 
 ## 11. Testing
 

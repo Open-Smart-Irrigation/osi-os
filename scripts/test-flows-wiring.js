@@ -1223,6 +1223,20 @@ if (!csRegisterDeviceFn) {
     console.log('OK  cs-register-device-fn references valve_settings');
 }
 
+// STREGA Gen2 profile reconciliation: a valve registered as Gen1 that turns out to be Gen2
+// must have its ChirpStack profile re-pointed once the ACK path observes GEN2-shaped
+// telemetry, not just its local valve_settings row promoted.
+const valveAckFn = byId['valve-ack-fn'];
+if (!valveAckFn) {
+    failures.push('valve-ack-fn not found');
+} else if (!/setDeviceProfile/.test(valveAckFn.func || '')) {
+    failures.push('valve-ack-fn must call setDeviceProfile to reconcile a GEN2 valve onto the Gen2 ChirpStack profile');
+} else if (!(Array.isArray(valveAckFn.libs) && valveAckFn.libs.some((l) => l.var === 'chirpstack' && l.module === 'osi-chirpstack-helper'))) {
+    failures.push('valve-ack-fn calls the ChirpStack helper without a libs entry providing it');
+} else {
+    console.log('OK  valve-ack-fn reconciles GEN2 valves onto the Gen2 ChirpStack profile');
+}
+
 runJournalHelperFailureMatrix()
     .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {

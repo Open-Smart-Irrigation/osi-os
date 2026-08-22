@@ -196,6 +196,18 @@ Logic lives in `osi-valve-control` (`plan.js`, `push.js`, `ack.js`,
 | Observed runs | "Observe valve-fired opens + trigger backfill" (`valve-observe-tick`) | 60 s |
 | Clock sync + housekeeping | "Valve clock sync + stale pushes" (`valve-clock-tick`): FPort 12 resync, 24 h `QUEUED`→`FAILED` sweep | 600 s (10 min) |
 
+STREGA valves provision onto one of two ChirpStack device profiles, STREGA
+Valve (Gen1) or STREGA Valve Gen2 (`CHIRPSTACK_PROFILE_STREGA_GEN2`,
+`osi-config-and-flags`). Registration picks the profile from the requested
+generation, but a valve that turns out to be the other generation is
+recoverable without re-registering it: "Valve ACK ledger" re-checks the
+stored `valve_settings.strega_generation` on every ACK-bearing uplink, and
+once it reads `GEN2`, calls `chirpstack.setDeviceProfile` to re-point the
+ChirpStack device record and `flushDeviceQueue` to clear any Gen1-encoded
+downlink still queued under the old profile. `setDeviceProfile` no-ops once
+the profile already matches, so this costs one `getDevice` per ACK on a
+steady-state valve.
+
 Plan and clock pushes leave through a dedicated `mqtt out` node, "Valve plan
 downlinks → ChirpStack" (`valve-push-mqtt-out`), separate from the STREGA
 manual-open builder in Actuator_STREGA (`cdbaa3891d40d7a1`) — plan pushes
