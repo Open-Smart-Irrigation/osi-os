@@ -43,7 +43,7 @@ Do NOT use this skill for (route instead):
 | `DRAGINO_LSN50` | Sensors | Yes — `dragino_lsn50_decoder.js` | `ext_temperature_c` (DS18B20), `adc_ch0v/adc_ch1v`, `bat_v`, plus MOD-specific: `dendro_position_mm`/`dendro_*` (dendrometer), `rain_*` (rain gauge), `flow_*` (flow meter), and Chameleon `swt_1/2/3` when a VIA Chameleon module is attached over I2C | °C, V, mm, µm, L |
 | `SENSECAP_S2120` | Sensors | Yes — `sensecap_s2120_decoder.js` | `ambient_temperature`, `relative_humidity`, `light_lux`, `barometric_pressure_hpa`, wind speed/direction/gust, `uv_index`, `rain_gauge_cumulative_mm` → `rain_mm_delta`/`rain_mm_today`, `bat_pct` | °C, %RH, hPa, m/s, deg, mm |
 | `AQUASCOPE_LORAIN` | Sensors | Yes — `aquascope_lorain_decoder.js` | `rain_mm_delta` (from raw 0.5 mm steps), `ambient_temperature`, `bat_v` | mm, °C, V |
-| `STREGA_VALVE` | Actuators | Yes — `strega_gen1_decoder.js` | `devices.current_state` (not a `device_data` column), `bat_pct`/`bat_v` | — |
+| `STREGA_VALVE` | Actuators | Yes — `strega_gen1_decoder.js` | `devices.current_state` (not a `device_data` column), `bat_pct`/`bat_v`, plus Gen1-only `ambient_temperature`/`relative_humidity` (enclosure climate, see below) | — |
 | `MILESIGHT_UC512` | Sensors | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
 
 File locations for all OSI-authored decoders:
@@ -450,6 +450,55 @@ decoder uses for the same concept). `strega-process-fn` in flows.json accepts
 `Actuator` as an alias so both generations' current-state derivation reads
 the same way downstream.
 
+### Enclosure temperature and humidity: Gen1 only, and not field weather
+
+Gen1 STREGA valves report enclosure climate in every periodic uplink;
+`strega_gen1_decoder.js` derives temperature and humidity from two 16-bit
+fields as `(v/65536)*165-40` and `(v/65536)*100`, emitted as `Temperature`
+and `Hygrometry`. `strega-process-fn` in flows.json normalises the pair
+125 °C / 100 % (the vendor's "no sensor fitted" sentinel) to `null`
+(`normalizeStregaEnvironment`, flows.json). The values land in
+`device_data.ambient_temperature` and `relative_humidity`, the same columns
+sensor devices use.
+
+**Gen2 (SV2) reports neither, and no decoding will produce them.** This is
+a hardware limit, not a gap in our code, confirmed three independent ways:
+1. The Gen2 vendor decoder
+   (`docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up`)
+   emits no temperature or humidity field at all.
+2. The SV2 manual's periodical uplink
+   (`/home/phil/kDrive/OSI OS/Hardware/STREGA/Gen2/HHW_SV2_STREGA_Smart_valve_Manual.pdf`,
+   payload format pp. 51-53) is 3 bytes of battery millivolts plus one
+   fully-mapped info-status byte (Class, Power, DI_1/LSC, DI_0/LSO,
+   valve-connection, valve-position), optionally followed by a counter;
+   no spare bits, no spare bytes.
+3. The manual's "Data Read" specification (p. 110) lists only valve state,
+   battery, device ID, digital inputs, counter, alarm, and RSSI.
+
+If a future engineer asks "can we get temperature off the Gen2 valves",
+the answer is no, and re-reading the decoder or the manual will not change
+it.
+
+**This is enclosure climate, not field weather.** The vendor's own variable
+names are `box_temp` and `box_hum`: the sensor sits inside the valve's
+buried housing, not in the crop canopy. Rising humidity in that box means
+water ingress, a maintenance signal that belongs beside battery level and
+last-contact time, not a growing-condition reading. The value lands in
+`device_data.ambient_temperature`, the same column `SENSECAP_S2120` and
+other weather sensors write to, which makes it easy to mistake for zone
+air temperature. It must never be used as zone air temperature and never
+fed into an agronomy calculation (SWT scheduling, ET0, dendrometer stress).
+
+`osi-valve-control` (`store.js`, `api.js`) reads these columns back out for
+the valve list as `enclosure_temperature_c`, `enclosure_humidity_pct`, and
+`enclosure_measured_at`. The two readings are selected independently (a
+valve can report one and not the other), and both are bounded to the newest
+row within a 7-day window, so a stale reading reports as absent rather than
+current. `ValveTile.tsx` renders the pair only when both are present, and
+`StregaValveCard.tsx` explains the two distinct absences: "no reading yet"
+for a Gen1 valve that has not reported one, and "not measured on Gen2" for
+hardware that cannot.
+
 ## Common mistakes
 
 - Assuming SWT is negative or that lower kPa means drier — it is the
@@ -487,6 +536,12 @@ the same way downstream.
   assuming one predicts the other. `strega_model` is hardware (STANDARD vs
   MOTORIZED); `strega_generation` is controller firmware/codec (GEN1 vs
   GEN2); they vary independently.
+- Assuming a Gen2 (SV2) STREGA valve's temperature/humidity gap can be
+  closed with a decoder change — the SV2 payload has no spare bits or
+  bytes for it (manual pp. 51-53, 110); the hardware does not measure it.
+- Reading `device_data.ambient_temperature` on a `STREGA_VALVE` row as zone
+  air temperature — it is the valve's own enclosure (`box_temp`), and must
+  never feed an agronomy calculation.
 
 ## Provenance and maintenance
 

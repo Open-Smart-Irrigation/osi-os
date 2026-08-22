@@ -196,6 +196,12 @@ Logic lives in `osi-valve-control` (`plan.js`, `push.js`, `ack.js`,
 | Observed runs | "Observe valve-fired opens + trigger backfill" (`valve-observe-tick`) | 60 s |
 | Clock sync + housekeeping | "Valve clock sync + stale pushes" (`valve-clock-tick`): FPort 12 resync, 24 h `QUEUED`→`FAILED` sweep | 600 s (10 min) |
 
+The valve list ("Valve API Router") also carries the newest non-null
+enclosure temperature and humidity per Gen1 valve (`store.js`, bounded to a
+7-day window); Gen2 (SV2) hardware does not measure either, and the interface
+states that explicitly rather than leaving the field blank
+(`osi-agronomy-sensors-reference`).
+
 STREGA valves provision onto one of two ChirpStack device profiles, STREGA
 Valve (Gen1) or STREGA Valve Gen2 (`CHIRPSTACK_PROFILE_STREGA_GEN2`,
 `osi-config-and-flags`). Registration picks the profile from the requested

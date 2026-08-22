@@ -284,6 +284,11 @@ weekday ACKs arrive on `Schl_Port` 14–20; Gen2 daymask ACKs arrive on
 backfill**, and **Valve clock sync + stale pushes** are the module's own ticks
 (see Timers below).
 
+The same valve list also carries the newest enclosure temperature and
+humidity reading for Gen1 valves; Gen2 (SV2) hardware does not measure
+either quantity, and the interface says so rather than showing a blank
+field (`osi-agronomy-sensors-reference`).
+
 STREGA valves register onto one of two ChirpStack device profiles, Gen1 or
 Gen2. Registration chooses the profile from the requested generation, and
 the choice self-corrects afterward: whenever **Valve ACK ledger** sees the
