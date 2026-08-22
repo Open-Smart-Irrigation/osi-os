@@ -130,8 +130,8 @@
       "reason": "FW-T5: default a missing zone timezone to the app_settings gateway_timezone (table-missing-safe), instead of silently relying on the irrigation_zones.timezone column DEFAULT 'UTC'; adds an async osiDb read/close and error-wrapping around the existing INSERT build (exact delta vs origin/main)"
     },
     "strega-process-fn": {
-      "delta": 216,
-      "reason": "STREGA Gen2 device profile Task 1: accept the Gen2 vendor decoder's `Actuator` field as an alias for `Valve` (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up emits Actuator, not Valve) via a valveRaw fallback, used in place of decodedObject.Valve at both read sites (+152); Task 6 fix round R1 (MAJOR-2): getProfileKind's stregaProfiles also matches CHIRPSTACK_PROFILE_STREGA_GEN2, so a valve already re-pointed to the Gen2 profile is still recognised as STREGA_VALVE instead of falling through to null (+64, exact delta vs origin/main)"
+      "delta": 1378,
+      "reason": "STREGA Gen2 device profile Task 1: accept the Gen2 vendor decoder's `Actuator` field as an alias for `Valve` (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up emits Actuator, not Valve) via a valveRaw fallback, used in place of decodedObject.Valve at both read sites (+152); Task 6 fix round R1 (MAJOR-2): getProfileKind's stregaProfiles also matches CHIRPSTACK_PROFILE_STREGA_GEN2, so a valve already re-pointed to the Gen2 profile is still recognised as STREGA_VALVE instead of falling through to null (+64); final review fix (MAJOR-5): the empty-object fallback decoder was Gen1-only, so a Gen2 valve hitting that branch got its bytes mis-decoded and written to device_data as though it were Gen1 telemetry -- refuse the fallback decode for a Gen2 profile instead (isGen2StregaProfile helper + a guarded decodedObject expression + a node.warn on the refused path), a wrong valve state being worse than a missing one (+1162, exact delta vs origin/main)"
     },
     "post-devices-auth": {
       "delta": 429,
