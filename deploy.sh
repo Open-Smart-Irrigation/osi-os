@@ -662,23 +662,31 @@ if [ -f /srv/node-red/.chirpstack.env ] && \
         echo "ERROR: could not back up .chirpstack.env; skipping Gen2 provisioning"
         cs_env_backup=""
     }
-    if [ -n "$cs_env_backup" ] && CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
-        echo "OK: Gen2 profile provisioned"
-        # Re-append lines the backup had that the rewritten file lost.
-        while IFS= read -r cs_line; do
-            case "$cs_line" in
-                ''|\#*) continue ;;
-            esac
-            cs_key="${cs_line%%=*}"
-            [ "$cs_key" = "$cs_line" ] && continue
-            if ! grep -q "^${cs_key}=" /srv/node-red/.chirpstack.env 2>/dev/null; then
-                echo "$cs_line" >> /srv/node-red/.chirpstack.env
-                echo "NOTE: restored non-ChirpStack env key ${cs_key} after bootstrap rewrite"
-            fi
-        done < "$cs_env_backup"
-    elif [ -n "$cs_env_backup" ]; then
-        echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
-        echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
+    if [ -n "$cs_env_backup" ]; then
+        if CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
+            echo "OK: Gen2 profile provisioned"
+        else
+            echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
+            echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
+        fi
+        # Restore unconditionally: bootstrap rewrites .chirpstack.env BEFORE its
+        # last steps (writeUciConfig), so a late failure leaves the file already
+        # stripped of operator keys -- including DEVICE_EUI. The loop is
+        # idempotent, so running it after success or failure is equally safe.
+        if [ -f /srv/node-red/.chirpstack.env ]; then
+            while IFS= read -r cs_line || [ -n "$cs_line" ]; do
+                case "$cs_line" in
+                    ''|\#*) continue ;;
+                esac
+                cs_key="${cs_line%%=*}"
+                [ "$cs_key" = "$cs_line" ] && continue
+                if ! grep -q "^${cs_key}=" /srv/node-red/.chirpstack.env 2>/dev/null; then
+                    echo "$cs_line" >> /srv/node-red/.chirpstack.env
+                    echo "NOTE: restored env key ${cs_key} dropped by the bootstrap rewrite"
+                fi
+            done < "$cs_env_backup"
+        fi
+        chmod 600 "$cs_env_backup" 2>/dev/null || true
     fi
 fi
 
