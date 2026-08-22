@@ -623,6 +623,10 @@ fetch_required "STREGA codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
     "/srv/node-red/codecs/strega_gen1_decoder.js"
 
+fetch_required "STREGA Gen2 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen2_decoder.js" \
+    "/srv/node-red/codecs/strega_gen2_decoder.js"
+
 fetch_required "LSN50 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js" \
     "/srv/node-red/codecs/dragino_lsn50_decoder.js"
@@ -642,6 +646,49 @@ fetch_required "UC512 codec" \
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
+
+if [ -f /srv/node-red/.chirpstack.env ] && \
+   ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' /srv/node-red/.chirpstack.env 2>/dev/null; then
+    echo "--- Provisioning STREGA Gen2 device profile (one-time) ---"
+    # Reuse the gateway's existing osi-nodered token; bootstrap only calls
+    # `chirpstack create-api-key` when CHIRPSTACK_API_KEY is empty, so this
+    # avoids leaving a second admin key behind. Empty value = old behaviour.
+    cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1 | tr -d '\r')"
+    # bootstrap rewrites .chirpstack.env wholesale with only the CHIRPSTACK_* keys
+    # it manages, so any operator-added line (AGROSCOPE_*, LOG_*, ...) is dropped.
+    # Keep a copy and restore the non-CHIRPSTACK lines afterwards.
+    cs_env_backup="/srv/node-red/.chirpstack.env.pre-gen2"
+    cp /srv/node-red/.chirpstack.env "$cs_env_backup" || {
+        echo "ERROR: could not back up .chirpstack.env; skipping Gen2 provisioning"
+        cs_env_backup=""
+    }
+    if [ -n "$cs_env_backup" ]; then
+        if CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
+            echo "OK: Gen2 profile provisioned"
+        else
+            echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
+            echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
+        fi
+        # Restore unconditionally: bootstrap rewrites .chirpstack.env BEFORE its
+        # last steps (writeUciConfig), so a late failure leaves the file already
+        # stripped of operator keys -- including DEVICE_EUI. The loop is
+        # idempotent, so running it after success or failure is equally safe.
+        if [ -f /srv/node-red/.chirpstack.env ]; then
+            while IFS= read -r cs_line || [ -n "$cs_line" ]; do
+                case "$cs_line" in
+                    ''|\#*) continue ;;
+                esac
+                cs_key="${cs_line%%=*}"
+                [ "$cs_key" = "$cs_line" ] && continue
+                if ! grep -q "^${cs_key}=" /srv/node-red/.chirpstack.env 2>/dev/null; then
+                    echo "$cs_line" >> /srv/node-red/.chirpstack.env
+                    echo "NOTE: restored env key ${cs_key} dropped by the bootstrap rewrite"
+                fi
+            done < "$cs_env_backup"
+        fi
+        chmod 600 "$cs_env_backup" 2>/dev/null || true
+    fi
+fi
 
 echo "--- Node-RED runtime dependencies ---"
 npm_log="$TMP_DIR/npm-install.log"

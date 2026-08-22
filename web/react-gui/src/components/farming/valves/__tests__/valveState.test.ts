@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { deriveValveGlyphState, estimateLiters, weekdaysFromMask, maskFromWeekdays, sortWeekdaysForDisplay, windowEnd } from '../valveState';
 import type { ValveSummary } from '../../../../types/farming';
 
-const base: ValveSummary = { deviceEui: '0016C001F1000001', name: 'A', zoneId: 1, zoneName: 'Z', zoneUuid: 'u', timezone: 'Europe/Zurich', currentState: 'CLOSED', targetState: null, stregaGeneration: 'GEN1', flowRateLpm: null, flowRateSource: null, defaultOpenMinutes: null, schedulerStatus: 'ACTIVE', skipTodayDate: null, lastUplinkAt: null, activeActuation: null, recentStaleState: null, nextRun: null, scheduleCount: 0, pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null }, lastClockSyncAckedAt: null };
+const base: ValveSummary = { deviceEui: '0016C001F1000001', name: 'A', zoneId: 1, zoneName: 'Z', zoneUuid: 'u', timezone: 'Europe/Zurich', currentState: 'CLOSED', targetState: null, stregaGeneration: 'GEN1', flowRateLpm: null, flowRateSource: null, defaultOpenMinutes: null, schedulerStatus: 'ACTIVE', skipTodayDate: null, lastUplinkAt: null, activeActuation: null, recentStaleState: null, nextRun: null, scheduleCount: 0, pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null }, lastClockSyncAckedAt: null, enclosureTemperatureC: null, enclosureHumidityPct: null, enclosureMeasuredAt: null };
 const now = Date.parse('2026-08-19T10:00:00Z');
 
 describe('deriveValveGlyphState', () => {

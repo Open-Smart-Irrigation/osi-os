@@ -181,6 +181,82 @@ test('getGatewaySetting (FW-T5): table-missing-safe — returns null instead of 
   db.close();
 });
 
+// (review R2, NEW-MAJOR-3) VALVE_LIST_SQL's enclosure subqueries are bounded to a 7-day
+// recency window measured against wall-clock `now` (review R1, MAJOR-1). A fixture pinned to
+// a hardcoded calendar date ages out of that window the day the calendar catches up to it,
+// turning the suite red with no commit to blame. Anchor every enclosure fixture below to
+// `Date.now()`, the same pattern the pre-existing `nowIso` fixture above (guarding
+// `recent_stale_state`'s own `datetime('now','-1 day')` predicate) already uses.
+test('listValvesForUser: enclosure reading comes from the newest non-null row per column, not the newest row overall', async () => {
+  const { db } = await tempDb();
+  const readingIso = new Date(Date.now() - 10 * 3600000).toISOString();
+  const nullRowIso = new Date(Date.now() - 9 * 3600000).toISOString();
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, 21.5, 48.2)", [readingIso]);
+  // Newest row overall is a state-only uplink (both columns null) and must not blank out the reading above.
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, NULL, NULL)", [nullRowIso]);
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, 21.5);
+  assert.equal(valve.enclosure_humidity_pct, 48.2);
+  assert.equal(valve.enclosure_measured_at, readingIso);
+  db.close();
+});
+
+test('listValvesForUser: enclosure reading is null when no device_data row ever carried one', async () => {
+  const { db } = await tempDb();
+  const rowIso = new Date(Date.now() - 10 * 3600000).toISOString();
+  await db.run("INSERT INTO device_data (deveui, recorded_at) VALUES ('0016C001F1000001', ?)", [rowIso]);
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, null);
+  assert.equal(valve.enclosure_humidity_pct, null);
+  assert.equal(valve.enclosure_measured_at, null);
+  db.close();
+});
+
+test('listValvesForUser: a valve that reports temperature but not humidity keeps the temperature instead of dropping both', async () => {
+  const { db } = await tempDb();
+  const readingIso = new Date(Date.now() - 10 * 3600000).toISOString();
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, 19.4, NULL)", [readingIso]);
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, 19.4);
+  assert.equal(valve.enclosure_humidity_pct, null);
+  assert.equal(valve.enclosure_measured_at, readingIso);
+  db.close();
+});
+
+test('listValvesForUser (review R1, MINOR-1/2): temperature from an older row and humidity from a newer row are both returned, each from its own row, and enclosure_measured_at is the newer of the two (MAX, not MIN)', async () => {
+  const { db } = await tempDb();
+  const temperatureIso = new Date(Date.now() - 12 * 3600000).toISOString();
+  const humidityIso = new Date(Date.now() - 9 * 3600000).toISOString();
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, 17.25, NULL)", [temperatureIso]);
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, NULL, 61.5)", [humidityIso]);
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, 17.25, 'temperature subquery finds its own newest non-null row, independent of the humidity row');
+  assert.equal(valve.enclosure_humidity_pct, 61.5, 'humidity subquery finds its own newest non-null row, independent of the temperature row');
+  assert.equal(valve.enclosure_measured_at, humidityIso, 'MAX over either-column-non-null rows must pick the newer (humidity) row, not the older (temperature) one a MIN regression would report');
+  db.close();
+});
+
+test('listValvesForUser (review R2, NEW-MINOR): the recency window boundary itself — a reading 2h old is present in all three fields, a reading 8d old is absent in all three', async () => {
+  const { db } = await tempDb();
+  // A second valve, so the two ages can be checked in isolation rather than one row shadowing
+  // the other on the same deveui.
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000002','Valve B','STREGA_VALVE',1,datetime('now'),datetime('now'))");
+  const recentIso = new Date(Date.now() - 2 * 3600000).toISOString(); // well inside the 7-day window
+  const staleIso = new Date(Date.now() - 8 * 24 * 3600000).toISOString(); // outside it
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, 22.5, 55.0)", [recentIso]);
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000002', ?, 22.5, 55.0)", [staleIso]);
+  const rows = await store.listValvesForUser(db, 1);
+  const recent = rows.find((r) => r.deveui === '0016C001F1000001');
+  const stale = rows.find((r) => r.deveui === '0016C001F1000002');
+  assert.equal(recent.enclosure_temperature_c, 22.5, 'a reading 2h old sits well inside the 7-day window and must be present');
+  assert.equal(recent.enclosure_humidity_pct, 55.0, 'a reading 2h old sits well inside the 7-day window and must be present');
+  assert.equal(recent.enclosure_measured_at, recentIso);
+  assert.equal(stale.enclosure_temperature_c, null, 'a reading 8 days old sits outside the 7-day window and must report absent, not stale-but-shown (widening the window to e.g. 700 days would leave this false)');
+  assert.equal(stale.enclosure_humidity_pct, null, 'a reading 8 days old sits outside the 7-day window and must report absent, not stale-but-shown');
+  assert.equal(stale.enclosure_measured_at, null, 'a reading 8 days old sits outside the 7-day window and must report absent, not stale-but-shown');
+  db.close();
+});
+
 test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read error too, warning instead of throwing', async () => {
   // Unified policy: a scheduled worker tick (runObserveTick/runClockTick/runHousekeeping)
   // has no enclosing try/catch around this one call, so ANY read failure — not just a

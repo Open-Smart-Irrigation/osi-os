@@ -282,7 +282,26 @@ weekday ACKs arrive on `Schl_Port` 14–20; Gen2 daymask ACKs arrive on
 `Schl_status_Port`/`Ack_Port` 21; clock ACKs arrive on `RTC_Port`/`Ack_Port`
 12/13. **Fire due one-time opens**, **Observe valve-fired opens + trigger
 backfill**, and **Valve clock sync + stale pushes** are the module's own ticks
-(see Timers below). Plan and clock pushes leave through a dedicated MQTT out
+(see Timers below).
+
+The same valve list also carries the newest enclosure temperature and
+humidity reading for Gen1 valves; Gen2 (SV2) payloads carry neither
+quantity, and the interface says so rather than showing a blank field
+(`osi-agronomy-sensors-reference`).
+
+STREGA valves register onto one of two ChirpStack device profiles, Gen1 or
+Gen2. Registration chooses the profile from the requested generation, and
+the choice self-corrects afterward: whenever **Valve ACK ledger** sees the
+uplink's own profile doesn't match and the valve's stored generation is
+Gen2, it re-points the ChirpStack profile, so a valve mis-registered as Gen1
+recovers on its first Gen2-shaped ACK without an operator re-registering it.
+A successful re-point also clears everything ChirpStack is still holding in
+that valve's downlink queue (ChirpStack can only clear a device's whole
+queue, not one frame), unless the valve has a commanded open still awaiting
+observation — that guard keeps a farmer's in-flight `OPEN_FOR_DURATION` from
+being discarded as collateral damage from the profile swap.
+
+Plan and clock pushes leave through a dedicated MQTT out
 node, **Valve plan downlinks → ChirpStack**, kept separate from the STREGA
 manual-open builder in Actuator_STREGA so a plan edit can never collide with
 a manual open in flight.

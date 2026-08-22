@@ -166,6 +166,7 @@ export interface AddDeviceRequest {
   name: string;
   type_id: DeviceType;
   appkey?: string;
+  strega_generation?: StregaGeneration;
 }
 
 export interface ValveActionRequest {
@@ -728,6 +729,9 @@ export interface ValveSummary {
   scheduleCount: number;
   pushState: ValvePushState;
   lastClockSyncAckedAt: string | null;
+  enclosureTemperatureC: number | null;
+  enclosureHumidityPct: number | null;
+  enclosureMeasuredAt: string | null;
 }
 
 export interface ValveSchedule {

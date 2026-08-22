@@ -238,9 +238,9 @@ mirrored under both hardware profiles'
 and creates-or-reuses:
 
 - 3 ChirpStack applications: **OSI Sensors**, **OSI Actuators**, **OSI Field Tester**
-- 7 device profiles: **KIWI Sensor**, **STREGA Valve**, **Dragino LSN50**,
-  **RAK Field Tester**, **SenseCAP S2120**, **Aqua-Scope LoRain**,
-  **OSI Milesight UC512**
+- 8 device profiles: **KIWI Sensor**, **STREGA Valve**, **STREGA Valve Gen2**,
+  **Dragino LSN50**, **RAK Field Tester**, **SenseCAP S2120**,
+  **Aqua-Scope LoRain**, **OSI Milesight UC512**
 - 1 API key (`osi-nodered`)
 
 Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
@@ -254,7 +254,8 @@ Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
 | `CHIRPSTACK_APP_ACTUATORS` | OSI Actuators app UUID | `chirpstack_app_actuators` |
 | `CHIRPSTACK_APP_FIELD_TESTER` | OSI Field Tester app UUID | `chirpstack_app_field_tester` |
 | `CHIRPSTACK_PROFILE_KIWI` | KIWI Sensor profile UUID | `chirpstack_profile_kiwi` |
-| `CHIRPSTACK_PROFILE_STREGA` | STREGA Valve profile UUID | `chirpstack_profile_strega` |
+| `CHIRPSTACK_PROFILE_STREGA` | STREGA Valve profile UUID (Gen1) | `chirpstack_profile_strega` |
+| `CHIRPSTACK_PROFILE_STREGA_GEN2` | STREGA Valve Gen2 profile UUID | `chirpstack_profile_strega_gen2` |
 | `CHIRPSTACK_PROFILE_LSN50` | Dragino LSN50 profile UUID | `chirpstack_profile_lsn50` |
 | `CHIRPSTACK_PROFILE_CLOVER` | **Alias** — intentionally set to the same UUID as `CHIRPSTACK_PROFILE_RAK10701` (compatibility alias for the RAK10701 field tester profile, not a separate profile) | `chirpstack_profile_clover` |
 | `CHIRPSTACK_PROFILE_RAK10701` | RAK Field Tester profile UUID | `chirpstack_profile_rak10701` |
@@ -288,6 +289,26 @@ etc. to discriminate device type on uplink. The actual MQTT topic
 subscription rule and the `deviceProfileName`-fallback discrimination pattern
 inside flows.json are mechanics of `osi-flows-json-editing` — not duplicated
 here.
+
+**`CHIRPSTACK_PROFILE_STREGA_GEN2` on existing gateways:** a fresh
+`chirpstack-bootstrap.js` run writes it like any other profile var, but a
+gateway that was already deployed before the Gen2 profile existed has a
+`.chirpstack.env` with no such line. `deploy.sh` closes that gap with a
+one-shot step (around the codec-fetch block): if `/srv/node-red/.chirpstack.env`
+exists and lacks a `CHIRPSTACK_PROFILE_STREGA_GEN2=` line, it reruns
+`chirpstack-bootstrap.js` with the gateway's existing `osi-nodered` API key so
+the rerun only adds the missing profile instead of minting a second admin key.
+A provisioning failure there is non-fatal — deploy continues and new Gen1
+registrations still work; only Gen2 registration and profile reconciliation
+are degraded until the next successful deploy. Five flows.json nodes read
+the resulting env var: `post-devices-insert` and `cs-reg-cloud-fn` (both
+registration paths select it for a Gen2 STREGA valve); `valve-ack-fn`
+(re-points a valve's ChirpStack profile to it once the valve's stored
+`strega_generation` reads `GEN2`); and `strega-process-fn` and the cloud
+telemetry builder (node `8809bb5239dfb3d4`, "Build Telemetry"), which both
+whitelist it alongside `CHIRPSTACK_PROFILE_STREGA` so a valve already
+re-pointed to the Gen2 profile is still recognised as `STREGA_VALVE` instead
+of falling through to a generic sensor payload.
 
 **Deploy-time post-check:** `deploy.sh` does **not** assert
 `CHIRPSTACK_PROFILE_RAK10701` or `CHIRPSTACK_PROFILE_S2120` anywhere

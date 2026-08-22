@@ -123,6 +123,17 @@ function shapeValve(row, schedules, now, tzFallback, pushes) {
     default_open_minutes: row.default_open_minutes != null ? Number(row.default_open_minutes) : null,
     scheduler_status: row.scheduler_status || 'ACTIVE', skip_today_date: row.skip_today_date || null,
     last_uplink_at: row.last_uplink_at || null,
+    // Pure passthrough — no rounding/clamping/defaulting here; strega-process-fn already
+    // normalized on ingest (review R1: a second normalisation is a second place to drift).
+    // `!= null` (not `||`) on the two numerics: a stored 0 is a real reading and must survive.
+    enclosure_temperature_c: row.enclosure_temperature_c != null ? row.enclosure_temperature_c : null,
+    enclosure_humidity_pct: row.enclosure_humidity_pct != null ? row.enclosure_humidity_pct : null,
+    // Time of the NEWEST enclosure reading (temperature OR humidity), not a timestamp for
+    // either number individually: the two are selected from device_data independently, so when
+    // they come from different rows this label reflects whichever is newer and can overstate
+    // the freshness of the other. Do not derive a per-value staleness gate from this field
+    // without per-column timestamps (review R1, §2).
+    enclosure_measured_at: row.enclosure_measured_at || null,
     active_actuation: row.active_expectation_id ? { expectation_id: row.active_expectation_id, reconciliation_state: row.active_reconciliation_state, commanded_at: row.active_commanded_at, expected_close_at: row.active_expected_close_at, duration_seconds: row.active_duration_seconds, trigger: row.active_trigger || null } : null,
     recent_stale_state: row.recent_stale_state || null,
     next_run: P.nextRun(schedules, now, row.zone_timezone || tzFallback),

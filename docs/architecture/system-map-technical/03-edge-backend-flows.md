@@ -196,6 +196,35 @@ Logic lives in `osi-valve-control` (`plan.js`, `push.js`, `ack.js`,
 | Observed runs | "Observe valve-fired opens + trigger backfill" (`valve-observe-tick`) | 60 s |
 | Clock sync + housekeeping | "Valve clock sync + stale pushes" (`valve-clock-tick`): FPort 12 resync, 24 h `QUEUED`→`FAILED` sweep | 600 s (10 min) |
 
+The valve list ("Valve API Router") also carries the newest non-null
+enclosure temperature and humidity per Gen1 valve (`store.js`, bounded to a
+7-day window); Gen2 (SV2) payloads carry neither value, and the interface
+states that explicitly rather than leaving the field blank
+(`osi-agronomy-sensors-reference`).
+
+STREGA valves provision onto one of two ChirpStack device profiles, STREGA
+Valve (Gen1) or STREGA Valve Gen2 (`CHIRPSTACK_PROFILE_STREGA_GEN2`,
+`osi-config-and-flags`). Registration picks the profile from the requested
+generation, but a valve that turns out to be the other generation is
+recoverable without re-registering it: "Valve ACK ledger" re-checks the
+stored `valve_settings.strega_generation` on every ACK-bearing uplink whose
+`deviceProfileId` does not already match, and once it reads `GEN2`, calls
+`chirpstack.setDeviceProfile` to re-point the ChirpStack device record.
+`setDeviceProfile` no-ops once the profile already matches, so this costs one
+`getDevice` per ACK on a steady-state valve, and comparing the uplink's own
+`deviceProfileId` first skips the gRPC call entirely once the swap has
+landed. A successful swap also calls `flushDeviceQueue`, which clears
+**every** downlink ChirpStack is holding for that device, not only
+Gen1-encoded ones — that is unavoidable because `FlushQueue` takes a DevEUI
+and nothing else. The flush is skipped while
+`valve_actuation_expectations` has a `PENDING_OBSERVATION` row for the
+device (`hasPendingObservation`); `OBSERVED_RUNNING` needs no guard because
+that state means the valve was already seen open, which means the frame
+already left the ChirpStack queue on delivery, so a flush at that point has
+nothing left of it to destroy. This keeps a farmer-commanded
+`OPEN_FOR_DURATION` still in flight from being discarded as collateral
+damage from the profile swap.
+
 Plan and clock pushes leave through a dedicated `mqtt out` node, "Valve plan
 downlinks → ChirpStack" (`valve-push-mqtt-out`), separate from the STREGA
 manual-open builder in Actuator_STREGA (`cdbaa3891d40d7a1`) — plan pushes

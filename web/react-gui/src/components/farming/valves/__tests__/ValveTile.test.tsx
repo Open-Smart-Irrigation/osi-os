@@ -25,6 +25,8 @@ const { translateForTest } = vi.hoisted(() => {
     'state.open': 'Open',
     'state.closing': 'Closing',
     'state.failed': 'Failed',
+    'format.temperature': '{{value}} °C',
+    'format.humidity': '{{value}} % RH',
   };
   return {
     translateForTest: (key: string, options?: Record<string, unknown>): string => {
@@ -61,6 +63,9 @@ function makeValve(overrides: Partial<ValveSummary> = {}): ValveSummary {
     scheduleCount: 0,
     pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
     lastClockSyncAckedAt: null,
+    enclosureTemperatureC: null,
+    enclosureHumidityPct: null,
+    enclosureMeasuredAt: null,
     ...overrides,
   };
 }
@@ -107,5 +112,35 @@ describe('ValveTile touch targets', () => {
     for (const item of screen.getAllByRole('menuitem')) {
       expect(item).toHaveClass('min-h-[44px]');
     }
+  });
+});
+
+describe('ValveTile enclosure climate reading', () => {
+  it('shows the enclosure reading when a Gen1 valve has reported one', () => {
+    renderTile({ stregaGeneration: 'GEN1', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48.2 });
+    expect(screen.getByText(/21[.,]5/)).toBeInTheDocument();
+    expect(screen.getByText(/48/)).toBeInTheDocument();
+  });
+
+  it('renders a measured zero rather than treating it as missing', () => {
+    renderTile({ stregaGeneration: 'GEN1', enclosureTemperatureC: 0, enclosureHumidityPct: 0 });
+    expect(screen.getByText('0 °C · 0 % RH')).toBeInTheDocument();
+  });
+
+  it('shows nothing at all when a Gen1 valve has not reported a reading', () => {
+    const { container } = renderTile({ stregaGeneration: 'GEN1', enclosureTemperatureC: null, enclosureHumidityPct: null });
+    expect(container.textContent).not.toMatch(/°C|% RH/);
+  });
+
+  it('shows nothing at all for a Gen2 valve, even if a value somehow exists', () => {
+    const { container } = renderTile({ stregaGeneration: 'GEN2', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48 });
+    expect(container.textContent).not.toMatch(/21\.5|48/);
+  });
+
+  it('keeps the pair unbreakable so humidity never orphans onto its own line', () => {
+    renderTile({ stregaGeneration: 'GEN1', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48 });
+    const pair = screen.getByText(/21[.,]5 °C · 48 % RH/);
+    expect(pair.className).toMatch(/whitespace-nowrap/);
+    expect(pair.className).toMatch(/inline-block/);
   });
 });

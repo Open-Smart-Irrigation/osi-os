@@ -30,6 +30,31 @@ test('GET /api/valves returns the user valves with zone name and defaults', asyn
   assert.equal(out.payload.valves[0].next_run, null);
 });
 
+test('GET /api/valves (review R1, MAJOR-2): the shaped valve payload carries the stored enclosure reading through the API', async () => {
+  const { path, db } = await tempDb();
+  // (review R2, NEW-MAJOR-3) VALVE_LIST_SQL's enclosure subqueries are bounded to a 7-day
+  // recency window against wall-clock `now` — a fixture pinned to a hardcoded calendar date
+  // stops being "recent" the day the window rolls past it, going red with no code change
+  // involved. Anchor to `Date.now()`, same pattern as the `nowIso` fixture at store.test.js:80.
+  const recentIso = new Date(Date.now() - 2 * 3600000).toISOString();
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, 21.5, 48.2)", [recentIso]);
+  const out = await call(path, req('GET', '/api/valves'));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.valves[0].enclosure_temperature_c, 21.5, 'the field must be present and carry the stored value, not be dropped from the shaped payload');
+  assert.equal(out.payload.valves[0].enclosure_humidity_pct, 48.2, 'the field must be present and carry the stored value, not be dropped from the shaped payload');
+  assert.equal(out.payload.valves[0].enclosure_measured_at, recentIso);
+});
+
+test('GET /api/valves (review R1, MAJOR-2): a stored 0/0 enclosure reading survives end-to-end as 0, not null', async () => {
+  const { path, db } = await tempDb();
+  const recentIso = new Date(Date.now() - 2 * 3600000).toISOString(); // (review R2) wall-clock-relative — see note above
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001', ?, 0, 0)", [recentIso]);
+  const out = await call(path, req('GET', '/api/valves'));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.valves[0].enclosure_temperature_c, 0, 'a real 0 reading must not be coerced to null by a `||` guard');
+  assert.equal(out.payload.valves[0].enclosure_humidity_pct, 0, 'a real 0 reading must not be coerced to null by a `||` guard');
+});
+
 test('GET /api/valves (FW-T5): a zoneless valve surfaces the gateway_timezone default, not UTC', async () => {
   const { path, db } = await tempDb();
   await db.run("INSERT INTO app_settings(key, value) VALUES ('gateway_timezone', 'Europe/Zurich')");

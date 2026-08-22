@@ -92,6 +92,14 @@ export const ValveTile: React.FC<ValveTileProps> = ({
       : t('nextRun', { when, minutes: valve.nextRun.minutes });
   }
 
+  const climatePair =
+    valve.stregaGeneration === 'GEN2' ? null
+    : valve.enclosureTemperatureC == null && valve.enclosureHumidityPct == null ? null
+    : [
+        valve.enclosureTemperatureC != null ? t('format.temperature', { value: valve.enclosureTemperatureC }) : null,
+        valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
+      ].filter(Boolean).join(' · ');
+
   let planLine: string | null = null;
   if (valve.pushState.queued > 0) {
     planLine = t('planDelivery', { acked: valve.pushState.acked, total: valve.pushState.acked + valve.pushState.queued });
@@ -120,6 +128,12 @@ export const ValveTile: React.FC<ValveTileProps> = ({
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             {stateLabel}
             {statusDetails.length > 0 && <span className="text-[var(--text-tertiary)]"> · {statusDetails.join(' · ')}</span>}
+            {climatePair && (
+              <span className="text-[var(--text-tertiary)]">
+                {' · '}
+                <span className="inline-block whitespace-nowrap">{climatePair}</span>
+              </span>
+            )}
           </p>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{nextRunLine}</p>
           {planLine && (

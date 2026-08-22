@@ -8,6 +8,27 @@ SELECT d.deveui, d.name, d.type_id, d.irrigation_zone_id, d.current_state, d.tar
        COALESCE(vs.scheduler_status,'ACTIVE') AS scheduler_status, vs.skip_today_date, vs.last_clock_sync_queued_at, vs.last_clock_sync_acked_at,
        zic.measured_flow_rate_lpm AS zone_flow_rate_lpm,
        (SELECT MAX(dd.recorded_at) FROM device_data dd WHERE dd.deveui = d.deveui) AS last_uplink_at,
+       -- Bounded to a 7-day lookback (review R1, MAJOR-1): a valve whose columns are always
+       -- NULL (every GEN2 unit — no such sensor; a GEN1 unit pinned on the 125/100
+       -- "no sensor fitted" sentinel; anything on pre-feature firmware) has no stopping point
+       -- for the unbounded "ORDER BY recorded_at DESC LIMIT 1" scan and walks its entire
+       -- device_data partition on every request, forever (device_data has no retention
+       -- anywhere in the repo). The range predicate is served by the existing
+       -- (deveui, recorded_at) index, so this is a plan change, not a schema change: a
+       -- never-reporting valve's cost goes from linear in the partition's total row count to
+       -- flat, independent of it (review R2 measured this holding constant across a 16x table
+       -- growth; the absolute ms figure is fixture-dependent — how the rows are spread across
+       -- the cutoff — so it isn't quoted here). Behavioural side effect, intentional: a reading
+       -- older than 7 days now reports as absent rather than being shown as current, which is
+       -- the honest answer for a diagnostic value.
+       (SELECT dd.ambient_temperature FROM device_data dd WHERE dd.deveui = d.deveui AND dd.ambient_temperature IS NOT NULL AND dd.recorded_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 day') ORDER BY dd.recorded_at DESC LIMIT 1) AS enclosure_temperature_c,
+       (SELECT dd.relative_humidity FROM device_data dd WHERE dd.deveui = d.deveui AND dd.relative_humidity IS NOT NULL AND dd.recorded_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 day') ORDER BY dd.recorded_at DESC LIMIT 1) AS enclosure_humidity_pct,
+       -- (review R1, §2) MAX(recorded_at) over rows carrying EITHER value: this timestamps the
+       -- newest enclosure reading, not either number individually. When temperature and
+       -- humidity come from two different rows (subqueries above are independent on purpose),
+       -- this label can be newer than the row the older of the two numbers actually came from.
+       -- Do not build a per-value staleness gate on this field without per-column timestamps.
+       (SELECT MAX(dd.recorded_at) FROM device_data dd WHERE dd.deveui = d.deveui AND (dd.ambient_temperature IS NOT NULL OR dd.relative_humidity IS NOT NULL) AND dd.recorded_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 day')) AS enclosure_measured_at,
        (SELECT vae.expectation_id FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY vae.commanded_at DESC LIMIT 1) AS active_expectation_id,
        (SELECT vae.reconciliation_state FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY vae.commanded_at DESC LIMIT 1) AS active_reconciliation_state,
        (SELECT vae.commanded_at FROM valve_actuation_expectations vae WHERE vae.device_eui = d.deveui AND vae.reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY vae.commanded_at DESC LIMIT 1) AS active_commanded_at,

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import useSWR from 'swr';
-import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI } from '../services/api';
+import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI, valvesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { DashboardHeader } from '../components/DashboardHeader';
@@ -19,12 +19,13 @@ import {
   type IrrigationOutcomeZoneContext,
 } from '../components/farming/IrrigationOutcomesPanel';
 import { useDisplayPreferences } from '../utils/displayPreferences';
-import type { Device, IrrigationZone } from '../types/farming';
+import type { Device, IrrigationZone, ValveSummary } from '../types/farming';
 import type { IrrigationActuationsResponse } from '../services/api';
 
 const devicesFetcher = () => devicesAPI.getAll();
 const zonesFetcher = () => irrigationZonesAPI.getAll();
 const irrigationActuationsFetcher = () => irrigationOutcomesAPI.recentActuations();
+const valvesFetcher = () => valvesAPI.list();
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
@@ -48,6 +49,32 @@ export const FarmingDashboard: React.FC = () => {
   const { data: zones, error: zonesError, mutate: mutateZones } = useSWR<IrrigationZone[]>(
     '/api/irrigation-zones',
     zonesFetcher,
+    {
+      refreshInterval: 10000,
+      revalidateOnFocus: true,
+    }
+  );
+
+  // A farm with no STREGA valves at all should not poll /api/valves — derive a stable
+  // boolean from the already-loaded device list (false, not a flapping value, while
+  // devices is still loading) and use it to gate the SWR key. `null` tells SWR "do not
+  // fetch": no request is ever issued for a valve-less farm, on a Raspberry Pi 5 that
+  // already polls three other endpoints every 10 s.
+  //
+  // When there IS at least one STREGA valve, this uses the exact same key
+  // ValveControlPanel already fetches ('/api/valves', identical options), so SWR
+  // dedupes and shares one cache entry/one poll while the panel is visible. That sharing
+  // depends on SWR's default ~2 s dedupingInterval — it is not structural, so do not gate
+  // this key on `modules.valveControl` (a per-browser display preference): StregaValveCard
+  // still needs the data whether or not the panel itself is rendered, and hiding the panel
+  // does not reduce this poll — it only stops being deduped against the panel's own timer.
+  const hasStregaValve = useMemo(
+    () => (devices ?? []).some((d) => d.type_id === 'STREGA_VALVE'),
+    [devices],
+  );
+  const { data: valves } = useSWR<ValveSummary[]>(
+    hasStregaValve ? '/api/valves' : null,
+    valvesFetcher,
     {
       refreshInterval: 10000,
       revalidateOnFocus: true,
@@ -112,6 +139,12 @@ export const FarmingDashboard: React.FC = () => {
   const zoneTimezones = useMemo(
     () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
     [zones],
+  );
+  // deviceEui is always uppercased by normaliseValveSummary; Device.deveui is always
+  // uppercased by normaliseDevice — so a plain-string key match is safe.
+  const valvesByEui = useMemo(
+    () => new Map((valves ?? []).map((v) => [v.deviceEui, v])),
+    [valves],
   );
   const irrigationOutcomeZoneContexts = useMemo(
     () => new Map<number, IrrigationOutcomeZoneContext>((zones ?? []).map((zone) => [
@@ -203,13 +236,19 @@ export const FarmingDashboard: React.FC = () => {
                     onUpdate={handleUpdate}
                     allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
                     irrigationActuations={irrigationActuations}
+                    valvesByEui={valvesByEui}
                   />
                 ))}
               </div>
             )}
 
-            {/* Valve control panel */}
-            {modules.valveControl && (
+            {/* Valve control panel — also gated on hasStregaValve: ValveControlPanel
+                runs its own unconditional useSWR('/api/valves', ...) on mount, so
+                showing it for a farm with zero STREGA valves would poll every 10 s for
+                a panel that can only ever say "no valves". modules.valveControl stays
+                the user's display preference; hasStregaValve is the data-driven "is
+                there anything to control at all" gate. */}
+            {modules.valveControl && hasStregaValve && (
               <div className="mt-8">
                 <ValveControlPanel onUpdate={handleUpdate} />
               </div>
@@ -256,6 +295,7 @@ export const FarmingDashboard: React.FC = () => {
                             onRemove={handleUpdate}
                             irrigationActuations={irrigationActuations}
                             timeZone={device.irrigation_zone_id ? zoneTimezones.get(device.irrigation_zone_id) : undefined}
+                            valve={valvesByEui.get(device.deveui)}
                           />
                         ))}
                       </div>

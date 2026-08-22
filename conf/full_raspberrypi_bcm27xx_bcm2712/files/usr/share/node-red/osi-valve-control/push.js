@@ -60,17 +60,49 @@ function toRow(deviceEui, p) {
 // a transaction failure after a successful flush would drop the previously-queued payloads
 // that were just flushed out. Accepted as a low-probability edge case rather than widening the
 // transaction to cover an external network call.
-async function queuePushes({ db, deviceEui, appId, pushes, flushQueue, warn }) {
-  if (!pushes.length) return { rows: [], messages: [], flushed: false };
+async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueue, warn }) {
+  const purposes = new Set(pushes.map((p) => p.purpose));
+  // MAJOR-A fix (review round 2): the per-push supersede below only ever touches rows of
+  // the SAME purpose as what was just compiled. A Gen1->Gen2 self-correction compiles
+  // DAYMASK_PLAN pushes, so the 7 pre-switch WEEKDAY_PLAN rows are a different purpose and
+  // are never touched -- they stay QUEUED forever, and pushSummary buckets GEN1/GEN2 rows
+  // under separate keyspaces (WEEKDAY_PLAN:<d> vs GEN2DAY:<d>), so the abandoned rows are
+  // counted *in addition to* the new ones instead of being replaced by them. The farmer's
+  // GUI badge then reports a permanent phantom "queued", followed by "failed" 24h later, for
+  // a plan the valve already abandoned. Whenever this compile produced a push of one
+  // generation's purpose, also supersede any leftover QUEUED rows of the other generation's
+  // plan purpose for this device -- reusing the same supersedeQueued() helper the per-push
+  // loop below already calls, once per weekday (WEEKDAY_PLAN has no single "all weekdays"
+  // token) or once with the full 7-day mask (DAYMASK_PLAN intersects on mask overlap).
+  //
+  // M1 fix (post-deploy review): the flags above are also derived straight from the caller's
+  // `generation`, not only from the purposes actually compiled. compileAndQueue always knows
+  // the device's CURRENT (post-switch) generation, even on a compile that produces zero
+  // pushes -- e.g. a GEN2->GEN1 demotion whose GEN1 hashes still match the ACKED rows from
+  // before the promotion. Without this, `if (!pushes.length) return` below would exit before
+  // ever reaching this supersede, leaving the abandoned generation's plan row QUEUED forever
+  // (the same phantom-failure badge MAJOR-A fixed, mirrored in the demotion direction). A
+  // caller that doesn't know/pass `generation` (e.g. a bare SCHEDULER_STATUS or CLOCK_SYNC
+  // push queued outside a compile) leaves these exactly as purpose-derived, unchanged.
+  const supersedeWeekday = purposes.has('DAYMASK_PLAN') || generation === 'GEN2';
+  const supersedeDaymask = purposes.has('WEEKDAY_PLAN') || (generation != null && generation !== 'GEN2');
+  if (!pushes.length && !supersedeWeekday && !supersedeDaymask) return { rows: [], messages: [], flushed: false };
   let flushed = false;
-  const pending = await store.hasPendingObservation(db, deviceEui);
-  if (!pending && typeof flushQueue === 'function') {
-    try { await flushQueue(deviceEui); flushed = true; } catch (e) { warn && warn('[valve-control] queue flush failed ' + deviceEui + ': ' + (e && e.message ? e.message : e)); }
+  if (pushes.length) {
+    const pending = await store.hasPendingObservation(db, deviceEui);
+    if (!pending && typeof flushQueue === 'function') {
+      try { await flushQueue(deviceEui); flushed = true; } catch (e) { warn && warn('[valve-control] queue flush failed ' + deviceEui + ': ' + (e && e.message ? e.message : e)); }
+    }
   }
   const rows = pushes.map((p) => toRow(deviceEui, p));
   await db.transaction(async (tx) => {
     for (const p of pushes) await store.supersedeQueued(tx, deviceEui, p.purpose, p.weekday == null ? (p.daymask == null ? null : p.daymask) : p.weekday);
-    await store.insertPushes(tx, rows);
+    if (supersedeWeekday) {
+      for (let d = 0; d < 7; d += 1) await store.supersedeQueued(tx, deviceEui, 'WEEKDAY_PLAN', d);
+    } else if (supersedeDaymask) {
+      await store.supersedeQueued(tx, deviceEui, 'DAYMASK_PLAN', 0x7F);
+    }
+    if (rows.length) await store.insertPushes(tx, rows);
   });
   const messages = rows.map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex }));
   return { rows, messages, flushed };
@@ -94,7 +126,7 @@ async function compileAndQueue({ db, deviceEui, appId, force, now, flushQueue, w
   const tz = (tzSchedule && tzSchedule.timezone) || timeZoneFallback || 'UTC';
   const needsClock = force || !settings.last_clock_sync_queued_at;
   if (needsClock) pushes.push(buildClockPush(settings.strega_generation, now || new Date(), tz));
-  const queued = await queuePushes({ db, deviceEui, appId, pushes, flushQueue, warn });
+  const queued = await queuePushes({ db, deviceEui, appId, pushes, generation: settings.strega_generation, flushQueue, warn });
   // MINOR 8 (review round 1): deliberately outside the transaction that queuePushes ran —
   // worst case on a crash between the two is a redundant clock sync queued next time, which
   // is harmless, versus coupling an unrelated settings write into the push-insert transaction.

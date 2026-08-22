@@ -62,13 +62,16 @@ function interpretUplink(decoded, fPort, rawBytes) {
     else if (g2port === CLOCK_FPORT || g2port === CLOCK_REQ_FPORT) acks.push({ purpose: 'CLOCK_SYNC', fport: g2port, weekday: null, status });
   }
 
-  // Fix round 1: the decoded-object Gen2 path above is unreachable in production. ChirpStack
-  // provisions exactly one STREGA device profile, wired to the Gen1 codec, for every valve
-  // (chirpstack-bootstrap.js ~line 445) -- so a real SV2's ACK frames always arrive here already
-  // decoded as plain Gen1 telemetry (no `Ack_Port` ever appears), and this is the only reachable
-  // Gen2-detection path on real hardware. Spec §3 anticipates exactly this and specifies raw-byte
-  // detection instead: "the Gen2 ACK marker 0x06 and a 3-char battery field". Only consulted when
-  // the decoded object produced nothing at all, so it can never override a real Gen1 ack.
+  // As of the Gen2 device-profile wave, ChirpStack provisions two STREGA profiles
+  // (chirpstack-bootstrap.js:451,453): Gen1 wired to strega_gen1_decoder.js, Gen2 wired to
+  // strega_gen2_decoder.js. A valve re-pointed onto the Gen2 profile decodes through the real
+  // Gen2 codec, so the decoded-object branch above (`Ack_Port`) is reachable on real hardware,
+  // not just in theory. This raw-byte fallback stays load-bearing for two cases the
+  // decoded-object branch cannot cover: a Gen2 valve still sitting on the Gen1 profile (its
+  // Gen1 codec mangles the bytes, so `acks` and `generationHint` both come back empty above),
+  // and any uplink where ChirpStack hands back an empty decoded object regardless of profile.
+  // Only consulted when the decoded object produced nothing at all, so it can never override a
+  // real ACK from either codec.
   if (acks.length === 0 && generationHint === null && rawBytes) {
     const raw = interpretRawGen2Ack(rawBytes);
     if (raw) {
