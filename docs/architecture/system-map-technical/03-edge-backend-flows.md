@@ -201,12 +201,20 @@ Valve (Gen1) or STREGA Valve Gen2 (`CHIRPSTACK_PROFILE_STREGA_GEN2`,
 `osi-config-and-flags`). Registration picks the profile from the requested
 generation, but a valve that turns out to be the other generation is
 recoverable without re-registering it: "Valve ACK ledger" re-checks the
-stored `valve_settings.strega_generation` on every ACK-bearing uplink, and
-once it reads `GEN2`, calls `chirpstack.setDeviceProfile` to re-point the
-ChirpStack device record and `flushDeviceQueue` to clear any Gen1-encoded
-downlink still queued under the old profile. `setDeviceProfile` no-ops once
-the profile already matches, so this costs one `getDevice` per ACK on a
-steady-state valve.
+stored `valve_settings.strega_generation` on every ACK-bearing uplink whose
+`deviceProfileId` does not already match, and once it reads `GEN2`, calls
+`chirpstack.setDeviceProfile` to re-point the ChirpStack device record.
+`setDeviceProfile` no-ops once the profile already matches, so this costs one
+`getDevice` per ACK on a steady-state valve, and comparing the uplink's own
+`deviceProfileId` first skips the gRPC call entirely once the swap has
+landed. A successful swap also calls `flushDeviceQueue`, which clears
+**every** downlink ChirpStack is holding for that device, not only
+Gen1-encoded ones — that is unavoidable because `FlushQueue` takes a DevEUI
+and nothing else. The flush is skipped while
+`valve_actuation_expectations` has a `PENDING_OBSERVATION`/`OBSERVED_RUNNING`
+row for the device (`hasPendingObservation`), so a farmer-commanded
+`OPEN_FOR_DURATION` still in flight is never discarded as collateral damage
+from the profile swap.
 
 Plan and clock pushes leave through a dedicated `mqtt out` node, "Valve plan
 downlinks → ChirpStack" (`valve-push-mqtt-out`), separate from the STREGA

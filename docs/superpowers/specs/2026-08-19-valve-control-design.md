@@ -408,6 +408,12 @@ Request and response shapes are JSON snake_case like the rest of flows.json;
      the local ledger write.
    - A Gen1 valve on the bench at the same time is unaffected throughout:
      its profile, schedule pushes, and ACKs behave exactly as before.
+   - Queue a one-time open on the mis-registered SV2 (still commanded while
+     it reads Gen1), then let the promoting ACK arrive before the open's
+     window closes: the open still fires and is observed normally — the
+     profile re-point must not cost the farmer that open. Separately,
+     confirm a stale queued Gen1 plan/clock frame is gone from the device
+     after the re-point (queue flush without a pending open).
 
 ## 11. Testing
 

@@ -1,44 +1,161 @@
 {
   "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
   "node_allowances": {
-    "062a0f9bf66d9789": { "delta": 850, "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)" },
-    "2a4f142e3e9b6d80": { "delta": 400, "reason": "sync outbox eviction index guard (1.A5)" },
-    "prune-sync-outbox": { "delta": 3000, "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)" },
-    "history-api-router-fn": { "delta": 462, "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312)" },
-    "sync-pending-split": { "delta": 401, "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields" },
-    "command-dedupe-dispatch": { "delta": 823, "reason": "Field Journal Task 10: shared command-ledger replay; PR #141 hardening: guarded osiLib loading and protected-type routing keep generic commands independent from optional journal hooks (+823 exact final delta vs origin/main)" },
-    "cmd-type-registry": { "delta": 3100, "reason": "1.C: expanded command-type registry from 8 to 33 types" },
-    "reject-indefinite-open": { "delta": 3100, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
-    "write-strega-expectation": { "delta": 3300, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
-    "9b3afb405207302e": { "delta": 800, "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest" },
-    "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return" },
-    "dendro-compute-fn": { "delta": 2304, "reason": "issue #10: INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version (dendrometer_daily + zone_daily_recommendations); PR #140 review finding: add sync_version to the three inline fallback CREATE TABLE statements (+104)" },
-    "sim-dendro-fn-setup": { "delta": 950, "reason": "issue #10: sim INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version" },
-    "sync-init-fn": { "delta": 1019, "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)" },
-    "sync-bootstrap-build": { "delta": 4398, "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); Field Journal Task 12 plus final review: fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper in normal bootstrap (+4078); PR #141 hardening: object-only outbox payload parser and rollback propagation (+139)" },
-    "sync-outbox-build": { "delta": 397, "reason": "retryable backoff: pending-events SELECT gains a last_retryable_failure_at/retry_count cooldown-exclusion clause (Task J); PR #141 hardening: object-only payload parser, rollback propagation, strict delivery mapping, and visible cleanup catches (+397 vs current origin/main)" },
-    "sync-outbox-mark": { "delta": 294, "reason": "retryable backoff: RETRYABLE_ERROR results now collect event uuids and persist retry_count/last_retryable_failure_at instead of only counting them (Task J)" },
-    "sync-force-build": { "delta": 5497, "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); retryable backoff: same cooldown-exclusion SELECT clause + retry_count/last_retryable_failure_at UPDATE as sync-outbox-mark (+280, Task J); Field Journal Tasks 11-12 plus final review: preserve trusted envelopes, fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper, and exposeEmptyCatches over main's Task J catches (+4936); PR #141 hardening: object-only outbox payload parser, rollback propagation, and strict delivery mapping (+100)" },
-    "put-chameleon-enabled-auth-fn": { "delta": 46, "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud" },
-    "dendro-ref-tree-fn": { "delta": 46, "reason": "issue #15: UPDATE bumps sync_version so a reference-tree toggle after the first delivered DEVICE event does not hit equal_version_payload_conflict, matching the put-chameleon-enabled-auth-fn / dendro_enabled / temp_enabled / rain_gauge_enabled / flow_meter_enabled precedent" },
-    "lsn50-zone-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
-    "s2120-rain-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
-    "lorain-rain-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
-    "device-api-http500": { "delta": 45, "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder" },
-    "dendro-raw-fn": { "delta": 10, "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all" },
-    "get-actuations-query": { "delta": 54, "reason": "valve control: recent-actuations SELECT exposes valve_actuation_expectations.trigger (+20); final-fix-wave MINOR 3: defensive CREATE TABLE IF NOT EXISTS fallback for never-migrated Pis was missing the trigger column entirely, 500ing the SELECT vae.trigger on those gateways - added `trigger TEXT` to the fallback DDL to match the real (migrated) schema (+34)" },
-    "get-actuations-response": { "delta": 214, "reason": "valve control: recent-actuations response payload maps trigger alongside cancelReason (+40); final-fix-wave MAJOR-2: GRACE_MS widened from 120s to 1800s to match strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC, plus a comment naming that mirrored constant, so a still-reconciling run is not badged OPEN_TIMEOUT/CLOSE_TIMEOUT early (+174)" },
-    "strega-reconciliation-monitor": { "delta": 404, "reason": "FW-T1 fix wave: gate state derivation on 'uplink && uplink.recorded_at' so a never-uplinked valve's LEFT JOIN NULL row is not mistaken for a real observation (phantom OBSERVED_COMPLETE/OBSERVED_RUNNING) (+22); FW-T1b Gap A: query also selects d.updated_at AS state_updated_at, and the state-derivation block additionally gates on Date.parse(state_updated_at) >= Date.parse(commanded_at) (both Number.isFinite, epoch-millis compare) so a stale current_state paired with a fresh Class-A uplink is not mistaken for a real observation (+381); FW-T1c: RECONCILIATION_GRACE_SEC widened 300 -> 1800 (a full Class-A 600s uplink cycle plus margin on both the OPEN-delivery and CLOSE-confirmation legs) so a genuine run confirming 600-1500s after expected_close_at no longer times out to the litres-excluded STALE_NO_OBSERVATION (+1). FW-T1c R1 (review be3346a8): the late-promotion path (STALE_NO_OBSERVATION rescan + 6h window guard, +391) was reverted per review ruling - it re-opened unbounded phantom-litres exposure (MAJOR-1, any later valve activity within 6h revived a stale row regardless of which run it belonged to) and collided with osi-valve-control's runObserveTick dedupe model (MAJOR-2, race-dependent duplicate rows). The node is now byte-for-byte the a88b88dd (FW-T1b) version plus only the grace constant change; delta shrunk from 794 to 404, exact vs origin/main" },
-    "zone-env-fn": { "delta": 29, "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from estimated-irrigation litres so a never-observed command does not credit phantom litres to the zone water balance (exact delta vs origin/main)" },
-    "strega-today-liters-fn": { "delta": 23, "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from today's litres sum so a never-observed command does not credit phantom litres to today's total (exact delta vs origin/main)" },
-    "post-zone-auth": { "delta": 270, "reason": "FW-T5: capture an optional client-supplied zone timezone alongside the existing name capture, for post-zone-insert's gateway_timezone fallback (exact delta vs origin/main)" },
-    "post-zone-insert": { "delta": 1290, "reason": "FW-T5: default a missing zone timezone to the app_settings gateway_timezone (table-missing-safe), instead of silently relying on the irrigation_zones.timezone column DEFAULT 'UTC'; adds an async osiDb read/close and error-wrapping around the existing INSERT build (exact delta vs origin/main)" },
-    "strega-process-fn": { "delta": 152, "reason": "STREGA Gen2 device profile Task 1: accept the Gen2 vendor decoder's `Actuator` field as an alias for `Valve` (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up emits Actuator, not Valve) via a valveRaw fallback, used in place of decodedObject.Valve at both read sites (exact delta vs origin/main)" },
-    "post-devices-auth": { "delta": 429, "reason": "STREGA Gen2 device profile Task 4: validate + capture the optional strega_generation request field the same way new_device_appkey is captured (+393); R1 review fix (MINOR d): generation only applies to STREGA_VALVE, ignored (forced to '') for every other device type (+36) (exact delta vs origin/main)" },
-    "check-existing-device": { "delta": 84, "reason": "STREGA Gen2 device profile Task 4 R1 review fix (MAJOR-2): LEFT JOIN valve_settings so post-devices-insert can see the stored generation, not just the request field, and keep a stored GEN2 sticky across re-registration (exact delta vs origin/main)" },
-    "post-devices-insert": { "delta": 1274, "reason": "STREGA Gen2 device profile Task 4: select CHIRPSTACK_PROFILE_STREGA_GEN2 for GEN2 STREGA registrations and stamp msg.deviceRegistration.stregaGeneration for cs-register-device-fn (+557); R1 review fix (MAJOR-2): resolve the effective generation from stored (LEFT JOIN valve_settings via check-existing-device) OR requested state, not the request field alone -- ensureDeviceProvisioned (Task 2) actively repoints ChirpStack to match the resolved profile, so consulting only the request field would demote an already-promoted GEN2 valve's ChirpStack profile back to Gen1 on a generation-omitted re-registration (+717) (exact delta vs origin/main)" },
-    "cs-register-device-fn": { "delta": 808, "reason": "STREGA Gen2 device profile Task 4: params-capable run() helper plus the promotion-only valve_settings upsert (GEN1->GEN2 only, never demotes a stored GEN2) after successful provisioning (+778); R1 review fix (MINOR b): maintain updated_at on the valve_settings write per osi-valve-control/store.js's documented invariant (+30) (exact delta vs origin/main)" },
-    "cs-reg-cloud-fn": { "delta": 2337, "reason": "STREGA Gen2 device profile Task 4: promotion-only valve_settings upsert on this independent registration path (+1260, superseding the removed dead placeholder block); R1 review fixes: MAJOR-2 -- since this cloud payload carries no generation field at all, query stored valve_settings.strega_generation inside the guarded REGISTER_DEVICE branch (via a new `all` helper reusing the branch's existing _db handle) and keep a stored GEN2 sticky, instead of hardcoding GEN1 unconditionally; MINOR a -- move the profile-selection block from above the REGISTER_DEVICE guard (where it was statically unreachable dead code) into the branch; MINOR b -- maintain updated_at on the valve_settings write (exact delta vs origin/main)" }
+    "062a0f9bf66d9789": {
+      "delta": 850,
+      "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)"
+    },
+    "2a4f142e3e9b6d80": {
+      "delta": 400,
+      "reason": "sync outbox eviction index guard (1.A5)"
+    },
+    "prune-sync-outbox": {
+      "delta": 3000,
+      "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)"
+    },
+    "history-api-router-fn": {
+      "delta": 462,
+      "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312)"
+    },
+    "sync-pending-split": {
+      "delta": 401,
+      "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields"
+    },
+    "command-dedupe-dispatch": {
+      "delta": 823,
+      "reason": "Field Journal Task 10: shared command-ledger replay; PR #141 hardening: guarded osiLib loading and protected-type routing keep generic commands independent from optional journal hooks (+823 exact final delta vs origin/main)"
+    },
+    "cmd-type-registry": {
+      "delta": 3100,
+      "reason": "1.C: expanded command-type registry from 8 to 33 types"
+    },
+    "reject-indefinite-open": {
+      "delta": 3100,
+      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
+    },
+    "write-strega-expectation": {
+      "delta": 3300,
+      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
+    },
+    "9b3afb405207302e": {
+      "delta": 800,
+      "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest"
+    },
+    "5f0d2b7e9b9b1b3a": {
+      "delta": 1700,
+      "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return"
+    },
+    "dendro-compute-fn": {
+      "delta": 2304,
+      "reason": "issue #10: INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version (dendrometer_daily + zone_daily_recommendations); PR #140 review finding: add sync_version to the three inline fallback CREATE TABLE statements (+104)"
+    },
+    "sim-dendro-fn-setup": {
+      "delta": 950,
+      "reason": "issue #10: sim INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version"
+    },
+    "sync-init-fn": {
+      "delta": 1019,
+      "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
+    },
+    "sync-bootstrap-build": {
+      "delta": 4398,
+      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); Field Journal Task 12 plus final review: fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper in normal bootstrap (+4078); PR #141 hardening: object-only outbox payload parser and rollback propagation (+139)"
+    },
+    "sync-outbox-build": {
+      "delta": 397,
+      "reason": "retryable backoff: pending-events SELECT gains a last_retryable_failure_at/retry_count cooldown-exclusion clause (Task J); PR #141 hardening: object-only payload parser, rollback propagation, strict delivery mapping, and visible cleanup catches (+397 vs current origin/main)"
+    },
+    "sync-outbox-mark": {
+      "delta": 294,
+      "reason": "retryable backoff: RETRYABLE_ERROR results now collect event uuids and persist retry_count/last_retryable_failure_at instead of only counting them (Task J)"
+    },
+    "sync-force-build": {
+      "delta": 5497,
+      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); retryable backoff: same cooldown-exclusion SELECT clause + retry_count/last_retryable_failure_at UPDATE as sync-outbox-mark (+280, Task J); Field Journal Tasks 11-12 plus final review: preserve trusted envelopes, fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper, and exposeEmptyCatches over main's Task J catches (+4936); PR #141 hardening: object-only outbox payload parser, rollback propagation, and strict delivery mapping (+100)"
+    },
+    "put-chameleon-enabled-auth-fn": {
+      "delta": 46,
+      "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud"
+    },
+    "dendro-ref-tree-fn": {
+      "delta": 46,
+      "reason": "issue #15: UPDATE bumps sync_version so a reference-tree toggle after the first delivered DEVICE event does not hit equal_version_payload_conflict, matching the put-chameleon-enabled-auth-fn / dendro_enabled / temp_enabled / rain_gauge_enabled / flow_meter_enabled precedent"
+    },
+    "lsn50-zone-agg-fn": {
+      "delta": 70,
+      "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
+    },
+    "s2120-rain-agg-fn": {
+      "delta": 70,
+      "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
+    },
+    "lorain-rain-agg-fn": {
+      "delta": 70,
+      "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
+    },
+    "device-api-http500": {
+      "delta": 45,
+      "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder"
+    },
+    "dendro-raw-fn": {
+      "delta": 10,
+      "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all"
+    },
+    "get-actuations-query": {
+      "delta": 54,
+      "reason": "valve control: recent-actuations SELECT exposes valve_actuation_expectations.trigger (+20); final-fix-wave MINOR 3: defensive CREATE TABLE IF NOT EXISTS fallback for never-migrated Pis was missing the trigger column entirely, 500ing the SELECT vae.trigger on those gateways - added `trigger TEXT` to the fallback DDL to match the real (migrated) schema (+34)"
+    },
+    "get-actuations-response": {
+      "delta": 214,
+      "reason": "valve control: recent-actuations response payload maps trigger alongside cancelReason (+40); final-fix-wave MAJOR-2: GRACE_MS widened from 120s to 1800s to match strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC, plus a comment naming that mirrored constant, so a still-reconciling run is not badged OPEN_TIMEOUT/CLOSE_TIMEOUT early (+174)"
+    },
+    "strega-reconciliation-monitor": {
+      "delta": 404,
+      "reason": "FW-T1 fix wave: gate state derivation on 'uplink && uplink.recorded_at' so a never-uplinked valve's LEFT JOIN NULL row is not mistaken for a real observation (phantom OBSERVED_COMPLETE/OBSERVED_RUNNING) (+22); FW-T1b Gap A: query also selects d.updated_at AS state_updated_at, and the state-derivation block additionally gates on Date.parse(state_updated_at) >= Date.parse(commanded_at) (both Number.isFinite, epoch-millis compare) so a stale current_state paired with a fresh Class-A uplink is not mistaken for a real observation (+381); FW-T1c: RECONCILIATION_GRACE_SEC widened 300 -> 1800 (a full Class-A 600s uplink cycle plus margin on both the OPEN-delivery and CLOSE-confirmation legs) so a genuine run confirming 600-1500s after expected_close_at no longer times out to the litres-excluded STALE_NO_OBSERVATION (+1). FW-T1c R1 (review be3346a8): the late-promotion path (STALE_NO_OBSERVATION rescan + 6h window guard, +391) was reverted per review ruling - it re-opened unbounded phantom-litres exposure (MAJOR-1, any later valve activity within 6h revived a stale row regardless of which run it belonged to) and collided with osi-valve-control's runObserveTick dedupe model (MAJOR-2, race-dependent duplicate rows). The node is now byte-for-byte the a88b88dd (FW-T1b) version plus only the grace constant change; delta shrunk from 794 to 404, exact vs origin/main"
+    },
+    "zone-env-fn": {
+      "delta": 29,
+      "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from estimated-irrigation litres so a never-observed command does not credit phantom litres to the zone water balance (exact delta vs origin/main)"
+    },
+    "strega-today-liters-fn": {
+      "delta": 23,
+      "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from today's litres sum so a never-observed command does not credit phantom litres to today's total (exact delta vs origin/main)"
+    },
+    "post-zone-auth": {
+      "delta": 270,
+      "reason": "FW-T5: capture an optional client-supplied zone timezone alongside the existing name capture, for post-zone-insert's gateway_timezone fallback (exact delta vs origin/main)"
+    },
+    "post-zone-insert": {
+      "delta": 1290,
+      "reason": "FW-T5: default a missing zone timezone to the app_settings gateway_timezone (table-missing-safe), instead of silently relying on the irrigation_zones.timezone column DEFAULT 'UTC'; adds an async osiDb read/close and error-wrapping around the existing INSERT build (exact delta vs origin/main)"
+    },
+    "strega-process-fn": {
+      "delta": 216,
+      "reason": "STREGA Gen2 device profile Task 1: accept the Gen2 vendor decoder's `Actuator` field as an alias for `Valve` (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up emits Actuator, not Valve) via a valveRaw fallback, used in place of decodedObject.Valve at both read sites (+152); Task 6 fix round R1 (MAJOR-2): getProfileKind's stregaProfiles also matches CHIRPSTACK_PROFILE_STREGA_GEN2, so a valve already re-pointed to the Gen2 profile is still recognised as STREGA_VALVE instead of falling through to null (+64, exact delta vs origin/main)"
+    },
+    "post-devices-auth": {
+      "delta": 429,
+      "reason": "STREGA Gen2 device profile Task 4: validate + capture the optional strega_generation request field the same way new_device_appkey is captured (+393); R1 review fix (MINOR d): generation only applies to STREGA_VALVE, ignored (forced to '') for every other device type (+36) (exact delta vs origin/main)"
+    },
+    "check-existing-device": {
+      "delta": 84,
+      "reason": "STREGA Gen2 device profile Task 4 R1 review fix (MAJOR-2): LEFT JOIN valve_settings so post-devices-insert can see the stored generation, not just the request field, and keep a stored GEN2 sticky across re-registration (exact delta vs origin/main)"
+    },
+    "post-devices-insert": {
+      "delta": 1274,
+      "reason": "STREGA Gen2 device profile Task 4: select CHIRPSTACK_PROFILE_STREGA_GEN2 for GEN2 STREGA registrations and stamp msg.deviceRegistration.stregaGeneration for cs-register-device-fn (+557); R1 review fix (MAJOR-2): resolve the effective generation from stored (LEFT JOIN valve_settings via check-existing-device) OR requested state, not the request field alone -- ensureDeviceProvisioned (Task 2) actively repoints ChirpStack to match the resolved profile, so consulting only the request field would demote an already-promoted GEN2 valve's ChirpStack profile back to Gen1 on a generation-omitted re-registration (+717) (exact delta vs origin/main)"
+    },
+    "cs-register-device-fn": {
+      "delta": 808,
+      "reason": "STREGA Gen2 device profile Task 4: params-capable run() helper plus the promotion-only valve_settings upsert (GEN1->GEN2 only, never demotes a stored GEN2) after successful provisioning (+778); R1 review fix (MINOR b): maintain updated_at on the valve_settings write per osi-valve-control/store.js's documented invariant (+30) (exact delta vs origin/main)"
+    },
+    "cs-reg-cloud-fn": {
+      "delta": 2337,
+      "reason": "STREGA Gen2 device profile Task 4: promotion-only valve_settings upsert on this independent registration path (+1260, superseding the removed dead placeholder block); R1 review fixes: MAJOR-2 -- since this cloud payload carries no generation field at all, query stored valve_settings.strega_generation inside the guarded REGISTER_DEVICE branch (via a new `all` helper reusing the branch's existing _db handle) and keep a stored GEN2 sticky, instead of hardcoding GEN1 unconditionally; MINOR a -- move the profile-selection block from above the REGISTER_DEVICE guard (where it was statically unreachable dead code) into the branch; MINOR b -- maintain updated_at on the valve_settings write (exact delta vs origin/main)"
+    }
   },
-  "total_allowance": { "delta": 24627, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + valve control Task 9: recent actuations expose trigger (+60: get-actuations-query +20, get-actuations-response +40) -- STREGA Gen2 device profile Task 4 (both R0 and its R1 review fix) carried entirely within per-node allowances above; the aggregate ceiling itself did not need raising (R1 review MINOR c: the R0 bump to 27615 was reverted here since the per-node entries alone keep HEAD's total under origin/main's)" }
+  "total_allowance": {
+    "delta": 24627,
+    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + valve control Task 9: recent actuations expose trigger (+60: get-actuations-query +20, get-actuations-response +40) -- STREGA Gen2 device profile Task 4 (both R0 and its R1 review fix) carried entirely within per-node allowances above; the aggregate ceiling itself did not need raising (R1 review MINOR c: the R0 bump to 27615 was reverted here since the per-node entries alone keep HEAD's total under origin/main's)"
+  }
 }

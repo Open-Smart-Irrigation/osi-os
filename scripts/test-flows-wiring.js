@@ -1250,10 +1250,18 @@ assertPromotionOnlyValveSettingsUpsert(csRegisterDeviceFn, 'cs-register-device-f
 const valveAckFn = byId['valve-ack-fn'];
 if (!valveAckFn) {
     failures.push('valve-ack-fn not found');
-} else if (!/setDeviceProfile/.test(valveAckFn.func || '')) {
-    failures.push('valve-ack-fn must call setDeviceProfile to reconcile a GEN2 valve onto the Gen2 ChirpStack profile');
+} else if (!/client\.setDeviceProfile\(devEui,\s*gen2Profile\)/.test(valveAckFn.func || '')) {
+    // Pin the executable call shape, not a bare /setDeviceProfile/ substring: that weaker
+    // regex is satisfied by a comment mentioning the name and does not fail when the real
+    // call is renamed (same defect class as Task 1's weak /Actuator/ pin).
+    failures.push('valve-ack-fn must call client.setDeviceProfile(devEui, gen2Profile) to reconcile a GEN2 valve onto the Gen2 ChirpStack profile');
 } else if (!(Array.isArray(valveAckFn.libs) && valveAckFn.libs.some((l) => l.var === 'chirpstack' && l.module === 'osi-chirpstack-helper'))) {
     failures.push('valve-ack-fn calls the ChirpStack helper without a libs entry providing it');
+} else if (!/settings\.strega_generation === 'GEN2'/.test(valveAckFn.func || '') || /generationPromoted/.test(valveAckFn.func || '')) {
+    // Pin the structural property the brief cared about most: reconcile from stored
+    // valve_settings state on every ACK, never from handleUplink's one-shot
+    // generationPromoted edge (a failed swap on the promoting uplink would then never retry).
+    failures.push('valve-ack-fn must reconcile from stored strega_generation state, not from handleUplink\'s one-shot generationPromoted edge');
 } else {
     console.log('OK  valve-ack-fn reconciles GEN2 valves onto the Gen2 ChirpStack profile');
 }

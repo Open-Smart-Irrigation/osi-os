@@ -428,14 +428,14 @@ encoder/decoder references for both generations are vendored at
 `devices.strega_model` (`STANDARD` or `MOTORIZED`) and
 `valve_settings.strega_generation` (`GEN1` or `GEN2`) answer different
 questions and must not be conflated. `strega_model` names the physical valve
-hardware — a motorized ball valve actuates and reports differently from a
+hardware: a motorized ball valve actuates and reports differently from a
 standard solenoid, independent of firmware. `strega_generation` names which
 ChirpStack device profile and codec the valve's controller board speaks:
 Gen1's weekday-per-FPort scheduler and Gen1 clock-set (FPort 12), or Gen2's
 daymask scheduler (FPort 25) and `DeviceTimeReq`-based clock (FPort 13). A
 MOTORIZED valve can be either generation, and a STANDARD valve can be either
-generation — the two columns vary independently, and neither is derived from
-the other.
+generation. The two columns vary independently; neither is derived from the
+other.
 
 `OPEN_FOR_DURATION` (the earlier "STREGA valve semantics" section) does not
 vary with `strega_generation`: both generations accept the identical command
@@ -445,8 +445,8 @@ table above.
 
 The Gen2 vendor decoder
 (`docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up`)
-names the decoded valve-state field `Actuator`, not `Valve` — the name Gen1's
-decoder uses for the same concept. `strega-process-fn` in flows.json accepts
+names the decoded valve-state field `Actuator`, not `Valve` (the name Gen1's
+decoder uses for the same concept). `strega-process-fn` in flows.json accepts
 `Actuator` as an alias so both generations' current-state derivation reads
 the same way downstream.
 

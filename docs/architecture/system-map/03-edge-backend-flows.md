@@ -287,10 +287,14 @@ backfill**, and **Valve clock sync + stale pushes** are the module's own ticks
 STREGA valves register onto one of two ChirpStack device profiles, Gen1 or
 Gen2. Registration chooses the profile from the requested generation, and
 the choice self-corrects afterward: whenever **Valve ACK ledger** sees the
-valve's stored generation is Gen2, it re-points the ChirpStack profile and
-clears any Gen1-encoded downlink still sitting in the ChirpStack queue, so a
-valve mis-registered as Gen1 recovers on its first Gen2-shaped ACK without
-an operator re-registering it.
+uplink's own profile doesn't match and the valve's stored generation is
+Gen2, it re-points the ChirpStack profile, so a valve mis-registered as Gen1
+recovers on its first Gen2-shaped ACK without an operator re-registering it.
+A successful re-point also clears everything ChirpStack is still holding in
+that valve's downlink queue (ChirpStack can only clear a device's whole
+queue, not one frame), unless the valve has a commanded open still awaiting
+observation — that guard keeps a farmer's in-flight `OPEN_FOR_DURATION` from
+being discarded as collateral damage from the profile swap.
 
 Plan and clock pushes leave through a dedicated MQTT out
 node, **Valve plan downlinks → ChirpStack**, kept separate from the STREGA
