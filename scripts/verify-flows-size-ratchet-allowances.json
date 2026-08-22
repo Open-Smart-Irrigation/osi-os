@@ -152,6 +152,10 @@
     "cs-reg-cloud-fn": {
       "delta": 2337,
       "reason": "STREGA Gen2 device profile Task 4: promotion-only valve_settings upsert on this independent registration path (+1260, superseding the removed dead placeholder block); R1 review fixes: MAJOR-2 -- since this cloud payload carries no generation field at all, query stored valve_settings.strega_generation inside the guarded REGISTER_DEVICE branch (via a new `all` helper reusing the branch's existing _db handle) and keep a stored GEN2 sticky, instead of hardcoding GEN1 unconditionally; MINOR a -- move the profile-selection block from above the REGISTER_DEVICE guard (where it was statically unreachable dead code) into the branch; MINOR b -- maintain updated_at on the valve_settings write (exact delta vs origin/main)"
+    },
+    "8809bb5239dfb3d4": {
+      "delta": 158,
+      "reason": "STREGA Gen2 device profile Task 6 fix round R2 (NEW-MAJOR-A, NEW-MAJOR-B): Build Telemetry's getProfileKind() gains the CHIRPSTACK_PROFILE_STREGA_GEN2 whitelist entry so a re-pointed Gen2 valve is still recognised as STREGA_VALVE on the cloud telemetry path instead of falling through to the generic sensor branch (matches valve-ack-fn/strega-process-fn from earlier in this task); and the Gen2 vendor decoder's Actuator field is accepted as an alias for Valve via an explicit !== undefined && !== null check (never ||, since valve state 0/CLOSED is falsy), matching strega-process-fn's Task 1 shape exactly -- without it every Gen2 valve mirrored state: null to the cloud regardless of profile naming (exact delta vs origin/main)"
     }
   },
   "total_allowance": {

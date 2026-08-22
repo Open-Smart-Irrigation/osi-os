@@ -300,11 +300,15 @@ exists and lacks a `CHIRPSTACK_PROFILE_STREGA_GEN2=` line, it reruns
 the rerun only adds the missing profile instead of minting a second admin key.
 A provisioning failure there is non-fatal — deploy continues and new Gen1
 registrations still work; only Gen2 registration and profile reconciliation
-are degraded until the next successful deploy. Three flows.json nodes read
+are degraded until the next successful deploy. Five flows.json nodes read
 the resulting env var: `post-devices-insert` and `cs-reg-cloud-fn` (both
-registration paths select it for a Gen2 STREGA valve) and `valve-ack-fn`
+registration paths select it for a Gen2 STREGA valve); `valve-ack-fn`
 (re-points a valve's ChirpStack profile to it once the valve's stored
-`strega_generation` reads `GEN2`).
+`strega_generation` reads `GEN2`); and `strega-process-fn` and the cloud
+telemetry builder (node `8809bb5239dfb3d4`, "Build Telemetry"), which both
+whitelist it alongside `CHIRPSTACK_PROFILE_STREGA` so a valve already
+re-pointed to the Gen2 profile is still recognised as `STREGA_VALVE` instead
+of falling through to a generic sensor payload.
 
 **Deploy-time post-check:** `deploy.sh` does **not** assert
 `CHIRPSTACK_PROFILE_RAK10701` or `CHIRPSTACK_PROFILE_S2120` anywhere

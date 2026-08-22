@@ -211,10 +211,13 @@ landed. A successful swap also calls `flushDeviceQueue`, which clears
 **every** downlink ChirpStack is holding for that device, not only
 Gen1-encoded ones — that is unavoidable because `FlushQueue` takes a DevEUI
 and nothing else. The flush is skipped while
-`valve_actuation_expectations` has a `PENDING_OBSERVATION`/`OBSERVED_RUNNING`
-row for the device (`hasPendingObservation`), so a farmer-commanded
-`OPEN_FOR_DURATION` still in flight is never discarded as collateral damage
-from the profile swap.
+`valve_actuation_expectations` has a `PENDING_OBSERVATION` row for the
+device (`hasPendingObservation`); `OBSERVED_RUNNING` needs no guard because
+that state means the valve was already seen open, which means the frame
+already left the ChirpStack queue on delivery, so a flush at that point has
+nothing left of it to destroy. This keeps a farmer-commanded
+`OPEN_FOR_DURATION` still in flight from being discarded as collateral
+damage from the profile swap.
 
 Plan and clock pushes leave through a dedicated `mqtt out` node, "Valve plan
 downlinks → ChirpStack" (`valve-push-mqtt-out`), separate from the STREGA

@@ -35,6 +35,25 @@ if (journalBootstrapResult.status !== 0) {
     console.log('OK  journal bootstrap behavior harness');
 }
 
+// Execution-based pin for the STREGA Gen2 device-profile reconciliation feature
+// (valve-ack-fn, strega-process-fn, Build Telemetry). A static regex on these nodes'
+// `func` strings can be defeated by a behavior-preserving-looking refactor (e.g. hoisting
+// the stored-generation check into a named const and inverting it) that still contains the
+// pinned literal; this harness extracts each node's real func and executes it under a stub
+// Node-RED environment, so it pins what the node actually does. See the file for detail.
+const gen2ReconcileResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'test-strega-gen2-reconcile.js')],
+    { encoding: 'utf8', timeout: 30000 }
+);
+if (gen2ReconcileResult.status !== 0) {
+    if (gen2ReconcileResult.stdout) process.stderr.write(gen2ReconcileResult.stdout);
+    if (gen2ReconcileResult.stderr) process.stderr.write(gen2ReconcileResult.stderr);
+    failures.push('STREGA Gen2 profile-reconciliation behavior harness failed');
+} else {
+    console.log('OK  STREGA Gen2 profile-reconciliation behavior harness (valve-ack-fn, strega-process-fn, Build Telemetry)');
+}
+
 function hasLib(node, varName, moduleName) {
     const libs = Array.isArray(node && node.libs) ? node.libs : [];
     return libs.some((lib) => lib.var === varName && lib.module === moduleName);
@@ -1186,8 +1205,14 @@ if (!stregaProcessFn) {
         failures.push('strega-process-fn must accept the Gen2 decoder alias `Actuator` for `Valve`');
     } else if (usesFalsyOrFallback || !hasExplicitNullCheck) {
         failures.push('strega-process-fn must select the Gen2 `Actuator` alias via an explicit `!== undefined && !== null` check on `decodedObject.Valve`, not a `||` fallback (a real valve state `0` is falsy and would wrongly fall through to Actuator)');
+    } else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(stregaProcessFunc)) {
+        // MAJOR-2/NEW-MINOR-B: the STREGA-profile gate must whitelist the Gen2 profile UUID
+        // explicitly, not rely solely on the 'STREGA' substring in the profile name
+        // (CS_PROFILE_STREGA_GEN2_NAME is operator-overridable). Real acceptance behavior is
+        // proven by execution in test-strega-gen2-reconcile.js.
+        failures.push('strega-process-fn must whitelist CHIRPSTACK_PROFILE_STREGA_GEN2 in its STREGA-profile gate');
     } else {
-        console.log('OK  strega-process-fn accepts Gen2 decoder alias Actuator for Valve via explicit null/undefined check');
+        console.log('OK  strega-process-fn accepts Gen2 decoder alias Actuator for Valve via explicit null/undefined check, and whitelists the Gen2 UUID');
     }
 }
 
@@ -1274,8 +1299,51 @@ if (!valveAckFn) {
     // valve_settings state on every ACK, never from handleUplink's one-shot
     // generationPromoted edge (a failed swap on the promoting uplink would then never retry).
     failures.push('valve-ack-fn must reconcile from stored strega_generation state, not from handleUplink\'s one-shot generationPromoted edge');
+} else if (!/const stregaProfiles = \[String\(env\.get\('CHIRPSTACK_PROFILE_STREGA'\)[^\]]*CHIRPSTACK_PROFILE_STREGA_GEN2/.test(valveAckFn.func || '')) {
+    // MAJOR-2/NEW-MINOR-B: pin the top-of-function STREGA-profile gate's own stregaProfiles
+    // array, not a bare substring test -- valve-ack-fn's func also mentions
+    // CHIRPSTACK_PROFILE_STREGA_GEN2 later (deriving gen2Profile for the reconcile), so a bare
+    // /CHIRPSTACK_PROFILE_STREGA_GEN2/ test would keep passing even if the whitelist entry were
+    // dropped from this specific gate. Real acceptance behavior, including the renamed-name
+    // case, is proven by execution in test-strega-gen2-reconcile.js.
+    failures.push('valve-ack-fn must whitelist CHIRPSTACK_PROFILE_STREGA_GEN2 in its top-level stregaProfiles gate');
+} else if (!/hasPendingObservation/.test(valveAckFn.func || '')) {
+    // MAJOR-1/NEW-MINOR-B: the queue flush must be gated on a pending observation, so a
+    // farmer-commanded OPEN_FOR_DURATION already queued is never discarded as collateral
+    // damage from a background profile swap. Real gating behavior (flush skipped when
+    // pending, flush fires when not) is proven by execution in
+    // test-strega-gen2-reconcile.js; this is the cheap static tripwire.
+    failures.push('valve-ack-fn must gate the ChirpStack queue flush on VC.store.hasPendingObservation');
 } else {
-    console.log('OK  valve-ack-fn reconciles GEN2 valves onto the Gen2 ChirpStack profile');
+    console.log('OK  valve-ack-fn reconciles GEN2 valves onto the Gen2 ChirpStack profile, whitelists the Gen2 UUID, and gates its flush on a pending observation');
+}
+
+// The cloud telemetry mirror (Build Telemetry) carries its own copy of the STREGA-profile
+// gate and its own read of the valve-state field; it must stay in step with valve-ack-fn's
+// and strega-process-fn's Gen2 whitelist (MAJOR-2 / NEW-MAJOR-A) and Task 1's Actuator alias
+// (NEW-MAJOR-B), or a re-pointed Gen2 valve silently stops mirroring telemetry to the cloud
+// even though its ACK ledger and profile are correct.
+const buildTelemetryFn = byId['8809bb5239dfb3d4'];
+if (!buildTelemetryFn) {
+    failures.push('Build Telemetry (8809bb5239dfb3d4) not found');
+} else {
+    const buildTelemetryFunc = buildTelemetryFn.func || '';
+    const hasActuatorAlias = /Actuator/.test(buildTelemetryFunc);
+    // Same idiom as the strega-process-fn pin above: the explicit null/undefined check, not a
+    // `||` fallback that would wrongly treat a real valve state `0` (CLOSED) as absent.
+    const hasExplicitNullCheck =
+        /obj\.Valve\s*!==\s*undefined/.test(buildTelemetryFunc) &&
+        /obj\.Valve\s*!==\s*null/.test(buildTelemetryFunc);
+    const usesFalsyOrFallback = /obj\.Valve\s*\|\|\s*obj\.Actuator/.test(buildTelemetryFunc);
+    if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(buildTelemetryFunc)) {
+        failures.push('Build Telemetry (cloud MQTT mirror) must whitelist CHIRPSTACK_PROFILE_STREGA_GEN2 in its own STREGA-profile gate (NEW-MAJOR-A), or a re-pointed Gen2 valve stops mirroring telemetry to the cloud');
+    } else if (!hasActuatorAlias) {
+        failures.push('Build Telemetry (cloud MQTT mirror) must accept the Gen2 decoder\'s Actuator field as an alias for Valve (NEW-MAJOR-B), or every Gen2 valve mirrors state: null to the cloud');
+    } else if (usesFalsyOrFallback || !hasExplicitNullCheck) {
+        failures.push('Build Telemetry must select the Gen2 Actuator alias via an explicit `!== undefined && !== null` check on `obj.Valve`, not a `||` fallback (a real valve state `0` is falsy and would wrongly fall through to Actuator)');
+    } else {
+        console.log('OK  Build Telemetry whitelists the Gen2 UUID and accepts the Actuator alias via explicit null/undefined check');
+    }
 }
 
 runJournalHelperFailureMatrix()
