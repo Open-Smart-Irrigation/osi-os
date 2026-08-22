@@ -8,6 +8,10 @@
     "deveuiPlaceholder": "16 hex characters",
     "deveuiHint": "Enter exactly 16 hexadecimal characters (0-9, A-F)",
     "deveuiInvalid": "DevEUI must be exactly 16 hexadecimal characters",
+    "generation": "Valve generation",
+    "generationGen1": "Gen1 (standard)",
+    "generationGen2": "Gen2 / SV2 (Bluetooth)",
+    "generationHint": "Gen2 valves can also be programmed over Bluetooth. If you are unsure, choose Gen1 — the gateway corrects it automatically on the valve's first reply.",
     "adding": "Adding...",
     "submit": "Add Device",
     "failed": "Failed to add device"

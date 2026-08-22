@@ -8,6 +8,10 @@
     "deveuiPlaceholder": "16 caractères hexadécimaux",
     "deveuiHint": "Entrez exactement 16 caractères hexadécimaux (0-9, A-F)",
     "deveuiInvalid": "Le DevEUI doit contenir exactement 16 caractères hexadécimaux",
+    "generation": "Génération de la vanne",
+    "generationGen1": "Gen1 (standard)",
+    "generationGen2": "Gen2 / SV2 (Bluetooth)",
+    "generationHint": "Les vannes Gen2 se programment aussi par Bluetooth. En cas de doute, choisissez Gen1 : la passerelle corrige automatiquement dès la première réponse de la vanne.",
     "adding": "Ajout en cours...",
     "submit": "Ajouter l'appareil",
     "failed": "Impossible d'ajouter l'appareil"

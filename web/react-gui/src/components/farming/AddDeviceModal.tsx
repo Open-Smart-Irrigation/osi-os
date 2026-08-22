@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { DeviceType, DeviceCatalogItem } from '../../types/farming';
+import type { DeviceType, DeviceCatalogItem, StregaGeneration } from '../../types/farming';
 import { devicesAPI } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 
@@ -21,6 +21,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const [name, setName] = useState('');
   const [deveui, setDeveui] = useState('');
   const [appkey, setAppkey] = useState('');
+  const [stregaGeneration, setStregaGeneration] = useState<StregaGeneration>('GEN1');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -63,11 +64,13 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
         name,
         type_id: selectedType,
         appkey: appkey || undefined,
+        ...(selectedType === 'STREGA_VALVE' ? { strega_generation: stregaGeneration } : {}),
       });
       // Reset form
       setName('');
       setDeveui('');
       setAppkey('');
+      setStregaGeneration('GEN1');
       onDeviceAdded();
       onClose();
     } catch (err: any) {
@@ -101,10 +104,11 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Device Type */}
           <div>
-            <label className="block text-[var(--text)] text-lg font-semibold mb-2">
+            <label htmlFor="deviceType" className="block text-[var(--text)] text-lg font-semibold mb-2">
               {t('addModal.deviceType')}
             </label>
             <select
+              id="deviceType"
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value as DeviceType)}
               className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
@@ -116,6 +120,27 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               ))}
             </select>
           </div>
+
+          {/* Strega Generation (valves only) */}
+          {selectedType === 'STREGA_VALVE' && (
+            <div>
+              <label htmlFor="stregaGeneration" className="block text-[var(--text)] text-lg font-semibold mb-2">
+                {t('addModal.generation')}
+              </label>
+              <select
+                id="stregaGeneration"
+                value={stregaGeneration}
+                onChange={(e) => setStregaGeneration(e.target.value as StregaGeneration)}
+                className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+              >
+                <option value="GEN1">{t('addModal.generationGen1')}</option>
+                <option value="GEN2">{t('addModal.generationGen2')}</option>
+              </select>
+              <p className="text-[var(--text-tertiary)] text-sm mt-1">
+                {t('addModal.generationHint')}
+              </p>
+            </div>
+          )}
 
           {/* Name */}
           <div>

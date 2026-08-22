@@ -166,6 +166,7 @@ export interface AddDeviceRequest {
   name: string;
   type_id: DeviceType;
   appkey?: string;
+  strega_generation?: StregaGeneration;
 }
 
 export interface ValveActionRequest {

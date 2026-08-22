@@ -8,6 +8,10 @@
     "deveuiPlaceholder": "16 caratteri esadecimali",
     "deveuiHint": "Inserisci esattamente 16 caratteri esadecimali (0-9, A-F)",
     "deveuiInvalid": "Il DevEUI deve contenere esattamente 16 caratteri esadecimali",
+    "generation": "Valve generation",
+    "generationGen1": "Gen1 (standard)",
+    "generationGen2": "Gen2 / SV2 (Bluetooth)",
+    "generationHint": "Gen2 valves can also be programmed over Bluetooth. If you are unsure, choose Gen1 — the gateway corrects it automatically on the valve's first reply.",
     "adding": "Aggiunta in corso...",
     "submit": "Aggiungi dispositivo",
     "failed": "Impossibile aggiungere il dispositivo"
