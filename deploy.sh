@@ -623,7 +623,7 @@ fetch_required "STREGA codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
     "/srv/node-red/codecs/strega_gen1_decoder.js"
 
-fetch_required "strega_gen2_decoder.js" \
+fetch_required "STREGA Gen2 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen2_decoder.js" \
     "/srv/node-red/codecs/strega_gen2_decoder.js"
 
@@ -649,12 +649,16 @@ fetch_required "Agroscope uplink transform" \
 
 if [ -f /srv/node-red/.chirpstack.env ] && \
    ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' /srv/node-red/.chirpstack.env 2>/dev/null; then
-  echo "--- Provisioning STREGA Gen2 device profile (one-time) ---"
-  if node /srv/node-red/chirpstack-bootstrap.js; then
-    echo "OK: Gen2 profile provisioned"
-  else
-    echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
-  fi
+    echo "--- Provisioning STREGA Gen2 device profile (one-time) ---"
+    # Reuse the gateway's existing osi-nodered token; bootstrap only calls
+    # `chirpstack create-api-key` when CHIRPSTACK_API_KEY is empty, so this
+    # avoids leaving a second admin key behind. Empty value = old behaviour.
+    cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1 | tr -d '\r')"
+    if CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
+        echo "OK: Gen2 profile provisioned"
+    else
+        echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
+    fi
 fi
 
 echo "--- Node-RED runtime dependencies ---"

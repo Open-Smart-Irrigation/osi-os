@@ -300,6 +300,7 @@ function toUciCloudKey(envKey) {
     CHIRPSTACK_APP_FIELD_TESTER: 'chirpstack_app_field_tester',
     CHIRPSTACK_PROFILE_KIWI: 'chirpstack_profile_kiwi',
     CHIRPSTACK_PROFILE_STREGA: 'chirpstack_profile_strega',
+    CHIRPSTACK_PROFILE_STREGA_GEN2: 'chirpstack_profile_strega_gen2',
     CHIRPSTACK_PROFILE_LSN50: 'chirpstack_profile_lsn50',
     CHIRPSTACK_PROFILE_CLOVER: 'chirpstack_profile_clover',
     CHIRPSTACK_PROFILE_RAK10701: 'chirpstack_profile_rak10701',
