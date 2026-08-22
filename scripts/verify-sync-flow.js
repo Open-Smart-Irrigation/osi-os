@@ -2704,6 +2704,14 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrC
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "CFG.lsn50CodecPath", 'tracks the shipped LSN50 decoder path in bootstrap config');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lsn50CodecPath, 'LSN50')", 'loads the shipped LSN50 decoder during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name", 'creates or repairs the OSI LSN50 profile with a payload codec');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'STREGA_GEN2_CODEC_PATH', 'allows overriding the STREGA Gen2 decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CFG.stregaGen2CodecPath', 'tracks the shipped STREGA Gen2 decoder path in bootstrap config');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.stregaGen2CodecPath, 'STREGA Gen2')", 'loads the shipped STREGA Gen2 decoder during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaGen2Name", 'creates or repairs the OSI STREGA Gen2 profile with a payload codec');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPSTACK_PROFILE_STREGA_GEN2', 'writes the STREGA Gen2 ChirpStack profile ID for Node-RED');
+expectFileIncludes('deploy.sh', deployScript, 'strega_gen2_decoder.js', 'ships the STREGA Gen2 decoder to the gateway');
+expectFileIncludes('deploy.sh', deployScript, 'CHIRPSTACK_PROFILE_STREGA_GEN2=', 'guards the one-shot Gen2 provisioning step on the profile key being absent');
+expectFileIncludes('deploy.sh', deployScript, 'CHIRPSTACK_API_KEY="$cs_api_key"', 'reuses the existing ChirpStack API key when provisioning the Gen2 profile');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CS_PROFILE_LORAIN_NAME', 'allows overriding the LoRain profile name during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'LORAIN_CODEC_PATH', 'allows overriding the LoRain decoder path during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CFG.lorainCodecPath', 'tracks the shipped LoRain decoder path in bootstrap config');
