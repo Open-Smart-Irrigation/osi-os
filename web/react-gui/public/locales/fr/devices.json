@@ -10,7 +10,7 @@
     "deveuiInvalid": "Le DevEUI doit contenir exactement 16 caractères hexadécimaux",
     "generation": "Génération de la vanne",
     "generationGen1": "Gen1 (standard)",
-    "generationGen2": "Gen2 / SV2 (Bluetooth)",
+    "generationGen2": "Gen2 / SV2 (Bluetooth — pas encore testée sur une vanne réelle)",
     "generationHint": "Les vannes Gen2 se programment aussi par Bluetooth. En cas de doute, choisissez Gen1 : la passerelle corrige automatiquement dès la première réponse de la vanne.",
     "adding": "Ajout en cours...",
     "submit": "Ajouter l'appareil",

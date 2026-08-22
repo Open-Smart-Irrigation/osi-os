@@ -10,7 +10,7 @@
     "deveuiInvalid": "O DevEUI deve ter exatamente 16 caracteres hexadecimais",
     "generation": "Valve generation",
     "generationGen1": "Gen1 (standard)",
-    "generationGen2": "Gen2 / SV2 (Bluetooth)",
+    "generationGen2": "Gen2 / SV2 (Bluetooth, untested on hardware)",
     "generationHint": "Gen2 valves can also be programmed over Bluetooth. If you are unsure, choose Gen1 — the gateway corrects it automatically on the valve's first reply.",
     "adding": "A adicionar...",
     "submit": "Adicionar dispositivo",

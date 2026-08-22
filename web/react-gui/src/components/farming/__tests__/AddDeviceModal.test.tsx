@@ -20,7 +20,7 @@ const { translateForTest } = vi.hoisted(() => {
     'addModal.appkeyHint': '32 hex characters printed on the device label',
     'addModal.generation': 'Valve generation',
     'addModal.generationGen1': 'Gen1 (standard)',
-    'addModal.generationGen2': 'Gen2 / SV2 (Bluetooth)',
+    'addModal.generationGen2': 'Gen2 / SV2 (Bluetooth, untested on hardware)',
     'addModal.generationHint':
       "Gen2 valves can also be programmed over Bluetooth. If you are unsure, choose Gen1 — the gateway corrects it automatically on the valve's first reply.",
     'addModal.adding': 'Adding...',
@@ -107,6 +107,25 @@ describe('AddDeviceModal generation control', () => {
 
     await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalled());
 
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'KIWI_SENSOR' } });
+    fillRequiredFields();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+
+    await waitFor(() => expect(devicesAPI.add).toHaveBeenCalled());
+    const calls = vi.mocked(devicesAPI.add).mock.calls;
+    const payload = calls[calls.length - 1][0];
+    expect(payload).not.toHaveProperty('strega_generation');
+  });
+
+  it('omits strega_generation when the type is switched away from STREGA after picking GEN2', async () => {
+    render(<AddDeviceModal isOpen={true} onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalled());
+
+    // Pick STREGA_VALVE and GEN2, then switch the device type away before submitting.
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
+    fireEvent.change(screen.getByLabelText('Valve generation'), { target: { value: 'GEN2' } });
     fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'KIWI_SENSOR' } });
     fillRequiredFields();
 
