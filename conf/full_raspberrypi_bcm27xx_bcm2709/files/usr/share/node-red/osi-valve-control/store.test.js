@@ -181,6 +181,38 @@ test('getGatewaySetting (FW-T5): table-missing-safe — returns null instead of 
   db.close();
 });
 
+test('listValvesForUser: enclosure reading comes from the newest non-null row per column, not the newest row overall', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001','2026-08-20T10:00:00.000Z', 21.5, 48.2)");
+  // Newest row overall is a state-only uplink (both columns null) and must not blank out the reading above.
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001','2026-08-20T11:00:00.000Z', NULL, NULL)");
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, 21.5);
+  assert.equal(valve.enclosure_humidity_pct, 48.2);
+  assert.equal(valve.enclosure_measured_at, '2026-08-20T10:00:00.000Z');
+  db.close();
+});
+
+test('listValvesForUser: enclosure reading is null when no device_data row ever carried one', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO device_data (deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-20T10:00:00.000Z')");
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, null);
+  assert.equal(valve.enclosure_humidity_pct, null);
+  assert.equal(valve.enclosure_measured_at, null);
+  db.close();
+});
+
+test('listValvesForUser: a valve that reports temperature but not humidity keeps the temperature instead of dropping both', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity) VALUES ('0016C001F1000001','2026-08-20T10:00:00.000Z', 19.4, NULL)");
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.enclosure_temperature_c, 19.4);
+  assert.equal(valve.enclosure_humidity_pct, null);
+  assert.equal(valve.enclosure_measured_at, '2026-08-20T10:00:00.000Z');
+  db.close();
+});
+
 test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read error too, warning instead of throwing', async () => {
   // Unified policy: a scheduled worker tick (runObserveTick/runClockTick/runHousekeeping)
   // has no enclosing try/catch around this one call, so ANY read failure — not just a
