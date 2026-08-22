@@ -15,7 +15,9 @@
 - **Gen2 (SV2) does not measure temperature or humidity, and no amount of decoding will produce them.** Verified three ways: the Gen2 vendor decoder emits no such field; the manual's periodical uplink is 3 bytes of battery millivolts plus one info-status byte (Class, Power, DI_1/LSC, DI_0/LSO, valve-connection, valve-position), optionally followed by a counter; and the specification's "Data Read" list names only valve state, battery, device ID, digital inputs, counter, alarm and RSSI. Never infer, estimate, or borrow these values for a Gen2 valve.
 - **The Gen1 measurement is enclosure climate, not field weather.** The vendor decoder's own variables are `box_temp` and `box_hum`. Label it as the valve's enclosure, never as air temperature for the zone, and never feed it into agronomy calculations.
 - **Missing data stays missing.** `null` means unavailable. The edge already treats the sentinel pair 125 °C / 100 % as "no sensor fitted" and stores `null`; the interface must render that as unknown, never as `0 °C`.
-- **A Gen2 valve's absent reading is a different state from a Gen1 valve that has not reported yet.** The first is "this hardware cannot measure it"; the second is "we do not know yet". Do not collapse them into one message.
+- **The tile shows the reading only when there is one.** Approved design decision (2026-08-22): no "not measured" text on Gen2 tiles and no "no reading yet" placeholder in the overview — otherwise every Gen2 valve permanently carries a line explaining something that does not exist. Both absences are explained in the STREGA detail card instead, where there is room to label them.
+- **A Gen2 valve's absent reading is a different state from a Gen1 valve that has not reported yet.** The first is "this hardware cannot measure it"; the second is "we do not know yet". The card must distinguish them; do not collapse them into one message.
+- **Approved wording and format:** the English noun is **"Enclosure"** (de-CH *Gehäuse*, fr *boîtier*), and the value pair renders as **`21.5 °C · 48 % RH`** on both surfaces.
 - **`flows.json` is edited only by a one-shot Node script** with the byte-identical roundtrip guard, and both hardware profiles must end identical (`osi-flows-json-editing` skill).
 - **Every gate is judged by exit code** (`node script; echo $?`), never by the last printed line.
 - **No `npm run build`** — the workstation OOMs. Use `npm run typecheck` and `npm run test:unit`.
@@ -130,11 +132,12 @@ git commit -m "feat(valves): expose the stored enclosure temperature and humidit
 
 ---
 
-### Task 2: Show the reading, and say plainly when there is none
+### Task 2: Show the reading on the tile, and explain its absence in the card
 
 **Files:**
 - Modify: `web/react-gui/src/types/farming.ts`, `web/react-gui/src/services/api.ts`
 - Modify: `web/react-gui/src/components/farming/valves/ValveTile.tsx`
+- Modify: `web/react-gui/src/components/farming/StregaValveCard.tsx`
 - Modify: `web/react-gui/public/locales/{en,de-CH,fr,es,it,lg,pt}/valves.json` (enumerate the real directories with `ls` first)
 - Test: `web/react-gui/src/components/farming/valves/__tests__/`, in its established harness
 
@@ -157,14 +160,21 @@ it('renders a measured zero rather than treating it as missing', () => {
   expect(screen.getByText(/0/)).toBeInTheDocument();
 });
 
-it('says the reading is unavailable for a Gen1 valve that has not reported it', () => {
-  render(<ValveTile {...props({ stregaGeneration: 'GEN1', enclosureTemperatureC: null, enclosureHumidityPct: null })} />);
-  expect(screen.getByText(/no reading|kein Messwert|aucune mesure/i)).toBeInTheDocument();
+it('shows nothing at all when a Gen1 valve has not reported a reading', () => {
+  const { container } = render(<ValveTile {...props({ stregaGeneration: 'GEN1', enclosureTemperatureC: null, enclosureHumidityPct: null })} />);
+  expect(container.textContent).not.toMatch(/°C|% RH/);
 });
 
-it('says a Gen2 valve does not measure it, and never shows a number', () => {
-  render(<ValveTile {...props({ stregaGeneration: 'GEN2', enclosureTemperatureC: null, enclosureHumidityPct: null })} />);
-  expect(screen.getByText(/not measured|misst|ne mesure/i)).toBeInTheDocument();
+it('shows nothing at all for a Gen2 valve, even if a value somehow exists', () => {
+  const { container } = render(<ValveTile {...props({ stregaGeneration: 'GEN2', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48 })} />);
+  expect(container.textContent).not.toMatch(/21\.5|48/);
+});
+
+it('keeps the pair unbreakable so humidity never orphans onto its own line', () => {
+  render(<ValveTile {...props({ stregaGeneration: 'GEN1', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48 })} />);
+  const pair = screen.getByText(/21[.,]5 °C · 48 % RH/);
+  expect(pair.className).toMatch(/whitespace-nowrap/);
+  expect(pair.className).toMatch(/inline-block/);
 });
 ```
 
@@ -197,58 +207,99 @@ In `services/api.ts`, map them in `normaliseValveSummary` using an explicit null
 
 (`??` is correct here: it passes `0` through and only replaces `null`/`undefined`.)
 
-- [ ] **Step 4: Render the four states in `ValveTile`**
+- [ ] **Step 4: Append the pair to the tile's status line**
 
-Match the tile's existing typography and the ≥44 px touch-target conventions; this is a read-only line, so it needs no interactive sizing. The branch order matters:
+The approved treatment is Option B from the 2026-08-22 mockup: the reading joins the existing dot-separated status run after last-contact, and **the temperature and humidity are one unbreakable unit**. When the line runs out of room the pair moves to the next line together — it must never split, leaving `48 % RH` orphaned on its own line.
+
+`ValveTile` already builds a `statusDetails: string[]` that is joined with `' · '` and rendered inside the status paragraph. A plain string pushed into that array would be free to break at any space, so the pair needs its own element:
 
 ```tsx
-const climate =
-  valve.stregaGeneration === 'GEN2'
-    ? t('tile.enclosureNotMeasured')
-    : valve.enclosureTemperatureC == null && valve.enclosureHumidityPct == null
-      ? t('tile.enclosureNoReading')
-      : [
-          valve.enclosureTemperatureC != null ? t('tile.enclosureTemp', { value: valve.enclosureTemperatureC }) : null,
-          valve.enclosureHumidityPct != null ? t('tile.enclosureHumidity', { value: valve.enclosureHumidityPct }) : null,
-        ].filter(Boolean).join(' · ');
+const climatePair =
+  valve.stregaGeneration === 'GEN2' ? null
+  : valve.enclosureTemperatureC == null && valve.enclosureHumidityPct == null ? null
+  : [
+      valve.enclosureTemperatureC != null ? t('tile.enclosureTemp', { value: valve.enclosureTemperatureC }) : null,
+      valve.enclosureHumidityPct != null ? t('tile.enclosureHumidity', { value: valve.enclosureHumidityPct }) : null,
+    ].filter(Boolean).join(' · ');
 ```
 
-Gen2 is checked first and unconditionally: even if a Gen2 valve somehow carried a stored value from a mis-registration, the honest statement is that this hardware does not measure it.
+and, rendered after the existing `statusDetails` span inside the same `<p>`:
+
+```tsx
+{climatePair && (
+  <span className="text-[var(--text-tertiary)]">
+    {' · '}
+    <span className="inline-block whitespace-nowrap">{climatePair}</span>
+  </span>
+)}
+```
+
+`inline-block` plus `whitespace-nowrap` is what makes the pair wrap as a unit — verify both are present, because `whitespace-nowrap` alone on an inline span still allows the browser to break *before* it in a way that can leave the separator stranded.
+
+Gen2 returns `null` first and unconditionally: even if a Gen2 valve carried a stored value from a mis-registration, the tile must not present it. Both null-checks use `== null` so a measured `0` survives.
 
 - [ ] **Step 5: Add the locale keys in every directory**
 
 English:
 
+The tile keys carry only the values (the pair is assembled in the component); the card keys carry the label and the two absences.
+
 ```json
 "tile": {
-  "enclosureTemp": "{{value}} °C in the housing",
-  "enclosureHumidity": "{{value}} % humidity",
-  "enclosureNoReading": "No housing reading yet",
-  "enclosureNotMeasured": "Gen2 valves do not measure housing climate"
+  "enclosureTemp": "{{value}} °C",
+  "enclosureHumidity": "{{value}} % RH"
+},
+"card": {
+  "enclosureLabel": "Enclosure",
+  "enclosureNoReading": "no reading yet",
+  "enclosureNotMeasured": "not measured on Gen2"
 }
 ```
 
 de-CH (no ß):
 
 ```json
-"enclosureTemp": "{{value}} °C im Gehäuse",
-"enclosureHumidity": "{{value}} % Feuchte",
-"enclosureNoReading": "Noch kein Messwert aus dem Gehäuse",
-"enclosureNotMeasured": "Gen2-Ventile messen das Gehäuseklima nicht"
+"enclosureTemp": "{{value}} °C",
+"enclosureHumidity": "{{value}} % rF",
+"enclosureLabel": "Gehäuse",
+"enclosureNoReading": "noch kein Messwert",
+"enclosureNotMeasured": "wird von Gen2 nicht gemessen"
 ```
 
 French (vouvoiement, *vanne*/*boîtier*):
 
 ```json
-"enclosureTemp": "{{value}} °C dans le boîtier",
-"enclosureHumidity": "{{value}} % d'humidité",
-"enclosureNoReading": "Pas encore de mesure dans le boîtier",
-"enclosureNotMeasured": "Les vannes Gen2 ne mesurent pas le climat du boîtier"
+"enclosureTemp": "{{value}} °C",
+"enclosureHumidity": "{{value}} % HR",
+"enclosureLabel": "Boîtier",
+"enclosureNoReading": "pas encore de mesure",
+"enclosureNotMeasured": "non mesuré sur Gen2"
 ```
+
+Note the humidity suffix is localised: `% RH` in English, `% rF` in German (relative Feuchte), `% HR` in French (humidité relative). Do not ship the English abbreviation into the other locales.
 
 `es`, `it`, `lg`, `pt` mirror English, consistent with how this namespace already handles untranslated keys (osi-os#168). Merge into the existing `tile` object if one exists; never create a duplicate key.
 
-- [ ] **Step 6: Verify**
+- [ ] **Step 6: Add the labelled pair and both absences to `StregaValveCard`**
+
+In the card's status block — after the large OPEN/CLOSED state and before the "Today: N L" line — add a labelled row using the card's existing 13 px type. This is where the absences get explained, so all three states render here:
+
+```tsx
+<dl className="mt-2 flex gap-2.5 text-[13px]">
+  <dt className="min-w-[62px] text-[var(--text-tertiary)]">{t('card.enclosureLabel')}</dt>
+  <dd className="m-0 tabular-nums text-[var(--text)]">
+    {isGen2
+      ? <span className="italic text-[var(--text-tertiary)]">{t('card.enclosureNotMeasured')}</span>
+      : temp == null && humidity == null
+        ? <span className="italic text-[var(--text-tertiary)]">{t('card.enclosureNoReading')}</span>
+        : pair}
+  </dd>
+</dl>
+```
+
+Read the card first: it takes a `device` prop, not a valve summary, so establish where its temperature, humidity and generation come from before writing this. If the card has no access to the generation, say so in your report rather than inventing a source — showing "no reading yet" for a Gen2 valve is a smaller error than fabricating a data path.
+
+- [ ] **Step 7: Verify**
 
 ```bash
 cd web/react-gui
@@ -258,7 +309,7 @@ npm run test:unit; echo "test:unit exit=$?"
 ```
 Expected: all exit=0, the full suite still green (≥714 tests plus your four).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 cd /home/phil/Repos/osi-os
