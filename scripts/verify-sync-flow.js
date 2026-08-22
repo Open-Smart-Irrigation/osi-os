@@ -3236,6 +3236,7 @@ if (!helperPath) {
   const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async setDeviceProfile(', 'lets ensureDeviceProvisioned re-point an existing device to a different device profile (Gen2 seam)');
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'new devicePb.FlushDeviceQueueRequest()', 'flushes device queues with the ChirpStack gRPC request type');
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, "grpcInvoke(this.deviceClient, 'flushQueue'", 'flushes device queues through DeviceService.FlushQueue');
   expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, '`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`', 'REST device queue path');

@@ -321,8 +321,11 @@ class ChirpStackClient {
           }
         }
       } else if (String(existingDevice.getDeviceProfileId() || '') !== deviceProfileId) {
-        await this.setDeviceProfile(devEui, deviceProfileId);
-        profileAction = 'repointed';
+        // setDeviceProfile re-fetches the device itself (the price of routing every
+        // profile assignment through the single seam); its boolean return is the
+        // truth about whether an update RPC was actually issued -- do not assume
+        // 'repointed' just because the two getDevice reads disagreed once.
+        profileAction = (await this.setDeviceProfile(devEui, deviceProfileId)) ? 'repointed' : 'unchanged';
       }
 
       const existingKeys = await this.getKeys(devEui);
