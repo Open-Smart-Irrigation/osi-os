@@ -14,10 +14,13 @@ SELECT d.deveui, d.name, d.type_id, d.irrigation_zone_id, d.current_state, d.tar
        -- for the unbounded "ORDER BY recorded_at DESC LIMIT 1" scan and walks its entire
        -- device_data partition on every request, forever (device_data has no retention
        -- anywhere in the repo). The range predicate is served by the existing
-       -- (deveui, recorded_at) index, so this is a plan change, not a schema change; measured
-       -- 27.66 ms -> 0.16 ms on a 38k-row never-reporting valve. Behavioural side effect,
-       -- intentional: a reading older than 7 days now reports as absent rather than being
-       -- shown as current, which is the honest answer for a diagnostic value.
+       -- (deveui, recorded_at) index, so this is a plan change, not a schema change: a
+       -- never-reporting valve's cost goes from linear in the partition's total row count to
+       -- flat, independent of it (review R2 measured this holding constant across a 16x table
+       -- growth; the absolute ms figure is fixture-dependent — how the rows are spread across
+       -- the cutoff — so it isn't quoted here). Behavioural side effect, intentional: a reading
+       -- older than 7 days now reports as absent rather than being shown as current, which is
+       -- the honest answer for a diagnostic value.
        (SELECT dd.ambient_temperature FROM device_data dd WHERE dd.deveui = d.deveui AND dd.ambient_temperature IS NOT NULL AND dd.recorded_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 day') ORDER BY dd.recorded_at DESC LIMIT 1) AS enclosure_temperature_c,
        (SELECT dd.relative_humidity FROM device_data dd WHERE dd.deveui = d.deveui AND dd.relative_humidity IS NOT NULL AND dd.recorded_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 day') ORDER BY dd.recorded_at DESC LIMIT 1) AS enclosure_humidity_pct,
        -- (review R1, §2) MAX(recorded_at) over rows carrying EITHER value: this timestamps the
