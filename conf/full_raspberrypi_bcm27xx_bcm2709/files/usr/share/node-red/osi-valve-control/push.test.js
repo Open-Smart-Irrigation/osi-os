@@ -46,7 +46,7 @@ test('status and clock pushes', () => {
 
 const { tempDb } = require('./test-helpers');
 const store = require('./store');
-const { compileAndQueue } = require('./push');
+const { compileAndQueue, queuePushes } = require('./push');
 
 test('compileAndQueue: first save pushes 7 weekdays + clock, second identical save pushes nothing, change pushes one day', async () => {
   const { db } = await tempDb();
@@ -158,6 +158,82 @@ test('MAJOR-A: a Gen1->Gen2 self-correction supersedes the abandoned WEEKDAY_PLA
   const afterStaleSweep = await store.pushSummary(db, '0016C001F1000001');
   assert.equal(afterStaleSweep.failed, 0, 'the abandoned GEN1 rows must not surface as phantom failures 24h later');
   assert.equal(afterStaleSweep.queued, 7, 'the fresh GEN2 slots are unaffected by the sweep');
+  db.close();
+});
+
+test('M1: a Gen2->Gen1 demotion whose GEN1 hashes still match ACKED rows produces zero pushes, but the leftover DAYMASK_PLAN row is still superseded', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'g1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 127, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+
+  // GEN1 compile, then ACK all 7 WEEKDAY_PLAN rows so their hashes persist in lastPushHashes
+  // (this is what lets the eventual demotion compile find "nothing changed").
+  const r1 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r1.rows.filter((r) => r.purpose === 'WEEKDAY_PLAN').length, 7);
+  for (const row of r1.rows) await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE push_id=?", [row.push_id]);
+
+  // Self-correction promotes to GEN2 and force-compiles (as MAJOR-A's test above), leaving
+  // one QUEUED DAYMASK_PLAN row plus a same-device SCHEDULER_STATUS push queued in between.
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' });
+  const r2 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: true, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r2.rows.filter((r) => r.purpose === 'DAYMASK_PLAN').length, 1);
+  await queuePushes({ db, deviceEui: '0016C001F1000001', appId: 'app', pushes: [buildStatusPush('1')], flushQueue: null, warn: () => {} });
+
+  // Another device's GEN2 compile, in parallel, must stay untouched by anything below.
+  const OTHER = '0016C001F1000002';
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES (?,'Valve B','STREGA_VALVE',1,datetime('now'),datetime('now'))", [OTHER]);
+  await store.insertSchedule(db, { schedule_uuid: 'o1', device_eui: OTHER, kind: 'WEEKLY', label: null, weekdays_mask: 127, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await store.upsertSettings(db, OTHER, { strega_generation: 'GEN2' });
+  await compileAndQueue({ db, deviceEui: OTHER, appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+
+  // Operator switches the valve back to Gen1 (ValveSettingsDialog.tsx); the next unforced
+  // compile finds the GEN1 hashes already match the ACKED rows above, so it produces ZERO
+  // pushes -- the exact case that used to hit `if (!pushes.length) return` before the
+  // cross-generation supersede ran.
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN1' });
+  const r3 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r3.rows.length, 0, 'the demoting compile itself must still produce no pushes -- this is the hole, not a workaround');
+
+  // The abandoned DAYMASK_PLAN row must be superseded even though the compile that demoted it
+  // produced nothing.
+  const dm = await db.all("SELECT state FROM valve_schedule_pushes WHERE device_eui='0016C001F1000001' AND purpose='DAYMASK_PLAN'");
+  assert.deepEqual(new Set(dm.map((r) => r.state)), new Set(['SUPERSEDED']), 'demotion direction must clean up the abandoned GEN2 row too, mirroring MAJOR-A');
+
+  // The GEN1 plan rows are the real, currently-applying plan: they were ACKED before the
+  // demotion and must survive as the newest-per-slot state, not be collaterally touched.
+  const wd = await db.all("SELECT state FROM valve_schedule_pushes WHERE device_eui='0016C001F1000001' AND purpose='WEEKDAY_PLAN'");
+  assert.deepEqual(new Set(wd.map((r) => r.state)), new Set(['ACKED']));
+
+  // A SCHEDULER_STATUS push queued in between must not be collaterally superseded.
+  const st = await db.all("SELECT state FROM valve_schedule_pushes WHERE device_eui='0016C001F1000001' AND purpose='SCHEDULER_STATUS'");
+  assert.equal(st.length, 1);
+  assert.equal(st[0].state, 'QUEUED', 'SCHEDULER_STATUS must NOT be collaterally superseded');
+
+  // The other device's outstanding GEN2 plan (same generation, unrelated device) survives.
+  const otherDm = await db.all("SELECT state FROM valve_schedule_pushes WHERE device_eui=? AND purpose='DAYMASK_PLAN'", [OTHER]);
+  assert.equal(otherDm.length, 1);
+  assert.equal(otherDm[0].state, 'QUEUED', "another device's same-generation outstanding push must survive");
+
+  // The GUI badge: no phantom queued/failed for the demoted valve, now or 24h later.
+  const summary = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(summary.queued, 0, 'no stale GEN2 slots left outstanding after demotion');
+  assert.equal(summary.acked, 7, 'the real GEN1 plan is what shows as applied');
+  assert.equal(summary.failed, 0);
+  await store.failStalePushes(db, new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+  const afterSweep = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(afterSweep.failed, 0, 'the abandoned GEN2 row must not surface as a phantom failure 24h later');
+  db.close();
+});
+
+test('M1: a clock-sync-only queuePushes call (no generation, no plan purpose) supersedes nothing', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'g1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 127, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' });
+  // Called directly, bypassing compileAndQueue, so no `generation` is known/passed -- exactly
+  // how workers.js's runClockTick queues a standalone clock push.
+  await queuePushes({ db, deviceEui: '0016C001F1000001', appId: 'app', pushes: [buildClockPush('GEN2', new Date(), 'UTC')], flushQueue: null, warn: () => {} });
+  const wd = await db.all("SELECT state FROM valve_schedule_pushes WHERE device_eui='0016C001F1000001' AND purpose='WEEKDAY_PLAN'");
+  assert.deepEqual(new Set(wd.map((r) => r.state)), new Set(['QUEUED']), 'a clock push alone must not touch plan rows');
   db.close();
 });
 

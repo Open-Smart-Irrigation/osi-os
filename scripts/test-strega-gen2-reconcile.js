@@ -764,6 +764,14 @@ test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a never-seen valve provis
   };
   const { calls } = await runCsRegCloudFn({ raw, payload, envVars: REG_ENV });
   assert.equal(calls.ensureDeviceProvisioned[0].deviceProfileId, GEN1_UUID);
+  // M3: the ChirpStack profile assertion above only pins what this node tells ChirpStack --
+  // it says nothing about what actually lands in valve_settings. The cloud registration
+  // payload carries no generation field at all, so this path's upsert is a plausible target
+  // for a "the ternary is redundant" simplification that stores a constant 'GEN2' regardless
+  // of input (review's mutant B2: the promotion-only WHERE guard stays byte-identical, only
+  // the bound value changes, so nothing else here catches it). Pin the stored row directly.
+  const row = await db.get('SELECT strega_generation FROM valve_settings WHERE device_eui = ?', [eui]);
+  assert.equal(row.strega_generation, 'GEN1', 'a never-seen valve registered through the cloud path must be stored as GEN1, not GEN2');
   raw.close();
 });
 
