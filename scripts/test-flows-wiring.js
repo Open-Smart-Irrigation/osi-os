@@ -1170,10 +1170,57 @@ if (!disableAllSchedulesFn || typeof disableAllSchedulesFn.func !== 'string') {
 const stregaProcessFn = byId['strega-process-fn'];
 if (!stregaProcessFn) {
     failures.push('strega-process-fn not found');
-} else if (!/Actuator/.test(stregaProcessFn.func || '')) {
-    failures.push('strega-process-fn must accept the Gen2 decoder alias `Actuator` for `Valve`');
 } else {
-    console.log('OK  strega-process-fn accepts Gen2 decoder alias Actuator for Valve');
+    const stregaProcessFunc = stregaProcessFn.func || '';
+    const hasActuatorAlias = /Actuator/.test(stregaProcessFunc);
+    // Pin the explicit null/undefined-check idiom, not just the presence of
+    // the string `Actuator`. A `decodedObject.Valve || decodedObject.Actuator`
+    // rewrite would also match a bare /Actuator/ substring test but silently
+    // breaks valve state `0` (a real CLOSED reading is falsy, so `||` would
+    // wrongly fall through to Actuator).
+    const hasExplicitNullCheck =
+        /decodedObject\.Valve\s*!==\s*undefined/.test(stregaProcessFunc) &&
+        /decodedObject\.Valve\s*!==\s*null/.test(stregaProcessFunc);
+    const usesFalsyOrFallback = /decodedObject\.Valve\s*\|\|\s*decodedObject\.Actuator/.test(stregaProcessFunc);
+    if (!hasActuatorAlias) {
+        failures.push('strega-process-fn must accept the Gen2 decoder alias `Actuator` for `Valve`');
+    } else if (usesFalsyOrFallback || !hasExplicitNullCheck) {
+        failures.push('strega-process-fn must select the Gen2 `Actuator` alias via an explicit `!== undefined && !== null` check on `decodedObject.Valve`, not a `||` fallback (a real valve state `0` is falsy and would wrongly fall through to Actuator)');
+    } else {
+        console.log('OK  strega-process-fn accepts Gen2 decoder alias Actuator for Valve via explicit null/undefined check');
+    }
+}
+
+// STREGA Gen2 device profile selection: both independent device-registration
+// paths must be able to route a Gen2 STREGA valve to the Gen2 ChirpStack
+// device profile, and the node that owns the local DB write must persist the
+// generation into valve_settings so the scheduler emits the right frame
+// format from its first push.
+const postDevicesInsertFn = byId['post-devices-insert'];
+if (!postDevicesInsertFn) {
+    failures.push('post-devices-insert not found');
+} else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(postDevicesInsertFn.func || '')) {
+    failures.push('post-devices-insert must select CHIRPSTACK_PROFILE_STREGA_GEN2 for Gen2 STREGA registrations');
+} else {
+    console.log('OK  post-devices-insert references CHIRPSTACK_PROFILE_STREGA_GEN2');
+}
+
+const csRegCloudFn = byId['cs-reg-cloud-fn'];
+if (!csRegCloudFn) {
+    failures.push('cs-reg-cloud-fn not found');
+} else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(csRegCloudFn.func || '')) {
+    failures.push('cs-reg-cloud-fn must select CHIRPSTACK_PROFILE_STREGA_GEN2 for Gen2 STREGA registrations (its own independent registration path)');
+} else {
+    console.log('OK  cs-reg-cloud-fn references CHIRPSTACK_PROFILE_STREGA_GEN2');
+}
+
+const csRegisterDeviceFn = byId['cs-register-device-fn'];
+if (!csRegisterDeviceFn) {
+    failures.push('cs-register-device-fn not found');
+} else if (!/valve_settings/.test(csRegisterDeviceFn.func || '')) {
+    failures.push('cs-register-device-fn must seed valve_settings.strega_generation after successful provisioning');
+} else {
+    console.log('OK  cs-register-device-fn references valve_settings');
 }
 
 runJournalHelperFailureMatrix()
