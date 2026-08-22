@@ -547,5 +547,5 @@ git commit -m "feat(valves): reconcile the ChirpStack profile for GEN2 valves; d
 - **Gen2 encoder** (`ChirpStack-JS-CODEC-Encoder-STREGA-Gen2`) stays unshipped: the edge builds downlink bytes itself in `osi-valve-control/plan.js`, and a ChirpStack-side encoder would be a second source of truth for the same frames.
 - **The raw-byte Gen2 ACK path stays** even with the Gen2 profile in place — it is what makes a mis-registered valve recoverable, and it is the only Gen2 ACK path with unit-test coverage today.
 - **Manual generation changes** in the Valve Settings dialog still do not re-point the profile. Registration and ACK reconciliation cover the real cases; revisit if bench testing shows otherwise.
-- **A pre-existing Gen1 profile's codec is not corrected** if `getOrCreateProfileWithCodec` only creates missing profiles (Task 3 Step 2 determines this and reports it).
+- ~~A pre-existing Gen1 profile's codec is not corrected~~ — **resolved during Task 3**: `getOrCreateProfileWithCodec` compares the stored codec runtime/script against the desired one and calls `updateDeviceProfile` when they differ, so a drifted profile self-heals on any bootstrap run.
 - **Cloud mirror.** AgroLink and OSI Cloud know nothing about valve generation; that belongs to Phase B (edge migration 0024).
