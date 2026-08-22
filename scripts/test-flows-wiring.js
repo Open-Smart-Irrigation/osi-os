@@ -1163,6 +1163,19 @@ if (!disableAllSchedulesFn || typeof disableAllSchedulesFn.func !== 'string') {
     }
 }
 
+// STREGA Gen2 decoder field alias: the Gen2 vendor decoder
+// (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up)
+// emits the valve state under `Actuator` instead of `Valve`. strega-process-fn
+// must accept both so a Gen2 uplink does not decode its valve state as null.
+const stregaProcessFn = byId['strega-process-fn'];
+if (!stregaProcessFn) {
+    failures.push('strega-process-fn not found');
+} else if (!/Actuator/.test(stregaProcessFn.func || '')) {
+    failures.push('strega-process-fn must accept the Gen2 decoder alias `Actuator` for `Valve`');
+} else {
+    console.log('OK  strega-process-fn accepts Gen2 decoder alias Actuator for Valve');
+}
+
 runJournalHelperFailureMatrix()
     .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {
