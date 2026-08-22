@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation } from '../../types/farming';
+import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation, ValveSummary } from '../../types/farming';
 import type { IrrigationActuation } from '../../services/api';
 import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../services/api';
 import { KiwiSensorCard } from './KiwiSensorCard';
@@ -26,6 +26,7 @@ interface IrrigationZoneCardProps {
   onUpdate: () => void;
   allZones?: Array<{ id: number; name: string }>;
   irrigationActuations?: IrrigationActuation[];
+  valvesByEui?: Map<string, ValveSummary>;
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -84,6 +85,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   onUpdate,
   allZones,
   irrigationActuations = [],
+  valvesByEui,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
@@ -453,6 +455,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           irrigationActuations={irrigationActuations}
                           timeZone={zone.timezone}
+                          valve={valvesByEui?.get(device.deveui)}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import type { Device, StregaModel } from '../../types/farming';
+import type { Device, StregaModel, ValveSummary } from '../../types/farming';
 import { devicesAPI, stregaAPI, valveAPI, type IrrigationActuation } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,14 @@ interface StregaValveCardProps {
   todayLiters?: { value: number; source: 'measured_flow_meter' | 'estimated_duration_flow_rate' | 'unknown' };
   irrigationActuations?: IrrigationActuation[];
   timeZone?: string | null;
+  // The valve-list row for this device (from GET /api/valves) — the single source of
+  // truth for STREGA generation and the enclosure temperature/humidity reading. `device`
+  // (from GET /api/devices) carries neither reliably: it has no strega_generation field
+  // at all, and its latest_data.ambient_temperature/relative_humidity come from the
+  // newest row overall rather than the newest row that actually carried a reading, which
+  // disagreed with the valve tile the moment a state-only uplink landed. Absent (still
+  // loading, or a valve missing from the list) means "we don't know" — render nothing.
+  valve?: ValveSummary | null;
 }
 
 const MAX_STREGA_INTERVAL_MINUTES = 255;
@@ -628,6 +636,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   todayLiters,
   irrigationActuations = [],
   timeZone,
+  valve,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
@@ -666,18 +675,15 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t as Translate);
   const hasActiveActuation = hasActiveValveActuation(device);
 
-  // The Device prop carries no STREGA generation field — the general devices
-  // list query does not join valve_settings the way the valve-summary API
-  // does (only the single-device lookup used during registration does). So
-  // this card can only tell "a reading exists" from "no reading yet"; it
-  // cannot distinguish a Gen1 valve that hasn't reported from a Gen2 valve
-  // that never measures enclosure climate at all. See the report for this
-  // task for the full explanation.
-  const enclosureTemp = device.latest_data?.ambient_temperature ?? null;
-  const enclosureHumidity = device.latest_data?.relative_humidity ?? null;
+  // Sourced from the `valve` prop (GET /api/valves), not `device` — see the prop's
+  // doc comment above for why. R1 review caught the card and the tile reading two
+  // different row-selection strategies for the same columns and disagreeing on screen.
+  const enclosureTemp = valve?.enclosureTemperatureC ?? null;
+  const enclosureHumidity = valve?.enclosureHumidityPct ?? null;
+  const enclosureIsGen2 = valve?.stregaGeneration === 'GEN2';
   const enclosurePair = [
-    enclosureTemp != null ? tv('tile.enclosureTemp', { value: enclosureTemp, defaultValue: '{{value}} °C' }) : null,
-    enclosureHumidity != null ? tv('tile.enclosureHumidity', { value: enclosureHumidity, defaultValue: '{{value}} % RH' }) : null,
+    enclosureTemp != null ? tv('format.temperature', { value: enclosureTemp, defaultValue: '{{value}} °C' }) : null,
+    enclosureHumidity != null ? tv('format.humidity', { value: enclosureHumidity, defaultValue: '{{value}} % RH' }) : null,
   ].filter(Boolean).join(' · ');
 
   const handleOpen = async () => {
@@ -812,14 +818,18 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           </p>
         )}
         {actuationFeedback && <ValveActuationBadge feedback={actuationFeedback} />}
-        <dl className="mt-2 flex gap-2.5 text-[13px]">
-          <dt className="min-w-[62px] text-[var(--text-tertiary)]">{tv('card.enclosureLabel', { defaultValue: 'Enclosure' })}</dt>
-          <dd className="m-0 tabular-nums text-[var(--text)]">
-            {enclosurePair
-              ? enclosurePair
-              : <span className="italic text-[var(--text-tertiary)]">{tv('card.enclosureNoReading', { defaultValue: 'no reading yet' })}</span>}
-          </dd>
-        </dl>
+        {valve != null && (
+          <dl className="mt-2 flex gap-2.5 text-[13px]">
+            <dt className="min-w-[62px] text-[var(--text-tertiary)]">{tv('card.enclosureLabel', { defaultValue: 'Enclosure' })}</dt>
+            <dd className="m-0 tabular-nums text-[var(--text)]">
+              {enclosureIsGen2
+                ? <span className="italic text-[var(--text-tertiary)]">{tv('card.enclosureNotMeasured', { defaultValue: 'not measured on Gen2' })}</span>
+                : enclosureTemp == null && enclosureHumidity == null
+                  ? <span className="italic text-[var(--text-tertiary)]">{tv('card.enclosureNoReading', { defaultValue: 'no reading yet' })}</span>
+                  : enclosurePair}
+            </dd>
+          </dl>
+        )}
       </div>
 
       {(fetchedLiters ?? todayLiters) && (

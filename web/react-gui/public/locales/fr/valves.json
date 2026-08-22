@@ -42,6 +42,6 @@
   "settingsDialog": { "title": "Réglages de la vanne", "generation": "Génération de la vanne", "gen2Untested": "GEN2 (SV2 — pas encore testée sur une vanne réelle)", "flowRate": "Débit (L/min)", "flowRateHint": "Indiquez un débit supérieur à 0 L/min.", "flowSource": "Origine", "measured": "Mesuré", "estimated": "Estimé", "clear": "Effacer", "save": "Enregistrer", "saveFailed": "Impossible d'enregistrer les réglages de la vanne." },
   "weekdays": { "0": "Dim", "1": "Lun", "2": "Mar", "3": "Mer", "4": "Jeu", "5": "Ven", "6": "Sam" },
   "trigger": { "manual": "Manuel", "cloud_command": "Depuis le cloud", "trigger_based": "Par capteur", "one_time": "Ponctuel", "on_valve_schedule": "Programme sur la vanne", "unexplained": "Ouverture hors programme" },
-  "tile": { "enclosureTemp": "{{value}} °C", "enclosureHumidity": "{{value}} % HR" },
+  "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % HR" },
   "card": { "enclosureLabel": "Boîtier", "enclosureNoReading": "pas encore de mesure", "enclosureNotMeasured": "non mesuré sur Gen2" }
 }

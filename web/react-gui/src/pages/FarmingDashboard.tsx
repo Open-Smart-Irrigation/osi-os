@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import useSWR from 'swr';
-import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI } from '../services/api';
+import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI, valvesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { DashboardHeader } from '../components/DashboardHeader';
@@ -19,12 +19,13 @@ import {
   type IrrigationOutcomeZoneContext,
 } from '../components/farming/IrrigationOutcomesPanel';
 import { useDisplayPreferences } from '../utils/displayPreferences';
-import type { Device, IrrigationZone } from '../types/farming';
+import type { Device, IrrigationZone, ValveSummary } from '../types/farming';
 import type { IrrigationActuationsResponse } from '../services/api';
 
 const devicesFetcher = () => devicesAPI.getAll();
 const zonesFetcher = () => irrigationZonesAPI.getAll();
 const irrigationActuationsFetcher = () => irrigationOutcomesAPI.recentActuations();
+const valvesFetcher = () => valvesAPI.list();
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
@@ -48,6 +49,20 @@ export const FarmingDashboard: React.FC = () => {
   const { data: zones, error: zonesError, mutate: mutateZones } = useSWR<IrrigationZone[]>(
     '/api/irrigation-zones',
     zonesFetcher,
+    {
+      refreshInterval: 10000,
+      revalidateOnFocus: true,
+    }
+  );
+
+  // Same SWR key ValveControlPanel uses for GET /api/valves — SWR dedupes the request
+  // and shares the cache entry, so this costs nothing extra even when the panel itself
+  // is hidden (modules.valveControl is only a client-side display preference). This is
+  // the single source of truth for STREGA generation and the enclosure reading; feeding
+  // it to StregaValveCard keeps the card from disagreeing with the tile on screen.
+  const { data: valves } = useSWR<ValveSummary[]>(
+    '/api/valves',
+    valvesFetcher,
     {
       refreshInterval: 10000,
       revalidateOnFocus: true,
@@ -112,6 +127,12 @@ export const FarmingDashboard: React.FC = () => {
   const zoneTimezones = useMemo(
     () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
     [zones],
+  );
+  // deviceEui is always uppercased by normaliseValveSummary; Device.deveui is always
+  // uppercased by normaliseDevice — so a plain-string key match is safe.
+  const valvesByEui = useMemo(
+    () => new Map((valves ?? []).map((v) => [v.deviceEui, v])),
+    [valves],
   );
   const irrigationOutcomeZoneContexts = useMemo(
     () => new Map<number, IrrigationOutcomeZoneContext>((zones ?? []).map((zone) => [
@@ -203,6 +224,7 @@ export const FarmingDashboard: React.FC = () => {
                     onUpdate={handleUpdate}
                     allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
                     irrigationActuations={irrigationActuations}
+                    valvesByEui={valvesByEui}
                   />
                 ))}
               </div>
@@ -256,6 +278,7 @@ export const FarmingDashboard: React.FC = () => {
                             onRemove={handleUpdate}
                             irrigationActuations={irrigationActuations}
                             timeZone={device.irrigation_zone_id ? zoneTimezones.get(device.irrigation_zone_id) : undefined}
+                            valve={valvesByEui.get(device.deveui)}
                           />
                         ))}
                       </div>

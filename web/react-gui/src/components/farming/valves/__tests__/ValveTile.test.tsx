@@ -25,8 +25,8 @@ const { translateForTest } = vi.hoisted(() => {
     'state.open': 'Open',
     'state.closing': 'Closing',
     'state.failed': 'Failed',
-    'tile.enclosureTemp': '{{value}} °C',
-    'tile.enclosureHumidity': '{{value}} % RH',
+    'format.temperature': '{{value}} °C',
+    'format.humidity': '{{value}} % RH',
   };
   return {
     translateForTest: (key: string, options?: Record<string, unknown>): string => {
@@ -124,7 +124,7 @@ describe('ValveTile enclosure climate reading', () => {
 
   it('renders a measured zero rather than treating it as missing', () => {
     renderTile({ stregaGeneration: 'GEN1', enclosureTemperatureC: 0, enclosureHumidityPct: 0 });
-    expect(screen.getByText(/0/)).toBeInTheDocument();
+    expect(screen.getByText('0 °C · 0 % RH')).toBeInTheDocument();
   });
 
   it('shows nothing at all when a Gen1 valve has not reported a reading', () => {

@@ -6,7 +6,7 @@ import React from 'react';
 import { StregaValveCard } from '../StregaValveCard';
 import { devicesAPI } from '../../../services/api';
 import type { IrrigationActuation } from '../../../services/api';
-import type { Device } from '../../../types/farming';
+import type { Device, ValveSummary } from '../../../types/farming';
 
 const { translateForTest } = vi.hoisted(() => {
     const testTranslations: Record<string, string> = {
@@ -62,6 +62,36 @@ const mockDevice: Device = {
     dendro_baseline_pending: 0,
     last_seen: '2026-05-17T12:00:00Z',
 } as unknown as Device;
+
+function makeValveSummary(overrides: Partial<ValveSummary> = {}): ValveSummary {
+    return {
+        deviceEui: mockDevice.deveui,
+        name: mockDevice.name,
+        zoneId: null,
+        zoneName: null,
+        zoneUuid: null,
+        timezone: 'UTC',
+        currentState: 'CLOSED',
+        targetState: null,
+        stregaGeneration: 'GEN1',
+        flowRateLpm: null,
+        flowRateSource: null,
+        defaultOpenMinutes: null,
+        schedulerStatus: 'ACTIVE',
+        skipTodayDate: null,
+        lastUplinkAt: null,
+        activeActuation: null,
+        recentStaleState: null,
+        nextRun: null,
+        scheduleCount: 0,
+        pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+        lastClockSyncAckedAt: null,
+        enclosureTemperatureC: null,
+        enclosureHumidityPct: null,
+        enclosureMeasuredAt: null,
+        ...overrides,
+    };
+}
 
 function actuationFixture(overrides: Partial<IrrigationActuation> = {}): IrrigationActuation {
     return {
@@ -198,23 +228,39 @@ describe('StregaValveCard', () => {
         expect(await screen.findByText(`Translated closed at ${expectedCloseLabel}`)).toBeInTheDocument();
     });
 
-    it('shows the labelled enclosure reading when latest_data carries one', async () => {
-        renderCard({
-            latest_data: { ambient_temperature: 21.5, relative_humidity: 48.2 },
-        } as Partial<Device>);
-        expect(await screen.findByText(/21\.5/)).toBeInTheDocument();
-        expect(screen.getByText(/48\.2/)).toBeInTheDocument();
+    it('shows the labelled enclosure reading when the valve-list row carries one', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ enclosureTemperatureC: 21.5, enclosureHumidityPct: 48.2 }),
+        });
+        expect(await screen.findByText('21.5 °C · 48.2 % RH')).toBeInTheDocument();
     });
 
     it('renders a measured zero enclosure reading rather than treating it as missing', async () => {
-        renderCard({
-            latest_data: { ambient_temperature: 0, relative_humidity: 0 },
-        } as Partial<Device>);
-        expect(await screen.findAllByText(/0/)).not.toHaveLength(0);
+        renderCard({}, {
+            valve: makeValveSummary({ enclosureTemperatureC: 0, enclosureHumidityPct: 0 }),
+        });
+        expect(await screen.findByText('0 °C · 0 % RH')).toBeInTheDocument();
     });
 
-    it('shows "no reading yet" when latest_data has no enclosure values', async () => {
-        renderCard({ latest_data: {} } as Partial<Device>);
+    it('shows "no reading yet" for a GEN1 valve whose list row has no enclosure values', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ stregaGeneration: 'GEN1', enclosureTemperatureC: null, enclosureHumidityPct: null }),
+        });
         expect(await screen.findByText('no reading yet')).toBeInTheDocument();
+    });
+
+    it('shows "not measured on Gen2" for a GEN2 valve, even if the row somehow carries a value', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ stregaGeneration: 'GEN2', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48 }),
+        });
+        expect(await screen.findByText('not measured on Gen2')).toBeInTheDocument();
+        expect(screen.queryByText('21.5 °C · 48 % RH')).not.toBeInTheDocument();
+        expect(screen.queryByText('no reading yet')).not.toBeInTheDocument();
+    });
+
+    it('renders nothing for the enclosure row when no valve-list row exists for this device', async () => {
+        const { container } = renderCard();
+        await screen.findByText(/5 min/); // wait for the card to finish its initial render
+        expect(container.textContent).not.toMatch(/Enclosure|no reading yet|not measured on Gen2|°C/);
     });
 });

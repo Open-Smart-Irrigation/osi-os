@@ -163,3 +163,48 @@ describe('normaliseValveSummary defensive actuation handling', () => {
     });
   });
 });
+
+describe('normaliseValveSummary enclosure climate mapping', () => {
+  beforeEach(() => {
+    axiosMocks.get.mockReset();
+  });
+
+  it('passes a measured zero through as 0, not null', async () => {
+    axiosMocks.get.mockResolvedValue({
+      data: {
+        valves: [{
+          device_eui: '0016c001f1000001',
+          name: 'V1',
+          enclosure_temperature_c: 0,
+          enclosure_humidity_pct: 0,
+          enclosure_measured_at: '2026-08-20T10:00:00.000Z',
+          push_state: {},
+        }],
+      },
+    });
+    const { valvesAPI } = await import('../../../../services/api');
+
+    const [summary] = await valvesAPI.list();
+    expect(summary.enclosureTemperatureC).toBe(0);
+    expect(summary.enclosureHumidityPct).toBe(0);
+    expect(summary.enclosureMeasuredAt).toBe('2026-08-20T10:00:00.000Z');
+  });
+
+  it('maps a missing enclosure reading to null, not undefined', async () => {
+    axiosMocks.get.mockResolvedValue({
+      data: {
+        valves: [{
+          device_eui: '0016c001f1000001',
+          name: 'V1',
+          push_state: {},
+        }],
+      },
+    });
+    const { valvesAPI } = await import('../../../../services/api');
+
+    const [summary] = await valvesAPI.list();
+    expect(summary.enclosureTemperatureC).toBeNull();
+    expect(summary.enclosureHumidityPct).toBeNull();
+    expect(summary.enclosureMeasuredAt).toBeNull();
+  });
+});

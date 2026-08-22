@@ -96,8 +96,8 @@ export const ValveTile: React.FC<ValveTileProps> = ({
     valve.stregaGeneration === 'GEN2' ? null
     : valve.enclosureTemperatureC == null && valve.enclosureHumidityPct == null ? null
     : [
-        valve.enclosureTemperatureC != null ? t('tile.enclosureTemp', { value: valve.enclosureTemperatureC }) : null,
-        valve.enclosureHumidityPct != null ? t('tile.enclosureHumidity', { value: valve.enclosureHumidityPct }) : null,
+        valve.enclosureTemperatureC != null ? t('format.temperature', { value: valve.enclosureTemperatureC }) : null,
+        valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
       ].filter(Boolean).join(' · ');
 
   let planLine: string | null = null;

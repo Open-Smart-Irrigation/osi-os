@@ -56,6 +56,9 @@ vi.mock('../../services/api', () => ({
   irrigationOutcomesAPI: {
     recentActuations: vi.fn(() => Promise.resolve({ actuations: [] })),
   },
+  valvesAPI: {
+    list: vi.fn(() => Promise.resolve([])),
+  },
 }));
 
 vi.mock('../../components/DashboardHeader', () => ({
