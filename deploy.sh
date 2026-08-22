@@ -654,10 +654,31 @@ if [ -f /srv/node-red/.chirpstack.env ] && \
     # `chirpstack create-api-key` when CHIRPSTACK_API_KEY is empty, so this
     # avoids leaving a second admin key behind. Empty value = old behaviour.
     cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1 | tr -d '\r')"
-    if CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
+    # bootstrap rewrites .chirpstack.env wholesale with only the CHIRPSTACK_* keys
+    # it manages, so any operator-added line (AGROSCOPE_*, LOG_*, ...) is dropped.
+    # Keep a copy and restore the non-CHIRPSTACK lines afterwards.
+    cs_env_backup="/srv/node-red/.chirpstack.env.pre-gen2"
+    cp /srv/node-red/.chirpstack.env "$cs_env_backup" || {
+        echo "ERROR: could not back up .chirpstack.env; skipping Gen2 provisioning"
+        cs_env_backup=""
+    }
+    if [ -n "$cs_env_backup" ] && CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
         echo "OK: Gen2 profile provisioned"
-    else
+        # Re-append lines the backup had that the rewritten file lost.
+        while IFS= read -r cs_line; do
+            case "$cs_line" in
+                ''|\#*) continue ;;
+            esac
+            cs_key="${cs_line%%=*}"
+            [ "$cs_key" = "$cs_line" ] && continue
+            if ! grep -q "^${cs_key}=" /srv/node-red/.chirpstack.env 2>/dev/null; then
+                echo "$cs_line" >> /srv/node-red/.chirpstack.env
+                echo "NOTE: restored non-ChirpStack env key ${cs_key} after bootstrap rewrite"
+            fi
+        done < "$cs_env_backup"
+    elif [ -n "$cs_env_backup" ]; then
         echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
+        echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
     fi
 fi
 
