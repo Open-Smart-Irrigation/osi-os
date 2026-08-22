@@ -197,4 +197,24 @@ describe('StregaValveCard', () => {
         }).format(new Date('2026-05-29T10:09:00Z'));
         expect(await screen.findByText(`Translated closed at ${expectedCloseLabel}`)).toBeInTheDocument();
     });
+
+    it('shows the labelled enclosure reading when latest_data carries one', async () => {
+        renderCard({
+            latest_data: { ambient_temperature: 21.5, relative_humidity: 48.2 },
+        } as Partial<Device>);
+        expect(await screen.findByText(/21\.5/)).toBeInTheDocument();
+        expect(screen.getByText(/48\.2/)).toBeInTheDocument();
+    });
+
+    it('renders a measured zero enclosure reading rather than treating it as missing', async () => {
+        renderCard({
+            latest_data: { ambient_temperature: 0, relative_humidity: 0 },
+        } as Partial<Device>);
+        expect(await screen.findAllByText(/0/)).not.toHaveLength(0);
+    });
+
+    it('shows "no reading yet" when latest_data has no enclosure values', async () => {
+        renderCard({ latest_data: {} } as Partial<Device>);
+        expect(await screen.findByText('no reading yet')).toBeInTheDocument();
+    });
 });

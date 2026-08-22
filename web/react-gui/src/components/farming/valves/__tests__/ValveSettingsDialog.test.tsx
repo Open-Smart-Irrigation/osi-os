@@ -62,6 +62,9 @@ function makeValve(overrides: Partial<ValveSummary> = {}): ValveSummary {
     scheduleCount: 0,
     pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
     lastClockSyncAckedAt: null,
+    enclosureTemperatureC: null,
+    enclosureHumidityPct: null,
+    enclosureMeasuredAt: null,
     ...overrides,
   };
 }

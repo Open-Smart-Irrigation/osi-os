@@ -631,6 +631,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
 }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
+  const { t: tv } = useTranslation('valves');
   const [loading, setLoading] = useState<'OPEN' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -664,6 +665,20 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   const isOpen = displayedState === 'OPEN';
   const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t as Translate);
   const hasActiveActuation = hasActiveValveActuation(device);
+
+  // The Device prop carries no STREGA generation field — the general devices
+  // list query does not join valve_settings the way the valve-summary API
+  // does (only the single-device lookup used during registration does). So
+  // this card can only tell "a reading exists" from "no reading yet"; it
+  // cannot distinguish a Gen1 valve that hasn't reported from a Gen2 valve
+  // that never measures enclosure climate at all. See the report for this
+  // task for the full explanation.
+  const enclosureTemp = device.latest_data?.ambient_temperature ?? null;
+  const enclosureHumidity = device.latest_data?.relative_humidity ?? null;
+  const enclosurePair = [
+    enclosureTemp != null ? tv('tile.enclosureTemp', { value: enclosureTemp, defaultValue: '{{value}} °C' }) : null,
+    enclosureHumidity != null ? tv('tile.enclosureHumidity', { value: enclosureHumidity, defaultValue: '{{value}} % RH' }) : null,
+  ].filter(Boolean).join(' · ');
 
   const handleOpen = async () => {
     const durationMinutes = Number(openDurationMin);
@@ -797,6 +812,14 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           </p>
         )}
         {actuationFeedback && <ValveActuationBadge feedback={actuationFeedback} />}
+        <dl className="mt-2 flex gap-2.5 text-[13px]">
+          <dt className="min-w-[62px] text-[var(--text-tertiary)]">{tv('card.enclosureLabel', { defaultValue: 'Enclosure' })}</dt>
+          <dd className="m-0 tabular-nums text-[var(--text)]">
+            {enclosurePair
+              ? enclosurePair
+              : <span className="italic text-[var(--text-tertiary)]">{tv('card.enclosureNoReading', { defaultValue: 'no reading yet' })}</span>}
+          </dd>
+        </dl>
       </div>
 
       {(fetchedLiters ?? todayLiters) && (

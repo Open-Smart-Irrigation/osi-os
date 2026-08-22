@@ -41,5 +41,7 @@
   },
   "settingsDialog": { "title": "Ventileinstellungen", "generation": "Ventilgeneration", "gen2Untested": "GEN2 (SV2, an Hardware ungetestet)", "flowRate": "Durchflussrate (L/Min.)", "flowRateHint": "Wert über 0 L/min eingeben.", "flowSource": "Quelle", "measured": "Gemessen", "estimated": "Geschätzt", "clear": "Löschen", "save": "Speichern", "saveFailed": "Ventileinstellungen konnten nicht gespeichert werden." },
   "weekdays": { "0": "So", "1": "Mo", "2": "Di", "3": "Mi", "4": "Do", "5": "Fr", "6": "Sa" },
-  "trigger": { "manual": "Manuell", "cloud_command": "Cloud", "trigger_based": "Sensorgesteuert", "one_time": "Einmalig", "on_valve_schedule": "Zeitplan (auf Ventil)", "unexplained": "Am Ventil geöffnet" }
+  "trigger": { "manual": "Manuell", "cloud_command": "Cloud", "trigger_based": "Sensorgesteuert", "one_time": "Einmalig", "on_valve_schedule": "Zeitplan (auf Ventil)", "unexplained": "Am Ventil geöffnet" },
+  "tile": { "enclosureTemp": "{{value}} °C", "enclosureHumidity": "{{value}} % rF" },
+  "card": { "enclosureLabel": "Gehäuse", "enclosureNoReading": "noch kein Messwert", "enclosureNotMeasured": "wird von Gen2 nicht gemessen" }
 }

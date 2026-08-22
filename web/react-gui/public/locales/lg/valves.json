@@ -41,5 +41,7 @@
   },
   "settingsDialog": { "title": "Valve settings", "generation": "Valve generation", "gen2Untested": "GEN2 (SV2, untested on hardware)", "flowRate": "Flow rate (L/min)", "flowRateHint": "Enter a rate above 0 L/min.", "flowSource": "Source", "measured": "Measured", "estimated": "Estimated", "clear": "Clear", "save": "Save", "saveFailed": "Could not save valve settings." },
   "weekdays": { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" },
-  "trigger": { "manual": "Manual", "cloud_command": "Cloud", "trigger_based": "Trigger-based", "one_time": "One-time", "on_valve_schedule": "Scheduled (on valve)", "unexplained": "Opened on valve" }
+  "trigger": { "manual": "Manual", "cloud_command": "Cloud", "trigger_based": "Trigger-based", "one_time": "One-time", "on_valve_schedule": "Scheduled (on valve)", "unexplained": "Opened on valve" },
+  "tile": { "enclosureTemp": "{{value}} °C", "enclosureHumidity": "{{value}} % RH" },
+  "card": { "enclosureLabel": "Enclosure", "enclosureNoReading": "no reading yet", "enclosureNotMeasured": "not measured on Gen2" }
 }

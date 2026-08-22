@@ -1156,6 +1156,9 @@ function normaliseValveSummary(row: any): ValveSummary {
     scheduleCount: Number(row?.schedule_count ?? 0),
     pushState: normaliseValvePushState(row?.push_state),
     lastClockSyncAckedAt: row?.last_clock_sync_acked_at ?? null,
+    enclosureTemperatureC: row?.enclosure_temperature_c ?? null,
+    enclosureHumidityPct: row?.enclosure_humidity_pct ?? null,
+    enclosureMeasuredAt: row?.enclosure_measured_at ?? null,
   };
 }
 

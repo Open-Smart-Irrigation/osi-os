@@ -729,6 +729,9 @@ export interface ValveSummary {
   scheduleCount: number;
   pushState: ValvePushState;
   lastClockSyncAckedAt: string | null;
+  enclosureTemperatureC: number | null;
+  enclosureHumidityPct: number | null;
+  enclosureMeasuredAt: string | null;
 }
 
 export interface ValveSchedule {
