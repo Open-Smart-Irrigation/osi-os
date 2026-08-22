@@ -43,7 +43,7 @@
 
 ### Task 1: Make STREGA uplink processing generation-agnostic
 
-**Why first:** the Gen1 decoder emits `Valve`; the Gen2 decoder computes the same value but emits it as **`Actuator`**, and omits `Tamper`, `Leakage`, `Cable`, `Temperature`, `Hygrometry` entirely (verified: `docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up` lines 168, 194, 218, 239). `strega-process-fn` reads `decodedObject.Valve`. Provisioning the Gen2 profile before this fix would make valve open/closed state decode as `null` on every Gen2 uplink — the feature would be net-negative. **[v1 defect: v1 had no such task.]**
+**Why first:** the Gen1 decoder emits `Valve`; the Gen2 decoder computes the same value but emits it as **`Actuator`**, and omits `Tamper`, `Leakage`, `Temperature`, `Hygrometry` entirely (it does emit `Cable` — verified during Task 1) (verified: `docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up` lines 168, 194, 218, 239). `strega-process-fn` reads `decodedObject.Valve`. Provisioning the Gen2 profile before this fix would make valve open/closed state decode as `null` on every Gen2 uplink — the feature would be net-negative. **[v1 defect: v1 had no such task.]**
 
 **Files:**
 - Modify: `flows.json` node `strega-process-fn`, both profiles
