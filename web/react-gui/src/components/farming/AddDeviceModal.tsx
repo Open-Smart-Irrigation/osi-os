@@ -27,6 +27,11 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setName('');
+      setDeveui('');
+      setAppkey('');
+      setStregaGeneration('GEN1');
+      setError('');
       loadCatalog();
     }
   }, [isOpen]);

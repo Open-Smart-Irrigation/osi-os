@@ -11,7 +11,7 @@
     "generation": "Génération de la vanne",
     "generationGen1": "Gen1 (standard)",
     "generationGen2": "Gen2 / SV2 (Bluetooth — pas encore testée sur une vanne réelle)",
-    "generationHint": "Les vannes Gen2 se programment aussi par Bluetooth. En cas de doute, choisissez Gen1 : la passerelle corrige automatiquement dès la première réponse de la vanne.",
+    "generationHint": "En cas de doute, choisissez Gen1 : la passerelle corrige automatiquement dès qu'une vanne Gen2 répond. Elle ne corrige pas l'inverse : un choix Gen2 erroné nécessite une réparation manuelle.",
     "adding": "Ajout en cours...",
     "submit": "Ajouter l'appareil",
     "failed": "Impossible d'ajouter l'appareil"

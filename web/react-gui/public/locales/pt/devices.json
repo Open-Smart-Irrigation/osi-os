@@ -11,7 +11,7 @@
     "generation": "Valve generation",
     "generationGen1": "Gen1 (standard)",
     "generationGen2": "Gen2 / SV2 (Bluetooth, untested on hardware)",
-    "generationHint": "Gen2 valves can also be programmed over Bluetooth. If you are unsure, choose Gen1 — the gateway corrects it automatically on the valve's first reply.",
+    "generationHint": "If you're unsure, choose Gen1 — the gateway corrects it automatically once a Gen2 valve replies. It cannot correct the other way: a wrong Gen2 pick needs manual repair.",
     "adding": "A adicionar...",
     "submit": "Adicionar dispositivo",
     "failed": "Falha ao adicionar dispositivo"

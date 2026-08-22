@@ -22,7 +22,7 @@ const { translateForTest } = vi.hoisted(() => {
     'addModal.generationGen1': 'Gen1 (standard)',
     'addModal.generationGen2': 'Gen2 / SV2 (Bluetooth, untested on hardware)',
     'addModal.generationHint':
-      "Gen2 valves can also be programmed over Bluetooth. If you are unsure, choose Gen1 — the gateway corrects it automatically on the valve's first reply.",
+      "If you're unsure, choose Gen1 — the gateway corrects it automatically once a Gen2 valve replies. It cannot correct the other way: a wrong Gen2 pick needs manual repair.",
     'addModal.adding': 'Adding...',
     'addModal.submit': 'Add Device',
     'addModal.failed': 'Failed to add device',
@@ -135,5 +135,50 @@ describe('AddDeviceModal generation control', () => {
     const calls = vi.mocked(devicesAPI.add).mock.calls;
     const payload = calls[calls.length - 1][0];
     expect(payload).not.toHaveProperty('strega_generation');
+  });
+
+  it('renders a generation hint that is true in both correction directions', async () => {
+    render(<AddDeviceModal isOpen={true} onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
+
+    expect(
+      screen.getByText(translateForTest('addModal.generationHint')),
+    ).toBeInTheDocument();
+  });
+
+  it('resets generation and other fields to defaults when reopened after a cancel', async () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <AddDeviceModal isOpen={true} onClose={onClose} onDeviceAdded={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
+    fireEvent.change(screen.getByLabelText('Valve generation'), { target: { value: 'GEN2' } });
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'North Valve' } });
+    fireEvent.change(screen.getByLabelText('DevEUI'), { target: { value: '0016C001F1000001' } });
+    fireEvent.change(screen.getByLabelText('AppKey'), {
+      target: { value: 'AABBCCDDEEFF00112233445566778899' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onClose).toHaveBeenCalled();
+
+    // Simulate the parent closing then reopening the modal.
+    rerender(<AddDeviceModal isOpen={false} onClose={onClose} onDeviceAdded={vi.fn()} />);
+    rerender(<AddDeviceModal isOpen={true} onClose={onClose} onDeviceAdded={vi.fn()} />);
+
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalledTimes(2));
+
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
+
+    expect(screen.getByLabelText('Valve generation')).toHaveValue('GEN1');
+    expect(screen.getByLabelText('Device Name')).toHaveValue('');
+    expect(screen.getByLabelText('DevEUI')).toHaveValue('');
+    expect(screen.getByLabelText('AppKey')).toHaveValue('');
   });
 });
