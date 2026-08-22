@@ -120,6 +120,47 @@ test('GEN2 forced re-push: exactly one QUEUED row per group, old intersecting ro
   db.close();
 });
 
+test('MAJOR-A: a Gen1->Gen2 self-correction supersedes the abandoned WEEKDAY_PLAN rows, so pushSummary shows no stale queued/failed', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'g1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 127, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+
+  // GEN1 compile: 7x WEEKDAY_PLAN + 1x CLOCK_SYNC, all QUEUED.
+  const r1 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r1.rows.filter((r) => r.purpose === 'WEEKDAY_PLAN').length, 7);
+  const beforeSwitch = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(beforeSwitch.queued, 7);
+
+  // Self-correction: promote to GEN2 (as workers.js's handleUplink does) and force a fresh
+  // compile (as valve-ack-fn's reconcile does after a successful ChirpStack profile re-point).
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' });
+  const r2 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: true, now: new Date(), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r2.rows.filter((r) => r.purpose === 'DAYMASK_PLAN').length, 1);
+
+  // The 7 pre-switch WEEKDAY_PLAN rows must now be SUPERSEDED, not left QUEUED forever.
+  const weekdayStates = await db.all("SELECT state FROM valve_schedule_pushes WHERE purpose='WEEKDAY_PLAN'");
+  assert.deepEqual(new Set(weekdayStates.map((r) => r.state)), new Set(['SUPERSEDED']));
+
+  // pushSummary (the GUI badge) buckets DAYMASK_PLAN rows per weekday bit set in their mask
+  // (same expansion as lastPushHashes), so this single all-days group legitimately occupies
+  // all 7 GEN2DAY:<d> slots -- but it must show exactly those 7, not 14 (the review's
+  // reproduced defect: 7 stale WEEKDAY_PLAN:<d> slots counted ALONGSIDE the 7 new GEN2DAY:<d>
+  // slots, because the two purposes are separate keyspaces), and no phantom failures, before
+  // OR after the 24h stale-push sweep.
+  const afterSwitch = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(afterSwitch.queued, 7, 'only the 7 new GEN2 slots are outstanding, not 7 + 7 = 14 with the stale GEN1 slots still counted');
+  assert.equal(afterSwitch.failed, 0);
+
+  // The standard 24h-ago cutoff (same shape as store.test.js's C2 regression): the fresh GEN2
+  // row survives on its own merits, and the already-SUPERSEDED GEN1 rows are untouched by
+  // failStalePushes' `state='QUEUED'` filter regardless of cutoff -- proving they can never
+  // resurface as phantom failures no matter how much real time passes.
+  await store.failStalePushes(db, new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+  const afterStaleSweep = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(afterStaleSweep.failed, 0, 'the abandoned GEN1 rows must not surface as phantom failures 24h later');
+  assert.equal(afterStaleSweep.queued, 7, 'the fresh GEN2 slots are unaffected by the sweep');
+  db.close();
+});
+
 test('compileAndQueue: clock-sync timezone prefers the first enabled WEEKLY schedule over a ONCE schedule (MINOR 5)', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'o1', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, fire_at: '2026-08-20T00:00:00.000Z', duration_minutes: 5, timezone: 'Pacific/Auckland', enabled: 1 });

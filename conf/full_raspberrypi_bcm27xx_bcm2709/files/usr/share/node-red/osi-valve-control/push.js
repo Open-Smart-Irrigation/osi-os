@@ -68,8 +68,26 @@ async function queuePushes({ db, deviceEui, appId, pushes, flushQueue, warn }) {
     try { await flushQueue(deviceEui); flushed = true; } catch (e) { warn && warn('[valve-control] queue flush failed ' + deviceEui + ': ' + (e && e.message ? e.message : e)); }
   }
   const rows = pushes.map((p) => toRow(deviceEui, p));
+  const purposes = new Set(pushes.map((p) => p.purpose));
   await db.transaction(async (tx) => {
     for (const p of pushes) await store.supersedeQueued(tx, deviceEui, p.purpose, p.weekday == null ? (p.daymask == null ? null : p.daymask) : p.weekday);
+    // MAJOR-A fix (review round 2): the per-push supersede above only ever touches rows of
+    // the SAME purpose as what was just compiled. A Gen1->Gen2 self-correction compiles
+    // DAYMASK_PLAN pushes, so the 7 pre-switch WEEKDAY_PLAN rows are a different purpose and
+    // are never touched -- they stay QUEUED forever, and pushSummary buckets GEN1/GEN2 rows
+    // under separate keyspaces (WEEKDAY_PLAN:<d> vs GEN2DAY:<d>), so the abandoned rows are
+    // counted *in addition to* the new ones instead of being replaced by them. The farmer's
+    // GUI badge then reports a permanent phantom "queued", followed by "failed" 24h later, for
+    // a plan the valve already abandoned. Whenever this compile produced a push of one
+    // generation's purpose, also supersede any leftover QUEUED rows of the other generation's
+    // plan purpose for this device -- reusing the same supersedeQueued() helper the per-push
+    // loop above already calls, once per weekday (WEEKDAY_PLAN has no single "all weekdays"
+    // token) or once with the full 7-day mask (DAYMASK_PLAN intersects on mask overlap).
+    if (purposes.has('DAYMASK_PLAN')) {
+      for (let d = 0; d < 7; d += 1) await store.supersedeQueued(tx, deviceEui, 'WEEKDAY_PLAN', d);
+    } else if (purposes.has('WEEKDAY_PLAN')) {
+      await store.supersedeQueued(tx, deviceEui, 'DAYMASK_PLAN', 0x7F);
+    }
     await store.insertPushes(tx, rows);
   });
   const messages = rows.map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex }));

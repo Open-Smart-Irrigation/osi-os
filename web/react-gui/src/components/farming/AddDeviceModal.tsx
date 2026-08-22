@@ -31,6 +31,11 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
       setDeveui('');
       setAppkey('');
       setStregaGeneration('GEN1');
+      // Reset unconditionally here rather than relying on loadCatalog(): that fetch's own
+      // reset only fires inside `if (data.length > 0)`, and its catch only console.errors, so
+      // a failed or empty catalog fetch used to leave the previous session's selectedType
+      // (e.g. a stale STREGA_VALVE) selected on reopen instead of the form's declared default.
+      setSelectedType('KIWI_SENSOR');
       setError('');
       loadCatalog();
     }

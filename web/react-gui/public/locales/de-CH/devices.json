@@ -11,7 +11,7 @@
     "generation": "Ventilgeneration",
     "generationGen1": "Gen1 (Standard)",
     "generationGen2": "Gen2 / SV2 (Bluetooth, an Hardware ungetestet)",
-    "generationHint": "Im Zweifel Gen1 wählen — das Gateway korrigiert dies automatisch, sobald ein Gen2-Ventil antwortet. Der umgekehrte Fall wird nicht korrigiert: eine falsche Gen2-Wahl muss manuell behoben werden.",
+    "generationHint": "Im Zweifel Gen1 wählen — das Gateway korrigiert dies automatisch, sobald ein Gen2-Ventil einen geplanten Befehl bestätigt. Der umgekehrte Fall wird nicht korrigiert: eine falsche Gen2-Wahl muss manuell behoben werden.",
     "adding": "Wird hinzugefügt...",
     "submit": "Gerät hinzufügen",
     "failed": "Gerät konnte nicht hinzugefügt werden"

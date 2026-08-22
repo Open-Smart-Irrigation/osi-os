@@ -691,7 +691,7 @@ test('cs-register-device-fn (execution): a GEN2-resolved registration promotes a
 // --- cs-reg-cloud-fn: independent registration path (no generation field in the cloud
 // command payload at all), promotion-only valve_settings upsert executed for real ---
 
-async function runCsRegCloudFn({ raw, payload, envVars }) {
+async function runCsRegCloudFn({ raw, payload, envVars, osiDb }) {
   const node = noopNode();
   const calls = { ensureDeviceProvisioned: [] };
   const chirpstack = {
@@ -700,11 +700,34 @@ async function runCsRegCloudFn({ raw, payload, envVars }) {
       deleteDevice: async () => {},
     }),
   };
-  const osiDb = makeOsiDbStub(raw);
+  const db = osiDb || makeOsiDbStub(raw);
   const msg = { payload };
   const execute = new Function('osiDb', 'chirpstack', 'env', 'node', 'msg', byId['cs-reg-cloud-fn'].func);
-  const out = await execute(osiDb, chirpstack, makeEnv(envVars), node, msg);
+  const out = await execute(db, chirpstack, makeEnv(envVars), node, msg);
   return { out, calls, node };
+}
+
+// Wraps the same real sqlite connection makeOsiDbStub() uses, but makes `all()` throw for any
+// SQL matching `sqlPattern` instead of executing it -- used to reproduce a transient
+// valve_settings lookup failure (review §5 residual gap) without disturbing any other query
+// the node makes on the same connection (its `run()` calls for the devices INSERT and the
+// valve_settings upsert still hit the real database, so what actually lands there is what's
+// asserted, not a stub's say-so).
+function makeThrowingOsiDbStub(raw, sqlPattern) {
+  const real = makeCallbackDb(raw);
+  return {
+    Database: function Database() {
+      return {
+        run: real.run,
+        all: (sql, params, cb) => {
+          if (typeof params === 'function') { cb = params; params = undefined; }
+          if (sqlPattern.test(sql)) { cb(new Error('injected valve_settings lookup failure')); return; }
+          real.all(sql, params, cb);
+        },
+        close: real.close,
+      };
+    },
+  };
 }
 
 test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a stored-GEN2 valve provisions onto the Gen2 ChirpStack profile', async () => {
@@ -741,5 +764,33 @@ test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a never-seen valve provis
   };
   const { calls } = await runCsRegCloudFn({ raw, payload, envVars: REG_ENV });
   assert.equal(calls.ensureDeviceProvisioned[0].deviceProfileId, GEN1_UUID);
+  raw.close();
+});
+
+test('cs-reg-cloud-fn (execution, review §5 residual): a throwing valve_settings lookup must not demote a stored GEN2 row', async () => {
+  const { db, raw } = await tempDb();
+  const eui = '0016C001F1004003';
+  // A real Gen2 valve already exists. The stored-generation lookup is wrapped in its own
+  // try/catch that warns and falls back to the 'GEN1' default (a plausible transient failure
+  // on a busy/read-only overlay) -- the guard on the valve_settings upsert
+  // (`WHERE ... AND excluded.strega_generation = 'GEN2'`) is what stops that fallback from
+  // being written back to the database. This is a regex-only-pinned mutant surface (review
+  // §5's `cloudcomment3`): the guard is unreachable by the existing no-throw tests above,
+  // because on the happy path `stregaGeneration` already resolves to 'GEN2', so a plain
+  // demoting upsert writes the SAME value the guarded upsert would have written -- no
+  // observable difference. Only a lookup failure makes `stregaGeneration` diverge from what's
+  // actually stored, which is exactly what distinguishes a guarded write from a demoting one.
+  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
+  await db.run("INSERT INTO valve_settings (device_eui, strega_generation, updated_at) VALUES (?, 'GEN2', datetime('now'))", [eui]);
+  const payload = {
+    commandType: 'REGISTER_DEVICE',
+    params: { devEui: eui, deviceType: 'STREGA_VALVE', appKey: APPKEY, name: 'Cloud Valve', cloudUserId: 1 },
+  };
+  const osiDb = makeThrowingOsiDbStub(raw, /FROM valve_settings/);
+  const { node } = await runCsRegCloudFn({ raw, payload, envVars: REG_ENV, osiDb });
+  assert.equal(node.calls.errors.length, 0);
+  assert.ok(node.calls.warns.some((w) => /generation lookup failed/.test(w)), 'the lookup failure must be visibly warned, not swallowed');
+  const row = await db.get('SELECT strega_generation FROM valve_settings WHERE device_eui = ?', [eui]);
+  assert.equal(row.strega_generation, 'GEN2', 'a lookup failure must never demote a stored GEN2 row to GEN1');
   raw.close();
 });
