@@ -266,6 +266,19 @@ class ChirpStackClient {
     }
   }
 
+  async setDeviceProfile(devEui, deviceProfileId) {
+    const targetId = String(deviceProfileId || '').trim();
+    if (!targetId) throw annotateError(new Error('setDeviceProfile: deviceProfileId is required'), 'validate');
+    const existing = await this.getDevice(devEui);
+    if (!existing) return false;
+    if (String(existing.getDeviceProfileId() || '') === targetId) return false;
+    existing.setDeviceProfileId(targetId);
+    const request = new devicePb.UpdateDeviceRequest();
+    request.setDevice(existing);
+    await grpcInvoke(this.deviceClient, 'update', request, this.metadata, 'setDeviceProfile');
+    return true;
+  }
+
   async ensureDeviceProvisioned(input) {
     const devEui = normalizeDevEui(input.devEui);
     const appKey = normalizeHexKey(input.appKey);
@@ -286,6 +299,7 @@ class ChirpStackClient {
     const keySpec = { devEui, nwkKey: appKey };
     let deviceCreated = false;
     let keysAction = 'unchanged';
+    let profileAction = 'unchanged';
 
     try {
       const existingDevice = await this.getDevice(devEui);
@@ -306,6 +320,9 @@ class ChirpStackClient {
             throw error;
           }
         }
+      } else if (String(existingDevice.getDeviceProfileId() || '') !== deviceProfileId) {
+        await this.setDeviceProfile(devEui, deviceProfileId);
+        profileAction = 'repointed';
       }
 
       const existingKeys = await this.getKeys(devEui);
@@ -324,7 +341,8 @@ class ChirpStackClient {
         devEui,
         deviceCreated,
         deviceExisted: !deviceCreated,
-        keysAction
+        keysAction,
+        profileAction
       };
     } catch (error) {
       if (deviceCreated) {
