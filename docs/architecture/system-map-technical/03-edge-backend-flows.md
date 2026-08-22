@@ -198,7 +198,7 @@ Logic lives in `osi-valve-control` (`plan.js`, `push.js`, `ack.js`,
 
 The valve list ("Valve API Router") also carries the newest non-null
 enclosure temperature and humidity per Gen1 valve (`store.js`, bounded to a
-7-day window); Gen2 (SV2) hardware does not measure either, and the interface
+7-day window); Gen2 (SV2) payloads carry neither value, and the interface
 states that explicitly rather than leaving the field blank
 (`osi-agronomy-sensors-reference`).
 
