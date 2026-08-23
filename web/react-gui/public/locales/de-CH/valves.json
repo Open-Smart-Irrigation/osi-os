@@ -21,7 +21,6 @@
   "noSchedule": "Kein Zeitplan",
   "schedulerPaused": "Zeitpläne pausiert",
   "skippedToday": "Heute ausgelassen",
-  "planDelivery": "Planübertragung: {{acked}} von {{total}} Tagen bestätigt",
   "planFailed": "{{count}} Downlink(s) seit 24 h nicht bestätigt",
   "lastSent": "Zuletzt gesendet {{when}}",
   "actionFailed": "Die Aktion konnte nicht ausgeführt werden.",

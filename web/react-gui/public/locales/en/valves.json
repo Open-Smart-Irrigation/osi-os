@@ -21,7 +21,6 @@
   "noSchedule": "No schedule",
   "schedulerPaused": "Schedules paused",
   "skippedToday": "Skipped today",
-  "planDelivery": "Plan delivery: {{acked}} of {{total}} days acknowledged",
   "planFailed": "{{count}} downlink(s) not acknowledged in 24 h",
   "lastSent": "Last sent {{when}}",
   "actionFailed": "The action could not be completed.",
