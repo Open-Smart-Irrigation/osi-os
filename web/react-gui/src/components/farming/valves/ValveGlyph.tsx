@@ -22,9 +22,22 @@ export function valveGlyphLabel(state: ValveGlyphState, t: Translate): string {
 const MUTED_STROKE = 'var(--text-tertiary)';
 const PENDING_STROKE = '#b45309';
 const FAILED_ACCENT = '#dc2626';
+// (#160) The open state must follow the APP theme, not the OS one. The previous
+// `text-blue-600 dark:text-blue-400` pair keyed off Tailwind's `dark:` variant, which tracks
+// the OS/`dark` class rather than `html[data-theme]`, so the glyph rendered the wrong colour
+// whenever the two disagreed. `--primary` is defined for both themes in index.css.
+const OPEN_ACCENT = 'var(--primary)';
 
 const RING_RADIUS = 27;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+// A single teardrop, apex up, bulb centred at (32,34) with r=14 so it sits inside the
+// progress ring (r=27 about (32,32)). State is carried by FILL rather than by geometry:
+// at tile size the old gate-valve schematic's 1.4px wheel/stem detail was the first thing
+// to disappear (#160), so the shape stays constant and only the fill/stroke change.
+const DROPLET_PATH = 'M32 6C39 19 46 26 46 34a14 14 0 1 1-28 0c0-8 7-15 14-28Z';
+// The falling drip, drawn small and reused three times below the bulb.
+const DRIP_PATH = 'M0 0c-2.1 2.5-3.3 4.4-3.3 6a3.3 3.3 0 1 0 6.6 0C3.3 4.4 2.1 2.5 0 0Z';
 
 export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 48, reducedMotion = false }) => {
   const isOpen = state === 'open';
@@ -32,23 +45,19 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
   const isClosing = state === 'closing';
   const isFailed = state === 'failed';
 
-  const stroke = isOpen ? 'currentColor' : MUTED_STROKE;
-  const dashArray = isPending ? '4 3' : undefined;
-  // Gate lifts out of the pipe when open or closing (fluid path clear); stays seated when
-  // closed, pending (still commanded but not yet confirmed open), or failed.
-  const gateY = isOpen || isClosing ? 10 : 22;
+  const stroke = isOpen ? OPEN_ACCENT : MUTED_STROKE;
+  const dashArray = isPending ? '5 4' : undefined;
 
   const showRing = progress !== null;
   const clampedProgress = showRing ? Math.max(0, Math.min(1, progress as number)) : 0;
   const ringOffset = RING_CIRCUMFERENCE * (1 - clampedProgress);
 
-  const wrapperClass = isOpen ? 'text-blue-600 dark:text-blue-400' : '';
   const animateDroplets = isOpen && !reducedMotion;
 
   return (
     <span
-      className={`relative inline-flex shrink-0 items-center justify-center ${wrapperClass}`}
-      style={{ width: size, height: size, color: isOpen ? undefined : MUTED_STROKE }}
+      className="relative inline-flex shrink-0 items-center justify-center"
+      style={{ width: size, height: size, color: isOpen ? OPEN_ACCENT : MUTED_STROKE }}
       aria-hidden="true"
     >
       <svg viewBox="0 0 64 64" width={size} height={size} className="overflow-visible">
@@ -59,7 +68,7 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
             r={RING_RADIUS}
             fill="none"
             stroke={isFailed ? FAILED_ACCENT : 'currentColor'}
-            strokeWidth="2"
+            strokeWidth="2.5"
             strokeLinecap="round"
             strokeDasharray={RING_CIRCUMFERENCE}
             strokeDashoffset={ringOffset}
@@ -68,48 +77,25 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
           />
         )}
 
-        {/* Actuator wheel + stem */}
-        <circle cx="32" cy="8" r="4.5" fill="none" stroke={stroke} strokeWidth="2.2" strokeDasharray={dashArray} />
-        <line x1="28" y1="8" x2="36" y2="8" stroke={stroke} strokeWidth="1.4" />
-        <line x1="32" y1="4.5" x2="32" y2="11.5" stroke={stroke} strokeWidth="1.4" />
-        <line x1="32" y1="12.5" x2="32" y2={gateY} stroke={stroke} strokeWidth="2.2" strokeDasharray={dashArray} />
-
-        {/* Horizontal pipe */}
-        <rect
-          x="8"
-          y="26"
-          width="48"
-          height="8"
-          rx="2"
+        {/* The droplet itself: solid when water is flowing, hollow when it is not. */}
+        <path
+          d={DROPLET_PATH}
           fill={isOpen ? 'currentColor' : 'none'}
-          fillOpacity={isOpen ? 0.16 : undefined}
           stroke={stroke}
-          strokeWidth="2.2"
+          strokeWidth="3"
+          strokeLinejoin="round"
           strokeDasharray={dashArray}
         />
 
-        {/* Gate */}
-        <rect
-          x="26"
-          y={gateY}
-          width="6"
-          height="14"
-          rx="1"
-          fill={isOpen ? 'currentColor' : stroke}
-          stroke={stroke}
-          strokeWidth="1.2"
-          strokeDasharray={dashArray}
-        />
-
-        {/* Droplets at the outlet. The per-droplet x/y offset lives on this wrapping <g> —
-            the CSS keyframes below set the inner <path>'s `transform` (translateY) while
+        {/* Droplets falling from the bulb. The per-droplet x/y offset lives on this wrapping
+            <g> — the CSS keyframes below set the inner <path>'s `transform` (translateY) while
             animating, and a CSS transform completely replaces an SVG transform *attribute*
             rather than composing with it, so the offset must not sit on the animated node
             itself or all droplets collapse to the same x position while dripping. */}
         {isOpen && [0, 1, 2].map((i) => (
-          <g key={i} transform={`translate(${(i - 1) * 7}, ${i * 3})`}>
+          <g key={i} transform={`translate(${32 + (i - 1) * 9}, ${52 + (i === 1 ? 3 : 0)})`}>
             <path
-              d="M47 39c-2.1 2.5-3.3 4.4-3.3 6a3.3 3.3 0 1 0 6.6 0c0-1.6-1.2-3.5-3.3-6Z"
+              d={DRIP_PATH}
               fill="currentColor"
               opacity={animateDroplets ? undefined : 0.85}
               className={animateDroplets ? 'valve-drip' : undefined}
@@ -120,27 +106,27 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
 
         {/* Status badge */}
         {isPending && (
-          <g transform="translate(46, 8)">
-            <circle r="7.5" fill="var(--surface)" stroke={PENDING_STROKE} strokeWidth="1.4" />
-            <path d="M0 -3.5v3.5l2.6 1.6" fill="none" stroke={PENDING_STROKE} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          <g transform="translate(48, 12)">
+            <circle r="9" fill="var(--surface)" stroke={PENDING_STROKE} strokeWidth="1.8" />
+            <path d="M0 -4.2v4.2l3.1 1.9" fill="none" stroke={PENDING_STROKE} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </g>
         )}
         {isClosing && (
-          <g transform="translate(46, 8)">
-            <circle r="7.5" fill="var(--surface)" stroke={MUTED_STROKE} strokeWidth="1.4" />
+          <g transform="translate(48, 12)">
+            <circle r="9" fill="var(--surface)" stroke={MUTED_STROKE} strokeWidth="1.8" />
             <path
-              d="M-2.8 -3.4h5.6M-2.8 3.4h5.6M-2.4 -3.4c0 2.6 4.4 2.6 4.4 0M-2.4 3.4c0-2.6 4.4-2.6 4.4 0"
+              d="M-3.4 -4.1h6.8M-3.4 4.1h6.8M-2.9 -4.1c0 3.1 5.3 3.1 5.3 0M-2.9 4.1c0-3.1 5.3-3.1 5.3 0"
               fill="none"
               stroke={MUTED_STROKE}
-              strokeWidth="1.1"
+              strokeWidth="1.4"
             />
           </g>
         )}
         {isFailed && (
-          <g transform="translate(46, 8)">
-            <circle r="7.5" fill="var(--surface)" stroke={FAILED_ACCENT} strokeWidth="1.4" />
-            <path d="M0 -3.2v2.8" stroke={FAILED_ACCENT} strokeWidth="1.5" strokeLinecap="round" />
-            <circle cx="0" cy="2.6" r="0.9" fill={FAILED_ACCENT} />
+          <g transform="translate(48, 12)">
+            <circle r="9" fill="var(--surface)" stroke={FAILED_ACCENT} strokeWidth="1.8" />
+            <path d="M0 -3.9v3.4" stroke={FAILED_ACCENT} strokeWidth="1.9" strokeLinecap="round" />
+            <circle cx="0" cy="3.2" r="1.1" fill={FAILED_ACCENT} />
           </g>
         )}
       </svg>

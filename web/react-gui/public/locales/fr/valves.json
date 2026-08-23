@@ -29,7 +29,7 @@
   "loadFailed": "Impossible de charger les vannes.",
   "bluetoothNote": "Les modifications faites directement sur la vanne par Bluetooth ne sont pas visibles ici.",
   "openDialog": { "title": "Ouvrir {{name}}", "duration": "Durée (min)", "durationHint": "Indiquez une durée entre 1 et 255 minutes.", "custom": "Autre", "summary": "fermeture ≈ {{time}}", "liters": "≈ {{liters}} L", "confirm": "Ouvrir pendant {{minutes}} min", "error": "L'ouverture n'a pas pu être confirmée. Vérifiez l'état de la vanne avant de réessayer." },
-  "scheduleDialog": {
+  "scheduleDialog": { "edit": "Modifier", "update": "Mettre à jour", "discardEdit": "Abandonner", "editWeekly": "Modifier le programme hebdomadaire", "editOnce": "Modifier l’ouverture ponctuelle",
     "title": "Programmes de {{name}}", "loadFailed": "Impossible de charger les programmes.", "week": "Cette semaine sur la vanne", "windows": "Plages : {{count}}/4", "noWindows": "—",
     "list": "Programmes", "addWeekly": "+ Hebdomadaire", "addOnce": "+ Ponctuel",
     "label": "Nom (facultatif)", "weekdays": "Jours", "startTime": "Début", "duration": "Durée (min)", "date": "Date", "time": "Heure",
@@ -39,7 +39,7 @@
     "conflictTooMany": "{{weekday}} aurait plus de 4 plages horaires.", "conflictOverlap": "Cette plage en chevauche une autre le {{weekday}}.", "conflictGeneric": "Ce programme entre en conflit avec les plages déjà réglées sur la vanne.", "conflictInvalidStart": "Un programme a une heure de début non valable.", "invalidStartTime": "Cette heure de début n'est pas valable.", "saveFailed": "Impossible d'enregistrer le programme.", "updateFailed": "Impossible de modifier le programme.", "deleteFailed": "Impossible de supprimer le programme.",
     "push": { "QUEUED": "en attente de la vanne", "ACKED": "confirmé à {{when}}", "FAILED": "non confirmé" }
   },
-  "settingsDialog": { "title": "Réglages de la vanne", "generation": "Génération de la vanne", "gen2Untested": "GEN2 (SV2 — pas encore testée sur une vanne réelle)", "flowRate": "Débit (L/min)", "flowRateHint": "Indiquez un débit supérieur à 0 L/min.", "flowSource": "Origine", "measured": "Mesuré", "estimated": "Estimé", "clear": "Effacer", "save": "Enregistrer", "saveFailed": "Impossible d'enregistrer les réglages de la vanne." },
+  "settingsDialog": { "title": "Réglages de la vanne", "generation": "Génération de la vanne", "gen1": "Gen-1", "gen2": "Gen-2", "flowRate": "Débit (L/min)", "flowRateHint": "Indiquez un débit supérieur à 0 L/min.", "flowSource": "Origine", "measured": "Mesuré", "estimated": "Estimé", "clear": "Effacer", "save": "Enregistrer", "saveFailed": "Impossible d'enregistrer les réglages de la vanne." },
   "weekdays": { "0": "Dim", "1": "Lun", "2": "Mar", "3": "Mer", "4": "Jeu", "5": "Ven", "6": "Sam" },
   "trigger": { "manual": "Manuel", "cloud_command": "Depuis le cloud", "trigger_based": "Par capteur", "one_time": "Ponctuel", "on_valve_schedule": "Programme sur la vanne", "unexplained": "Ouverture hors programme" },
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % HR" },

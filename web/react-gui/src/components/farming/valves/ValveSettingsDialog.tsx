@@ -14,6 +14,7 @@ type FlowSource = 'measured' | 'estimated';
 
 export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve, open, onClose, onChanged }) => {
   const { t } = useTranslation('valves');
+  const { t: tc } = useTranslation('common');
   const [generation, setGeneration] = useState<StregaGeneration>(valve.stregaGeneration);
   const [flowRateInput, setFlowRateInput] = useState(valve.flowRateLpm !== null ? String(valve.flowRateLpm) : '');
   const [flowSource, setFlowSource] = useState<FlowSource>(valve.flowRateSource === 'measured' ? 'measured' : 'estimated');
@@ -77,7 +78,18 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
         className="w-full max-w-sm rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('settingsDialog.title')}</h2>
+        <div className="flex items-start justify-between gap-3">
+          <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('settingsDialog.title')}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label={tc('close')}
+            className="-mr-1 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            &times;
+          </button>
+        </div>
 
         <div className="mt-4">
           <label className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]" htmlFor={`valve-generation-${valve.deviceEui}`}>
@@ -90,8 +102,8 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
             onChange={(event) => setGeneration(event.target.value as StregaGeneration)}
             className="mt-1 min-h-[44px] w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
           >
-            <option value="GEN1">GEN1</option>
-            <option value="GEN2">{t('settingsDialog.gen2Untested')}</option>
+            <option value="GEN1">{t('settingsDialog.gen1')}</option>
+            <option value="GEN2">{t('settingsDialog.gen2')}</option>
           </select>
         </div>
 
@@ -158,14 +170,6 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
         {error && <p className="mt-3 text-sm text-[var(--warn-text)]">{error}</p>}
 
         <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className="min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {t('cancel')}
-          </button>
           <button
             type="button"
             onClick={() => void handleSave()}

@@ -26,6 +26,7 @@ function formatClosesAt(minutes: number, timeZone: string): string {
 
 export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, onClose, onSubmit }) => {
   const { t } = useTranslation('valves');
+  const { t: tc } = useTranslation('common');
   const [minutesInput, setMinutesInput] = useState(String(valve.defaultOpenMinutes ?? 5));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,9 +85,20 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
         className="w-full max-w-sm rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">
-          {t('openDialog.title', { name: valve.name })}
-        </h2>
+        <div className="flex items-start justify-between gap-3">
+          <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">
+            {t('openDialog.title', { name: valve.name })}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label={tc('close')}
+            className="-mr-1 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            &times;
+          </button>
+        </div>
 
         <div className="mt-4 flex gap-2">
           {QUICK_CHIPS.map((chip) => (

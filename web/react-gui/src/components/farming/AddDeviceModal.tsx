@@ -146,9 +146,6 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                 <option value="GEN1">{t('addModal.generationGen1')}</option>
                 <option value="GEN2">{t('addModal.generationGen2')}</option>
               </select>
-              <p className="text-[var(--text-tertiary)] text-sm mt-1">
-                {t('addModal.generationHint')}
-              </p>
             </div>
           )}
 

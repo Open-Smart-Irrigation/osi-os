@@ -9,9 +9,8 @@
     "deveuiHint": "Inserisci esattamente 16 caratteri esadecimali (0-9, A-F)",
     "deveuiInvalid": "Il DevEUI deve contenere esattamente 16 caratteri esadecimali",
     "generation": "Valve generation",
-    "generationGen1": "Gen1 (standard)",
-    "generationGen2": "Gen2 / SV2 (Bluetooth, untested on hardware)",
-    "generationHint": "If you're unsure, choose Gen1 — the gateway corrects it automatically once a Gen2 valve acknowledges a scheduled command. It cannot correct the other way: a wrong Gen2 pick needs manual repair.",
+    "generationGen1": "Gen-1",
+    "generationGen2": "Gen-2",
     "adding": "Aggiunta in corso...",
     "submit": "Aggiungi dispositivo",
     "failed": "Impossibile aggiungere il dispositivo"
