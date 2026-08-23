@@ -37,3 +37,18 @@ location /download/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
+
+# gzip is already enabled at http level by OpenWrt's generated uci.conf, but
+# gzip_types is never set there -- and nginx's default is `text/html` alone. So
+# every asset that actually matters shipped uncompressed: measured on a Pi 4,
+# a cold load of /gui pulled 2.34 MB of JavaScript (index 1,303,500 B +
+# analysis-echarts 1,036,871 B) in ~3.7 s. With these types declared the same
+# two files are 349,658 B + 346,307 B in ~1.0 s -- ~3.4x less payload and about
+# 2.6 s off a cold load, for no code change.
+#
+# Only reachable via nginx (:80/:443). Hitting Node-RED directly on :1880
+# bypasses this: express.static does not compress and Node-RED exposes no option
+# to make it, so the fix cannot live on that path. Prefer the nginx URL.
+gzip_types application/javascript text/javascript application/json text/css image/svg+xml application/manifest+json;
+gzip_min_length 1024;
+gzip_comp_level 5;
