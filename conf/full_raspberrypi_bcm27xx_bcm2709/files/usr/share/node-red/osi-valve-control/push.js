@@ -104,8 +104,24 @@ async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueu
     }
     if (rows.length) await store.insertPushes(tx, rows);
   });
-  const messages = rows.map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex }));
-  return { rows, messages, flushed };
+  // The flush above wiped ChirpStack's queue for this device. Rows left QUEUED by an EARLIER
+  // compile that this one does not supersede (a different day-set) lost their downlink with it,
+  // while their ledger row stays QUEUED -- so that weekday's plan silently never reaches the
+  // valve, and the row sits untouched until failStalePushes marks it FAILED 24h later. Observed
+  // live on a bench Gen2 valve: three compiles inside 12s left a DAYMASK_PLAN for days 1+4
+  // QUEUED and undelivered across two hours of uplinks. Re-emit whatever the ledger still
+  // considers outstanding, oldest first, so the queue matches the ledger again.
+  let carried = [];
+  if (flushed) {
+    const fresh = new Set(rows.map((r) => r.push_id));
+    try {
+      carried = (await store.listQueued(db, deviceEui)).filter((r) => !fresh.has(r.push_id));
+    } catch (e) {
+      warn && warn('[valve-control] could not re-queue outstanding pushes for ' + deviceEui + ': ' + (e && e.message ? e.message : e));
+    }
+  }
+  const messages = carried.concat(rows).map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex }));
+  return { rows, messages, flushed, requeued: carried.length };
 }
 
 async function compileAndQueue({ db, deviceEui, appId, force, now, flushQueue, warn, timeZoneFallback }) {

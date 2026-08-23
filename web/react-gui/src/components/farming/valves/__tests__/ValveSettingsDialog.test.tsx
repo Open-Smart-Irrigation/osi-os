@@ -1,9 +1,9 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ValveSettingsDialog } from '../ValveSettingsDialog';
-import { valvesAPI } from '../../../../services/api';
+import { devicesAPI, valvesAPI } from '../../../../services/api';
 import type { ValveSummary } from '../../../../types/farming';
 
 const { translateForTest } = vi.hoisted(() => {
@@ -20,6 +20,12 @@ const { translateForTest } = vi.hoisted(() => {
     'settingsDialog.clear': 'Clear',
     'settingsDialog.save': 'Save',
     'settingsDialog.saveFailed': 'Could not save valve settings.',
+    'settingsDialog.overrideTitle': 'Manual override',
+    'settingsDialog.overrideHint': 'Use only if a valve is stuck open.',
+    'settingsDialog.closeValve': 'Close valve now',
+    'settingsDialog.closeConfirm': 'Yes, close it',
+    'settingsDialog.closeSent': 'Close command sent.',
+    'settingsDialog.closeFailed': 'Could not send the close command.',
     cancel: 'Cancel',
     close: 'Close',
   };
@@ -38,6 +44,9 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../../../services/api', () => ({
   valvesAPI: {
     updateSettings: vi.fn().mockResolvedValue(undefined),
+  },
+  devicesAPI: {
+    controlValve: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -111,5 +120,41 @@ describe('ValveSettingsDialog', () => {
     expect(close).toHaveClass('h-11');
     expect(close).toHaveClass('w-11');
     expect(screen.getByRole('button', { name: 'Save' })).toHaveClass('min-h-[44px]');
+  });
+
+  it('does not send CLOSE on a single tap -- the override is two-step', async () => {
+    render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close valve now' }));
+
+    // First tap only arms the confirm. A bare CLOSE actuates hardware, so it must not be one tap.
+    expect(devicesAPI.controlValve).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Yes, close it' })).toBeInTheDocument();
+  });
+
+  it('sends a bare CLOSE once confirmed', async () => {
+    const onChanged = vi.fn();
+    render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={onChanged} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close valve now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, close it' }));
+
+    await waitFor(() => expect(devicesAPI.controlValve).toHaveBeenCalled());
+    // Deliberately a bare CLOSE (0x30 on FPort 1), not OPEN_FOR_DURATION: the valve is already
+    // running its own timer and only an explicit close will shut it before that timer expires.
+    expect(devicesAPI.controlValve).toHaveBeenCalledWith('0016C001F1000001', { action: 'CLOSE' });
+    await waitFor(() => expect(screen.getByText('Close command sent.')).toBeInTheDocument());
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('surfaces a failed close instead of claiming the valve shut', async () => {
+    vi.mocked(devicesAPI.controlValve).mockRejectedValueOnce(new Error('offline'));
+    render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close valve now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, close it' }));
+
+    expect(await screen.findByText('Could not send the close command.')).toBeInTheDocument();
+    expect(screen.queryByText('Close command sent.')).not.toBeInTheDocument();
   });
 });

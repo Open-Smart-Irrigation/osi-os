@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { StregaGeneration, ValveSummary } from '../../../types/farming';
-import { valvesAPI } from '../../../services/api';
+import { devicesAPI, valvesAPI } from '../../../services/api';
 
 export interface ValveSettingsDialogProps {
   valve: ValveSummary;
@@ -20,6 +20,8 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
   const [flowSource, setFlowSource] = useState<FlowSource>(valve.flowRateSource === 'measured' ? 'measured' : 'estimated');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [closeDone, setCloseDone] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -27,6 +29,8 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
       setFlowRateInput(valve.flowRateLpm !== null ? String(valve.flowRateLpm) : '');
       setFlowSource(valve.flowRateSource === 'measured' ? 'measured' : 'estimated');
       setError(null);
+      setConfirmClose(false);
+      setCloseDone(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, valve.deviceEui]);
@@ -64,6 +68,27 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
       onClose();
     } catch {
       setError(t('settingsDialog.saveFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Manual override. STREGA's normal path is OPEN_FOR_DURATION and the valve closes itself
+  // when the timer elapses -- a bare CLOSE is deliberately NOT part of routine irrigation.
+  // This exists for the stuck-open case: if the scheduler is emptied mid-cycle, the valve keeps
+  // its own timer and stays open until the next scheduler event, and nothing else can shut it.
+  // The dashboard's Cancel action does not help there -- it flushes the ChirpStack queue and
+  // marks local state, it never sends a close downlink. Hence: settings-only, two-step.
+  const handleClose = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await devicesAPI.controlValve(valve.deviceEui, { action: 'CLOSE' });
+      setCloseDone(true);
+      setConfirmClose(false);
+      onChanged();
+    } catch {
+      setError(t('settingsDialog.closeFailed'));
     } finally {
       setBusy(false);
     }
@@ -166,6 +191,43 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
             </div>
           </div>
         )}
+
+        <div className="mt-5 border-t border-[var(--border)] pt-4">
+          <p className="text-sm font-semibold text-[var(--text)]">{t('settingsDialog.overrideTitle')}</p>
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">{t('settingsDialog.overrideHint')}</p>
+          {closeDone ? (
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('settingsDialog.closeSent')}</p>
+          ) : confirmClose ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void handleClose()}
+                disabled={busy}
+                className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                {t('settingsDialog.closeConfirm')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmClose(false)}
+                disabled={busy}
+                className="min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {tc('cancel')}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmClose(true)}
+              disabled={busy}
+              className="mt-2 min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {t('settingsDialog.closeValve')}
+            </button>
+          )}
+        </div>
 
         {error && <p className="mt-3 text-sm text-[var(--warn-text)]">{error}</p>}
 
