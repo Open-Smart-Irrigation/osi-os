@@ -247,3 +247,38 @@ test('compileAndQueue: clock-sync timezone prefers the first enabled WEEKLY sche
   assert.equal(clock.payload_hex, '0001000304040004020000080206');
   db.close();
 });
+
+test('GEN2: a flush that wipes the queue re-emits pushes an earlier compile left outstanding', async () => {
+  // Live reproduction (bench Gen2 valve, 2026-08-23): several compiles inside ~12s. An earlier
+  // compile's DAYMASK_PLAN for days 1+4 was not superseded by the later one (different day-set),
+  // but the later compile's flushQueue() wiped its downlink out of ChirpStack. The row stayed
+  // QUEUED and undelivered across two hours of uplinks -- that weekday's plan never reached the
+  // valve, and nothing would have touched the row until failStalePushes FAILED it 24h later.
+  const { db } = await tempDb();
+  const eui = '0016C001F1000001';
+  await store.upsertSettings(db, eui, { strega_generation: 'GEN2' });
+
+  // Compile A: a window on days 1 and 4 only.
+  await store.insertSchedule(db, { schedule_uuid: 'a1', device_eui: eui, kind: 'WEEKLY', label: null, weekdays_mask: 0x12, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
+  await compileAndQueue({ db, deviceEui: eui, appId: 'app', force: false, now: new Date('2026-08-23T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+
+  const outstanding = await store.listQueued(db, eui);
+  assert.ok(outstanding.length > 0, 'compile A should leave queued rows');
+
+  // Compile B: add a window on days 0/3/6. Its groups do not cover days 1+4's group, so
+  // compile A's row survives supersede -- but the flush still wipes its downlink.
+  await store.insertSchedule(db, { schedule_uuid: 'b1', device_eui: eui, kind: 'WEEKLY', label: null, weekdays_mask: 0x49, start_time: '08:00', duration_minutes: 45, timezone: 'Europe/Zurich', enabled: 1 });
+  let flushed = false;
+  const r = await compileAndQueue({ db, deviceEui: eui, appId: 'app', force: false, now: new Date('2026-08-23T10:00:10Z'), flushQueue: async () => { flushed = true; }, warn: () => {} });
+
+  assert.equal(flushed, true, 'compile B must have flushed the queue for this to be the real case');
+
+  // Every row the ledger still calls QUEUED must have a corresponding outgoing message,
+  // otherwise its downlink is gone from ChirpStack and it can never be delivered or acked.
+  const stillQueued = await store.listQueued(db, eui);
+  const sentHex = new Set(r.messages.map((m) => Buffer.from(m.payload.data, 'base64').toString('hex').toUpperCase()));
+  for (const row of stillQueued) {
+    assert.ok(sentHex.has(row.payload_hex.toUpperCase()), `queued row ${row.payload_hex} was flushed away without being re-sent`);
+  }
+  assert.ok(r.requeued >= 1, 'at least one earlier-compile row should have been carried over');
+});

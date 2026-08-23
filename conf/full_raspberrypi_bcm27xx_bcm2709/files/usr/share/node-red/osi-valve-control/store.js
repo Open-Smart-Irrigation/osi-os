@@ -236,6 +236,15 @@ async function pushSummary(db, deviceEui) {
   };
 }
 
+// Rows the ledger still considers outstanding for this device, oldest first (ChirpStack's
+// queue is FIFO, so re-emitting in queued_at order preserves the intended delivery order).
+async function listQueued(db, deviceEui) {
+  return db.all(
+    "SELECT push_id, fport, payload_hex FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' ORDER BY queued_at, rowid",
+    [deviceEui]
+  );
+}
+
 async function hasPendingObservation(db, deviceEui) {
   const row = await db.get("SELECT 1 AS x FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND reconciliation_state='PENDING_OBSERVATION' LIMIT 1", [deviceEui]);
   return !!row;
@@ -269,4 +278,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, pushSummary, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { listQueued, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, pushSummary, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
