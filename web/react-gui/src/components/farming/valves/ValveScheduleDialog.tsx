@@ -89,6 +89,19 @@ function zonedTimeToUtcIso(dateStr: string, timeStr: string, timeZone: string): 
   return new Date(naiveUtc - finalOffset * 60_000).toISOString();
 }
 
+// Inverse of zonedTimeToUtcIso: split a UTC instant into the date/time field values a user
+// would see in the valve's timezone, so editing a ONCE schedule round-trips instead of
+// re-interpreting a UTC wall clock as local time.
+function utcIsoToZonedFields(iso: string, timeZone: string): { date: string; time: string } | null {
+  const at = new Date(iso);
+  if (!Number.isFinite(at.getTime())) return null;
+  const shifted = new Date(at.getTime() + timeZoneOffsetMinutes(timeZone, at) * 60_000);
+  return {
+    date: `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`,
+    time: `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`,
+  };
+}
+
 function describeConflict(details: ValvePlanError[], t: Translate): string {
   const first = details[0];
   if (!first) return t('scheduleDialog.conflictGeneric');
@@ -142,6 +155,8 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const [savingWeekly, setSavingWeekly] = useState(false);
   const [savingOnce, setSavingOnce] = useState(false);
   const [rowBusyUuid, setRowBusyUuid] = useState<string | null>(null);
+  const [editingWeeklyUuid, setEditingWeeklyUuid] = useState<string | null>(null);
+  const [editingOnceUuid, setEditingOnceUuid] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -151,6 +166,8 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       setWeeklyError(null);
       setOnceError(null);
       setRowError(null);
+      setEditingWeeklyUuid(null);
+      setEditingOnceUuid(null);
     }
   }, [open, valve.deviceEui]);
 
@@ -199,15 +216,23 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     setSavingWeekly(true);
     setWeeklyError(null);
     try {
-      await valvesAPI.createSchedule(valve.deviceEui, {
-        kind: 'WEEKLY',
+      const weeklyFields = {
         label: weekly.label.trim() || null,
         weekdaysMask: maskFromWeekdays(weekly.days),
         startTime: weekly.startTime,
         durationMinutes: weeklyDurationNum,
-        enabled: true,
-      });
+      };
+      if (editingWeeklyUuid) {
+        // The server re-validates and re-runs the plan-conflict check against the OTHER
+        // schedules with this row swapped in, so an edit that would collide is rejected the
+        // same way a create would be — `enabled` is deliberately not sent, so the row keeps
+        // whatever the enable toggle last set.
+        await valvesAPI.updateSchedule(valve.deviceEui, editingWeeklyUuid, weeklyFields);
+      } else {
+        await valvesAPI.createSchedule(valve.deviceEui, { kind: 'WEEKLY', ...weeklyFields, enabled: true });
+      }
       setWeekly(EMPTY_WEEKLY);
+      setEditingWeeklyUuid(null);
       await afterMutation();
     } catch (err) {
       setWeeklyError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
@@ -223,20 +248,64 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     setSavingOnce(true);
     setOnceError(null);
     try {
-      await valvesAPI.createSchedule(valve.deviceEui, {
-        kind: 'ONCE',
+      const onceFields = {
         label: once.label.trim() || null,
         fireAt,
         durationMinutes: onceDurationNum,
-        enabled: true,
-      });
+      };
+      if (editingOnceUuid) {
+        await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
+      } else {
+        await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
+      }
       setOnce(EMPTY_ONCE);
+      setEditingOnceUuid(null);
       await afterMutation();
     } catch (err) {
       setOnceError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
       setSavingOnce(false);
     }
+  };
+
+  const startEdit = (schedule: ValveSchedule) => {
+    setRowError(null);
+    if (schedule.kind === 'WEEKLY') {
+      setEditingOnceUuid(null);
+      setOnce(EMPTY_ONCE);
+      setWeeklyError(null);
+      setEditingWeeklyUuid(schedule.scheduleUuid);
+      setWeekly({
+        days: weekdaysFromMask(schedule.weekdaysMask ?? 0),
+        startTime: schedule.startTime ?? '06:00',
+        duration: String(schedule.durationMinutes),
+        label: schedule.label ?? '',
+      });
+      return;
+    }
+    setEditingWeeklyUuid(null);
+    setWeekly(EMPTY_WEEKLY);
+    setOnceError(null);
+    setEditingOnceUuid(schedule.scheduleUuid);
+    const fields = schedule.fireAt ? utcIsoToZonedFields(schedule.fireAt, valve.timezone) : null;
+    setOnce({
+      date: fields?.date ?? '',
+      time: fields?.time ?? '06:00',
+      duration: String(schedule.durationMinutes),
+      label: schedule.label ?? '',
+    });
+  };
+
+  const cancelWeeklyEdit = () => {
+    setEditingWeeklyUuid(null);
+    setWeekly(EMPTY_WEEKLY);
+    setWeeklyError(null);
+  };
+
+  const cancelOnceEdit = () => {
+    setEditingOnceUuid(null);
+    setOnce(EMPTY_ONCE);
+    setOnceError(null);
   };
 
   const toggleEnabled = async (schedule: ValveSchedule) => {
@@ -257,6 +326,10 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     setRowError(null);
     try {
       await valvesAPI.deleteSchedule(valve.deviceEui, schedule.scheduleUuid);
+      // Otherwise the form stays bound to a schedule_uuid the server has soft-deleted, and
+      // saving would 404 against a row the list no longer shows.
+      if (editingWeeklyUuid === schedule.scheduleUuid) cancelWeeklyEdit();
+      if (editingOnceUuid === schedule.scheduleUuid) cancelOnceEdit();
       await afterMutation();
     } catch (err) {
       setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.deleteFailed'));
@@ -299,9 +372,10 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
           <button
             type="button"
             onClick={onClose}
-            className="flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] sm:min-h-0"
+            aria-label={tc('close')}
+            className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--text)]"
           >
-            {t('cancel')}
+            &times;
           </button>
         </div>
 
@@ -405,6 +479,14 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           </label>
                           <button
                             type="button"
+                            onClick={() => startEdit(schedule)}
+                            disabled={rowBusyUuid === schedule.scheduleUuid}
+                            className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--text-secondary)] underline transition-colors hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
+                          >
+                            {t('scheduleDialog.edit')}
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => void deleteRow(schedule)}
                             disabled={rowBusyUuid === schedule.scheduleUuid}
                             className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--warn-text)] underline disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
@@ -420,7 +502,9 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
 
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-                  <p className="text-sm font-semibold text-[var(--text)]">{t('scheduleDialog.addWeekly')}</p>
+                  <p className="text-sm font-semibold text-[var(--text)]">
+                    {editingWeeklyUuid ? t('scheduleDialog.editWeekly') : t('scheduleDialog.addWeekly')}
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {WEEKDAYS.map((d) => (
                       <button
@@ -478,18 +562,34 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                     </p>
                   )}
                   {weeklyError && <p className="mt-2 text-xs text-[var(--warn-text)]">{weeklyError}</p>}
-                  <button
-                    type="button"
-                    onClick={() => void saveWeekly()}
-                    disabled={!isWeeklyValid || savingWeekly}
-                    className="mt-3 min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {savingWeekly ? t('scheduleDialog.saving') : t('scheduleDialog.save')}
-                  </button>
+                  <div className="mt-3 flex gap-2">
+                    {editingWeeklyUuid && (
+                      <button
+                        type="button"
+                        onClick={cancelWeeklyEdit}
+                        disabled={savingWeekly}
+                        className="min-h-[44px] shrink-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {t('scheduleDialog.discardEdit')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void saveWeekly()}
+                      disabled={!isWeeklyValid || savingWeekly}
+                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {savingWeekly
+                        ? t('scheduleDialog.saving')
+                        : editingWeeklyUuid ? t('scheduleDialog.update') : t('scheduleDialog.save')}
+                    </button>
+                  </div>
                 </section>
 
                 <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-                  <p className="text-sm font-semibold text-[var(--text)]">{t('scheduleDialog.addOnce')}</p>
+                  <p className="text-sm font-semibold text-[var(--text)]">
+                    {editingOnceUuid ? t('scheduleDialog.editOnce') : t('scheduleDialog.addOnce')}
+                  </p>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-xs text-[var(--text-tertiary)]" htmlFor={`once-date-${valve.deviceEui}`}>{t('scheduleDialog.date')}</label>
@@ -544,14 +644,28 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                     </p>
                   )}
                   {onceError && <p className="mt-2 text-xs text-[var(--warn-text)]">{onceError}</p>}
-                  <button
-                    type="button"
-                    onClick={() => void saveOnce()}
-                    disabled={!isOnceValid || savingOnce}
-                    className="mt-3 min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {savingOnce ? t('scheduleDialog.saving') : t('scheduleDialog.save')}
-                  </button>
+                  <div className="mt-3 flex gap-2">
+                    {editingOnceUuid && (
+                      <button
+                        type="button"
+                        onClick={cancelOnceEdit}
+                        disabled={savingOnce}
+                        className="min-h-[44px] shrink-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {t('scheduleDialog.discardEdit')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void saveOnce()}
+                      disabled={!isOnceValid || savingOnce}
+                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {savingOnce
+                        ? t('scheduleDialog.saving')
+                        : editingOnceUuid ? t('scheduleDialog.update') : t('scheduleDialog.save')}
+                    </button>
+                  </div>
                 </section>
               </div>
             </>

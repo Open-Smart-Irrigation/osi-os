@@ -9,9 +9,8 @@
     "deveuiHint": "Entrez exactement 16 caractères hexadécimaux (0-9, A-F)",
     "deveuiInvalid": "Le DevEUI doit contenir exactement 16 caractères hexadécimaux",
     "generation": "Génération de la vanne",
-    "generationGen1": "Gen1 (standard)",
-    "generationGen2": "Gen2 / SV2 (Bluetooth — pas encore testée sur une vanne réelle)",
-    "generationHint": "En cas de doute, choisissez Gen1 : la passerelle corrige automatiquement dès qu'une vanne Gen2 confirme la réception d'une commande planifiée. Elle ne corrige pas l'inverse : un choix Gen2 erroné nécessite une réparation manuelle.",
+    "generationGen1": "Gen-1",
+    "generationGen2": "Gen-2",
     "adding": "Ajout en cours...",
     "submit": "Ajouter l'appareil",
     "failed": "Impossible d'ajouter l'appareil"

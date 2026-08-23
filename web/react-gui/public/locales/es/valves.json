@@ -29,7 +29,7 @@
   "loadFailed": "Could not load valves.",
   "bluetoothNote": "Changes made on the valve over Bluetooth are not visible here.",
   "openDialog": { "title": "Open {{name}}", "duration": "Duration (min)", "durationHint": "Enter 1–255 minutes.", "custom": "Custom", "summary": "closes ≈ {{time}}", "liters": "≈ {{liters}} L", "confirm": "Open for {{minutes}} min", "error": "Could not send the open command." },
-  "scheduleDialog": {
+  "scheduleDialog": { "edit": "Editar", "update": "Actualizar", "discardEdit": "Descartar", "editWeekly": "Editar programa semanal", "editOnce": "Editar apertura puntual",
     "title": "Schedules for {{name}}", "loadFailed": "Could not load schedules.", "week": "Compiled week (what the valve will run)", "windows": "{{count}} of 4 windows", "noWindows": "—",
     "list": "Schedules", "addWeekly": "+ Weekly", "addOnce": "+ One-time",
     "label": "Label (optional)", "weekdays": "Days", "startTime": "Start", "duration": "Duration (min)", "date": "Date", "time": "Time",
@@ -39,7 +39,7 @@
     "conflictTooMany": "{{weekday}} would have more than 4 windows.", "conflictOverlap": "Overlaps another window on {{weekday}}.", "conflictGeneric": "The schedule conflicts with the plan.", "conflictInvalidStart": "A schedule has an invalid start time.", "invalidStartTime": "That start time is not valid.", "saveFailed": "Could not save the schedule.", "updateFailed": "Could not update the schedule.", "deleteFailed": "Could not delete the schedule.",
     "push": { "QUEUED": "waiting for valve", "ACKED": "acknowledged {{when}}", "FAILED": "failed" }
   },
-  "settingsDialog": { "title": "Valve settings", "generation": "Valve generation", "gen2Untested": "GEN2 (SV2, untested on hardware)", "flowRate": "Flow rate (L/min)", "flowRateHint": "Enter a rate above 0 L/min.", "flowSource": "Source", "measured": "Measured", "estimated": "Estimated", "clear": "Clear", "save": "Save", "saveFailed": "Could not save valve settings." },
+  "settingsDialog": { "title": "Valve settings", "generation": "Valve generation", "gen1": "Gen-1", "gen2": "Gen-2", "flowRate": "Flow rate (L/min)", "flowRateHint": "Enter a rate above 0 L/min.", "flowSource": "Source", "measured": "Measured", "estimated": "Estimated", "clear": "Clear", "save": "Save", "saveFailed": "Could not save valve settings." },
   "weekdays": { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" },
   "trigger": { "manual": "Manual", "cloud_command": "Cloud", "trigger_based": "Trigger-based", "one_time": "One-time", "on_valve_schedule": "Scheduled (on valve)", "unexplained": "Opened on valve" },
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % RH" },

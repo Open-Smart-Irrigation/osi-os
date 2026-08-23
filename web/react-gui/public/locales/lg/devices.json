@@ -9,9 +9,8 @@
     "deveuiHint": "Yingiza ebyagiro 16 eby'hexadecimal (0-9, A-F)",
     "deveuiInvalid": "DevEUI eba n'ebyagiro 16 eby'hexadecimal",
     "generation": "Valve generation",
-    "generationGen1": "Gen1 (standard)",
-    "generationGen2": "Gen2 / SV2 (Bluetooth, untested on hardware)",
-    "generationHint": "If you're unsure, choose Gen1 — the gateway corrects it automatically once a Gen2 valve acknowledges a scheduled command. It cannot correct the other way: a wrong Gen2 pick needs manual repair.",
+    "generationGen1": "Gen-1",
+    "generationGen2": "Gen-2",
     "adding": "Tikuyongera...",
     "submit": "Yongera Ekyuma",
     "failed": "Okuyongera ekyuma kugaanye"

@@ -20,17 +20,9 @@ const { translateForTest } = vi.hoisted(() => {
     'addModal.appkeyPlaceholder': 'AABBCCDDEEFF00112233445566778899',
     'addModal.appkeyHint': '32 hex characters printed on the device label',
     'addModal.generation': 'Valve generation',
-    'addModal.generationGen1': 'Gen1 (standard)',
-    'addModal.generationGen2': 'Gen2 / SV2 (Bluetooth, untested on hardware)',
+    'addModal.generationGen1': 'Gen-1',
+    'addModal.generationGen2': 'Gen-2',
     // react-i18next is fully mocked in this file, so nothing here ever touches the real
-    // locale backend -- this literal only drives render plumbing (does the component ask for
-    // the right key and display whatever it's given). The 'renders the shipped generation
-    // hint' test below is what actually pins the real en/devices.json content, by importing
-    // it directly and asserting it equals a correct literal written independently of this
-    // table (vi.hoisted runs before module imports resolve, so this table cannot reference
-    // the imported JSON itself -- see that test's comment for why the pin still holds).
-    'addModal.generationHint':
-      "If you're unsure, choose Gen1 — the gateway corrects it automatically once a Gen2 valve acknowledges a scheduled command. It cannot correct the other way: a wrong Gen2 pick needs manual repair.",
     'addModal.adding': 'Adding...',
     'addModal.submit': 'Add Device',
     'addModal.failed': 'Failed to add device',
@@ -145,24 +137,24 @@ describe('AddDeviceModal generation control', () => {
     expect(payload).not.toHaveProperty('strega_generation');
   });
 
-  it('renders the shipped generation hint, correctly describing the ACK-based trigger', async () => {
+  it('offers exactly Gen-1 and Gen-2 with no advisory hint', async () => {
     render(<AddDeviceModal isOpen={true} onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
 
     await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalled());
 
     fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
 
-    // Pinned as an independent literal (not `translateForTest(...)`, which is just an echo of
-    // whatever the mock table holds): correction requires an ACK-bearing uplink, which in turn
-    // requires a downlink -- a schedule or command -- to have been sent first. A valve that has
-    // never had anything scheduled never corrects no matter how often it "replies", so the old
-    // "once a Gen2 valve replies" claim was false in exactly that case. This asserts against the
-    // real shipped en/devices.json content directly, so reverting the file to the old claim
-    // fails this test instead of silently passing against a stale copy of the string.
-    const expectedHint =
-      "If you're unsure, choose Gen1 — the gateway corrects it automatically once a Gen2 valve acknowledges a scheduled command. It cannot correct the other way: a wrong Gen2 pick needs manual repair.";
-    expect(enDevices.addModal.generationHint).toBe(expectedHint);
-    expect(screen.getByText(expectedHint)).toBeInTheDocument();
+    // Pinned against the real shipped en/devices.json, not the mock table (which is just an
+    // echo): the labels must stay bare product names. The previous copy carried an
+    // "untested on hardware" qualifier that a live Gen2 valve has since disproved, and an
+    // advisory hint recommending Gen1 that was removed by product decision. Asserting the
+    // key is absent makes a silent reintroduction fail here rather than ship.
+    expect(enDevices.addModal.generationGen1).toBe('Gen-1');
+    expect(enDevices.addModal.generationGen2).toBe('Gen-2');
+    expect(enDevices.addModal).not.toHaveProperty('generationHint');
+
+    const select = screen.getByLabelText('Valve generation') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Gen-1', 'Gen-2']);
   });
 
   it('resets generation and other fields to defaults when reopened after a cancel', async () => {

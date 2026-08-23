@@ -9,9 +9,8 @@
     "deveuiHint": "Genau 16 Hexadezimalzeichen eingeben (0-9, A-F)",
     "deveuiInvalid": "DevEUI muss genau 16 Hexadezimalzeichen enthalten",
     "generation": "Ventilgeneration",
-    "generationGen1": "Gen1 (Standard)",
-    "generationGen2": "Gen2 / SV2 (Bluetooth, an Hardware ungetestet)",
-    "generationHint": "Im Zweifel Gen1 wählen — das Gateway korrigiert dies automatisch, sobald ein Gen2-Ventil einen geplanten Befehl bestätigt. Der umgekehrte Fall wird nicht korrigiert: eine falsche Gen2-Wahl muss manuell behoben werden.",
+    "generationGen1": "Gen-1",
+    "generationGen2": "Gen-2",
     "adding": "Wird hinzugefügt...",
     "submit": "Gerät hinzufügen",
     "failed": "Gerät konnte nicht hinzugefügt werden"

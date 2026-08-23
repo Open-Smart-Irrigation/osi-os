@@ -10,7 +10,8 @@ const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
     'settingsDialog.title': 'Valve settings',
     'settingsDialog.generation': 'Valve generation',
-    'settingsDialog.gen2Untested': 'GEN2 (SV2, untested on hardware)',
+    'settingsDialog.gen1': 'Gen-1',
+    'settingsDialog.gen2': 'Gen-2',
     'settingsDialog.flowRate': 'Flow rate (L/min)',
     'settingsDialog.flowRateHint': 'Enter a rate above 0 L/min.',
     'settingsDialog.flowSource': 'Source',
@@ -20,6 +21,7 @@ const { translateForTest } = vi.hoisted(() => {
     'settingsDialog.save': 'Save',
     'settingsDialog.saveFailed': 'Could not save valve settings.',
     cancel: 'Cancel',
+    close: 'Close',
   };
   return {
     translateForTest: (key: string, options?: Record<string, unknown>): string => {
@@ -103,7 +105,11 @@ describe('ValveSettingsDialog', () => {
     expect(screen.getByRole('button', { name: 'Clear' })).toHaveClass('min-h-[44px]');
     expect(screen.getByLabelText('Measured').closest('label')).toHaveClass('min-h-[44px]');
     expect(screen.getByLabelText('Estimated').closest('label')).toHaveClass('min-h-[44px]');
-    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('min-h-[44px]');
+    // Cancel was removed by product decision: an X in the header is the single dismiss
+    // affordance for settings dialogs. h-11/w-11 is exactly 44x44px.
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(close).toHaveClass('h-11');
+    expect(close).toHaveClass('w-11');
     expect(screen.getByRole('button', { name: 'Save' })).toHaveClass('min-h-[44px]');
   });
 });
