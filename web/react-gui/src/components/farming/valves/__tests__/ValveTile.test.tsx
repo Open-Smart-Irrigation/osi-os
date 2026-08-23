@@ -25,6 +25,7 @@ const { translateForTest } = vi.hoisted(() => {
     'state.open': 'Open',
     'state.closing': 'Closing',
     'state.failed': 'Failed',
+    planFailed: '{{count}} downlink(s) not acknowledged in 24 h',
     'format.temperature': '{{value}} °C',
     'format.humidity': '{{value}} % RH',
   };
@@ -142,5 +143,35 @@ describe('ValveTile enclosure climate reading', () => {
     const pair = screen.getByText(/21[.,]5 °C · 48 % RH/);
     expect(pair.className).toMatch(/whitespace-nowrap/);
     expect(pair.className).toMatch(/inline-block/);
+  });
+});
+
+describe("ValveTile plan line", () => {
+  it("shows no plan-delivery progress line while downlinks are still queued", () => {
+    const { container } = renderTile({
+      pushState: { queued: 3, acked: 4, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(container.textContent).not.toMatch(/planDelivery|acknowledged/);
+  });
+
+  it("still surfaces the failed-downlink line when some downlinks are also queued", () => {
+    renderTile({
+      pushState: { queued: 2, acked: 1, failed: 2, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(screen.getByText("2 downlink(s) not acknowledged in 24 h")).toBeInTheDocument();
+  });
+
+  it("surfaces the failed-downlink line when nothing is queued", () => {
+    renderTile({
+      pushState: { queued: 0, acked: 1, failed: 1, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(screen.getByText("1 downlink(s) not acknowledged in 24 h")).toBeInTheDocument();
+  });
+
+  it("shows no plan line at all when every downlink is acknowledged", () => {
+    const { container } = renderTile({
+      pushState: { queued: 0, acked: 7, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(container.textContent).not.toMatch(/downlink|acknowledged/);
   });
 });

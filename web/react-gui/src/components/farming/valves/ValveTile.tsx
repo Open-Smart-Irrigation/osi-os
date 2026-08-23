@@ -100,12 +100,8 @@ export const ValveTile: React.FC<ValveTileProps> = ({
         valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
       ].filter(Boolean).join(' · ');
 
-  let planLine: string | null = null;
-  if (valve.pushState.queued > 0) {
-    planLine = t('planDelivery', { acked: valve.pushState.acked, total: valve.pushState.acked + valve.pushState.queued });
-  } else if (valve.pushState.failed > 0) {
-    planLine = t('planFailed', { count: valve.pushState.failed });
-  }
+  const planLine: string | null =
+    valve.pushState.failed > 0 ? t('planFailed', { count: valve.pushState.failed }) : null;
 
   const isPaused = valve.schedulerStatus === 'DEACTIVATED';
   const alreadySkipped = valve.schedulerStatus === 'SKIP_TODAY';
@@ -137,7 +133,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
           </p>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{nextRunLine}</p>
           {planLine && (
-            <p className={`mt-0.5 text-xs ${valve.pushState.failed > 0 && valve.pushState.queued === 0 ? 'text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
+            <p className="mt-0.5 text-xs text-[var(--warn-text)]">
               {planLine}
             </p>
           )}
