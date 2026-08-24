@@ -176,3 +176,54 @@ whose valve UI is shipped and working.
 - `ui-core` vendoring into osi-server (C3b) — the real fix for edge/cloud UI drift.
 - Cloud→edge schedule authoring (C2b) and settings commands (C1 follow-up).
 - Whether the six advanced STREGA commands belong in the cloud at all.
+
+---
+
+## 8. Rulings (independent review, 2026-08-24)
+
+All five decisions were reviewed against both repos. **Three recommendations were
+overturned**, one on safety grounds.
+
+| # | Recommended | **Ruled** | Why |
+|---|---|---|---|
+| C1 | (b) cloud-appropriate page | **(b), but thinner** | The support-request form has **no cloud backend** — no controller or endpoint exists in osi-server. Including it is new scope, not a port. Ship language + account link; theme only if the Bovey frontend genuinely has one |
+| C2 | (a) read-only + `editable` flag | **(a), flag dropped** | The flag is a comforting story: schedule authoring needs edge compile/pushState machinery and a richer response than any cloud endpoint can return under D2/D4. `editable=true` would light up dialogs whose data model does not exist |
+| C3 | (a) port 9 components | **(c) small cloud-native view** | A faithful port renders mostly empty states. Reuse `ValveGlyph`, `valveState` helpers and a schedule list inside a small cloud `ValveCard`. Code never ported cannot drift |
+| C4 | remove legacy card controls | **DEFER — do not touch** | **The cloud already has valve writes.** `StregaValveCard` dispatches open/close plus six advanced STREGA commands today. Removing them is a capability regression sold as decluttering |
+| C5 | rename the account | **REJECTED — unsafe** | Sync tokens are JWTs with the **username as subject**; the gateway holds a long-lived token issued for subject `admin`. Renaming breaks the gateway's sync auth and forces a re-link — an edge touch this spec forbids |
+
+**D4 reversal (sync `valve_settings`): NO.** A column migration plus triggers,
+contract, cloud table and applier on a live gateway in presentation week, to
+upgrade a panel from credible to rich, inverts this spec's one correct instinct.
+
+### Factual corrections to §2 and §4
+
+1. §2(c) is **half wrong**. Module toggles are client-side localStorage display
+   preferences, not gateway hardware; only the scheduler-off path writes edge
+   state. The conclusion survives for a different reason: they toggle *edge
+   dashboard* cards the cloud does not render.
+2. §2(b) is **wrong**. The valve components import **zero** `ui-core` primitives.
+   Vendoring is orthogonal to C3 entirely.
+3. §5 lists the combined branch as work; it **already exists** —
+   `feat/bovey-cloud-parity` @ `2173c5ca`. Verify and deploy, do not rebuild.
+4. C2/C4 implicitly assumed the cloud has no valve write path. It does.
+
+### Revised scope
+
+**Cut:** C4 legacy-card removal, C5 rename, the settings support form, the
+9-component port, all `editable`-flag machinery, D4 reversal.
+
+**Keep, in this order:**
+
+1. Deploy `feat/bovey-cloud-parity` as-is. Banks most of the demo value before
+   any new code exists.
+2. Read-only cloud `ValveController` — `/api/v1/valves`,
+   `/api/v1/valves/{eui}/schedules` — shaped to the fields the cloud actually has.
+3. Small cloud valve panel: glyph + reduced tile + schedule list, no dialogs.
+4. Thin `/settings` — only if time remains.
+5. Prove the gateway untouched.
+
+**Minimum credible deliverable:** Bovey branding plus a valve panel showing name,
+zone, open/closed and the live-synced schedule list, with the demonstrable moment
+*"a schedule created on the gateway appears in the cloud"* — and the legacy card
+still able to open a valve. No step 2–4 failure can strand the demo.
