@@ -722,6 +722,14 @@ fetch_required "osi-valve-control workers.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers.js" \
     "/srv/node-red/osi-valve-control/workers.js"
 
+# index.js require()s this at module load, so a gateway without it fails to load
+# osi-valve-control ENTIRELY -- schedules, pushes and ACKs, not just the cloud
+# commands it serves. verify-helper-registration.js does not catch intra-module
+# files, only whole modules.
+fetch_required "osi-valve-control cloud-commands.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cloud-commands.js" \
+    "/srv/node-red/osi-valve-control/cloud-commands.js"
+
 fetch_required "osi-system-settings package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
     "/srv/node-red/osi-system-settings/package.json"
