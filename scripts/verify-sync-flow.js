@@ -2668,6 +2668,101 @@ pendingChecks.push((async () => {
 })().catch((error) => {
   fail(`failed to execute VALVE_COMMAND ACK context fixture: ${error.message}`);
 }));
+
+// Task 4 (2026-08-24 valve-advanced-controls-consolidation, E2): the STREGA
+// downlink builder already computes a percentage for SET_PARTIAL_OPENING /
+// SET_FLUSHING but was dropping it before it reached actuator_log. Assert on
+// the emitted _log_ctx fields, NOT on any display label text (the label may be
+// reworded/translated and is not the contract here).
+pendingChecks.push((async () => {
+  const gatewayEui = '0016C001F11715E2';
+  const partialResult = await executeFunctionNodeById('cdbaa3891d40d7a1', {
+    payload: {
+      type: 'actuator_command',
+      device: { devEui: '70B3D57708000335' },
+      data: {
+        action: 'SET_PARTIAL_OPENING',
+        valve_action: 'OPEN',
+        percentage: 40,
+        commandType: 'SET_STREGA_PARTIAL_OPENING',
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: gatewayEui },
+  });
+  const partialLogMsg = Array.isArray(partialResult) ? partialResult[1] : null;
+  const partialCtx = partialLogMsg && partialLogMsg._log_ctx;
+  if (!partialCtx) {
+    fail('SET_PARTIAL_OPENING did not emit a log context');
+  } else if (partialCtx.percentage !== 40) {
+    fail(`SET_PARTIAL_OPENING log context dropped the percentage (got ${JSON.stringify(partialCtx.percentage)})`);
+  }
+
+  const flushResult = await executeFunctionNodeById('cdbaa3891d40d7a1', {
+    payload: {
+      type: 'actuator_command',
+      device: { devEui: '70B3D57708000335' },
+      data: {
+        action: 'SET_FLUSHING',
+        return_position: 'OPEN',
+        percentage: 40,
+        commandType: 'SET_STREGA_FLUSHING',
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: gatewayEui },
+  });
+  const flushLogMsg = Array.isArray(flushResult) ? flushResult[1] : null;
+  const flushCtx = flushLogMsg && flushLogMsg._log_ctx;
+  if (!flushCtx) {
+    fail('SET_FLUSHING did not emit a log context');
+  } else {
+    if (flushCtx.percentage !== 40) {
+      fail(`SET_FLUSHING log context dropped the percentage (got ${JSON.stringify(flushCtx.percentage)})`);
+    }
+    if (flushCtx.returnPosition !== 'OPEN') {
+      fail(`SET_FLUSHING log context dropped returnPosition (got ${JSON.stringify(flushCtx.returnPosition)})`);
+    }
+  }
+
+  // A command type that carries no percentage (e.g. a plain timed OPEN) must not
+  // have percentage/returnPosition invented for it.
+  const openResult = await executeFunctionNodeById('cdbaa3891d40d7a1', {
+    payload: {
+      type: 'actuator_command',
+      device: { devEui: '70B3D57708000335' },
+      data: { action: 'OPEN', commandType: 'OPEN' },
+    },
+  }, {
+    env: { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: gatewayEui },
+  });
+  const openLogMsg = Array.isArray(openResult) ? openResult[1] : null;
+  const openCtx = openLogMsg && openLogMsg._log_ctx;
+  if (openCtx && (openCtx.percentage !== null || openCtx.returnPosition !== null)) {
+    fail('OPEN log context should not carry a percentage/returnPosition');
+  }
+
+  // The INSERT node must actually persist the percentage into the one free-text
+  // column actuator_log has (action) — no schema change. Prefix-matchable so any
+  // consumer keying off action LIKE 'SET_PARTIAL_OPENING%' still works.
+  if (partialCtx) {
+    const partialInsertMsg = await executeFunctionNodeById('5c45136f382d501c', { _log_ctx: partialCtx });
+    const partialSql = partialInsertMsg && partialInsertMsg.topic;
+    if (!partialSql || !/SET_PARTIAL_OPENING 40%/.test(partialSql)) {
+      fail(`actuator_log INSERT did not carry the partial-opening percentage into action (got ${JSON.stringify(partialSql)})`);
+    }
+  }
+  if (flushCtx) {
+    const flushInsertMsg = await executeFunctionNodeById('5c45136f382d501c', { _log_ctx: flushCtx });
+    const flushSql = flushInsertMsg && flushInsertMsg.topic;
+    if (!flushSql || !/SET_FLUSHING 40% -> OPEN/.test(flushSql)) {
+      fail(`actuator_log INSERT did not carry the flushing percentage\\/return position into action (got ${JSON.stringify(flushSql)})`);
+    }
+  }
+})().catch((error) => {
+  fail(`failed to execute STREGA percentage log-context fixture: ${error.message}`);
+}));
+
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'self-heals active concentratord gateway-id state during startup');

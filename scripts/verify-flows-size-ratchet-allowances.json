@@ -1,6 +1,14 @@
 {
   "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
   "node_allowances": {
+    "cdbaa3891d40d7a1": {
+      "delta": 500,
+      "reason": "Valve advanced controls consolidation Task 4 (E2): _log_ctx gains percentage/returnPosition fields for SET_PARTIAL_OPENING/SET_FLUSHING so the value the encoder already computes is no longer dropped before it reaches actuator_log (+497 exact delta vs origin/main)"
+    },
+    "5c45136f382d501c": {
+      "delta": 465,
+      "reason": "Valve advanced controls consolidation Task 4 (E2): actuator_log INSERT composes the percentage (and returnPosition for flushing) into the action free-text column instead of writing the bare command string -- no schema change, actuator_log has no JSON/detail column to hold it in (+462 exact delta vs origin/main)"
+    },
     "934bf2bc19a8ce22": {
       "delta": 250,
       "reason": "Valve control Phase B Task 3: Route Command dispatches the four cloud valve-schedule commands (UPSERT_VALVE_SCHEDULE, DELETE_VALVE_SCHEDULE, RESEND_VALVE_PLAN, SET_VALVE_SCHEDULER_STATUS) to a new sixth output, wired to a thin Valve Cloud Command Bridge node that delegates to osi-valve-control's applyCloudCommand (+223 exact delta vs origin/main)"
