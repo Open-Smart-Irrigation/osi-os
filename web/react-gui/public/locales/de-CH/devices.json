@@ -78,7 +78,7 @@
       "open": "OFFEN",
       "openClosesAt": "OFFEN — schliesst um {{time}}",
       "openQueued": "Öffnung in Warteschlange",
-      "waitingForUplink": "warte auf Ventil-Uplink (≈ {{minutes}} Min.)"
+      "waitingForUplink": "wartet auf Rückmeldung des Ventils (≈ {{minutes}} min)"
     }
   },
   "zone": {

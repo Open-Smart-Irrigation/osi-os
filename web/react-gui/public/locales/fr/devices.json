@@ -107,7 +107,7 @@
       "open": "OUVERTE",
       "openClosesAt": "OUVERTE — fermeture à {{time}}",
       "openQueued": "Ouverture en attente",
-      "waitingForUplink": "en attente de l'uplink de la vanne (≈ {{minutes}} min)"
+      "waitingForUplink": "en attente du rapport de la vanne (≈ {{minutes}} min)"
     }
   },
   "zone": {

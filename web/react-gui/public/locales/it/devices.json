@@ -78,7 +78,7 @@
       "open": "APERTA",
       "openClosesAt": "APERTA — chiude alle {{time}}",
       "openQueued": "Apertura in coda",
-      "waitingForUplink": "in attesa dell'uplink della valvola (≈ {{minutes}} min)"
+      "waitingForUplink": "in attesa del rapporto della valvola (≈ {{minutes}} min)"
     }
   },
   "zone": {
