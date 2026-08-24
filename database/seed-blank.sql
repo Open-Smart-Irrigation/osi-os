@@ -1046,6 +1046,100 @@ CREATE INDEX IF NOT EXISTS idx_valve_schedules_device ON valve_schedules(device_
 CREATE INDEX IF NOT EXISTS idx_valve_schedules_once_due
   ON valve_schedules(fire_at) WHERE kind = 'ONCE' AND once_state = 'PENDING' AND deleted_at IS NULL;
 
+-- valve_schedules -> sync_outbox triggers (Valve control Phase B, migration 0024).
+-- Mirrors trg_sync_schedules_outbox_* (irrigation_schedules) but resolves
+-- gateway_device_eui through devices, since valve_schedules parents on a
+-- device, not a zone. deleted_at is carried in the upsert (D5) -- there is no
+-- separate VALVE_SCHEDULE_DELETED op.
+CREATE TRIGGER trg_sync_valve_schedules_outbox_ai
+AFTER INSERT ON valve_schedules
+FOR EACH ROW
+WHEN EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'VALVE_SCHEDULE',
+    NEW.schedule_uuid,
+    'VALVE_SCHEDULE_UPSERTED',
+    json_object(
+      'contract_version', 1,
+      'schedule_uuid',    NEW.schedule_uuid,
+      'device_eui',       NEW.device_eui,
+      'kind',             NEW.kind,
+      'label',            NEW.label,
+      'weekdays_mask',    NEW.weekdays_mask,
+      'start_time',       NEW.start_time,
+      'fire_at',          NEW.fire_at,
+      'duration_minutes', NEW.duration_minutes,
+      'timezone',         NEW.timezone,
+      'enabled',          NEW.enabled,
+      'once_state',       NEW.once_state,
+      'deleted_at',       NEW.deleted_at,
+      'sync_version',     NEW.sync_version
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(
+      NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.device_eui AND deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+    )
+  );
+END;
+
+CREATE TRIGGER trg_sync_valve_schedules_outbox_au
+AFTER UPDATE ON valve_schedules
+FOR EACH ROW
+WHEN EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1)
+  AND (
+    COALESCE(NEW.kind,'')             <> COALESCE(OLD.kind,'')             OR
+    COALESCE(NEW.label,'')            <> COALESCE(OLD.label,'')            OR
+    COALESCE(NEW.weekdays_mask,0)     <> COALESCE(OLD.weekdays_mask,0)     OR
+    COALESCE(NEW.start_time,'')       <> COALESCE(OLD.start_time,'')       OR
+    COALESCE(NEW.fire_at,'')          <> COALESCE(OLD.fire_at,'')          OR
+    COALESCE(NEW.duration_minutes,0)  <> COALESCE(OLD.duration_minutes,0)  OR
+    COALESCE(NEW.timezone,'')         <> COALESCE(OLD.timezone,'')         OR
+    COALESCE(NEW.enabled,0)           <> COALESCE(OLD.enabled,0)           OR
+    COALESCE(NEW.once_state,'')       <> COALESCE(OLD.once_state,'')       OR
+    COALESCE(NEW.deleted_at,'')       <> COALESCE(OLD.deleted_at,'')       OR
+    COALESCE(NEW.sync_version,0)      <> COALESCE(OLD.sync_version,0)
+  )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'VALVE_SCHEDULE',
+    NEW.schedule_uuid,
+    'VALVE_SCHEDULE_UPSERTED',
+    json_object(
+      'contract_version', 1,
+      'schedule_uuid',    NEW.schedule_uuid,
+      'device_eui',       NEW.device_eui,
+      'kind',             NEW.kind,
+      'label',            NEW.label,
+      'weekdays_mask',    NEW.weekdays_mask,
+      'start_time',       NEW.start_time,
+      'fire_at',          NEW.fire_at,
+      'duration_minutes', NEW.duration_minutes,
+      'timezone',         NEW.timezone,
+      'enabled',          NEW.enabled,
+      'once_state',       NEW.once_state,
+      'deleted_at',       NEW.deleted_at,
+      'sync_version',     NEW.sync_version
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(
+      NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.device_eui AND deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+    )
+  );
+END;
+
 CREATE TABLE IF NOT EXISTS valve_settings (
   device_eui                TEXT PRIMARY KEY REFERENCES devices(deveui) ON DELETE CASCADE,
   strega_generation         TEXT NOT NULL DEFAULT 'GEN1' CHECK (strega_generation IN ('GEN1','GEN2')),

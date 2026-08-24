@@ -15,6 +15,10 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
   // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
   'trg_improvement_requests_outbox_ai',
+  // 0024__valve_schedule_sync_triggers.sql — same story: seed DB + deploy-time
+  // migration runner delivery, not the frozen sync-init-fn boot DDL.
+  'trg_sync_valve_schedules_outbox_ai',
+  'trg_sync_valve_schedules_outbox_au',
 ]);
 
 function q(db, sql) {

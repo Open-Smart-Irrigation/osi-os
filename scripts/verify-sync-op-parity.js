@@ -84,6 +84,8 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0005__field_work_requests.sql / seed DB trigger, not by
   // flows.json. The server must still handle it and the schema must declare it.
   'WORK_REQUEST_SUBMITTED',
+  // Emitted by 0024__valve_schedule_sync_triggers.sql, not by flows.json.
+  'VALVE_SCHEDULE_UPSERTED',
 ]);
 
 function readUtf8(file) {
