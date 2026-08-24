@@ -152,6 +152,16 @@ with a canonical form beyond the general rules above:
 - `timezone` — IANA timezone name (`Europe/Zurich`), never a fixed UTC
   offset.
 
+The edge GUI renders Monday-first (Swiss convention) purely as a display
+ordering over the same 0=Sunday indices — see `WEEKDAY_DISPLAY_ORDER` in
+`web/react-gui/src/components/farming/valves/valveState.ts`. Any consumer that
+re-derives day names MUST use the 0=Sunday origin above; treating bit0 as
+Monday shifts a farmer's irrigation by one day.
+
+`start_time` is local wall-clock `HH:MM` interpreted in the schedule's own
+`timezone`. It is NOT a UTC instant. `fire_at` (ONCE schedules) IS a UTC
+ISO-8601 instant, canonicalized per the Timestamps rule above.
+
 ## Conformance
 
 A new runtime must pass every test vector before its hashes are accepted by other systems. Hashes computed by a non-conformant runtime are discarded.

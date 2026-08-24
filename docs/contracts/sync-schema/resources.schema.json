@@ -386,8 +386,13 @@
         },
         "ValveSchedule": {
             "type": "object",
-            "required": ["schedule_uuid", "device_eui", "kind", "duration_minutes", "timezone"],
+            "required": ["schedule_uuid", "device_eui", "kind", "duration_minutes", "timezone", "enabled"],
             "properties": {
+                "contract_version": {
+                    "type": "integer",
+                    "const": 1,
+                    "description": "Sync event contract version stamped into every emitted sync_outbox payload JSON."
+                },
                 "schedule_uuid": {"$ref": "#/definitions/CanonicalUuid"},
                 "device_eui": {"$ref": "#/definitions/Eui64"},
                 "kind": {"type": "string", "enum": ["WEEKLY", "ONCE"]},
