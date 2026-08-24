@@ -195,4 +195,4 @@ The #171 evidence was one valve showing `Closed` on the tile and `CLOSED + Open 
 - **Spec coverage:** §5 "in scope" maps to Tasks 1, 2, 4, 5; the retirement to Task 3; §6 verification is Task 3 Step 1's gate.
 - **Deliberate omission:** deleting `StregaValveCard` outright. Task 3 removes controls only.
 - **Ordering hazard:** Task 3 must not precede Tasks 1–2. This is stated twice on purpose.
-- **Cross-plan collision:** migration number `0024` is claimed by the Phase B plan. Whichever lands second takes the next number.
+- **Cross-plan collision: GONE.** This plan no longer adds a migration (E2 ruled persist-nothing-new), so `0024` belongs to the Phase B parity plan uncontested.
