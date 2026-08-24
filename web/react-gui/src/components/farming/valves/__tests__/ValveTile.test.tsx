@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 
 import { ValveTile } from '../ValveTile';
 import type { ValveSummary } from '../../../../types/farming';
@@ -16,6 +17,7 @@ const { translateForTest } = vi.hoisted(() => {
     resumeSchedules: 'Resume schedules',
     resendPlan: 'Resend plan',
     settings: 'Settings',
+    service: 'Service',
     unassignedZone: 'Unassigned',
     noSchedule: 'No schedule',
     schedulerPaused: 'Schedules paused',
@@ -28,6 +30,14 @@ const { translateForTest } = vi.hoisted(() => {
     planFailed: '{{count}} downlink(s) not acknowledged in 24 h',
     'format.temperature': '{{value}} °C',
     'format.humidity': '{{value}} % RH',
+    pendingHint: "Waiting for the valve's next contact",
+    closesAt: 'closes ≈ {{time}}',
+    lastContact: 'Last contact {{when}} ago',
+    neverSeen: 'Never seen',
+    deleteMenuItem: 'Delete valve',
+    deleteConfirmTitle: 'Delete this valve?',
+    deleteConfirmBody: 'This removes it from the dashboard. Schedules are not sent again.',
+    deleteConfirmButton: 'Yes, delete',
   };
   return {
     translateForTest: (key: string, options?: Record<string, unknown>): string => {
@@ -71,7 +81,7 @@ function makeValve(overrides: Partial<ValveSummary> = {}): ValveSummary {
   };
 }
 
-function renderTile(overrides: Partial<ValveSummary> = {}) {
+function renderTile(overrides: Partial<ValveSummary> = {}, callbackOverrides: Partial<ComponentProps<typeof ValveTile>> = {}) {
   return render(
     <ValveTile
       valve={makeValve(overrides)}
@@ -84,7 +94,10 @@ function renderTile(overrides: Partial<ValveSummary> = {}) {
       onResume={vi.fn()}
       onResend={vi.fn()}
       onSettings={vi.fn()}
+      onService={vi.fn()}
+      onDelete={vi.fn()}
       busy={false}
+      {...callbackOverrides}
     />,
   );
 }
@@ -173,5 +186,98 @@ describe("ValveTile plan line", () => {
       pushState: { queued: 0, acked: 7, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
     });
     expect(container.textContent).not.toMatch(/downlink|acknowledged/);
+  });
+});
+
+// The five items from osi-os#171's original acceptance criteria, brought onto the daily
+// surface (ValveTile/ValveControlPanel) per the 2026-08-24 consolidation plan Task 2.
+describe('ValveTile #171 disclosures', () => {
+  it('1. shows the device EUI (legacy-only today)', () => {
+    renderTile({ deviceEui: '0016C001F1000042' });
+    expect(screen.getByText('0016C001F1000042')).toBeInTheDocument();
+  });
+
+  it('2. discloses a valve that has never reported instead of rendering it as closed and fine', () => {
+    renderTile({ currentState: 'CLOSED', lastUplinkAt: null, activeActuation: null });
+    expect(screen.getByText('Never seen')).toBeInTheDocument();
+    expect(screen.queryByText('Closed')).not.toBeInTheDocument();
+  });
+
+  it('2b. does not show the never-seen disclosure once a valve has reported', () => {
+    renderTile({ currentState: 'CLOSED', lastUplinkAt: '2026-08-20T10:00:00.000Z' });
+    expect(screen.queryByText('Never seen')).not.toBeInTheDocument();
+    expect(screen.getByText('Closed')).toBeInTheDocument();
+  });
+
+  it('2c. a never-uplinked valve with a pending open still shows the honest pending state, not "never seen"', () => {
+    renderTile({
+      lastUplinkAt: null,
+      activeActuation: {
+        expectationId: 'exp-1',
+        reconciliationState: 'PENDING_OBSERVATION',
+        commandedAt: new Date().toISOString(),
+        expectedCloseAt: new Date(Date.now() + 300_000).toISOString(),
+        durationSeconds: 300,
+        trigger: 'manual',
+      },
+    });
+    expect(screen.getByText('Pending')).toBeInTheDocument();
+    expect(screen.queryByText('Never seen')).not.toBeInTheDocument();
+  });
+
+  it('3. says a commanded-but-unconfirmed open is pending, matching the honesty the legacy card already has', () => {
+    renderTile({
+      activeActuation: {
+        expectationId: 'exp-1',
+        reconciliationState: 'PENDING_OBSERVATION',
+        commandedAt: new Date().toISOString(),
+        expectedCloseAt: new Date(Date.now() + 300_000).toISOString(),
+        durationSeconds: 300,
+        trigger: 'manual',
+      },
+    });
+    expect(screen.getByText('Pending')).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for the valve's next contact/)).toBeInTheDocument();
+  });
+
+  it('4. tapping Open only invokes the onOpen callback -- it never calls an API directly (one tap must not move water)', () => {
+    const onOpen = vi.fn();
+    renderTile({}, { onOpen });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('5. delete is reachable from the overflow menu (not adjacent to the primary Open button)', () => {
+    renderTile();
+    // Open is a top-level button, never inside the "more" menu.
+    expect(screen.getByRole('button', { name: 'Open' }).closest('[role="menu"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete valve' });
+    expect(deleteItem.closest('[role="menu"]')).not.toBeNull();
+  });
+
+  it('5b. delete requires confirmation before calling onDelete -- one tap must not remove the valve', () => {
+    const onDelete = vi.fn();
+    renderTile({}, { onDelete });
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete valve' }));
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Yes, delete' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds a low-prominence Service entry point in the overflow menu, not a primary button', () => {
+    const onService = vi.fn();
+    renderTile({}, { onService });
+
+    expect(screen.queryByRole('button', { name: 'Service' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Service' }));
+    expect(onService).toHaveBeenCalledTimes(1);
   });
 });
