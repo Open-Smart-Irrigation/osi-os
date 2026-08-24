@@ -4,16 +4,20 @@
 
 **Goal:** End the two-surface duplication in osi-os#171 without losing the six advanced STREGA commands, by moving them to a clearly separated service view and giving the daily surface the five things the legacy card does better.
 
-**Architecture:** Frontend-only for Tasks 1–3. A new `ValveServiceDialog` carries the six `stregaAPI` commands; the Valve control panel gains delete, EUI, never-seen and pending disclosures plus an open confirmation; `StregaValveCard`'s control surface is then removed from the daily path. Task 4 (recording the one-shot partial-opening event, if E2 says record it at all) is the only task that touches the edge, and it is **gated on decision E2**.
+**Architecture:** Frontend-only for Tasks 1–3. A new `ValveServiceDialog` carries the six `stregaAPI` commands; the Valve control panel gains delete, EUI, never-seen and pending disclosures plus an open confirmation; `StregaValveCard`'s control surface is then removed from the daily path. Task 4 is a flows-level enrichment of an existing `actuator_log` write — the only task touching the edge, and it needs no migration.
 
 **Tech Stack:** React + TypeScript (`web/react-gui`), existing `stregaAPI` clients, `osi-valve-control` module (Task 4 only), SQLite migration (Task 4 only).
 
-**Spec:** [docs/superpowers/specs/2026-08-24-valve-advanced-controls-consolidation-design.md](../specs/2026-08-24-valve-advanced-controls-consolidation-design.md) — read §4 first. This plan assumes the **recommended** answers: E1=(ii) separate service view, E2=(b) persist commanded value with honest labelling, E3=document the split, E4=**answered, closed**, E5=inherited unchanged.
+**Spec:** [docs/superpowers/specs/2026-08-24-valve-advanced-controls-consolidation-design.md](../specs/2026-08-24-valve-advanced-controls-consolidation-design.md) — read §4 first. **RULED 2026-08-24** (independent review + operator acceptance):
+**E1** service view — **as a subordinate dialog of the panel only**, no independent entry point, rendering no valve state the panel does not provide (the "third surface" objection dissolves only under that condition).
+**E2** **persist nothing new** — the action is already written to `actuator_log`; only the percentage is dropped. Task 4 enriches that one write. No migration, and the `0024` collision disappears.
+**E3** document the split, including the **third** capability source: inference from the device *name*.
+**E4** closed (one-shot, default 100%). **E5** inherited unchanged.
 
 ## Global Constraints
 
 - **E4 is ANSWERED (operator, 2026-08-24): `SET_PARTIAL_OPENING` is a ONE-TIME action and the default opening is always 100%.** Partial opening is therefore safe to ship alongside the scheduler — a scheduled `OPEN_FOR_DURATION` always runs fully open and a 40% flush does not leak into later windows. Build all six commands in Task 1.
-- **That answer changed Task 4's shape.** Because the resting position is always 100%, there is no persistent aperture to store; a `current_aperture` column would model a state that does not exist. Task 4 is now about recording the one-shot *event*, if anything — and "persist nothing" became a defensible option. It stays gated on E2.
+- **E2 ruled: persist nothing new.** Every advanced STREGA command already writes an `actuator_log` row (builder `cdbaa3891d40d7a1` emits `_log_ctx`; node `5c45136f382d501c` inserts it) — it just records `action` as the bare string `SET_PARTIAL_OPENING` and drops the percentage. Task 4 adds the percentage to that existing write. **No migration, no new table.** `valve_actuation_expectations` is the wrong home (it drives a reconciliation state machine expecting a close, which a one-shot position command has none) and `osi-command-ledger` is the wrong home (it is the cloud pending-command pipeline, not a local action journal).
 - **Aperture can never be read back.** Neither decoder reports position; `current_state` is binary. Any aperture the GUI shows is *what was last commanded*, and — since the action is one-shot — describes a past action, not a present position. Copy says "Open once to 40%" / "40% opening sent 14:02"; never "40% open" (an observation we cannot make) and never "Set opening to 40%" (a lasting position the valve does not hold).
 - **Do not delete `StregaValveCard` in this plan.** Task 3 removes its *control* surface from the daily path only. Deleting the component is a separate decision once the service view has proven itself in the field.
 - **Keep the motorized gate and its copy.** `stregaValve.motorizedLocked` ("Set the valve model to motorized to unlock partial opening and flushing commands") is good, discoverable copy — carry it over rather than re-writing it.
@@ -45,6 +49,10 @@ Cover the shape, not the styling:
 //   strega_model is not MOTORIZED, and enabled when it is
 // - each control calls its stregaAPI client exactly once with the typed payload
 // - a failed call surfaces an error and does NOT claim success
+// - the three water-moving actions (partial opening, timed action, flushing)
+//   require a confirmation step; one tap must not move water. Mirrors the rule
+//   Task 2 applies to daily Open — review found Task 1 omitted it, which would
+//   have made the service dialog laxer than the daily surface.
 // - the dialog dismisses via an X in the header (house pattern, see
 //   ValveSettingsDialog) and has no Cancel button
 ```
@@ -138,26 +146,45 @@ The #171 evidence was one valve showing `Closed` on the tile and `CLOSED + Open 
 
 ---
 
-### Task 4: Persist commanded aperture — **BLOCKED on E2 and E4**
+### Task 4: Stop dropping the percentage from the `actuator_log` write
 
-Do not start without a ruling on both. Recorded here so the shape is agreed, not so it gets built by default.
+**Files:**
+- Modify (via one-shot script): both `flows.json` profiles — the STREGA downlink builder `cdbaa3891d40d7a1`, and the insert node `5c45136f382d501c` only if the destination column needs it
 
-**Files (under E2 answer (b), `valve_actuation_expectations` variant):**
-- Create: `database/migrations/ordered/00NN__valve_commanded_aperture.sql`
-- Modify: `osi-valve-control/store.js` + bcm2709 mirror
-- Modify: `ValveServiceDialog.tsx`, `ValveTile.tsx`
+**No migration.** E2 ruled persist-nothing-new: the record already exists and is merely lossy. The builder computes a good label (`'PARTIAL OPEN 40%'`, `'FLUSH 40% -> OPEN'`) and then emits `action` as the bare command string, discarding the number.
 
-- [ ] **Step 1: Record the ruling in the spec before coding.** If E2 chose the cheap `valve_settings` column instead, this task is a different, smaller shape — re-plan it rather than adapting.
-- [ ] **Step 2: Migration** — take the next free number; `0024` is claimed by the Phase B parity plan, so coordinate if both land in the same release.
-- [ ] **Step 3: Write-side** — record the commanded percentage as an event when the command is queued, never on ACK (the ACK confirms receipt, not position). Do not write it to any field that reads as current state.
-- [ ] **Step 4: Read-side** — surface it as *commanded*. A test must assert the copy does not read as an observation.
-- [ ] **Step 5: Mirror to bcm2709, `verify-profile-parity.js`, commit.**
+- [ ] **Step 1: Write the failing test**
+
+```
+// SET_PARTIAL_OPENING at 40% produces a log context carrying the percentage;
+// SET_FLUSHING likewise, including its return position.
+// Assert on the emitted context, NOT on the label string — the label is display
+// text and may be reworded or translated.
+```
+
+- [ ] **Step 2: Run, fail, implement.** Carry `percentage` (and `returnPosition`) in the `_log_ctx`. Check where `actuator_log` can hold it **before** adding anything — if an existing JSON/detail column fits, use it rather than proposing a column.
+
+- [ ] **Step 3: Roundtrip guard, mirror both profiles, gates, commit.**
+
+---
+
+### Task 4b: Decide what an observed partial open looks like to the farmer
+
+**A real interaction review surfaced, not a nicety.** A partial open physically opens the valve, but `write-strega-expectation` classifies `SET_STREGA_PARTIAL_OPENING` as `actuator: false`, so no expectation is written. The observe worker (`osi-valve-control/workers.js:83-118`) then files the resulting OPEN uplink as `trigger='unexplained'` with a 24-hour watch — so a routine service action appears in Recent irrigations as an **unexplained open**, the same label a Bluetooth-opened valve produced on the bench.
+
+- [ ] **Step 1: Choose and record the treatment** — either write an expectation with a service-specific trigger value, or accept `unexplained` and document why.
+- [ ] **Step 2: If a new trigger value is chosen**, round-trip it through the trigger chip's i18n like the existing values, and reconcile with Package A Task 6's `reason` vocabulary if that lands first.
+- [ ] **Step 3: Test that a service action is not counted as irrigation** — a 40% flush must not appear as a watering event.
 
 ---
 
 ### Task 5: Documentation
 
-- [ ] **Step 1: Document the capability-flag split** (spec §3b) wherever device capability is described — `devices.strega_model` governs mechanics (partial opening, flushing); `valve_settings.strega_generation` governs scheduler encoding. Note they are independent and a GEN2 motorized valve is valid.
+- [ ] **Step 1: Document the capability-flag split** (spec §3b) — `devices.strega_model` governs mechanics (partial opening, flushing); `valve_settings.strega_generation` governs scheduler encoding; they are independent and a GEN2 motorized valve is valid.
+
+  Include the **third** source review found: `getRecognizedStregaModel` (`StregaValveCard.tsx:44-51`) infers `MOTORIZED` when the device *name* contains "motor", and `STANDARD` from "solenoid"/"lite"/"standard". Capability is therefore partly derived from a free-text field a user can rename at any time. Document it; do not silently rely on it.
+
+  Record the **merge-direction constraint** D4 creates: `strega_model` already syncs (it is in the device outbox payload and the bootstrap devices query) while `strega_generation` does not — so a future merge must land on a synced surface (`devices`) or wait for `valve_settings` to gain sync columns. Merging "into `valve_settings`" would silently REMOVE valve capability from the cloud.
 - [ ] **Step 2: Send the remaining vendor question** — Phase A §13, whether SV2 firmware can report its scheduler over LoRaWAN after a Bluetooth edit. (E4 is answered: partial opening is one-shot, default 100%.) Also document that answer wherever partial opening is described.
 - [ ] **Step 3: Update #171** with what shipped and what remains.
 
