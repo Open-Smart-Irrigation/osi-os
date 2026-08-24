@@ -65,6 +65,10 @@
                 "UPSERT_DEVICE_SOIL_DEPTHS",
                 "UPDATE_SCHEDULE",
                 "UPSERT_SCHEDULE",
+                "UPSERT_VALVE_SCHEDULE",
+                "DELETE_VALVE_SCHEDULE",
+                "RESEND_VALVE_PLAN",
+                "SET_VALVE_SCHEDULER_STATUS",
                 "WORK_REQUEST_STATUS",
                 "UPSERT_JOURNAL_ENTRY",
                 "VOID_JOURNAL_ENTRY",
@@ -95,7 +99,9 @@
         "base_sync_version": {"type": "integer", "minimum": 0},
         "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocab"},
         "plot": {"$ref": "resources.schema.json#/definitions/JournalPlot"},
-        "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"}
+        "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"},
+        "schedule": {"$ref": "resources.schema.json#/definitions/ValveSchedule"},
+        "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"}
     },
     "allOf": [
         {
@@ -262,6 +268,39 @@
                         "pattern": "^journal_plot_group:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
                     },
                     "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroupCommand"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_VALVE_SCHEDULE"}}},
+            "then": {
+                "required": ["device_eui", "schedule"],
+                "properties": {
+                    "schedule": {"$ref": "resources.schema.json#/definitions/ValveSchedule"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "DELETE_VALVE_SCHEDULE"}}},
+            "then": {
+                "required": ["schedule_uuid"],
+                "properties": {
+                    "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "RESEND_VALVE_PLAN"}}},
+            "then": {
+                "required": ["device_eui"]
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "SET_VALVE_SCHEDULER_STATUS"}}},
+            "then": {
+                "required": ["device_eui", "status"],
+                "properties": {
+                    "status": {"type": "string", "enum": ["ACTIVE", "SKIP_TODAY", "DEACTIVATED"]}
                 }
             }
         }
