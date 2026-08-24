@@ -265,7 +265,16 @@ function assertFrontendValveControls() {
 
 const DURATION_FREE_ACTUATOR_KEYS = ['CLOSE'];
 const ACTUATOR_NAME_PATTERN = /OPEN|VALVE|CLOS|ACTUAT/i;
-const ACTUATOR_PATTERN_FALSE_POSITIVES = ['SET_STREGA_PARTIAL_OPENING'];
+const ACTUATOR_PATTERN_FALSE_POSITIVES = [
+    'SET_STREGA_PARTIAL_OPENING',
+    // Valve *schedule* management (Valve control Phase B) - these mutate valve_schedules /
+    // valve_settings rows and re-compile the on-valve plan; they never themselves open or
+    // close a valve, so they are correctly actuator=false despite "VALVE" in the name.
+    'UPSERT_VALVE_SCHEDULE',
+    'DELETE_VALVE_SCHEDULE',
+    'RESEND_VALVE_PLAN',
+    'SET_VALVE_SCHEDULER_STATUS',
+];
 
 function extractRegistryObject(nodeFunc, constName) {
     const declaration = `const ${constName}`;

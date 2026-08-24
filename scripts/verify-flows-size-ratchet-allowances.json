@@ -1,6 +1,10 @@
 {
   "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
   "node_allowances": {
+    "934bf2bc19a8ce22": {
+      "delta": 250,
+      "reason": "Valve control Phase B Task 3: Route Command dispatches the four cloud valve-schedule commands (UPSERT_VALVE_SCHEDULE, DELETE_VALVE_SCHEDULE, RESEND_VALVE_PLAN, SET_VALVE_SCHEDULER_STATUS) to a new sixth output, wired to a thin Valve Cloud Command Bridge node that delegates to osi-valve-control's applyCloudCommand (+223 exact delta vs origin/main)"
+    },
     "062a0f9bf66d9789": {
       "delta": 850,
       "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)"

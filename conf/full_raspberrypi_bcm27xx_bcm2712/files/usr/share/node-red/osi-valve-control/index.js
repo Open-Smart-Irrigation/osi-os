@@ -5,4 +5,5 @@ const store = require('./store');
 const push = require('./push');
 const api = require('./api');
 const workers = require('./workers');
-module.exports = { ...plan, ...ack, ...api, ...workers, store, push };
+const cloudCommands = require('./cloud-commands');
+module.exports = { ...plan, ...ack, ...api, ...workers, ...cloudCommands, store, push };
