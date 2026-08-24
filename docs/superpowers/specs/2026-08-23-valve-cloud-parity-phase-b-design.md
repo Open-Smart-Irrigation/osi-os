@@ -336,6 +336,27 @@ Note the nearest analogue, `irrigation_schedules`, is **one row per zone**
 (`zone_id` is UNIQUE) whereas `valve_schedules` is **many per device** — so the
 analogue does not transfer cleanly, and copying it blindly would be wrong.
 
+## 9b. Known future direction: shared schedules
+
+**Operator intent, 2026-08-24:** saved schedules are conceptually a plan for the
+whole holding, not a per-valve detail. A fleet-wide *read* view shipped
+immediately (`ValveScheduleOverview`). The larger change — one schedule
+*applied to several valves*, edited once — is deliberately deferred, and the
+cloud side should be designed knowing it is coming.
+
+Why it is not a display change: `valve_schedules.device_eui` is
+`NOT NULL REFERENCES devices(deveui)`, one schedule to one valve. Sharing needs
+a join table and a migration.
+
+**It also reopens a decision already made here.** The server resource id is the
+composite `device_eui|schedule_uuid`, chosen so ownership resolves from the EUI
+prefix and each schedule gets its own watermark slot. A schedule spanning
+several valves has no single `device_eui`, so that key would need rethinking on
+both sides — along with the `EdgeOwnershipService` branch that parses it.
+
+Anyone taking this on should re-read D2 and the resource-key ruling before
+touching the schema, rather than treating it as a GUI feature.
+
 ## 10. Open items
 
 - `verify-sync-op-parity.js` fails on `main` too. Confirm it goes green rather

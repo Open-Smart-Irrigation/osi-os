@@ -1,4 +1,4 @@
-{
+{ "overview": {"title": "Bewässerungsplan — alle Ventile", "subtitle": "Alle gespeicherten Programme über sämtliche Ventile.", "loading": "Wird geladen…", "off": "aus"},
   "title": "Ventilsteuerung",
   "subtitle": "Alle Ventile, alle Zonen. Wochenpläne laufen auf dem Ventil selbst.",
   "empty": "Noch keine STREGA-Ventile registriert.",
