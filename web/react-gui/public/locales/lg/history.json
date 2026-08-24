@@ -199,7 +199,7 @@
       "emptyTitle": "No irrigation events",
       "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
       "eventsCount": "{{count}} events",
-      "eventLabel": {
+      "eventLabel": { "serviceAction": "Omulimu gw’obuweereza",
         "irrigation": "Irrigation event",
         "scheduled": "Okufukirira okusinziira ku ssensa",
         "manualOverride": "Manual override",
