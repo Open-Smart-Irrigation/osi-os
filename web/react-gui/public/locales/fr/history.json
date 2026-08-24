@@ -200,7 +200,7 @@
       "emptyTitle": "Aucun événement d'irrigation",
       "emptyBody": "Les irrigations et les fenêtres de réponse apparaîtront ici dès que des données d'historique seront disponibles.",
       "eventsCount": "Événements : {{count}}",
-      "eventLabel": {
+      "eventLabel": { "serviceAction": "Intervention de service",
         "irrigation": "Événement d'irrigation",
         "scheduled": "Irrigation déclenchée par capteur",
         "manualOverride": "Commande manuelle",

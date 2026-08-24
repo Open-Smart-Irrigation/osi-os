@@ -1508,6 +1508,7 @@ export type IrrigationTrigger =
   | 'trigger_based'
   | 'one_time'
   | 'on_valve_schedule'
+  | 'service_action'
   | 'unexplained';
 
 export interface IrrigationActuation {

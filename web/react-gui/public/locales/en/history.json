@@ -215,7 +215,7 @@
       "emptyTitle": "No irrigation events",
       "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
       "eventsCount": "{{count}} events",
-      "eventLabel": {
+      "eventLabel": { "serviceAction": "Service action",
         "irrigation": "Irrigation event",
         "scheduled": "Trigger-based irrigation",
         "manualOverride": "Manual override",

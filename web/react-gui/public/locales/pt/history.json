@@ -199,7 +199,7 @@
       "emptyTitle": "No irrigation events",
       "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
       "eventsCount": "{{count}} events",
-      "eventLabel": {
+      "eventLabel": { "serviceAction": "Ação de serviço",
         "irrigation": "Irrigation event",
         "scheduled": "Irrigação acionada por sensor",
         "manualOverride": "Manual override",

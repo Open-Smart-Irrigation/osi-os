@@ -169,6 +169,11 @@ function triggerEventLabelKey(trigger: unknown): string | null {
       return 'history.irrigationTimeline.eventLabel.oneTime';
     case 'unexplained':
       return 'history.irrigationTimeline.eventLabel.unexplained';
+    // Without this case a service action falls through to the clue-based
+    // heuristics below and gets labelled "Scheduled" — actively wrong for a
+    // manual maintenance flush.
+    case 'service_action':
+      return 'history.irrigationTimeline.eventLabel.serviceAction';
     case 'trigger_based':
       return 'history.irrigationTimeline.eventLabel.scheduled';
     default:
