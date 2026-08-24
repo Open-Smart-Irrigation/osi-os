@@ -4,7 +4,7 @@
 reviewer rules on *decisions*, not on prose, and so the questions arrive with the
 evidence already attached.
 
-**What is being asked:** rule on the ten decisions in §3. Not "is this a good
+**What is being asked:** rule on the nine open decisions in §3 (E4 has since been answered by the operator and is closed). Not "is this a good
 plan" — specifically, for each decision, which option, and what would change your
 answer. Where you disagree with a recommendation, say what evidence would be
 needed to settle it rather than substituting a preference.
@@ -93,8 +93,12 @@ per-schedule (`schedule_uuid`) or per-zone. The obvious analogue misleads —
 - **E3** Reconcile the two capability flags or document the split? *(rec:
   document now, merge later — **interacts with D4**, since moving anything to
   `valve_settings` means it does not reach the cloud)*
-- **E4** What aperture does a *scheduled* open use? *(rec: **treat as a blocking
-  unknown** — this is a vendor question, not ours to decide)*
+- **E4** ~~What aperture does a scheduled open use?~~ **ANSWERED by the operator
+  2026-08-24 — not for review.** `SET_PARTIAL_OPENING` is a ONE-TIME action and
+  the default opening is always 100%, so a scheduled open always runs fully open
+  and a 40% flush does not leak into later windows. **This answer reshapes E2**
+  (see above): with no persistent position, "persist nothing" became a
+  defensible option and any stored value must be an event, not state.
 - **E5** The five items #171 already lists *(not in question; inherited)*
 
 **Two hard constraints for Package B**, established by reading the code:
@@ -117,10 +121,10 @@ Offered as the author's own read of the weakest points, not as a defence:
   option that makes "link an existing gateway" correct, but it collides with a
   server that terminally dead-letters unknown-owner events. If the ordering
   guarantee cannot be made, the recommendation may be wrong.
-- **E4 blocking partial opening.** Treating a vendor unknown as a blocker is
-  either prudent or an excuse to defer; the reviewer should decide which. Note
-  the risk is concrete: a 40% flush silently irrigating every later scheduled
-  window at 40%.
+- **E2 after E4's answer.** The recommendation was rewritten once already when
+  E4 came back one-shot. A recommendation that moves that much under one new
+  fact deserves suspicion — in particular, whether persisting the event at all
+  earns its keep, or whether the honest answer is now "persist nothing".
 - **D1's consistency argument.** "Follow the existing pattern" is doing a lot of
   work in a codebase where that pattern has just been measured as expensive. The
   counter — that schedule volume is nothing like telemetry volume — is sound but

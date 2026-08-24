@@ -12,7 +12,8 @@
 
 ## Global Constraints
 
-- **Task 4 and the partial-opening parts of Task 1 are BLOCKED on E4**, a vendor question: is `SET_PARTIAL_OPENING` a persistent position or a one-shot action? If persistent, a 40% flush silently irrigates every later scheduled window at 40%. **Do not ship partial opening until this is answered.** The other five commands are unaffected — build them.
+- **E4 is ANSWERED (operator, 2026-08-24): `SET_PARTIAL_OPENING` is a ONE-TIME action and the default opening is always 100%.** Partial opening is therefore safe to ship alongside the scheduler — a scheduled `OPEN_FOR_DURATION` always runs fully open and a 40% flush does not leak into later windows. Build all six commands in Task 1.
+- **That answer changed Task 4's shape.** Because the resting position is always 100%, there is no persistent aperture to store; a `current_aperture` column would model a state that does not exist. Task 4 is now about recording the one-shot *event*, if anything — and "persist nothing" became a defensible option. It stays gated on E2.
 - **Aperture can never be read back.** Neither decoder reports position; `current_state` is binary. Any aperture the GUI shows is *what we last commanded*. Copy must say "set to 40%", never "40% open". Rendering a commanded value as an observation violates the repo's missing-data rule.
 - **Do not delete `StregaValveCard` in this plan.** Task 3 removes its *control* surface from the daily path only. Deleting the component is a separate decision once the service view has proven itself in the field.
 - **Keep the motorized gate and its copy.** `stregaValve.motorizedLocked` ("Set the valve model to motorized to unlock partial opening and flushing commands") is good, discoverable copy — carry it over rather than re-writing it.
@@ -54,7 +55,12 @@ Cover the shape, not the styling:
 
 Copy `ValveSettingsDialog.tsx` as the structural template — header with `×` and `aria-label={tc('close')}`, footer with the action alone, 44 px targets, `var(--…)` tokens only. Group the controls so the destructive-ish ones are visually separate from the informational ones.
 
-**Omit partial opening and flushing entirely if E4 is unanswered** — build the other four, and leave a single `TODO(E4)` comment naming the blocking question. Do not ship a disabled-forever control.
+Build all six. E4 is answered, so partial opening carries no scheduler
+interaction risk. Keep the motorized gate on partial opening and flushing.
+
+The copy must not imply a lasting position: this is a one-shot action and the
+valve returns to 100%. "Open once to 40%" is honest; "Set opening to 40%" is
+not.
 
 - [ ] **Step 4: Add locale keys to all seven locales**
 
@@ -143,7 +149,7 @@ Do not start without a ruling on both. Recorded here so the shape is agreed, not
 
 - [ ] **Step 1: Record the ruling in the spec before coding.** If E2 chose the cheap `valve_settings` column instead, this task is a different, smaller shape — re-plan it rather than adapting.
 - [ ] **Step 2: Migration** — take the next free number; `0024` is claimed by the Phase B parity plan, so coordinate if both land in the same release.
-- [ ] **Step 3: Write-side** — record the commanded percentage when the command is queued, never on ACK (the ACK confirms receipt, not position).
+- [ ] **Step 3: Write-side** — record the commanded percentage as an event when the command is queued, never on ACK (the ACK confirms receipt, not position). Do not write it to any field that reads as current state.
 - [ ] **Step 4: Read-side** — surface it as *commanded*. A test must assert the copy does not read as an observation.
 - [ ] **Step 5: Mirror to bcm2709, `verify-profile-parity.js`, commit.**
 
@@ -152,7 +158,7 @@ Do not start without a ruling on both. Recorded here so the shape is agreed, not
 ### Task 5: Documentation
 
 - [ ] **Step 1: Document the capability-flag split** (spec §3b) wherever device capability is described — `devices.strega_model` governs mechanics (partial opening, flushing); `valve_settings.strega_generation` governs scheduler encoding. Note they are independent and a GEN2 motorized valve is valid.
-- [ ] **Step 2: Send the vendor questions as one message** — E4 (is `SET_PARTIAL_OPENING` persistent or one-shot?) plus the Phase A §13 question about SV2 scheduler read-back.
+- [ ] **Step 2: Send the remaining vendor question** — Phase A §13, whether SV2 firmware can report its scheduler over LoRaWAN after a Bluetooth edit. (E4 is answered: partial opening is one-shot, default 100%.) Also document that answer wherever partial opening is described.
 - [ ] **Step 3: Update #171** with what shipped and what remains.
 
 ---

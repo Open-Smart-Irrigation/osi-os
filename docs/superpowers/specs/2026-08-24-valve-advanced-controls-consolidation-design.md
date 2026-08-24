@@ -107,14 +107,20 @@ shows no aperture at all; (b) persist the **commanded** value with explicit
 "commanded, not confirmed" framing; (c) persist and attempt read-back, which
 requires vendor support that does not exist today.
 
-**Recommendation: (b)**, with the label doing real work — "set to 40%" rather
-than "40% open". A control whose effect the GUI cannot read back at all is worse
-than one that admits what it knows.
+**Recommendation: (b) as an EVENT, not as state** — revised after E4 was
+answered. Since the resting position is always 100% and the action is one-shot,
+a `valve_settings.current_aperture` column would model a state that does not
+exist and would be wrong the moment the next scheduled window ran. Record the
+commanded action with its percentage and timestamp instead, and label it as an
+action that happened ("40% partial opening sent 14:02"), not a position the
+valve is holding.
 
-**Open question for the reviewer:** should this reuse the existing
-`valve_actuation_expectations` machinery (which already models "commanded vs
-observed" and is where a percentage would naturally hang), or a simple column on
-`valve_settings`? The former is the honest shape; the latter is far cheaper.
+**Open question for the reviewer:** where does that event belong — the existing
+`osi-command-ledger`, a `valve_actuation_expectations` row (which already models
+commanded-vs-observed and is where a percentage would naturally hang), or
+nowhere at all, on the grounds that a one-shot service action with no read-back
+may not be worth persisting? Option (a) — persist nothing — is more defensible
+under E4's answer than it was before it.
 
 **If wrong:** we either ship a control with no feedback at all, or build
 reconciliation for a value the hardware will never confirm.
@@ -134,21 +140,29 @@ cloud. **These two decisions interact and should be ruled on together.**
 (generation = encoding, model = mechanics), and merging is a migration that
 should not ride along with a GUI consolidation.
 
-### E4 — What aperture does a *scheduled* open use?
+### E4 — What aperture does a *scheduled* open use? — **RESOLVED, not open**
 
-Unresolved and, as far as the code shows, never considered. A weekly schedule
-compiles to `OPEN_FOR_DURATION`, which carries minutes and no percentage. If a
-motorized valve was last set to 40%, does the scheduled open run at 40% or 100%?
+**Answered by the operator, 2026-08-24: `SET_PARTIAL_OPENING` is a ONE-TIME
+action. The default opening is always 100%.**
 
-That depends on STREGA firmware semantics we do not have documented: whether
-`SET_PARTIAL_OPENING` sets a persistent position or a one-shot action. **This is
-a question for the vendor, not a design choice we can make.** Until it is
-answered, shipping partial opening alongside the scheduler risks a farmer
-setting 40% for a flush and silently irrigating every subsequent scheduled
-window at 40%.
+So a scheduled `OPEN_FOR_DURATION` always runs fully open, and a 40% flush does
+not leak into any later window. The risk that made this a blocker — a farmer
+setting 40% once and silently under-irrigating every subsequent scheduled run —
+does not exist. **Partial opening is safe to ship alongside the scheduler**, and
+this decision needs no review.
 
-**Recommendation: treat this as a blocking unknown** for partial opening
-specifically. The other five commands are unaffected.
+**But the answer reshapes E2, which the reviewer must still rule on.** If the
+action is one-shot and the resting position is always 100%, then "what aperture
+is this valve at?" has no persistent answer to store: between actions it is
+always 100% by definition. Persisting a *current aperture* field would therefore
+model something that does not exist, and would go stale the moment the next
+scheduled window runs.
+
+What may still be worth recording is the **event** — "a 40% partial opening was
+commanded at 14:02" — which is history, not state. Note the repo already has a
+command ledger (`osi-command-ledger`) and `valve_actuation_expectations` for
+exactly this commanded-action shape. E2's framing below predates this answer and
+should be read through it.
 
 ### E5 — The five items #171 already lists
 
@@ -163,8 +177,8 @@ with honest labelling; the five #171 items on the daily surface; documentation
 of the capability-flag split.
 
 **Out:** merging `strega_model` into `valve_settings` (E3, later); read-back of
-actual position (needs vendor support); partial opening itself if E4 stays
-unanswered.
+actual position (needs vendor support, and is moot for a one-shot action);
+any persistent "current aperture" field (E4's answer rules it out).
 
 ## 6. Verification
 
@@ -182,10 +196,9 @@ unanswered.
 
 ## 7. Open items
 
-- **E4 is a vendor question.** Someone has to ask STREGA whether
-  `SET_PARTIAL_OPENING` is persistent or one-shot. Phase A's spec §13 already
-  carries a similar open question about SV2 scheduler read-back; these should go
-  in the same message.
+- Phase A's spec §13 still carries an open question about SV2 scheduler
+  read-back over LoRaWAN. E4 is answered, so that one travels to the vendor
+  alone.
 - Whether the T-Valve and UC512 (see `project_upcoming_valve_devices`) share
   this surface or need their own. The T-Valve is genuinely positional, so E2's
   answer will be load-bearing for it in a way it is not for STREGA.
