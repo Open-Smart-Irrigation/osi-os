@@ -77,6 +77,48 @@ test('runObserveTick: OPEN outside any window -> unexplained with 0 duration', a
   assert.deepEqual({ ...e }, { trigger: 'unexplained', commanded_duration_seconds: 0 });
 });
 
+test('runObserveTick (Task 4b): OPEN preceded by a recent SET_PARTIAL_OPENING service command -> service_action, not unexplained', async () => {
+  const { db } = await tempDb();
+  // Task 4's actuator_log write composes 'SET_PARTIAL_OPENING <pct>%' - assert the classifier
+  // matches on the stable command prefix, not the percentage suffix.
+  await db.run("INSERT INTO actuator_log(deveui, action, created_at) VALUES ('0016C001F1000001','SET_PARTIAL_OPENING 40%','2026-08-19T14:58:00.000Z')");
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T15:00:00.000Z')");
+  await W.runObserveTick({ db, now: new Date('2026-08-19T15:00:30Z'), warn: () => {} });
+  const e = await db.get("SELECT trigger, commanded_duration_seconds FROM valve_actuation_expectations WHERE device_eui='0016C001F1000001'");
+  assert.deepEqual({ ...e }, { trigger: 'service_action', commanded_duration_seconds: 0 });
+});
+
+test('runObserveTick (Task 4b): OPEN preceded by a recent SET_FLUSHING service command -> service_action', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO actuator_log(deveui, action, created_at) VALUES ('0016C001F1000001','SET_FLUSHING 40% -> OPEN','2026-08-19T14:59:00.000Z')");
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T15:00:00.000Z')");
+  await W.runObserveTick({ db, now: new Date('2026-08-19T15:00:30Z'), warn: () => {} });
+  const e = await db.get("SELECT trigger FROM valve_actuation_expectations WHERE device_eui='0016C001F1000001'");
+  assert.equal(e.trigger, 'service_action');
+});
+
+test('runObserveTick (Task 4b): a service command older than the 24h lookback does not explain a fresh open', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO actuator_log(deveui, action, created_at) VALUES ('0016C001F1000001','SET_PARTIAL_OPENING 40%','2026-08-18T14:00:00.000Z')");
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T15:00:00.000Z')");
+  await W.runObserveTick({ db, now: new Date('2026-08-19T15:00:30Z'), warn: () => {} });
+  const e = await db.get("SELECT trigger FROM valve_actuation_expectations WHERE device_eui='0016C001F1000001'");
+  assert.equal(e.trigger, 'unexplained');
+});
+
+test('runObserveTick (Task 4b): an unrelated actuator_log action (e.g. OPEN_FOR_DURATION) does not count as a service command', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO actuator_log(deveui, action, created_at) VALUES ('0016C001F1000001','OPEN_FOR_DURATION','2026-08-19T14:59:00.000Z')");
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T15:00:00.000Z')");
+  await W.runObserveTick({ db, now: new Date('2026-08-19T15:00:30Z'), warn: () => {} });
+  const e = await db.get("SELECT trigger FROM valve_actuation_expectations WHERE device_eui='0016C001F1000001'");
+  assert.equal(e.trigger, 'unexplained');
+});
+
 test('runObserveTick (I1): a STALE_OPEN_OBSERVED expectation still blocks a duplicate unexplained row', async () => {
   const { db } = await tempDb();
   await db.run("INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) VALUES ('stale1','0016C001F1000001','2026-08-19T04:00:00.000Z',1800,'2026-08-19T04:30:00.000Z','unknown','STALE_OPEN_OBSERVED','on_valve_schedule','2026-08-19T04:00:00.000Z')");

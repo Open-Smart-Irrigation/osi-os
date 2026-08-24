@@ -9,6 +9,16 @@ const ONCE_GRACE_MS = 10 * 60 * 1000;
 const STALE_PUSH_MS = 24 * 3600 * 1000;
 const CLOCK_PERIOD_MS = 7 * 86400000;
 const DOWNLINK_LATENCY_BUDGET_SEC = 120;
+// (Valve advanced controls consolidation, Task 4b) a SET_PARTIAL_OPENING/SET_FLUSHING
+// command is one-shot with no auto-close (E4) and write-strega-expectation deliberately
+// does not write an expectation for it (actuator: false, config-class command) - so an
+// OPEN uplink that follows one looks identical, at the observe tick, to a Bluetooth-opened
+// valve. runObserveTick disambiguates by consulting actuator_log (Task 4 now carries the
+// percentage there) for a recent service command on the same deveui before crediting
+// 'unexplained'. 24h matches the same watch horizon already used for a genuinely
+// unexplained open (see expectedClose below) - a service command older than that is
+// treated as stale and no longer explains a fresh open.
+const SERVICE_ACTION_LOOKBACK_MS = 24 * 3600 * 1000;
 
 async function handleUplink({ db, deviceEui, decoded, fPort, rawBytes, receivedAt, warn }) {
   const { acks, generationHint } = interpretUplink(decoded, fPort, rawBytes || null);
@@ -111,7 +121,20 @@ async function runObserveTick({ db, now, warn }) {
       volumeSource = flowRate != null ? 'estimated_duration_flow_rate' : 'unknown';
       if (flowRate != null) liters = Math.round(flowRate * durationSec / 60);
     } else {
-      commandedAt = new Date(uplinkMs); durationSec = 0; expectedClose = new Date(uplinkMs + 86400000); trigger = 'unexplained'; volumeSource = 'unknown';
+      commandedAt = new Date(uplinkMs); durationSec = 0; expectedClose = new Date(uplinkMs + 86400000); volumeSource = 'unknown';
+      // (Task 4b) Not inside a schedule window - before defaulting to 'unexplained', check
+      // whether the last thing we told this valve to do was a partial-opening/flushing
+      // service command (Task 4 makes these greppable by a stable action-column prefix
+      // regardless of the percentage suffix). If so this is an explained service action,
+      // not a mystery open, even though - like 'unexplained' - we still have no expected
+      // close time for it (SET_PARTIAL_OPENING/SET_FLUSHING are one-shot with no auto-close,
+      // E4).
+      const recentServiceLog = await db.get(
+        "SELECT created_at FROM actuator_log WHERE UPPER(deveui) = UPPER(?) AND (action LIKE 'SET_PARTIAL_OPENING%' OR action LIKE 'SET_FLUSHING%') AND created_at <= ? ORDER BY created_at DESC LIMIT 1",
+        [d.deveui, d.last_uplink_at]
+      );
+      const serviceLogMs = recentServiceLog ? Date.parse(recentServiceLog.created_at) : NaN;
+      trigger = (Number.isFinite(serviceLogMs) && uplinkMs - serviceLogMs <= SERVICE_ACTION_LOOKBACK_MS) ? 'service_action' : 'unexplained';
     }
     await db.run(`INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, command_id, effect_key, commanded_at, commanded_duration_seconds, expected_close_at, flow_rate_lpm, flow_rate_source, estimated_gross_liters, volume_source, observed_open_at, reconciliation_state, created_at, trigger)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
