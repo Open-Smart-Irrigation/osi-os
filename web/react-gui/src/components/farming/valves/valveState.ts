@@ -11,7 +11,14 @@ export interface ValveGlyph {
 
 export function deriveValveGlyphState(v: ValveSummary, nowMs: number): ValveGlyph {
   const a = v.activeActuation;
-  const failed = (v.recentStaleState !== null && v.recentStaleState.startsWith('STALE_')) || v.pushState.failed > 0;
+  // A STALE_* reconciliation state is the valve contradicting itself — it reported open,
+  // then stopped explaining itself. That is malfunction and earns the red badge.
+  //
+  // An unacknowledged plan downlink is NOT: the valve is fine, some of the plan just has
+  // not landed yet, and the fix is a tap on Resend. Driving the alarm state off it turned
+  // one stale bookkeeping row into a headline "Attention" on a healthy valve — which is
+  // exactly the kind of false alarm that teaches a farmer to ignore real ones.
+  const failed = v.recentStaleState !== null && v.recentStaleState.startsWith('STALE_');
   if (a && a.reconciliationState === 'PENDING_OBSERVATION') {
     return { state: 'pending', remainingSeconds: null, progress: null, closesAt: a.durationSeconds ? a.expectedCloseAt : null };
   }

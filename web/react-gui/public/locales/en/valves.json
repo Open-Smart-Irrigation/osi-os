@@ -27,7 +27,7 @@
   "noSchedule": "No schedule",
   "schedulerPaused": "Schedules paused",
   "skippedToday": "Skipped today",
-  "planFailed": "{{count}} downlink(s) not acknowledged in 24 h",
+  "planIncomplete": "Not yet confirmed on the valve for {{count}} day(s) — resend the plan",
   "lastSent": "Last sent {{when}}",
   "actionFailed": "The action could not be completed.",
   "lastContact": "Last contact {{when}} ago",
