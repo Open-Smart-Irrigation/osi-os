@@ -1,4 +1,4 @@
-{
+{ "overview": {"title": "Irrigation plan — all valves", "subtitle": "Every saved schedule across your valves.", "loading": "Loading…", "off": "off"},
   "title": "Valve control",
   "subtitle": "All valves, all zones. Weekly plans run on the valve itself.",
   "empty": "No STREGA valves registered yet.",

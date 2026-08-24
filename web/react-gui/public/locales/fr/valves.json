@@ -1,4 +1,4 @@
-{
+{ "overview": {"title": "Programme d’irrigation — toutes les vannes", "subtitle": "Tous les programmes enregistrés, pour l’ensemble de vos vannes.", "loading": "Chargement…", "off": "désactivé"},
   "title": "Commande des vannes",
   "subtitle": "Toutes les vannes, toutes les zones. Les programmes hebdomadaires tournent sur la vanne elle-même.",
   "empty": "Aucune vanne STREGA enregistrée pour l'instant.",

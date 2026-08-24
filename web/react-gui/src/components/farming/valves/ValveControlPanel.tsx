@@ -7,6 +7,7 @@ import { deriveValveGlyphState } from './valveState';
 import { ValveTile } from './ValveTile';
 import { ValveOpenDialog } from './ValveOpenDialog';
 import { ValveScheduleDialog } from './ValveScheduleDialog';
+import { ValveScheduleOverview } from './ValveScheduleOverview';
 import { ValveSettingsDialog } from './ValveSettingsDialog';
 import { ValveServiceDialog } from './ValveServiceDialog';
 
@@ -181,6 +182,16 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }
             />
           ))}
         </div>
+      )}
+
+      {/* Saved schedules are a plan for the whole holding, not a per-valve detail: the farmer
+          should see every valve's programme at once rather than opening each tile in turn.
+          Rows deep-link into the per-valve dialog for editing. */}
+      {valves && valves.length > 0 && (
+        <ValveScheduleOverview
+          valves={valves}
+          onOpenValve={(valve) => { setDialogEui(valve.deviceEui); setDialogKind('schedule'); }}
+        />
       )}
 
       {dialogs}
