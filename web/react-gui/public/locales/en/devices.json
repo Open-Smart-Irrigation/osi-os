@@ -107,7 +107,7 @@
       "open": "OPEN",
       "openClosesAt": "OPEN — closes at {{time}}",
       "openQueued": "Open queued",
-      "waitingForUplink": "waiting for valve uplink (≈ {{minutes}} min)"
+      "waitingForUplink": "waiting for the valve to report (≈ {{minutes}} min)"
     }
   },
   "zone": {

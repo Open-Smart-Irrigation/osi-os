@@ -78,7 +78,7 @@
       "open": "ABERTO",
       "openClosesAt": "ABERTO — fecha às {{time}}",
       "openQueued": "Abertura enfileirada",
-      "waitingForUplink": "aguardando uplink da válvula (≈ {{minutes}} min)"
+      "waitingForUplink": "à espera do reporte da válvula (≈ {{minutes}} min)"
     }
   },
   "zone": {

@@ -41,7 +41,7 @@
       "comparisonMode": "Comparación",
       "addPanel": "Añadir panel {{title}}",
       "removePanel": "Quitar panel",
-      "panelLimitWarning": "Solo se pueden mostrar {{count}} paneles de comparación en esta pasarela edge.",
+      "panelLimitWarning": "Solo se pueden mostrar {{count}} paneles de comparación a la vez.",
       "selectedTimestampNone": "Ninguna marca de tiempo seleccionada",
       "selectedTimestamp": "Marca de tiempo seleccionada: {{timestamp}}",
       "inspectorTitle": "Inspector",
@@ -117,7 +117,7 @@
       "timelineBrush": "Timeline viewport",
       "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
+      "placeholderBody": "Los gráficos y el calendario aparecerán aquí cuando esta tarjeta tenga lecturas.",
       "cardDataLoading": "Loading card data...",
       "cardDataError": "Card data failed to load: {{message}}",
       "cardDataUnknownError": "Unknown error"

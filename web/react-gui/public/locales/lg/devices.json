@@ -78,7 +78,7 @@
       "open": "GGULE",
       "openClosesAt": "GGULE — ejja kuggalwa ku {{time}}",
       "openQueued": "Okuggulawo kulindiridde",
-      "waitingForUplink": "tukulindirira obubaka bwa valve (≈ {{minutes}} min)"
+      "waitingForUplink": "nkulinda bbomba okuwa alipoota (≈ {{minutes}} min)"
     }
   },
   "zone": {
