@@ -16,28 +16,23 @@ export function valveGlyphLabel(state: ValveGlyphState, t: Translate): string {
   return t(`state.${state}`);
 }
 
-// Design tokens: `--text-muted` does not exist in the token set (see index.css); the closest
-// existing token for de-emphasized strokes is `--text-tertiary`, used the same way elsewhere
-// (StregaValveCard, IrrigationOutcomesPanel).
-const MUTED_STROKE = 'var(--text-tertiary)';
-const PENDING_STROKE = '#b45309';
-const FAILED_ACCENT = '#dc2626';
-// (#160) The open state must follow the APP theme, not the OS one. The previous
-// `text-blue-600 dark:text-blue-400` pair keyed off Tailwind's `dark:` variant, which tracks
-// the OS/`dark` class rather than `html[data-theme]`, so the glyph rendered the wrong colour
-// whenever the two disagreed. `--primary` is defined for both themes in index.css.
-const OPEN_ACCENT = 'var(--primary)';
+// Geometry from the OSI OS valve-state icon package v2 (`OSI_OS_valve_icons_v2`), whose body
+// paths derive from Google's Material Symbols Rounded `valve` glyph (Apache-2.0 — see
+// docs/THIRD_PARTY_NOTICES.md). The package's viewBox is Material's `0 -960 960 1000`, kept
+// verbatim so the donated paths are not re-scaled by hand: transcription errors in a 700-char
+// path are invisible in review and show up as a subtly broken icon.
+const VIEW_BOX = '0 -960 960 1000';
+const OUTLINE_PATH = 'M440-760H320q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760H520v80q0 17-11.5 28.5T480-640q-17 0-28.5-11.5T440-680v-80ZM160-159v-242q0-17 11.5-28.5T200-441q17 0 28.5 11.5T240-401v1h120v-120h-1q-17 0-28.5-11.5T319-560q0-17 11.5-28.5T359-600h242q17 0 28.5 11.5T641-560q0 17-11.5 28.5T601-520h-1v120h120v-1q0-17 11.5-28.5T760-441q17 0 28.5 11.5T800-401v242q0 17-11.5 28.5T760-119q-17 0-28.5-11.5T720-159v-1H240v1q0 17-11.5 28.5T200-119q-17 0-28.5-11.5T160-159Zm80-81h480v-80H520v-200h-80v200H240v80Zm240 0Z';
+const FILLED_PATH = 'M440-760H320q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760H520v80q0 17-11.5 28.5T480-640q-17 0-28.5-11.5T440-680v-80ZM160-159v-242q0-17 11.5-28.5T200-441q17 0 28.5 11.5T240-401v1h120v-120h-1q-17 0-28.5-11.5T319-560q0-17 11.5-28.5T359-600h242q17 0 28.5 11.5T641-560q0 17-11.5 28.5T601-520h-1v120h120v-1q0-17 11.5-28.5T760-441q17 0 28.5 11.5T800-401v242q0 17-11.5 28.5T760-119q-17 0-28.5-11.5T720-159v-1H240v1q0 17-11.5 28.5T200-119q-17 0-28.5-11.5T160-159Z';
+const WATER_PATH = 'M790 -286 C842 -286 858 -252 851 -216 C844 -179 883 -151 880 -62';
 
-const RING_RADIUS = 27;
+// Countdown ring, sized in the same 960 space: r=470 about (480,-470) clears the body
+// (x 160..800, y -840..-119) without leaving the viewBox.
+const RING_RADIUS = 470;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-// A single teardrop, apex up, bulb centred at (32,34) with r=14 so it sits inside the
-// progress ring (r=27 about (32,32)). State is carried by FILL rather than by geometry:
-// at tile size the old gate-valve schematic's 1.4px wheel/stem detail was the first thing
-// to disappear (#160), so the shape stays constant and only the fill/stroke change.
-const DROPLET_PATH = 'M32 6C39 19 46 26 46 34a14 14 0 1 1-28 0c0-8 7-15 14-28Z';
-// The falling drip, drawn small and reused three times below the bulb.
-const DRIP_PATH = 'M0 0c-2.1 2.5-3.3 4.4-3.3 6a3.3 3.3 0 1 0 6.6 0C3.3 4.4 2.1 2.5 0 0Z';
+const BADGE_TRANSFORM = 'translate(770, -800)';
+const BADGE_RADIUS = 140;
 
 export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 48, reducedMotion = false }) => {
   const isOpen = state === 'open';
@@ -45,88 +40,93 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
   const isClosing = state === 'closing';
   const isFailed = state === 'failed';
 
-  const stroke = isOpen ? OPEN_ACCENT : MUTED_STROKE;
-  const dashArray = isPending ? '5 4' : undefined;
+  // The valve body is filled only when water is actually moving through it. `pending` is a
+  // command the valve has not confirmed and `failed` is a plan it never took, so both keep the
+  // hollow outline — the package README makes the same point: an unacknowledged command must
+  // not look like a running valve.
+  const bodyFilled = isOpen || isClosing;
+
+  // Water is drawn for `closing` too, but frozen: the valve is still reporting open, so showing
+  // a dry outlet would be a lie, while animating it would suggest a run that is already over.
+  const showWater = isOpen || isClosing;
+  const animateWater = isOpen && !reducedMotion;
 
   const showRing = progress !== null;
   const clampedProgress = showRing ? Math.max(0, Math.min(1, progress as number)) : 0;
   const ringOffset = RING_CIRCUMFERENCE * (1 - clampedProgress);
 
-  const animateDroplets = isOpen && !reducedMotion;
+  const stateClass = `valve-glyph--${state}`;
+  const motionClass = animateWater ? '' : 'valve-glyph--static';
 
   return (
     <span
-      className="relative inline-flex shrink-0 items-center justify-center"
-      style={{ width: size, height: size, color: isOpen ? OPEN_ACCENT : MUTED_STROKE }}
+      className={`valve-glyph ${stateClass} ${motionClass} relative inline-flex shrink-0 items-center justify-center`.trim()}
+      style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <svg viewBox="0 0 64 64" width={size} height={size} className="overflow-visible">
+      <svg viewBox={VIEW_BOX} width={size} height={size} className="valve-glyph__svg overflow-visible">
         {showRing && (
           <circle
-            cx="32"
-            cy="32"
+            className="valve-glyph__ring"
+            cx="480"
+            cy="-470"
             r={RING_RADIUS}
             fill="none"
-            stroke={isFailed ? FAILED_ACCENT : 'currentColor'}
-            strokeWidth="2.5"
+            strokeWidth="38"
             strokeLinecap="round"
             strokeDasharray={RING_CIRCUMFERENCE}
             strokeDashoffset={ringOffset}
-            transform="rotate(-90 32 32)"
-            opacity={0.55}
+            transform="rotate(-90 480 -470)"
           />
         )}
 
-        {/* The droplet itself: solid when water is flowing, hollow when it is not. */}
-        <path
-          d={DROPLET_PATH}
-          fill={isOpen ? 'currentColor' : 'none'}
-          stroke={stroke}
-          strokeWidth="3"
-          strokeLinejoin="round"
-          strokeDasharray={dashArray}
-        />
-
-        {/* Droplets falling from the bulb. The per-droplet x/y offset lives on this wrapping
-            <g> — the CSS keyframes below set the inner <path>'s `transform` (translateY) while
-            animating, and a CSS transform completely replaces an SVG transform *attribute*
-            rather than composing with it, so the offset must not sit on the animated node
-            itself or all droplets collapse to the same x position while dripping. */}
-        {isOpen && [0, 1, 2].map((i) => (
-          <g key={i} transform={`translate(${32 + (i - 1) * 9}, ${52 + (i === 1 ? 3 : 0)})`}>
-            <path
-              d={DRIP_PATH}
-              fill="currentColor"
-              opacity={animateDroplets ? undefined : 0.85}
-              className={animateDroplets ? 'valve-drip' : undefined}
-              style={animateDroplets ? { animationDelay: `${i * 0.35}s` } : undefined}
-            />
+        {/* Water sits behind the body so it reads as emerging from the outlet. */}
+        {showWater && (
+          <g className="valve-glyph__water">
+            <path className="valve-glyph__water-edge" d={WATER_PATH} />
+            <path className="valve-glyph__water-main" d={WATER_PATH} />
+            <path className="valve-glyph__water-band valve-glyph__water-band--a" d={WATER_PATH} />
+            <path className="valve-glyph__water-band valve-glyph__water-band--b" d={WATER_PATH} />
+            {/* Static offsets live in cx/cy, never in a transform attribute: the drop keyframes
+                set `transform` in CSS, and a CSS transform replaces an SVG transform attribute
+                outright rather than composing with it. */}
+            <g className="valve-glyph__drop valve-glyph__drop--a">
+              <circle cx="835" cy="-15" r="18" />
+              <circle className="valve-glyph__drop-shine" cx="831" cy="-20" r="7" />
+            </g>
+            <g className="valve-glyph__drop valve-glyph__drop--b">
+              <circle cx="926" cy="-28" r="16" />
+              <circle className="valve-glyph__drop-shine" cx="922" cy="-33" r="6" />
+            </g>
+            <g className="valve-glyph__drop valve-glyph__drop--c">
+              <circle cx="895" cy="12" r="11" />
+            </g>
           </g>
-        ))}
+        )}
 
-        {/* Status badge */}
+        <path className="valve-glyph__body" d={bodyFilled ? FILLED_PATH : OUTLINE_PATH} />
+
         {isPending && (
-          <g transform="translate(48, 12)">
-            <circle r="9" fill="var(--surface)" stroke={PENDING_STROKE} strokeWidth="1.8" />
-            <path d="M0 -4.2v4.2l3.1 1.9" fill="none" stroke={PENDING_STROKE} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <g className="valve-glyph__badge valve-glyph__badge--pending" transform={BADGE_TRANSFORM}>
+            <circle r={BADGE_RADIUS} />
+            <path d="M0 -64v64l48 30" fill="none" strokeWidth="30" strokeLinecap="round" strokeLinejoin="round" />
           </g>
         )}
         {isClosing && (
-          <g transform="translate(48, 12)">
-            <circle r="9" fill="var(--surface)" stroke={MUTED_STROKE} strokeWidth="1.8" />
+          <g className="valve-glyph__badge valve-glyph__badge--closing" transform={BADGE_TRANSFORM}>
+            <circle r={BADGE_RADIUS} />
             <path
-              d="M-3.4 -4.1h6.8M-3.4 4.1h6.8M-2.9 -4.1c0 3.1 5.3 3.1 5.3 0M-2.9 4.1c0-3.1 5.3-3.1 5.3 0"
+              d="M-52 -62h104M-52 62h104M-44 -62c0 48 88 48 88 0M-44 62c0-48 88-48 88 0"
               fill="none"
-              stroke={MUTED_STROKE}
-              strokeWidth="1.4"
+              strokeWidth="24"
             />
           </g>
         )}
         {isFailed && (
-          <g transform="translate(48, 12)">
-            <circle r="9" fill="var(--surface)" stroke={FAILED_ACCENT} strokeWidth="1.8" />
-            <path d="M0 -3.9v3.4" stroke={FAILED_ACCENT} strokeWidth="1.9" strokeLinecap="round" />
-            <circle cx="0" cy="3.2" r="1.1" fill={FAILED_ACCENT} />
+          <g className="valve-glyph__badge valve-glyph__badge--failed" transform={BADGE_TRANSFORM}>
+            <circle r={BADGE_RADIUS} />
+            <path d="M0 -62v52" strokeWidth="32" strokeLinecap="round" fill="none" />
+            <circle className="valve-glyph__badge-dot" cx="0" cy="48" r="18" />
           </g>
         )}
       </svg>
