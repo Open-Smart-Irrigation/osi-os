@@ -124,28 +124,36 @@ A low-prominence affordance (overflow menu or a "Service" link in the settings d
 
 ---
 
-### Task 3: Retire the legacy control surface
+### Task 3: ~~Retire the legacy control surface~~ → REPLACED: confirm the card's Open
 
-**Files:**
-- Modify: `web/react-gui/src/components/farming/StregaValveCard.tsx`
-- Modify: its call sites (`IrrigationZoneCard.tsx`, the Unassigned Devices view)
-- Modify: `web/react-gui/src/components/farming/__tests__/` as needed
+**Operator decision, 2026-08-24: do NOT retire the legacy card.** Two of the three
+premises #171 built on have since collapsed, and a third argument against
+retirement emerged that the plan never considered.
 
-- [ ] **Step 1: Verify the survivor is complete first**
+**What changed:**
 
-Do not start this task until Tasks 1 and 2 are merged and every item in spec §6 is demonstrably true. **Removing the legacy controls before the replacement carries them is the exact failure this plan exists to prevent.**
+1. **The contradictory state is already fixed.** #171's evidence was one valve
+   reading `Closed` on the tile and `CLOSED + Open queued` on the card at the same
+   second. `StregaValveCard.tsx:16` now takes the valve-list row from
+   `GET /api/valves` — the same source the panel uses — so they can no longer
+   disagree that way.
+2. **The capability gaps are gone.** Tasks 1–2 moved delete, never-seen, pending
+   honesty and all six advanced commands onto the survivor. Retirement would no
+   longer *rescue* anything.
+3. **Coverage argues against it.** The legacy card renders in TWO places —
+   `IrrigationZoneCard.tsx:452` and `FarmingDashboard.tsx:291` — while
+   `ValveControlPanel` renders only on the dashboard (`:253`). Retiring the card's
+   controls would leave a valve viewed *inside its zone* with no controls at all.
+   (Also: `ValveServiceDialog` imports `getRecognizedStregaModel` from
+   `StregaValveCard`, so the component cannot simply be deleted.)
 
-Write the check as a test, not a promise: assert that every `stregaAPI` method still has a reachable caller in the surviving tree.
+**What actually needed fixing — done:** the card opened water on a **single tap**
+(`onClick={handleOpen}` straight to `controlValve`), while the panel required an
+explicit confirm. The same valve was laxer on one surface than the other. The card
+now uses a two-step confirm, with a test asserting a single tap calls no API.
 
-- [ ] **Step 2: Remove the control surface, keep identity/diagnostics**
-
-Per #171 option 1. The card keeps EUI, model, last-seen and any read-only diagnostics; it loses the OPEN button, the delete ✕ and the advanced command forms.
-
-- [ ] **Step 3: Confirm the original symptom is gone**
-
-The #171 evidence was one valve showing `Closed` on the tile and `CLOSED + Open queued` on the card simultaneously. Assert one valve now yields exactly one control surface.
-
-- [ ] **Step 4: Commit**
+**Revisit retirement only if** the panel is extended into the zone-card context —
+at which point it becomes a coverage upgrade rather than a loss.
 
 ---
 
