@@ -1,15 +1,13 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { ValveScheduleOverview } from '../ValveScheduleOverview';
-import { valvesAPI } from '../../../../services/api';
 import type { ValveSummary } from '../../../../types/farming';
 
 const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
     'overview.title': 'Irrigation plan — all valves',
-    'overview.subtitle': 'Every saved schedule across your valves.',
     'overview.loading': 'Loading…',
     'overview.off': 'off',
     noSchedule: 'No schedule yet',
@@ -24,7 +22,7 @@ const { translateForTest } = vi.hoisted(() => {
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: translateForTest, i18n: { language: 'en' } }) }));
 vi.mock('../../../../services/api', () => ({ valvesAPI: { schedules: vi.fn() } }));
 vi.mock('swr', () => ({
-  default: (key: string | null, fetcher: () => Promise<unknown>) => {
+  default: (key: string | null) => {
     const state = (globalThis as any).__swr ?? {};
     return state[key as string] ?? { data: undefined, error: undefined };
   },

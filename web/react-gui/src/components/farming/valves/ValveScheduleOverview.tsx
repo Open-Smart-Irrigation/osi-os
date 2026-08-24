@@ -91,7 +91,6 @@ export const ValveScheduleOverview: React.FC<ValveScheduleOverviewProps> = ({ va
   return (
     <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <h3 className="text-sm font-semibold text-[var(--text)]">{t('overview.title')}</h3>
-      <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{t('overview.subtitle')}</p>
       <ul className="mt-2">
         {valves.map((valve) => (
           <ValveScheduleRow key={valve.deviceEui} valve={valve} onOpen={() => onOpenValve(valve)} />

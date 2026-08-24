@@ -1,4 +1,4 @@
-{ "overview": {"title": "Plan de riego — todas las válvulas", "subtitle": "Todos los programas guardados de sus válvulas.", "loading": "Cargando…", "off": "desactivado"},
+{ "overview": {"title": "Plan de riego — todas las válvulas", "loading": "Cargando…", "off": "desactivado"},
   "title": "Valve control",
   "subtitle": "All valves, all zones. Weekly plans run on the valve itself.",
   "empty": "No STREGA valves registered yet.",
