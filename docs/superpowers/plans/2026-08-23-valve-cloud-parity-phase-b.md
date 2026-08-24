@@ -128,7 +128,17 @@ node -e "require('./docs/contracts/sync-schema/resources.schema.json'); require(
 node scripts/verify-sync-contract.js
 node scripts/test-contract-schemas.js
 ```
-Expected: all pass. `verify-sync-op-parity.js` will still FAIL — the server half does not exist yet. That is expected until lockstep.
+Expected: `test-contract-schemas.js` passes.
+
+**`verify-sync-contract.js` will FAIL after this task alone** — adding the four
+commands to `commands.schema.json` creates enum drift against flows.json's
+"Command Type Registry" until **Task 3** wires them in. That is expected in a
+split execution and is not a regression; it must be green again once Task 3
+lands. (An earlier draft of this plan said "all pass" here, which is wrong.)
+
+`verify-sync-op-parity.js` will also still FAIL — the osi-server half does not
+exist yet. After Task 2 its message should reduce to `server missing from union:
+VALVE_SCHEDULE_UPSERTED`, with no complaint about a missing edge emitter.
 
 - [ ] **Step 5: Commit**
 
