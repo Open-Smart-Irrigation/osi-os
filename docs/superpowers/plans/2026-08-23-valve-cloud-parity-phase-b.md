@@ -4,11 +4,27 @@
 
 **Goal:** Make `valve_schedules` changes flow to the cloud as `VALVE_SCHEDULE_UPSERTED` events, and accept cloud-authored schedule changes as commands, so `verify-sync-op-parity.js` goes green.
 
-**Architecture:** A trigger-only SQLite migration (`0024`) puts `_ai`/`_au` triggers on `valve_schedules` that write `sync_outbox` rows, mirroring the existing `irrigation_schedules` pair. Four new cloud→edge commands route into the *existing* `osi-valve-control` REST handlers so the valve keeps exactly one writer. A backfill step enqueues existing schedules when a gateway first links.
+**Architecture:** A trigger-only SQLite migration (`0024`) puts `_ai`/`_au` triggers on `valve_schedules` that write `sync_outbox` rows, mirroring the existing schedules pair. Four new cloud→edge commands route into the *existing* `osi-valve-control` REST handlers so the valve keeps exactly one writer. Pre-existing schedules reach the cloud through the **existing bootstrap snapshot** (not a bespoke backfill). A sixth task makes observed weekly runs visible to the cloud via the already-supported `IRRIGATION_EVENT_APPENDED` op.
 
 **Tech Stack:** SQLite (triggers, ordered migrations), Node-RED `flows.json` function nodes, `osi-valve-control` CommonJS module, JSON-Schema contract files shared with osi-server.
 
-**Spec:** [docs/superpowers/specs/2026-08-23-valve-cloud-parity-phase-b-design.md](../specs/2026-08-23-valve-cloud-parity-phase-b-design.md) — read §5 first; this plan assumes the **recommended** answers (D1=trigger, D2=edge-authoritative, D3=backfill-on-link, D4=`valve_settings` stays edge-only, D5=`deleted_at` carried in the upsert). **If review overturns any of these, stop and re-plan the affected task.**
+**Spec:** [docs/superpowers/specs/2026-08-23-valve-cloud-parity-phase-b-design.md](../specs/2026-08-23-valve-cloud-parity-phase-b-design.md)
+
+**RULED 2026-08-24** (independent review + operator acceptance). These are no
+longer assumptions:
+
+- **D1** trigger pair — as recommended.
+- **D2** edge-authoritative, cloud writes as commands — as recommended.
+- **D3** backfill YES, but **via the existing bootstrap snapshot**, NOT a bespoke
+  outbox walk. The bespoke mechanism cannot work: ownership is checked *before*
+  the parent-missing retry path, so a schedule arriving ahead of its device is
+  dead-lettered **terminally**. Task 4 is rewritten accordingly.
+- **D4** `valve_settings` stays edge-only. (Its original justification was false —
+  see the spec's correction — but the ruling stands.)
+- **D5** `deleted_at` carried in the upsert — as recommended.
+- **Resource key:** composite **`device_eui|schedule_uuid`** server-side.
+- **NEW — weekly runs reach the cloud (Task 6).** Review found the flagship
+  weekly path is invisible: `irrigation_events` is written only by `runOnceTick`.
 
 ## Global Constraints
 
@@ -19,6 +35,8 @@
 - **Never touch `sync-init-fn`** (the frozen boot-DDL node) for schema behaviour.
 - **Weekday bit order is `bit0 = Sunday … bit6 = Saturday`.** The GUI displays Monday-first over the same 0=Sunday storage. Do not "fix" one to match the other.
 - **Aggregate type `VALVE_SCHEDULE`, aggregate key `schedule_uuid`, op `VALVE_SCHEDULE_UPSERTED`** — exact strings, they are contract.
+- **Server-side resource id is the composite `device_eui|schedule_uuid`** (ruled 2026-08-24). Neither pure option works: a bare `schedule_uuid` cannot be resolved to an owner before the row exists, so every first upsert would be terminal `ownership_denied`; and `device_eui` alone collapses many schedules onto one watermark, so sibling schedules cross-reject as `stale_sync_version`. The composite follows the existing `DEVICE_DATA_ROW` (`deveui|recorded_at`) and `WORK_REQUEST` precedents, resolves ownership from the EUI prefix, and is 49 chars — inside `resource_id VARCHAR(128)`. The **edge** still sets `aggregate_key = schedule_uuid`; the server derives the composite. Record this in the contract so the lockstep half cannot miss it.
+- **The lockstep osi-server change has three touch points that are easy to miss**, each of which silently breaks delivery: a `VALVE_SCHEDULE_` case in `resourceTypeFromOp` (today `VALVE_*` falls through to `"EVENT"`, which disables watermark dedupe/ordering), a case in `EdgeOwnershipService`, and an `isParentMissing` message prefix the valve applier actually throws (matching is on **literal** prefixes). Put these in the contract/PR description.
 - Two repo gates already fail on this branch and on `main` — `verify-dendro-contract-mirror.js` and `verify-sync-op-parity.js`. The second is what this work fixes; the first is out of scope, do not touch it.
 - **`event_uuid` must be ≤ 36 characters.** The server never records a longer
   one in `sync_inbox` (`SyncEventTxExecutor.java:25,194`), which means it can
@@ -346,64 +364,126 @@ git commit -m "feat(sync): route the four cloud valve commands to the local hand
 
 ---
 
-### Task 4: Backfill existing schedules when a gateway links
+### Task 4: Carry `valve_schedules` in the bootstrap snapshot
 
 **Files:**
-- Modify: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/store.js` (+ bcm2709 mirror)
-- Test: the module's existing `store.test.js` (+ mirror)
+- Modify (via one-shot script): both `flows.json` profiles — nodes
+  `sync-bootstrap-build` **and** `sync-force-build`
+- Modify: `docs/contracts/sync-schema/` bootstrap request shape if it is pinned there
 
-**Interfaces:**
-- Consumes: the trigger's aggregate/op strings from Task 2.
-- Produces: `backfillSchedulesForLink(db, deviceEuiOrNull)` returning the count enqueued.
+**Why this and not a backfill walk (D3 ruling):** the triggers capture only
+*changes*, so schedules that exist before a gateway links would be invisible to
+the cloud forever. The obvious fix — enqueue outbox rows on link — **cannot
+work**: `SyncEventTxExecutor` checks ownership *before* the parent-missing retry
+branch, so a `VALVE_SCHEDULE` event whose device has not yet landed cloud-side
+resolves to a null owner and is rejected **terminally**, not retried. The device
+cannot arrive by events either (same gap) — devices land via the **bootstrap
+snapshot**.
 
-**Why:** the triggers only capture *changes*. A gateway that already has schedules when it first links would have them invisible to the cloud forever (spec §5 D3). Every gateway adopting valve control after Phase B is in exactly this position, including the Bovey Pi 4.
+That snapshot already exists, already ships users/zones/`irrigation_schedules`/
+devices/telemetry to `POST /api/v1/sync/edge/bootstrap`, is applied **in-process,
+parents first, bypassing per-resource ownership**, and runs both on link and
+**every 6 hours**. That 6-hourly cadence also self-heals the steady-state window
+where a schedule is created before its device's first bootstrap.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Read the existing bootstrap builder**
 
-In `store.test.js`, using the existing `tempDb()` helper:
+Find `sync-bootstrap-build` in `flows.json` and read how `irrigation_schedules`
+is collected and shaped. Note the ORDER of the collections — the server applies
+them in payload order.
 
-```js
-// seed: 3 valve_schedules (one soft-deleted), sync_link_state linked=1 inserted
-//       AFTER the schedules, so no trigger ever fired for them
-// act:  await store.backfillSchedulesForLink(db, null)
-// assert: exactly 2 outbox rows (soft-deleted rows are NOT backfilled),
-//         op='VALVE_SCHEDULE_UPSERTED', keys == the two live schedule_uuids
-// assert: calling it twice does not double-enqueue (idempotent on aggregate_key
-//         where delivered_at IS NULL)
-```
+- [ ] **Step 2: Add `valve_schedules` to both builders**
 
-- [ ] **Step 2: Run it, watch it fail**
+`sync-bootstrap-build` and `sync-force-build` must agree; a snapshot that differs
+by trigger path is a bug that only shows under force.
+
+Use **the same field list** as the 0024 trigger payload. That list now appears in
+three places (schema, trigger, bootstrap) and they must not drift — Task 5's
+verification includes checking they match.
+
+- [ ] **Step 3: Ordering — parents before children**
+
+**Critical:** the server's `applyBootstrap` loops in payload order, and the
+existing schedules loop runs *before* devices. That is safe only because
+`irrigation_schedules` parent on **zones**. `valve_schedules` parent on
+**devices**, so the valve-schedule collection must be placed **after** the
+devices loop. Getting this wrong reproduces the exact terminal-rejection failure
+this task exists to avoid.
+
+Record this as a note for the lockstep osi-server change; the edge side only
+controls payload order.
+
+- [ ] **Step 4: Mirror, verify, commit**
 
 ```bash
-cd conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control
-node --test store.test.js
-```
-Expected: FAIL, `backfillSchedulesForLink is not a function`.
-
-- [ ] **Step 3: Implement**
-
-Add to `store.js`, exporting it from `module.exports`. It must build the same payload the trigger builds (keep the field list identical — a divergence here means backfilled rows and live rows disagree), and skip rows already pending in the outbox for the same `aggregate_key`.
-
-- [ ] **Step 4: Run tests, mirror, verify**
-
-```bash
-node --test ack.test.js api.test.js plan.test.js push.test.js store.test.js workers.test.js
-# NOTE: `node --test <dir>` silently runs only ONE file on this Node build (osi-os#182).
-#       Always list the files explicitly.
-cp store.js store.test.js ../../../../../../full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/   # adjust path
 node scripts/verify-profile-parity.js
-node scripts/verify-helper-registration.js
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git commit -am "feat(sync): backfill existing valve schedules on first cloud link"
+node scripts/test-flows-wiring.js
+node scripts/verify-flows-fn-parse.js
+node scripts/verify-sync-flow.js
+git add conf/*/files/usr/share/flows.json
+git commit -m "feat(sync): carry valve_schedules in the bootstrap snapshot"
 ```
 
 ---
 
+### Task 6: Make weekly/on-valve runs reach the cloud
+
+**Files:**
+- Modify (via one-shot script): both `flows.json` profiles — node
+  `strega-reconciliation-monitor`
+- Test: extend `scripts/test-flows-wiring.js` coverage or add a focused test
+
+**Why:** review established that the cloud never sees a weekly run. Verified:
+`irrigation_events` is written **only** at `osi-valve-control/workers.js:53,62`,
+both inside `runOnceTick`; `runObserveTick` writes none; and
+`valve_actuation_expectations` has **no sync trigger in any migration**. So under
+Tasks 1–4 the cloud would receive valve *schedules* and never see them *execute*.
+
+The cheap, correct fix reuses the existing server-supported
+`IRRIGATION_EVENT_APPENDED` op rather than inventing a new one.
+
+- [ ] **Step 1: Write the failing test**
+
+```
+// when the reconciliation monitor moves an expectation to OBSERVED_COMPLETE:
+//  - trigger 'on_valve_schedule' or 'unexplained' -> writes exactly ONE
+//    irrigation_events row, action IRRIGATE, duration from the OBSERVED span
+//    (observed_close_at - observed_open_at), not the commanded duration
+//  - trigger 'one_time' -> writes NOTHING. runOnceTick already logged this run
+//    at fire time; logging again would double-count the farmer's water.
+//  - a zone-less or user-less valve -> writes nothing (irrigation_events has
+//    user_id and irrigation_zone_id NOT NULL), and warns
+//  - event_uuid is OMITTED so trg_sync_irrigation_events_uuid_ai mints the
+//    canonical 'irrig-<gwEui>-<seq>' key — a hand-rolled UUID ships a
+//    non-conforming aggregate_key to the cloud
+```
+
+- [ ] **Step 2: Run it, watch it fail**
+
+- [ ] **Step 3: Implement in `strega-reconciliation-monitor`**
+
+The monitor already computes `observedCloseAt` and transitions to
+`OBSERVED_COMPLETE` (it currently only UPDATEs `valve_actuation_expectations`).
+Add the `irrigation_events` INSERT in the same transaction as that transition, so
+a crash cannot produce a completed actuation with no event or vice versa.
+
+Duration comes from the **observed** span. If `observed_open_at` is null, log no
+duration rather than substituting the commanded one — the missing-data rule
+applies: an unknown duration is unknown, not zero.
+
+Reuse the `reason` vocabulary already in `irrigation_events`; add a value for
+observed-on-valve runs rather than overloading `one_time_open`.
+
+- [ ] **Step 4: Mirror both profiles, run the gates, commit**
+
+---
+
 ### Task 5: Full verification sweep
+
+- [ ] **Step 0: Confirm the three payload field lists agree**
+
+Schema (Task 1), trigger `json_object` (Task 2), bootstrap builders (Task 4, both
+nodes). A drift here means backfilled and live rows disagree on shape.
 
 - [ ] **Step 1: Run every gate**
 
@@ -444,6 +524,8 @@ Do NOT link the Bovey gateway to the cloud as part of this plan. Linking is a se
 
 ## Self-review notes
 
-- **Spec coverage:** §6 items 1–4 map to Tasks 2, 1, 3, 4 respectively. §7 verification maps to Task 5.
+- **Spec coverage:** contract → Task 1, triggers → Task 2, commands → Task 3, pre-existing schedules → Task 4 (bootstrap), verification → Task 5, weekly-run visibility → Task 6.
 - **Not covered by design:** `valve_settings` sync (D4 — deliberately out of scope; adding it later is a *column* migration, not trigger-only).
-- **Type consistency:** the payload field list appears in Task 1 (schema), Task 2 (trigger `json_object`) and Task 4 (backfill). These three MUST agree field-for-field. If you change one, change all three.
+- **Type consistency:** the payload field list appears in **three** places — Task 1 (schema), Task 2 (trigger `json_object`), Task 4 (bootstrap builder, ×2 nodes). They MUST agree field-for-field; Task 5 checks it.
+- **Ordering hazard:** Task 4's bootstrap collection must sit **after** devices, unlike the existing schedules collection which sits before. Wrong order = terminal rejections, which is the failure the task exists to prevent.
+- **Task 6 double-count hazard:** ONCE runs already log at fire time. The monitor must log only for `on_valve_schedule` / `unexplained` triggers, or the farmer's water is counted twice.
