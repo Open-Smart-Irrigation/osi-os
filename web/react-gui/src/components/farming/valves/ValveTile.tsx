@@ -16,6 +16,14 @@ export interface ValveTileProps {
   onResume: () => void;
   onResend: () => void;
   onSettings: () => void;
+  // Low-prominence entry point to ValveServiceDialog (the six advanced STREGA commands).
+  // Per the E1 ruling, this dialog has no independent entry point of its own -- it is
+  // reachable only from here, inside the overflow menu, not as a primary button.
+  onService: () => void;
+  // Deliberately NOT placed next to the primary Open button -- see #171: the legacy
+  // StregaValveCard put its remove control beside a one-tap water-moving action. This
+  // lives inside the overflow menu instead, with its own confirmation step.
+  onDelete: () => void;
   busy: boolean;
 }
 
@@ -55,16 +63,23 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   onResume,
   onResend,
   onSettings,
+  onService,
+  onDelete,
   busy,
 }) => {
   const { t } = useTranslation('valves');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useDismissOnPointerDown(menuRef, () => setMenuOpen(false));
 
   const glyph = deriveValveGlyphState(valve, nowMs);
-  const stateLabel = valveGlyphLabel(glyph.state, t as Translate);
   const isPendingCommand = valve.activeActuation?.reconciliationState === 'PENDING_OBSERVATION';
+  // #171 item 2: a valve that has never reported must not render as "closed and fine".
+  // Only overrides the label when the glyph would otherwise resolve to a plain "closed" --
+  // an active/pending actuation already carries its own honest label regardless of uplink history.
+  const neverSeen = valve.lastUplinkAt === null && glyph.state === 'closed';
+  const stateLabel = neverSeen ? t('neverSeen') : valveGlyphLabel(glyph.state, t as Translate);
 
   const statusDetails: string[] = [];
   if (glyph.state === 'open' && glyph.remainingSeconds !== null) {
@@ -72,7 +87,10 @@ export const ValveTile: React.FC<ValveTileProps> = ({
     if (glyph.closesAt) statusDetails.push(t('closesAt', { time: formatClock(glyph.closesAt, valve.timezone) }));
   }
   if (glyph.state === 'pending') {
+    // #171 item 3: a commanded-but-unconfirmed open says so, matching the honesty
+    // StregaValveCard's actuationFeedback badge already has.
     statusDetails.push(t('pendingHint'));
+    if (glyph.closesAt) statusDetails.push(t('closesAt', { time: formatClock(glyph.closesAt, valve.timezone) }));
     if (valve.lastUplinkAt) {
       statusDetails.push(t('lastContact', { when: formatRelativePast(valve.lastUplinkAt, nowMs) }));
     }
@@ -121,7 +139,9 @@ export const ValveTile: React.FC<ValveTileProps> = ({
               {valve.zoneName ?? t('unassignedZone')}
             </span>
           </div>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          {/* #171 item 1: the device EUI, legacy-only today. */}
+          <p className="truncate font-mono text-xs text-[var(--text-tertiary)]">{valve.deviceEui}</p>
+          <p className={`mt-1 text-sm ${neverSeen ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-secondary)]'}`}>
             {stateLabel}
             {statusDetails.length > 0 && <span className="text-[var(--text-tertiary)]"> · {statusDetails.join(' · ')}</span>}
             {climatePair && (
@@ -195,11 +215,50 @@ export const ValveTile: React.FC<ValveTileProps> = ({
                   label={t('settings')}
                   onClick={() => { setMenuOpen(false); onSettings(); }}
                 />
+                {/* Low-prominence entry point to the service dialog (E1: no independent
+                    entry point of its own) -- an overflow item, not a primary button. */}
+                <MenuItem
+                  label={t('service')}
+                  onClick={() => { setMenuOpen(false); onService(); }}
+                />
+                {/* #171 item 5: reachable, but deliberately not adjacent to the primary
+                    Open button -- unlike the legacy card, which puts its remove ✕ beside
+                    a one-tap water-moving control. */}
+                <MenuItem
+                  label={t('deleteMenuItem')}
+                  onClick={() => { setMenuOpen(false); setConfirmDelete(true); }}
+                />
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {confirmDelete && (
+        <div className="rounded-lg border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2">
+          <p className="text-sm font-semibold text-[var(--warn-text)]">{t('deleteConfirmTitle')}</p>
+          <p className="mt-0.5 text-xs text-[var(--warn-text)]">{t('deleteConfirmBody')}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => { setConfirmDelete(false); onDelete(); }}
+              disabled={busy}
+              className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy && <Spinner />}
+              {t('deleteConfirmButton')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              disabled={busy}
+              className="min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {t('cancel')}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

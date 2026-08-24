@@ -8,12 +8,13 @@ import { ValveTile } from './ValveTile';
 import { ValveOpenDialog } from './ValveOpenDialog';
 import { ValveScheduleDialog } from './ValveScheduleDialog';
 import { ValveSettingsDialog } from './ValveSettingsDialog';
+import { ValveServiceDialog } from './ValveServiceDialog';
 
 export interface ValveControlPanelProps {
   onUpdate: () => void;
 }
 
-type DialogKind = 'open' | 'schedule' | 'settings' | null;
+type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
 
 const valvesFetcher = () => valvesAPI.list();
 
@@ -111,6 +112,15 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }
         onClose={closeDialog}
         onChanged={refresh}
       />
+      {/* E1: subordinate to the panel, no independent entry point -- reached only via
+          ValveTile's overflow menu (see onService below). */}
+      <ValveServiceDialog
+        key={`service-${selectedValve.deviceEui}`}
+        valve={selectedValve}
+        open={dialogKind === 'service'}
+        onClose={closeDialog}
+        onChanged={refresh}
+      />
     </>
   );
 
@@ -161,11 +171,13 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }
               onOpen={() => { setDialogEui(valve.deviceEui); setDialogKind('open'); }}
               onSchedule={() => { setDialogEui(valve.deviceEui); setDialogKind('schedule'); }}
               onSettings={() => { setDialogEui(valve.deviceEui); setDialogKind('settings'); }}
+              onService={() => { setDialogEui(valve.deviceEui); setDialogKind('service'); }}
               onCancel={() => runAction(valve.deviceEui, () => devicesAPI.cancelIrrigation(valve.deviceEui))}
               onSkipToday={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'SKIP_TODAY'))}
               onPause={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'DEACTIVATED'))}
               onResume={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'ACTIVE'))}
               onResend={() => runAction(valve.deviceEui, () => valvesAPI.resendPlan(valve.deviceEui))}
+              onDelete={() => runAction(valve.deviceEui, () => devicesAPI.remove(valve.deviceEui))}
             />
           ))}
         </div>
