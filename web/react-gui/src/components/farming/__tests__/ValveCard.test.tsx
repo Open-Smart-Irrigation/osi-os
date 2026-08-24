@@ -131,10 +131,19 @@ function renderCard(overrides: Partial<Device> = {}, props: Record<string, unkno
 }
 
 describe('StregaValveCard', () => {
-    it('sends timed OPEN with duration_seconds', async () => {
+    it('does not move water on a single tap — Open must be confirmed', async () => {
+        // osi-os#171: the Valve control panel requires an explicit confirm
+        // (ValveOpenDialog) before opening. This card went straight to controlValve, so the
+        // same valve was laxer here than on the panel. First tap arms only.
+        renderCard();
+        fireEvent.click(await screen.findByText(/5 min/));
+        expect(devicesAPI.controlValve).not.toHaveBeenCalled();
+    });
+
+    it('sends timed OPEN with duration_seconds once confirmed', async () => {
         const { onUpdate } = renderCard();
-        const openBtn = await screen.findByText(/5 min/);
-        fireEvent.click(openBtn);
+        fireEvent.click(await screen.findByText(/5 min/));           // arm
+        fireEvent.click(await screen.findByText(/Confirm/i));        // confirm
         await waitFor(() => {
             expect(devicesAPI.controlValve).toHaveBeenCalledWith(mockDevice.deveui, {
                 action: 'OPEN_FOR_DURATION',

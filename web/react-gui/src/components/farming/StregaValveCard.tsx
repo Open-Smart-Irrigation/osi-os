@@ -642,6 +642,10 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   const { t: tc } = useTranslation('common');
   const { t: tv } = useTranslation('valves');
   const [loading, setLoading] = useState<'OPEN' | null>(null);
+  // One tap must not move water. The Valve control panel already requires an explicit
+  // confirm (ValveOpenDialog); this card went straight to controlValve, so the same valve
+  // was laxer here than there. osi-os#171.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -862,9 +866,9 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
           />
           <button
-            onClick={handleOpen}
+            onClick={() => { if (!confirmOpen) { setConfirmOpen(true); return; } setConfirmOpen(false); void handleOpen(); }}
             disabled={loading !== null}
-            className="mt-1 w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
+            className={`mt-1 w-full ${confirmOpen ? 'bg-[var(--warn-border)]' : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)]'} disabled:bg-[var(--border)] text-white font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2`}
           >
             {loading === 'OPEN' ? (
               <>
@@ -872,7 +876,9 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
                 {t('stregaValve.opening')}
               </>
             ) : (
-              `${t('stregaValve.open')} ${openDurationMin} min`
+              confirmOpen
+                ? t('stregaValve.confirmOpen', { minutes: openDurationMin, defaultValue: 'Confirm — open for {{minutes}} min' })
+                : `${t('stregaValve.open')} ${openDurationMin} min`
             )}
           </button>
         </div>

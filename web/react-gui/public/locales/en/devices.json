@@ -77,7 +77,7 @@
     "failedToEnableTempHumidity": "Failed to enable Kiwi temperature and humidity",
     "enableTempHumidityRequiresInterval": "Enter a whole number of minutes between 1 and 1440 before enabling ambient temperature and humidity."
   },
-  "stregaValve": {
+  "stregaValve": { "confirmOpen": "Confirm — open for {{minutes}} min",
     "badge": "STREGA VALVE",
     "status": "STATUS",
     "open": "OPEN",

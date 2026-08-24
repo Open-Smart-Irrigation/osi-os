@@ -58,7 +58,7 @@
     "lightIntensity": "INTENSIDADE LUMINOSA",
     "lastSeen": "Visto há {{minutes}} minutos"
   },
-  "stregaValve": {
+  "stregaValve": { "confirmOpen": "Confirmar — abrir {{minutes}} min",
     "badge": "VÁLVULA STREGA",
     "status": "ESTADO",
     "open": "ABERTA",

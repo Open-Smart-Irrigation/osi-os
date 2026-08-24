@@ -58,7 +58,7 @@
     "lightIntensity": "LICHTINTENSITÄT",
     "lastSeen": "Zuletzt gesehen: vor {{minutes}} Minuten"
   },
-  "stregaValve": {
+  "stregaValve": { "confirmOpen": "Bestätigen — {{minutes}} min öffnen",
     "badge": "STREGA VENTIL",
     "status": "STATUS",
     "open": "OFFEN",

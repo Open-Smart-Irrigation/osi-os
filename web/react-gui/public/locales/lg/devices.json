@@ -58,7 +58,7 @@
     "lightIntensity": "AKAWAAWA K'OMUSANA",
     "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"
   },
-  "stregaValve": {
+  "stregaValve": { "confirmOpen": "Kakasa — ggulawo {{minutes}} min",
     "badge": "ZZIMU YA STREGA",
     "status": "ENKOLAGANA",
     "open": "GGULE",
