@@ -4,17 +4,17 @@
 
 **Goal:** End the two-surface duplication in osi-os#171 without losing the six advanced STREGA commands, by moving them to a clearly separated service view and giving the daily surface the five things the legacy card does better.
 
-**Architecture:** Frontend-only for Tasks 1–3. A new `ValveServiceDialog` carries the six `stregaAPI` commands; the Valve control panel gains delete, EUI, never-seen and pending disclosures plus an open confirmation; `StregaValveCard`'s control surface is then removed from the daily path. Task 4 (commanded aperture persistence) is the only task that touches the edge, and it is **gated on decision E2**.
+**Architecture:** Frontend-only for Tasks 1–3. A new `ValveServiceDialog` carries the six `stregaAPI` commands; the Valve control panel gains delete, EUI, never-seen and pending disclosures plus an open confirmation; `StregaValveCard`'s control surface is then removed from the daily path. Task 4 (recording the one-shot partial-opening event, if E2 says record it at all) is the only task that touches the edge, and it is **gated on decision E2**.
 
 **Tech Stack:** React + TypeScript (`web/react-gui`), existing `stregaAPI` clients, `osi-valve-control` module (Task 4 only), SQLite migration (Task 4 only).
 
-**Spec:** [docs/superpowers/specs/2026-08-24-valve-advanced-controls-consolidation-design.md](../specs/2026-08-24-valve-advanced-controls-consolidation-design.md) — read §4 first. This plan assumes the **recommended** answers: E1=(ii) separate service view, E2=(b) persist commanded value with honest labelling, E3=document the split, E4=**blocking unknown**, E5=inherited unchanged.
+**Spec:** [docs/superpowers/specs/2026-08-24-valve-advanced-controls-consolidation-design.md](../specs/2026-08-24-valve-advanced-controls-consolidation-design.md) — read §4 first. This plan assumes the **recommended** answers: E1=(ii) separate service view, E2=(b) persist commanded value with honest labelling, E3=document the split, E4=**answered, closed**, E5=inherited unchanged.
 
 ## Global Constraints
 
 - **E4 is ANSWERED (operator, 2026-08-24): `SET_PARTIAL_OPENING` is a ONE-TIME action and the default opening is always 100%.** Partial opening is therefore safe to ship alongside the scheduler — a scheduled `OPEN_FOR_DURATION` always runs fully open and a 40% flush does not leak into later windows. Build all six commands in Task 1.
 - **That answer changed Task 4's shape.** Because the resting position is always 100%, there is no persistent aperture to store; a `current_aperture` column would model a state that does not exist. Task 4 is now about recording the one-shot *event*, if anything — and "persist nothing" became a defensible option. It stays gated on E2.
-- **Aperture can never be read back.** Neither decoder reports position; `current_state` is binary. Any aperture the GUI shows is *what we last commanded*. Copy must say "set to 40%", never "40% open". Rendering a commanded value as an observation violates the repo's missing-data rule.
+- **Aperture can never be read back.** Neither decoder reports position; `current_state` is binary. Any aperture the GUI shows is *what was last commanded*, and — since the action is one-shot — describes a past action, not a present position. Copy says "Open once to 40%" / "40% opening sent 14:02"; never "40% open" (an observation we cannot make) and never "Set opening to 40%" (a lasting position the valve does not hold).
 - **Do not delete `StregaValveCard` in this plan.** Task 3 removes its *control* surface from the daily path only. Deleting the component is a separate decision once the service view has proven itself in the field.
 - **Keep the motorized gate and its copy.** `stregaValve.motorizedLocked` ("Set the valve model to motorized to unlock partial opening and flushing commands") is good, discoverable copy — carry it over rather than re-writing it.
 - All new user-facing strings go in **all seven** locales (`en, fr, de-CH, es, it, lg, pt`).

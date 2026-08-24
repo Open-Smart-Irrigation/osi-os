@@ -86,10 +86,11 @@ per-schedule (`schedule_uuid`) or per-zone. The obvious analogue misleads —
 
 - **E1** Where do advanced controls live? *(rec: a separate service view — these
   are commissioning actions, not daily ones, and one tap from OPEN is wrong)*
-- **E2** Persist commanded aperture, and how labelled? *(rec: persist the
-  commanded value with "set to 40%" framing; open sub-question: reuse
-  `valve_actuation_expectations`, which already models commanded-vs-observed, or
-  a cheap `valve_settings` column)*
+- **E2** Record the one-shot partial-opening action, and how labelled? *(rec:
+  record it as an EVENT, never as state — a `current_aperture` field would model
+  a position that does not exist under E4's answer. Open sub-question: the
+  `osi-command-ledger`, a `valve_actuation_expectations` row, or **nothing at
+  all**, which E4's answer made defensible)*
 - **E3** Reconcile the two capability flags or document the split? *(rec:
   document now, merge later — **interacts with D4**, since moving anything to
   `valve_settings` means it does not reach the cloud)*
@@ -129,9 +130,10 @@ Offered as the author's own read of the weakest points, not as a defence:
   work in a codebase where that pattern has just been measured as expensive. The
   counter — that schedule volume is nothing like telemetry volume — is sound but
   convenient.
-- **E2's honesty framing.** "Show the commanded value, labelled as commanded" may
-  still mislead a farmer who reads any number as truth. The alternative (show
-  nothing) is defensible.
+- **E1's split-surface recommendation.** "Daily surface plus a separate service
+  view" is tidy in the abstract, but it is also a third surface in a programme
+  whose whole problem is having two. The reviewer should test whether it really
+  ends the confusion #171 describes or just relocates it.
 
 ## 5. Verification status
 
