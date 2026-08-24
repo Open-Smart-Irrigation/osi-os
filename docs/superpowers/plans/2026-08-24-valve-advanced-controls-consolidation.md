@@ -4,7 +4,7 @@
 
 **Goal:** End the two-surface duplication in osi-os#171 without losing the six advanced STREGA commands, by moving them to a clearly separated service view and giving the daily surface the five things the legacy card does better.
 
-**Architecture:** Frontend-only for Tasks 1–3. A new `ValveServiceDialog` carries the six `stregaAPI` commands; the Valve control panel gains delete, EUI, never-seen and pending disclosures plus an open confirmation; `StregaValveCard`'s control surface is then removed from the daily path. Task 4 is a flows-level enrichment of an existing `actuator_log` write — the only task touching the edge, and it needs no migration.
+**Architecture:** Frontend-only for Tasks 1–3. A new `ValveServiceDialog` carries the six `stregaAPI` commands; the Valve control panel gains delete, never-seen and pending disclosures plus an open confirmation; `StregaValveCard`'s control surface is then removed from the daily path. Task 4 is a flows-level enrichment of an existing `actuator_log` write — the only task touching the edge, and it needs no migration.
 
 **Tech Stack:** React + TypeScript (`web/react-gui`), existing `stregaAPI` clients, `osi-valve-control` module (Task 4 only), SQLite migration (Task 4 only).
 
@@ -100,7 +100,10 @@ These are #171's original acceptance criteria, verbatim:
 - [ ] **Step 1: Failing tests for all five**
 
 ```tsx
-// 1. the device EUI is shown (legacy-only today)
+// 1. the device EUI is NOT shown — REVERSED by operator decision 2026-08-24.
+//    #171 listed it, but a 16-hex identifier is engineering detail a farmer never
+//    acts on and it crowded the state line. It stays on the device card. The test
+//    asserts its ABSENCE so the old checklist cannot drift it back in.
 // 2. a valve that has never reported renders a "never seen" disclosure —
 //    lastUplinkAt === null must NOT render as "closed and fine"
 // 3. a commanded-but-unconfirmed open says so ("waiting for valve uplink"),

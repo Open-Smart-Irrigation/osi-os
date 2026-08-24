@@ -139,8 +139,6 @@ export const ValveTile: React.FC<ValveTileProps> = ({
               {valve.zoneName ?? t('unassignedZone')}
             </span>
           </div>
-          {/* #171 item 1: the device EUI, legacy-only today. */}
-          <p className="truncate font-mono text-xs text-[var(--text-tertiary)]">{valve.deviceEui}</p>
           <p className={`mt-1 text-sm ${neverSeen ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-secondary)]'}`}>
             {stateLabel}
             {statusDetails.length > 0 && <span className="text-[var(--text-tertiary)]"> · {statusDetails.join(' · ')}</span>}

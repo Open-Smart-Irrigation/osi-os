@@ -192,9 +192,14 @@ describe("ValveTile plan line", () => {
 // The five items from osi-os#171's original acceptance criteria, brought onto the daily
 // surface (ValveTile/ValveControlPanel) per the 2026-08-24 consolidation plan Task 2.
 describe('ValveTile #171 disclosures', () => {
-  it('1. shows the device EUI (legacy-only today)', () => {
+  it('1. does NOT show the device EUI', () => {
+    // Reversed by operator decision 2026-08-24: #171 listed the EUI as something the
+    // surviving surface had to carry, but a 16-hex identifier is engineering detail a
+    // farmer never acts on, and it crowds the line that shows valve state. It stays
+    // available on the device card. Asserted rather than merely deleted so it does not
+    // drift back in on the strength of the old checklist.
     renderTile({ deviceEui: '0016C001F1000042' });
-    expect(screen.getByText('0016C001F1000042')).toBeInTheDocument();
+    expect(screen.queryByText('0016C001F1000042')).not.toBeInTheDocument();
   });
 
   it('2. discloses a valve that has never reported instead of rendering it as closed and fine', () => {
