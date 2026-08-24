@@ -27,7 +27,7 @@ const { translateForTest } = vi.hoisted(() => {
     'state.open': 'Open',
     'state.closing': 'Closing',
     'state.failed': 'Failed',
-    planFailed: '{{count}} downlink(s) not acknowledged in 24 h',
+    planIncomplete: 'Not yet confirmed on the valve for {{count}} day(s) — resend the plan',
     'format.temperature': '{{value}} °C',
     'format.humidity': '{{value}} % RH',
     pendingHint: "Waiting for the valve's next contact",
@@ -167,18 +167,18 @@ describe("ValveTile plan line", () => {
     expect(container.textContent).not.toMatch(/planDelivery|acknowledged/);
   });
 
-  it("still surfaces the failed-downlink line when some downlinks are also queued", () => {
+  it("still surfaces the incomplete-plan line when some downlinks are also queued", () => {
     renderTile({
       pushState: { queued: 2, acked: 1, failed: 2, lastPlanQueuedAt: null, lastPlanAckedAt: null },
     });
-    expect(screen.getByText("2 downlink(s) not acknowledged in 24 h")).toBeInTheDocument();
+    expect(screen.getByText("Not yet confirmed on the valve for 2 day(s) — resend the plan")).toBeInTheDocument();
   });
 
-  it("surfaces the failed-downlink line when nothing is queued", () => {
+  it("surfaces the incomplete-plan line when nothing is queued", () => {
     renderTile({
       pushState: { queued: 0, acked: 1, failed: 1, lastPlanQueuedAt: null, lastPlanAckedAt: null },
     });
-    expect(screen.getByText("1 downlink(s) not acknowledged in 24 h")).toBeInTheDocument();
+    expect(screen.getByText("Not yet confirmed on the valve for 1 day(s) — resend the plan")).toBeInTheDocument();
   });
 
   it("shows no plan line at all when every downlink is acknowledged", () => {

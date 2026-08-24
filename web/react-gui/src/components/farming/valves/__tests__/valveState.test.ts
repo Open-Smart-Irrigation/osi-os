@@ -20,9 +20,13 @@ describe('deriveValveGlyphState', () => {
     const v = { ...base, currentState: 'OPEN' as const, activeActuation: { expectationId: 'e', reconciliationState: 'OBSERVED_RUNNING', commandedAt: '2026-08-19T09:00:00Z', expectedCloseAt: '2026-08-19T09:32:00Z', durationSeconds: 1800, trigger: 'manual' } };
     expect(deriveValveGlyphState(v, now).state).toBe('closing');
   });
-  it('failed on a recent STALE state or a failed push', () => {
+  it('raises the alarm state for a STALE reconciliation, but NOT for an unacknowledged push', () => {
+    // A STALE_* state is the valve contradicting itself — genuine malfunction.
     expect(deriveValveGlyphState({ ...base, recentStaleState: 'STALE_NO_OBSERVATION' }, now).state).toBe('failed');
-    expect(deriveValveGlyphState({ ...base, pushState: { ...base.pushState, failed: 1 } }, now).state).toBe('failed');
+    // An undelivered plan downlink is not a malfunction: the valve is fine and the fix is a
+    // tap on Resend. Alarming on it turned one stale bookkeeping row into a headline
+    // "Attention" on a healthy valve, which teaches farmers to ignore real alarms.
+    expect(deriveValveGlyphState({ ...base, pushState: { ...base.pushState, failed: 1 } }, now).state).toBe('closed');
   });
   it('open with unknown duration (unexplained) has null progress', () => {
     const v = { ...base, currentState: 'OPEN' as const, activeActuation: { expectationId: 'e', reconciliationState: 'OBSERVED_RUNNING', commandedAt: '2026-08-19T09:50:00Z', expectedCloseAt: '2026-08-20T09:50:00Z', durationSeconds: 0, trigger: 'unexplained' } };

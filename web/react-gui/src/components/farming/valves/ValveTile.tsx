@@ -118,8 +118,11 @@ export const ValveTile: React.FC<ValveTileProps> = ({
         valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
       ].filter(Boolean).join(' · ');
 
+  // Shown only when part of the plan genuinely did not reach the valve, and phrased as the
+  // consequence the farmer can act on rather than as transport bookkeeping. Deliberately not
+  // an alarm: see deriveValveGlyphState.
   const planLine: string | null =
-    valve.pushState.failed > 0 ? t('planFailed', { count: valve.pushState.failed }) : null;
+    valve.pushState.failed > 0 ? t('planIncomplete', { count: valve.pushState.failed }) : null;
 
   const isPaused = valve.schedulerStatus === 'DEACTIVATED';
   const alreadySkipped = valve.schedulerStatus === 'SKIP_TODAY';
@@ -151,7 +154,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
           </p>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{nextRunLine}</p>
           {planLine && (
-            <p className="mt-0.5 text-xs text-[var(--warn-text)]">
+            <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
               {planLine}
             </p>
           )}
