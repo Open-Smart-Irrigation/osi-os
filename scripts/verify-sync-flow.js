@@ -2024,6 +2024,14 @@ expectIncludesById('strega-reconciliation-monitor', 'd.current_state', 'reads ca
 expectIncludesById('strega-reconciliation-monitor', 'LEFT JOIN device_data dd ON dd.deveui = d.deveui', 'uses device_data only to find the latest observation timestamp');
 expectIncludesById('strega-reconciliation-monitor', 'ORDER BY dd.recorded_at DESC LIMIT 1', 'uses the newest matching uplink timestamp for reconciliation');
 expectExcludesById('strega-reconciliation-monitor', 'current_state FROM device_data', 'the old invalid device_data.current_state observer query');
+// Task 4b (2026-08-24 valve-advanced-controls-consolidation): osi-valve-control's
+// runObserveTick now classifies an unschedule-explained OPEN as trigger='service_action'
+// when a recent partial-opening/flushing command explains it (see workers.js). That
+// value is deliberately NOT in this OBSERVED_COMPLETE irrigation-event whitelist -
+// pinning the exact condition text here means a future edit that widens the whitelist to
+// include 'service_action' (double-counting a service action as an irrigation event) has
+// to touch this assertion too, not slip in silently.
+expectIncludesById('strega-reconciliation-monitor', "exp.trigger === 'on_valve_schedule' || exp.trigger === 'unexplained'", "OBSERVED_COMPLETE irrigation_events logging stays scoped to on_valve_schedule/unexplained; service_action (Task 4b) stays excluded so a partial-opening/flushing service action is never counted as an irrigation event");
 expectExcludesById('strega-sql-fn', 'BEGIN IMMEDIATE;', 'the old manual transaction opener inside the function node');
 expectExcludesById('strega-sql-fn', 'COMMIT;', 'the old manual transaction committer inside the function node');
 expectExcludesById('strega-sql-fn', 'ROLLBACK;', 'the old manual rollback branch inside the function node');
