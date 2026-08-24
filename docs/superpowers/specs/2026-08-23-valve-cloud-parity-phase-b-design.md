@@ -36,16 +36,29 @@ verify-sync-op-parity: FAIL
 
 Making that verifier go green is the acceptance signal for the pair of changes.
 
-## 2. What is already covered (do not rebuild)
+## 2. What is already covered — CORRECTED after review
 
-**Valve actuations already reach the cloud.** `runOnceTick` writes to
-`irrigation_events` (`workers.js:43-59`), which carries the existing
-`IRRIGATION_EVENT_APPENDED` op — server-supported today. Volumes, durations and
-reasons (`one_time_open`, `one_time_missed`) therefore already flow. Phase B
-adds **no** new actuation path.
+An earlier draft of this spec claimed "valve actuations already reach the cloud".
+**That is true only for ONCE schedules, and it was the wrong premise to build on.**
 
-This matters because it means the cloud already sees *what the valve did*. What
-it cannot see is *what the valve was told to do*.
+Verified:
+
+- `irrigation_events` is written from exactly two places in the valve module,
+  `workers.js:53` and `:62`, both inside **`runOnceTick`** — and only when the
+  valve has both a zone and a user.
+- **`runObserveTick` writes zero `irrigation_events`.** That is the worker that
+  files observed *weekly* and on-valve runs. Those land only in
+  `valve_actuation_expectations`.
+- `valve_actuation_expectations` has **no sync trigger in any migration**
+  (checked across `0001`, `0011`, `0019`, `0022`). It never reaches the cloud.
+
+**So the flagship weekly path is invisible to the cloud.** Under Phase B as
+scoped, the cloud would receive valve *schedules* and never see them *execute* —
+a farmer looking at the cloud would see a plan with no runs against it.
+
+Whether to close that gap in Phase B or record it as a known limitation is a
+decision, not an established fact (see §10). What Phase B does not need to
+rebuild is the ONCE path, which genuinely does flow.
 
 ## 3. Decisions inherited from Phase A (binding unless §5 overturns them)
 
@@ -184,10 +197,21 @@ litres, and litres are what the cloud reports. Today the cloud receives
 `estimated_gross_liters` on the actuation event, computed edge-side — so the
 number crosses even though its input does not.
 
-**Question for the reviewer:** is that sufficient, or does the cloud need the
-flow rate itself (e.g. to recompute, or to show "estimated from 12 L/min")?
-Note `valve_settings` has neither `sync_version` nor `deleted_at`, so syncing it
-later is *not* a trigger-only migration.
+**CORRECTION after review — the premise above was false.** `estimated_gross_liters`
+does **not** cross to the cloud. It exists only on `valve_actuation_expectations`
+(`0001__baseline.sql:809`), which has no sync trigger, and the
+`IRRIGATION_EVENT_APPENDED` payload carries no volume field at all — its keys are
+`contract_version, event_uuid, event_id, user_id, irrigation_zone_id, zone_uuid,
+gateway_device_eui, action, reason, aggregate_kpa, threshold_kpa,
+duration_minutes, valve_deveui`.
+
+So the cloud receives **no** per-valve volume today, estimated or otherwise. The
+ruling (edge-only for Phase B) still stands on its own merits —
+`valve_settings` has neither `sync_version` nor `deleted_at`, so syncing it later
+is not a trigger-only migration — but the "the number crosses anyway" argument
+must not be used to support it. If cloud-side litres are wanted, the cheap route
+is adding the edge-computed estimate to the irrigation-event payload, not
+syncing `valve_settings`.
 
 **Recommendation: keep it edge-only for Phase B**, and record explicitly that
 adding it later costs a column migration.
@@ -318,3 +342,7 @@ analogue does not transfer cleanly, and copying it blindly would be wrong.
   than merely changing which op it complains about.
 - Whether the cloud reuses `irrigation_schedules` or gets a new table is an
   osi-server decision; it does not change the edge payload.
+- **Open, raised by review:** weekly/on-valve runs never reach the cloud (§2).
+  Decide whether Phase B closes that (an `irrigation_events` write from
+  `runObserveTick`, or a sync trigger on `valve_actuation_expectations`) or
+  records it as a documented limitation.

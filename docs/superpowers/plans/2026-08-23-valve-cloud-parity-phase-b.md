@@ -126,6 +126,13 @@ git commit -m "contract: ValveSchedule resource, four valve commands, weekday bi
 **Files:**
 - Create: `database/migrations/ordered/0024__valve_schedule_sync_triggers.sql`
 - Modify: `database/migrations/ordered/CHECKSUMS.json`
+- Modify: `database/seeds/seed-blank.sql` — **added after review.** The seed
+  incorporates every migration's objects (0023's `app_settings` is at
+  `seed-blank.sql:1080`), and the parity verifier reads ops out of the **bundled
+  DBs**, not just the migrations. Seed, the bundled `farming.db` copies and the
+  fingerprints all move with 0024. An earlier draft of this plan listed only the
+  migration — follow `osi-schema-change-control` and Phase A design §4 here.
+- Modify: the bundled seed databases for every profile
 - Test: `scripts/test-valve-schedule-sync-triggers.js` (new)
 
 **Interfaces:**
@@ -142,10 +149,14 @@ Create `scripts/test-valve-schedule-sync-triggers.js`. It must build a DB by rep
 // 2. LINKED gateway emits on INSERT
 //    -> expect exactly 1 row, aggregate_type='VALVE_SCHEDULE',
 //       aggregate_key = the schedule_uuid, op='VALVE_SCHEDULE_UPSERTED'
-// 3. _au does NOT fire on an unsynced column
-//    -> UPDATE once_fired_at -> expect NO new outbox row
-//       (this is the regression that would otherwise emit an event every time
-//        a ONCE schedule fires)
+// 3. _au does not fire on a bare unsynced-column touch
+//    -> UPDATE once_fired_at ALONE, via raw SQL, without bumping sync_version
+//       -> expect NO new outbox row.
+//    CAUTION (review finding): this asserts an invariant PRODUCTION NEVER
+//    EXERCISES. The real firing path goes through store.updateSchedule, which
+//    always bumps sync_version, so a real firing DOES emit. Add a second case
+//    asserting the production shape emits exactly ONE event — a test that only
+//    covers the raw-SQL path is testing a situation that cannot occur.
 // 4. _au DOES fire on a synced column
 //    -> UPDATE enabled -> expect exactly 1 new outbox row
 // 5. soft delete emits an upsert carrying deleted_at (D5)
@@ -161,7 +172,7 @@ Expected: FAIL — the triggers do not exist, so assertion 2 finds 0 rows.
 
 - [ ] **Step 3: Write the migration**
 
-Create `database/migrations/ordered/0024__valve_schedule_sync_triggers.sql`. Mirror `trg_sync_irrigation_schedules_outbox_ai/_au` in `0003__stamp_contract_version_and_zone_op_split.sql` — open that file and copy the shape rather than inventing one.
+Create `database/migrations/ordered/0024__valve_schedule_sync_triggers.sql`. Mirror the schedules pair in `0003__stamp_contract_version_and_zone_op_split.sql` — the trigger is named **`trg_sync_schedules_outbox_au`** (NOT `trg_sync_irrigation_schedules_*`, which does not exist; an earlier draft of this plan named it wrongly). Open that file and copy the shape rather than inventing one.
 
 ```sql
 DROP TRIGGER IF EXISTS trg_sync_valve_schedules_outbox_ai;
@@ -226,7 +237,13 @@ BEGIN
 END;
 ```
 
-**`once_fired_at` is deliberately absent from the `_au` guard** — including it would emit a sync event every time a ONCE schedule fires, which is bookkeeping, not a plan change. The firing itself already reaches the cloud as `IRRIGATION_EVENT_APPENDED`.
+**On `once_fired_at`:** it is absent from the guard, but do NOT justify that by
+"so a firing emits nothing" — review showed that is false. `store.updateSchedule`
+(`store.js`) *always* bumps `sync_version`, and `sync_version` IS in the guard, so
+a production ONCE firing emits an event regardless. That is arguably desirable
+(the cloud learns the schedule reached FIRED). The honest statement is: the guard
+lists the fields whose change is *meaningful*, and `once_fired_at` adds nothing a
+`sync_version` bump does not already carry.
 
 - [ ] **Step 4: Declare the op as SQL-owned in the parity verifier**
 

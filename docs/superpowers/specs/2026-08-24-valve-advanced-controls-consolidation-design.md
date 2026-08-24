@@ -72,6 +72,12 @@ render a commanded value as if it were a reading.
 | `strega_model` | `devices` | STANDARD / MOTORIZED | legacy card (`setModel`) |
 | `strega_generation` | `valve_settings` | GEN1 / GEN2 | Valve settings dialog |
 
+There is also a **third, undocumented source**: `getRecognizedStregaModel`
+(`StregaValveCard.tsx:44-51`) infers `MOTORIZED` when the device *name* contains
+"motor", and `STANDARD` from "solenoid"/"lite"/"standard". So capability is
+partly derived from a free-text field a user can rename at any time. Review
+found this; it belongs in whatever E3 documents.
+
 They answer overlapping questions ("what can this valve do?") and nothing keeps
 them consistent. Generation selects the *scheduler encoding*; model gates
 *partial opening*. A GEN2 motorized valve is a legitimate combination, so they
@@ -102,10 +108,17 @@ has to hunt for them in the field.
 
 ### E2 — Do we persist commanded aperture, and how is it labelled?
 
-Given §3(a), the options are: (a) do not persist — fire-and-forget, and the UI
-shows no aperture at all; (b) persist the **commanded** value with explicit
-"commanded, not confirmed" framing; (c) persist and attempt read-back, which
-requires vendor support that does not exist today.
+**Correction after review: the action is ALREADY persisted.** Every advanced
+STREGA command emits a `_log_ctx` from the downlink builder
+(`cdbaa3891d40d7a1`) which node `5c45136f382d501c` inserts into `actuator_log`.
+But the ctx carries `action` as the bare string `SET_PARTIAL_OPENING` — the
+builder's own label (`'PARTIAL OPEN 40%'`) and the percentage are **dropped**.
+So option (b) is largely built and merely lossy.
+
+Given §3(a), the options are: (a) do not persist anything new — and, per the
+above, the record already exists minus the number; (b) persist the **commanded**
+value with explicit "commanded, not confirmed" framing; (c) persist and attempt
+read-back, which requires vendor support that does not exist today.
 
 **Recommendation: (b) as an EVENT, not as state** — revised after E4 was
 answered. Since the resting position is always 100% and the action is one-shot,
