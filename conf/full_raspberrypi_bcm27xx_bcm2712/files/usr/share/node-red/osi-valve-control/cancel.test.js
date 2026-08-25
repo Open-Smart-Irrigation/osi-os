@@ -54,10 +54,63 @@ test('cancelActuation emits a VALVE_RUNTIME_CHANGED sync_outbox row on a linked 
   await linkCloud(db);
   await cancelActuation({ db, deviceEui: EUI, reason: null, flushQueue: countingFlush(), now: new Date('2026-08-25T10:15:00.000Z') });
   const rows = await db.all('SELECT op, aggregate_key, payload_json FROM sync_outbox');
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].op, 'VALVE_RUNTIME_CHANGED');
-  assert.equal(rows[0].aggregate_key, EUI);
-  assert.equal(JSON.parse(rows[0].payload_json).active_actuation, null, 'the just-cancelled row must not appear as active');
+  const runtimeRow = rows.find((r) => r.op === 'VALVE_RUNTIME_CHANGED');
+  assert.ok(runtimeRow);
+  assert.equal(runtimeRow.aggregate_key, EUI);
+  assert.equal(JSON.parse(runtimeRow.payload_json).active_actuation, null, 'the just-cancelled row must not appear as active');
+  db.close();
+});
+
+// Bovey cloud full-parity Task P4-E1: CANCELLED is a terminal reconciliation_state -- cancelActuation
+// is the ONLY code seam that ever writes it, so it must also archive it.
+test('cancelActuation emits a VALVE_ACTUATION_ARCHIVED sync_outbox row (status=CANCELLED) on a linked gateway, and none on an unlinked one', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await cancelActuation({ db, deviceEui: EUI, reason: 'field_visit', flushQueue: countingFlush(), now: new Date('2026-08-25T10:05:00.000Z') });
+  assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0, 'unlinked gateway must not enqueue anything');
+
+  await insertExpectation(db, { id: 'e2', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:10:00.000Z' });
+  await linkCloud(db);
+  await cancelActuation({ db, deviceEui: EUI, reason: 'field_visit', flushQueue: countingFlush(), now: new Date('2026-08-25T10:15:00.000Z') });
+  const rows = await db.all('SELECT op, aggregate_key, payload_json FROM sync_outbox');
+  const archiveRow = rows.find((r) => r.op === 'VALVE_ACTUATION_ARCHIVED');
+  assert.ok(archiveRow, 'a VALVE_ACTUATION_ARCHIVED row must be enqueued alongside VALVE_RUNTIME_CHANGED');
+  assert.equal(archiveRow.aggregate_key, 'e2', 'aggregate_key is the expectation_id, not the device_eui');
+  const payload = JSON.parse(archiveRow.payload_json);
+  assert.equal(payload.expectation_id, 'e2');
+  assert.equal(payload.status, 'CANCELLED');
+  assert.equal(payload.cancel_reason, 'field_visit');
+  db.close();
+});
+
+test('cancelActuation: an emit failure in emitActuationArchived is isolated the same way emitRuntimeChanged is -- ok:true, cancel committed, warn visible', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const warnings = [];
+  let insertCount = 0;
+  const failingDb = {
+    get: (...args) => db.get(...args),
+    all: (...args) => db.all(...args),
+    run: (sql, params) => {
+      if (/insert into sync_outbox/i.test(sql)) {
+        insertCount += 1;
+        // Let the first insert (VALVE_RUNTIME_CHANGED) through; fail the second (the archive).
+        if (insertCount === 2) return Promise.reject(new Error('boom'));
+      }
+      return db.run(sql, params);
+    },
+    transaction: (...args) => db.transaction(...args),
+    close: (...args) => db.close(...args),
+  };
+
+  const out = await cancelActuation({ db: failingDb, deviceEui: EUI, reason: null, flushQueue: countingFlush(), now: new Date('2026-08-25T10:05:00.000Z'), warn: (m) => warnings.push(m) });
+
+  assert.equal(out.ok, true, 'an archive-emission failure must not turn a successful cancel into ok:false');
+  const row = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.reconciliation_state, 'CANCELLED', 'the cancel itself must still have committed');
+  assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'")).length, 1, 'the runtime emit that succeeded must still have committed');
+  assert.ok(warnings.some((w) => /actuation-archive emit failed/.test(w)), 'the failure must still be visible via warn');
   db.close();
 });
 
