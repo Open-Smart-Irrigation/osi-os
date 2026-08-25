@@ -458,6 +458,7 @@ const schemaContract = {
     'last_clock_sync_queued_at',
     'last_clock_sync_acked_at',
     'updated_at',
+    'sync_version',
   ],
   valve_schedule_pushes: [
     'push_id',
