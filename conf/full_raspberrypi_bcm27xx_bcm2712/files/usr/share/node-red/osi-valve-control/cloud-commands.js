@@ -1,6 +1,7 @@
 'use strict';
-// Applies the four cloud->edge valve-schedule commands (Valve control Phase B) via the
-// SAME store/push/plan calls api.js's REST routes use, so a cloud edit and a local edit
+// Applies the cloud->edge valve commands (Valve control Phase B: the four schedule
+// commands; Bovey cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION) via the SAME
+// store/push/plan/cancel calls api.js's REST routes use, so a cloud edit and a local edit
 // compile identically - one code path, two entry points. There is no HTTP auth wrapper
 // here (no verifyBearer/ownedValve): these commands carry no end-user identity, only a
 // device_eui - the same trust boundary every other cloud command in Route Command's
@@ -130,7 +131,7 @@ const APPLIERS = {
   CANCEL_VALVE_ACTUATION: applyCancelValveActuation,
 };
 
-// Applies one of the four cloud->edge valve-schedule commands. Returns
+// Applies one of the cloud->edge valve commands registered in APPLIERS above. Returns
 // { ok, error, downlinks } rather than throwing or writing an HTTP response - the caller
 // (flows.json's "Valve Cloud Command Bridge") turns this into a command ACK plus MQTT
 // downlink messages via the existing command-ack path.
