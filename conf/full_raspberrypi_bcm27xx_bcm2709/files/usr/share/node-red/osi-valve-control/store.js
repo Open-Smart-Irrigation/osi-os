@@ -58,15 +58,29 @@ async function getSettings(db, deviceEui) {
 
 const SETTINGS_COLUMNS = ['strega_generation', 'flow_rate_lpm', 'flow_rate_source', 'flow_rate_updated_at', 'default_open_minutes', 'scheduler_status', 'skip_today_date', 'last_clock_sync_queued_at', 'last_clock_sync_acked_at'];
 
+// Subset of SETTINGS_COLUMNS that is part of the synced ValveSettings resource (Bovey
+// cloud full-parity Task P2-E1, migration 0025's trigger pair). last_clock_sync_queued_at/
+// acked_at are edge-local push-tracking bookkeeping written on nearly every scheduler tick
+// for a GEN2 valve (push.js/workers.js), and flow_rate_updated_at is a companion timestamp
+// for flow_rate_lpm/flow_rate_source, not itself a resource field. sync_version is only
+// bumped -- and the trg_sync_valve_settings_outbox_ai/_au triggers only fire -- when a
+// write actually touches one of these; otherwise a routine 10-minute clock-sync push would
+// flood sync_outbox with events the cloud contract does not even model.
+const SYNCED_SETTINGS_COLUMNS = ['strega_generation', 'flow_rate_lpm', 'flow_rate_source', 'default_open_minutes', 'scheduler_status', 'skip_today_date'];
+
 async function upsertSettings(db, deviceEui, patch) {
   const cols = SETTINGS_COLUMNS.filter((c) => Object.prototype.hasOwnProperty.call(patch || {}, c));
   if (!cols.length) return;
   const eui = String(deviceEui).toUpperCase();
   await db.run('INSERT OR IGNORE INTO valve_settings(device_eui) VALUES (?)', [eui]);
+  const bumpSyncVersion = cols.some((c) => SYNCED_SETTINGS_COLUMNS.includes(c));
   // datetime('now') (space-separated), not a hand-rolled ISO strftime: this matches the
   // column's own DEFAULT (datetime('now')) so every write to valve_settings.updated_at is the
   // same format, regardless of whether the row was just INSERTed or is being UPDATEd here.
-  await db.run('UPDATE valve_settings SET ' + cols.map((c) => c + '=?').join(', ') + ", updated_at=datetime('now') WHERE device_eui=?", cols.map((c) => patch[c]).concat([eui]));
+  const setClause = cols.map((c) => c + '=?').join(', ')
+    + (bumpSyncVersion ? ', sync_version = COALESCE(sync_version,0)+1' : '')
+    + ", updated_at=datetime('now')";
+  await db.run('UPDATE valve_settings SET ' + setClause + ' WHERE device_eui=?', cols.map((c) => patch[c]).concat([eui]));
 }
 
 // node:sqlite's DatabaseSync/StatementSync rejects `undefined` bind params (must be `null`);
