@@ -447,6 +447,62 @@
                 "sync_version": {"type": "integer", "minimum": 0},
                 "updated_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"}
             }
+        },
+        "ValveRuntime": {
+            "type": "object",
+            "description": "Derived runtime state (no backing table of its own) -- assembled from valve_actuation_expectations and valve_schedule_pushes by osi-valve-control/runtime.js, mirroring the same fields the edge GET /api/valves route serves. Emitted on the code paths that change this state (expectation writes, reconciliation transitions, cancel, push-ledger acks/queueing), not from a table trigger. The cloud applier is last-write-wins on as_of.",
+            "required": ["contract_version", "device_eui", "active_actuation", "recent_stale_state", "push_state", "as_of"],
+            "properties": {
+                "contract_version": {
+                    "type": "integer",
+                    "const": 1,
+                    "description": "Sync event contract version stamped into every emitted sync_outbox payload JSON."
+                },
+                "device_eui": {"$ref": "#/definitions/Eui64"},
+                "active_actuation": {
+                    "type": ["object", "null"],
+                    "description": "The newest PENDING_OBSERVATION/OBSERVED_RUNNING valve_actuation_expectations row, or null when the valve has no active actuation.",
+                    "required": ["expectation_id", "reconciliation_state", "commanded_at", "expected_close_at", "duration_seconds", "trigger"],
+                    "properties": {
+                        "expectation_id": {"type": "string", "minLength": 1},
+                        "reconciliation_state": {"type": "string", "enum": ["PENDING_OBSERVATION", "OBSERVED_RUNNING"]},
+                        "commanded_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                        "expected_close_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                        "duration_seconds": {"type": "integer", "minimum": 0},
+                        "trigger": {"type": ["string", "null"]}
+                    }
+                },
+                "recent_stale_state": {
+                    "type": ["string", "null"],
+                    "description": "The newest STALE_* reconciliation_state commanded within the last day, or null.",
+                    "enum": ["STALE_NO_OBSERVATION", "STALE_OPEN_OBSERVED", null]
+                },
+                "push_state": {
+                    "type": "object",
+                    "description": "Plan-push delivery summary, matching the edge GET /api/valves route's push_state shape (store.pushSummary).",
+                    "required": ["queued", "acked", "failed", "last_plan_acked_at"],
+                    "properties": {
+                        "queued": {"type": "integer", "minimum": 0},
+                        "acked": {"type": "integer", "minimum": 0},
+                        "failed": {"type": "integer", "minimum": 0},
+                        "last_plan_acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                        "weekday_states": {
+                            "type": "array",
+                            "description": "GEN1 only: the raw WEEKDAY_PLAN push-ledger rows for this valve, mirroring what ValveScheduleDialog.tsx's per-weekday badges consume (store.weekdayPushStates).",
+                            "items": {
+                                "type": "object",
+                                "required": ["weekday", "state", "acked_at"],
+                                "properties": {
+                                    "weekday": {"type": "integer", "minimum": 0, "maximum": 6},
+                                    "state": {"type": "string", "enum": ["QUEUED", "ACKED", "FAILED"]},
+                                    "acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "as_of": {"$ref": "#/definitions/CanonicalUtcTimestamp"}
+            }
         }
     }
 }
