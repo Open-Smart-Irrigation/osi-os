@@ -479,7 +479,7 @@
                 },
                 "push_state": {
                     "type": "object",
-                    "description": "Plan-push delivery summary, matching the edge GET /api/valves route's push_state shape (store.pushSummary).",
+                    "description": "Plan-push delivery summary, matching the edge GET /api/valves route's push_state shape (store.pushSummary) -- with one deliberate divergence: last_plan_queued_at (present on the edge API response) is intentionally omitted here, since nothing in the cloud surface consumes a queued-at timestamp independent of the acked-at one.",
                     "required": ["queued", "acked", "failed", "last_plan_acked_at"],
                     "properties": {
                         "queued": {"type": "integer", "minimum": 0},
@@ -488,7 +488,7 @@
                         "last_plan_acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
                         "weekday_states": {
                             "type": "array",
-                            "description": "GEN1 only: the raw WEEKDAY_PLAN push-ledger rows for this valve, mirroring what ValveScheduleDialog.tsx's per-weekday badges consume (store.weekdayPushStates).",
+                            "description": "GEN1 only: one entry per weekday (0-6) that has ever had a WEEKDAY_PLAN push, collapsed to the newest push-ledger row per weekday by queued_at (an ACKED row is never superseded by a later re-edit of the same weekday, so the raw ledger can otherwise carry more than one surviving row per weekday) -- mirrors the per-weekday badge ValveScheduleDialog.tsx's own latestPush() reduction shows, but pre-reduced server-side rather than shipped as raw history.",
                             "items": {
                                 "type": "object",
                                 "required": ["weekday", "state", "acked_at"],
@@ -501,7 +501,10 @@
                         }
                     }
                 },
-                "as_of": {"$ref": "#/definitions/CanonicalUtcTimestamp"}
+                "as_of": {
+                    "allOf": [{"$ref": "#/definitions/CanonicalUtcTimestamp"}],
+                    "description": "Snapshot-build time, stamped once at assembly (never from an event-specific timestamp such as an uplink's receivedAt or an expectation's commanded_at). Monotone non-decreasing per device_eui in practice (each emission reads the clock at its own build time, strictly after any earlier emission's read); the cloud applier uses last-write-wins on this field."
+                }
             }
         }
     }

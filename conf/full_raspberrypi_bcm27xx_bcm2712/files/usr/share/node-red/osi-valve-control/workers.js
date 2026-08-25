@@ -35,7 +35,12 @@ async function handleUplink({ db, deviceEui, decoded, fPort, rawBytes, receivedA
     if (a.purpose === 'CLOCK_SYNC') await store.upsertSettings(db, deviceEui, { last_clock_sync_acked_at: at });
     if (a.purpose === 'WEEKDAY_PLAN' || a.purpose === 'DAYMASK_PLAN') planAcked = true;
   }
-  if (planAcked) await runtime.emitRuntimeChanged(db, deviceEui, new Date(at));
+  // Best-effort: a runtime-emission failure must not turn an otherwise-successful uplink
+  // handler into a reported failure (matches the flows.json seams' own try/catch shape).
+  if (planAcked) {
+    try { await runtime.emitRuntimeChanged(db, deviceEui, warn); }
+    catch (e) { warn && warn('[valve-control] handleUplink: runtime emit failed: ' + (e && e.message ? e.message : e)); }
+  }
   let generationPromoted = false;
   if (generationHint === 'GEN2') {
     const s = await store.getSettings(db, deviceEui);
@@ -147,7 +152,9 @@ async function runObserveTick({ db, now, warn }) {
     await db.run(`INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, command_id, effect_key, commanded_at, commanded_duration_seconds, expected_close_at, flow_rate_lpm, flow_rate_source, estimated_gross_liters, volume_source, observed_open_at, reconciliation_state, created_at, trigger)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [crypto.randomUUID(), d.deveui, d.irrigation_zone_id, null, null, commandedAt.toISOString(), durationSec, expectedClose.toISOString(), flowRate, flowSource, liters, volumeSource, new Date(uplinkMs).toISOString(), 'OBSERVED_RUNNING', nowDate.toISOString(), trigger]);
-    await runtime.emitRuntimeChanged(db, d.deveui, nowDate);
+    // Best-effort: see handleUplink's comment above.
+    try { await runtime.emitRuntimeChanged(db, d.deveui, warn); }
+    catch (e) { warn && warn('[valve-control] runObserveTick: runtime emit failed: ' + (e && e.message ? e.message : e)); }
     created += 1;
   }
   return { created };
@@ -157,7 +164,17 @@ async function runClockTick({ db, now, appId, warn }) {
   const nowDate = now || new Date();
   // (FW-T5) Read once per tick, same rationale as runObserveTick above.
   const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
-  await store.failStalePushes(db, new Date(nowDate.getTime() - STALE_PUSH_MS).toISOString());
+  // P3-E1 review fix (IMPORTANT 1): failStalePushes flips QUEUED -> FAILED fleet-wide with no
+  // emission of its own -- without this, the cloud shows "queued" forever for a valve whose plan
+  // push aged out unacknowledged, since nothing else touches push_state until some unrelated
+  // seam next fires for that device. Pre-SELECT (state is still QUEUED) before the UPDATE runs.
+  const staleCutoffIso = new Date(nowDate.getTime() - STALE_PUSH_MS).toISOString();
+  const staleDeviceEuis = await store.staleQueuedPlanDeviceEuis(db, staleCutoffIso);
+  await store.failStalePushes(db, staleCutoffIso);
+  for (const eui of staleDeviceEuis) {
+    try { await runtime.emitRuntimeChanged(db, eui, warn); }
+    catch (e) { warn && warn('[valve-control] runClockTick: stale-push runtime emit failed for ' + eui + ': ' + (e && e.message ? e.message : e)); }
+  }
   // (I2, spec §5.4): FPort 12 must encode local wall-clock digits in the SCHEDULE's timezone,
   // not the zone's. schedule_timezone picks, per valve, the first enabled WEEKLY schedule's
   // timezone (an enabled WEEKLY row sorts first), falling back to any other schedule's
@@ -268,6 +285,13 @@ async function runTriggerBackfill({ db, warn }) {
     }
     await db.run('UPDATE valve_actuation_expectations SET trigger=? WHERE expectation_id=? AND trigger IS NULL', [trigger, r.expectation_id]);
     updated += 1;
+  }
+
+  // P3-E1 review fix (rider 5): a backfilled row's trigger is part of ValveRuntime.active_actuation
+  // (when that row happens to still be the active one) -- emit once per affected device, best-effort.
+  for (const eui of new Set(rows.map((r) => r.device_eui))) {
+    try { await runtime.emitRuntimeChanged(db, eui, warn); }
+    catch (e) { warn && warn('[valve-control] runTriggerBackfill: runtime emit failed for ' + eui + ': ' + (e && e.message ? e.message : e)); }
   }
 
   const unknownVolume = await db.all(`SELECT vae.expectation_id, vae.device_eui, vae.zone_id, vae.commanded_duration_seconds,

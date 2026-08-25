@@ -255,6 +255,38 @@ test('P3-E1: a plan-affecting queuePushes call emits VALVE_RUNTIME_CHANGED on a 
   db.close();
 });
 
+// P3-E1 review fix (IMPORTANT 4): the emit inside queuePushes' transaction used to be uncaught --
+// a failure there would have rolled back the push-ledger writes made in the SAME transaction,
+// losing a real, successful plan compile over a best-effort sync side effect.
+test('P3-E1: queuePushes still commits its push-ledger writes even when the runtime emission inside the same transaction fails', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await store.insertSchedule(db, { schedule_uuid: 'g1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const warnings = [];
+  const failingDb = {
+    get: (...args) => db.get(...args),
+    all: (...args) => db.all(...args),
+    run: (...args) => db.run(...args),
+    close: (...args) => db.close(...args),
+    transaction: (executor) => db.transaction((tx) => executor({
+      get: (...args) => tx.get(...args),
+      all: (...args) => tx.all(...args),
+      run: (sql, params) => (/insert into sync_outbox/i.test(sql) ? Promise.reject(new Error('boom')) : tx.run(sql, params)),
+    })),
+  };
+
+  const r = await compileAndQueue({ db: failingDb, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: (m) => warnings.push(m) });
+
+  assert.equal(r.rows.filter((row) => row.purpose === 'WEEKDAY_PLAN').length, 7, 'the push-ledger writes must still have committed');
+  // Scoped to VALVE_RUNTIME_CHANGED, not "no sync_outbox rows at all": insertSchedule's own
+  // trigger (VALVE_SCHEDULE_UPSERTED) and the clock-sync settings write's trigger
+  // (VALVE_SETTINGS_UPSERTED) legitimately land rows here too -- this test is only about the
+  // runtime emission specifically not landing (and not blocking the rest).
+  assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'")).length, 0, 'the failed emit itself never landed');
+  assert.ok(warnings.some((w) => /runtime emit failed/.test(w)));
+  db.close();
+});
+
 test('compileAndQueue: clock-sync timezone prefers the first enabled WEEKLY schedule over a ONCE schedule (MINOR 5)', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'o1', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, fire_at: '2026-08-20T00:00:00.000Z', duration_minutes: 5, timezone: 'Pacific/Auckland', enabled: 1 });

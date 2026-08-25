@@ -201,6 +201,22 @@ async function failStalePushes(db, olderThanIso) {
   return db.run("UPDATE valve_schedule_pushes SET state='FAILED', error='no_ack_24h' WHERE state='QUEUED' AND datetime(queued_at) < datetime(?)", [olderThanIso]);
 }
 
+// P3-E1 review fix (IMPORTANT 1): devices with a QUEUED WEEKDAY_PLAN/DAYMASK_PLAN row past
+// olderThanIso -- i.e. the set failStalePushes(olderThanIso) is about to flip to FAILED. Only
+// those two purposes feed ValveRuntime.push_state (pushSummary/weekdayPushStates both filter to
+// them), so this is deliberately narrower than failStalePushes' own fleet-wide, all-purposes
+// UPDATE. Callers must SELECT this BEFORE calling failStalePushes (the UPDATE would otherwise
+// have already erased the QUEUED state this query keys on), then emit once per returned
+// device_eui afterward -- otherwise a valve whose plan push aged out with no ack shows "queued"
+// in the cloud forever, since nothing else touches push_state until the next unrelated seam fires.
+async function staleQueuedPlanDeviceEuis(db, olderThanIso) {
+  const rows = await db.all(
+    "SELECT DISTINCT device_eui FROM valve_schedule_pushes WHERE state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND datetime(queued_at) < datetime(?)",
+    [olderThanIso]
+  );
+  return rows.map((r) => r.device_eui);
+}
+
 // (final-fix-wave IMPORTANT 1) The naive SUM(...)-over-30-days form counted every ACKED/QUEUED
 // row across every purpose, so a plan re-edit within the window left the OLD (now-superseded-
 // by-newer-row, but not state-SUPERSEDED because it was already ACKED) rows in the tally
@@ -320,4 +336,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { listQueued, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { listQueued, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

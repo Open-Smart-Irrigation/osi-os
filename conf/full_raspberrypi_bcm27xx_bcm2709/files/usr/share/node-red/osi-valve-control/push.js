@@ -108,7 +108,12 @@ async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueu
       await store.supersedeQueued(tx, deviceEui, 'DAYMASK_PLAN', 0x7F);
     }
     if (rows.length) await store.insertPushes(tx, rows);
-    if (affectsPushState) await runtime.emitRuntimeChanged(tx, deviceEui);
+    // P3-E1 review fix (IMPORTANT 4): best-effort -- an emit failure here must not roll back the
+    // push-ledger writes this same transaction just made (matches the flows.json seams' shape).
+    if (affectsPushState) {
+      try { await runtime.emitRuntimeChanged(tx, deviceEui, warn); }
+      catch (e) { warn && warn('[valve-control] queuePushes: runtime emit failed: ' + (e && e.message ? e.message : e)); }
+    }
   });
   // The flush above wiped ChirpStack's queue for this device. Rows left QUEUED by an EARLIER
   // compile that this one does not supersede (a different day-set) lost their downlink with it,
