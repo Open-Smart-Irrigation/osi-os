@@ -192,9 +192,15 @@ overturned**, one on safety grounds.
 | C4 | remove legacy card controls | **DEFER — do not touch** | **The cloud already has valve writes.** `StregaValveCard` dispatches open/close plus six advanced STREGA commands today. Removing them is a capability regression sold as decluttering |
 | C5 | rename the account | **REJECTED — unsafe** | Sync tokens are JWTs with the **username as subject**; the gateway holds a long-lived token issued for subject `admin`. Renaming breaks the gateway's sync auth and forces a re-link — an edge touch this spec forbids |
 
+**C2 ruling superseded 2026-08-25.** See the addendum at the end of this
+section; the read-only ruling above no longer governs implementation.
+
 **D4 reversal (sync `valve_settings`): NO.** A column migration plus triggers,
 contract, cloud table and applier on a live gateway in presentation week, to
 upgrade a panel from credible to rich, inverts this spec's one correct instinct.
+
+**D4 reversal superseded 2026-08-25.** See the addendum at the end of this
+section; the edge-only ruling above no longer governs implementation.
 
 ### Factual corrections to §2 and §4
 
@@ -227,3 +233,19 @@ upgrade a panel from credible to rich, inverts this spec's one correct instinct.
 zone, open/closed and the live-synced schedule list, with the demonstrable moment
 *"a schedule created on the gateway appears in the cloud"* — and the legacy card
 still able to open a valve. No step 2–4 failure can strand the demo.
+
+### Addendum — 2026-08-25 (rulings superseded)
+
+Phil confirmed the operator decision on 2026-08-25: "cloud fully functional."
+Two rulings above no longer govern implementation. The C2 read-only ruling
+(`(a), flag dropped`, row above) is overturned: the cloud valve surface gets
+full write capability, not a read-only view behind a dropped flag. The D4
+reversal ruling (`D4 reversal (sync valve_settings): NO`, paragraph above) is
+also overturned: `valve_settings` sync from edge to cloud is now in scope.
+
+Both are superseded by
+`docs/superpowers/plans/2026-08-25-bovey-cloud-full-parity-program.md`, which
+specifies the cloud write path (pending commands through the existing REST-poll
+transport) and the `valve_settings` sync design (new resource and event types,
+edge-only-in-v1 status ends). The C2 and D4 rows above stay as the historical
+record of the 2026-08-24 review; they describe a ruling that no longer applies.
