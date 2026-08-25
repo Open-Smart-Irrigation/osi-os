@@ -74,17 +74,6 @@
   fill: var(--valve-body-closed);
 }
 
-/* ── Countdown ring ───────────────────────────────────────────────────────── */
-
-.valve-glyph__ring {
-  stroke: var(--valve-body-open);
-  opacity: 0.55;
-}
-
-.valve-glyph--failed .valve-glyph__ring {
-  stroke: var(--valve-badge-failed);
-}
-
 /* ── Water ────────────────────────────────────────────────────────────────── */
 
 .valve-glyph__water-edge {

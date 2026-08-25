@@ -4,7 +4,6 @@ import type { ValveGlyphState } from './valveState';
 
 export interface ValveGlyphProps {
   state: ValveGlyphState;
-  progress: number | null;
   size?: number;
   reducedMotion?: boolean;
 }
@@ -26,15 +25,10 @@ const OUTLINE_PATH = 'M440-760H320q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-84
 const FILLED_PATH = 'M440-760H320q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760H520v80q0 17-11.5 28.5T480-640q-17 0-28.5-11.5T440-680v-80ZM160-159v-242q0-17 11.5-28.5T200-441q17 0 28.5 11.5T240-401v1h120v-120h-1q-17 0-28.5-11.5T319-560q0-17 11.5-28.5T359-600h242q17 0 28.5 11.5T641-560q0 17-11.5 28.5T601-520h-1v120h120v-1q0-17 11.5-28.5T760-441q17 0 28.5 11.5T800-401v242q0 17-11.5 28.5T760-119q-17 0-28.5-11.5T720-159v-1H240v1q0 17-11.5 28.5T200-119q-17 0-28.5-11.5T160-159Z';
 const WATER_PATH = 'M790 -286 C842 -286 858 -252 851 -216 C844 -179 883 -151 880 -62';
 
-// Countdown ring, sized in the same 960 space: r=470 about (480,-470) clears the body
-// (x 160..800, y -840..-119) without leaving the viewBox.
-const RING_RADIUS = 470;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-
 const BADGE_TRANSFORM = 'translate(770, -800)';
 const BADGE_RADIUS = 140;
 
-export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 48, reducedMotion = false }) => {
+export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, size = 48, reducedMotion = false }) => {
   const isOpen = state === 'open';
   const isPending = state === 'pending';
   const isClosing = state === 'closing';
@@ -51,10 +45,6 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
   const showWater = isOpen || isClosing;
   const animateWater = isOpen && !reducedMotion;
 
-  const showRing = progress !== null;
-  const clampedProgress = showRing ? Math.max(0, Math.min(1, progress as number)) : 0;
-  const ringOffset = RING_CIRCUMFERENCE * (1 - clampedProgress);
-
   const stateClass = `valve-glyph--${state}`;
   const motionClass = animateWater ? '' : 'valve-glyph--static';
 
@@ -65,21 +55,6 @@ export const ValveGlyph: React.FC<ValveGlyphProps> = ({ state, progress, size = 
       aria-hidden="true"
     >
       <svg viewBox={VIEW_BOX} width={size} height={size} className="valve-glyph__svg overflow-visible">
-        {showRing && (
-          <circle
-            className="valve-glyph__ring"
-            cx="480"
-            cy="-470"
-            r={RING_RADIUS}
-            fill="none"
-            strokeWidth="38"
-            strokeLinecap="round"
-            strokeDasharray={RING_CIRCUMFERENCE}
-            strokeDashoffset={ringOffset}
-            transform="rotate(-90 480 -470)"
-          />
-        )}
-
         {/* Water sits behind the body so it reads as emerging from the outlet. */}
         {showWater && (
           <g className="valve-glyph__water">
