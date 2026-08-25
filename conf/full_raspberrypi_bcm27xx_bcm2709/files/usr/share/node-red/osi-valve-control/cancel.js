@@ -88,6 +88,11 @@ async function cancelActuation({ db, deviceEui, reason, flushQueue, now, warn })
   try { await runtime.emitRuntimeChanged(db, eui, warn); }
   catch (e) { warn && warn('[valve-control] cancelActuation: runtime emit failed: ' + (e && e.message ? e.message : e)); }
 
+  // Bovey cloud full-parity Task P4-E1: CANCELLED is one of the terminal reconciliation_states
+  // -- same best-effort rationale as the runtime emit immediately above.
+  try { await runtime.emitActuationArchived(db, eui, active.expectation_id, warn); }
+  catch (e) { warn && warn('[valve-control] cancelActuation: actuation-archive emit failed: ' + (e && e.message ? e.message : e)); }
+
   return {
     ok: true,
     downlinks: [],

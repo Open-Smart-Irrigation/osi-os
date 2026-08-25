@@ -19,9 +19,19 @@ const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
 const monitorNode = flows.find((n) => n.id === 'strega-reconciliation-monitor');
 if (!monitorNode) throw new Error('strega-reconciliation-monitor node not found in flows.json');
 
-const { tempDb } = require(path.resolve(
+const { tempDb, linkCloud } = require(path.resolve(
   __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/test-helpers.js'
 ));
+// P3-E1 added an `osiLib.require('osi-valve-control')` call to the monitor node's own func
+// (for its VALVE_RUNTIME_CHANGED emission) -- the real module, not a hand-built stub, since this
+// test's whole point is to exercise real DB-writing side effects end to end (including, as of
+// P4-E1, VALVE_ACTUATION_ARCHIVED).
+const VC = require(path.resolve(
+  __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js'
+));
+const osiLib = {
+  require: (name) => (name === 'osi-valve-control' ? { ok: true, value: VC } : { ok: false, error: 'unexpected osiLib.require: ' + name }),
+};
 
 const EUI = '0016C001F1000001';
 
@@ -57,11 +67,11 @@ async function runMonitor(raw) {
   const node = noopNode();
   const msg = { payload: null };
   const runner = new Function(
-    'msg', 'node', 'osiDb', 'flow', 'context', 'env', 'global',
+    'msg', 'node', 'osiDb', 'osiLib', 'flow', 'context', 'env', 'global',
     monitorNode.func + '\n//# sourceURL=strega-reconciliation-monitor.js'
   );
   const noopCtx = { get: () => undefined, set: () => {} };
-  const outMsg = await runner(msg, node, osiDb, noopCtx, noopCtx, { get: () => null }, { get: () => undefined });
+  const outMsg = await runner(msg, node, osiDb, osiLib, noopCtx, noopCtx, { get: () => null }, { get: () => undefined });
   return { result: outMsg && outMsg.payload, node };
 }
 
@@ -207,6 +217,84 @@ async function main() {
     assert.equal(result.advanced, 1);
     const events = await db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
     assert.equal(events.length, 0);
+  });
+
+  // --- Bovey cloud full-parity Task P4-E1: VALVE_ACTUATION_ARCHIVED on terminal transitions ---
+
+  await test('OBSERVED_COMPLETE on a linked gateway emits a VALVE_ACTUATION_ARCHIVED sync_outbox row (status=COMPLETED); unlinked emits nothing', async () => {
+    const { db, raw } = await tempDb();
+    await seedExpectation(db, { trigger: 'unexplained' });
+    await simulateCloseUplink(db);
+    await runMonitor(raw);
+    assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0, 'unlinked gateway must not enqueue anything');
+
+    const exp2 = await seedExpectation(db, { trigger: 'unexplained' });
+    await linkCloud(db);
+    const recordedAt = new Date(Date.now() - 60000).toISOString();
+    await db.run("UPDATE devices SET current_state='CLOSED', updated_at=? WHERE deveui=?", [recordedAt, EUI]);
+    await db.run('INSERT INTO device_data(deveui, recorded_at) VALUES (?,?)', [EUI, recordedAt]);
+
+    await runMonitor(raw);
+    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].aggregate_key, exp2.expectation_id);
+    const payload = JSON.parse(rows[0].payload_json);
+    assert.equal(payload.expectation_id, exp2.expectation_id);
+    assert.equal(payload.status, 'COMPLETED');
+    assert.equal(payload.trigger, 'unexplained');
+  });
+
+  await test('STALE_NO_OBSERVATION (never observed open, past grace) emits status=OPEN_TIMEOUT on a linked gateway', async () => {
+    const { db, raw } = await tempDb();
+    await linkCloud(db);
+    const farPast = new Date(Date.now() - 40 * 60000).toISOString(); // 40 min ago: past the 30-min grace
+    const exp = await seedExpectation(db, {
+      trigger: 'manual', reconciliation_state: 'PENDING_OBSERVATION',
+      observed_open_at: null, observed_close_at: null, expected_close_at: farPast,
+    });
+
+    const { result } = await runMonitor(raw);
+    assert.equal(result.advanced, 1);
+    const updated = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', [exp.expectation_id]);
+    assert.equal(updated.reconciliation_state, 'STALE_NO_OBSERVATION');
+
+    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
+    assert.equal(rows.length, 1);
+    assert.equal(JSON.parse(rows[0].payload_json).status, 'OPEN_TIMEOUT');
+  });
+
+  await test('STALE_OPEN_OBSERVED (observed open, never observed close, past grace) emits status=CLOSE_TIMEOUT on a linked gateway', async () => {
+    const { db, raw } = await tempDb();
+    await linkCloud(db);
+    const farPast = new Date(Date.now() - 40 * 60000).toISOString(); // 40 min ago: past the 30-min grace
+    const exp = await seedExpectation(db, {
+      trigger: 'manual', reconciliation_state: 'OBSERVED_RUNNING',
+      observed_open_at: new Date(Date.now() - 35 * 60000).toISOString(), observed_close_at: null, expected_close_at: farPast,
+    });
+
+    const { result } = await runMonitor(raw);
+    assert.equal(result.advanced, 1);
+    const updated = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', [exp.expectation_id]);
+    assert.equal(updated.reconciliation_state, 'STALE_OPEN_OBSERVED');
+
+    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
+    assert.equal(rows.length, 1);
+    assert.equal(JSON.parse(rows[0].payload_json).status, 'CLOSE_TIMEOUT');
+  });
+
+  await test('a non-completing transition (PENDING_OBSERVATION -> OBSERVED_RUNNING) never emits VALVE_ACTUATION_ARCHIVED, even on a linked gateway', async () => {
+    const { db, raw } = await tempDb();
+    await linkCloud(db);
+    await seedExpectation(db, { trigger: 'on_valve_schedule', reconciliation_state: 'PENDING_OBSERVATION', observed_open_at: null, observed_close_at: null });
+    const recordedAt = new Date(Date.now() - 60000).toISOString();
+    await db.run("UPDATE devices SET current_state='OPEN', updated_at=? WHERE deveui=?", [recordedAt, EUI]);
+    await db.run('INSERT INTO device_data(deveui, recorded_at) VALUES (?,?)', [EUI, recordedAt]);
+
+    const { result } = await runMonitor(raw);
+    assert.equal(result.advanced, 1, 'the expectation must still advance to OBSERVED_RUNNING');
+    assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'")).length, 0);
+    // The runtime-state emission is unaffected by this task's addition.
+    assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'")).length, 1);
   });
 }
 

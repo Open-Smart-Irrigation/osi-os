@@ -147,4 +147,119 @@ async function emitRuntimeChanged(db, deviceEui, warn, now) {
   return { event_uuid: eventUuid, payload };
 }
 
-module.exports = { buildRuntimePayload, emitRuntimeChanged };
+// --- Bovey cloud full-parity Task P4-E1: terminal actuation history (VALVE_ACTUATION_ARCHIVED) ---
+//
+// Maps a TERMINAL valve_actuation_expectations.reconciliation_state to the ValveActuation
+// resource's `status` vocabulary (docs/contracts/sync-schema/resources.schema.json). Only
+// terminal reconciliation states appear here -- PENDING_OBSERVATION/OBSERVED_RUNNING are active,
+// not archived, and are intentionally absent (buildActuationPayload/emitActuationArchived below
+// no-op for them, so a caller never needs its own "is this terminal" check before calling in).
+// COMMAND_FAILED is NOT included: the edge panel (get-actuations-response's deriveStatus, in
+// flows.json) derives COMMAND_FAILED from applied_commands.result at GET-time, not from
+// reconciliation_state -- there is no discrete write inside "the reconciliation monitor + cancel
+// path" (this task's scoped emission seams) that ever marks a row command-failed, so this task
+// does not emit it. See docs/superpowers/sdd/2026-08-25-bovey-cloud-full-parity-program/
+// task-p4e1-report.md for the full trace of why (applied_commands is written by the generic
+// osi-command-ledger module, shared across command domains well outside these two seams).
+const TERMINAL_STATUS_BY_RECONCILIATION_STATE = {
+  OBSERVED_COMPLETE: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  STALE_NO_OBSERVATION: 'OPEN_TIMEOUT',
+  STALE_OPEN_OBSERVED: 'CLOSE_TIMEOUT',
+};
+
+// Assembles the ValveActuation resource payload for one expectation row, mirroring the field
+// values GET /api/irrigation/recent-actuations serves for the same row (get-actuations-query's
+// SQL + get-actuations-response's Format Response function in flows.json) -- zone_uuid replaces
+// the edge-local zone_id (sync payloads never carry local integer ids) and duration_seconds
+// replaces commanded_duration_seconds (renamed, same value). `status` is the row's terminal
+// state, not recomputed against a wall-clock grace window: once terminal the row never changes
+// again, so there is nothing left to time out further. Returns null when the expectation does
+// not exist, or exists but has not (yet) reached a terminal reconciliation_state.
+async function buildActuationPayload(db, expectationId) {
+  const row = await db.get(
+    'SELECT vae.expectation_id, vae.device_eui, vae.reconciliation_state, vae.trigger, ' +
+      'vae.commanded_at, vae.observed_open_at, vae.observed_close_at, vae.expected_close_at, ' +
+      'vae.commanded_duration_seconds, vae.estimated_gross_liters, vae.volume_source, vae.cancel_reason, ' +
+      '(SELECT zone_uuid FROM irrigation_zones WHERE id = vae.zone_id AND deleted_at IS NULL) AS zone_uuid, ' +
+      'ac.result_detail AS command_result_detail ' +
+      'FROM valve_actuation_expectations vae LEFT JOIN applied_commands ac ON ac.command_id = vae.command_id ' +
+      'WHERE vae.expectation_id = ?',
+    [expectationId]
+  );
+  if (!row) return null;
+  const status = TERMINAL_STATUS_BY_RECONCILIATION_STATE[row.reconciliation_state];
+  if (!status) return null;
+  return {
+    contract_version: 1,
+    expectation_id: row.expectation_id,
+    device_eui: String(row.device_eui).toUpperCase(),
+    zone_uuid: row.zone_uuid || null,
+    status,
+    trigger: row.trigger || null,
+    commanded_at: row.commanded_at,
+    observed_open_at: row.observed_open_at || null,
+    observed_close_at: row.observed_close_at || null,
+    expected_close_at: row.expected_close_at || null,
+    duration_seconds: row.commanded_duration_seconds != null ? Number(row.commanded_duration_seconds) : null,
+    estimated_gross_liters: row.estimated_gross_liters != null ? Number(row.estimated_gross_liters) : null,
+    volume_source: row.volume_source || null,
+    cancel_reason: row.cancel_reason || null,
+    command_result_detail: row.command_result_detail || null,
+    // No sync_version bookkeeping column exists on this table (unlike ValveSettings) -- the
+    // cloud applier is last-write-wins on this field instead, the same as ValveRuntime.as_of.
+    // Deterministic from the row's own terminal timestamps, never wall-clock "now": the row
+    // never changes again once terminal, so a repeated emission (bootstrap replay, a later
+    // trigger-backfill touching the same row) resolves to the SAME archived_at rather than
+    // drifting forward on every re-run.
+    archived_at: row.observed_close_at || row.expected_close_at || row.commanded_at,
+  };
+}
+
+// Builds and enqueues a VALVE_ACTUATION_ARCHIVED sync_outbox row for one expectation. Reuses the
+// same link/gateway resolution and best-effort-INSERT shape as emitRuntimeChanged above (see its
+// comment block for the guard rationale) -- the only difference is this event carries no
+// meaningful `now` override (there is nothing to snapshot-build; buildActuationPayload reads
+// entirely from the row's own persisted, immutable-once-terminal fields).
+//
+// No-ops (returning null) when: unlinked; no resolvable gateway_device_eui (warns); the
+// expectation does not exist; or the expectation has not reached a terminal state yet -- this
+// last guard means callers (cancel.js, the strega-reconciliation-monitor flows.json node) can
+// call in unconditionally after ANY transition without checking terminality themselves.
+async function emitActuationArchived(db, deviceEui, expectationId, warn) {
+  const link = await resolveLinkAndGateway(db, deviceEui);
+  if (!link.linked) return null;
+  if (!link.gatewayDeviceEui) {
+    if (typeof warn === 'function') warn('[valve-control] actuation-archive emit skipped for ' + deviceEui + ': no resolvable gateway_device_eui');
+    return null;
+  }
+  const payload = await buildActuationPayload(db, expectationId);
+  if (!payload) return null;
+  const eventUuid = crypto.randomUUID();
+  await db.run(
+    'INSERT INTO sync_outbox (' +
+      'event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui' +
+    ') VALUES (?,?,?,?,?,?,?,?)',
+    [
+      eventUuid,
+      'VALVE_ACTUATION',
+      payload.expectation_id,
+      'VALVE_ACTUATION_ARCHIVED',
+      JSON.stringify(payload),
+      // Same rationale as VALVE_RUNTIME_CHANGED above: no backing sync_version to stamp, the
+      // cloud applier is last-write-wins on payload.archived_at instead.
+      0,
+      payload.archived_at,
+      link.gatewayDeviceEui,
+    ]
+  );
+  return { event_uuid: eventUuid, payload };
+}
+
+module.exports = {
+  buildRuntimePayload,
+  emitRuntimeChanged,
+  buildActuationPayload,
+  emitActuationArchived,
+  TERMINAL_STATUS_BY_RECONCILIATION_STATE,
+};
