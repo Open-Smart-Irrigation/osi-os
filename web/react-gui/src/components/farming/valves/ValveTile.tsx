@@ -134,7 +134,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex items-start gap-3">
-        <ValveGlyph state={glyph.state} progress={glyph.progress} size={48} />
+        <ValveGlyph state={glyph.state} size={48} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-sm font-semibold text-[var(--text)]">{valve.name}</h3>
