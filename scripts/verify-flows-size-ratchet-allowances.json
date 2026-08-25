@@ -196,6 +196,22 @@
     "8809bb5239dfb3d4": {
       "delta": 158,
       "reason": "STREGA Gen2 device profile Task 6 fix round R2 (NEW-MAJOR-A, NEW-MAJOR-B): Build Telemetry's getProfileKind() gains the CHIRPSTACK_PROFILE_STREGA_GEN2 whitelist entry so a re-pointed Gen2 valve is still recognised as STREGA_VALVE on the cloud telemetry path instead of falling through to the generic sensor branch (matches valve-ack-fn/strega-process-fn from earlier in this task); and the Gen2 vendor decoder's Actuator field is accepted as an alias for Valve via an explicit !== undefined && !== null check (never ||, since valve state 0/CLOSED is falsy), matching strega-process-fn's Task 1 shape exactly -- without it every Gen2 valve mirrored state: null to the cloud regardless of profile naming (exact delta vs origin/main)"
+    },
+    "al-link-store-mqtt": {
+      "delta": 143,
+      "reason": "Cloud MQTT broker URL fix: persist osi-server.cloud.mqtt_broker_url (from the already-validated al_mqtt_broker_url) alongside mqtt_password/server_host/link_gateway_device_eui, and back it up in _mqttConfigBackup for rollback (exact delta vs origin/main)"
+    },
+    "al-unlink-clear-mqtt": {
+      "delta": 132,
+      "reason": "Cloud MQTT broker URL fix: clear osi-server.cloud.mqtt_broker_url on unlink and back up its prior value in _mqttConfigBackup for restore, mirroring the existing mqtt_password/server_host/link_gateway_device_eui handling (exact delta vs origin/main)"
+    },
+    "al-link-rollback-mqtt": {
+      "delta": 86,
+      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on link rollback, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main)"
+    },
+    "al-unlink-restore-mqtt": {
+      "delta": 86,
+      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on unlink failure, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main)"
     }
   },
   "total_allowance": {
