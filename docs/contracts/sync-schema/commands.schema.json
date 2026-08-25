@@ -69,6 +69,7 @@
                 "DELETE_VALVE_SCHEDULE",
                 "RESEND_VALVE_PLAN",
                 "SET_VALVE_SCHEDULER_STATUS",
+                "CANCEL_VALVE_ACTUATION",
                 "WORK_REQUEST_STATUS",
                 "UPSERT_JOURNAL_ENTRY",
                 "VOID_JOURNAL_ENTRY",
@@ -302,6 +303,12 @@
                 "properties": {
                     "status": {"type": "string", "enum": ["ACTIVE", "SKIP_TODAY", "DEACTIVATED"]}
                 }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "CANCEL_VALVE_ACTUATION"}}},
+            "then": {
+                "required": ["device_eui"]
             }
         }
     ]
