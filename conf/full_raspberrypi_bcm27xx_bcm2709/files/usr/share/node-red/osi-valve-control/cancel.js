@@ -25,6 +25,20 @@ function normalizeReason(reason) {
 }
 
 async function cancelActuation({ db, deviceEui, reason, flushQueue, now }) {
+  // Fail closed BEFORE any write. The cloud CANCEL_VALVE_ACTUATION path (Valve Cloud
+  // Command Bridge) builds flushQueue inside its own try/catch and passes null when
+  // createProvisioningClientFromEnv throws - without this guard, a broken ChirpStack
+  // client would silently skip the flush (the `typeof flushQueue === 'function'` check
+  // below) while still marking the expectation CANCELLED and closing target_state, so a
+  // queued OPEN_FOR_DURATION could still reach the valve while both sides believe it was
+  // cancelled. The REST route never hits this: its flushQueue is a lazily-constructed
+  // closure that is always a function (see cancel-strega-actuation-fn), so a broken
+  // ChirpStack client there throws INSIDE the flush call below instead, before the
+  // transaction runs - same fail-closed outcome, different failure point.
+  if (typeof flushQueue !== 'function') {
+    return { ok: false, error: 'chirpstack_unavailable', downlinks: [] };
+  }
+
   const eui = String(deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required', downlinks: [] };
 
@@ -46,8 +60,10 @@ async function cancelActuation({ db, deviceEui, reason, flushQueue, now }) {
   const cancelReason = normalizeReason(reason);
   const nowIso = (now || new Date()).toISOString();
 
-  let queueFlush = null;
-  if (typeof flushQueue === 'function') queueFlush = await flushQueue(eui);
+  // Flush BEFORE the write, and let a flush failure propagate uncaught: if the queue
+  // can't be flushed, the expectation must not be marked CANCELLED either (fail closed,
+  // nothing mutated). flushQueue is guaranteed to be a function past the guard above.
+  const queueFlush = await flushQueue(eui);
 
   await db.transaction(async (tx) => {
     await tx.run(
