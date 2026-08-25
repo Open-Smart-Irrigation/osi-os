@@ -8,6 +8,7 @@
 const P = require('./plan');
 const store = require('./store');
 const push = require('./push');
+const { cancelActuation } = require('./cancel');
 
 async function getDevice(db, eui) {
   return db.get(
@@ -109,11 +110,24 @@ async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, 
   return { ok: true, downlinks: q.messages || [] };
 }
 
+// Cloud->edge cancel: reuses the SAME core (cancel.js) the REST cancel route uses - one
+// code path, two entry points, same as the four schedule appliers above. No downlink is
+// ever sent to the valve here; cancellation is a ChirpStack queue flush plus marking the
+// newest active expectation CANCELLED (see cancel.js for the no-active-expectation
+// behavior note, which deliberately matches the REST route rather than always succeeding).
+async function applyCancelValveActuation({ db, cmd, flushQueue, now }) {
+  const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
+  if (!eui) return { ok: false, error: 'device_eui is required' };
+  const result = await cancelActuation({ db, deviceEui: eui, reason: cmd.reason, flushQueue, now });
+  return { ok: result.ok, error: result.error, downlinks: result.downlinks || [] };
+}
+
 const APPLIERS = {
   UPSERT_VALVE_SCHEDULE: applyUpsertValveSchedule,
   DELETE_VALVE_SCHEDULE: applyDeleteValveSchedule,
   RESEND_VALVE_PLAN: applyResendValvePlan,
   SET_VALVE_SCHEDULER_STATUS: applySetValveSchedulerStatus,
+  CANCEL_VALVE_ACTUATION: applyCancelValveActuation,
 };
 
 // Applies one of the four cloud->edge valve-schedule commands. Returns

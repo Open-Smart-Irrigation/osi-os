@@ -730,6 +730,13 @@ fetch_required "osi-valve-control cloud-commands.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cloud-commands.js" \
     "/srv/node-red/osi-valve-control/cloud-commands.js"
 
+# cloud-commands.js require()s this at module load (CANCEL_VALVE_ACTUATION applier), and
+# the "Cancel STREGA Actuation" HTTP route delegates to it too -- same missing-file failure
+# mode as cloud-commands.js above.
+fetch_required "osi-valve-control cancel.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js" \
+    "/srv/node-red/osi-valve-control/cancel.js"
+
 fetch_required "osi-system-settings package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
     "/srv/node-red/osi-system-settings/package.json"

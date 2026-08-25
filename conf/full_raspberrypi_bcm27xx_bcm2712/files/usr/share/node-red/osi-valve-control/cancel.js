@@ -1,0 +1,77 @@
+'use strict';
+// Cancel STREGA Actuation - the shared core behind two entry points: the REST route
+// POST /api/v1/valves/:deveui/cancel (flows.json node "Cancel STREGA Actuation") and the
+// cloud->edge CANCEL_VALVE_ACTUATION command applier in cloud-commands.js. One code path,
+// two entry points - the same pattern documented at the top of cloud-commands.js.
+//
+// Cancellation is a ChirpStack downlink-queue flush plus marking the newest active
+// valve_actuation_expectations row CANCELLED. It NEVER sends a downlink to the valve - a
+// bare CLOSE must never be sent to a STREGA valve (see feedback_strega_valve_operation).
+//
+// Behavior note: when there is no active expectation to cancel, this matches the REST
+// route's existing behavior exactly rather than the alternative "flush anyway, succeed
+// idempotently" shape - the REST route returns 404 without touching ChirpStack's queue at
+// all when it finds nothing PENDING_OBSERVATION/OBSERVED_RUNNING, so this does the same
+// (no flushQueue call, ok:false) to keep both entry points identical rather than widening
+// the REST route's contract as a side effect of adding the cloud path.
+
+const ACTIVE_STATES = "('PENDING_OBSERVATION','OBSERVED_RUNNING')";
+
+function normalizeReason(reason) {
+  // Contract types `reason` as ["string","null"] - an explicit null must be treated the
+  // same as absence, not as the literal string "null".
+  const trimmed = String(reason === null || reason === undefined ? '' : reason).trim();
+  return trimmed || 'operator_cancel';
+}
+
+async function cancelActuation({ db, deviceEui, reason, flushQueue, now }) {
+  const eui = String(deviceEui || '').trim().toUpperCase();
+  if (!eui) return { ok: false, error: 'device_eui is required', downlinks: [] };
+
+  const device = await db.get(
+    'SELECT deveui, type_id FROM devices WHERE UPPER(deveui) = UPPER(?) AND deleted_at IS NULL LIMIT 1',
+    [eui]
+  );
+  if (!device) return { ok: false, error: 'not_found', downlinks: [] };
+  if (String(device.type_id || '') !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve', downlinks: [] };
+
+  const active = await db.get(
+    'SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations ' +
+    'WHERE UPPER(device_eui) = UPPER(?) AND reconciliation_state IN ' + ACTIVE_STATES +
+    ' ORDER BY commanded_at DESC LIMIT 1',
+    [eui]
+  );
+  if (!active) return { ok: false, error: 'no_active_actuation', downlinks: [] };
+
+  const cancelReason = normalizeReason(reason);
+  const nowIso = (now || new Date()).toISOString();
+
+  let queueFlush = null;
+  if (typeof flushQueue === 'function') queueFlush = await flushQueue(eui);
+
+  await db.transaction(async (tx) => {
+    await tx.run(
+      "UPDATE valve_actuation_expectations SET reconciliation_state='CANCELLED', cancel_reason=? " +
+      'WHERE expectation_id = (SELECT expectation_id FROM valve_actuation_expectations ' +
+      'WHERE UPPER(device_eui) = UPPER(?) AND reconciliation_state IN ' + ACTIVE_STATES +
+      ' ORDER BY commanded_at DESC LIMIT 1)',
+      [cancelReason, eui]
+    );
+    await tx.run(
+      "UPDATE devices SET target_state='CLOSED', updated_at=? WHERE UPPER(deveui)=UPPER(?)",
+      [nowIso, eui]
+    );
+  });
+
+  return {
+    ok: true,
+    downlinks: [],
+    expectationId: active.expectation_id,
+    previousState: active.reconciliation_state,
+    reason: cancelReason,
+    chirpstackQueueStatus: queueFlush && queueFlush.statusCode,
+    timestamp: nowIso,
+  };
+}
+
+module.exports = { cancelActuation };

@@ -28,6 +28,7 @@ const STREGA_CARD = path.join(REPO, 'web/react-gui/src/components/farming/Strega
 const VALVE_CANCEL_BUTTON = path.join(REPO, 'web/react-gui/src/components/farming/ValveCancelButton.tsx');
 const FARMING_TYPES = path.join(REPO, 'web/react-gui/src/types/farming.ts');
 const CHIRPSTACK_HELPER = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js');
+const CANCEL_JS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js');
 
 function readFlows() {
     return JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
@@ -194,11 +195,24 @@ function assertCancelPath() {
     if (!fn.func.includes('flushDeviceQueue(deveui)')) {
         throw new Error('Cancel function must flush the ChirpStack device queue');
     }
-    if (!fn.func.includes("'CANCELLED'") && !fn.func.includes('"CANCELLED"')) {
-        throw new Error('Cancel function must set reconciliation_state = CANCELLED');
+    // Bovey cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved
+    // out of this HTTP route and into cancel.js's cancelActuation(), shared with the new
+    // CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points). The
+    // node now delegates instead of inlining the SQL, so verify the delegation call here
+    // and check the actual safety invariants (CANCELLED state, cancel_reason, no bare
+    // CLOSE) against cancel.js directly rather than against this node's source text.
+    if (!fn.func.includes('VC.cancelActuation(')) {
+        throw new Error('Cancel function must delegate to cancel.js cancelActuation() (shared with the CANCEL_VALVE_ACTUATION cloud command applier)');
     }
-    if (!fn.func.includes('cancel_reason')) {
-        throw new Error('Cancel function must record cancel_reason');
+    const cancelJsSrc = fs.readFileSync(CANCEL_JS, 'utf8');
+    if (!cancelJsSrc.includes("'CANCELLED'") && !cancelJsSrc.includes('"CANCELLED"')) {
+        throw new Error('cancel.js must set reconciliation_state = CANCELLED');
+    }
+    if (!cancelJsSrc.includes('cancel_reason')) {
+        throw new Error('cancel.js must record cancel_reason');
+    }
+    if (cancelJsSrc.includes("action: 'CLOSE'") || cancelJsSrc.includes('return [closeMsg, responseMsg]')) {
+        throw new Error('cancel.js must not emit a CLOSE command');
     }
     if (!fn.func.includes('return msg')) {
         throw new Error('Cancel errors must route to the HTTP response output');
@@ -274,6 +288,11 @@ const ACTUATOR_PATTERN_FALSE_POSITIVES = [
     'DELETE_VALVE_SCHEDULE',
     'RESEND_VALVE_PLAN',
     'SET_VALVE_SCHEDULER_STATUS',
+    // Bovey cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION matches on "VALVE"/"ACTUAT"
+    // but never itself opens or closes a valve - it flushes the ChirpStack downlink queue
+    // and marks the newest active valve_actuation_expectations row CANCELLED (cancel.js's
+    // cancelActuation, shared with the REST cancel route). Correctly actuator=false.
+    'CANCEL_VALVE_ACTUATION',
 ];
 
 function extractRegistryObject(nodeFunc, constName) {

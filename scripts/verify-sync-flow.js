@@ -2587,8 +2587,13 @@ expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'incl
 expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
 expectIncludes('Cancel STREGA Actuation', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack helper configuration');
 expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes the ChirpStack device queue');
-expectIncludes('Cancel STREGA Actuation', "reconciliation_state='CANCELLED'", 'marks active actuation expectations CANCELLED');
-expectIncludes('Cancel STREGA Actuation', "WHERE expectation_id = (", 'updates only the latest active expectation');
+// Bovey cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved out
+// of this HTTP route and into cancel.js's cancelActuation(), shared with the new
+// CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points - see
+// cloud-commands.js's header comment). This node now delegates instead of inlining the
+// SQL, so the pin checks the delegation call; cancel.js's own cancel.test.js pins the
+// CANCELLED-marking and latest-active-only targeting behavior directly.
+expectIncludes('Cancel STREGA Actuation', 'VC.cancelActuation(', 'delegates actuation cancellation (mark CANCELLED, latest-active-only) to cancel.js');
 expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
 expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 // --- System Stats fan detection: hwmon preferred, raw PWM fallback ---
