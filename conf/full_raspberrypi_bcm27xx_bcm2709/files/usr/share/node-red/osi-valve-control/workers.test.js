@@ -220,6 +220,26 @@ test('runClockTick queues a weekly GEN1 clock push and fails >24h queued pushes'
   assert.equal((await db.get("SELECT state FROM valve_schedule_pushes WHERE push_id='stale'")).state, 'FAILED');
 });
 
+// P3-E1 review fix (IMPORTANT 1): failStalePushes flips QUEUED -> FAILED fleet-wide with no
+// emission of its own -- without the pre-SELECT + per-device emit in runClockTick, the cloud
+// would show this valve's plan as permanently "queued" even after the edge gave up on it.
+test('runClockTick (P3-E1) emits VALVE_RUNTIME_CHANGED for a device whose WEEKDAY_PLAN push just aged out unacked, on a linked gateway; not for one whose stale push is CLOCK_SYNC-only', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await store.insertSchedule(db, { schedule_uuid: 's1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await store.upsertSettings(db, '0016C001F1000001', { last_clock_sync_queued_at: '2026-08-01T00:00:00.000Z' });
+  await store.insertPushes(db, [{ push_id: 'stale-plan', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 0, fport: 14, payload_hex: 'FF'.repeat(24), plan_hash: 'h' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime('2026-08-19 10:00:00', '-3 days') WHERE push_id='stale-plan'");
+
+  await W.runClockTick({ db, now: new Date('2026-08-19T10:00:00Z'), appId: 'app', warn: () => {} });
+
+  const rows = await db.all("SELECT op, aggregate_key FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].aggregate_key, '0016C001F1000001');
+  const payload = JSON.parse((await db.get("SELECT payload_json FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'")).payload_json);
+  assert.equal(payload.push_state.failed, 1, 'the snapshot must reflect the just-failed push');
+});
+
 test('runClockTick (I2) uses the schedule timezone, not the zone timezone, for the FPort 12 wall-clock payload', async () => {
   const { db } = await tempDb();
   await db.run("INSERT INTO irrigation_zones(name, user_id, timezone) VALUES ('Zone UTC', 1, 'UTC')");

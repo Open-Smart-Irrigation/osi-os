@@ -26,7 +26,7 @@ function normalizeReason(reason) {
   return trimmed || 'operator_cancel';
 }
 
-async function cancelActuation({ db, deviceEui, reason, flushQueue, now }) {
+async function cancelActuation({ db, deviceEui, reason, flushQueue, now, warn }) {
   // Fail closed BEFORE any write. The cloud CANCEL_VALVE_ACTUATION path (Valve Cloud
   // Command Bridge) builds flushQueue inside its own try/catch and passes null when
   // createProvisioningClientFromEnv throws - without this guard, a broken ChirpStack
@@ -81,7 +81,12 @@ async function cancelActuation({ db, deviceEui, reason, flushQueue, now }) {
     );
   });
 
-  await runtime.emitRuntimeChanged(db, eui, new Date(nowIso));
+  // P3-E1 review fix (IMPORTANT 4): best-effort. An emit failure here must not turn a
+  // successful cancel (expectation CANCELLED, queue already flushed) into a reported failure --
+  // a retry after that would find no_active_actuation and report a false error on an operation
+  // that already fully succeeded.
+  try { await runtime.emitRuntimeChanged(db, eui, warn); }
+  catch (e) { warn && warn('[valve-control] cancelActuation: runtime emit failed: ' + (e && e.message ? e.message : e)); }
 
   return {
     ok: true,

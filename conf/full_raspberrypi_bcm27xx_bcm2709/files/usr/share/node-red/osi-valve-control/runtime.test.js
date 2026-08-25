@@ -100,6 +100,32 @@ test('buildRuntimePayload: GEN1 weekday_states mirrors the raw WEEKDAY_PLAN push
   assert.equal(payload.push_state.acked, 1);
 });
 
+test('buildRuntimePayload: GEN1 weekday_states collapses to ONE entry per weekday -- an ACKED row is never superseded by a later re-edit (supersedeQueued only touches state=QUEUED rows), so the raw ledger can carry several surviving rows for the same weekday; the newest by queued_at must win, not all of them', async () => {
+  const { db } = await tempDb();
+  const insertRow = (id, weekday, state, queuedAt, ackedAt) => db.run(
+    'INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, state, queued_at, acked_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [id, EUI, 'WEEKDAY_PLAN', weekday, 14 + weekday, 'FF'.repeat(24), 'h-' + id, state, queuedAt, ackedAt]
+  );
+  // Monday (weekday 1): three ledger generations, deliberately inserted OUT of queued_at order
+  // so a naive "last inserted" or "first inserted" read would get this wrong -- only sorting by
+  // queued_at itself picks the true newest.
+  await insertRow('p-mid', 1, 'QUEUED', '2026-08-22T09:00:00', null);
+  await insertRow('p-old', 1, 'ACKED', '2026-08-20T09:00:00', '2026-08-20T09:05:00.000Z');
+  await insertRow('p-new', 1, 'ACKED', '2026-08-24T09:00:00', '2026-08-24T09:05:00.000Z');
+  // Tuesday (weekday 2): a single row, for contrast -- must survive the collapse untouched.
+  await insertRow('p-tue', 2, 'QUEUED', '2026-08-24T09:00:00', null);
+
+  const payload = await buildRuntimePayload(db, EUI);
+  assert.deepEqual(
+    payload.push_state.weekday_states.slice().sort((a, b) => a.weekday - b.weekday),
+    [
+      { weekday: 1, state: 'ACKED', acked_at: '2026-08-24T09:05:00.000Z' },
+      { weekday: 2, state: 'QUEUED', acked_at: null },
+    ]
+  );
+  assert.equal(payload.push_state.weekday_states.length, 2, 'exactly one entry per weekday, not three-plus-one');
+});
+
 test('buildRuntimePayload: GEN2 has no weekday_states key at all (mirrors the schedule dialog, which has nothing to filter a null-weekday DAYMASK_PLAN row into)', async () => {
   const { db } = await tempDb();
   await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
@@ -116,10 +142,25 @@ test('buildRuntimePayload: GEN2 has no weekday_states key at all (mirrors the sc
 test('emitRuntimeChanged: unlinked gateway is a no-op -- returns null and enqueues nothing', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
-  const result = await emitRuntimeChanged(db, EUI, new Date('2026-08-25T10:01:00.000Z'));
+  const result = await emitRuntimeChanged(db, EUI, undefined, new Date('2026-08-25T10:01:00.000Z'));
   assert.equal(result, null);
   const rows = await db.all('SELECT * FROM sync_outbox');
   assert.equal(rows.length, 0);
+});
+
+test('emitRuntimeChanged: linked but no resolvable gateway_device_eui anywhere is a no-op with a warn -- an outbox row with a NULL gateway_device_eui is an undeliverable orphan (matches the gateway_locations trigger guard)', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at) VALUES ('cloud', 1, 'https://sync.test.invalid', 'cloud-user-1', NULL, datetime('now'))");
+  // trg_sync_devices_defaults_ai backfills devices.gateway_device_eui to the well-known Silvan
+  // EUI on every insert (tempDb()'s fixture device is no exception) -- null it back out so this
+  // test can actually reach the "nothing resolves anywhere" branch.
+  await db.run('UPDATE devices SET gateway_device_eui = NULL WHERE UPPER(deveui) = ?', [EUI]);
+  const warnings = [];
+  const result = await emitRuntimeChanged(db, EUI, (m) => warnings.push(m));
+  assert.equal(result, null);
+  assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /no resolvable gateway_device_eui/);
 });
 
 test('emitRuntimeChanged: a linked gateway enqueues a VALVE_RUNTIME_CHANGED sync_outbox row whose payload matches buildRuntimePayload', async () => {
@@ -128,7 +169,7 @@ test('emitRuntimeChanged: a linked gateway enqueues a VALVE_RUNTIME_CHANGED sync
   await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
 
   const now = new Date('2026-08-25T10:01:00.000Z');
-  const result = await emitRuntimeChanged(db, EUI, now);
+  const result = await emitRuntimeChanged(db, EUI, undefined, now);
   assert.ok(result);
   assert.equal(result.event_uuid, result.event_uuid);
 
@@ -152,7 +193,7 @@ test('emitRuntimeChanged: a device-level gateway_device_eui override wins over s
   const { db } = await tempDb();
   await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
   await db.run('UPDATE devices SET gateway_device_eui=? WHERE UPPER(deveui)=?', ['0016C001F1999999', EUI]);
-  await emitRuntimeChanged(db, EUI, new Date());
+  await emitRuntimeChanged(db, EUI);
   const row = await db.get('SELECT gateway_device_eui FROM sync_outbox');
   assert.equal(row.gateway_device_eui, '0016C001F1999999');
 });
@@ -160,8 +201,19 @@ test('emitRuntimeChanged: a device-level gateway_device_eui override wins over s
 test('emitRuntimeChanged: multiple emits for the same device are not deduplicated/debounced -- each call enqueues its own row (design: coalescing is fine, cloud applier is last-write-wins on as_of)', async () => {
   const { db } = await tempDb();
   await linkCloud(db);
-  await emitRuntimeChanged(db, EUI, new Date('2026-08-25T10:00:00.000Z'));
-  await emitRuntimeChanged(db, EUI, new Date('2026-08-25T10:00:01.000Z'));
+  await emitRuntimeChanged(db, EUI, undefined, new Date('2026-08-25T10:00:00.000Z'));
+  await emitRuntimeChanged(db, EUI, undefined, new Date('2026-08-25T10:00:01.000Z'));
   const rows = await db.all('SELECT occurred_at FROM sync_outbox ORDER BY occurred_at');
   assert.deepEqual(rows.map((r) => r.occurred_at), ['2026-08-25T10:00:00.000Z', '2026-08-25T10:00:01.000Z']);
+});
+
+test('emitRuntimeChanged: as_of/occurred_at default to a real current timestamp when no now override is given (the production shape -- no call site passes one)', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  const before = Date.now();
+  const result = await emitRuntimeChanged(db, EUI);
+  const after = Date.now();
+  assert.ok(result);
+  const stamped = Date.parse(result.payload.as_of);
+  assert.ok(stamped >= before - 1000 && stamped <= after + 1000, 'as_of must be a real current-time snapshot, not derived from an unrelated event timestamp');
 });

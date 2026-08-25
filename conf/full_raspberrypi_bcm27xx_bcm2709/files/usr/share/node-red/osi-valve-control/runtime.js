@@ -49,7 +49,10 @@ function buildActiveActuation(row) {
 // for one device, reusing store.js's derivations -- the same ones api.js's shapeValve()/
 // pushSummary() use for the edge GET /api/valves response, so the cloud sees exactly the field
 // values/casing the edge GUI itself renders from.
-async function buildRuntimePayload(db, deviceEui) {
+//
+// `now` (optional Date) is a snapshot-build-time override, for test determinism only -- see
+// emitRuntimeChanged's comment below for why production callers never pass one.
+async function buildRuntimePayload(db, deviceEui, now) {
   const eui = String(deviceEui).toUpperCase();
   const [active, staleState, pushes, settings] = await Promise.all([
     store.activeActuation(db, eui),
@@ -67,9 +70,21 @@ async function buildRuntimePayload(db, deviceEui) {
   // dialog itself only shows the "overall" badge for GEN2 for the same reason (ValveScheduleDialog.
   // tsx's per-weekday filter finds nothing to show). Mirrors that: weekday_states is GEN1-only.
   if ((settings.strega_generation || 'GEN1') === 'GEN1') {
+    // P3-E1 review fix (IMPORTANT 2): store.weekdayPushStates returns EVERY surviving ledger row,
+    // unbounded -- supersedeQueued only ever touches state='QUEUED' rows, so an already-ACKED row
+    // is never superseded by a later re-edit of the same weekday and both rows survive the
+    // state IN ('QUEUED','ACKED','FAILED') filter forever. Collapse to one entry per weekday here,
+    // the same first-wins-in-queued_at-DESC-order collapse store.pushSummary()'s own
+    // latestStateBySlot already applies for its aggregate counts -- rows arrive pre-sorted
+    // `ORDER BY queued_at DESC`, so the first row seen per weekday is the newest.
     const rows = await store.weekdayPushStates(db, eui);
-    pushState.weekday_states = rows
-      .filter((r) => r.purpose === 'WEEKDAY_PLAN')
+    const latestByWeekday = new Map();
+    for (const r of rows) {
+      if (r.purpose !== 'WEEKDAY_PLAN') continue;
+      if (!latestByWeekday.has(r.weekday)) latestByWeekday.set(r.weekday, r);
+    }
+    pushState.weekday_states = [...latestByWeekday.values()]
+      .sort((a, b) => a.weekday - b.weekday)
       .map((r) => ({ weekday: r.weekday, state: r.state, acked_at: r.acked_at || null }));
   }
   return {
@@ -78,7 +93,13 @@ async function buildRuntimePayload(db, deviceEui) {
     active_actuation: buildActiveActuation(active),
     recent_stale_state: staleState,
     push_state: pushState,
-    as_of: new Date().toISOString(),
+    // P3-E1 review fix (IMPORTANT 3): as_of is stamped exactly once, here, at the instant this
+    // snapshot is actually assembled -- never from an event-specific timestamp (an uplink's
+    // receivedAt, an expectation's commanded_at, a cancel's own `now`). Those can be older than
+    // the previous emission's as_of (a delayed/replayed uplink, e.g.), which would let a NEWER,
+    // more accurate snapshot lose a last-write-wins comparison on the cloud to an OLDER, stale
+    // one. `now` exists only so tests can pin this value; no production call site passes it.
+    as_of: (now instanceof Date ? now : new Date()).toISOString(),
   };
 }
 
@@ -90,12 +111,21 @@ async function buildRuntimePayload(db, deviceEui) {
 //
 // Returns null (no-op) when unlinked, matching the trigger pair's own `WHEN EXISTS (... linked =
 // 1)` guard -- there is nothing useful to enqueue for a gateway that has never linked to a cloud
-// account.
-async function emitRuntimeChanged(db, deviceEui, now) {
+// account. Also a no-op (with a warn) when no gateway_device_eui resolves at all -- same guard
+// the gateway_locations trigger (trg_gateway_locations_outbox_ai) uses: an outbox row with a NULL
+// gateway_device_eui is an undeliverable orphan, not a harmless placeholder.
+//
+// `warn` is optional (best-effort logging only -- every call site here is itself best-effort, see
+// each seam's own try/catch). `now` is a snapshot-build-time override for test determinism only;
+// production callers never pass it (see buildRuntimePayload's comment on as_of above).
+async function emitRuntimeChanged(db, deviceEui, warn, now) {
   const link = await resolveLinkAndGateway(db, deviceEui);
   if (!link.linked) return null;
-  const payload = await buildRuntimePayload(db, deviceEui);
-  payload.as_of = (now instanceof Date ? now : new Date()).toISOString();
+  if (!link.gatewayDeviceEui) {
+    if (typeof warn === 'function') warn('[valve-control] runtime emit skipped for ' + deviceEui + ': no resolvable gateway_device_eui');
+    return null;
+  }
+  const payload = await buildRuntimePayload(db, deviceEui, now);
   const eventUuid = crypto.randomUUID();
   await db.run(
     'INSERT INTO sync_outbox (' +

@@ -61,6 +61,32 @@ test('cancelActuation emits a VALVE_RUNTIME_CHANGED sync_outbox row on a linked 
   db.close();
 });
 
+// P3-E1 review fix (IMPORTANT 4): the emit used to be uncaught -- a failure there converted an
+// already-successful cancel (expectation CANCELLED, ChirpStack queue already flushed) into a
+// reported failure, and a retry afterward would find no_active_actuation and report a confusing
+// false error on an operation that had, in truth, fully succeeded the first time.
+test('cancelActuation still reports ok:true (and still committed the cancel) even when the runtime emission itself fails', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const warnings = [];
+  const failingDb = {
+    get: (...args) => db.get(...args),
+    all: (...args) => db.all(...args),
+    run: (sql, params) => (/insert into sync_outbox/i.test(sql) ? Promise.reject(new Error('boom')) : db.run(sql, params)),
+    transaction: (...args) => db.transaction(...args),
+    close: (...args) => db.close(...args),
+  };
+
+  const out = await cancelActuation({ db: failingDb, deviceEui: EUI, reason: null, flushQueue: countingFlush(), now: new Date('2026-08-25T10:05:00.000Z'), warn: (m) => warnings.push(m) });
+
+  assert.equal(out.ok, true, 'a runtime-emission failure must not turn a successful cancel into ok:false');
+  const row = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.reconciliation_state, 'CANCELLED', 'the cancel itself must still have committed');
+  assert.ok(warnings.some((w) => /runtime emit failed/.test(w)), 'the failure must still be visible via warn');
+  db.close();
+});
+
 test('cancelActuation with no active expectation matches the REST route: no flush, ok:false, no_active_actuation', async () => {
   const { db } = await tempDb();
   const flushQueue = countingFlush();

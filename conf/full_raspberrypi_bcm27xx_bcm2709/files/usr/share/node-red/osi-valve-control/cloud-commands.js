@@ -163,10 +163,10 @@ async function applyUpsertValveSettings({ db, cmd, now }) {
 // ever sent to the valve here; cancellation is a ChirpStack queue flush plus marking the
 // newest active expectation CANCELLED (see cancel.js for the no-active-expectation
 // behavior note, which deliberately matches the REST route rather than always succeeding).
-async function applyCancelValveActuation({ db, cmd, flushQueue, now }) {
+async function applyCancelValveActuation({ db, cmd, flushQueue, now, warn }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required' };
-  const result = await cancelActuation({ db, deviceEui: eui, reason: cmd.reason, flushQueue, now });
+  const result = await cancelActuation({ db, deviceEui: eui, reason: cmd.reason, flushQueue, now, warn });
   return { ok: result.ok, error: result.error, downlinks: result.downlinks || [] };
 }
 
