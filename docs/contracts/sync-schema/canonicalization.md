@@ -162,6 +162,26 @@ Monday shifts a farmer's irrigation by one day.
 `timezone`. It is NOT a UTC instant. `fire_at` (ONCE schedules) IS a UTC
 ISO-8601 instant, canonicalized per the Timestamps rule above.
 
+## Valve settings
+
+`ValveSettings` (`docs/contracts/sync-schema/resources.schema.json`) fields
+with a canonical form beyond the general rules above:
+
+- `skip_today_date` — local calendar date, zero-padded `YYYY-MM-DD`
+  (`2026-08-25`, not `2026-8-25`). It is NOT a UTC instant. Unlike
+  `ValveSchedule`, `ValveSettings` carries no `timezone` field of its own:
+  the date is computed and interpreted in the owning device's zone
+  timezone (the same `irrigation_zones.timezone` lookup the schedule
+  compiler uses, falling back to the gateway default when the device has
+  no zone), set only while `scheduler_status = SKIP_TODAY` and cleared
+  (`null`) otherwise.
+- `updated_at` — UTC instant, canonical millisecond-precision ISO
+  (`YYYY-MM-DDTHH:MM:SS.sssZ`) per the Timestamps rule above. The edge
+  column itself stores `datetime('now')`'s space-separated form; the
+  `trg_sync_valve_settings_outbox_ai`/`_au` triggers reformat it via
+  `strftime('%Y-%m-%dT%H:%M:%fZ', updated_at)` before it reaches the
+  payload, so every synced value is already canonical.
+
 ## Conformance
 
 A new runtime must pass every test vector before its hashes are accepted by other systems. Hashes computed by a non-conformant runtime are discarded.
