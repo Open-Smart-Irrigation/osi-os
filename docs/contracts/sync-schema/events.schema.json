@@ -36,6 +36,7 @@
                 "IRRIGATION_EVENT_APPENDED",
                 "SCHEDULE_UPSERTED",
                 "VALVE_SCHEDULE_UPSERTED",
+                "VALVE_SETTINGS_UPSERTED",
                 "WORK_REQUEST_SUBMITTED",
                 "ZONE_CONFIG_UPSERTED",
                 "ZONE_DELETED",
