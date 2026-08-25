@@ -168,10 +168,26 @@
     "8809bb5239dfb3d4": {
       "delta": 158,
       "reason": "STREGA Gen2 device profile Task 6 fix round R2 (NEW-MAJOR-A, NEW-MAJOR-B): Build Telemetry's getProfileKind() gains the CHIRPSTACK_PROFILE_STREGA_GEN2 whitelist entry so a re-pointed Gen2 valve is still recognised as STREGA_VALVE on the cloud telemetry path instead of falling through to the generic sensor branch (matches valve-ack-fn/strega-process-fn from earlier in this task); and the Gen2 vendor decoder's Actuator field is accepted as an alias for Valve via an explicit !== undefined && !== null check (never ||, since valve state 0/CLOSED is falsy), matching strega-process-fn's Task 1 shape exactly -- without it every Gen2 valve mirrored state: null to the cloud regardless of profile naming (exact delta vs origin/main)"
+    },
+    "al-link-store-mqtt": {
+      "delta": 143,
+      "reason": "Cloud MQTT broker URL fix: persist osi-server.cloud.mqtt_broker_url (from the already-validated al_mqtt_broker_url) alongside mqtt_password/server_host/link_gateway_device_eui, and back it up in _mqttConfigBackup for rollback (exact delta vs origin/main)"
+    },
+    "al-unlink-clear-mqtt": {
+      "delta": 132,
+      "reason": "Cloud MQTT broker URL fix: clear osi-server.cloud.mqtt_broker_url on unlink and back up its prior value in _mqttConfigBackup for restore, mirroring the existing mqtt_password/server_host/link_gateway_device_eui handling (exact delta vs origin/main)"
+    },
+    "al-link-rollback-mqtt": {
+      "delta": 86,
+      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on link rollback, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main)"
+    },
+    "al-unlink-restore-mqtt": {
+      "delta": 86,
+      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on unlink failure, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main)"
     }
   },
   "total_allowance": {
-    "delta": 24627,
+    "delta": 25074,
     "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + valve control Task 9: recent actuations expose trigger (+60: get-actuations-query +20, get-actuations-response +40) -- STREGA Gen2 device profile Task 4 (both R0 and its R1 review fix) carried entirely within per-node allowances above; the aggregate ceiling itself did not need raising (R1 review MINOR c: the R0 bump to 27615 was reverted here since the per-node entries alone keep HEAD's total under origin/main's)"
   }
 }
