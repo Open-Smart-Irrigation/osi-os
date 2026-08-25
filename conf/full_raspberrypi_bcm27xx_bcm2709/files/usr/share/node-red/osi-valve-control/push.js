@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const P = require('./plan');
 const store = require('./store');
+const runtime = require('./runtime');
 
 function hexOf(buf) { return Buffer.from(buf).toString('hex').toUpperCase(); }
 
@@ -95,6 +96,10 @@ async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueu
     }
   }
   const rows = pushes.map((p) => toRow(deviceEui, p));
+  // ValveRuntime.push_state (queued/acked/failed/weekday_states) only reflects WEEKDAY_PLAN/
+  // DAYMASK_PLAN rows -- a queuePushes call that only carries a SCHEDULER_STATUS or CLOCK_SYNC
+  // push (no plan purpose, no cross-generation supersede) leaves that resource unchanged.
+  const affectsPushState = supersedeWeekday || supersedeDaymask || purposes.has('WEEKDAY_PLAN') || purposes.has('DAYMASK_PLAN');
   await db.transaction(async (tx) => {
     for (const p of pushes) await store.supersedeQueued(tx, deviceEui, p.purpose, p.weekday == null ? (p.daymask == null ? null : p.daymask) : p.weekday);
     if (supersedeWeekday) {
@@ -103,6 +108,7 @@ async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueu
       await store.supersedeQueued(tx, deviceEui, 'DAYMASK_PLAN', 0x7F);
     }
     if (rows.length) await store.insertPushes(tx, rows);
+    if (affectsPushState) await runtime.emitRuntimeChanged(tx, deviceEui);
   });
   // The flush above wiped ChirpStack's queue for this device. Rows left QUEUED by an EARLIER
   // compile that this one does not supersede (a different day-set) lost their downlink with it,

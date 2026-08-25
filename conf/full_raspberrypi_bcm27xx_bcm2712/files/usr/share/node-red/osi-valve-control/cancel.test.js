@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { tempDb } = require('./test-helpers');
+const { tempDb, linkCloud } = require('./test-helpers');
 const { cancelActuation } = require('./cancel');
 
 const EUI = '0016C001F1000001';
@@ -39,6 +39,25 @@ test('cancelActuation cancels the newest active expectation, sets cancel_reason,
   assert.equal(byId['e-new'].reconciliation_state, 'CANCELLED', 'the newest active row must be cancelled');
   assert.equal(byId['e-new'].cancel_reason, 'field_visit');
   assert.equal(byId['e-old'].reconciliation_state, 'PENDING_OBSERVATION', 'an older row must not be touched');
+  db.close();
+});
+
+// P3-E1: cancelActuation is one of the code seams that changes ValveRuntime's derived state
+// (the CANCELLED row drops out of active_actuation).
+test('cancelActuation emits a VALVE_RUNTIME_CHANGED sync_outbox row on a linked gateway, and none on an unlinked one', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await cancelActuation({ db, deviceEui: EUI, reason: null, flushQueue: countingFlush(), now: new Date('2026-08-25T10:05:00.000Z') });
+  assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0, 'unlinked gateway must not enqueue anything');
+
+  await insertExpectation(db, { id: 'e2', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:10:00.000Z' });
+  await linkCloud(db);
+  await cancelActuation({ db, deviceEui: EUI, reason: null, flushQueue: countingFlush(), now: new Date('2026-08-25T10:15:00.000Z') });
+  const rows = await db.all('SELECT op, aggregate_key, payload_json FROM sync_outbox');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].op, 'VALVE_RUNTIME_CHANGED');
+  assert.equal(rows[0].aggregate_key, EUI);
+  assert.equal(JSON.parse(rows[0].payload_json).active_actuation, null, 'the just-cancelled row must not appear as active');
   db.close();
 });
 

@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { tempDb } = require('./test-helpers');
+const { tempDb, linkCloud } = require('./test-helpers');
 const store = require('./store');
 const P = require('./plan');
 const W = require('./workers');
@@ -16,6 +16,23 @@ test('handleUplink acks the newest queued weekday push and records RTC ack', asy
   // node:sqlite returns null-prototype row objects; spread into plain objects before deepEqual (strict).
   assert.deepEqual(rows.map((r) => ({ ...r })), [{ push_id: 'p1', state: 'ACKED' }, { push_id: 'p2', state: 'ACKED' }]);
   assert.equal((await store.getSettings(db, '0016C001F1000001')).last_clock_sync_acked_at, '2026-08-19T10:01:00.000Z');
+});
+
+// P3-E1: handleUplink's ack loop is one of the code seams that changes ValveRuntime's derived
+// state (push_state), but only for a WEEKDAY_PLAN/DAYMASK_PLAN ack -- a CLOCK_SYNC ack alone
+// (as in the "records RTC ack" half of the test above) does not change that resource.
+test('handleUplink (P3-E1) emits VALVE_RUNTIME_CHANGED on a linked gateway when a WEEKDAY_PLAN ack lands, not on a CLOCK_SYNC-only ack', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await store.insertPushes(db, [{ push_id: 'p1', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 2, fport: 16, payload_hex: 'FF'.repeat(24), plan_hash: 'h' }, { push_id: 'p2', device_eui: '0016C001F1000001', purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null }]);
+
+  await W.handleUplink({ db, deviceEui: '0016C001F1000001', decoded: { RTC_Port: 12, RTC_status: '00' }, fPort: 2, receivedAt: '2026-08-19T10:00:00.000Z', warn: () => {} });
+  assert.equal((await db.all("SELECT op FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'")).length, 0, 'a CLOCK_SYNC-only ack must not touch ValveRuntime');
+
+  await W.handleUplink({ db, deviceEui: '0016C001F1000001', decoded: { Schl_Port: 16, Schl_status: '00' }, fPort: 2, receivedAt: '2026-08-19T10:00:01.000Z', warn: () => {} });
+  const rows = await db.all("SELECT op, aggregate_key FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].aggregate_key, '0016C001F1000001');
 });
 
 test('runOnceTick fires due ONCE rows within grace and skips stale ones', async () => {
@@ -66,6 +83,18 @@ test('runObserveTick creates an on_valve_schedule expectation when OPEN inside a
   assert.equal(e.trigger, 'on_valve_schedule'); assert.equal(e.commanded_duration_seconds, 1800); assert.equal(e.reconciliation_state, 'OBSERVED_RUNNING');
   // second tick does not duplicate
   assert.equal((await W.runObserveTick({ db, now: new Date('2026-08-19T04:11:30Z'), warn: () => {} })).created, 0);
+});
+
+// P3-E1: runObserveTick's INSERT is a code seam that creates a new active_actuation.
+test('runObserveTick (P3-E1) emits VALVE_RUNTIME_CHANGED on a linked gateway for a newly-created expectation', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await db.run("UPDATE devices SET current_state='OPEN' WHERE deveui='0016C001F1000001'");
+  await db.run("INSERT INTO device_data(deveui, recorded_at) VALUES ('0016C001F1000001','2026-08-19T15:00:00.000Z')");
+  await W.runObserveTick({ db, now: new Date('2026-08-19T15:00:30Z'), warn: () => {} });
+  const rows = await db.all("SELECT op, aggregate_key FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].aggregate_key, '0016C001F1000001');
 });
 
 test('runObserveTick: OPEN outside any window -> unexplained with 0 duration', async () => {

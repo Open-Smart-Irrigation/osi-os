@@ -201,6 +201,7 @@ class EdgeSyncService {
     sqlSources: [],
     databaseSources: [],
     sqlOwnedEventOps: [],
+    jsModuleOwnedEventOps: [],
     moduleSources: [
       { name: 'journal-lifecycle', path: modulePath },
       { name: 'journal-api', path: apiModulePath },

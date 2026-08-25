@@ -89,6 +89,20 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0025__valve_settings_sync_triggers.sql, not by flows.json.
   'VALVE_SETTINGS_UPSERTED',
 ]);
+// Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
+// "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living
+// outside JOURNAL_MODULE_DIRECTORY, so extractJournalModuleOps() never scans it (that scan,
+// and the eventOps.edgeModuleOwned staging-manifest contract it validates against, are scoped
+// to osi-journal only). Unlike SQL_OWNED_EVENT_OPS, there is no SQL/DB source this script can
+// cross-check the op literal against -- the op is a bound parameter (`?`), not SQL text -- so
+// this allowlist is trusted on the strength of the emitting module's own test suite rather than
+// independently re-verified here. Bovey cloud full-parity Task P3-E1.
+const JS_MODULE_OWNED_EVENT_OPS = new Set([
+  // Emitted by osi-valve-control/runtime.js's emitRuntimeChanged() (called from workers.js,
+  // cancel.js, push.js, and the write-strega-expectation/strega-reconciliation-monitor flows.json
+  // nodes via osiLib.require('osi-valve-control')); verified by osi-valve-control/runtime.test.js.
+  'VALVE_RUNTIME_CHANGED',
+]);
 
 function readUtf8(file) {
   return fs.readFileSync(file, 'utf8');
@@ -1268,6 +1282,9 @@ function checkSyncOpParity(options = {}) {
   const sqlOwnedEventOps = options.sqlOwnedEventOps === undefined
     ? SQL_OWNED_EVENT_OPS
     : new Set(options.sqlOwnedEventOps);
+  const jsModuleOwnedEventOps = options.jsModuleOwnedEventOps === undefined
+    ? JS_MODULE_OWNED_EVENT_OPS
+    : new Set(options.jsModuleOwnedEventOps);
   const requireSqlOwnedSources = options.requireSqlOwnedSources === undefined
     ? options.sqlSources === undefined && options.databaseSources === undefined
     : Boolean(options.requireSqlOwnedSources);
@@ -1387,6 +1404,7 @@ function checkSyncOpParity(options = {}) {
     ...sqlResults.flatMap((source) => source.ops),
     ...databaseResults.flatMap((source) => source.ops),
     ...(stagingEnabled ? sqlOwnedEventOps : []),
+    ...(stagingEnabled ? jsModuleOwnedEventOps : []),
   ]);
   if (requireSqlOwnedSources) {
     const persistenceOps = new Set([

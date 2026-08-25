@@ -15,6 +15,8 @@
 // (no flushQueue call, ok:false) to keep both entry points identical rather than widening
 // the REST route's contract as a side effect of adding the cloud path.
 
+const runtime = require('./runtime');
+
 const ACTIVE_STATES = "('PENDING_OBSERVATION','OBSERVED_RUNNING')";
 
 function normalizeReason(reason) {
@@ -78,6 +80,8 @@ async function cancelActuation({ db, deviceEui, reason, flushQueue, now }) {
       [nowIso, eui]
     );
   });
+
+  await runtime.emitRuntimeChanged(db, eui, new Date(nowIso));
 
   return {
     ok: true,

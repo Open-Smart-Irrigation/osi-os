@@ -259,6 +259,34 @@ async function listQueued(db, deviceEui) {
   );
 }
 
+// Single-device counterpart of VALVE_LIST_SQL's active_expectation_id/active_reconciliation_state/
+// active_commanded_at/active_expected_close_at/active_duration_seconds/active_trigger subqueries
+// above -- same predicate (newest PENDING_OBSERVATION/OBSERVED_RUNNING row), parameterized on
+// device_eui instead of correlated on d.deveui. Used by runtime.js's buildRuntimePayload(), which
+// needs this per-device rather than batched across every valve a user owns.
+async function activeActuation(db, deviceEui) {
+  return db.get(
+    'SELECT expectation_id, reconciliation_state, commanded_at, expected_close_at, ' +
+    'commanded_duration_seconds AS duration_seconds, trigger ' +
+    'FROM valve_actuation_expectations ' +
+    "WHERE UPPER(device_eui) = UPPER(?) AND reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') " +
+    'ORDER BY commanded_at DESC LIMIT 1',
+    [deviceEui]
+  );
+}
+
+// Single-device counterpart of VALVE_LIST_SQL's recent_stale_state subquery above.
+async function recentStaleState(db, deviceEui) {
+  const row = await db.get(
+    'SELECT reconciliation_state FROM valve_actuation_expectations ' +
+    "WHERE UPPER(device_eui) = UPPER(?) AND reconciliation_state LIKE 'STALE_%' " +
+    "AND datetime(commanded_at) > datetime('now','-1 day') " +
+    'ORDER BY commanded_at DESC LIMIT 1',
+    [deviceEui]
+  );
+  return row ? row.reconciliation_state : null;
+}
+
 async function hasPendingObservation(db, deviceEui) {
   const row = await db.get("SELECT 1 AS x FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND reconciliation_state='PENDING_OBSERVATION' LIMIT 1", [deviceEui]);
   return !!row;
@@ -292,4 +320,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { listQueued, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, pushSummary, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { listQueued, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

@@ -4,6 +4,7 @@ const P = require('./plan');
 const store = require('./store');
 const push = require('./push');
 const { interpretUplink } = require('./ack');
+const runtime = require('./runtime');
 
 const ONCE_GRACE_MS = 10 * 60 * 1000;
 const STALE_PUSH_MS = 24 * 3600 * 1000;
@@ -24,10 +25,17 @@ async function handleUplink({ db, deviceEui, decoded, fPort, rawBytes, receivedA
   const { acks, generationHint } = interpretUplink(decoded, fPort, rawBytes || null);
   const at = receivedAt || new Date().toISOString();
   let acked = 0;
+  // ValveRuntime.push_state (queued/acked/failed/weekday_states) only reflects WEEKDAY_PLAN/
+  // DAYMASK_PLAN rows (store.pushSummary/weekdayPushStates both filter to those purposes) -- a
+  // CLOCK_SYNC or SCHEDULER_STATUS-only uplink leaves that resource unchanged, so only an ack
+  // that actually lands on one of the two plan purposes needs a runtime emission.
+  let planAcked = false;
   for (const a of acks) {
     acked += await store.ackPush(db, deviceEui, a.purpose, a.fport, a.weekday, a.status, at);
     if (a.purpose === 'CLOCK_SYNC') await store.upsertSettings(db, deviceEui, { last_clock_sync_acked_at: at });
+    if (a.purpose === 'WEEKDAY_PLAN' || a.purpose === 'DAYMASK_PLAN') planAcked = true;
   }
+  if (planAcked) await runtime.emitRuntimeChanged(db, deviceEui, new Date(at));
   let generationPromoted = false;
   if (generationHint === 'GEN2') {
     const s = await store.getSettings(db, deviceEui);
@@ -139,6 +147,7 @@ async function runObserveTick({ db, now, warn }) {
     await db.run(`INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, command_id, effect_key, commanded_at, commanded_duration_seconds, expected_close_at, flow_rate_lpm, flow_rate_source, estimated_gross_liters, volume_source, observed_open_at, reconciliation_state, created_at, trigger)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [crypto.randomUUID(), d.deveui, d.irrigation_zone_id, null, null, commandedAt.toISOString(), durationSec, expectedClose.toISOString(), flowRate, flowSource, liters, volumeSource, new Date(uplinkMs).toISOString(), 'OBSERVED_RUNNING', nowDate.toISOString(), trigger]);
+    await runtime.emitRuntimeChanged(db, d.deveui, nowDate);
     created += 1;
   }
   return { created };
