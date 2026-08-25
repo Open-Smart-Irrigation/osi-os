@@ -119,3 +119,47 @@ test('cancelActuation sets devices.target_state to CLOSED, matching the REST rou
   assert.equal(row.target_state, 'CLOSED');
   db.close();
 });
+
+// --- Review fix (Task 1.4, finding 1): fail closed when there is no way to flush the
+// ChirpStack queue, instead of silently skipping the flush and still marking the
+// expectation CANCELLED / closing target_state -- a queued OPEN_FOR_DURATION could
+// otherwise still reach the valve while both sides believe it was cancelled. ---
+
+test('cancelActuation fails closed with chirpstack_unavailable when flushQueue is not a function (bridge could not build a ChirpStack client): no row mutated, no flush', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+
+  const outNull = await cancelActuation({ db, deviceEui: EUI, reason: 'operator_cancel', flushQueue: null, now: new Date() });
+  assert.equal(outNull.ok, false);
+  assert.equal(outNull.error, 'chirpstack_unavailable');
+  assert.deepEqual(outNull.downlinks, []);
+
+  const outUndefined = await cancelActuation({ db, deviceEui: EUI, reason: 'operator_cancel', now: new Date() });
+  assert.equal(outUndefined.ok, false);
+  assert.equal(outUndefined.error, 'chirpstack_unavailable');
+
+  const row = await db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.reconciliation_state, 'PENDING_OBSERVATION', 'the expectation must not be mutated when the queue cannot be flushed');
+  assert.equal(row.cancel_reason, null);
+  const device = await db.get('SELECT target_state FROM devices WHERE UPPER(deveui)=?', [EUI]);
+  assert.notEqual(device.target_state, 'CLOSED', 'target_state must not be closed when the queue cannot be flushed');
+  db.close();
+});
+
+test('cancelActuation flushes BEFORE marking CANCELLED: a flush failure propagates and leaves the expectation untouched (fail-closed ordering)', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_RUNNING', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const failingFlush = async () => { throw new Error('chirpstack unreachable'); };
+
+  await assert.rejects(
+    cancelActuation({ db, deviceEui: EUI, reason: 'operator_cancel', flushQueue: failingFlush, now: new Date() }),
+    /chirpstack unreachable/
+  );
+
+  const row = await db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.reconciliation_state, 'OBSERVED_RUNNING', 'a failed flush must leave the expectation unmutated - flush happens before the write');
+  assert.equal(row.cancel_reason, null);
+  const device = await db.get('SELECT target_state FROM devices WHERE UPPER(deveui)=?', [EUI]);
+  assert.notEqual(device.target_state, 'CLOSED');
+  db.close();
+});

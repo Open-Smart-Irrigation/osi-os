@@ -190,3 +190,20 @@ test('CANCEL_VALVE_ACTUATION command replay (applied twice) is harmless', async 
   const row = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
   assert.equal(row.reconciliation_state, 'CANCELLED');
 });
+
+// Review fix (Task 1.4, finding 1): the Valve Cloud Command Bridge builds flushQueue inside
+// its own try/catch and passes null when createProvisioningClientFromEnv throws. The
+// applier must fail closed rather than silently skip the flush while still cancelling.
+test('CANCEL_VALVE_ACTUATION fails closed with chirpstack_unavailable when the bridge could not build a ChirpStack client (flushQueue: null): no row mutated', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, reason: 'operator_cancel' }, { flushQueue: null });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'chirpstack_unavailable');
+  assert.deepEqual(out.downlinks, []);
+  const row = await db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.reconciliation_state, 'PENDING_OBSERVATION');
+  assert.equal(row.cancel_reason, null);
+  const device = await db.get('SELECT target_state FROM devices WHERE UPPER(deveui)=?', [EUI]);
+  assert.notEqual(device.target_state, 'CLOSED');
+});
