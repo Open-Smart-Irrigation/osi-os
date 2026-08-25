@@ -35,6 +35,7 @@
                 "GATEWAY_LOCATION_UPSERTED",
                 "IRRIGATION_EVENT_APPENDED",
                 "SCHEDULE_UPSERTED",
+                "VALVE_RUNTIME_CHANGED",
                 "VALVE_SCHEDULE_UPSERTED",
                 "VALVE_SETTINGS_UPSERTED",
                 "WORK_REQUEST_SUBMITTED",
