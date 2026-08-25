@@ -13,6 +13,36 @@ test('listValvesForUser: valve with no valve_settings row defaults to GEN1/ACTIV
   db.close();
 });
 
+test('upsertSettings bumps sync_version when the patch touches a synced column (Bovey cloud full-parity Task P2-E1)', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' });
+  const row = await db.get('SELECT strega_generation, sync_version FROM valve_settings WHERE device_eui=?', ['0016C001F1000001']);
+  assert.equal(row.strega_generation, 'GEN2');
+  assert.equal(row.sync_version, 1, 'first synced-column write bumps sync_version from the column default 0 to 1');
+});
+
+test('upsertSettings does NOT bump sync_version for a clock-sync-bookkeeping-only patch (no synced column touched)', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' }); // sync_version -> 1
+  await store.upsertSettings(db, '0016C001F1000001', { last_clock_sync_queued_at: '2026-08-25T10:00:00.000Z' });
+  const row = await db.get('SELECT last_clock_sync_queued_at, sync_version FROM valve_settings WHERE device_eui=?', ['0016C001F1000001']);
+  assert.equal(row.last_clock_sync_queued_at, '2026-08-25T10:00:00.000Z', 'bookkeeping column is still written');
+  assert.equal(row.sync_version, 1, 'a clock-sync-only write must not flood sync_outbox with irrelevant events');
+});
+
+test('upsertSettings bumps sync_version on every call that touches a synced column, even mixed with bookkeeping fields', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, '0016C001F1000001', {
+    scheduler_status: 'SKIP_TODAY',
+    skip_today_date: '2026-08-25',
+    last_clock_sync_acked_at: '2026-08-25T09:00:00.000Z',
+  });
+  const row = await db.get('SELECT scheduler_status, last_clock_sync_acked_at, sync_version FROM valve_settings WHERE device_eui=?', ['0016C001F1000001']);
+  assert.equal(row.scheduler_status, 'SKIP_TODAY');
+  assert.equal(row.last_clock_sync_acked_at, '2026-08-25T09:00:00.000Z');
+  assert.equal(row.sync_version, 1);
+});
+
 test('supersedeQueued(DAYMASK_PLAN) supersedes only rows whose mask intersects the new push (CRITICAL 1)', async () => {
   const { db } = await tempDb();
   // Row A: mask 0x80 (all days) QUEUED

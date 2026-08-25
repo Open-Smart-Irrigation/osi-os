@@ -10,8 +10,8 @@
       "reason": "Valve advanced controls consolidation Task 4 (E2): actuator_log INSERT composes the percentage (and returnPosition for flushing) into the action free-text column instead of writing the bare command string -- no schema change, actuator_log has no JSON/detail column to hold it in (+462 exact delta vs origin/main)"
     },
     "934bf2bc19a8ce22": {
-      "delta": 260,
-      "reason": "Valve control Phase B Task 3: Route Command dispatches the four cloud valve-schedule commands (UPSERT_VALVE_SCHEDULE, DELETE_VALVE_SCHEDULE, RESEND_VALVE_PLAN, SET_VALVE_SCHEDULER_STATUS) to a new sixth output, wired to a thin Valve Cloud Command Bridge node that delegates to osi-valve-control's applyCloudCommand (+223 exact delta vs origin/main). Bovey cloud full-parity Task 1.4: the same hardcoded routing array is the actual gate for reaching the bridge (neither the bridge nor this node reads cmd-type-registry's `dispatch` field for this decision), so CANCEL_VALVE_ACTUATION was added to it too (+253 exact delta vs origin/main)."
+      "delta": 282,
+      "reason": "Valve control Phase B Task 3: Route Command dispatches the four cloud valve-schedule commands (UPSERT_VALVE_SCHEDULE, DELETE_VALVE_SCHEDULE, RESEND_VALVE_PLAN, SET_VALVE_SCHEDULER_STATUS) to a new sixth output, wired to a thin Valve Cloud Command Bridge node that delegates to osi-valve-control's applyCloudCommand (+223 exact delta vs origin/main). Bovey cloud full-parity Task 1.4: the same hardcoded routing array is the actual gate for reaching the bridge (neither the bridge nor this node reads cmd-type-registry's `dispatch` field for this decision), so CANCEL_VALVE_ACTUATION was added to it too (+253 exact delta vs origin/main). Bovey cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS added to the same hardcoded routing array for the same reason (+282 exact delta vs origin/main)."
     },
     "062a0f9bf66d9789": {
       "delta": 850,

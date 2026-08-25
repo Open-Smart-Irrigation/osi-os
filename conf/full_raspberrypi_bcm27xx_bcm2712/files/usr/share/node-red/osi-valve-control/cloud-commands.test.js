@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { tempDb } = require('./test-helpers');
 const { applyCloudCommand } = require('./cloud-commands');
+const store = require('./store');
 
 const EUI = '0016C001F1000001';
 const noopFlush = async () => {};
@@ -112,6 +113,106 @@ test('SET_VALVE_SCHEDULER_STATUS rejects an invalid status', async () => {
   const out = await apply(db, { commandType: 'SET_VALVE_SCHEDULER_STATUS', device_eui: EUI, status: 'BOGUS' });
   assert.equal(out.ok, false);
   assert.equal(out.error, 'invalid_status');
+});
+
+test('UPSERT_VALVE_SETTINGS applies a partial update (only the fields present in the command change)', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, EUI, { strega_generation: 'GEN2', default_open_minutes: 20 });
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, default_open_minutes: 30 });
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.downlinks, []);
+  const row = await db.get('SELECT strega_generation, default_open_minutes FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(row.strega_generation, 'GEN2', 'absent field (strega_generation) is left unchanged');
+  assert.equal(row.default_open_minutes, 30, 'present field is updated');
+});
+
+test('UPSERT_VALVE_SETTINGS creates a row for a valve with no prior settings', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, strega_generation: 'GEN2', flow_rate_lpm: 4.5, flow_rate_source: 'measured' });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT strega_generation, flow_rate_lpm, flow_rate_source FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(row.strega_generation, 'GEN2');
+  assert.equal(row.flow_rate_lpm, 4.5);
+  assert.equal(row.flow_rate_source, 'measured');
+});
+
+test('UPSERT_VALVE_SETTINGS: flow_rate_lpm=null clears flow_rate_lpm/flow_rate_source together (matches the REST route)', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, EUI, { flow_rate_lpm: 4.5, flow_rate_source: 'measured' });
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, flow_rate_lpm: null });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT flow_rate_lpm, flow_rate_source FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(row.flow_rate_lpm, null);
+  assert.equal(row.flow_rate_source, null);
+});
+
+test('UPSERT_VALVE_SETTINGS: a non-"measured" flow_rate_source coerces to "estimated" (matches the REST route)', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, flow_rate_lpm: 3, flow_rate_source: 'guessed' });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT flow_rate_source FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(row.flow_rate_source, 'estimated');
+});
+
+test('UPSERT_VALVE_SETTINGS rejects an invalid strega_generation', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, strega_generation: 'GEN3' });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'invalid_generation');
+  const row = await db.get('SELECT device_eui FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(row, undefined, 'a rejected command must never reach the DB');
+});
+
+test('UPSERT_VALVE_SETTINGS rejects an out-of-range flow_rate_lpm', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, flow_rate_lpm: -1 });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'invalid_flow_rate');
+});
+
+test('UPSERT_VALVE_SETTINGS rejects an out-of-range default_open_minutes', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, default_open_minutes: 256 });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'invalid_default_open_minutes');
+});
+
+test('UPSERT_VALVE_SETTINGS rejects scheduler_status (the REST PUT /settings route does not accept it either)', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, scheduler_status: 'DEACTIVATED' });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'scheduler_status_not_supported');
+  const row = await db.get('SELECT device_eui FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(row, undefined, 'a rejected command must never reach the DB');
+});
+
+test('UPSERT_VALVE_SETTINGS on an unknown EUI returns not_found', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: 'FFFFFFFFFFFFFFFF', strega_generation: 'GEN2' });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'not_found');
+});
+
+test('UPSERT_VALVE_SETTINGS on a non-valve device is rejected', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000099','Sensor','DRAGINO_LSN50',1,datetime('now'),datetime('now'))");
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: '0016C001F1000099', strega_generation: 'GEN2' });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'not_a_valve');
+});
+
+test('UPSERT_VALVE_SETTINGS replay (same command applied twice) is idempotent: bumps sync_version once per apply, final state matches', async () => {
+  const { db } = await tempDb();
+  const first = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, default_open_minutes: 15 });
+  assert.equal(first.ok, true);
+  const afterFirst = await db.get('SELECT default_open_minutes, sync_version FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(afterFirst.default_open_minutes, 15);
+  assert.equal(afterFirst.sync_version, 1);
+  const second = await apply(db, { commandType: 'UPSERT_VALVE_SETTINGS', device_eui: EUI, default_open_minutes: 15 });
+  assert.equal(second.ok, true);
+  const afterSecond = await db.get('SELECT default_open_minutes, sync_version FROM valve_settings WHERE device_eui=?', [EUI]);
+  assert.equal(afterSecond.default_open_minutes, 15, 'replay converges on the same value');
+  assert.equal(afterSecond.sync_version, 2, 'sync_version still advances on replay (idempotent VALUE, not a no-op write)');
 });
 
 test('an unrecognised command type is rejected without touching the DB', async () => {

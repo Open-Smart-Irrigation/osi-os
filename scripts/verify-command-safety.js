@@ -293,6 +293,11 @@ const ACTUATOR_PATTERN_FALSE_POSITIVES = [
     // and marks the newest active valve_actuation_expectations row CANCELLED (cancel.js's
     // cancelActuation, shared with the REST cancel route). Correctly actuator=false.
     'CANCEL_VALVE_ACTUATION',
+    // Bovey cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS matches on "VALVE" but only
+    // ever writes valve_settings columns (strega_generation, flow_rate_lpm/source,
+    // default_open_minutes) via store.upsertSettings() -- the same call the REST PUT
+    // /settings route uses, which never sends a downlink. Correctly actuator=false.
+    'UPSERT_VALVE_SETTINGS',
 ];
 
 function extractRegistryObject(nodeFunc, constName) {
