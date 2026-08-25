@@ -120,3 +120,73 @@ test('an unrecognised command type is rejected without touching the DB', async (
   assert.equal(out.ok, false);
   assert.equal(out.error, 'unknown_command_type');
 });
+
+async function insertExpectation(db, { id, state, commandedAt, deviceEui }) {
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) " +
+    "VALUES (?, ?, ?, 900, ?, 'unknown', ?, 'on_valve_schedule', ?)",
+    [id, deviceEui || EUI, commandedAt, commandedAt, state, commandedAt]
+  );
+}
+
+test('CANCEL_VALVE_ACTUATION cancels the newest active expectation and flushes the queue exactly once', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const flushCalls = [];
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, reason: 'operator_cancel' }, {
+    flushQueue: async (eui) => { flushCalls.push(eui); },
+  });
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.downlinks, []);
+  assert.equal(flushCalls.length, 1);
+  const row = await db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.reconciliation_state, 'CANCELLED');
+  assert.equal(row.cancel_reason, 'operator_cancel');
+});
+
+test('CANCEL_VALVE_ACTUATION with an explicit null reason defaults to operator_cancel', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_RUNNING', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, reason: null });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.cancel_reason, 'operator_cancel');
+});
+
+test('CANCEL_VALVE_ACTUATION with no active expectation matches the REST route (no flush, no_active_actuation)', async () => {
+  const { db } = await tempDb();
+  const flushCalls = [];
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI }, {
+    flushQueue: async (eui) => { flushCalls.push(eui); },
+  });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'no_active_actuation');
+  assert.equal(flushCalls.length, 0);
+});
+
+test('CANCEL_VALVE_ACTUATION on an unknown EUI returns not_found', async () => {
+  const { db } = await tempDb();
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: 'FFFFFFFFFFFFFFFF' });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'not_found');
+});
+
+test('CANCEL_VALVE_ACTUATION on a non-valve device returns not_a_valve', async () => {
+  const { db } = await tempDb();
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000099','Sensor','DRAGINO_LSN50',1,datetime('now'),datetime('now'))");
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: '0016C001F1000099' });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'not_a_valve');
+});
+
+test('CANCEL_VALVE_ACTUATION command replay (applied twice) is harmless', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const first = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, reason: 'operator_cancel' });
+  assert.equal(first.ok, true);
+  const second = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, reason: 'operator_cancel' });
+  assert.equal(second.ok, false);
+  assert.equal(second.error, 'no_active_actuation');
+  const row = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.equal(row.reconciliation_state, 'CANCELLED');
+});
