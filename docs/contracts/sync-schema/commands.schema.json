@@ -70,6 +70,7 @@
                 "RESEND_VALVE_PLAN",
                 "SET_VALVE_SCHEDULER_STATUS",
                 "CANCEL_VALVE_ACTUATION",
+                "UPSERT_VALVE_SETTINGS",
                 "WORK_REQUEST_STATUS",
                 "UPSERT_JOURNAL_ENTRY",
                 "VOID_JOURNAL_ENTRY",
@@ -108,7 +109,11 @@
         "fire_at": {"type": ["string", "null"], "format": "date-time"},
         "label": {"type": ["string", "null"]},
         "enabled": {"type": ["boolean", "integer", "null"]},
-        "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+        "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+        "strega_generation": {"type": ["string", "null"]},
+        "flow_rate_lpm": {"type": ["number", "null"]},
+        "flow_rate_source": {"type": ["string", "null"]},
+        "default_open_minutes": {"type": ["integer", "null"]}
     },
     "allOf": [
         {
@@ -323,6 +328,18 @@
             "if": {"properties": {"command_type": {"const": "CANCEL_VALVE_ACTUATION"}}},
             "then": {
                 "required": ["device_eui"]
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_VALVE_SETTINGS"}}},
+            "then": {
+                "required": ["device_eui"],
+                "properties": {
+                    "strega_generation": {"type": ["string", "null"], "enum": ["GEN1", "GEN2", null]},
+                    "flow_rate_lpm": {"type": ["number", "null"], "minimum": 0, "maximum": 10000},
+                    "flow_rate_source": {"type": ["string", "null"]},
+                    "default_open_minutes": {"type": ["integer", "null"], "minimum": 1, "maximum": 255}
+                }
             }
         }
     ]
