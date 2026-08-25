@@ -1152,7 +1152,93 @@ CREATE TABLE IF NOT EXISTS valve_settings (
   last_clock_sync_queued_at TEXT,
   last_clock_sync_acked_at  TEXT,
   updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
-);
+, sync_version INTEGER DEFAULT 0);
+
+-- valve_settings -> sync_outbox triggers (Bovey cloud full-parity Task P2-E1, migration
+-- 0025). See 0025__valve_settings_sync_triggers.sql for the full rationale: aggregate_key
+-- is device_eui directly (valve_settings' own primary key), sync_version is bumped by
+-- store.upsertSettings() only when a write touches one of the six synced columns (not on
+-- every clock-sync bookkeeping write), and updated_at is reformatted to
+-- CanonicalUtcTimestamp in the payload since the column itself stores datetime('now')'s
+-- space-separated form.
+DROP TRIGGER IF EXISTS trg_sync_valve_settings_outbox_ai;
+CREATE TRIGGER trg_sync_valve_settings_outbox_ai
+AFTER INSERT ON valve_settings
+FOR EACH ROW
+WHEN EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'VALVE_SETTINGS',
+    NEW.device_eui,
+    'VALVE_SETTINGS_UPSERTED',
+    json_object(
+      'contract_version',     1,
+      'device_eui',           NEW.device_eui,
+      'strega_generation',    NEW.strega_generation,
+      'flow_rate_lpm',        NEW.flow_rate_lpm,
+      'flow_rate_source',     NEW.flow_rate_source,
+      'default_open_minutes', NEW.default_open_minutes,
+      'scheduler_status',     NEW.scheduler_status,
+      'skip_today_date',      NEW.skip_today_date,
+      'sync_version',         NEW.sync_version,
+      'updated_at',           strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at)
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(
+      NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.device_eui AND deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+    )
+  );
+END;
+
+DROP TRIGGER IF EXISTS trg_sync_valve_settings_outbox_au;
+CREATE TRIGGER trg_sync_valve_settings_outbox_au
+AFTER UPDATE ON valve_settings
+FOR EACH ROW
+WHEN EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1)
+  AND (
+    COALESCE(NEW.strega_generation,'')    <> COALESCE(OLD.strega_generation,'')    OR
+    COALESCE(NEW.flow_rate_lpm,0)         <> COALESCE(OLD.flow_rate_lpm,0)         OR
+    COALESCE(NEW.flow_rate_source,'')     <> COALESCE(OLD.flow_rate_source,'')     OR
+    COALESCE(NEW.default_open_minutes,0)  <> COALESCE(OLD.default_open_minutes,0)  OR
+    COALESCE(NEW.scheduler_status,'')     <> COALESCE(OLD.scheduler_status,'')     OR
+    COALESCE(NEW.skip_today_date,'')      <> COALESCE(OLD.skip_today_date,'')      OR
+    COALESCE(NEW.sync_version,0)          <> COALESCE(OLD.sync_version,0)
+  )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'VALVE_SETTINGS',
+    NEW.device_eui,
+    'VALVE_SETTINGS_UPSERTED',
+    json_object(
+      'contract_version',     1,
+      'device_eui',           NEW.device_eui,
+      'strega_generation',    NEW.strega_generation,
+      'flow_rate_lpm',        NEW.flow_rate_lpm,
+      'flow_rate_source',     NEW.flow_rate_source,
+      'default_open_minutes', NEW.default_open_minutes,
+      'scheduler_status',     NEW.scheduler_status,
+      'skip_today_date',      NEW.skip_today_date,
+      'sync_version',         NEW.sync_version,
+      'updated_at',           strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at)
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(
+      NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.device_eui AND deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+    )
+  );
+END;
 
 CREATE TABLE IF NOT EXISTS valve_schedule_pushes (
   push_id      TEXT PRIMARY KEY,

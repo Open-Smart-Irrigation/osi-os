@@ -86,6 +86,8 @@ const SQL_OWNED_EVENT_OPS = new Set([
   'WORK_REQUEST_SUBMITTED',
   // Emitted by 0024__valve_schedule_sync_triggers.sql, not by flows.json.
   'VALVE_SCHEDULE_UPSERTED',
+  // Emitted by 0025__valve_settings_sync_triggers.sql, not by flows.json.
+  'VALVE_SETTINGS_UPSERTED',
 ]);
 
 function readUtf8(file) {

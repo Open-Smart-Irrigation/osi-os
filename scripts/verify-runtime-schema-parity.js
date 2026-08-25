@@ -19,6 +19,10 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   // migration runner delivery, not the frozen sync-init-fn boot DDL.
   'trg_sync_valve_schedules_outbox_ai',
   'trg_sync_valve_schedules_outbox_au',
+  // 0025__valve_settings_sync_triggers.sql (Bovey cloud full-parity Task P2-E1) —
+  // same story again: seed DB + deploy-time migration runner delivery.
+  'trg_sync_valve_settings_outbox_ai',
+  'trg_sync_valve_settings_outbox_au',
 ]);
 
 function q(db, sql) {
