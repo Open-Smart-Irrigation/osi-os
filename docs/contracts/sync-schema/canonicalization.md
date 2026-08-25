@@ -199,13 +199,32 @@ rules above:
   again, so a repeated emission (bootstrap replay, a later trigger-backfill
   touching the same row) must resolve to the SAME `archived_at` rather than
   drift forward on every re-run.
-- `status` — the 5-value terminal subset of the edge panel's 8-state
-  vocabulary (`COMPLETED`, `CANCELLED`, `COMMAND_FAILED`, `OPEN_TIMEOUT`,
-  `CLOSE_TIMEOUT`); `PENDING_OPEN`/`RUNNING`/`UNKNOWN` never appear here
-  because this resource only exists once an expectation is archived.
-  `COMMAND_FAILED` is reserved (declared in the schema, not currently
-  emitted by any code path) — see the resource's own `description` and
-  `task-p4e1-report.md` for why.
+  **Tie-break rule (diverges from `ValveRuntime.as_of`):** because a
+  correction re-emit ties on `archived_at` instead of advancing past it, the
+  cloud applier MUST use `>=` (a later-arriving event with an EQUAL
+  `archived_at` still wins and replaces the row already applied), not a
+  strict `>`. `as_of` stays strict-`>` (P3-E1 ruling) because it is a fresh
+  wall-clock read every emission and effectively never ties; `archived_at`
+  is deliberately reused verbatim across corrections, so it needs the
+  opposite tie behavior to let a correction (e.g. `runTriggerBackfill`
+  fixing `estimated_gross_liters` on an already-archived row) actually land.
+- `status` — the edge panel's 8-state vocabulary, restricted to its 5
+  terminal values (`COMPLETED`, `CANCELLED`, `COMMAND_FAILED`,
+  `OPEN_TIMEOUT`, `CLOSE_TIMEOUT`); `PENDING_OPEN`/`RUNNING`/`UNKNOWN` never
+  appear here because this resource only exists once an expectation is
+  archived. Derived with the SAME precedence the edge panel's own read-time
+  `deriveStatus()` uses (`get-actuations-response`, flows.json) — checked in
+  order: `reconciliation_state = CANCELLED` first, then
+  `applied_commands.result` (case-insensitively, anything but `APPLIED`) for
+  `COMMAND_FAILED`, then `observed_open_at`/`observed_close_at` for
+  `COMPLETED`/`CLOSE_TIMEOUT`/`OPEN_TIMEOUT` — never a
+  `reconciliation_state`-only lookup: that shape mislabelled a failed
+  command as `OPEN_TIMEOUT` (a failed command still ages the expectation
+  out to `STALE_NO_OBSERVATION` on the normal grace clock, so it does reach
+  archiving — just under the wrong label) and a never-confirmed-open CLOSE
+  uplink (`reconciliation_state = OBSERVED_COMPLETE` with `observed_open_at`
+  still null) as `COMPLETED` with `estimated_gross_liters` attached — the
+  phantom-litres class this repo has reverted once already.
 
 ## Conformance
 

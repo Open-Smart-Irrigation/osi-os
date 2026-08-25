@@ -149,47 +149,73 @@ async function emitRuntimeChanged(db, deviceEui, warn, now) {
 
 // --- Bovey cloud full-parity Task P4-E1: terminal actuation history (VALVE_ACTUATION_ARCHIVED) ---
 //
-// Maps a TERMINAL valve_actuation_expectations.reconciliation_state to the ValveActuation
-// resource's `status` vocabulary (docs/contracts/sync-schema/resources.schema.json). Only
-// terminal reconciliation states appear here -- PENDING_OBSERVATION/OBSERVED_RUNNING are active,
-// not archived, and are intentionally absent (buildActuationPayload/emitActuationArchived below
-// no-op for them, so a caller never needs its own "is this terminal" check before calling in).
-// COMMAND_FAILED is NOT included: the edge panel (get-actuations-response's deriveStatus, in
-// flows.json) derives COMMAND_FAILED from applied_commands.result at GET-time, not from
-// reconciliation_state -- there is no discrete write inside "the reconciliation monitor + cancel
-// path" (this task's scoped emission seams) that ever marks a row command-failed, so this task
-// does not emit it. See docs/superpowers/sdd/2026-08-25-bovey-cloud-full-parity-program/
-// task-p4e1-report.md for the full trace of why (applied_commands is written by the generic
-// osi-command-ledger module, shared across command domains well outside these two seams).
-const TERMINAL_STATUS_BY_RECONCILIATION_STATE = {
-  OBSERVED_COMPLETE: 'COMPLETED',
-  CANCELLED: 'CANCELLED',
-  STALE_NO_OBSERVATION: 'OPEN_TIMEOUT',
-  STALE_OPEN_OBSERVED: 'CLOSE_TIMEOUT',
-};
+// The reconciliation_state values a TERMINAL valve_actuation_expectations row can carry --
+// PENDING_OBSERVATION/OBSERVED_RUNNING are active, not archived, and are intentionally absent
+// (buildActuationPayload/emitActuationArchived below no-op for them, so a caller never needs its
+// own "is this terminal" check before calling in). This set gates TERMINALITY ONLY -- it decides
+// whether to archive at all, never what `status` value to archive with (see deriveArchiveStatus
+// below for that; review fix, Critical 1/2: the two concerns are independent, and collapsing them
+// into one reconciliation_state -> status map produced two live mislabels -- see that function's
+// comment).
+const TERMINAL_RECONCILIATION_STATES = new Set([
+  'OBSERVED_COMPLETE', 'CANCELLED', 'STALE_NO_OBSERVATION', 'STALE_OPEN_OBSERVED',
+]);
+
+// Derives the ValveActuation resource's `status` (docs/contracts/sync-schema/resources.schema.json)
+// for a TERMINAL row, using EXACTLY the same precedence get-actuations-response's deriveStatus()
+// (flows.json) uses for the edge panel -- CANCELLED, then command_result, then the observed-
+// open/close pair -- rather than a reconciliation_state -> status lookup table. Two live bugs
+// that lookup-table shape produced (review fix, Critical 1/2):
+//   1. COMMAND_FAILED was unreachable: a failed command still leaves the expectation to age out
+//      to STALE_NO_OBSERVATION on the normal grace-period clock (nothing about a failed command
+//      short-circuits that), so it DOES reach a terminal state and DOES get archived -- just
+//      mislabelled OPEN_TIMEOUT, because reconciliation_state alone never consulted
+//      applied_commands.result. Consulting command_result here (once the row goes terminal, via
+//      the SAME emission timing as before -- no new hook, no osi-command-ledger change needed)
+//      fixes this for free.
+//   2. Phantom COMPLETED: strega-reconciliation-monitor's CLOSE-uplink branch sets
+//      reconciliation_state='OBSERVED_COMPLETE' whenever a CLOSE uplink arrives, WITHOUT
+//      requiring observed_open_at to already be set (a valve that reports CLOSE having never
+//      reported OPEN first). The old lookup mapped OBSERVED_COMPLETE -> COMPLETED unconditionally,
+//      shipping a never-confirmed-open actuation as COMPLETED (with estimated_gross_liters
+//      attached) -- the exact phantom-litres class this repo already reverted once (see
+//      strega-reconciliation-monitor's own trigger-gating history). deriveStatus's real
+//      precedence (hasOpen && hasClose only) correctly falls through to OPEN_TIMEOUT for this
+//      case, matching the edge panel exactly.
+function deriveArchiveStatus(row) {
+  if (row.reconciliation_state === 'CANCELLED') return 'CANCELLED';
+  if (row.command_result && String(row.command_result).toUpperCase() !== 'APPLIED') return 'COMMAND_FAILED';
+  if (row.observed_open_at && row.observed_close_at) return 'COMPLETED';
+  if (row.observed_open_at) return 'CLOSE_TIMEOUT';
+  return 'OPEN_TIMEOUT';
+}
 
 // Assembles the ValveActuation resource payload for one expectation row, mirroring the field
 // values GET /api/irrigation/recent-actuations serves for the same row (get-actuations-query's
 // SQL + get-actuations-response's Format Response function in flows.json) -- zone_uuid replaces
 // the edge-local zone_id (sync payloads never carry local integer ids) and duration_seconds
-// replaces commanded_duration_seconds (renamed, same value). `status` is the row's terminal
-// state, not recomputed against a wall-clock grace window: once terminal the row never changes
-// again, so there is nothing left to time out further. Returns null when the expectation does
-// not exist, or exists but has not (yet) reached a terminal reconciliation_state.
+// replaces commanded_duration_seconds (renamed, same value). `status` is derived once, at
+// terminal-transition time, not recomputed against a wall-clock grace window on every emission --
+// but see deriveArchiveStatus above: the row's OWN persisted fields (observed_open_at/
+// observed_close_at/command_result), not a wall clock, decide it, so a later correction (a
+// trigger/volume backfill, or an applied_commands row landing after the terminal transition) that
+// re-calls this still derives the historically-correct status from the row as it stands now.
+// Returns null when the expectation does not exist, or exists but has not (yet) reached a
+// terminal reconciliation_state.
 async function buildActuationPayload(db, expectationId) {
   const row = await db.get(
     'SELECT vae.expectation_id, vae.device_eui, vae.reconciliation_state, vae.trigger, ' +
       'vae.commanded_at, vae.observed_open_at, vae.observed_close_at, vae.expected_close_at, ' +
       'vae.commanded_duration_seconds, vae.estimated_gross_liters, vae.volume_source, vae.cancel_reason, ' +
       '(SELECT zone_uuid FROM irrigation_zones WHERE id = vae.zone_id AND deleted_at IS NULL) AS zone_uuid, ' +
-      'ac.result_detail AS command_result_detail ' +
+      'ac.result AS command_result, ac.result_detail AS command_result_detail ' +
       'FROM valve_actuation_expectations vae LEFT JOIN applied_commands ac ON ac.command_id = vae.command_id ' +
       'WHERE vae.expectation_id = ?',
     [expectationId]
   );
   if (!row) return null;
-  const status = TERMINAL_STATUS_BY_RECONCILIATION_STATE[row.reconciliation_state];
-  if (!status) return null;
+  if (!TERMINAL_RECONCILIATION_STATES.has(row.reconciliation_state)) return null;
+  const status = deriveArchiveStatus(row);
   return {
     contract_version: 1,
     expectation_id: row.expectation_id,
@@ -207,11 +233,20 @@ async function buildActuationPayload(db, expectationId) {
     cancel_reason: row.cancel_reason || null,
     command_result_detail: row.command_result_detail || null,
     // No sync_version bookkeeping column exists on this table (unlike ValveSettings) -- the
-    // cloud applier is last-write-wins on this field instead, the same as ValveRuntime.as_of.
-    // Deterministic from the row's own terminal timestamps, never wall-clock "now": the row
-    // never changes again once terminal, so a repeated emission (bootstrap replay, a later
+    // cloud applier is last-write-wins on this field instead, the same role ValveRuntime.as_of
+    // plays. Deterministic from the row's own terminal timestamps, never wall-clock "now": the
+    // row never changes again once terminal, so a repeated emission (bootstrap replay, a later
     // trigger-backfill touching the same row) resolves to the SAME archived_at rather than
     // drifting forward on every re-run.
+    //
+    // Review fix (Important 3): because a correction re-emit (runTriggerBackfill touching an
+    // already-archived row) produces an IDENTICAL archived_at rather than a later one, the cloud
+    // applier MUST use >= (later-or-equal wins), not a strict >, or the corrected re-emission
+    // (carrying the fixed trigger/volume/status) would lose the tie to the row already applied
+    // and be silently dropped. This deliberately diverges from ValveRuntime.as_of's own ruling
+    // (P3-E1: strict last-write-wins, ties broken by arrival order) precisely because as_of is a
+    // fresh wall-clock read every emission (no two emissions ever truly tie) while archived_at is
+    // reused verbatim across corrections by design. See canonicalization.md.
     archived_at: row.observed_close_at || row.expected_close_at || row.commanded_at,
   };
 }
@@ -261,5 +296,6 @@ module.exports = {
   emitRuntimeChanged,
   buildActuationPayload,
   emitActuationArchived,
-  TERMINAL_STATUS_BY_RECONCILIATION_STATE,
+  deriveArchiveStatus,
+  TERMINAL_RECONCILIATION_STATES,
 };

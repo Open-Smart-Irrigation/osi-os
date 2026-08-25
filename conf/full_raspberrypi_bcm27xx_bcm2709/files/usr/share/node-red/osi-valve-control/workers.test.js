@@ -360,3 +360,44 @@ test('runTriggerBackfill: unknown-volume row backfilled from zone calibration fl
   assert.equal(row.estimated_gross_liters, 375);
   assert.equal(row.volume_source, 'estimated_duration_flow_rate');
 });
+
+// Bovey cloud full-parity Task P4-E1 review fix (Important 2): the volume-backfill loop above
+// mutates estimated_gross_liters on ALREADY-TERMINAL rows with no state filter -- a shipped
+// VALVE_ACTUATION_ARCHIVED payload can be carrying the stale 'unknown' figure. This pins that a
+// correction to an already-archived row re-emits with the corrected liters.
+test('runTriggerBackfill: a volume correction on an already-terminal (archived) row re-emits VALVE_ACTUATION_ARCHIVED with the corrected liters', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await db.run("INSERT INTO irrigation_zones(name, user_id) VALUES ('Zone B', 1)");
+  const zone = await db.get("SELECT id FROM irrigation_zones WHERE name='Zone B'");
+  await db.run("INSERT INTO zone_irrigation_calibration(zone_id, measured_flow_rate_lpm, measurement_method, measured_at, created_at, updated_at) VALUES (?, 12.5, 'meter', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')", [zone.id]);
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, volume_source, reconciliation_state, trigger, created_at) " +
+    "VALUES ('e5','0016C001F1000001', ?, '2026-08-19T06:00:00.000Z',1800,'2026-08-19T06:32:00.000Z','2026-08-19T06:00:05.000Z','2026-08-19T06:30:03.000Z','unknown','OBSERVED_COMPLETE','on_valve_schedule','2026-08-19T06:00:00.000Z')",
+    [zone.id]
+  );
+
+  await W.runTriggerBackfill({ db, warn: () => {} });
+
+  const rows = await db.all("SELECT op, aggregate_key, payload_json FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED' AND aggregate_key='e5'");
+  assert.equal(rows.length, 1, 'the correction must re-emit an archive event for the touched expectation');
+  const payload = JSON.parse(rows[0].payload_json);
+  assert.equal(payload.status, 'COMPLETED');
+  assert.equal(payload.estimated_gross_liters, 375, 'the payload must carry the CORRECTED liters, not the stale unknown-volume value it archived with originally');
+  assert.equal(payload.volume_source, 'estimated_duration_flow_rate');
+});
+
+test('runTriggerBackfill: a trigger correction on an already-terminal (archived) row also re-emits VALVE_ACTUATION_ARCHIVED (trigger is part of the payload too)', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, volume_source, reconciliation_state, trigger, created_at) " +
+    "VALUES ('e6','0016C001F1000001','2026-08-19T06:00:00.000Z',900,'2026-08-19T06:15:00.000Z','2026-08-19T06:00:05.000Z','2026-08-19T06:15:03.000Z','unknown','OBSERVED_COMPLETE',NULL,'2026-08-19T06:00:00.000Z')"
+  );
+
+  await W.runTriggerBackfill({ db, warn: () => {} });
+
+  const rows = await db.all("SELECT payload_json FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED' AND aggregate_key='e6'");
+  assert.equal(rows.length, 1);
+  assert.equal(JSON.parse(rows[0].payload_json).trigger, 'manual');
+});

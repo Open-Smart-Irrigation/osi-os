@@ -301,6 +301,18 @@ async function runTriggerBackfill({ db, warn }) {
     LEFT JOIN valve_settings vs ON vs.device_eui = vae.device_eui
     LEFT JOIN zone_irrigation_calibration zic ON zic.zone_id = vae.zone_id
     WHERE vae.volume_source='unknown' AND vae.commanded_duration_seconds > 0`);
+  // Bovey cloud full-parity Task P4-E1 review fix (Important 2): this loop mutates
+  // flow_rate_lpm/estimated_gross_liters/volume_source with NO reconciliation_state filter --
+  // it fires routinely well after a row has already archived (e.g. an operator entering a
+  // valve's flow rate in Settings any time after the run finished), so an already-shipped
+  // VALVE_ACTUATION_ARCHIVED payload can be carrying a stale/unknown liters figure. Track which
+  // expectation_ids this loop actually UPDATEs (not the full query result -- `rate == null`
+  // below skips the write) and re-archive each, alongside the trigger-backfill rows above (same
+  // "corrects data a shipped archive already carries" rationale, since `trigger` is also part of
+  // the ValveActuation payload). emitActuationArchived self-guards on terminality, so calling it
+  // for a still-active row (trigger somehow null on a live PENDING_OBSERVATION/OBSERVED_RUNNING
+  // expectation) is a harmless no-op -- no filter needed here either.
+  const touchedExpectationDeviceEuis = new Map(rows.map((r) => [r.expectation_id, r.device_eui]));
   for (const r of unknownVolume) {
     let rate = null; let source = null;
     if (r.valve_flow_rate_lpm != null) { rate = Number(r.valve_flow_rate_lpm); source = 'valve_' + (r.valve_flow_rate_source || 'estimated'); }
@@ -308,6 +320,12 @@ async function runTriggerBackfill({ db, warn }) {
     if (rate == null) continue;
     const liters = Math.round(rate * r.commanded_duration_seconds / 60);
     await db.run("UPDATE valve_actuation_expectations SET flow_rate_lpm=?, flow_rate_source=?, estimated_gross_liters=?, volume_source='estimated_duration_flow_rate' WHERE expectation_id=?", [rate, source, liters, r.expectation_id]);
+    touchedExpectationDeviceEuis.set(r.expectation_id, r.device_eui);
+  }
+
+  for (const [expectationId, deviceEui] of touchedExpectationDeviceEuis) {
+    try { await runtime.emitActuationArchived(db, deviceEui, expectationId, warn); }
+    catch (e) { warn && warn('[valve-control] runTriggerBackfill: actuation-archive emit failed for ' + expectationId + ': ' + (e && e.message ? e.message : e)); }
   }
 
   return { updated };
