@@ -3,15 +3,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { tempDb, linkCloud } = require('./test-helpers');
 const store = require('./store');
-const { buildRuntimePayload, emitRuntimeChanged, buildActuationPayload, emitActuationArchived } = require('./runtime');
+const { buildRuntimePayload, emitRuntimeChanged, buildActuationPayload, emitActuationArchived, deriveArchiveStatus } = require('./runtime');
 
 const EUI = '0016C001F1000001';
 
-async function insertExpectation(db, { id, state, commandedAt, expectedCloseAt, durationSeconds, trigger, deviceEui }) {
+async function insertExpectation(db, { id, state, commandedAt, expectedCloseAt, durationSeconds, trigger, deviceEui, observedOpenAt, observedCloseAt, commandId }) {
   await db.run(
-    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, deviceEui || EUI, commandedAt, durationSeconds == null ? 900 : durationSeconds, expectedCloseAt || commandedAt, 'unknown', state, trigger === undefined ? 'on_valve_schedule' : trigger, commandedAt]
+    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, volume_source, reconciliation_state, trigger, created_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, deviceEui || EUI, commandId || null, commandedAt, durationSeconds == null ? 900 : durationSeconds, expectedCloseAt || commandedAt, observedOpenAt || null, observedCloseAt || null, 'unknown', state, trigger === undefined ? 'on_valve_schedule' : trigger, commandedAt]
   );
 }
 
@@ -239,14 +239,16 @@ test('buildActuationPayload: null for a non-terminal reconciliation_state (nothi
   assert.equal(await buildActuationPayload(db, 'e2'), null);
 });
 
-test('buildActuationPayload: OBSERVED_COMPLETE shapes to status=COMPLETED, field-for-field, zone_id resolved to zone_uuid', async () => {
+test('buildActuationPayload: OBSERVED_COMPLETE shapes to status=COMPLETED, field-for-field, zone_id resolved to zone_uuid, device_eui uppercased', async () => {
   const { db } = await tempDb();
   const zone = await insertZone(db);
   await db.run('UPDATE devices SET irrigation_zone_id=? WHERE UPPER(deveui)=?', [zone.id, EUI]);
   await db.run(
     'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, flow_rate_lpm, estimated_gross_liters, volume_source, reconciliation_state, trigger, created_at) ' +
     'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    ['e1', EUI, zone.id, '2026-08-25T10:00:00.000Z', 900, '2026-08-25T10:15:00.000Z', '2026-08-25T10:00:05.000Z', '2026-08-25T10:15:03.000Z', 4, 60, 'estimated_duration_flow_rate', 'OBSERVED_COMPLETE', 'on_valve_schedule', '2026-08-25T10:00:00.000Z']
+    // Lowercase on the wire (devices can store lowercase deveui) -- review fix (Important 4):
+    // must uppercase the same way the event-path GET route/emitRuntimeChanged already do.
+    ['e1', EUI.toLowerCase(), zone.id, '2026-08-25T10:00:00.000Z', 900, '2026-08-25T10:15:00.000Z', '2026-08-25T10:00:05.000Z', '2026-08-25T10:15:03.000Z', 4, 60, 'estimated_duration_flow_rate', 'OBSERVED_COMPLETE', 'on_valve_schedule', '2026-08-25T10:00:00.000Z']
   );
   const payload = await buildActuationPayload(db, 'e1');
   assert.deepEqual(payload, {
@@ -282,12 +284,62 @@ test('buildActuationPayload: CANCELLED shapes to status=CANCELLED and carries ca
   assert.equal(payload.archived_at, '2026-08-25T10:15:00.000Z');
 });
 
-test('buildActuationPayload: STALE_NO_OBSERVATION -> OPEN_TIMEOUT, STALE_OPEN_OBSERVED -> CLOSE_TIMEOUT', async () => {
+test('buildActuationPayload: STALE_NO_OBSERVATION (never observed open) -> OPEN_TIMEOUT, STALE_OPEN_OBSERVED (observed open, never close) -> CLOSE_TIMEOUT', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e-open-timeout', state: 'STALE_NO_OBSERVATION', commandedAt: '2026-08-25T09:00:00.000Z', expectedCloseAt: '2026-08-25T09:15:00.000Z' });
-  await insertExpectation(db, { id: 'e-close-timeout', state: 'STALE_OPEN_OBSERVED', commandedAt: '2026-08-25T09:00:00.000Z', expectedCloseAt: '2026-08-25T09:15:00.000Z' });
+  // A real STALE_OPEN_OBSERVED row always carries observed_open_at (the monitor only reaches
+  // it via OBSERVED_RUNNING, which requires an observed open) -- fixture must reflect that.
+  await insertExpectation(db, { id: 'e-close-timeout', state: 'STALE_OPEN_OBSERVED', commandedAt: '2026-08-25T09:00:00.000Z', expectedCloseAt: '2026-08-25T09:15:00.000Z', observedOpenAt: '2026-08-25T09:00:05.000Z' });
   assert.equal((await buildActuationPayload(db, 'e-open-timeout')).status, 'OPEN_TIMEOUT');
   assert.equal((await buildActuationPayload(db, 'e-close-timeout')).status, 'CLOSE_TIMEOUT');
+});
+
+// Review fix (Critical 1/2): status is derived from the row's own fields (deriveArchiveStatus),
+// not looked up from reconciliation_state -- both mislabel cases the lookup-table shape produced,
+// pinned directly.
+
+test('buildActuationPayload: a failed command reaches COMMAND_FAILED once the row goes terminal (STALE_NO_OBSERVATION), not OPEN_TIMEOUT -- the mislabel the reconciliation_state-only lookup produced', async () => {
+  const { db } = await tempDb();
+  await db.run(
+    "INSERT INTO applied_commands(command_id, device_eui, command_type, result, applied_at) VALUES ('cmd-1', ?, 'OPEN_FOR_DURATION', 'FAILED_RETRYABLE', '2026-08-25T09:00:10.000Z')",
+    [EUI]
+  );
+  await insertExpectation(db, { id: 'e1', state: 'STALE_NO_OBSERVATION', commandId: 'cmd-1', commandedAt: '2026-08-25T09:00:00.000Z', expectedCloseAt: '2026-08-25T09:15:00.000Z', trigger: 'cloud_command' });
+  const payload = await buildActuationPayload(db, 'e1');
+  assert.equal(payload.status, 'COMMAND_FAILED', 'the command failed outright, so it must be labelled COMMAND_FAILED, not the generic OPEN_TIMEOUT a lookup on reconciliation_state alone would have produced');
+});
+
+test('buildActuationPayload: command_result is case-insensitively compared and APPLIED never overrides the open/close-derived status', async () => {
+  const { db } = await tempDb();
+  await db.run(
+    "INSERT INTO applied_commands(command_id, device_eui, command_type, result, applied_at) VALUES ('cmd-2', ?, 'OPEN_FOR_DURATION', 'applied', '2026-08-25T10:00:10.000Z')",
+    [EUI]
+  );
+  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandId: 'cmd-2', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z', observedOpenAt: '2026-08-25T10:00:05.000Z', observedCloseAt: '2026-08-25T10:15:03.000Z' });
+  const payload = await buildActuationPayload(db, 'e1');
+  assert.equal(payload.status, 'COMPLETED');
+});
+
+test('buildActuationPayload: OBSERVED_COMPLETE with NO observed_open_at (a CLOSE uplink that arrived with no prior OPEN) shapes to OPEN_TIMEOUT, not COMPLETED -- the phantom-litres mislabel', async () => {
+  const { db } = await tempDb();
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, estimated_gross_liters, volume_source, reconciliation_state, trigger, created_at) ' +
+    'VALUES (?,?,?,?,?,NULL,?,?,?,?,?,?)',
+    ['e1', EUI, '2026-08-25T10:00:00.000Z', 900, '2026-08-25T10:15:00.000Z', '2026-08-25T10:15:03.000Z', 60, 'estimated_duration_flow_rate', 'OBSERVED_COMPLETE', 'unexplained', '2026-08-25T10:00:00.000Z']
+  );
+  const payload = await buildActuationPayload(db, 'e1');
+  assert.equal(payload.status, 'OPEN_TIMEOUT', 'never-confirmed-open must not ship as COMPLETED, regardless of reconciliation_state');
+  assert.equal(payload.observed_open_at, null);
+});
+
+test('deriveArchiveStatus: unit coverage of the full precedence, matching get-actuations-response deriveStatus exactly', () => {
+  const base = { reconciliation_state: 'OBSERVED_COMPLETE', command_result: null, observed_open_at: null, observed_close_at: null };
+  assert.equal(deriveArchiveStatus({ ...base, reconciliation_state: 'CANCELLED', command_result: 'FAILED', observed_open_at: 'x', observed_close_at: 'x' }), 'CANCELLED', 'CANCELLED wins over everything, including a set command_result');
+  assert.equal(deriveArchiveStatus({ ...base, command_result: 'FAILED_RETRYABLE' }), 'COMMAND_FAILED');
+  assert.equal(deriveArchiveStatus({ ...base, command_result: 'applied' }), 'OPEN_TIMEOUT', 'a lowercase APPLIED must not be mistaken for a failure');
+  assert.equal(deriveArchiveStatus({ ...base, observed_open_at: 'a', observed_close_at: 'b' }), 'COMPLETED');
+  assert.equal(deriveArchiveStatus({ ...base, observed_open_at: 'a', observed_close_at: null }), 'CLOSE_TIMEOUT');
+  assert.equal(deriveArchiveStatus({ ...base, observed_open_at: null, observed_close_at: null }), 'OPEN_TIMEOUT');
 });
 
 test('buildActuationPayload: archived_at falls all the way back to commanded_at when neither observed_close_at nor expected_close_at carries a truthy value (expected_close_at is schema-NOT-NULL in production, but an empty string is a legal value and must fall through the same as null would)', async () => {
@@ -302,7 +354,7 @@ test('buildActuationPayload: archived_at falls all the way back to commanded_at 
 
 test('emitActuationArchived: unlinked gateway is a no-op -- returns null and enqueues nothing', async () => {
   const { db } = await tempDb();
-  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
+  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z', observedOpenAt: '2026-08-25T10:00:05.000Z', observedCloseAt: '2026-08-25T10:15:03.000Z' });
   const result = await emitActuationArchived(db, EUI, 'e1');
   assert.equal(result, null);
   assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0);
@@ -312,7 +364,7 @@ test('emitActuationArchived: linked but no resolvable gateway_device_eui is a no
   const { db } = await tempDb();
   await db.run("INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at) VALUES ('cloud', 1, 'https://sync.test.invalid', 'cloud-user-1', NULL, datetime('now'))");
   await db.run('UPDATE devices SET gateway_device_eui = NULL WHERE UPPER(deveui) = ?', [EUI]);
-  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
+  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z', observedOpenAt: '2026-08-25T10:00:05.000Z', observedCloseAt: '2026-08-25T10:15:03.000Z' });
   const warnings = [];
   const result = await emitActuationArchived(db, EUI, 'e1', (m) => warnings.push(m));
   assert.equal(result, null);
@@ -332,7 +384,7 @@ test('emitActuationArchived: a non-terminal expectation is a no-op even when lin
 test('emitActuationArchived: a linked gateway enqueues a VALVE_ACTUATION_ARCHIVED sync_outbox row whose payload matches buildActuationPayload', async () => {
   const { db } = await tempDb();
   await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
-  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
+  await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z', observedOpenAt: '2026-08-25T10:00:05.000Z', observedCloseAt: '2026-08-25T10:15:03.000Z' });
 
   const result = await emitActuationArchived(db, EUI, 'e1');
   assert.ok(result);

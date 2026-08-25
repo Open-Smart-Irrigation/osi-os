@@ -21,9 +21,9 @@ function extractBlock(func) {
   const startMarker = 'const valveActuationRows = await q(';
   const start = func.indexOf(startMarker);
   if (start < 0) throw new Error('valveActuationRows query not found in node func');
-  const endMarker = '}));';
+  const endMarker = '})).filter((a) => a.status != null);';
   const end = func.indexOf(endMarker, start);
-  if (end < 0) throw new Error('end of valveActuations map not found');
+  if (end < 0) throw new Error('end of valveActuations map/filter not found');
   return func.slice(start, end + endMarker.length);
 }
 
@@ -58,13 +58,19 @@ async function tempDb() {
 
 function insertExpectation(raw, row) {
   raw.prepare(
-    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, volume_source, reconciliation_state, cancel_reason, trigger, created_at) ' +
-    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, command_id, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, volume_source, reconciliation_state, cancel_reason, trigger, created_at) ' +
+    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
   ).run(
-    row.expectation_id, row.device_eui || EUI, row.zone_id || null, row.commanded_at, row.commanded_duration_seconds || 900,
+    row.expectation_id, row.device_eui || EUI, row.zone_id || null, row.command_id || null, row.commanded_at, row.commanded_duration_seconds || 900,
     row.expected_close_at, row.observed_open_at || null, row.observed_close_at || null, row.volume_source || 'unknown',
     row.reconciliation_state, row.cancel_reason || null, row.trigger || null, row.commanded_at
   );
+}
+
+function insertAppliedCommand(raw, { commandId, deviceEui, result }) {
+  raw.prepare(
+    "INSERT INTO applied_commands(command_id, device_eui, command_type, result, applied_at) VALUES (?,?,'OPEN_FOR_DURATION',?,?)"
+  ).run(commandId, deviceEui || EUI, result, '2026-08-20T10:00:10.000Z');
 }
 
 async function main() {
@@ -140,6 +146,49 @@ async function main() {
         assert.equal(byId.e2.status, 'OPEN_TIMEOUT');
         assert.equal(byId.e2.zone_uuid, null);
         assert.equal(byId.e2.archived_at, '2026-08-21T10:15:00.000Z', 'no observed_close_at -- falls back to expected_close_at');
+        raw.close();
+      });
+
+      // Review fix (Critical 1/2 + Important 4): status must be derived like the event path's
+      // deriveArchiveStatus (command_result-aware, open/close-based), not a reconciliation_state
+      // lookup, and device_eui must be uppercased -- both bugs the lookup-table shape had.
+
+      await test(`[${profile}/${nodeId}] a failed command reaches COMMAND_FAILED once terminal (STALE_NO_OBSERVATION), not the generic OPEN_TIMEOUT`, async () => {
+        const raw = await tempDb();
+        insertAppliedCommand(raw, { commandId: 'cmd-1', result: 'FAILED_RETRYABLE' });
+        insertExpectation(raw, {
+          expectation_id: 'e1', command_id: 'cmd-1', reconciliation_state: 'STALE_NO_OBSERVATION', trigger: 'cloud_command',
+          commanded_at: '2026-08-20T10:00:00.000Z', expected_close_at: '2026-08-20T10:15:00.000Z',
+        });
+        const rows = await runBlock(block, raw);
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].status, 'COMMAND_FAILED');
+        raw.close();
+      });
+
+      await test(`[${profile}/${nodeId}] OBSERVED_COMPLETE with NO observed_open_at ships as OPEN_TIMEOUT, not COMPLETED (phantom-litres mislabel)`, async () => {
+        const raw = await tempDb();
+        insertExpectation(raw, {
+          expectation_id: 'e1', reconciliation_state: 'OBSERVED_COMPLETE', trigger: 'unexplained',
+          commanded_at: '2026-08-20T10:00:00.000Z', expected_close_at: '2026-08-20T10:15:00.000Z',
+          observed_open_at: null, observed_close_at: '2026-08-20T10:15:03.000Z',
+        });
+        const rows = await runBlock(block, raw);
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].status, 'OPEN_TIMEOUT');
+        assert.equal(rows[0].observed_open_at, null);
+        raw.close();
+      });
+
+      await test(`[${profile}/${nodeId}] device_eui is uppercased even when the row stores it lowercase (no devices JOIN backs this query -- vae.device_eui ships as-is otherwise)`, async () => {
+        const raw = await tempDb();
+        insertExpectation(raw, {
+          expectation_id: 'e1', device_eui: EUI.toLowerCase(), reconciliation_state: 'CANCELLED',
+          commanded_at: '2026-08-20T10:00:00.000Z', expected_close_at: '2026-08-20T10:15:00.000Z',
+        });
+        const rows = await runBlock(block, raw);
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].device_eui, EUI, 'must uppercase, matching the contract Eui64 pattern and the event path');
         raw.close();
       });
     }
