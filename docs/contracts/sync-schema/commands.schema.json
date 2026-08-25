@@ -335,10 +335,10 @@
             "then": {
                 "required": ["device_eui"],
                 "properties": {
-                    "strega_generation": {"type": ["string", "null"], "enum": ["GEN1", "GEN2", null]},
+                    "strega_generation": {"type": "string", "enum": ["GEN1", "GEN2"]},
                     "flow_rate_lpm": {"type": ["number", "null"], "minimum": 0, "maximum": 10000},
                     "flow_rate_source": {"type": ["string", "null"]},
-                    "default_open_minutes": {"type": ["integer", "null"], "minimum": 1, "maximum": 255}
+                    "default_open_minutes": {"type": "integer", "minimum": 1, "maximum": 255}
                 }
             }
         }

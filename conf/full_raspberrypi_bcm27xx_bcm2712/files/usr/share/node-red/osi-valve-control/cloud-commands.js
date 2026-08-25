@@ -146,7 +146,7 @@ async function applyUpsertValveSettings({ db, cmd, now }) {
       if (!Number.isFinite(n) || n <= 0 || n > 10000) return { ok: false, error: 'invalid_flow_rate' };
       patch.flow_rate_lpm = n;
       patch.flow_rate_source = cmd.flow_rate_source === 'measured' ? 'measured' : 'estimated';
-      patch.flow_rate_updated_at = (now || new Date()).toISOString();
+      patch.flow_rate_updated_at = now.toISOString();
     }
   }
   if (cmd.default_open_minutes !== undefined) {

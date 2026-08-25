@@ -67,6 +67,8 @@ jobs:
       - run: node scripts/verify-runtime-schema-parity.js
       - run: node scripts/verify-boot-ddl-interpolation.js
       - run: node --test scripts/verify-boot-ddl-interpolation.test.js scripts/test-upsert-sync-versioning.js
+      - run: node scripts/test-valve-schedule-sync-triggers.js
+      - run: node scripts/test-valve-settings-sync-triggers.js
       - name: Verify trigger-body parity (seed vs boot DDL)
         run: node scripts/verify-trigger-body-parity.js
       - name: Trigger-body parity unit tests
