@@ -506,6 +506,40 @@
                     "description": "Snapshot-build time, stamped once at assembly (never from an event-specific timestamp such as an uplink's receivedAt or an expectation's commanded_at). Monotone non-decreasing per device_eui in practice (each emission reads the clock at its own build time, strictly after any earlier emission's read); the cloud applier uses last-write-wins on this field."
                 }
             }
+        },
+        "ValveActuation": {
+            "type": "object",
+            "description": "A frozen, TERMINAL valve_actuation_expectations row (Bovey cloud full-parity Task P4-E1), mirroring the field values GET /api/irrigation/recent-actuations serves for the same row -- zone_uuid replaces the edge-local zone_id (sync payloads never carry local integer ids) and duration_seconds replaces commanded_duration_seconds (renamed, same value). Emitted once per terminal transition (osi-valve-control/runtime.js's emitActuationArchived(), called from the reconciliation monitor and cancel.js) and backfilled on link/force-sync (sync-bootstrap-build/sync-force-build's valve_actuations array, capped at the 200 most recent terminal rows). `status` only ever takes the 4 values reachable from those two seams -- COMPLETED, CANCELLED, OPEN_TIMEOUT, CLOSE_TIMEOUT. COMMAND_FAILED is part of the edge panel's read-time-derived 8-state vocabulary (get-actuations-response's deriveStatus(), keyed off applied_commands.result) but has no discrete write inside valve_actuation_expectations itself, so this task does not emit it -- see task-p4e1-report.md.",
+            "required": ["contract_version", "expectation_id", "device_eui", "status", "commanded_at", "archived_at"],
+            "properties": {
+                "contract_version": {
+                    "type": "integer",
+                    "const": 1,
+                    "description": "Sync event contract version stamped into every emitted sync_outbox payload JSON."
+                },
+                "expectation_id": {"type": "string", "minLength": 1, "description": "Stable key: valve_actuation_expectations.expectation_id."},
+                "device_eui": {"$ref": "#/definitions/Eui64"},
+                "zone_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "status": {
+                    "type": "string",
+                    "enum": ["COMPLETED", "CANCELLED", "COMMAND_FAILED", "OPEN_TIMEOUT", "CLOSE_TIMEOUT"],
+                    "description": "COMMAND_FAILED is reserved for forward compatibility (see the type-level description) -- no current emitter produces it."
+                },
+                "trigger": {"type": ["string", "null"]},
+                "commanded_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "observed_open_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "observed_close_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "expected_close_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "duration_seconds": {"type": ["integer", "null"], "minimum": 0},
+                "estimated_gross_liters": {"type": ["number", "null"], "minimum": 0},
+                "volume_source": {"type": ["string", "null"], "enum": ["unknown", "estimated_duration_flow_rate", "measured_flow_meter", null]},
+                "cancel_reason": {"type": ["string", "null"]},
+                "command_result_detail": {"type": ["string", "null"]},
+                "archived_at": {
+                    "allOf": [{"$ref": "#/definitions/CanonicalUtcTimestamp"}],
+                    "description": "Last-write-wins snapshot field -- this table has no sync_version bookkeeping column of its own (unlike ValveSettings). Deterministic from the row's own terminal timestamps (COALESCE(observed_close_at, expected_close_at, commanded_at)), never wall-clock 'now': the row never changes again once terminal, so a repeated emission (bootstrap replay, a later trigger-backfill touching the same row) resolves to the SAME archived_at rather than drifting forward on every re-run."
+                }
+            }
         }
     }
 }

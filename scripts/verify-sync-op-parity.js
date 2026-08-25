@@ -102,6 +102,10 @@ const JS_MODULE_OWNED_EVENT_OPS = new Set([
   // cancel.js, push.js, and the write-strega-expectation/strega-reconciliation-monitor flows.json
   // nodes via osiLib.require('osi-valve-control')); verified by osi-valve-control/runtime.test.js.
   'VALVE_RUNTIME_CHANGED',
+  // Emitted by osi-valve-control/runtime.js's emitActuationArchived() (called from cancel.js and
+  // the strega-reconciliation-monitor flows.json node's terminal-transition branch); verified by
+  // osi-valve-control/runtime.test.js and cancel.test.js. Bovey cloud full-parity Task P4-E1.
+  'VALVE_ACTUATION_ARCHIVED',
 ]);
 
 function readUtf8(file) {

@@ -182,6 +182,31 @@ with a canonical form beyond the general rules above:
   `strftime('%Y-%m-%dT%H:%M:%fZ', updated_at)` before it reaches the
   payload, so every synced value is already canonical.
 
+## Valve actuation archive
+
+`ValveActuation` (`docs/contracts/sync-schema/resources.schema.json`, Bovey
+cloud full-parity Task P4-E1) fields with a canonical form beyond the general
+rules above:
+
+- `archived_at` — UTC instant, canonical millisecond-precision ISO. This
+  table (`valve_actuation_expectations`) has no `sync_version`/`updated_at`
+  bookkeeping column of its own (unlike `ValveSettings`), so the cloud
+  applier is last-write-wins on this field instead, the same role
+  `ValveRuntime.as_of` plays. Unlike `as_of` (stamped from wall-clock `now`
+  at emission time), `archived_at` is deterministic from the row's OWN
+  terminal timestamps — `COALESCE(observed_close_at, expected_close_at,
+  commanded_at)` — never wall-clock `now`: a terminal row never changes
+  again, so a repeated emission (bootstrap replay, a later trigger-backfill
+  touching the same row) must resolve to the SAME `archived_at` rather than
+  drift forward on every re-run.
+- `status` — the 5-value terminal subset of the edge panel's 8-state
+  vocabulary (`COMPLETED`, `CANCELLED`, `COMMAND_FAILED`, `OPEN_TIMEOUT`,
+  `CLOSE_TIMEOUT`); `PENDING_OPEN`/`RUNNING`/`UNKNOWN` never appear here
+  because this resource only exists once an expectation is archived.
+  `COMMAND_FAILED` is reserved (declared in the schema, not currently
+  emitted by any code path) — see the resource's own `description` and
+  `task-p4e1-report.md` for why.
+
 ## Conformance
 
 A new runtime must pass every test vector before its hashes are accepted by other systems. Hashes computed by a non-conformant runtime are discarded.
