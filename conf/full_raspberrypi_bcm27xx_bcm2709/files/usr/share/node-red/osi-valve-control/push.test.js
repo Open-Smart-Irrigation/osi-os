@@ -44,7 +44,7 @@ test('status and clock pushes', () => {
   assert.deepEqual(buildClockPush('GEN2', new Date(), 'Europe/Zurich'), { purpose: 'CLOCK_SYNC', weekday: null, fport: 13, payloadHex: '01', planHash: null });
 });
 
-const { tempDb } = require('./test-helpers');
+const { tempDb, linkCloud } = require('./test-helpers');
 const store = require('./store');
 const { compileAndQueue, queuePushes } = require('./push');
 
@@ -234,6 +234,24 @@ test('M1: a clock-sync-only queuePushes call (no generation, no plan purpose) su
   await queuePushes({ db, deviceEui: '0016C001F1000001', appId: 'app', pushes: [buildClockPush('GEN2', new Date(), 'UTC')], flushQueue: null, warn: () => {} });
   const wd = await db.all("SELECT state FROM valve_schedule_pushes WHERE device_eui='0016C001F1000001' AND purpose='WEEKDAY_PLAN'");
   assert.deepEqual(new Set(wd.map((r) => r.state)), new Set(['QUEUED']), 'a clock push alone must not touch plan rows');
+  db.close();
+});
+
+// P3-E1: queuePushes is one of the code seams that changes ValveRuntime's derived state
+// (push_state.queued/acked/failed/weekday_states) -- but only for WEEKDAY_PLAN/DAYMASK_PLAN
+// pushes; a SCHEDULER_STATUS/CLOCK_SYNC-only push leaves that resource unchanged.
+test('P3-E1: a plan-affecting queuePushes call emits VALVE_RUNTIME_CHANGED on a linked gateway; a clock-sync-only call does not', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await store.insertSchedule(db, { schedule_uuid: 'g1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+
+  await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  const afterPlan = await db.all("SELECT op FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'");
+  assert.equal(afterPlan.length, 1, 'the WEEKDAY_PLAN pushes (+ their bundled clock push) must emit exactly one runtime event');
+
+  await queuePushes({ db, deviceEui: '0016C001F1000001', appId: 'app', pushes: [buildClockPush('GEN1', new Date(), 'UTC')], flushQueue: null, warn: () => {} });
+  const afterClock = await db.all("SELECT op FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'");
+  assert.equal(afterClock.length, 1, 'a standalone clock push must not add another runtime event');
   db.close();
 });
 

@@ -29,4 +29,17 @@ async function tempDb() {
   return { db, path: dbPath, raw };
 }
 
-module.exports = { tempDb, facade };
+// Seeds a linked sync_link_state('cloud') row -- the predicate every JS/trigger sync emitter in
+// this module gates on. tempDb()'s device/user fixtures deliberately leave this table empty (no
+// server_url/server_sync_token on the seeded user), so unlinked is the default and tests that
+// need the linked path opt in explicitly with this helper.
+async function linkCloud(db, opts) {
+  const o = opts || {};
+  await db.run(
+    "INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at) " +
+    "VALUES ('cloud', 1, ?, ?, ?, datetime('now'))",
+    [o.serverUrl || 'https://sync.test.invalid', o.cloudUserId || 'cloud-user-1', o.gatewayDeviceEui || '0016C001F11715E2']
+  );
+}
+
+module.exports = { tempDb, facade, linkCloud };
