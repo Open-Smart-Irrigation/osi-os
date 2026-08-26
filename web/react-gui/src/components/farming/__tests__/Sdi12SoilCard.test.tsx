@@ -48,6 +48,31 @@ describe('Sdi12SoilCard', () => {
     expect(screen.queryByText(/µS\/cm/)).not.toBeInTheDocument();
   });
 
+  it('sorts configured modules by depth and shows VWC with adjacent VIC or missing markers', () => {
+    render(<Sdi12SoilCard device={makeDevice({
+      sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+      sdi12_channel_layout_json: { version: 1, address: 'L', sensors: [
+        { channel: 7, response_position: 2, depth_cm: 80, type: 'ENVIROSCAN' },
+        { channel: 9, response_position: 1, depth_cm: 70, type: 'TRISCAN' },
+      ] },
+      latest: { vwc_9: 22.5, soil_vic_9: 0.125 },
+    })} />);
+    const depths = screen.getAllByText(/Depth \d+ cm/).map((node) => node.textContent);
+    expect(depths).toEqual(['Depth 70 cm', 'Depth 80 cm']);
+    expect(screen.getByText('22.5 %')).toBeInTheDocument();
+    expect(screen.getByText('0.125')).toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(1);
+    expect(screen.getByText(/TriSCAN VIC acquisition is disabled/)).toBeInTheDocument();
+  });
+
+  it('surfaces an invalid stored Sentek layout status', () => {
+    render(<Sdi12SoilCard device={makeDevice({
+      sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+      sdi12_layout_status: 'invalid',
+    })} />);
+    expect(screen.getByText(/saved Sentek channel layout is invalid/)).toBeInTheDocument();
+  });
+
   it('shows pending state when unidentified', () => {
     render(<Sdi12SoilCard device={makeDevice({
       sdi12_probe_status: 'pending_identify',

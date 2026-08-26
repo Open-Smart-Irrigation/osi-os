@@ -338,16 +338,14 @@ const localRestartReader = [
 ].join('\n');
 const protectedNodeHashes = {
   'al-link-validate': 'c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7',
-  // Re-pinned #2 (Fable A6 review, SHOULD-FIX 3): the guarded devices rebuild's
-  // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_value_count, so a
-  // live rebuild (if the CHECK-convergence guard ever fires) no longer silently drops
-  // the column and its data -- covered by rehearse-devices-rebuild.test.js's
-  // sdi12-sentinels case. Sanctioned: same class of edit as 0027's own
-  // DEVICES_NEW_DDL/DEVICES_COPY_SQL extension for sdi12_probe_profile/
-  // sdi12_probe_status/sdi12_identity, not new schema behavior in the frozen node.
-  // Hash re-derived on this branch, not copied from AgroLink.
-  // Previous pin: d8084b6316892301fb1d41c1828c312b5707c7ee43bc6354b34805052f12da2c
-  'sync-init-fn': 'b0f432fb7c972905a0d45797537d69ef16c04a64024de624638a561f68400c69',
+  // Re-pinned #3 (port adaptation, migration 0029): the guarded devices rebuild's
+  // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_channel_layout_json.
+  // AgroLink's own history never closed this gap -- a live rebuild would have created
+  // devices_new without the column and silently dropped every stored Sentek probe
+  // layout. Same sanctioned class of edit as 0027/0028's literal extensions, applied in
+  // the same commit as the migration. Hash re-derived on this branch.
+  // Previous pin: b0f432fb7c972905a0d45797537d69ef16c04a64024de624638a561f68400c69
+  'sync-init-fn': '69aed774a08b5372c251d1c22c1f70ee7f983b7dbe1f17ff9ee01e5d0b944bbf',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],

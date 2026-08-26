@@ -363,5 +363,65 @@
     "key": "soil_ec_8",
     "edgeField": "soil_ec_8",
     "unit": "µS/cm"
+  },
+  {
+    "key": "vwc_9",
+    "edgeField": "vwc_9",
+    "unit": "%"
+  },
+  {
+    "key": "vwc_10",
+    "edgeField": "vwc_10",
+    "unit": "%"
+  },
+  {
+    "key": "soil_vic_1",
+    "edgeField": "soil_vic_1",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_2",
+    "edgeField": "soil_vic_2",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_3",
+    "edgeField": "soil_vic_3",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_4",
+    "edgeField": "soil_vic_4",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_5",
+    "edgeField": "soil_vic_5",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_6",
+    "edgeField": "soil_vic_6",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_7",
+    "edgeField": "soil_vic_7",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_8",
+    "edgeField": "soil_vic_8",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_9",
+    "edgeField": "soil_vic_9",
+    "unit": ""
+  },
+  {
+    "key": "soil_vic_10",
+    "edgeField": "soil_vic_10",
+    "unit": ""
   }
 ]

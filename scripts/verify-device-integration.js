@@ -103,7 +103,9 @@ describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', ()
   const manifest = loadEdgeManifest();
   const sdi12Columns = [
     'swt_1', 'swt_2', 'swt_3',
-    'vwc_1', 'vwc_2', 'vwc_3', 'vwc_4', 'vwc_5', 'vwc_6', 'vwc_7', 'vwc_8',
+    'vwc_1', 'vwc_2', 'vwc_3', 'vwc_4', 'vwc_5', 'vwc_6', 'vwc_7', 'vwc_8', 'vwc_9', 'vwc_10',
+    'soil_vic_1', 'soil_vic_2', 'soil_vic_3', 'soil_vic_4', 'soil_vic_5',
+    'soil_vic_6', 'soil_vic_7', 'soil_vic_8', 'soil_vic_9', 'soil_vic_10',
     'soil_temp_1', 'soil_temp_2', 'soil_temp_3', 'soil_temp_4',
     'soil_temp_5', 'soil_temp_6', 'soil_temp_7', 'soil_temp_8',
     'soil_ec_1', 'soil_ec_2', 'soil_ec_3', 'soil_ec_4',

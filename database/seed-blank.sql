@@ -139,6 +139,7 @@ CREATE TABLE devices (
   sdi12_probe_status                    TEXT CHECK(sdi12_probe_status IN ('pending_identify','identified','unmatched','manual')),
   sdi12_identity                        TEXT,
   sdi12_value_count                     INTEGER CHECK(sdi12_value_count IS NULL OR (sdi12_value_count BETWEEN 1 AND 8)),
+  sdi12_channel_layout_json             TEXT,
   FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE SET NULL,
   FOREIGN KEY (farm_id)  REFERENCES farms(farm_id)        ON DELETE SET NULL
 );
@@ -251,6 +252,18 @@ CREATE TABLE device_data (
   soil_ec_6                 REAL,
   soil_ec_7                 REAL,
   soil_ec_8                 REAL,
+  vwc_9                     REAL,
+  vwc_10                    REAL,
+  soil_vic_1                REAL,
+  soil_vic_2                REAL,
+  soil_vic_3                REAL,
+  soil_vic_4                REAL,
+  soil_vic_5                REAL,
+  soil_vic_6                REAL,
+  soil_vic_7                REAL,
+  soil_vic_8                REAL,
+  soil_vic_9                REAL,
+  soil_vic_10               REAL,
   FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
 );
 
@@ -1736,6 +1749,56 @@ BEGIN
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
   );
+END;
+
+-- Additive Sentek payload augmentation. These triggers decorate the existing
+-- boot-owned outbox events, so boot does not need to recreate schema objects
+-- or carry a second copy of the new column list.
+CREATE TRIGGER trg_sentek_device_outbox_payload_ai
+AFTER INSERT ON sync_outbox
+FOR EACH ROW
+WHEN NEW.aggregate_type = 'DEVICE'
+BEGIN
+  UPDATE sync_outbox
+  SET payload_json = json_set(
+    payload_json,
+    '$.sdi12_channel_layout_json',
+    json((SELECT sdi12_channel_layout_json FROM devices WHERE deveui = NEW.aggregate_key))
+  )
+  WHERE event_uuid = NEW.event_uuid;
+END;
+
+CREATE TRIGGER trg_sentek_data_outbox_payload_ai
+AFTER INSERT ON sync_outbox
+FOR EACH ROW
+WHEN NEW.aggregate_type = 'DEVICE_DATA' AND NEW.op = 'DEVICE_DATA_APPENDED'
+BEGIN
+  UPDATE sync_outbox
+  SET payload_json = json_patch(
+    payload_json,
+    COALESCE((
+      SELECT json_object(
+        'vwc_9', dd.vwc_9,
+        'vwc_10', dd.vwc_10,
+        'soil_vic_1', dd.soil_vic_1,
+        'soil_vic_2', dd.soil_vic_2,
+        'soil_vic_3', dd.soil_vic_3,
+        'soil_vic_4', dd.soil_vic_4,
+        'soil_vic_5', dd.soil_vic_5,
+        'soil_vic_6', dd.soil_vic_6,
+        'soil_vic_7', dd.soil_vic_7,
+        'soil_vic_8', dd.soil_vic_8,
+        'soil_vic_9', dd.soil_vic_9,
+        'soil_vic_10', dd.soil_vic_10
+      )
+      FROM device_data dd
+      WHERE dd.deveui = json_extract(NEW.payload_json, '$.device_eui')
+        AND dd.recorded_at = json_extract(NEW.payload_json, '$.recorded_at')
+      ORDER BY dd.id DESC
+      LIMIT 1
+    ), '{}')
+  )
+  WHERE event_uuid = NEW.event_uuid;
 END;
 
 -- chameleon_readings → sync_outbox (insert)

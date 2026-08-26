@@ -242,3 +242,146 @@ test('bench 2026-08-19: SENTEK_ENVIROSCAN live 5-value frame maps mm/10cm straig
   assert.deepStrictEqual(r2.unknown, {});
   assert.strictEqual(r2.channels.vwc_5, 0.34);
 });
+
+test('Sentek layout validation canonicalizes order and derives VWC/VIC depth projection', () => {
+  const result = m.validateSentekLayout({
+    version: 1,
+    address: 'L',
+    sensors: [
+      { channel: 8, response_position: 8, depth_cm: 100, type: 'ENVIROSCAN' },
+      { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
+      { channel: 7, response_position: 7, depth_cm: 80, type: 'ENVIROSCAN' },
+      { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
+      { channel: 3, response_position: 3, depth_cm: 30, type: 'ENVIROSCAN' },
+      { channel: 4, response_position: 4, depth_cm: 40, type: 'ENVIROSCAN' },
+      { channel: 5, response_position: 5, depth_cm: 50, type: 'TRISCAN' },
+      { channel: 6, response_position: 6, depth_cm: 60, type: 'ENVIROSCAN' },
+    ],
+  });
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(result.layout.sensors.map((sensor) => sensor.channel), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepStrictEqual(result.depths, {
+    vwc_1: 10, soil_vic_1: 10, vwc_2: 20, vwc_3: 30, vwc_4: 40,
+    vwc_5: 50, soil_vic_5: 50, vwc_6: 60, vwc_7: 80, vwc_8: 100,
+  });
+});
+
+test('Sentek layout supports stable channels when a 70 cm module is inserted as channel 9', () => {
+  const result = m.validateSentekLayout({ version: 1, address: 'L', sensors: [
+    { channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' },
+    { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
+    { channel: 3, response_position: 3, depth_cm: 30, type: 'ENVIROSCAN' },
+    { channel: 4, response_position: 4, depth_cm: 40, type: 'ENVIROSCAN' },
+    { channel: 5, response_position: 5, depth_cm: 50, type: 'ENVIROSCAN' },
+    { channel: 6, response_position: 6, depth_cm: 60, type: 'ENVIROSCAN' },
+    { channel: 9, response_position: 7, depth_cm: 70, type: 'ENVIROSCAN' },
+    { channel: 7, response_position: 8, depth_cm: 80, type: 'ENVIROSCAN' },
+    { channel: 8, response_position: 9, depth_cm: 100, type: 'ENVIROSCAN' },
+  ] });
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(result.layout.sensors.map((sensor) => sensor.channel), [1, 2, 3, 4, 5, 6, 9, 7, 8]);
+});
+
+test('Sentek layout rejects duplicate identities, non-contiguous positions, depths, and invalid addresses', () => {
+  const base = [
+    { channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' },
+    { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
+  ];
+  for (const layout of [
+    { version: 1, address: 'L', sensors: [base[0], { ...base[1], channel: 1 }] },
+    { version: 1, address: 'L', sensors: [base[0], { ...base[1], response_position: 3 }] },
+    { version: 1, address: 'L', sensors: [base[0], { ...base[1], depth_cm: 10 }] },
+    { version: 1, address: '!', sensors: base },
+  ]) assert.strictEqual(m.validateSentekLayout(layout).ok, false);
+});
+
+test('canonical VWC-only Sentek layout maps exact values by response position up to channel 10', () => {
+  const sensors = Array.from({ length: 10 }, (_, index) => ({
+    channel: index + 1,
+    response_position: 10 - index,
+    depth_cm: (index + 1) * 10,
+    type: 'ENVIROSCAN',
+  }));
+  const layout = m.validateSentekLayout({ version: 1, address: 'L', sensors }).layout;
+  const r = m.normalize(
+    { BatV: 3.4, data_sum: '+1+2+3+4+5+6+7+8+9+10' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ValueCount: 5, sdi12ChannelLayout: layout },
+    {},
+  );
+  assert.deepStrictEqual(r.unknown, {});
+  assert.strictEqual(r.channels.vwc_10, 1);
+  assert.strictEqual(r.channels.vwc_1, 10);
+});
+
+test('canonical Sentek layout has atomic cardinality and malformed-layout failures', () => {
+  const layout = m.validateSentekLayout({ version: 1, address: 'L', sensors: [
+    { channel: 2, response_position: 1, depth_cm: 20, type: 'ENVIROSCAN' },
+    { channel: 7, response_position: 2, depth_cm: 80, type: 'ENVIROSCAN' },
+  ] }).layout;
+  const mismatch = m.normalize(
+    { BatV: 3.4, data_sum: '+1+2+3' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ChannelLayout: layout }, {},
+  );
+  assert.deepStrictEqual(Object.keys(mismatch.channels), ['bat_v']);
+  assert.ok(mismatch.unknown.sdi12_layout_value_count);
+  const malformed = m.normalize(
+    { BatV: 3.4, data_sum: '+1+2' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ChannelLayout: '{bad' }, {},
+  );
+  assert.deepStrictEqual(Object.keys(malformed.channels), ['bat_v']);
+  assert.ok(malformed.unknown.sdi12_layout_invalid);
+});
+
+test('TriSCAN layout fails closed until VIC response framing is bench-verified', () => {
+  const layout = m.validateSentekLayout({ version: 1, address: 'L', sensors: [
+    { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
+    { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
+  ] }).layout;
+  const r = m.normalize(
+    { BatV: 3.4, data_sum: '+12.3+14.5' },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ChannelLayout: layout }, {},
+  );
+  assert.deepStrictEqual(Object.keys(r.channels), ['bat_v']);
+  assert.strictEqual(r.unknown.sdi12_vic_framing_unverified, '+12.3+14.5');
+});
+
+test('Sentek mixed layout maps an exact VWC-then-VIC vector atomically', () => {
+  const layout = m.validateSentekLayout({ version: 1, address: 'L', sensors: [
+    { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
+    { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
+    { channel: 3, response_position: 3, depth_cm: 30, type: 'ENVIROSCAN' },
+    { channel: 4, response_position: 4, depth_cm: 40, type: 'ENVIROSCAN' },
+    { channel: 5, response_position: 5, depth_cm: 50, type: 'TRISCAN' },
+    { channel: 6, response_position: 6, depth_cm: 60, type: 'ENVIROSCAN' },
+    { channel: 7, response_position: 7, depth_cm: 80, type: 'ENVIROSCAN' },
+    { channel: 8, response_position: 8, depth_cm: 100, type: 'ENVIROSCAN' },
+  ] }).layout;
+  // VWC values are ordered by response_position. The compact M2 salinity
+  // group follows and contains only TriSCAN modules, in the same order.
+  const raw = '+0.046458+0.122612+0.002829+0.000000+0.092529+0.100000+0.200000+0.300000+201.7789+216.6983';
+  const r = m.normalize(
+    { BatV: 3.504, data_sum: raw },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ChannelLayout: layout }, {},
+  );
+  assert.deepStrictEqual(r.unknown, {});
+  assert.deepStrictEqual(
+    [r.channels.vwc_1, r.channels.vwc_2, r.channels.vwc_3, r.channels.vwc_4,
+      r.channels.vwc_5, r.channels.vwc_6, r.channels.vwc_7, r.channels.vwc_8],
+    [0.05, 0.12, 0, 0, 0.09, 0.1, 0.2, 0.3],
+  );
+  assert.strictEqual(r.channels.soil_vic_1, 201.78);
+  assert.strictEqual(r.channels.soil_vic_5, 216.7);
+
+  for (const malformed of [
+    raw.replace('+216.6983', ''),
+    raw + '+999.0000',
+    raw.replace('+201.7789', '-999.9999'),
+  ]) {
+    const rejected = m.normalize(
+      { BatV: 3.504, data_sum: malformed },
+      { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ChannelLayout: layout }, {},
+    );
+    assert.deepStrictEqual(Object.keys(rejected.channels), ['bat_v']);
+    assert.ok(Object.keys(rejected.unknown).some((key) => key.startsWith('sdi12_vic_')));
+  }
+});

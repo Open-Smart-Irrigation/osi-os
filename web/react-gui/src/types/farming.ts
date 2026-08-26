@@ -1,6 +1,18 @@
 // The specific supported hardware types
 export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512' | 'DRAGINO_SDI12';
 export type Sdi12ProbeStatus = 'pending_identify' | 'identified' | 'unmatched' | 'manual';
+export type SentekSensorType = 'ENVIROSCAN' | 'TRISCAN';
+export interface SentekChannelSensor {
+  channel: number;
+  response_position: number;
+  depth_cm: number;
+  type: SentekSensorType;
+}
+export interface SentekChannelLayout {
+  version: 1;
+  address: string;
+  sensors: SentekChannelSensor[];
+}
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
@@ -19,6 +31,8 @@ export interface Device {
   sdi12_probe_status?: Sdi12ProbeStatus | null;
   sdi12_identity?: string | null;
   sdi12_value_count?: number | null;
+  sdi12_channel_layout_json?: SentekChannelLayout | null;
+  sdi12_layout_status?: 'legacy_count' | 'configured' | 'active_vwc' | 'vic_framing_unverified' | 'invalid' | null;
 
   // Specific data payload matching Node-RED output
   latest_data: {
@@ -35,6 +49,18 @@ export interface Device {
     vwc_6?: number | null;
     vwc_7?: number | null;
     vwc_8?: number | null;
+    vwc_9?: number | null;
+    vwc_10?: number | null;
+    soil_vic_1?: number | null;
+    soil_vic_2?: number | null;
+    soil_vic_3?: number | null;
+    soil_vic_4?: number | null;
+    soil_vic_5?: number | null;
+    soil_vic_6?: number | null;
+    soil_vic_7?: number | null;
+    soil_vic_8?: number | null;
+    soil_vic_9?: number | null;
+    soil_vic_10?: number | null;
     soil_temp_1?: number | null;
     soil_temp_2?: number | null;
     soil_temp_3?: number | null;

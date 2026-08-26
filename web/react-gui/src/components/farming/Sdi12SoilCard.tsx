@@ -18,10 +18,11 @@ interface Sdi12SoilCardProps {
   readOnly?: boolean;
 }
 
-type SoilChannel = 'vwc' | 'soil_temp' | 'soil_ec' | 'swt';
+type SoilChannel = 'vwc' | 'soil_vic' | 'soil_temp' | 'soil_ec' | 'swt';
 
 const CHANNELS: Array<{ kind: SoilChannel; unit: string; decimals: number }> = [
   { kind: 'vwc', unit: '%', decimals: 1 },
+  { kind: 'soil_vic', unit: '', decimals: 3 },
   { kind: 'soil_temp', unit: '°C', decimals: 1 },
   { kind: 'soil_ec', unit: 'µS/cm', decimals: 0 },
   { kind: 'swt', unit: 'kPa', decimals: 1 },
@@ -46,6 +47,7 @@ function depthLabel(device: Device, index: number): string {
 function channelLabel(kind: SoilChannel): string {
   switch (kind) {
     case 'vwc': return 'VWC';
+    case 'soil_vic': return 'VIC';
     case 'soil_temp': return 'Soil temperature';
     case 'soil_ec': return 'Soil EC';
     case 'swt': return 'SWT';
@@ -100,14 +102,29 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
     }
   };
 
-  const rows = Array.from({ length: 8 }, (_, offset) => {
-    const index = offset + 1;
-    const values = CHANNELS.map(({ kind }) => ({
-      kind,
-      value: finiteValue(data[`${kind}_${index}` as keyof typeof data]),
-    })).filter(({ value }) => value != null) as Array<{ kind: SoilChannel; value: number }>;
-    return { index, values };
-  }).filter(({ values }) => values.length > 0);
+  const configuredSensors = device.sdi12_channel_layout_json?.sensors ?? [];
+  const hasTriScan = configuredSensors.some((sensor) => sensor.type === 'TRISCAN');
+  const rows = configuredSensors.length > 0
+    ? [...configuredSensors]
+      .sort((left, right) => left.depth_cm - right.depth_cm)
+      .map((sensor) => ({
+        index: sensor.channel,
+        depthCm: sensor.depth_cm,
+        values: [
+          { kind: 'vwc' as const, value: finiteValue(data[`vwc_${sensor.channel}` as keyof typeof data]) },
+          ...(sensor.type === 'TRISCAN'
+            ? [{ kind: 'soil_vic' as const, value: finiteValue(data[`soil_vic_${sensor.channel}` as keyof typeof data]) }]
+            : []),
+        ],
+      }))
+    : Array.from({ length: 10 }, (_, offset) => {
+      const index = offset + 1;
+      const values = CHANNELS.map(({ kind }) => ({
+        kind,
+        value: finiteValue(data[`${kind}_${index}` as keyof typeof data]),
+      })).filter(({ value }) => value != null) as Array<{ kind: SoilChannel; value: number | null }>;
+      return { index, depthCm: null, values };
+    }).filter(({ values }) => values.length > 0);
   const minutesAgo = minutesSince(device.last_seen);
 
   return (
@@ -194,18 +211,30 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
         </p>
       )}
 
+      {device.sdi12_layout_status === 'invalid' && (
+        <p className="mb-3 rounded-lg bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
+          The saved Sentek channel layout is invalid. Open device settings and save a valid layout before relying on soil readings.
+        </p>
+      )}
+
+      {hasTriScan && (
+        <p className="mb-3 rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
+          TriSCAN VIC acquisition is disabled until the Dragino response framing is bench-verified.
+        </p>
+      )}
+
       {rows.length > 0 ? (
         <div className="space-y-2">
-          {rows.map(({ index, values }) => (
+          {rows.map(({ index, depthCm, values }) => (
             <div key={index} className="rounded-lg bg-[var(--card)] p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-                Depth {depthLabel(device, index)}
+                Depth {depthCm == null ? depthLabel(device, index) : `${depthCm} cm`}
               </p>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text)]">
                 {values.map(({ kind, value }) => (
                   <span key={kind}>
                     <span className="text-[var(--text-tertiary)]">{channelLabel(kind)}: </span>
-                    <span className="tabular-nums">{formatChannelValue(kind, value)}</span>
+                    <span className="tabular-nums">{value == null ? '—' : formatChannelValue(kind, value)}</span>
                   </span>
                 ))}
               </div>
