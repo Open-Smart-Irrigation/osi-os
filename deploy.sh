@@ -614,6 +614,13 @@ fetch_required "osi-valve-control cancel.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js" \
     "/srv/node-red/osi-valve-control/cancel.js"
 
+# index.js require()s this at module load too -- same missing-file failure mode as
+# cloud-commands.js and cancel.js above: a gateway without it fails to load
+# osi-valve-control ENTIRELY.
+fetch_required "osi-valve-control runtime.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/runtime.js" \
+    "/srv/node-red/osi-valve-control/runtime.js"
+
 fetch_required "osi-system-settings package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
     "/srv/node-red/osi-system-settings/package.json"
