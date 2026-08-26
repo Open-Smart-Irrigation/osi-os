@@ -27,7 +27,7 @@
   "noSchedule": "Kein Zeitplan",
   "schedulerPaused": "Zeitpläne pausiert",
   "skippedToday": "Heute ausgelassen",
-  "planIncomplete": "Für {{count}} Tag(e) noch nicht am Ventil bestätigt — Plan erneut senden",
+  "planIncomplete": "{{count}} Planaktualisierung(en) vom Ventil noch nicht bestätigt — Plan erneut senden",
   "lastSent": "Zuletzt gesendet {{when}}",
   "actionFailed": "Die Aktion konnte nicht ausgeführt werden.",
   "lastContact": "Letzter Kontakt vor {{when}}",

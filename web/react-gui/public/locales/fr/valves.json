@@ -27,7 +27,7 @@
   "noSchedule": "Aucun programme",
   "schedulerPaused": "Programmes suspendus",
   "skippedToday": "Irrigation sautée aujourd'hui",
-  "planIncomplete": "Pas encore confirmé sur la vanne pour {{count}} jour(s) — renvoyer le programme",
+  "planIncomplete": "{{count}} mise(s) à jour du programme non confirmée(s) par la vanne — renvoyer le programme",
   "lastSent": "Dernier envoi {{when}}",
   "actionFailed": "L'action n'a pas pu être confirmée. Vérifiez la passerelle, puis réessayez.",
   "lastContact": "Dernier contact il y a {{when}}",
