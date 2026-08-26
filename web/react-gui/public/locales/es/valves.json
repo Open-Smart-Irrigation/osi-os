@@ -27,7 +27,7 @@
   "noSchedule": "No schedule",
   "schedulerPaused": "Schedules paused",
   "skippedToday": "Skipped today",
-  "planIncomplete": "Sin confirmar en la válvula para {{count}} día(s) — reenviar el programa",
+  "planIncomplete": "{{count}} actualización(es) del programa aún no confirmada(s) por la válvula — reenviar el programa",
   "lastSent": "Last sent {{when}}",
   "actionFailed": "The action could not be completed.",
   "lastContact": "Last contact {{when}} ago",
