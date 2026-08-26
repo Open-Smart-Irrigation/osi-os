@@ -126,7 +126,7 @@ describe('Sdi12SettingsModal', () => {
     expect(screen.queryByText('sdi12.noResponse')).not.toBeInTheDocument();
   });
 
-  it('A6: shows the value-count field only for variable-count profiles and sends it on save', async () => {
+  it('uses the dynamic layout instead of legacy value-count for Sentek', async () => {
     vi.mocked(fetchSdi12Profiles).mockResolvedValue({
       profiles: [
         {
@@ -156,19 +156,22 @@ describe('Sdi12SettingsModal', () => {
     expect(screen.queryByLabelText('sdi12.valueCount')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Probe profile'), { target: { value: 'SENTEK_ENVIROSCAN' } });
-    const valueCountInput = await screen.findByLabelText('sdi12.valueCount');
-    fireEvent.change(valueCountInput, { target: { value: '5' } });
+    expect(screen.queryByLabelText('sdi12.valueCount')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('SDI-12 address')).toHaveValue('L');
+    fireEvent.change(screen.getByLabelText('Depth 1 (cm)'), { target: { value: '15' } });
+    fireEvent.change(screen.getByLabelText('Module type 1'), { target: { value: 'TRISCAN' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
         probe_profile: 'SENTEK_ENVIROSCAN',
-        value_count: 5,
+        address: 'L',
+        sensors: [{ channel: 1, response_position: 1, depth_cm: 15, type: 'TRISCAN' }],
       });
     });
   });
 
-  it('A6: an empty value-count field explicitly clears the stored count', async () => {
+  it('loads a saved Sentek layout without renumbering stable channels', async () => {
     vi.mocked(fetchSdi12Profiles).mockResolvedValue({
       profiles: [{
         id: 'SENTEK_ENVIROSCAN',
@@ -179,20 +182,59 @@ describe('Sdi12SettingsModal', () => {
         channels: ['vwc_1'],
       }],
     });
-    const withCount: Device = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_value_count: 5 };
-    render(<Sdi12SettingsModal device={withCount} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    const withLayout: Device = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_channel_layout_json: {
+      version: 1, address: 'L', sensors: [
+        { channel: 9, response_position: 1, depth_cm: 70, type: 'TRISCAN' },
+        { channel: 7, response_position: 2, depth_cm: 80, type: 'ENVIROSCAN' },
+      ],
+    } };
+    render(<Sdi12SettingsModal device={withLayout} onClose={vi.fn()} onUpdate={vi.fn()} />);
 
-    const valueCountInput = await screen.findByLabelText('sdi12.valueCount');
-    expect(valueCountInput).toHaveValue(5);
-    fireEvent.change(valueCountInput, { target: { value: '' } });
+    expect(await screen.findByLabelText('Channel 1')).toHaveValue(9);
+    expect(screen.getByLabelText('Channel 2')).toHaveValue(7);
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(putSdi12Config).toHaveBeenCalledWith(withCount.deveui, {
+      expect(putSdi12Config).toHaveBeenCalledWith(withLayout.deveui, {
         probe_profile: 'SENTEK_ENVIROSCAN',
-        value_count: null,
+        address: 'L',
+        sensors: withLayout.sdi12_channel_layout_json?.sensors,
       });
     });
+  });
+
+  it('adds at most ten Sentek modules and renumbers response positions after removal', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    const add = await screen.findByRole('button', { name: 'Add module' });
+    for (let index = 0; index < 9; index += 1) fireEvent.click(add);
+    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(10);
+    expect(add).toBeDisabled();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
+    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(9);
+    expect(screen.getByLabelText('Response position 1')).toHaveValue(1);
+    expect(screen.getByLabelText('Channel 1')).toHaveValue(2);
+    expect(add).toBeEnabled();
+  });
+
+  it('rejects duplicate Sentek channels before calling the API', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add module' }));
+    fireEvent.change(screen.getByLabelText('Channel 2'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Channels, response positions, and positive depths must be unique and valid.')).toBeInTheDocument();
+    expect(putSdi12Config).not.toHaveBeenCalled();
   });
 
   it('surfaces the server message on a failed save', async () => {

@@ -62,6 +62,7 @@ const schemaContract = {
     'sdi12_probe_status',
     'sdi12_value_count',
     'sdi12_identity',
+    'sdi12_channel_layout_json',
   ],
   device_data: [
     'id',
@@ -126,6 +127,18 @@ const schemaContract = {
     'vwc_6',
     'vwc_7',
     'vwc_8',
+    'vwc_9',
+    'vwc_10',
+    'soil_vic_1',
+    'soil_vic_2',
+    'soil_vic_3',
+    'soil_vic_4',
+    'soil_vic_5',
+    'soil_vic_6',
+    'soil_vic_7',
+    'soil_vic_8',
+    'soil_vic_9',
+    'soil_vic_10',
     'soil_temp_1',
     'soil_temp_2',
     'soil_temp_3',
@@ -1128,6 +1141,17 @@ const requiredIndexSqlFragments = {
 };
 
 const requiredTriggerSqlFragments = {
+  trg_sentek_device_outbox_payload_ai: [
+    "new.aggregate_type = 'device'",
+    "'$.sdi12_channel_layout_json'",
+    'where event_uuid = new.event_uuid',
+  ],
+  trg_sentek_data_outbox_payload_ai: [
+    "new.aggregate_type = 'device_data'",
+    "new.op = 'device_data_appended'",
+    "'soil_vic_10', dd.soil_vic_10",
+    'order by dd.id desc',
+  ],
   trg_journal_attachment_edge_binding_immutable_bu: [
     'before update of workspace_uuid,entry_uuid,entry_revision_uuid,parent_mutation_uuid,parent_disposition,cloud_registration_state',
     "old.source='edge'",

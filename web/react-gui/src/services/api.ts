@@ -44,6 +44,8 @@ import type {
   RegisterResponse,
   DeviceCatalogItem,
   Sdi12Profile,
+  SentekChannelLayout,
+  SentekChannelSensor,
   AddDeviceRequest,
   ValveActionRequest,
   IrrigationZone,
@@ -219,7 +221,41 @@ function normaliseSchedule(sched: RawIrrigationSchedule): IrrigationSchedule {
   };
 }
 
-function normaliseDevice(device: any): Device {
+function normaliseSentekLayout(value: unknown): SentekChannelLayout | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const layout = value as Record<string, unknown>;
+  if (layout.version !== 1 || typeof layout.address !== 'string' || !/^[0-9A-Za-z]$/.test(layout.address)
+    || !Array.isArray(layout.sensors) || layout.sensors.length < 1 || layout.sensors.length > 10) return null;
+  const sensors: SentekChannelSensor[] = [];
+  const channels = new Set<number>();
+  const positions = new Set<number>();
+  const depths = new Set<number>();
+  for (const valueSensor of layout.sensors) {
+    if (!valueSensor || typeof valueSensor !== 'object' || Array.isArray(valueSensor)) return null;
+    const sensor = valueSensor as Record<string, unknown>;
+    if (!Number.isInteger(sensor.channel) || Number(sensor.channel) < 1 || Number(sensor.channel) > 10
+      || !Number.isInteger(sensor.response_position) || Number(sensor.response_position) < 1 || Number(sensor.response_position) > 10
+      || !Number.isInteger(sensor.depth_cm) || Number(sensor.depth_cm) < 1 || Number(sensor.depth_cm) > 1000
+      || (sensor.type !== 'ENVIROSCAN' && sensor.type !== 'TRISCAN')) return null;
+    const channel = Number(sensor.channel);
+    const responsePosition = Number(sensor.response_position);
+    const depthCm = Number(sensor.depth_cm);
+    if (channels.has(channel) || positions.has(responsePosition) || depths.has(depthCm)) return null;
+    channels.add(channel);
+    positions.add(responsePosition);
+    depths.add(depthCm);
+    sensors.push({
+      channel,
+      response_position: responsePosition,
+      depth_cm: depthCm,
+      type: sensor.type,
+    });
+  }
+  if (sensors.some((_, index) => !positions.has(index + 1))) return null;
+  return { version: 1, address: layout.address, sensors };
+}
+
+export function normaliseDevice(device: any): Device {
   const rawDepths = device?.soil_moisture_probe_depths_json;
   const soilMoistureProbeDepths = rawDepths && typeof rawDepths === 'object' && !Array.isArray(rawDepths)
     ? Object.fromEntries(
@@ -234,6 +270,8 @@ function normaliseDevice(device: any): Device {
     : configuredFlag === false || configuredFlag === 0
       ? false
       : undefined;
+  const rawSentekLayout = device?.sdi12_channel_layout_json;
+  const sentekLayout = normaliseSentekLayout(rawSentekLayout);
   const rawActiveActuation = device?.activeValveActuation ?? device?.active_valve_actuation ?? null;
   const activeValveActuation = rawActiveActuation && typeof rawActiveActuation === 'object' && !Array.isArray(rawActiveActuation)
     ? {
@@ -260,6 +298,8 @@ function normaliseDevice(device: any): Device {
     sdi12_probe_status: device?.sdi12_probe_status ?? null,
     sdi12_identity: device?.sdi12_identity ?? null,
     sdi12_value_count: device?.sdi12_value_count ?? null,
+    sdi12_channel_layout_json: sentekLayout,
+    sdi12_layout_status: rawSentekLayout != null && !sentekLayout ? 'invalid' : (device?.sdi12_layout_status ?? null),
     soilMoistureProbeDepths,
     soilMoistureProbeDepthsConfigured,
     activeValveActuation,
@@ -309,6 +349,8 @@ export interface Sdi12ConfigRequest {
   probe_profile: string;
   depths?: Record<string, number>;
   value_count?: number | null;
+  address?: string;
+  sensors?: SentekChannelSensor[];
 }
 
 export const fetchSdi12Profiles = async (): Promise<{ profiles: Sdi12Profile[] }> => {

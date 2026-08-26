@@ -172,7 +172,7 @@ test('A4: sdi12-write-fn does not re-trigger identify once an attempt has alread
   }
 });
 
-test('B1 (Fable A6 review SHOULD-FIX 1): GET /api/devices (merge-device-data) projects sdi12_value_count', async () => {
+test('B1: GET /api/devices projects legacy count, canonical layout, and ten-channel latest data', async () => {
   // The modal tests seed the field directly on the Device fixture, so they
   // cannot see this bug: it lives entirely in the merge step between the
   // devices-list SQL row (which already has the column via SELECT d.*) and
@@ -183,14 +183,55 @@ test('B1 (Fable A6 review SHOULD-FIX 1): GET /api/devices (merge-device-data) pr
         deveui: 'A840410000000108', name: 'SDI12 dev', type_id: 'DRAGINO_SDI12',
         sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_probe_status: 'manual',
         sdi12_identity: null, sdi12_value_count: 5,
+        sdi12_channel_layout_json: JSON.stringify({
+          version: 1,
+          address: 'L',
+          sensors: [{ channel: 10, response_position: 1, depth_cm: 100, type: 'TRISCAN' }],
+        }),
       }],
-      payload: [],
+      payload: [{ deveui: 'A840410000000108', vwc_10: 27.5, soil_vic_10: 0.041 }],
     },
     env: {},
     db: seedScopedDb(),
   });
   assert.equal(response.result.payload[0].sdi12_value_count, 5,
     'GET /api/devices must return the learned sdi12_value_count, not silently drop it');
+  assert.equal(response.result.payload[0].sdi12_channel_layout_json.sensors[0].channel, 10);
+  assert.equal(response.result.payload[0].sdi12_layout_status, 'configured');
+  assert.equal(response.result.payload[0].latest_data.vwc_10, 27.5);
+  assert.equal(response.result.payload[0].latest_data.soil_vic_10, 0.041);
+});
+
+test('B1: GET /api/devices latest-data SQL includes all Sentek columns and prepares successfully', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('format-devices'), {
+      msg: { payload: [{ deveui: 'A840410000000108' }] },
+      env: {},
+      db,
+    });
+    assert.match(response.result.topic, /dd\.vwc_10,/);
+    assert.match(response.result.topic, /dd\.soil_vic_10,/);
+    assert.doesNotThrow(() => db.prepare(response.result.topic));
+  } finally {
+    db.close();
+  }
+});
+
+test('B1: GET /api/devices surfaces malformed stored Sentek layouts', async () => {
+  const response = await executeFunction(loadNode('merge-device-data'), {
+    msg: {
+      devices_to_format: [{
+        deveui: 'A840410000000112', name: 'Broken layout', type_id: 'DRAGINO_SDI12',
+        sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_channel_layout_json: '{broken',
+      }],
+      payload: [],
+    },
+    env: {},
+    db: seedScopedDb(),
+  });
+  assert.equal(response.result.payload[0].sdi12_channel_layout_json, null);
+  assert.equal(response.result.payload[0].sdi12_layout_status, 'invalid');
 });
 
 test('B2 (Fable A6 review SHOULD-FIX 2): PUT /sdi12/config nulls a stale value_count when switching to a fixed-shape profile', async () => {
@@ -216,4 +257,46 @@ test('B2 (Fable A6 review SHOULD-FIX 2): PUT /sdi12/config nulls a stale value_c
   } finally {
     db.close();
   }
+});
+
+test('Sentek layout save is canonical, bound, and updates its compatibility projection atomically', async () => {
+  const db = seedScopedDb();
+  try {
+    db.exec(`INSERT INTO devices (deveui,name,type_id,user_id,sdi12_probe_profile,sdi12_value_count,created_at,updated_at)
+      VALUES ('A840410000000110','Sentek layout','DRAGINO_SDI12',1,'SENTEK_ENVIROSCAN',5,'2026-01-01','2026-01-01')`);
+    const sensors = [
+      { channel: 7, response_position: 2, depth_cm: 80, type: 'ENVIROSCAN' },
+      { channel: 9, response_position: 1, depth_cm: 70, type: 'TRISCAN' },
+    ];
+    const response = await executeFunction(loadNode('sdi12-config-action-fn'), {
+      msg: { req: { body: { probe_profile: 'SENTEK_ENVIROSCAN', address: 'L', sensors } }, deviceRow: { deveui: 'A840410000000110' } },
+      env: ENV, db,
+    });
+    assert.equal(response.result.statusCode, undefined, JSON.stringify(response.result.payload));
+    const row = db.prepare(`SELECT sdi12_value_count,sdi12_channel_layout_json,
+      soil_moisture_probe_depths_json,sync_version FROM devices WHERE deveui='A840410000000110'`).get();
+    assert.equal(row.sdi12_value_count, null);
+    assert.deepEqual(JSON.parse(row.sdi12_channel_layout_json).sensors.map((sensor) => sensor.channel), [9, 7]);
+    assert.deepEqual(JSON.parse(row.soil_moisture_probe_depths_json), { vwc_9: 70, soil_vic_9: 70, vwc_7: 80 });
+    assert.equal(row.sync_version, 2);
+    assert.equal(response.result.payload.layout_status, 'vic_framing_unverified');
+  } finally { db.close(); }
+});
+
+test('Sentek layout save rejects mixed legacy fields and invalid duplicate positions without writing', async () => {
+  const db = seedScopedDb();
+  try {
+    db.exec(`INSERT INTO devices (deveui,name,type_id,user_id,created_at,updated_at)
+      VALUES ('A840410000000111','Sentek invalid','DRAGINO_SDI12',1,'2026-01-01','2026-01-01')`);
+    const sensor = { channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' };
+    const mixed = await executeFunction(loadNode('sdi12-config-action-fn'), {
+      msg: { req: { body: { probe_profile: 'SENTEK_ENVIROSCAN', address: 'L', sensors: [sensor], value_count: 1 } }, deviceRow: { deveui: 'A840410000000111' } }, env: ENV, db,
+    });
+    assert.equal(mixed.result.statusCode, 400);
+    const duplicate = await executeFunction(loadNode('sdi12-config-action-fn'), {
+      msg: { req: { body: { probe_profile: 'SENTEK_ENVIROSCAN', address: 'L', sensors: [sensor, { channel: 2, response_position: 1, depth_cm: 20, type: 'ENVIROSCAN' }] } }, deviceRow: { deveui: 'A840410000000111' } }, env: ENV, db,
+    });
+    assert.equal(duplicate.result.statusCode, 400);
+    assert.equal(db.prepare("SELECT sdi12_channel_layout_json FROM devices WHERE deveui='A840410000000111'").get().sdi12_channel_layout_json, null);
+  } finally { db.close(); }
 });

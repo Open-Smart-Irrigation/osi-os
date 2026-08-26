@@ -33,6 +33,69 @@ var VARIABLE_SEQ_PROFILE_IDS = {
   DELTAT_PR2_6: true
 };
 
+var SDI12_ADDRESS_RE = /^[0-9A-Za-z]$/;
+var SENTEK_SENSOR_TYPES = { ENVIROSCAN: true, TRISCAN: true };
+
+function invalidLayout(error) {
+  return { ok: false, error: error, layout: null, depths: null, hasTriScan: false };
+}
+
+function validateSentekLayout(input) {
+  var value = input;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch (_) { return invalidLayout('invalid_json'); }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalidLayout('object_required');
+  var topKeys = Object.keys(value).sort().join(',');
+  if (topKeys !== 'address,sensors,version') return invalidLayout('unexpected_layout_fields');
+  if (value.version !== 1) return invalidLayout('unsupported_version');
+  if (typeof value.address !== 'string' || !SDI12_ADDRESS_RE.test(value.address)) return invalidLayout('invalid_address');
+  if (!Array.isArray(value.sensors) || value.sensors.length < 1 || value.sensors.length > 10) {
+    return invalidLayout('sensor_count');
+  }
+  var channels = {};
+  var positions = {};
+  var depthsSeen = {};
+  var sensors = [];
+  var depths = {};
+  var hasTriScan = false;
+  for (var i = 0; i < value.sensors.length; i++) {
+    var sensor = value.sensors[i];
+    if (!sensor || typeof sensor !== 'object' || Array.isArray(sensor)) return invalidLayout('invalid_sensor');
+    if (Object.keys(sensor).sort().join(',') !== 'channel,depth_cm,response_position,type') {
+      return invalidLayout('unexpected_sensor_fields');
+    }
+    var channel = sensor.channel;
+    var position = sensor.response_position;
+    var depth = sensor.depth_cm;
+    var type = sensor.type;
+    if (!Number.isInteger(channel) || channel < 1 || channel > 10 || channels[channel]) return invalidLayout('invalid_channel');
+    if (!Number.isInteger(position) || position < 1 || position > 10 || positions[position]) return invalidLayout('invalid_response_position');
+    if (!Number.isInteger(depth) || depth < 1 || depth > 1000 || depthsSeen[depth]) return invalidLayout('invalid_depth');
+    if (!SENTEK_SENSOR_TYPES[type]) return invalidLayout('invalid_sensor_type');
+    channels[channel] = true;
+    positions[position] = true;
+    depthsSeen[depth] = true;
+    sensors.push({ channel: channel, response_position: position, depth_cm: depth, type: type });
+    depths['vwc_' + channel] = depth;
+    if (type === 'TRISCAN') {
+      depths['soil_vic_' + channel] = depth;
+      hasTriScan = true;
+    }
+  }
+  sensors.sort(function (a, b) { return a.response_position - b.response_position; });
+  for (var expected = 1; expected <= sensors.length; expected++) {
+    if (!positions[expected]) return invalidLayout('non_contiguous_response_positions');
+  }
+  return {
+    ok: true,
+    error: null,
+    layout: { version: 1, address: value.address, sensors: sensors },
+    depths: depths,
+    hasTriScan: hasTriScan
+  };
+}
+
 // Resolve the per-uplink expected reading count: a valid learned
 // deviceConfig.sdi12ValueCount takes priority over the profile's own
 // expectedValues; an out-of-range learned count (which should never exist
@@ -104,7 +167,7 @@ var PROFILES = [
   },
   {
     id: 'SENTEK_ENVIROSCAN',
-    label: 'Sentek EnviroSCAN (VWC, up to 8 depths, variable count)',
+    label: 'Sentek EnviroSCAN / TriSCAN (configured layout up to 10 modules)',
     // Bench-verified 2026-08-19 on agrolink-test-01 (A8404161D1886837):
     // live aI! = "012SENTEK  XEPI  139D938D7150000" (vendor SENTEK, model XEPI,
     // fw 1.3.9); live aM!/aD0! frame = 5 values, e.g.
@@ -197,6 +260,7 @@ var PROFILES = [
 
 var BOUNDS = {
   vwc: { min: 0, max: 100 },
+  soil_vic: { min: 0 },
   soil_temp: { min: -30, max: 70 },
   soil_ec: { min: 0, max: 100000 }
 };
@@ -272,6 +336,7 @@ function applyValue(entry, raw) {
   }
   if (typeof entry.scale === 'number') v = v * entry.scale;
   if (typeof entry.offset === 'number') v = v + entry.offset;
+  if (!Number.isFinite(v)) return { error: 'not_finite' };
   var family = channelFamily(entry.channel);
   if (family === 'swt') {
     // Clamp like resistanceOhmsToKpa (osi-chameleon-helper): [0,300], 2dp.
@@ -279,7 +344,7 @@ function applyValue(entry, raw) {
     return { value: Math.round(v * 100) / 100 };
   }
   var bounds = BOUNDS[family];
-  if (bounds && (v < bounds.min || v > bounds.max)) {
+  if (bounds && ((bounds.min != null && v < bounds.min) || (bounds.max != null && v > bounds.max))) {
     return { error: 'out_of_range' };
   }
   return { value: Math.round(v * 100) / 100 };
@@ -304,9 +369,57 @@ function normalize(decoded, deviceConfig, meta) {
     unknown.sdi12_unconfigured = raw || '(empty)';
   } else {
     var values = parseSdi12Values(raw);
-    var resolvedCount = resolveCount(profile, deviceConfig);
+    var sentekLayout = null;
+    if (profile.id === 'SENTEK_ENVIROSCAN' && deviceConfig && deviceConfig.sdi12ChannelLayout != null) {
+      sentekLayout = validateSentekLayout(deviceConfig.sdi12ChannelLayout);
+    }
+    var resolvedCount = sentekLayout && sentekLayout.ok ? null : resolveCount(profile, deviceConfig);
     if (values === null) {
       unknown.unparseable_sdi12 = raw || '(empty)';
+    } else if (sentekLayout && !sentekLayout.ok) {
+      unknown.sdi12_layout_invalid = sentekLayout.error;
+    } else if (sentekLayout && sentekLayout.hasTriScan) {
+      var sentekSensors = sentekLayout.layout.sensors;
+      var triScanSensors = sentekSensors.filter(function (sensor) { return sensor.type === 'TRISCAN'; });
+      var expectedMixedCount = sentekSensors.length + triScanSensors.length;
+      if (values.length === sentekSensors.length) {
+        // A legacy VWC-only vector does not prove that the salinity command ran.
+        // Keep it out of storage rather than relabeling VWC as VIC or accepting
+        // a partial mixed sample.
+        unknown.sdi12_vic_framing_unverified = raw;
+      } else if (values.length !== expectedMixedCount) {
+        unknown.sdi12_vic_value_count = raw;
+      } else {
+        // Production recipe contract: all VWC values in response-position order,
+        // followed by the compact M2 salinity group containing TriSCAN modules
+        // in that same order. Every command DATACUT strips address + CR/LF.
+        var mixedEntries = sentekSensors.map(function (sensor) {
+          return { index: sensor.response_position - 1, channel: 'vwc_' + sensor.channel };
+        });
+        triScanSensors.forEach(function (sensor, index) {
+          mixedEntries.push({ index: sentekSensors.length + index, channel: 'soil_vic_' + sensor.channel });
+        });
+        var mixedChannels = {};
+        var mixedError = null;
+        for (var mixedIndex = 0; mixedIndex < mixedEntries.length; mixedIndex++) {
+          var mixedEntry = mixedEntries[mixedIndex];
+          var mixedResult = applyValue(mixedEntry, values[mixedEntry.index]);
+          if (mixedResult.error) {
+            mixedError = mixedEntry.channel + ':' + mixedResult.error;
+            break;
+          }
+          mixedChannels[mixedEntry.channel] = mixedResult.value;
+        }
+        if (mixedError) {
+          unknown['sdi12_vic_' + mixedError] = raw;
+        } else {
+          Object.keys(mixedChannels).forEach(function (channel) {
+            channels[channel] = mixedChannels[channel];
+          });
+        }
+      }
+    } else if (sentekLayout && values.length !== sentekLayout.layout.sensors.length) {
+      unknown.sdi12_layout_value_count = raw;
     } else if (resolvedCount != null && values.length !== resolvedCount) {
       // Cardinality mismatch rejects the frame atomically: a glued address
       // digit or truncated response must never produce a partial write.
@@ -323,9 +436,16 @@ function normalize(decoded, deviceConfig, meta) {
       // channel entries to the learned count; every other profile (notably
       // HYDRASCOUT's non-homogeneous interleave) always uses its static
       // profile.values, unaffected by any learned count.
-      var valueEntries = (learnedCount != null && VARIABLE_SEQ_PROFILE_IDS[profile.id])
-        ? seq('vwc', learnedCount)
-        : profile.values;
+      var valueEntries;
+      if (sentekLayout) {
+        valueEntries = sentekLayout.layout.sensors.map(function (sensor) {
+          return { index: sensor.response_position - 1, channel: 'vwc_' + sensor.channel };
+        });
+      } else {
+        valueEntries = (learnedCount != null && VARIABLE_SEQ_PROFILE_IDS[profile.id])
+          ? seq('vwc', learnedCount)
+          : profile.values;
+      }
       for (var i = 0; i < valueEntries.length; i++) {
         var entry = valueEntries[i];
         if (entry.index >= values.length) continue;
@@ -356,6 +476,7 @@ module.exports = {
   getProfile: getProfile,
   worstCaseUplinkBytes: worstCaseUplinkBytes,
   uplinkBudgetOk: uplinkBudgetOk,
+  validateSentekLayout: validateSentekLayout,
   TRANSFORMS: TRANSFORMS,
   PROFILES: PROFILES
 };

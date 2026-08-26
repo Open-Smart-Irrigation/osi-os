@@ -90,8 +90,8 @@
       "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A); AgroLink SDI-12 schema slice adds DRAGINO_SDI12 and the SDI-12 device columns/trigger payload (+1010); the 2026-08-14 arg-limit fix splits trg_dp_device_data_outbox_ai's 150-arg payload json_object into json_insert(json_object(...), ...) so it parses under the gateway sqlite3's SQLITE_MAX_FUNCTION_ARG=127 (+91). A6 review fix (walkthrough fix wave 1): trg_sync_devices_outbox_au's boot-owned literal gains sdi12_value_count in the WHEN clause and payload_json, mirroring migration 0047 and seed-blank.sql byte-for-byte (fingerprint-drift correction -- see 0047's header comment) (+120). Fable A6 review SHOULD-FIX 3: DEVICES_NEW_DDL and DEVICES_COPY_SQL (the guarded devices rebuild) extended with sdi12_value_count so a live rebuild no longer drops the column, mirroring 0046's own DDL/copy-SQL extension pattern (+117)"
     },
     "sync-bootstrap-build": {
-      "max_chars": 37111,
-      "reason": "Reviewed bootstrap baseline plus zone, irrigation-config, device, and weather-station desired-state capability and row advertisements (+502); stable installation identity creates, validates, and merges gateway history into the bootstrap envelope (+2483); live identity restart sentinel (Option C Slice 1)."
+      "max_chars": 38000,
+      "reason": "Reviewed bootstrap baseline plus zone, irrigation-config, device, and weather-station desired-state capability and row advertisements (+502); stable installation identity creates, validates, and merges gateway history into the bootstrap envelope (+2483); live identity restart sentinel (Option C Slice 1); Sentek ten-channel bootstrap adds the canonical layout, VWC 9-10, and VIC 1-10 (+889)."
     },
     "sync-outbox-build": {
       "max_chars": 18056,
@@ -206,12 +206,12 @@
       "reason": "AgroLink Phase B: owned-plus-granted device filtering with the shared-weather exception (+1449). AgroLink review E4: deny disabled accounts before building the SQL instead of relying on the zone-membership half of the predicate collapsing to '0' -- the weather-device OR-branch was not itself gated on account state, so a disabled account with an unexpired token could still list every weather station (+649). Write-only scoping Task 1 makes device reads account-wide while preserving the owner-or-zone lifecycle filter (+214). E3 covers cloud-assigned devices that have a zone but no local owner (+310)."
     },
     "format-devices": {
-      "max_chars": 4391,
-      "reason": "Inherited f50950b1 baseline at exact measured size; Task 13 explicitly enumerates the 24 SDI-12 latest-data channels in the device SELECT (+488)."
+      "max_chars": 4647,
+      "reason": "Inherited f50950b1 baseline at exact measured size; Task 13 explicitly enumerates the 24 SDI-12 latest-data channels in the device SELECT (+488); Sentek ten-channel latest-data query adds VWC 9-10 and VIC 1-10 (+256)."
     },
     "merge-device-data": {
-      "max_chars": 12086,
-      "reason": "Inherited f50950b1 baseline at exact measured size; Task 13 carries the 24 SDI-12 channels through the latest-data map and response (+1448); review IB2 carries four persisted SDI-12 device fields through the response (+194). Fable A6 review SHOULD-FIX 1: projects sdi12_value_count so GET /api/devices no longer silently drops it, which was causing a re-save (e.g. depths) to clear the learned count (+52)."
+      "max_chars": 13236,
+      "reason": "Inherited f50950b1 baseline at exact measured size; Task 13 carries the 24 SDI-12 channels through the latest-data map and response (+1448); review IB2 carries four persisted SDI-12 device fields through the response (+194). Fable A6 review SHOULD-FIX 1 projects sdi12_value_count (+52); Sentek ten-channel response adds layout/status, VWC 9-10, VIC 1-10, and malformed-layout visibility (+1150)."
     },
     "catalog-response": {
       "max_chars": 551,
@@ -446,8 +446,8 @@
       "reason": "AgroLink SDI-12 ingest: prepared bound-parameter device configuration query."
     },
     "sdi12-write-fn": {
-      "max_chars": 4792,
-      "reason": "AgroLink SDI-12 ingest: normalizer, manifest, narrow-waist writer, visible failure stages, and the reviewed per-device dead-letter warning cooldown. A4 (walkthrough fix wave 1): cs-reg-cloud-fn stages msg.deviceRegistration on REGISTER_DEVICE success and tees a new link-out to sdi12-post-reg-hook-fn so the cloud-issued registration path also auto-triggers SDI-12 identify (+348); sdi12-write-fn gains a second output firing a first-join identify trigger when sdi12_probe_status has never been set, plus the [null,null] two-output tail for reportFailure's early-exit paths (+765). A6 (walkthrough fix wave 1): passes the learned per-device sdi12ValueCount through to normalize() alongside probeProfile (+40). Multi-segment uplinks (2026-08-19): a pre-normalize quarantineOnly branch records one dead-letter row for an incomplete reassembly sequence and returns without a device_data insert, using its own DB handle closed in a finally (+962)."
+      "max_chars": 4843,
+      "reason": "AgroLink SDI-12 ingest: normalizer, manifest, narrow-waist writer, visible failure stages, and the reviewed dead-letter warning cooldown; first-join identify, legacy value-count, and multi-segment quarantine behavior remain intact. Sentek canonical ingest passes the stored layout to the shared normalizer (+51)."
     },
     "934bf2bc19a8ce22": {
       "max_chars": 23053,
@@ -1118,8 +1118,8 @@
       "reason": "Task 12 validates the SDI-12 config device identity with bound ownership lookup and the approved scoped/legacy auth fallback."
     },
     "sdi12-config-action-fn": {
-      "max_chars": 4743,
-      "reason": "Task 12 validates profile-specific depth slots, fans them out to exact channels, and persists the replacement config with bound SQL; review IS1 read-modify-writes only the new profile's retained depth keys. A6 (walkthrough fix wave 1): validates an optional value_count (1-8 or null), falls back to the existing stored sdi12_value_count when the field is omitted from the PUT body, and persists it alongside sdi12_probe_profile in both UPDATE branches (+836). Fable A6 review SHOULD-FIX 2: forces sdi12_value_count to NULL whenever the target profile is fixed-shape (expectedValues != null), so a stale learned count can never survive a profile switch away from a variable profile (+480)."
+      "max_chars": 6038,
+      "reason": "Task 12 validates profile-specific depth slots and persists bound updates; A6 retains legacy value_count compatibility and clears stale fixed-shape counts. Sentek layout saving adds strict shared validation, mutual-exclusivity checks, bound transactional JSON/projection persistence, rollback visibility, and sync-version advancement (+1295)."
     },
     "scoped-zone-config-guard": {
       "max_chars": 3724,
@@ -1155,7 +1155,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1293748,
-    "reason": "raised through the SDI-12 program; +385 for the durable unsupported-payver quarantine branch in sdi12-gate-fn (2026-08-20 post-exec review finding 1)"
+    "max_total": 1297389,
+    "reason": "Raised through the SDI-12 program; Sentek ten-channel layout, latest-data, bootstrap, and transactional configuration paths add 3641 reviewed characters across five existing nodes."
   }
 }

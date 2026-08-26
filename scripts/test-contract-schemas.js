@@ -1567,6 +1567,62 @@ const deviceDesiredState = {
     sync_version: 4,
     deleted_at: null,
 };
+const sentekDepths = Object.fromEntries([
+    ...Array.from({ length: 10 }, (_, index) => [`vwc_${index + 1}`, (index + 1) * 10]),
+    ...Array.from({ length: 10 }, (_, index) => [`soil_vic_${index + 1}`, (index + 1) * 10]),
+    ...Array.from({ length: 8 }, (_, index) => [`soil_temp_${index + 1}`, (index + 1) * 10]),
+    ...Array.from({ length: 8 }, (_, index) => [`soil_ec_${index + 1}`, (index + 1) * 10]),
+]);
+const sentekDesiredState = {
+    ...deviceDesiredState,
+    name: 'Sentek ten channel probe',
+    type: 'DRAGINO_SDI12',
+    dendro_enabled: 0,
+    temp_enabled: 0,
+    is_reference_tree: 0,
+    chameleon_enabled: 0,
+    soil_moisture_probe_depths_json: {
+        swt_1: 10,
+        swt_2: 20,
+        swt_3: 30,
+        ...sentekDepths,
+    },
+    soil_moisture_probe_depths_configured: 1,
+    chameleon_swt1_depth_cm: null,
+    chameleon_swt2_depth_cm: null,
+    chameleon_swt3_depth_cm: null,
+    sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+    sdi12_value_count: null,
+    sdi12_channel_layout_json: {
+        version: 1,
+        address: 'L',
+        sensors: Array.from({ length: 10 }, (_, index) => ({
+            channel: index + 1,
+            response_position: index + 1,
+            depth_cm: (index + 1) * 10,
+            type: index === 0 || index === 4 ? 'TRISCAN' : 'ENVIROSCAN',
+        })),
+    },
+};
+expectValid(
+    'DeviceDesiredState accepts ten-channel Sentek layout and complete soil depth keys',
+    resourcesSchema.definitions.DeviceDesiredState,
+    sentekDesiredState,
+    resourcesSchema
+);
+expectInvalid(
+    'DeviceDesiredState rejects unknown soil depth keys',
+    resourcesSchema.definitions.DeviceDesiredState,
+    {
+        ...sentekDesiredState,
+        soil_moisture_probe_depths_json: {
+            ...sentekDesiredState.soil_moisture_probe_depths_json,
+            soil_vic_11: 110,
+        },
+    },
+    /soil_vic_11: additional property is forbidden/,
+    resourcesSchema
+);
 const deviceUpsertCommand = {
     command_id: UUID,
     command_type: 'UPSERT_DEVICE',

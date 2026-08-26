@@ -38,6 +38,31 @@
             "type": ["string", "null"],
             "pattern": "^[0-9A-F]{16}$"
         },
+        "SentekChannelLayout": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "address", "sensors"],
+            "properties": {
+                "version": {"type": "integer", "const": 1},
+                "address": {"type": "string", "pattern": "^[0-9A-Za-z]$"},
+                "sensors": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["channel", "response_position", "depth_cm", "type"],
+                        "properties": {
+                            "channel": {"type": "integer", "minimum": 1, "maximum": 10},
+                            "response_position": {"type": "integer", "minimum": 1, "maximum": 10},
+                            "depth_cm": {"type": "integer", "minimum": 1, "maximum": 1000},
+                            "type": {"type": "string", "enum": ["ENVIROSCAN", "TRISCAN"]}
+                        }
+                    }
+                }
+            }
+        },
         "Zone": {
             "type": "object",
             "required": ["zone_id", "name"],
@@ -155,6 +180,12 @@
                 "chameleon_enabled": {"type": ["integer", "null"], "enum": [0, 1, null]},
                 "sdi12_probe_profile": {"type": ["string", "null"]},
                 "sdi12_value_count": {"type": ["integer", "null"]},
+                "sdi12_channel_layout_json": {
+                    "oneOf": [
+                        {"$ref": "#/definitions/SentekChannelLayout"},
+                        {"type": "null"}
+                    ]
+                },
                 "chameleon_swt1_depth_cm": {"type": ["number", "null"]},
                 "chameleon_swt2_depth_cm": {"type": ["number", "null"]},
                 "chameleon_swt3_depth_cm": {"type": ["number", "null"]},
@@ -189,6 +220,12 @@
                 },
                 "sdi12_probe_profile": {"type": ["string", "null"]},
                 "sdi12_value_count": {"type": ["integer", "null"]},
+                "sdi12_channel_layout_json": {
+                    "oneOf": [
+                        {"$ref": "#/definitions/SentekChannelLayout"},
+                        {"type": "null"}
+                    ]
+                },
                 "claimed_user_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
                 "zone_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
                 "dendro_enabled": {"type": "integer", "enum": [0, 1]},
@@ -203,7 +240,43 @@
                     "properties": {
                         "swt_1": {"type": "integer", "minimum": 1, "maximum": 1000},
                         "swt_2": {"type": "integer", "minimum": 1, "maximum": 1000},
-                        "swt_3": {"type": "integer", "minimum": 1, "maximum": 1000}
+                        "swt_3": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_1": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_2": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_3": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_4": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_5": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_6": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_7": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_8": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_9": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "vwc_10": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_1": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_2": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_3": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_4": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_5": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_6": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_7": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_temp_8": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_1": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_2": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_3": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_4": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_5": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_6": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_7": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_ec_8": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_1": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_2": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_3": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_4": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_5": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_6": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_7": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_8": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_9": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "soil_vic_10": {"type": "integer", "minimum": 1, "maximum": 1000}
                     }
                 },
                 "soil_moisture_probe_depths_configured": {"type": "integer", "enum": [0, 1]},

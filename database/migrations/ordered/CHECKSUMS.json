@@ -45,5 +45,6 @@
   "0044__journal_v2_media.sql": "f54b272e387cc389653425572dca5392a322abbc9a925d8c1bdee47fe98b0d01",
   "0045__sdi12_columns.sql": "af9433f45a601cde57d8646f1c19ba417ff591084c40ecedb6b722e7f0b8c4f5",
   "0046__add_dragino_sdi12_type.sql": "6e25185e7b46d7d7e1804005297f3707723e61d41217da7f10f96c228580eff7",
-  "0047__sdi12_value_count.sql": "887c707650fa5ac1a5610aacaf1fdc8dd99981fc6b527290201ea49069e03aae"
+  "0047__sdi12_value_count.sql": "887c707650fa5ac1a5610aacaf1fdc8dd99981fc6b527290201ea49069e03aae",
+  "0048__sentek_vwc_vic_channels.sql": "d93d874711627da7e3cc98332324fd5e36c6bf3b32ba9c8330909ed23d722a21"
 }

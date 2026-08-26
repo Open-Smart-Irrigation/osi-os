@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { Device, Sdi12Profile } from '../../types/farming';
+import type { Device, Sdi12Profile, SentekChannelSensor, SentekSensorType } from '../../types/farming';
 import {
   fetchSdi12Profiles,
   getApiErrorMessage,
@@ -71,6 +71,17 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   const [depthInputs, setDepthInputs] = useState<Record<string, string>>({});
   const [initialDepthInputs, setInitialDepthInputs] = useState<Record<string, string>>({});
   const [valueCountInput, setValueCountInput] = useState('');
+  const [sentekAddress, setSentekAddress] = useState(device.sdi12_channel_layout_json?.address ?? 'L');
+  const [sentekSensors, setSentekSensors] = useState<SentekChannelSensor[]>(() => {
+    if (device.sdi12_channel_layout_json?.sensors?.length) return device.sdi12_channel_layout_json.sensors;
+    const count = Math.max(1, Math.min(8, device.sdi12_value_count ?? 1));
+    return Array.from({ length: count }, (_, index) => ({
+      channel: index + 1,
+      response_position: index + 1,
+      depth_cm: device.soil_moisture_probe_depths_json?.[`vwc_${index + 1}`] ?? (index + 1) * 10,
+      type: 'ENVIROSCAN' as const,
+    }));
+  });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'identify' | 'save' | null>(null);
   const [identifyPending, setIdentifyPending] = useState(false);
@@ -119,6 +130,7 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   // hatch). Fixed-shape profiles like HYDRASCOUT/TENSIOMARK/IMKO_PICO64
   // never show this field.
   const isVariableCountProfile = selectedProfile ? selectedProfile.expectedValues == null : false;
+  const isSentekProfile = selectedProfileId === 'SENTEK_ENVIROSCAN';
 
   const handleProfileChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedProfileId(event.target.value);
@@ -129,6 +141,47 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   const handleSave = async () => {
     if (!selectedProfile) {
       setError('Select a probe profile.');
+      return;
+    }
+    if (isSentekProfile) {
+      if (!/^[0-9A-Za-z]$/.test(sentekAddress)) {
+        setError('SDI-12 address must be one letter or digit.');
+        return;
+      }
+      if (sentekSensors.length < 1 || sentekSensors.length > 10) {
+        setError('Configure between one and ten connected modules.');
+        return;
+      }
+      const channels = new Set<number>();
+      const positions = new Set<number>();
+      const depthsSeen = new Set<number>();
+      for (const sensor of sentekSensors) {
+        if (!Number.isInteger(sensor.channel) || sensor.channel < 1 || sensor.channel > 10 || channels.has(sensor.channel)
+          || !Number.isInteger(sensor.response_position) || sensor.response_position < 1 || sensor.response_position > sentekSensors.length || positions.has(sensor.response_position)
+          || !Number.isInteger(sensor.depth_cm) || sensor.depth_cm < 1 || sensor.depth_cm > 1000 || depthsSeen.has(sensor.depth_cm)) {
+          setError('Channels, response positions, and positive depths must be unique and valid.');
+          return;
+        }
+        channels.add(sensor.channel);
+        positions.add(sensor.response_position);
+        depthsSeen.add(sensor.depth_cm);
+      }
+      setBusy('save');
+      setError(null);
+      setInfo(null);
+      try {
+        await putSdi12Config(device.deveui, {
+          probe_profile: selectedProfile.id,
+          address: sentekAddress,
+          sensors: sentekSensors,
+        });
+        setInfo('SDI-12 configuration saved.');
+        onUpdate();
+      } catch (err: unknown) {
+        setError(getApiErrorMessage(err, 'Failed to save SDI-12 configuration.'));
+      } finally {
+        setBusy(null);
+      }
       return;
     }
     const depths: Record<string, number> = {};
@@ -255,7 +308,7 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
             </p>
           )}
 
-          {isVariableCountProfile && (
+          {isVariableCountProfile && !isSentekProfile && (
             <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
               <label htmlFor={`sdi12-value-count-${device.deveui}`} className="block text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
                 {t('sdi12.valueCount')}
@@ -275,7 +328,49 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
             </div>
           )}
 
-          {selectedProfile && depthSlots(selectedProfile).length > 0 && (
+          {isSentekProfile && (
+            <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Connected Sentek modules</p>
+              <label htmlFor={`sdi12-address-${device.deveui}`} className="mt-3 block text-xs font-semibold text-[var(--text-secondary)]">SDI-12 address</label>
+              <input id={`sdi12-address-${device.deveui}`} value={sentekAddress} maxLength={1} disabled={busy !== null}
+                onChange={(event) => setSentekAddress(event.target.value)}
+                className="mt-1 w-20 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]" />
+              <div className="mt-3 space-y-2">
+                {sentekSensors.map((sensor, rowIndex) => (
+                  <div key={`${sensor.channel}-${rowIndex}`} className="grid grid-cols-2 gap-2 rounded-lg border border-[var(--border)] p-2 sm:grid-cols-5">
+                    <label className="text-xs">Channel<input aria-label={`Channel ${rowIndex + 1}`} type="number" min={1} max={10} value={sensor.channel} disabled={busy !== null}
+                      onChange={(event) => setSentekSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, channel: Number(event.target.value) } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1" /></label>
+                    <label className="text-xs">Response position<input aria-label={`Response position ${rowIndex + 1}`} type="number" min={1} max={10} value={sensor.response_position} disabled={busy !== null}
+                      onChange={(event) => setSentekSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, response_position: Number(event.target.value) } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1" /></label>
+                    <label className="text-xs">Depth (cm)<input aria-label={`Depth ${rowIndex + 1} (cm)`} type="number" min={1} max={1000} value={sensor.depth_cm} disabled={busy !== null}
+                      onChange={(event) => setSentekSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, depth_cm: Number(event.target.value) } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1" /></label>
+                    <label className="text-xs">Module type<select aria-label={`Module type ${rowIndex + 1}`} value={sensor.type} disabled={busy !== null}
+                      onChange={(event) => setSentekSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, type: event.target.value as SentekSensorType } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1"><option value="ENVIROSCAN">EnviroSCAN</option><option value="TRISCAN">TriSCAN</option></select></label>
+                    <button type="button" disabled={busy !== null || sentekSensors.length === 1} onClick={() => setSentekSensors((rows) => rows
+                      .filter((_, index) => index !== rowIndex)
+                      .map((row, index) => ({ ...row, response_position: index + 1 })))}
+                      className="self-end rounded border border-[var(--border)] px-2 py-1 text-sm disabled:opacity-40">Remove</button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" disabled={busy !== null || sentekSensors.length >= 10}
+                onClick={() => setSentekSensors((rows) => {
+                  const used = new Set(rows.map((row) => row.channel));
+                  const channel = Array.from({ length: 10 }, (_, index) => index + 1).find((candidate) => !used.has(candidate)) ?? 10;
+                  return [...rows, { channel, response_position: rows.length + 1, depth_cm: (rows.length + 1) * 10, type: 'ENVIROSCAN' }];
+                })}
+                className="mt-3 rounded border border-[var(--border)] px-3 py-1.5 text-sm">Add module</button>
+              <p className="mt-3 rounded bg-[var(--warn-bg)] px-3 py-2 text-xs text-[var(--warn-text)]">
+                Saving activates the explicit layout. TriSCAN VIC decoding remains disabled until Dragino response framing is bench-verified.
+              </p>
+            </div>
+          )}
+
+          {selectedProfile && !isSentekProfile && depthSlots(selectedProfile).length > 0 && (
             <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Probe depths</p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">

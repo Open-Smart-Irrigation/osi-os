@@ -78,6 +78,17 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
     'trg_journal_attachment_edge_binding_immutable_bu',
     '0044__journal_v2_media.sql',
   ],
+  // 0048 decorates existing outbox rows with additive Sentek fields. These
+  // triggers are migration-owned so the frozen boot DDL does not duplicate
+  // the new schema behavior.
+  [
+    'trg_sentek_device_outbox_payload_ai',
+    '0048__sentek_vwc_vic_channels.sql',
+  ],
+  [
+    'trg_sentek_data_outbox_payload_ai',
+    '0048__sentek_vwc_vic_channels.sql',
+  ],
 ]);
 
 function q(db, sql) {
