@@ -58,29 +58,6 @@
     "lightIntensity": "INTENSIDAD LUMÍNICA",
     "lastSeen": "Visto hace {{minutes}} minutos"
   },
-  "stregaValve": { "confirmOpen": "Confirmar — abrir {{minutes}} min",
-    "badge": "VÁLVULA STREGA",
-    "status": "ESTADO",
-    "open": "ABIERTA",
-    "closed": "CERRADA",
-    "target": "Objetivo: {{state}}",
-    "opening": "Abriendo...",
-    "closing": "Cerrando...",
-    "removeConfirm": "¿Eliminar este dispositivo?",
-    "removeSubtitle": "El dispositivo se desvinculará de tu cuenta.",
-    "yesRemove": "Sí, eliminar",
-    "removing": "Eliminando...",
-    "failedToRemove": "Error al eliminar el dispositivo",
-    "lastSeen": "Visto hace {{minutes}} minutos",
-    "actuationFeedback": {
-      "closed": "Cerrada",
-      "closedAt": "Cerrada a las {{time}}",
-      "open": "ABIERTA",
-      "openClosesAt": "ABIERTA — cierra a las {{time}}",
-      "openQueued": "Apertura en cola",
-      "waitingForUplink": "esperando el reporte de la válvula (≈ {{minutes}} min)"
-    }
-  },
   "zone": {
     "deviceCount_one": "{{count}} dispositivo",
     "deviceCount_other": "{{count}} dispositivos",

@@ -49,5 +49,11 @@
   "weekdays": { "0": "Dim", "1": "Lun", "2": "Mar", "3": "Mer", "4": "Jeu", "5": "Ven", "6": "Sam" },
   "trigger": { "service_action": "Intervention de service", "manual": "Manuel", "cloud_command": "Depuis le cloud", "trigger_based": "Par capteur", "one_time": "Ponctuel", "on_valve_schedule": "Programme sur la vanne", "unexplained": "Ouverture hors programme" },
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % HR" },
-  "card": { "enclosureLabel": "Boîtier", "enclosureNoReading": "pas encore de mesure", "enclosureNotMeasured": "non mesuré sur Gen2" }
+  "card": { "enclosureLabel": "Boîtier", "enclosureNoReading": "pas encore de mesure", "enclosureNotMeasured": "non mesuré sur Gen2" },
+  "lastSeen": { "never": "Jamais vu", "justNow": "Vu à l'instant", "minutesAgo_one": "Vu il y a {{count}} minute", "minutesAgo_other": "Vu il y a {{count}} minutes", "hoursAgo_one": "Vu il y a {{count}} heure", "hoursAgo_other": "Vu il y a {{count}} heures", "daysAgo_one": "Vu il y a {{count}} jour", "daysAgo_other": "Vu il y a {{count}} jours" },
+  "battery": "🔋 {{percent}}%",
+  "removeFromZoneMenuItem": "Retirer de la zone",
+  "removeFromZoneConfirmTitle": "Retirer cette vanne de la zone ?",
+  "removeFromZoneConfirmBody": "Elle reste enregistrée et garde ses programmes — elle quitte seulement cette zone.",
+  "removeFromZoneConfirmButton": "Oui, retirer"
 }

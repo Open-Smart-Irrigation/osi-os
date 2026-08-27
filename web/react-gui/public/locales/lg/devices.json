@@ -58,29 +58,6 @@
     "lightIntensity": "AKAWAAWA K'OMUSANA",
     "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"
   },
-  "stregaValve": { "confirmOpen": "Kakasa — ggulawo {{minutes}} min",
-    "badge": "ZZIMU YA STREGA",
-    "status": "ENKOLAGANA",
-    "open": "GGULE",
-    "closed": "GGANGWE",
-    "target": "Eggwe: {{state}}",
-    "opening": "Tikuggulawo...",
-    "closing": "Tikuganga...",
-    "removeConfirm": "Ggyawo ekyuma kino?",
-    "removeSubtitle": "Ekyuma kiggyibwako ku akawunti yo.",
-    "yesRemove": "Yee, Ggyawo",
-    "removing": "Tikuggyawo...",
-    "failedToRemove": "Okuggyawo ekyuma kugaanye",
-    "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde",
-    "actuationFeedback": {
-      "closed": "Ggangwe",
-      "closedAt": "Ggangwe ku {{time}}",
-      "open": "GGULE",
-      "openClosesAt": "GGULE — ejja kuggalwa ku {{time}}",
-      "openQueued": "Okuggulawo kulindiridde",
-      "waitingForUplink": "nkulinda bbomba okuwa alipoota (≈ {{minutes}} min)"
-    }
-  },
   "zone": {
     "deviceCount_one": "ekyuma {{count}}",
     "deviceCount_other": "ebyuma {{count}}",

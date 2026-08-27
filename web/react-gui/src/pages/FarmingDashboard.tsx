@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { DashboardHeader } from '../components/DashboardHeader';
 import { KiwiSensorCard } from '../components/farming/KiwiSensorCard';
-import { StregaValveCard } from '../components/farming/StregaValveCard';
+import { DeviceValveTile } from '../components/farming/valves/DeviceValveTile';
 import { DraginoTempCard } from '../components/farming/DraginoTempCard';
 import { IrrigationZoneCard } from '../components/farming/IrrigationZoneCard';
 import { AddDeviceModal } from '../components/farming/AddDeviceModal';
@@ -65,9 +65,11 @@ export const FarmingDashboard: React.FC = () => {
   // ValveControlPanel already fetches ('/api/valves', identical options), so SWR
   // dedupes and shares one cache entry/one poll while the panel is visible. That sharing
   // depends on SWR's default ~2 s dedupingInterval — it is not structural, so do not gate
-  // this key on `modules.valveControl` (a per-browser display preference): StregaValveCard
-  // still needs the data whether or not the panel itself is rendered, and hiding the panel
-  // does not reduce this poll — it only stops being deduped against the panel's own timer.
+  // this key on `modules.valveControl` (a per-browser display preference): the zone-card/
+  // unassigned-grid `DeviceValveTile` placement still needs the data whether or not the
+  // panel itself is rendered (C2: a valve must always be operable from its zone card), and
+  // hiding the panel does not reduce this poll — it only stops being deduped against the
+  // panel's own timer.
   const hasStregaValve = useMemo(
     () => (devices ?? []).some((d) => d.type_id === 'STREGA_VALVE'),
     [devices],
@@ -135,11 +137,6 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedLSN50 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_LSN50');
   const unassignedS2120 = unassignedDevices.filter((d) => d.type_id === 'SENSECAP_S2120');
   const unassignedLoRain = unassignedDevices.filter((d) => d.type_id === 'AQUASCOPE_LORAIN');
-  const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
-  const zoneTimezones = useMemo(
-    () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
-    [zones],
-  );
   // deviceEui is always uppercased by normaliseValveSummary; Device.deveui is always
   // uppercased by normaliseDevice — so a plain-string key match is safe.
   const valvesByEui = useMemo(
@@ -235,7 +232,6 @@ export const FarmingDashboard: React.FC = () => {
                     unassignedDevices={unassignedDevices}
                     onUpdate={handleUpdate}
                     allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
-                    irrigationActuations={irrigationActuations}
                     valvesByEui={valvesByEui}
                   />
                 ))}
@@ -288,14 +284,12 @@ export const FarmingDashboard: React.FC = () => {
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('smartValves')}</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {unassignedValves.map((device) => (
-                          <StregaValveCard
+                          <DeviceValveTile
                             key={device.deveui}
                             device={device}
+                            valve={valvesByEui.get(device.deveui)}
                             onUpdate={handleUpdate}
                             onRemove={handleUpdate}
-                            irrigationActuations={irrigationActuations}
-                            timeZone={device.irrigation_zone_id ? zoneTimezones.get(device.irrigation_zone_id) : undefined}
-                            valve={valvesByEui.get(device.deveui)}
                           />
                         ))}
                       </div>

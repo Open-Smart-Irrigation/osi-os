@@ -3,7 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { StregaModel, ValveSummary } from '../../../types/farming';
 import { devicesAPI, stregaAPI } from '../../../services/api';
-import { getRecognizedStregaModel, normaliseStregaModel } from '../StregaValveCard';
+import { getRecognizedStregaModel, normaliseStregaModel } from './valveCardHelpers';
 
 export interface ValveServiceDialogProps {
   valve: ValveSummary;
@@ -22,8 +22,8 @@ const MAX_TIMED_AMOUNT = 255;
 const devicesFetcher = () => devicesAPI.getAll();
 
 // Structural template: ValveSettingsDialog.tsx (header X, no Cancel button, 44px targets,
-// var(--...) tokens only). This dialog carries the six stregaAPI commands that today exist
-// only on StregaValveCard's control surface -- see docs/superpowers/specs/
+// var(--...) tokens only). This dialog carries the six stregaAPI commands that used to live
+// only on the now-deleted StregaValveCard's control surface -- see docs/superpowers/specs/
 // 2026-08-24-valve-advanced-controls-consolidation-design.md.
 //
 // The three water-moving commands (timed action, partial opening, flushing) require an
@@ -36,9 +36,9 @@ const devicesFetcher = () => devicesAPI.getAll();
 export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, open, onClose, onChanged }) => {
   const { t } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
-  // motorizedLocked/motorizedNote already exist as good, discoverable copy on StregaValveCard
-  // (devices.json, via inline defaultValue) -- reused here verbatim rather than minting a
-  // near-duplicate string in valves.json.
+  // motorizedLocked/motorizedNote are inline-defaultValue copy in the 'devices' namespace
+  // (no matching keys in devices.json for any locale) -- carried over verbatim from the
+  // deleted StregaValveCard rather than minting a near-duplicate string in valves.json.
   const { t: td } = useTranslation('devices');
 
   // strega_model lives on `devices`, not on ValveSummary (GET /api/valves does not carry
