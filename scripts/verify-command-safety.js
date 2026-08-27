@@ -24,15 +24,16 @@ const SEED_DB_PATHS = [
     path.join(REPO, 'web/react-gui/farming.db'),
 ];
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
-// Bovey final fix wave (C2, "one ValveTile everywhere"): StregaValveCard.tsx and
-// ValveCancelButton.tsx are deleted -- the DD17 frontend invariants below now live in the
-// shared ValveTile family instead. See docs/superpowers/sdd/final-fix-wave for the review
-// that repointed this gate.
+// Bovey final fix wave (C2, "one ValveTile everywhere") deleted StregaValveCard.tsx and
+// ValveCancelButton.tsx; a follow-on operator ruling then restored them as the devices-tab
+// card (zone card + unassigned grid) while the tile stays the Valve control panel's control
+// surface. Both surfaces are DD17-relevant, so both are asserted below.
 const VALVE_OPEN_DIALOG = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveOpenDialog.tsx');
-const DEVICE_VALVE_TILE = path.join(REPO, 'web/react-gui/src/components/farming/valves/DeviceValveTile.tsx');
 const VALVE_CONTROL_PANEL = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveControlPanel.tsx');
 const VALVE_TILE = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveTile.tsx');
 const VALVE_SETTINGS_DIALOG = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveSettingsDialog.tsx');
+const STREGA_CARD = path.join(REPO, 'web/react-gui/src/components/farming/StregaValveCard.tsx');
+const VALVE_CANCEL_BUTTON = path.join(REPO, 'web/react-gui/src/components/farming/ValveCancelButton.tsx');
 const FARMING_TYPES = path.join(REPO, 'web/react-gui/src/types/farming.ts');
 const CHIRPSTACK_HELPER = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js');
 const CANCEL_JS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js');
@@ -255,40 +256,53 @@ function assertQueueFlushUsesGrpc() {
 
 function assertFrontendValveControls() {
     const openDialog = fs.readFileSync(VALVE_OPEN_DIALOG, 'utf8');
-    const deviceValveTile = fs.readFileSync(DEVICE_VALVE_TILE, 'utf8');
     const controlPanel = fs.readFileSync(VALVE_CONTROL_PANEL, 'utf8');
     const valveTile = fs.readFileSync(VALVE_TILE, 'utf8');
     const settingsDialog = fs.readFileSync(VALVE_SETTINGS_DIALOG, 'utf8');
+    const stregaCard = fs.readFileSync(STREGA_CARD, 'utf8');
+    const cancelButton = fs.readFileSync(VALVE_CANCEL_BUTTON, 'utf8');
     const farmingTypes = fs.readFileSync(FARMING_TYPES, 'utf8');
     if (!farmingTypes.includes("'OPEN_FOR_DURATION'")) {
         throw new Error('ValveActionRequest must allow OPEN_FOR_DURATION');
     }
 
-    // Duration bound: the one shared Open dialog every valve placement (top panel, zone
-    // card, unassigned grid) renders through -- ValveOpenDialog.tsx -- must reject an
-    // out-of-range/non-integer minute count before a caller can ever dispatch OPEN_FOR_DURATION.
+    // Duration bound: the shared Open dialog the top-level panel renders through --
+    // ValveOpenDialog.tsx -- must reject an out-of-range/non-integer minute count before a
+    // caller can ever dispatch OPEN_FOR_DURATION.
     for (const required of ['const MIN_MINUTES = 1', 'const MAX_MINUTES = 255', 'Number.isInteger(minutes)', 'minutes >= MIN_MINUTES', 'minutes <= MAX_MINUTES']) {
         if (!openDialog.includes(required)) {
             throw new Error(`ValveOpenDialog must validate the timed-open duration is bounded (${required})`);
         }
     }
 
-    // Both call sites that actually dispatch the open command -- the zone-card/unassigned-grid
-    // tile and the top-level panel -- must send OPEN_FOR_DURATION with an explicit duration,
-    // never a bare/indefinite OPEN.
-    for (const [name, src] of [['DeviceValveTile', deviceValveTile], ['ValveControlPanel', controlPanel]]) {
-        for (const required of ["action: 'OPEN_FOR_DURATION'", 'duration_seconds']) {
-            if (!src.includes(required)) {
-                throw new Error(`${name} must dispatch timed opens as OPEN_FOR_DURATION with a duration (${required})`);
-            }
+    // The top-level panel must send OPEN_FOR_DURATION with an explicit duration, never a
+    // bare/indefinite OPEN.
+    for (const required of ["action: 'OPEN_FOR_DURATION'", 'duration_seconds']) {
+        if (!controlPanel.includes(required)) {
+            throw new Error(`ValveControlPanel must dispatch timed opens as OPEN_FOR_DURATION with a duration (${required})`);
         }
+    }
+
+    // The devices-tab card (operator ruling: zone card + unassigned grid, alongside the
+    // tile) dispatches opens through its own duration input rather than ValveOpenDialog, so
+    // it needs its own bound check.
+    for (const required of ['Number.isInteger(durationMinutes)', 'durationMinutes < 1', 'durationMinutes > 255', "action: 'OPEN_FOR_DURATION'"]) {
+        if (!stregaCard.includes(required)) {
+            throw new Error(`StregaValveCard must validate and send timed open controls (${required})`);
+        }
+    }
+    if (stregaCard.includes("action === 'OPEN' ? 'OPEN_FOR_DURATION' : 'CLOSE'")) {
+        throw new Error('StregaValveCard must not send CLOSE from the main valve controls');
+    }
+    if (!stregaCard.includes('hasActiveValveActuation(device)')) {
+        throw new Error('StregaValveCard must gate cancel rendering on an active VAE row');
     }
 
     // No bare CLOSE from any of the daily-use surfaces. The only sanctioned bare CLOSE is the
     // settings-dialog manual override (stuck-open recovery, two-step confirm) -- assert it
     // stays confined there, not merely that the daily surfaces lack it, so a future CLOSE added
-    // to any of these four files fails loudly instead of silently widening the safety surface.
-    const mainControlSurfaces = [['ValveOpenDialog', openDialog], ['DeviceValveTile', deviceValveTile], ['ValveControlPanel', controlPanel], ['ValveTile', valveTile]];
+    // to any of these files fails loudly instead of silently widening the safety surface.
+    const mainControlSurfaces = [['ValveOpenDialog', openDialog], ['ValveControlPanel', controlPanel], ['ValveTile', valveTile]];
     for (const [name, src] of mainControlSurfaces) {
         if (src.includes("action: 'CLOSE'")) {
             throw new Error(`${name} must not send a bare CLOSE from the main valve controls`);
@@ -309,16 +323,24 @@ function assertFrontendValveControls() {
         throw new Error('ValveTile must label the pending-cancel action as cancelling a queued open, not the generic Cancel/dismiss label');
     }
 
-    // Cancel result reporting: both callers that actually issue the cancel command must
-    // surface both outcomes -- a successful cancel updates the shared valve state, a failed
-    // one sets a visible error -- never a silent fire-and-forget.
-    for (const [name, src] of [['DeviceValveTile', deviceValveTile], ['ValveControlPanel', controlPanel]]) {
-        if (!/catch\s*\{[^}]*setActionError/.test(src) && !/catch\s*\(\s*\)\s*\{[^}]*setActionError/.test(src)) {
-            throw new Error(`${name} must set a visible error on a failed cancel/action (setActionError in its catch)`);
+    // Cancel result reporting: the top-level panel must surface both outcomes -- a
+    // successful cancel updates the shared valve state, a failed one sets a visible error --
+    // never a silent fire-and-forget.
+    if (!/catch\s*\{[^}]*setActionError/.test(controlPanel) && !/catch\s*\(\s*\)\s*\{[^}]*setActionError/.test(controlPanel)) {
+        throw new Error('ValveControlPanel must set a visible error on a failed cancel/action (setActionError in its catch)');
+    }
+    if (!(controlPanel.includes('onUpdate()') || controlPanel.includes('refresh()'))) {
+        throw new Error('ValveControlPanel must refresh valve state after a successful cancel/action');
+    }
+
+    // The devices-tab card's cancel button must report both outcomes too.
+    for (const required of ['onUpdate?.()', 'onError?.(message)', 'catch (err: any)']) {
+        if (!cancelButton.includes(required)) {
+            throw new Error(`ValveCancelButton must report cancel success/failure (${required})`);
         }
-        if (!(src.includes('onUpdate()') || src.includes('refresh()'))) {
-            throw new Error(`${name} must refresh valve state after a successful cancel/action`);
-        }
+    }
+    if (!cancelButton.includes('cancelQueuedOpen')) {
+        throw new Error('ValveCancelButton must label the action as cancelling a queued open');
     }
 
     console.log('  ok frontend valve controls are duration-bound and report cancel results');

@@ -48,13 +48,13 @@ vi.mock('../../components/farming/IrrigationOutcomesPanel', () => ({
 vi.mock('../../components/farming/SystemPanel', () => ({
   SystemPanel: () => <div data-testid="system-panel-stub" />,
 }));
-// Stub the zone-card/unassigned-grid valve tile so the only thing generating /api/valves
-// traffic is FarmingDashboard's own useSWR and (when mounted) the real ValveControlPanel —
-// the exact pair whose dedupe/no-dedupe behavior is under test. ValveControlPanel itself is
-// deliberately left real (unmocked). C2: this placement now renders `DeviceValveTile`
-// (formerly `StregaValveCard`).
-vi.mock('../../components/farming/valves/DeviceValveTile', () => ({
-  DeviceValveTile: () => <div data-testid="device-valve-tile-stub" />,
+// StregaValveCard has its own effects (getTodayLiters) unrelated to this poll-count
+// measurement; stub it so the only thing generating /api/valves traffic is
+// FarmingDashboard's own useSWR and (when mounted) the real ValveControlPanel — the
+// exact pair whose dedupe/no-dedupe behavior is under test. ValveControlPanel itself is
+// deliberately left real (unmocked).
+vi.mock('../../components/farming/StregaValveCard', () => ({
+  StregaValveCard: () => <div data-testid="strega-valve-card-stub" />,
 }));
 
 function stregaDevice(overrides: Partial<Device> = {}): Device {
