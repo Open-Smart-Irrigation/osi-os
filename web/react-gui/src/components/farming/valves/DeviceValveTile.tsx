@@ -30,6 +30,12 @@ export interface DeviceValveTileProps {
   // (the unassigned-devices grid) falls back to `devicesAPI.remove` below, matching the
   // pre-C2 StregaValveCard's own default behavior there.
   removeDevice?: (deviceEui: string) => Promise<void>;
+  // M-1 (Bovey final fix wave review): the shared `/api/valves` fetch's own SWR error, from
+  // whichever ancestor owns that `useSWR` call (FarmingDashboard) -- this component has no
+  // fetch of its own to read an error off (see the `valve` prop's own doc comment on why).
+  // Distinguishes "still loading" from "the list failed to load", mirroring the cloud's
+  // `DeviceValveTile` (which has this for free from its own `useSWR`).
+  error?: unknown;
 }
 
 type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
@@ -50,7 +56,7 @@ type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
  * `removeDevice`, so this falls back to `devicesAPI.remove` with the ordinary "Delete valve"
  * copy) -- see `ValveTile`'s own `deleteMenuLabel`/`deleteConfirm*` props.
  */
-export const DeviceValveTile: React.FC<DeviceValveTileProps> = ({ device, valve, onUpdate, onRemove, removeDevice }) => {
+export const DeviceValveTile: React.FC<DeviceValveTileProps> = ({ device, valve, onUpdate, onRemove, removeDevice, error }) => {
   const { t } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
 
@@ -109,7 +115,13 @@ export const DeviceValveTile: React.FC<DeviceValveTileProps> = ({ device, valve,
     onRemove?.();
   });
 
+  // M-1: an unresolved fetch and a resolved-but-failed one must not read the same -- "loading"
+  // implies data is still on its way; a failed `/api/valves` fetch never will resolve on its
+  // own. Mirrors the cloud DeviceValveTile's `if (!valve) { if (error) ... }` branch.
   if (!valve) {
+    if (error) {
+      return <p className="text-sm text-[var(--warn-text)]">{t('loadFailed')}</p>;
+    }
     return <p className="text-sm text-[var(--text-tertiary)]">{tc('loading')}</p>;
   }
 

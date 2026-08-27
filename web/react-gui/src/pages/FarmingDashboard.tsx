@@ -74,7 +74,7 @@ export const FarmingDashboard: React.FC = () => {
     () => (devices ?? []).some((d) => d.type_id === 'STREGA_VALVE'),
     [devices],
   );
-  const { data: valves } = useSWR<ValveSummary[]>(
+  const { data: valves, error: valvesError } = useSWR<ValveSummary[]>(
     hasStregaValve ? '/api/valves' : null,
     valvesFetcher,
     {
@@ -233,6 +233,7 @@ export const FarmingDashboard: React.FC = () => {
                     onUpdate={handleUpdate}
                     allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
                     valvesByEui={valvesByEui}
+                    valvesError={valvesError}
                   />
                 ))}
               </div>
@@ -288,6 +289,7 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             valve={valvesByEui.get(device.deveui)}
+                            error={valvesError}
                             onUpdate={handleUpdate}
                             onRemove={handleUpdate}
                           />

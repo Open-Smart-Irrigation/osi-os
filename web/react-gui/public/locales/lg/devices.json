@@ -58,6 +58,7 @@
     "lightIntensity": "AKAWAAWA K'OMUSANA",
     "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"
   },
+  "stregaValve": { "motorizedLocked": "Set the valve model to motorized to unlock partial opening and flushing commands.", "motorizedNote": "Partial opening and anti-sediment flushing are only supported for motorized valves." },
   "zone": {
     "deviceCount_one": "ekyuma {{count}}",
     "deviceCount_other": "ebyuma {{count}}",

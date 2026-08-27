@@ -36,9 +36,9 @@ const devicesFetcher = () => devicesAPI.getAll();
 export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, open, onClose, onChanged }) => {
   const { t } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
-  // motorizedLocked/motorizedNote are inline-defaultValue copy in the 'devices' namespace
-  // (no matching keys in devices.json for any locale) -- carried over verbatim from the
-  // deleted StregaValveCard rather than minting a near-duplicate string in valves.json.
+  // motorizedLocked/motorizedNote live in the 'devices' namespace (I-3 review fix: real keys
+  // in devices.json for every locale, ported from the cloud) -- kept there rather than
+  // minting a near-duplicate string in valves.json.
   const { t: td } = useTranslation('devices');
 
   // strega_model lives on `devices`, not on ValveSummary (GET /api/valves does not carry
@@ -225,12 +225,12 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
   };
 
   const eui = valve.deviceEui;
-  const motorizedLockedCopy = td('stregaValve.motorizedLocked', {
-    defaultValue: 'Set the valve model to motorized to unlock partial opening and flushing commands.',
-  });
-  const motorizedNoteCopy = td('stregaValve.motorizedNote', {
-    defaultValue: 'Partial opening and anti-sediment flushing are only supported for motorized valves.',
-  });
+  // I-3 (Bovey final fix wave review): these keys now exist in every locale's devices.json
+  // (ported from the cloud's serviceDialog.motorizedLocked/motorizedNote, which had already
+  // been through a real translation pass) -- the English-only inline `defaultValue` that used
+  // to paper over their absence is gone.
+  const motorizedLockedCopy = td('stregaValve.motorizedLocked');
+  const motorizedNoteCopy = td('stregaValve.motorizedNote');
 
   const busy = busyCommand !== null;
 
