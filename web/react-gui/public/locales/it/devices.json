@@ -58,6 +58,7 @@
     "lightIntensity": "INTENSITÀ LUMINOSA",
     "lastSeen": "Ultimo rilevamento: {{minutes}} minuti fa"
   },
+  "stregaValve": { "motorizedLocked": "Imposta il modello della valvola su motorizzata per sbloccare i comandi di apertura parziale e lavaggio.", "motorizedNote": "L'apertura parziale e il lavaggio anti-sedimenti sono supportati solo per le valvole motorizzate." },
   "zone": {
     "deviceCount_one": "{{count}} dispositivo",
     "deviceCount_other": "{{count}} dispositivi",

@@ -77,6 +77,7 @@
     "failedToEnableTempHumidity": "Failed to enable Kiwi temperature and humidity",
     "enableTempHumidityRequiresInterval": "Enter a whole number of minutes between 1 and 1440 before enabling ambient temperature and humidity."
   },
+  "stregaValve": { "motorizedLocked": "Set the valve model to motorized to unlock partial opening and flushing commands.", "motorizedNote": "Partial opening and anti-sediment flushing are only supported for motorized valves." },
   "zone": {
     "deviceCount_one": "{{count}} device",
     "deviceCount_other": "{{count}} devices",

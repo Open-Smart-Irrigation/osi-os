@@ -58,6 +58,7 @@
     "lightIntensity": "LICHTINTENSITÄT",
     "lastSeen": "Zuletzt gesehen: vor {{minutes}} Minuten"
   },
+  "stregaValve": { "motorizedLocked": "Ventilmodell auf Motorisiert stellen, um Teilöffnung und Spülbefehle freizuschalten.", "motorizedNote": "Teilöffnung und Anti-Sediment-Spülung werden nur bei motorisierten Ventilen unterstützt." },
   "zone": {
     "deviceCount_one": "{{count}} Gerät",
     "deviceCount_other": "{{count}} Geräte",

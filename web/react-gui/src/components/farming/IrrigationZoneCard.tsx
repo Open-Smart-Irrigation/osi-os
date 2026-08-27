@@ -25,6 +25,9 @@ interface IrrigationZoneCardProps {
   onUpdate: () => void;
   allZones?: Array<{ id: number; name: string }>;
   valvesByEui?: Map<string, ValveSummary>;
+  // M-1: FarmingDashboard's own `/api/valves` SWR error, threaded through so DeviceValveTile
+  // can distinguish "still loading" from "the list failed to load" -- see its own doc comment.
+  valvesError?: unknown;
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -83,6 +86,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   onUpdate,
   allZones,
   valvesByEui,
+  valvesError,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
@@ -466,6 +470,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                         <DeviceValveTile
                           device={device}
                           valve={valvesByEui?.get(device.deveui)}
+                          error={valvesError}
                           onUpdate={onUpdate}
                           onRemove={onUpdate}
                           removeDevice={removeValveFromZone}

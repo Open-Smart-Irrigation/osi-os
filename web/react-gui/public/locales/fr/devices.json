@@ -77,6 +77,7 @@
     "failedToEnableTempHumidity": "Impossible d'activer la température et l'humidité du Kiwi",
     "enableTempHumidityRequiresInterval": "Indiquez un nombre entier de minutes entre 1 et 1440 avant d'activer la température ambiante et l'humidité."
   },
+  "stregaValve": { "motorizedLocked": "Réglez le modèle de la vanne sur motorisée pour débloquer les commandes d'ouverture partielle et de purge.", "motorizedNote": "L'ouverture partielle et la purge anti-sédiments ne sont prises en charge que pour les vannes motorisées." },
   "zone": {
     "deviceCount_one": "{{count}} appareil",
     "deviceCount_other": "{{count}} appareils",

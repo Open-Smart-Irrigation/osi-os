@@ -58,6 +58,7 @@
     "lightIntensity": "INTENSIDAD LUMÍNICA",
     "lastSeen": "Visto hace {{minutes}} minutos"
   },
+  "stregaValve": { "motorizedLocked": "Configure el modelo de válvula como motorizada para desbloquear los comandos de apertura parcial y purga.", "motorizedNote": "La apertura parcial y la purga antisedimentos solo son compatibles con válvulas motorizadas." },
   "zone": {
     "deviceCount_one": "{{count}} dispositivo",
     "deviceCount_other": "{{count}} dispositivos",

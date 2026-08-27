@@ -11,6 +11,7 @@ const { translateForTest } = vi.hoisted(() => {
     open: 'Open',
     schedule: 'Schedule',
     cancel: 'Cancel',
+    cancelQueuedOpen: 'Cancel queued open',
     more: 'More',
     skipToday: 'Skip today',
     pauseSchedules: 'Pause schedules',
@@ -38,7 +39,7 @@ const { translateForTest } = vi.hoisted(() => {
     deleteConfirmTitle: 'Delete this valve?',
     deleteConfirmBody: 'This removes it from the dashboard. Schedules are not sent again.',
     deleteConfirmButton: 'Yes, delete',
-    battery: '🔋 {{percent}}%',
+    battery: 'Battery: {{percent}} %',
     // Deliberately distinct from `neverSeen` above (the big state-label override) so a
     // test asserting on this top-right label can never accidentally match that one --
     // both really do render "Never seen" in production copy (see valveCardHelpers.ts's
@@ -340,23 +341,49 @@ describe('ValveTile last-seen label (I6)', () => {
 describe('ValveTile battery footer (I6)', () => {
   it('shows nothing at all when no battery data is available', () => {
     const { container } = renderTile();
-    expect(container.textContent).not.toMatch(/🔋/);
+    expect(container.textContent).not.toMatch(/Battery:/);
   });
 
   it('shows the battery percent when bat_pct is present', () => {
     renderTile({}, { batteryPercent: 72 });
-    expect(screen.getByText('🔋 72%')).toBeInTheDocument();
+    expect(screen.getByText('Battery: 72 %')).toBeInTheDocument();
   });
 
   it('falls back to the voltage-derived percent when bat_pct is absent', () => {
     // LSN50 usable range is 2.1V-3.6V (deviceCardBattery.ts) -- 3.6V is a full battery.
     renderTile({}, { batteryVoltage: 3.6 });
-    expect(screen.getByText('🔋 100%')).toBeInTheDocument();
+    expect(screen.getByText('Battery: 100 %')).toBeInTheDocument();
   });
 
   it('prefers bat_pct over the voltage fallback when both are present', () => {
     renderTile({}, { batteryPercent: 40, batteryVoltage: 3.6 });
-    expect(screen.getByText('🔋 40%')).toBeInTheDocument();
-    expect(screen.queryByText('🔋 100%')).not.toBeInTheDocument();
+    expect(screen.getByText('Battery: 40 %')).toBeInTheDocument();
+    expect(screen.queryByText('Battery: 100 %')).not.toBeInTheDocument();
+  });
+});
+
+// M-2 (Bovey final fix wave review): the pending-state primary action used to share the
+// generic `cancel` key with every dismiss/close-dialog button in this file family, which read
+// as a bare "Cancel" out of context. It now has its own key.
+describe('ValveTile pending-cancel label (M-2)', () => {
+  it('labels the primary action "Cancel queued open" (not the generic dismiss "Cancel") while a command is pending', () => {
+    const onCancel = vi.fn();
+    renderTile(
+      {
+        activeActuation: {
+          expectationId: 'exp-1',
+          reconciliationState: 'PENDING_OBSERVATION',
+          commandedAt: new Date().toISOString(),
+          expectedCloseAt: new Date(Date.now() + 300_000).toISOString(),
+          durationSeconds: 300,
+          trigger: 'manual',
+        },
+      },
+      { onCancel },
+    );
+    expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+    const primary = screen.getByRole('button', { name: 'Cancel queued open' });
+    fireEvent.click(primary);
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
