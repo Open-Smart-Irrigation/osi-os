@@ -281,7 +281,7 @@ describe('StregaValveCard', () => {
     // from the whole farm.
     it('removeContext="zone": confirming remove only calls onRemove, never devicesAPI.remove', async () => {
         const { onRemove } = renderCard({}, { removeContext: 'zone' });
-        fireEvent.click(await screen.findByTitle('Remove device'));
+        fireEvent.click(await screen.findByTitle('stregaValve.removeDeviceTitle'));
         fireEvent.click(await screen.findByText('stregaValve.yesRemove'));
         await waitFor(() => {
             expect(onRemove).toHaveBeenCalled();
@@ -291,7 +291,7 @@ describe('StregaValveCard', () => {
 
     it('default removeContext ("farm"): confirming remove calls devicesAPI.remove, then onRemove', async () => {
         const { onRemove } = renderCard();
-        fireEvent.click(await screen.findByTitle('Remove device'));
+        fireEvent.click(await screen.findByTitle('stregaValve.removeDeviceTitle'));
         fireEvent.click(await screen.findByText('stregaValve.yesRemove'));
         await waitFor(() => {
             expect(devicesAPI.remove).toHaveBeenCalledWith(mockDevice.deveui);

@@ -226,12 +226,12 @@ const ConfigPanel: React.FC<{
     const closedMinutes = Number(closedIntervalInput);
     const openedMinutes = Number(openedIntervalInput);
     if (!Number.isInteger(closedMinutes) || closedMinutes < 1 || closedMinutes > MAX_STREGA_INTERVAL_MINUTES) {
-      setError(t('stregaValve.invalidInterval', { defaultValue: 'Enter a closed-box interval between 1 and 255 minutes.' }));
+      setError(t('stregaValve.invalidInterval'));
       setInfo(null);
       return;
     }
     if (!Number.isInteger(openedMinutes) || openedMinutes < 1 || openedMinutes > MAX_STREGA_INTERVAL_MINUTES) {
-      setError(t('stregaValve.invalidOpenInterval', { defaultValue: 'Enter an opened-box interval between 1 and 255 minutes.' }));
+      setError(t('stregaValve.invalidOpenInterval'));
       setInfo(null);
       return;
     }
@@ -246,13 +246,12 @@ const ConfigPanel: React.FC<{
         tamperDisabled,
       });
       setInfo(t('stregaValve.intervalPending', {
-        defaultValue: 'Interval change requested for {{closed}} min closed / {{opened}} min opened.',
         closed: closedMinutes,
         opened: openedMinutes,
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedToSetInterval', { defaultValue: 'Failed to change Strega interval' })));
+      setError(getApiMessage(err, t('stregaValve.failedToSetInterval')));
     } finally {
       setBusyAction(null);
     }
@@ -265,12 +264,11 @@ const ConfigPanel: React.FC<{
     try {
       await stregaAPI.setModel(device.deveui, modelInput);
       setInfo(t('stregaValve.modelPending', {
-        defaultValue: 'Model update requested. The valve will be treated as {{model}} after sync confirms it.',
         model: modelInput === 'MOTORIZED' ? 'motorized' : 'standard',
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedToSetModel', { defaultValue: 'Failed to update the Strega model' })));
+      setError(getApiMessage(err, t('stregaValve.failedToSetModel')));
     } finally {
       setBusyAction(null);
     }
@@ -279,7 +277,7 @@ const ConfigPanel: React.FC<{
   const applyTimedAction = async () => {
     const amount = Number(timedAmountInput);
     if (!Number.isInteger(amount) || amount < 1 || amount > MAX_STREGA_TIMED_ACTION_AMOUNT) {
-      setError(t('stregaValve.invalidTimedAction', { defaultValue: 'Timed actions require a value between 1 and 255.' }));
+      setError(t('stregaValve.invalidTimedAction'));
       setInfo(null);
       return;
     }
@@ -294,14 +292,13 @@ const ConfigPanel: React.FC<{
         amount,
       });
       setInfo(t('stregaValve.timedActionPending', {
-        defaultValue: '{{action}} requested for {{amount}} {{unit}}.',
         action: timedAction === 'OPEN' ? 'Open' : 'Close',
         amount,
         unit: timedUnit,
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedTimedAction', { defaultValue: 'Failed to queue the timed valve action' })));
+      setError(getApiMessage(err, t('stregaValve.failedTimedAction')));
     } finally {
       setBusyAction(null);
     }
@@ -314,12 +311,11 @@ const ConfigPanel: React.FC<{
     try {
       await stregaAPI.setMagnetEnabled(device.deveui, magnetEnabled);
       setInfo(t('stregaValve.magnetPending', {
-        defaultValue: 'Magnet control will be {{state}} after the next downlink.',
         state: magnetEnabled ? 'enabled' : 'disabled',
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedMagnet', { defaultValue: 'Failed to change magnet control' })));
+      setError(getApiMessage(err, t('stregaValve.failedMagnet')));
     } finally {
       setBusyAction(null);
     }
@@ -328,7 +324,7 @@ const ConfigPanel: React.FC<{
   const applyPartialOpening = async () => {
     const percentage = Number(partialPercentageInput);
     if (!Number.isInteger(percentage) || percentage < 1 || percentage > 100) {
-      setError(t('stregaValve.invalidPercentage', { defaultValue: 'Enter a percentage between 1 and 100.' }));
+      setError(t('stregaValve.invalidPercentage'));
       setInfo(null);
       return;
     }
@@ -342,13 +338,12 @@ const ConfigPanel: React.FC<{
         percentage,
       });
       setInfo(t('stregaValve.partialPending', {
-        defaultValue: 'Partial {{action}} requested at {{percentage}}%.',
         action: partialAction === 'OPEN' ? 'open' : 'close',
         percentage,
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedPartial', { defaultValue: 'Failed to queue partial opening' })));
+      setError(getApiMessage(err, t('stregaValve.failedPartial')));
     } finally {
       setBusyAction(null);
     }
@@ -357,7 +352,7 @@ const ConfigPanel: React.FC<{
   const applyFlushing = async () => {
     const percentage = Number(flushPercentageInput);
     if (!Number.isInteger(percentage) || percentage < 1 || percentage > 100) {
-      setError(t('stregaValve.invalidPercentage', { defaultValue: 'Enter a percentage between 1 and 100.' }));
+      setError(t('stregaValve.invalidPercentage'));
       setInfo(null);
       return;
     }
@@ -371,13 +366,12 @@ const ConfigPanel: React.FC<{
         percentage,
       });
       setInfo(t('stregaValve.flushPending', {
-        defaultValue: 'Flushing turn requested at {{percentage}}%, returning to {{state}}.',
         percentage,
         state: flushReturnPosition === 'OPEN' ? 'open' : 'closed',
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedFlush', { defaultValue: 'Failed to queue anti-sediment flushing' })));
+      setError(getApiMessage(err, t('stregaValve.failedFlush')));
     } finally {
       setBusyAction(null);
     }
@@ -394,7 +388,7 @@ const ConfigPanel: React.FC<{
         <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
           <p className="text-[var(--text)] text-sm font-semibold">{t('stregaValve.quickAction', { defaultValue: 'Quick timed action' })}</p>
           <p className="text-[var(--text-tertiary)] text-xs mt-1">
-            {t('stregaValve.quickActionNote', { defaultValue: 'Queue a one-off open or close for seconds, minutes, or hours.' })}
+            {t('stregaValve.quickActionNote')}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
             <select
@@ -403,8 +397,11 @@ const ConfigPanel: React.FC<{
               onChange={(event) => setTimedAction(event.target.value as 'OPEN' | 'CLOSE')}
               className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
             >
-              <option value="OPEN">{t('stregaValve.open', { defaultValue: 'Open' })}</option>
-              <option value="CLOSE">{t('stregaValve.closed', { defaultValue: 'Closed' })}</option>
+              {/* M-3: action verbs ("Open"/"Close" the valve now), not the status-word keys
+                  (stregaValve.open/closed = "OUVERTE"/"FERMÉE" in fr) -- this dropdown picks
+                  an action to queue, not a state to display. */}
+              <option value="OPEN">{t('stregaValve.actionOpen')}</option>
+              <option value="CLOSE">{t('stregaValve.actionClose')}</option>
             </select>
             <input
               type="number"
@@ -424,9 +421,9 @@ const ConfigPanel: React.FC<{
               onChange={(event) => setTimedUnit(event.target.value as TimedActionUnit)}
               className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
             >
-              <option value="seconds">{t('stregaValve.seconds', { defaultValue: 'seconds' })}</option>
-              <option value="minutes">{t('stregaValve.minutes', { defaultValue: 'minutes' })}</option>
-              <option value="hours">{t('stregaValve.hours', { defaultValue: 'hours' })}</option>
+              <option value="seconds">{t('stregaValve.seconds')}</option>
+              <option value="minutes">{t('stregaValve.minutes')}</option>
+              <option value="hours">{t('stregaValve.hours')}</option>
             </select>
           </div>
           <button
@@ -436,8 +433,8 @@ const ConfigPanel: React.FC<{
             className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyAction === 'timed'
-              ? t('stregaValve.applyingTimedAction', { defaultValue: 'Queueing timed action...' })
-              : t('stregaValve.applyTimedAction', { defaultValue: 'Queue timed action' })}
+              ? t('stregaValve.applyingTimedAction')
+              : t('stregaValve.applyTimedAction')}
           </button>
         </section>
 
@@ -454,7 +451,7 @@ const ConfigPanel: React.FC<{
               value={closedIntervalInput}
               disabled={busyAction === 'interval'}
               onChange={(event) => setClosedIntervalInput(event.target.value)}
-              placeholder={t('stregaValve.closedBoxInterval', { defaultValue: 'Closed-box min' })}
+              placeholder={t('stregaValve.closedBoxInterval')}
               className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
             />
             <input
@@ -466,7 +463,7 @@ const ConfigPanel: React.FC<{
               value={openedIntervalInput}
               disabled={busyAction === 'interval'}
               onChange={(event) => setOpenedIntervalInput(event.target.value)}
-              placeholder={t('stregaValve.openedBoxInterval', { defaultValue: 'Opened-box min' })}
+              placeholder={t('stregaValve.openedBoxInterval')}
               className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
             />
           </div>
@@ -478,7 +475,7 @@ const ConfigPanel: React.FC<{
               onChange={(event) => setTamperDisabled(event.target.checked)}
               className="w-4 h-4 accent-[var(--primary)]"
             />
-            <span>{t('stregaValve.disableTamper', { defaultValue: 'Disable tamper-triggered wakeups' })}</span>
+            <span>{t('stregaValve.disableTamper')}</span>
           </label>
           <button
             type="button"
@@ -487,8 +484,8 @@ const ConfigPanel: React.FC<{
             className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyAction === 'interval'
-              ? t('stregaValve.applyingInterval', { defaultValue: 'Applying interval...' })
-              : t('stregaValve.applyInterval', { defaultValue: 'Apply intervals' })}
+              ? t('stregaValve.applyingInterval')
+              : t('stregaValve.applyInterval')}
           </button>
         </section>
 
@@ -498,7 +495,6 @@ const ConfigPanel: React.FC<{
               <p className="text-[var(--text)] text-sm font-semibold">{t('stregaValve.modelHeading', { defaultValue: 'Model recognition' })}</p>
               <p className="text-[var(--text-tertiary)] text-xs mt-1">
                 {t('stregaValve.modelDetected', {
-                  defaultValue: 'Recognized as {{model}}.',
                   model: recognizedModel === 'UNKNOWN' ? 'unknown' : recognizedModel.toLowerCase(),
                 })}
               </p>
@@ -521,15 +517,15 @@ const ConfigPanel: React.FC<{
             className="mt-3 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyAction === 'model'
-              ? t('stregaValve.applyingModel', { defaultValue: 'Saving model...' })
-              : t('stregaValve.applyModel', { defaultValue: 'Save valve model' })}
+              ? t('stregaValve.applyingModel')
+              : t('stregaValve.applyModel')}
           </button>
         </section>
 
         <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-          <p className="text-[var(--text)] text-sm font-semibold">{t('stregaValve.maintenance', { defaultValue: 'Maintenance' })}</p>
+          <p className="text-[var(--text)] text-sm font-semibold">{t('stregaValve.maintenance')}</p>
           <p className="text-[var(--text-tertiary)] text-xs mt-1">
-            {t('stregaValve.magnetNote', { defaultValue: 'Magnet control resets to disabled after a device reboot.' })}
+            {t('stregaValve.magnetNote')}
           </p>
           <label className="mt-3 flex items-center gap-3 text-sm text-[var(--text)]">
             <input
@@ -548,8 +544,8 @@ const ConfigPanel: React.FC<{
             className="mt-3 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyAction === 'magnet'
-              ? t('stregaValve.applyingMagnet', { defaultValue: 'Updating magnet control...' })
-              : t('stregaValve.applyMagnet', { defaultValue: 'Apply magnet setting' })}
+              ? t('stregaValve.applyingMagnet')
+              : t('stregaValve.applyMagnet')}
           </button>
         </section>
 
@@ -568,8 +564,8 @@ const ConfigPanel: React.FC<{
                 onChange={(event) => setPartialAction(event.target.value as 'OPEN' | 'CLOSE')}
                 className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
               >
-                <option value="OPEN">{t('stregaValve.partialOpen', { defaultValue: 'Partial open' })}</option>
-                <option value="CLOSE">{t('stregaValve.partialClose', { defaultValue: 'Partial close' })}</option>
+                <option value="OPEN">{t('stregaValve.partialOpen')}</option>
+                <option value="CLOSE">{t('stregaValve.partialClose')}</option>
               </select>
               <input
                 type="number"
@@ -591,8 +587,8 @@ const ConfigPanel: React.FC<{
               className="w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busyAction === 'partial'
-                ? t('stregaValve.applyingPartial', { defaultValue: 'Queueing partial move...' })
-                : t('stregaValve.applyPartial', { defaultValue: 'Queue partial move' })}
+                ? t('stregaValve.applyingPartial')
+                : t('stregaValve.applyPartial')}
             </button>
             <div className="grid grid-cols-2 gap-2">
               <select
@@ -601,8 +597,8 @@ const ConfigPanel: React.FC<{
                 onChange={(event) => setFlushReturnPosition(event.target.value as 'OPEN' | 'CLOSE')}
                 className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
               >
-                <option value="OPEN">{t('stregaValve.returnOpen', { defaultValue: 'Return open' })}</option>
-                <option value="CLOSE">{t('stregaValve.returnClosed', { defaultValue: 'Return closed' })}</option>
+                <option value="OPEN">{t('stregaValve.returnOpen')}</option>
+                <option value="CLOSE">{t('stregaValve.returnClosed')}</option>
               </select>
               <input
                 type="number"
@@ -624,8 +620,8 @@ const ConfigPanel: React.FC<{
               className="w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busyAction === 'flush'
-                ? t('stregaValve.applyingFlush', { defaultValue: 'Queueing flush...' })
-                : t('stregaValve.applyFlush', { defaultValue: 'Queue anti-sediment flush' })}
+                ? t('stregaValve.applyingFlush')
+                : t('stregaValve.applyFlush')}
             </button>
           </section>
         ) : (
@@ -705,7 +701,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   const handleOpen = async () => {
     const durationMinutes = Number(openDurationMin);
     if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 255) {
-      setError(t('stregaValve.invalidOpenDuration', { defaultValue: 'Enter an open duration between 1 and 255 minutes.' }));
+      setError(t('stregaValve.invalidOpenDuration'));
       return;
     }
 
@@ -718,7 +714,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
       });
       onUpdate();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to open valve');
+      setError(err.response?.data?.message || t('stregaValve.failedToOpen'));
     } finally {
       setLoading(null);
     }
@@ -777,7 +773,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving || loading !== null}
             className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Remove device"
+            title={t('stregaValve.removeDeviceTitle')}
           >
             ✕
           </button>
