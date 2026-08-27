@@ -34,7 +34,7 @@
   "loadFailed": "Impossible de charger les vannes.",
   "bluetoothNote": "Les modifications faites directement sur la vanne par Bluetooth ne sont pas visibles ici.",
   "openDialog": { "title": "Ouvrir {{name}}", "duration": "Durée (min)", "durationHint": "Indiquez une durée entre 1 et 255 minutes.", "custom": "Autre", "summary": "fermeture ≈ {{time}}", "liters": "≈ {{liters}} L", "confirm": "Ouvrir pendant {{minutes}} min", "error": "L'ouverture n'a pas pu être envoyée." },
-  "scheduleDialog": { "edit": "Modifier", "update": "Mettre à jour", "discardEdit": "Abandonner", "editWeekly": "Modifier le programme hebdomadaire", "editOnce": "Modifier l’ouverture ponctuelle",
+  "scheduleDialog": { "edit": "Modifier", "update": "Mettre à jour le programme", "discardEdit": "Abandonner", "editWeekly": "Modifier le programme hebdomadaire", "editOnce": "Modifier l’ouverture ponctuelle",
     "title": "Programmes de {{name}}", "loadFailed": "Impossible de charger les programmes.", "week": "Cette semaine sur la vanne", "windows": "Plages : {{count}}/4", "noWindows": "—",
     "list": "Programmes", "addWeekly": "+ Hebdomadaire", "addOnce": "+ Ponctuel",
     "label": "Nom (facultatif)", "weekdays": "Jours", "startTime": "Début", "duration": "Durée (min)", "date": "Date", "time": "Heure",
