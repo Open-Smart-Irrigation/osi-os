@@ -66,7 +66,13 @@ test('buildRuntimePayload: CANCELLED/OBSERVED_COMPLETE rows are not an active_ac
 
 test('buildRuntimePayload: a recent STALE_* row is recent_stale_state, and does not double as active_actuation', async () => {
   const { db } = await tempDb();
-  await insertExpectation(db, { id: 'e1', state: 'STALE_OPEN_OBSERVED', commandedAt: '2026-08-25T09:00:00.000Z', expectedCloseAt: '2026-08-25T09:15:00.000Z' });
+  // I8 fix: store.js's recentStaleState() filters on `datetime(commanded_at) > datetime('now','-1 day')`
+  // (a clock-relative SQL window) -- an absolute fixture date here rots the day after it is
+  // written, once "now" moves more than 24h past it. Pinned to the relative clock instead
+  // (2h ago), matching the enclosure-window fixture fix in runtime.js's own test suite.
+  const commandedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const expectedCloseAt = new Date(Date.now() - 2 * 60 * 60 * 1000 + 15 * 60 * 1000).toISOString();
+  await insertExpectation(db, { id: 'e1', state: 'STALE_OPEN_OBSERVED', commandedAt, expectedCloseAt });
   const payload = await buildRuntimePayload(db, EUI);
   assert.equal(payload.recent_stale_state, 'STALE_OPEN_OBSERVED');
   assert.equal(payload.active_actuation, null);
