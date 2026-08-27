@@ -728,7 +728,16 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
     setIsRemoving(true);
     setError(null);
     try {
-      await devicesAPI.remove(device.deveui);
+      // C-1 fix: the zone-card placement (removeContext="zone") must only detach the
+      // valve from this zone -- that's the caller's onRemove (IrrigationZoneCard's
+      // handleRemoveDevice -> irrigationZonesAPI.removeDevice). Calling devicesAPI.remove
+      // unconditionally here unclaimed the device from the whole farm even from the zone
+      // card, contradicting stregaValve.removeSubtitleZone's "it only leaves this zone".
+      // Only the unassigned-grid placement (the default, 'farm') actually deletes the
+      // device.
+      if (removeContext === 'farm') {
+        await devicesAPI.remove(device.deveui);
+      }
       onRemove?.();
     } catch (err: any) {
       setError(err.response?.data?.message || t('stregaValve.failedToRemove'));

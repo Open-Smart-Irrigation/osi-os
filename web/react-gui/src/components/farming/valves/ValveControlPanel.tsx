@@ -13,13 +13,19 @@ import { ValveServiceDialog } from './ValveServiceDialog';
 
 export interface ValveControlPanelProps {
   onUpdate: () => void;
+  // I-1 (Bovey final fix wave review): ValveSummary (GET /api/valves) carries no battery
+  // field -- only Device.latest_data does -- so the caller must build this from the device
+  // list it already polls and key it by deviceEui (uppercased, matching normaliseValveSummary/
+  // normaliseDevice). Undefined/missing entries render the tile with no battery line, same
+  // as before this prop existed.
+  batteryByEui?: Map<string, { batPct?: unknown; batV?: unknown }>;
 }
 
 type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
 
 const valvesFetcher = () => valvesAPI.list();
 
-export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }) => {
+export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, batteryByEui }) => {
   const { t } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
 
@@ -179,6 +185,8 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate }
               onResume={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'ACTIVE'))}
               onResend={() => runAction(valve.deviceEui, () => valvesAPI.resendPlan(valve.deviceEui))}
               onDelete={() => runAction(valve.deviceEui, () => devicesAPI.remove(valve.deviceEui))}
+              batteryPercent={batteryByEui?.get(valve.deviceEui)?.batPct}
+              batteryVoltage={batteryByEui?.get(valve.deviceEui)?.batV}
             />
           ))}
         </div>

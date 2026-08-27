@@ -298,11 +298,19 @@ function assertFrontendValveControls() {
         throw new Error('StregaValveCard must gate cancel rendering on an active VAE row');
     }
 
+    // C-1 (Bovey final fix wave review): the devices-tab card's own farm-level device
+    // removal must be gated on removeContext -- the zone-card placement (removeContext=
+    // "zone") must only ever detach from the zone (its caller's onRemove does that), never
+    // also unclaim the device from the whole farm.
+    if (!/if\s*\(\s*removeContext\s*===\s*'farm'\s*\)\s*\{\s*\n\s*await devicesAPI\.remove/.test(stregaCard)) {
+        throw new Error("StregaValveCard must gate devicesAPI.remove on removeContext === 'farm' -- the zone-card placement must not unclaim the device from the farm");
+    }
+
     // No bare CLOSE from any of the daily-use surfaces. The only sanctioned bare CLOSE is the
     // settings-dialog manual override (stuck-open recovery, two-step confirm) -- assert it
     // stays confined there, not merely that the daily surfaces lack it, so a future CLOSE added
     // to any of these files fails loudly instead of silently widening the safety surface.
-    const mainControlSurfaces = [['ValveOpenDialog', openDialog], ['ValveControlPanel', controlPanel], ['ValveTile', valveTile]];
+    const mainControlSurfaces = [['ValveOpenDialog', openDialog], ['ValveControlPanel', controlPanel], ['ValveTile', valveTile], ['StregaValveCard', stregaCard]];
     for (const [name, src] of mainControlSurfaces) {
         if (src.includes("action: 'CLOSE'")) {
             throw new Error(`${name} must not send a bare CLOSE from the main valve controls`);
