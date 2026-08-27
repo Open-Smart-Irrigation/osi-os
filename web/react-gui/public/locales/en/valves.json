@@ -51,7 +51,7 @@
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % RH" },
   "card": { "enclosureLabel": "Enclosure", "enclosureNoReading": "no reading yet", "enclosureNotMeasured": "not measured on Gen2" },
   "lastSeen": { "never": "Never seen", "justNow": "Seen just now", "minutesAgo_one": "Last seen {{count}} minute ago", "minutesAgo_other": "Last seen {{count}} minutes ago", "hoursAgo_one": "Last seen {{count}} hour ago", "hoursAgo_other": "Last seen {{count}} hours ago", "daysAgo_one": "Last seen {{count}} day ago", "daysAgo_other": "Last seen {{count}} days ago" },
-  "battery": "Battery: {{percent}} %",
+  "battery": "Battery: {{percent}}%",
   "cancelQueuedOpen": "Cancel queued open",
   "removeFromZoneMenuItem": "Remove from zone",
   "removeFromZoneConfirmTitle": "Remove this valve from the zone?",

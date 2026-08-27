@@ -51,7 +51,7 @@
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % RH" },
   "card": { "enclosureLabel": "Enclosure", "enclosureNoReading": "no reading yet", "enclosureNotMeasured": "not measured on Gen2" },
   "lastSeen": { "never": "Nunca visto", "justNow": "Visto agora mesmo", "minutesAgo_one": "Visto há {{count}} minuto", "minutesAgo_other": "Visto há {{count}} minutos", "hoursAgo_one": "Visto há {{count}} hora", "hoursAgo_other": "Visto há {{count}} horas", "daysAgo_one": "Visto há {{count}} dia", "daysAgo_other": "Visto há {{count}} dias" },
-  "battery": "Bateria: {{percent}} %",
+  "battery": "Bateria: {{percent}}%",
   "cancelQueuedOpen": "Cancelar comando em espera",
   "removeFromZoneMenuItem": "Remover da zona",
   "removeFromZoneConfirmTitle": "Remover esta válvula da zona?",
