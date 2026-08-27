@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation, ValveSummary } from '../../types/farming';
-import type { IrrigationActuation } from '../../services/api';
 import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../services/api';
 import { KiwiSensorCard } from './KiwiSensorCard';
 import { DraginoTempCard } from './DraginoTempCard';
-import { StregaValveCard } from './StregaValveCard';
+import { DeviceValveTile } from './valves/DeviceValveTile';
 import { SenseCapWeatherCard } from './SenseCapWeatherCard';
 import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { ScheduleSection } from './ScheduleSection';
@@ -25,7 +24,6 @@ interface IrrigationZoneCardProps {
   unassignedDevices: Device[];
   onUpdate: () => void;
   allZones?: Array<{ id: number; name: string }>;
-  irrigationActuations?: IrrigationActuation[];
   valvesByEui?: Map<string, ValveSummary>;
 }
 
@@ -84,7 +82,6 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   unassignedDevices,
   onUpdate,
   allZones,
-  irrigationActuations = [],
   valvesByEui,
 }) => {
   const { t } = useTranslation('devices');
@@ -123,6 +120,23 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       onUpdate();
     } catch (err: any) {
       setError(err.response?.data?.message || t('zone.failedToRemoveDevice'));
+    } finally {
+      setRemovingDevice(null);
+    }
+  };
+
+  // C2 final fix wave: same zone-detach call `handleRemoveDevice` makes, shaped as
+  // `DeviceValveTile`'s own `removeDevice: (deviceEui) => Promise<void>` contract instead --
+  // it rethrows on failure so the tile's own action-error banner surfaces it too, in addition
+  // to this card's `error` state (mirrors the OSI Server cloud's `removeDeviceFromZone`).
+  const removeValveFromZone = async (deveui: string) => {
+    setRemovingDevice(deveui);
+    setError(null);
+    try {
+      await irrigationZonesAPI.removeDevice(zone.id, deveui);
+    } catch (err: any) {
+      setError(err.response?.data?.message || t('zone.failedToRemoveDevice'));
+      throw err;
     } finally {
       setRemovingDevice(null);
     }
@@ -449,13 +463,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {stregaValves.map((device) => (
                       <div key={device.deveui} className="relative">
-                        <StregaValveCard
+                        <DeviceValveTile
                           device={device}
-                          onUpdate={onUpdate}
-                          onRemove={() => handleRemoveDevice(device.deveui)}
-                          irrigationActuations={irrigationActuations}
-                          timeZone={zone.timezone}
                           valve={valvesByEui?.get(device.deveui)}
+                          onUpdate={onUpdate}
+                          onRemove={onUpdate}
+                          removeDevice={removeValveFromZone}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">

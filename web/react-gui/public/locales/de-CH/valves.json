@@ -49,5 +49,11 @@
   "weekdays": { "0": "So", "1": "Mo", "2": "Di", "3": "Mi", "4": "Do", "5": "Fr", "6": "Sa" },
   "trigger": { "service_action": "Serviceeingriff", "manual": "Manuell", "cloud_command": "Cloud", "trigger_based": "Sensorgesteuert", "one_time": "Einmalig", "on_valve_schedule": "Zeitplan (auf Ventil)", "unexplained": "Am Ventil geöffnet" },
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % rF" },
-  "card": { "enclosureLabel": "Gehäuse", "enclosureNoReading": "noch kein Messwert", "enclosureNotMeasured": "wird von Gen2 nicht gemessen" }
+  "card": { "enclosureLabel": "Gehäuse", "enclosureNoReading": "noch kein Messwert", "enclosureNotMeasured": "wird von Gen2 nicht gemessen" },
+  "lastSeen": { "never": "Nie gesehen", "justNow": "Gerade eben gesehen", "minutesAgo_one": "Zuletzt gesehen: vor {{count}} Minute", "minutesAgo_other": "Zuletzt gesehen: vor {{count}} Minuten", "hoursAgo_one": "Zuletzt gesehen: vor {{count}} Stunde", "hoursAgo_other": "Zuletzt gesehen: vor {{count}} Stunden", "daysAgo_one": "Zuletzt gesehen: vor {{count}} Tag", "daysAgo_other": "Zuletzt gesehen: vor {{count}} Tagen" },
+  "battery": "🔋 {{percent}}%",
+  "removeFromZoneMenuItem": "Aus Zone entfernen",
+  "removeFromZoneConfirmTitle": "Dieses Ventil aus der Zone entfernen?",
+  "removeFromZoneConfirmBody": "Es bleibt registriert und behält seine Pläne — es verlässt nur diese Zone.",
+  "removeFromZoneConfirmButton": "Ja, entfernen"
 }

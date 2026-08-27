@@ -38,6 +38,20 @@ const { translateForTest } = vi.hoisted(() => {
     deleteConfirmTitle: 'Delete this valve?',
     deleteConfirmBody: 'This removes it from the dashboard. Schedules are not sent again.',
     deleteConfirmButton: 'Yes, delete',
+    battery: '🔋 {{percent}}%',
+    // Deliberately distinct from `neverSeen` above (the big state-label override) so a
+    // test asserting on this top-right label can never accidentally match that one --
+    // both really do render "Never seen" in production copy (see valveCardHelpers.ts's
+    // own doc comment on the ported-from-cloud duplication), but the test fixture text
+    // only needs to be unambiguous, not production-accurate.
+    'lastSeen.never': 'Last seen: never',
+    'lastSeen.justNow': 'Last seen: just now',
+    'lastSeen.minutesAgo_one': 'Last seen: {{count}} minute ago',
+    'lastSeen.minutesAgo_other': 'Last seen: {{count}} minutes ago',
+    'lastSeen.hoursAgo_one': 'Last seen: {{count}} hour ago',
+    'lastSeen.hoursAgo_other': 'Last seen: {{count}} hours ago',
+    'lastSeen.daysAgo_one': 'Last seen: {{count}} day ago',
+    'lastSeen.daysAgo_other': 'Last seen: {{count}} days ago',
   };
   return {
     translateForTest: (key: string, options?: Record<string, unknown>): string => {
@@ -284,5 +298,65 @@ describe('ValveTile #171 disclosures', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Service' }));
     expect(onService).toHaveBeenCalledTimes(1);
+  });
+});
+
+// I6 (Bovey final fix wave): last-seen top-right label + battery footer, ported from the
+// OSI Server cloud's ValveTile.tsx placement. Tier logic itself (describeLastSeen) is unit
+// tested directly in valveCardHelpers.test.ts; these assert the tile actually renders what
+// that helper produces, and that the battery line is honestly omitted rather than "—".
+describe('ValveTile last-seen label (I6)', () => {
+  it('shows the "never" tier when the valve has no lastUplinkAt', () => {
+    renderTile({ lastUplinkAt: null });
+    expect(screen.getByText('Last seen: never')).toBeInTheDocument();
+  });
+
+  it('shows the "just now" tier for a contact under a minute old', () => {
+    renderTile({ lastUplinkAt: new Date(Date.now() - 10_000).toISOString() });
+    expect(screen.getByText('Last seen: just now')).toBeInTheDocument();
+  });
+
+  it('shows the singular minutes tier for a one-minute-old contact', () => {
+    renderTile({ lastUplinkAt: new Date(Date.now() - 60_000).toISOString() });
+    expect(screen.getByText('Last seen: 1 minute ago')).toBeInTheDocument();
+  });
+
+  it('shows the plural minutes tier for a contact several minutes old', () => {
+    renderTile({ lastUplinkAt: new Date(Date.now() - 5 * 60_000).toISOString() });
+    expect(screen.getByText('Last seen: 5 minutes ago')).toBeInTheDocument();
+  });
+
+  it('shows the hours tier for a contact several hours old', () => {
+    renderTile({ lastUplinkAt: new Date(Date.now() - 3 * 3_600_000).toISOString() });
+    expect(screen.getByText('Last seen: 3 hours ago')).toBeInTheDocument();
+  });
+
+  it('shows the days tier for a contact several days old', () => {
+    renderTile({ lastUplinkAt: new Date(Date.now() - 2 * 86_400_000).toISOString() });
+    expect(screen.getByText('Last seen: 2 days ago')).toBeInTheDocument();
+  });
+});
+
+describe('ValveTile battery footer (I6)', () => {
+  it('shows nothing at all when no battery data is available', () => {
+    const { container } = renderTile();
+    expect(container.textContent).not.toMatch(/🔋/);
+  });
+
+  it('shows the battery percent when bat_pct is present', () => {
+    renderTile({}, { batteryPercent: 72 });
+    expect(screen.getByText('🔋 72%')).toBeInTheDocument();
+  });
+
+  it('falls back to the voltage-derived percent when bat_pct is absent', () => {
+    // LSN50 usable range is 2.1V-3.6V (deviceCardBattery.ts) -- 3.6V is a full battery.
+    renderTile({}, { batteryVoltage: 3.6 });
+    expect(screen.getByText('🔋 100%')).toBeInTheDocument();
+  });
+
+  it('prefers bat_pct over the voltage fallback when both are present', () => {
+    renderTile({}, { batteryPercent: 40, batteryVoltage: 3.6 });
+    expect(screen.getByText('🔋 40%')).toBeInTheDocument();
+    expect(screen.queryByText('🔋 100%')).not.toBeInTheDocument();
   });
 });

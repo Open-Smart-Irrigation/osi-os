@@ -49,5 +49,11 @@
   "weekdays": { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" },
   "trigger": { "service_action": "Acción de servicio", "manual": "Manual", "cloud_command": "Cloud", "trigger_based": "Trigger-based", "one_time": "One-time", "on_valve_schedule": "Scheduled (on valve)", "unexplained": "Opened on valve" },
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % RH" },
-  "card": { "enclosureLabel": "Enclosure", "enclosureNoReading": "no reading yet", "enclosureNotMeasured": "not measured on Gen2" }
+  "card": { "enclosureLabel": "Enclosure", "enclosureNoReading": "no reading yet", "enclosureNotMeasured": "not measured on Gen2" },
+  "lastSeen": { "never": "Nunca visto", "justNow": "Visto ahora mismo", "minutesAgo_one": "Visto hace {{count}} minuto", "minutesAgo_other": "Visto hace {{count}} minutos", "hoursAgo_one": "Visto hace {{count}} hora", "hoursAgo_other": "Visto hace {{count}} horas", "daysAgo_one": "Visto hace {{count}} día", "daysAgo_other": "Visto hace {{count}} días" },
+  "battery": "🔋 {{percent}}%",
+  "removeFromZoneMenuItem": "Quitar de la zona",
+  "removeFromZoneConfirmTitle": "¿Quitar esta válvula de la zona?",
+  "removeFromZoneConfirmBody": "Sigue registrada y conserva sus programas — solo sale de esta zona.",
+  "removeFromZoneConfirmButton": "Sí, quitar"
 }

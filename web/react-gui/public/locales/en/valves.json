@@ -49,5 +49,11 @@
   "weekdays": { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" },
   "trigger": { "service_action": "Service action", "manual": "Manual", "cloud_command": "Cloud", "trigger_based": "Trigger-based", "one_time": "One-time", "on_valve_schedule": "Scheduled (on valve)", "unexplained": "Opened on valve" },
   "format": { "temperature": "{{value}} °C", "humidity": "{{value}} % RH" },
-  "card": { "enclosureLabel": "Enclosure", "enclosureNoReading": "no reading yet", "enclosureNotMeasured": "not measured on Gen2" }
+  "card": { "enclosureLabel": "Enclosure", "enclosureNoReading": "no reading yet", "enclosureNotMeasured": "not measured on Gen2" },
+  "lastSeen": { "never": "Never seen", "justNow": "Seen just now", "minutesAgo_one": "Last seen {{count}} minute ago", "minutesAgo_other": "Last seen {{count}} minutes ago", "hoursAgo_one": "Last seen {{count}} hour ago", "hoursAgo_other": "Last seen {{count}} hours ago", "daysAgo_one": "Last seen {{count}} day ago", "daysAgo_other": "Last seen {{count}} days ago" },
+  "battery": "🔋 {{percent}}%",
+  "removeFromZoneMenuItem": "Remove from zone",
+  "removeFromZoneConfirmTitle": "Remove this valve from the zone?",
+  "removeFromZoneConfirmBody": "The valve stays registered and keeps its schedules — it only leaves this zone.",
+  "removeFromZoneConfirmButton": "Yes, remove"
 }

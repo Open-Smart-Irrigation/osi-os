@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import type { ValveSummary } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
 import { ValveGlyph, valveGlyphLabel, type Translate } from './ValveGlyph';
+import { describeLastSeen, renderLastSeen } from './valveCardHelpers';
+import { getBatteryPercentFromVoltage, getValidBatteryPercent } from '../shared/deviceCardBattery';
 import { useDismissOnPointerDown } from '../../../hooks/useDismissOnPointerDown';
 
 export interface ValveTileProps {
@@ -25,6 +27,25 @@ export interface ValveTileProps {
   // lives inside the overflow menu instead, with its own confirmation step.
   onDelete: () => void;
   busy: boolean;
+  // C2 final fix wave ("one ValveTile everywhere"): the zone-card/unassigned-grid
+  // placement (`DeviceValveTile`) detaches from a zone rather than deleting the device
+  // outright, so its overflow item and confirmation copy read "Remove from zone" instead
+  // of "Delete valve". Undefined (the top-level ValveControlPanel placement, which always
+  // fully unclaims the valve) falls back to the existing deleteMenuItem/deleteConfirm*
+  // keys below.
+  deleteMenuLabel?: string;
+  deleteConfirmTitle?: string;
+  deleteConfirmBody?: string;
+  deleteConfirmButton?: string;
+  // I6: battery footer line, ported from the OSI Server cloud's ValveTile.tsx. `ValveSummary`
+  // (GET /api/valves) carries no battery field -- only `Device.latest_data` does -- so the
+  // caller (`DeviceValveTile`, which already has the `Device`) passes both raw fields
+  // through. `batteryVoltage` is an edge-only addition over the cloud's prop (LSN50-style
+  // devices sometimes report only `bat_v`, never `bat_pct`) -- see deviceCardBattery.ts.
+  // Loose-typed (`unknown`) to match those helpers: a raw sensor value is never assumed
+  // clean.
+  batteryPercent?: unknown;
+  batteryVoltage?: unknown;
 }
 
 function formatClock(iso: string, timeZone: string): string {
@@ -66,12 +87,23 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   onService,
   onDelete,
   busy,
+  deleteMenuLabel,
+  deleteConfirmTitle,
+  deleteConfirmBody,
+  deleteConfirmButton,
+  batteryPercent,
+  batteryVoltage,
 }) => {
   const { t } = useTranslation('valves');
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useDismissOnPointerDown(menuRef, () => setMenuOpen(false));
+
+  // I6: top-right, subtle -- shared by every ValveTile placement automatically since it is
+  // derived straight from `valve.lastUplinkAt`, not a caller-supplied prop.
+  const lastSeenLabel = renderLastSeen(describeLastSeen(valve.lastUplinkAt), t as Translate);
+  const battery = getValidBatteryPercent(batteryPercent) ?? getBatteryPercentFromVoltage(batteryVoltage);
 
   const glyph = deriveValveGlyphState(valve, nowMs);
   const isPendingCommand = valve.activeActuation?.reconciliationState === 'PENDING_OBSERVATION';
@@ -159,6 +191,8 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             </p>
           )}
         </div>
+        {/* I6: top-right, subtle -- shared by every ValveTile placement automatically. */}
+        <span className="shrink-0 whitespace-nowrap text-xs text-[var(--text-tertiary)]">{lastSeenLabel}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -226,7 +260,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
                     Open button -- unlike the legacy card, which puts its remove ✕ beside
                     a one-tap water-moving control. */}
                 <MenuItem
-                  label={t('deleteMenuItem')}
+                  label={deleteMenuLabel ?? t('deleteMenuItem')}
                   onClick={() => { setMenuOpen(false); setConfirmDelete(true); }}
                 />
               </div>
@@ -237,8 +271,8 @@ export const ValveTile: React.FC<ValveTileProps> = ({
 
       {confirmDelete && (
         <div className="rounded-lg border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2">
-          <p className="text-sm font-semibold text-[var(--warn-text)]">{t('deleteConfirmTitle')}</p>
-          <p className="mt-0.5 text-xs text-[var(--warn-text)]">{t('deleteConfirmBody')}</p>
+          <p className="text-sm font-semibold text-[var(--warn-text)]">{deleteConfirmTitle ?? t('deleteConfirmTitle')}</p>
+          <p className="mt-0.5 text-xs text-[var(--warn-text)]">{deleteConfirmBody ?? t('deleteConfirmBody')}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button
               type="button"
@@ -247,7 +281,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
               className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy && <Spinner />}
-              {t('deleteConfirmButton')}
+              {deleteConfirmButton ?? t('deleteConfirmButton')}
             </button>
             <button
               type="button"
@@ -259,6 +293,14 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* I6: battery footer -- omitted entirely (not "—") when absent, never fabricated
+          from a missing/invalid sensor value. */}
+      {battery !== null && (
+        <p className="border-t border-[var(--border)] pt-2 text-xs text-[var(--text-tertiary)]">
+          {t('battery', { percent: battery })}
+        </p>
       )}
     </div>
   );
