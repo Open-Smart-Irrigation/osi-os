@@ -17,13 +17,16 @@ function getPath(obj: Record<string, any>, keyPath: string): unknown {
 }
 
 test('devices locale files include irrigation actuation translation keys', () => {
-  // C2 final fix wave ("one ValveTile everywhere"): `stregaValve.actuationFeedback.*` was
-  // read only by the now-deleted StregaValveCard.tsx (getStregaActuationFeedback) -- the
-  // shared ValveTile surfaces the same information via valves.json's own state/pendingHint/
-  // planIncomplete keys instead. Removed from this required set alongside the keys
-  // themselves (all 7 devices.json), which stregaValveCard.test.ts's own deletion also
-  // stopped exercising.
+  // `stregaValve.actuationFeedback.*` is read by StregaValveCard.tsx
+  // (getStregaActuationFeedback) -- the devices-tab card restored by the EDGE-2 operator
+  // ruling (final fix wave) that sits alongside the Valve control panel's ValveTile.
   const requiredKeys = [
+    'stregaValve.actuationFeedback.closed',
+    'stregaValve.actuationFeedback.closedAt',
+    'stregaValve.actuationFeedback.open',
+    'stregaValve.actuationFeedback.openClosesAt',
+    'stregaValve.actuationFeedback.openQueued',
+    'stregaValve.actuationFeedback.waitingForUplink',
     'irrigationOutcomes.duration',
     'irrigationOutcomes.totalVolume',
     'irrigationOutcomes.irrigated',

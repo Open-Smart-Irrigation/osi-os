@@ -27,23 +27,24 @@ export interface ValveTileProps {
   // lives inside the overflow menu instead, with its own confirmation step.
   onDelete: () => void;
   busy: boolean;
-  // C2 final fix wave ("one ValveTile everywhere"): the zone-card/unassigned-grid
-  // placement (`DeviceValveTile`) detaches from a zone rather than deleting the device
-  // outright, so its overflow item and confirmation copy read "Remove from zone" instead
-  // of "Delete valve". Undefined (the top-level ValveControlPanel placement, which always
-  // fully unclaims the valve) falls back to the existing deleteMenuItem/deleteConfirm*
-  // keys below.
+  // C2 final fix wave ("one ValveTile everywhere"): kept for parity with a zone-scoped
+  // placement that detaches from a zone rather than deleting the device outright, so its
+  // overflow item and confirmation copy would read "Remove from zone" instead of "Delete
+  // valve". Undefined (the current, sole caller: the top-level ValveControlPanel, which
+  // always fully unclaims the valve) falls back to the existing deleteMenuItem/deleteConfirm*
+  // keys below. The operator-ruling restore of the devices-tab STREGA card (final fix wave,
+  // EDGE-2) put that zone-scoped placement back on the legacy StregaValveCard instead of a
+  // ValveTile, so no caller currently passes these overrides.
   deleteMenuLabel?: string;
   deleteConfirmTitle?: string;
   deleteConfirmBody?: string;
   deleteConfirmButton?: string;
   // I6: battery footer line, ported from the OSI Server cloud's ValveTile.tsx. `ValveSummary`
-  // (GET /api/valves) carries no battery field -- only `Device.latest_data` does -- so the
-  // caller (`DeviceValveTile`, which already has the `Device`) passes both raw fields
-  // through. `batteryVoltage` is an edge-only addition over the cloud's prop (LSN50-style
-  // devices sometimes report only `bat_v`, never `bat_pct`) -- see deviceCardBattery.ts.
-  // Loose-typed (`unknown`) to match those helpers: a raw sensor value is never assumed
-  // clean.
+  // (GET /api/valves) carries no battery field -- only `Device.latest_data` does -- so a
+  // caller that also has the `Device` would pass both raw fields through. `batteryVoltage`
+  // is an edge-only addition over the cloud's prop (LSN50-style devices sometimes report
+  // only `bat_v`, never `bat_pct`) -- see deviceCardBattery.ts. Loose-typed (`unknown`) to
+  // match those helpers: a raw sensor value is never assumed clean.
   batteryPercent?: unknown;
   batteryVoltage?: unknown;
 }
