@@ -147,6 +147,15 @@ export const FarmingDashboard: React.FC = () => {
     () => new Map((valves ?? []).map((v) => [v.deviceEui, v])),
     [valves],
   );
+  // I-1 (Bovey final fix wave review): ValveTile's battery footer (I6) needs
+  // Device.latest_data, which ValveSummary doesn't carry -- build it once from the device
+  // list this page already polls and hand it to the panel.
+  const batteryByEui = useMemo(
+    () => new Map((devices ?? [])
+      .filter((d) => d.type_id === 'STREGA_VALVE')
+      .map((d) => [d.deveui, { batPct: d.latest_data?.bat_pct, batV: d.latest_data?.bat_v }])),
+    [devices],
+  );
   const irrigationOutcomeZoneContexts = useMemo(
     () => new Map<number, IrrigationOutcomeZoneContext>((zones ?? []).map((zone) => [
       zone.id,
@@ -251,7 +260,7 @@ export const FarmingDashboard: React.FC = () => {
                 there anything to control at all" gate. */}
             {modules.valveControl && hasStregaValve && (
               <div className="mt-8">
-                <ValveControlPanel onUpdate={handleUpdate} />
+                <ValveControlPanel onUpdate={handleUpdate} batteryByEui={batteryByEui} />
               </div>
             )}
 

@@ -38,6 +38,7 @@ vi.mock('../../../services/api', () => ({
     devicesAPI: {
         controlValve: vi.fn().mockResolvedValue(undefined),
         cancelIrrigation: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
     },
     valveAPI: {
         getTodayLiters: vi.fn().mockResolvedValue({ liters: null, source: 'unknown' }),
@@ -271,5 +272,30 @@ describe('StregaValveCard', () => {
         const { container } = renderCard();
         await screen.findByText(/5 min/); // wait for the card to finish its initial render
         expect(container.textContent).not.toMatch(/Enclosure|no reading yet|not measured on Gen2|°C/);
+    });
+
+    // C-1 (Bovey final fix wave review): the confirm-remove flow's own devicesAPI.remove
+    // call must be gated on removeContext, not unconditional -- the zone-card placement
+    // (removeContext="zone") relies on the caller's onRemove to do the actual
+    // irrigationZonesAPI.removeDevice zone-detach; it must never also unclaim the device
+    // from the whole farm.
+    it('removeContext="zone": confirming remove only calls onRemove, never devicesAPI.remove', async () => {
+        const { onRemove } = renderCard({}, { removeContext: 'zone' });
+        fireEvent.click(await screen.findByTitle('Remove device'));
+        fireEvent.click(await screen.findByText('stregaValve.yesRemove'));
+        await waitFor(() => {
+            expect(onRemove).toHaveBeenCalled();
+        });
+        expect(devicesAPI.remove).not.toHaveBeenCalled();
+    });
+
+    it('default removeContext ("farm"): confirming remove calls devicesAPI.remove, then onRemove', async () => {
+        const { onRemove } = renderCard();
+        fireEvent.click(await screen.findByTitle('Remove device'));
+        fireEvent.click(await screen.findByText('stregaValve.yesRemove'));
+        await waitFor(() => {
+            expect(devicesAPI.remove).toHaveBeenCalledWith(mockDevice.deveui);
+        });
+        expect(onRemove).toHaveBeenCalled();
     });
 });
