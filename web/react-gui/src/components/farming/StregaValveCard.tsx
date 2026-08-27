@@ -13,6 +13,14 @@ interface StregaValveCardProps {
   todayLiters?: { value: number; source: 'measured_flow_meter' | 'estimated_duration_flow_rate' | 'unknown' };
   irrigationActuations?: IrrigationActuation[];
   timeZone?: string | null;
+  // Per-placement remove copy (EDGE-2 operator ruling): the zone-card slot's ✕ only
+  // detaches the valve from this zone (the caller's onRemove does the actual
+  // irrigationZonesAPI.removeDevice call) while the device stays registered on the
+  // farm; the unassigned-grid slot's ✕ fully removes the device (this card's own
+  // devicesAPI.remove call below, unconditionally). Both share the same confirm title
+  // and buttons -- only the explanatory subtitle differs. Defaults to 'farm' so an
+  // unassigned-style caller that omits this prop keeps the pre-existing copy.
+  removeContext?: 'zone' | 'farm';
   // The valve-list row for this device (from GET /api/valves) — the single source of
   // truth for STREGA generation and the enclosure temperature/humidity reading. `device`
   // (from GET /api/devices) carries neither reliably: it has no strega_generation field
@@ -25,10 +33,6 @@ interface StregaValveCardProps {
 
 const MAX_STREGA_INTERVAL_MINUTES = 255;
 const MAX_STREGA_TIMED_ACTION_AMOUNT = 255;
-const STREGA_MODE_OPTIONS: Array<{ value: StregaModel; label: string }> = [
-  { value: 'STANDARD', label: 'Standard / Solenoid' },
-  { value: 'MOTORIZED', label: 'Motorized valve' },
-];
 
 type RecognizedStregaModel = StregaModel | 'UNKNOWN';
 type TimedActionUnit = 'seconds' | 'minutes' | 'hours';
@@ -208,6 +212,13 @@ const ConfigPanel: React.FC<{
   const [info, setInfo] = useState<string | null>(null);
   const recognizedModel = getRecognizedStregaModel(device);
   const isMotorized = recognizedModel === 'MOTORIZED';
+  // Translated (fresh review C2): these two option labels used to be raw English strings
+  // in a module-scope constant, so fr/de-CH/etc. always showed "Standard / Solenoid" and
+  // "Motorized valve" in the dropdown regardless of locale.
+  const stregaModeOptions: Array<{ value: StregaModel; label: string }> = [
+    { value: 'STANDARD', label: t('stregaValve.modelStandard', { defaultValue: 'Standard / Solenoid' }) },
+    { value: 'MOTORIZED', label: t('stregaValve.modelMotorized', { defaultValue: 'Motorized valve' }) },
+  ];
 
   useDismissOnPointerDown(ref, onClose);
 
@@ -498,7 +509,7 @@ const ConfigPanel: React.FC<{
               onChange={(event) => setModelInput(event.target.value as StregaModel)}
               className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
             >
-              {STREGA_MODE_OPTIONS.map(option => (
+              {stregaModeOptions.map(option => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -636,6 +647,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   todayLiters,
   irrigationActuations = [],
   timeZone,
+  removeContext = 'farm',
   valve,
 }) => {
   const { t } = useTranslation('devices');
@@ -773,7 +785,9 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
       {showConfirm && (
         <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
           <p className="font-bold mb-2">{t('stregaValve.removeConfirm')}</p>
-          <p className="text-sm mb-3">{t('stregaValve.removeSubtitle')}</p>
+          <p className="text-sm mb-3">
+            {removeContext === 'zone' ? t('stregaValve.removeSubtitleZone') : t('stregaValve.removeSubtitle')}
+          </p>
           <div className="flex gap-2">
             <button
               onClick={handleRemove}
@@ -818,7 +832,10 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
         </div>
         {shouldShowStregaTargetState(device) && (
           <p className="text-xs text-[var(--text-secondary)] mt-1">
-            {t('stregaValve.target', { state: device.target_state })}
+            {/* Copy repair (fresh review C2): interpolate the already-localized OPEN/CLOSED
+                word, not the raw device.target_state enum -- fr previously rendered the
+                English "Cible : OPEN" here regardless of locale. */}
+            {t('stregaValve.target', { state: device.target_state === 'OPEN' ? t('stregaValve.open') : t('stregaValve.closed') })}
           </p>
         )}
         {actuationFeedback && <ValveActuationBadge feedback={actuationFeedback} />}
@@ -838,12 +855,12 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
 
       {(fetchedLiters ?? todayLiters) && (
         <div className="text-sm text-[var(--text)] mb-3 px-1">
-          Today: {(fetchedLiters ?? todayLiters)!.value} L
+          {t('stregaValve.todayLiters', { liters: (fetchedLiters ?? todayLiters)!.value, defaultValue: 'Today: {{liters}} L' })}
           {(fetchedLiters ?? todayLiters)!.source === 'measured_flow_meter' && (
-            <span className="ml-1 text-xs uppercase tracking-wide text-[var(--toggle-on)]">Measured</span>
+            <span className="ml-1 text-xs uppercase tracking-wide text-[var(--toggle-on)]">{t('stregaValve.measured', { defaultValue: 'Measured' })}</span>
           )}
           {(fetchedLiters ?? todayLiters)!.source === 'estimated_duration_flow_rate' && (
-            <span className="ml-1 text-xs uppercase tracking-wide text-amber-700">Estimated</span>
+            <span className="ml-1 text-xs uppercase tracking-wide text-amber-700">{t('stregaValve.estimated', { defaultValue: 'Estimated' })}</span>
           )}
         </div>
       )}
@@ -878,7 +895,10 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
             ) : (
               confirmOpen
                 ? t('stregaValve.confirmOpen', { minutes: openDurationMin, defaultValue: 'Confirm — open for {{minutes}} min' })
-                : `${t('stregaValve.open')} ${openDurationMin} min`
+                // Copy repair (fresh review C2): a verb form, not the OPEN/OUVERTE status
+                // word -- fr previously rendered "OUVERTE 5 min" (an adjective, not an
+                // instruction to act).
+                : t('stregaValve.openFor', { minutes: openDurationMin, defaultValue: 'Open {{minutes}} min' })
             )}
           </button>
         </div>
