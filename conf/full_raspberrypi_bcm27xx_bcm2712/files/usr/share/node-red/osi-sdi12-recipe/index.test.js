@@ -34,9 +34,16 @@ function commandSlots(compiledRecipe) {
 }
 
 function valuesInCut(cut) {
-  const match = /^0,(\d+),2,2~\d+$/.exec(cut);
+  const match = /^(\d+),2,2~\d+$/.exec(cut);
   assert.ok(match, `unexpected cut: ${cut}`);
   return (Number(match[1]) - 3) / 9;
+}
+
+function assertAfLengthsMatchAscii(compiledRecipe) {
+  for (const entry of compiledRecipe.frames.filter((frame) => frame.hex.startsWith('AF'))) {
+    const bytes = Buffer.from(entry.hex, 'hex');
+    assert.equal(bytes[3], bytes.length - 5, entry.hex);
+  }
 }
 
 function expectedFamilySlots(address, measure, count) {
@@ -98,6 +105,7 @@ test('all 2,046 Sentek type masks compile response-position-only recipes within 
 
       assert.equal(compiledRecipe.address, layout.address);
       assert.equal(compiledRecipe.slots.length <= 8, true);
+      assertAfLengthsMatchAscii(compiledRecipe);
       const vwcEnd = commands.findIndex((command) => command.includes('M2!') || command.includes('M3!'));
       const vicStart = vwcEnd === -1 ? commands.length : vwcEnd;
       assert.equal(compiledRecipe.slots.slice(0, vicStart).reduce((sum, slot) => sum + valuesInCut(slot.cut), 0), expectedVwc);
@@ -119,7 +127,7 @@ test('VWC and TriSCAN response boundaries select measurement and D-response slot
     const vwc = compiled(buildLayout(count, 0, '0'));
     const expectedVwc = expectedFamilySlots('0', '0M!,1,1,2', count);
     assert.deepEqual(commandSlots(vwc), expectedVwc.commands);
-    assert.deepEqual(vwc.slots.map((slot) => slot.cut), expectedVwc.chunks.map((values) => `0,${3 + 9 * values},2,2~${1 + 9 * values}`));
+    assert.deepEqual(vwc.slots.map((slot) => slot.cut), expectedVwc.chunks.map((values) => `${3 + 9 * values},2,2~${1 + 9 * values}`));
 
     const allTriScanMask = (1 << count) - 1;
     const vic = compiled(buildLayout(count, allTriScanMask, '0'));
@@ -127,7 +135,7 @@ test('VWC and TriSCAN response boundaries select measurement and D-response slot
     const expectedVic = expectedFamilySlots('0', '0M2!,1,1,2', count);
     assert.deepEqual(vicCommands.slice(-expectedVic.commands.length), expectedVic.commands);
     const vicSlots = vic.slots.slice(-expectedVic.commands.length);
-    assert.deepEqual(vicSlots.map((slot) => slot.cut), expectedVic.chunks.map((values) => `0,${3 + 9 * values},2,2~${1 + 9 * values}`));
+    assert.deepEqual(vicSlots.map((slot) => slot.cut), expectedVic.chunks.map((values) => `${3 + 9 * values},2,2~${1 + 9 * values}`));
   }
 });
 
@@ -148,21 +156,22 @@ test('the bench fixture produces the exact four-slot ordered recipe and Dragino 
   };
   const compiledRecipe = compiled(layout);
   assert.deepEqual(compiledRecipe.slots, [
-    { slot: 1, command: '0M!,1,1,2', cut: '0,30,2,2~28' },
-    { slot: 2, command: '0D1!,0,0,2', cut: '0,30,2,2~28' },
-    { slot: 3, command: '0D2!,0,0,2', cut: '0,21,2,2~19' },
-    { slot: 4, command: '0M2!,1,1,2', cut: '0,21,2,2~19' },
+    { slot: 1, command: '0M!,1,1,2', cut: '30,2,2~28' },
+    { slot: 2, command: '0D1!,0,0,2', cut: '30,2,2~28' },
+    { slot: 3, command: '0D2!,0,0,2', cut: '21,2,2~19' },
+    { slot: 4, command: '0M2!,1,1,2', cut: '21,2,2~19' },
   ]);
   assert.equal(compiledRecipe.slots.slice(0, 3).reduce((sum, slot) => sum + valuesInCut(slot.cut), 0), 8);
   assert.equal(compiledRecipe.slots.slice(3).reduce((sum, slot) => sum + valuesInCut(slot.cut), 0), 2);
   assert.deepEqual(compiledRecipe.frames.map(frameHex), [
     '07031F40', 'AB01', 'AE02', 'AD01', 'A90D09',
-    'AF010109304D212C312C312C3200', 'AF01020B302C33302C322C327E323800',
-    'AF02010B304431212C302C302C3200', 'AF02020B302C33302C322C327E323800',
-    'AF03010B304432212C302C302C3200', 'AF03020B302C32312C322C327E313900',
-    'AF04010A304D32212C312C312C3200', 'AF04020B302C32312C322C327E313900',
+    'AF010109304D212C312C312C3200', 'AF01020933302C322C327E323800',
+    'AF02010A304431212C302C302C3200', 'AF02020933302C322C327E323800',
+    'AF03010A304432212C302C302C3200', 'AF03020932312C322C327E313900',
+    'AF04010A304D32212C312C312C3200', 'AF04020932312C322C327E313900',
     '09050F', '010004B0',
   ]);
+  assertAfLengthsMatchAscii(compiledRecipe);
 });
 
 test('global frames bracket active command/cut pairs and only clear the unused tail', () => {
@@ -178,6 +187,40 @@ test('global frames bracket active command/cut pairs and only clear the unused t
   const tail = frames.filter((hex) => hex.startsWith('09'));
   assert.deepEqual(tail, [`09${(activeSlots.length + 1).toString(16).padStart(2, '0').toUpperCase()}0F`]);
   assert.equal(frames.some((hex) => /^(?:08|0A|AC|B0)/.test(hex)), false);
+});
+
+test('an eight-slot recipe clears slot 9 before setting the normal interval', () => {
+  const compiledRecipe = compiled(buildLayout(10, 0b1111111111, '0'));
+  assert.equal(compiledRecipe.slots.length, 8);
+  assert.deepEqual(compiledRecipe.frames.slice(-2).map(frameHex), ['09090F', '010004B0']);
+});
+
+test('stable channel IDs and depths change the layout hash but never the recipe frames', () => {
+  const first = {
+    version: 1,
+    address: 'C',
+    sensors: Array.from({ length: 8 }, (_, index) => ({
+      channel: index + 1,
+      response_position: index + 1,
+      depth_cm: (index + 1) * 10,
+      type: index === 0 || index === 4 ? 'TRISCAN' : 'ENVIROSCAN',
+    })),
+  };
+  const second = {
+    version: 1,
+    address: 'C',
+    sensors: Array.from({ length: 8 }, (_, index) => ({
+      channel: 10 - index,
+      response_position: index + 1,
+      depth_cm: 101 + index,
+      type: index === 0 || index === 4 ? 'TRISCAN' : 'ENVIROSCAN',
+    })).reverse(),
+  };
+  const firstRecipe = compiled(first);
+  const secondRecipe = compiled(second);
+  assert.notEqual(firstRecipe.layoutHash, secondRecipe.layoutHash);
+  assert.deepEqual(firstRecipe.slots, secondRecipe.slots);
+  assert.deepEqual(firstRecipe.frames, secondRecipe.frames);
 });
 
 test('identify encoding accepts only discovery or one validated address plus I', () => {

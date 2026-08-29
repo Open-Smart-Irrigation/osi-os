@@ -22,7 +22,7 @@ function canonicalLayoutHash(layout) {
 
 function cutForValueCount(valueCount) {
   const responseLength = 3 + (9 * valueCount);
-  return `0,${responseLength},2,2~${1 + (9 * valueCount)}`;
+  return `${responseLength},2,2~${1 + (9 * valueCount)}`;
 }
 
 function addSlot(slots, command, valueCount) {
@@ -45,10 +45,7 @@ function frame(purpose, bytes) {
 
 function afFrame(slot, selector, ascii, purpose) {
   const payload = Buffer.from(ascii, 'ascii');
-  // Dragino's AF command-length field counts one extra byte for D-response
-  // commands. The bench-approved wire fixture is authoritative here.
-  const length = payload.length + (/^[0-9A-Za-z]D[12]!/.test(ascii) ? 1 : 0);
-  return frame(purpose, Buffer.concat([Buffer.from([0xAF, slot, selector, length]), payload, Buffer.from([0x00])]));
+  return frame(purpose, Buffer.concat([Buffer.from([0xAF, slot, selector, payload.length]), payload, Buffer.from([0x00])]));
 }
 
 function compileSentekRecipe(layout) {
@@ -81,7 +78,7 @@ function compileSentekRecipe(layout) {
     frames.push(afFrame(active.slot, 0x01, active.command, 'command_' + active.slot));
     frames.push(afFrame(active.slot, 0x02, active.cut, 'cut_' + active.slot));
   }
-  if (slots.length < MAX_SLOTS) frames.push(frame('clear_unused_tail', [0x09, slots.length + 1, 0x0F]));
+  frames.push(frame('clear_unused_tail', [0x09, slots.length + 1, 0x0F]));
   frames.push(frame('normal_interval', [0x01, 0x00, 0x04, 0xB0]));
 
   return {

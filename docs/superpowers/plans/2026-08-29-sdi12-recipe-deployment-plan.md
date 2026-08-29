@@ -118,7 +118,7 @@ encodeIdentifyFrame(command)
 
   ```text
   AF010109304D212C312C312C3200
-  AF02010B304431212C302C302C3200
+  AF02010A304431212C302C302C3200
   ```
 
 - [ ] Add exact tests for the global frames `07031F40`, `AB01`, `AE02`, `AD01`, `A90D09`, tail clear `09 <first-unused> 0F`, and final `010004B0`.
