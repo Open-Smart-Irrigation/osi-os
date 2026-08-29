@@ -274,7 +274,8 @@
     "actButtonHint": "Si la sonde ne répond pas, appuyez sur le bouton ACT de l'appareil Dragino, puis réessayez.",
     "noResponse": "La sonde n'a pas répondu à l'identification",
     "valueCount": "Nombre de valeurs",
-    "valueCountHelp": "Laissez vide pour accepter n'importe quel nombre de lectures. Indiquez un nombre pour rejeter les trames qui ne correspondent pas exactement."
+    "valueCountHelp": "Laissez vide pour accepter n'importe quel nombre de lectures. Indiquez un nombre pour rejeter les trames qui ne correspondent pas exactement.",
+    "layoutSaved": "Configuration enregistrée ; acquisition non appliquée.", "apply": "Appliquer la configuration d’acquisition", "rollback": "Rétablir la configuration d’acquisition", "rollingBack": "Rétablissement…", "confirmApply": "Confirmer l’application", "applyConfirmation": "Une recette maximale prend environ huit heures à la cadence normale de 20 minutes et utilise une fenêtre de 12 V de huit secondes par cycle. Elle n’utilise ni alimentation continue ni intervalle plus court.", "deploymentQueued": "Configuration d’acquisition mise en file (version {{version}} ; {{status}}).", "rollbackQueued": "Rétablissement mis en file (version {{version}} ; {{status}}).", "degraded": "Configuration d’acquisition dégradée", "active": "Configuration d’acquisition active", "deploymentStatus": "Configuration d’acquisition : {{status}}"
   },
   "sdi12Soil": {
     "removeConfirm": "Supprimer cet appareil ?",
