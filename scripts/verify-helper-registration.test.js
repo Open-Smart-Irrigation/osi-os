@@ -57,6 +57,16 @@ test('checkSurfaces: each missing surface is reported', () => {
   assert.match(checkSurfaces(fixtures({ moduleDir: { hasDir: true, hasPackageJson: true, hasMain: false, mainName: 'index.js' } })).join(' '), /main file/);
 });
 
+test('checkSurfaces: lockfile must carry both the node_modules link and local package metadata', () => {
+  const fixture = fixtures();
+  delete fixture.packageLock.packages['osi-history-sync-helper'];
+
+  const issues = checkSurfaces(fixture);
+
+  assert.equal(issues.length, 1);
+  assert.match(issues[0], /local package metadata/);
+});
+
 test('checkCodecs: codec entries need a deploy.sh fetch line + the file on disk', () => {
   const issues = checkCodecs({ nameToPath: NAME_TO_PATH, deploySource: '', codecsDir: '/nonexistent' });
   assert.equal(issues.length, 2);

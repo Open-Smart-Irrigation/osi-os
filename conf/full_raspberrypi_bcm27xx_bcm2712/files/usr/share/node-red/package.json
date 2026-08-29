@@ -32,6 +32,7 @@
     "osi-lsn50-normalize": "file:osi-lsn50-normalize",
     "osi-sdi12-normalize": "file:osi-sdi12-normalize",
     "osi-sdi12-recipe": "file:osi-sdi12-recipe",
+    "osi-sdi12-commissioning": "file:osi-sdi12-commissioning",
     "osi-sdi12-reassemble": "file:osi-sdi12-reassemble",
     "osi-scope-helper": "file:osi-scope-helper"
   }

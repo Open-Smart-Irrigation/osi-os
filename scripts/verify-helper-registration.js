@@ -46,6 +46,9 @@ function checkSurfaces({ name, packageJson, packageLock, seedSource, deploySourc
   if (!pkgs['node_modules/' + name]) {
     issues.push(name + ': missing node_modules link entry in package-lock.json');
   }
+  if (!pkgs[name]) {
+    issues.push(name + ': missing local package metadata in package-lock.json');
+  }
   const loop = seedSource.match(/^for module in (.+); do$/m);
   if (!loop || !loop[1].split(/\s+/).includes(name)) {
     issues.push(name + ': missing from 98_osi_node_red_seed module-copy loop');
