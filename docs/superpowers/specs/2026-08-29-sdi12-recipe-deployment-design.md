@@ -25,6 +25,8 @@ defects still need repair so future commissioning state is represented honestly.
   channel layout.
 - Compile the bench-approved Sentek acquisition recipe on the edge. The browser
   cannot submit command strings, byte cuts, or arbitrary downlink bytes.
+- Acquire VWC from all eight installed modules and VIC from the two installed
+  TriSCAN modules at response positions 1 and 5.
 - Make recipe application an explicit operator action after layout save.
 - Record desired, queued, and observed recipe state in SQLite.
 - Keep the switched 12 V window at 8000 ms and the ordinary 1200-second
@@ -79,6 +81,42 @@ An unsupported but valid layout returns HTTP 409 with
 `recipe_shape_unverified`. It remains stored and usable for manual converter
 commissioning.
 
+## First field probe
+
+The first field deployment targets the probe closed on the lab bench on
+2026-08-28. Its SDI-12 address is the digit `0`, not the letter `o`. The saved
+layout is:
+
+| Response position | Depth | Module |
+|---:|---:|---|
+| 1 | 10 cm | TriSCAN |
+| 2 | 20 cm | EnviroSCAN |
+| 3 | 30 cm | EnviroSCAN |
+| 4 | 40 cm | EnviroSCAN |
+| 5 | 50 cm | TriSCAN |
+| 6 | 60 cm | EnviroSCAN |
+| 7 | 80 cm | EnviroSCAN |
+| 8 | 100 cm | EnviroSCAN |
+
+The compiler must emit the captured mixed recipe for this layout:
+
+```text
+AT+COMMAND1=0M!,1,1,2
+AT+COMMAND2=0D1!,0,0,2
+AT+COMMAND3=0D2!,0,0,2
+AT+COMMAND4=0M2!,1,1,2
+AT+DATACUT1=30,2,2~28
+AT+DATACUT2=30,2,2~28
+AT+DATACUT3=21,2,2~19
+AT+DATACUT4=21,2,2~19
+```
+
+The expected normalized shape is eight VWC values followed by two VIC values.
+The first field apply remains operator-triggered after the physical probe swap
+and saved-layout check. It cannot run merely because this target is present in
+the design. Address `0` is a field-layout value, not a compiler constant or
+default.
+
 ## Recipe compiler
 
 The compiler is a focused CommonJS module named `osi-sdi12-recipe`. Node-RED
@@ -90,7 +128,7 @@ compileSentekRecipe(layout) -> {
   recipe: {
     version: 1,
     profile: 'SENTEK_ENVIROSCAN',
-    address: 'C',
+    address: layout.address,
     layoutHash: '<sha256>',
     normalIntervalSeconds: 1200,
     powerWindowMs: 8000,
@@ -174,8 +212,8 @@ arrives.
 
 ## Durable edge state
 
-Ordered additive migration `0049__sdi12_recipe_deployments.sql` creates one
-local-only table:
+Ordered additive migration `0049__sdi12_recipe_deployments.sql` creates two
+local-only tables. The first stores recipe state:
 
 ```sql
 CREATE TABLE sdi12_recipe_deployments (
@@ -197,6 +235,18 @@ CREATE TABLE sdi12_recipe_deployments (
   last_error_code TEXT,
   compatible_recipe_json TEXT,
   compatible_at TEXT,
+  updated_at TEXT NOT NULL
+);
+```
+
+The second stores the two-stage address discovery and identity operation:
+
+```sql
+CREATE TABLE sdi12_identify_attempts (
+  deveui TEXT PRIMARY KEY REFERENCES devices(deveui) ON DELETE CASCADE,
+  stage TEXT NOT NULL CHECK(stage IN ('discovering','identifying')),
+  discovered_address TEXT,
+  requested_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 ```
@@ -296,19 +346,34 @@ deployment table emits `node.warn` but does not block valid telemetry storage.
 
 `sdi12-identify-action-fn` selects `sdi12_channel_layout_json`. When the stored
 layout validates, it passes that address to `sdi12-identify-trigger-fn`, which
-builds `<address>I!`. A missing layout retains the legacy address `0` behavior
-for first registration. A malformed stored layout returns HTTP 409 instead of
-sending a command to address `0`.
+builds `<address>I!` and records stage `identifying`.
 
-The address comes only from `validateSentekLayout()`, whose accepted SDI-12
-address grammar is one alphanumeric character. Manual layout configuration
-therefore takes precedence over the legacy fallback.
+When no saved address exists, Identify records stage `discovering` and sends the
+address-neutral SDI-12 query `?!` through the Dragino `0xA8` command. A valid
+one-character discovery response is stored in `discovered_address`; the flow
+then sends `<discovered_address>I!` and moves to stage `identifying`. The normal
+identity response completes the existing profile match. Discovery rejects an
+empty response, more than one returned address, or any byte outside the
+one-character SDI-12 address grammar.
+
+A malformed stored layout returns HTTP 409 instead of falling back to another
+address. Saving a manual layout cancels an older discovery attempt. A pending
+discovery never overrides the address in a newer saved layout.
+
+Recipe addresses come only from `validateSentekLayout()`, whose accepted SDI-12
+address grammar is one alphanumeric character. Identify addresses come from the
+same validator or a valid `?!` response. No runtime path defaults to address
+`0`, `L`, `C`, or another probe-specific value.
 
 ## GUI behavior
 
 The Sentek settings modal keeps layout save and hardware application separate.
 After save it shows `Layout saved; acquisition configuration not applied` and an
 `Apply acquisition configuration` button.
+
+For a device without a saved layout, the address input starts empty. A completed
+discovery may prefill it, but the operator still saves the canonical layout
+before recipe application.
 
 Before enqueueing, the GUI confirms that commissioning can take about five
 hours at the ordinary 20-minute interval. Each cycle uses an eight-second 12 V
@@ -334,12 +399,15 @@ Before live deployment:
   partial failure.
 - Test endpoint authentication, device scoping, idempotent retry, and state
   transitions.
-- Test Identify with saved address `C`, no layout, and malformed layout.
+- Test Identify with saved address `0`, an alternative valid address, no layout,
+  and malformed layout.
 - Run migration replay, all bundled-database consistency checks, flow parsing,
   profile parity, SDI-12 registration tests, normalizer vectors, and the React
   unit/build gates.
 
 Live rollout to `100.121.141.64` requires a timestamped backup, migration with
 Node-RED stopped, GUI and flow deployment, database integrity checks, and an
-operator-triggered apply. The first field apply uses the saved field address and
-module layout; it does not infer either from the failed `C`/`0`/`L` probes.
+operator-triggered apply. The first field apply requires the saved digit-`0`
+layout with TriSCAN at 10 and 50 cm. It does not infer configuration from the
+failed `C`/`0`/`L` probes and must wait until the lab-tested probe is physically
+installed.
