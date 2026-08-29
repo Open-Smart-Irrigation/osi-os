@@ -46,6 +46,8 @@ import type {
   Sdi12Profile,
   SentekChannelLayout,
   SentekChannelSensor,
+  Sdi12RecipeDeployment,
+  Sdi12RecipeDeploymentStatus,
   AddDeviceRequest,
   ValveActionRequest,
   IrrigationZone,
@@ -209,6 +211,42 @@ function normaliseSentekLayout(value: unknown): SentekChannelLayout | null {
   return { version: 1, address: layout.address, sensors };
 }
 
+const SDI12_DEPLOYMENT_STATUSES = new Set<Sdi12RecipeDeploymentStatus>([
+  'not_applied', 'queueing', 'queued', 'observed_once', 'observed_compatible', 'degraded',
+]);
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function normaliseSdi12RecipeDeployment(value: unknown): Sdi12RecipeDeployment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const status = row.status;
+  const desiredVersion = Number(row.desired_version);
+  const frameCount = row.frame_count == null ? null : Number(row.frame_count);
+  if (typeof status !== 'string' || !SDI12_DEPLOYMENT_STATUSES.has(status as Sdi12RecipeDeploymentStatus)
+    || !Number.isInteger(desiredVersion) || desiredVersion < 0
+    || (frameCount != null && (!Number.isInteger(frameCount) || frameCount < 0))
+    || typeof row.compatible_available !== 'boolean') return null;
+  const errorCode = nullableString(row.last_error_code);
+  if (errorCode != null && !/^[a-z0-9_]{1,64}$/.test(errorCode)) return null;
+  return {
+    desired_version: desiredVersion,
+    desired_layout_hash: nullableString(row.desired_layout_hash),
+    status: status as Sdi12RecipeDeploymentStatus,
+    queued_at: nullableString(row.queued_at),
+    queue_drained_at: nullableString(row.queue_drained_at),
+    commissioning_deadline_at: nullableString(row.commissioning_deadline_at),
+    last_observed_at: nullableString(row.last_observed_at),
+    compatible_at: nullableString(row.compatible_at),
+    updated_at: nullableString(row.updated_at),
+    frame_count: frameCount,
+    compatible_available: row.compatible_available,
+    last_error_code: errorCode,
+  };
+}
+
 export function normaliseDevice(device: any): Device {
   const rawDepths = device?.soil_moisture_probe_depths_json;
   const soilMoistureProbeDepths = rawDepths && typeof rawDepths === 'object' && !Array.isArray(rawDepths)
@@ -226,6 +264,11 @@ export function normaliseDevice(device: any): Device {
       : undefined;
   const rawSentekLayout = device?.sdi12_channel_layout_json;
   const sentekLayout = normaliseSentekLayout(rawSentekLayout);
+  const deployment = normaliseSdi12RecipeDeployment(device?.sdi12_recipe_deployment);
+  const discoveredAddress = typeof device?.sdi12_discovered_address === 'string'
+    && /^[0-9A-Za-z]$/.test(device.sdi12_discovered_address)
+    ? device.sdi12_discovered_address
+    : null;
   const rawActiveActuation = device?.activeValveActuation ?? device?.active_valve_actuation ?? null;
   const activeValveActuation = rawActiveActuation && typeof rawActiveActuation === 'object' && !Array.isArray(rawActiveActuation)
     ? {
@@ -253,6 +296,8 @@ export function normaliseDevice(device: any): Device {
     sdi12_identity: device?.sdi12_identity ?? null,
     sdi12_value_count: device?.sdi12_value_count ?? null,
     sdi12_channel_layout_json: sentekLayout,
+    sdi12_recipe_deployment: deployment,
+    sdi12_discovered_address: discoveredAddress,
     sdi12_layout_status: rawSentekLayout != null && !sentekLayout ? 'invalid' : (device?.sdi12_layout_status ?? null),
     soilMoistureProbeDepths,
     soilMoistureProbeDepthsConfigured,
@@ -318,6 +363,16 @@ export const putSdi12Config = async (deveui: string, body: Sdi12ConfigRequest): 
 
 export const postSdi12Identify = async (deveui: string): Promise<void> => {
   await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/identify`);
+};
+
+export const postSdi12RecipeApply = async (deveui: string): Promise<Sdi12RecipeDeployment | null> => {
+  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/apply`, {});
+  return normaliseSdi12RecipeDeployment(response.data);
+};
+
+export const postSdi12RecipeRollback = async (deveui: string): Promise<Sdi12RecipeDeployment | null> => {
+  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/rollback`, {});
+  return normaliseSdi12RecipeDeployment(response.data);
 };
 
 function normaliseZone(z: any): IrrigationZone {

@@ -2,6 +2,23 @@
 export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512' | 'DRAGINO_SDI12';
 export type Sdi12ProbeStatus = 'pending_identify' | 'identified' | 'unmatched' | 'manual';
 export type SentekSensorType = 'ENVIROSCAN' | 'TRISCAN';
+export type Sdi12RecipeDeploymentStatus =
+  | 'not_applied' | 'queueing' | 'queued'
+  | 'observed_once' | 'observed_compatible' | 'degraded';
+export interface Sdi12RecipeDeployment {
+  desired_version: number;
+  desired_layout_hash: string | null;
+  status: Sdi12RecipeDeploymentStatus;
+  queued_at: string | null;
+  queue_drained_at: string | null;
+  commissioning_deadline_at: string | null;
+  last_observed_at: string | null;
+  compatible_at: string | null;
+  updated_at: string | null;
+  frame_count: number | null;
+  compatible_available: boolean;
+  last_error_code: string | null;
+}
 export interface SentekChannelSensor {
   channel: number;
   response_position: number;
@@ -32,6 +49,8 @@ export interface Device {
   sdi12_identity?: string | null;
   sdi12_value_count?: number | null;
   sdi12_channel_layout_json?: SentekChannelLayout | null;
+  sdi12_recipe_deployment?: Sdi12RecipeDeployment | null;
+  sdi12_discovered_address?: string | null;
   sdi12_layout_status?: 'legacy_count' | 'configured' | 'active_vwc' | 'vic_framing_unverified' | 'invalid' | null;
 
   // Specific data payload matching Node-RED output

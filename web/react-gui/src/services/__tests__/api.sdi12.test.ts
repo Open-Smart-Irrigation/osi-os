@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { normaliseDevice } from '../api';
+import { api, normaliseDevice, postSdi12RecipeApply, postSdi12RecipeRollback } from '../api';
 
 describe('SDI-12 device API normalization', () => {
   it('narrows a canonical snake-case Sentek layout and preserves status', () => {
@@ -43,5 +43,40 @@ describe('SDI-12 device API normalization', () => {
 
     expect(device.sdi12_channel_layout_json).toBeNull();
     expect(device.sdi12_layout_status).toBe('invalid');
+  });
+
+  it('normalizes only bounded deployment state and a valid discovered address', () => {
+    const device = normaliseDevice({
+      deveui: 'a840410000000203', type_id: 'DRAGINO_SDI12', latest_data: {},
+      sdi12_discovered_address: 'C',
+      sdi12_recipe_deployment: {
+        desired_version: 3, desired_layout_hash: 'abc', status: 'queued',
+        queued_at: '2026-08-29T12:00:00.000Z', queue_drained_at: null,
+        commissioning_deadline_at: null, last_observed_at: null, compatible_at: null,
+        updated_at: '2026-08-29T12:00:00.000Z', frame_count: 7,
+        compatible_available: false, last_error_code: null, queue_item_ids: ['secret'],
+      },
+    });
+
+    expect(device.sdi12_discovered_address).toBe('C');
+    expect(device.sdi12_recipe_deployment).toMatchObject({ desired_version: 3, status: 'queued', frame_count: 7 });
+    expect(JSON.stringify(device.sdi12_recipe_deployment)).not.toContain('secret');
+    expect(normaliseDevice({
+      deveui: 'a840410000000204', type_id: 'DRAGINO_SDI12', latest_data: {},
+      sdi12_discovered_address: 'too-long', sdi12_recipe_deployment: { status: 'invented' },
+    }).sdi12_recipe_deployment).toBeNull();
+  });
+
+  it('posts empty apply and rollback bodies to encoded device paths', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: {
+      desired_version: 2, status: 'queueing', desired_layout_hash: null, queued_at: null,
+      queue_drained_at: null, commissioning_deadline_at: null, last_observed_at: null,
+      compatible_at: null, updated_at: null, frame_count: 1, compatible_available: false, last_error_code: null,
+    } });
+    await expect(postSdi12RecipeApply('ab/c')).resolves.toMatchObject({ desired_version: 2, status: 'queueing' });
+    await expect(postSdi12RecipeRollback('ab/c')).resolves.toMatchObject({ desired_version: 2, status: 'queueing' });
+    expect(post).toHaveBeenNthCalledWith(1, '/api/devices/ab%2Fc/sdi12/recipe/apply', {});
+    expect(post).toHaveBeenNthCalledWith(2, '/api/devices/ab%2Fc/sdi12/recipe/rollback', {});
+    post.mockRestore();
   });
 });

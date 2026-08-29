@@ -238,7 +238,8 @@
     "actButtonHint": "Ekyuma bwe kitaddamu, nyiga akabonero ACT ku kyuma kya Dragino, oluvannyuma ogezeeko nate.",
     "noResponse": "Ekyuma tekyaddamu ku kukebera",
     "valueCount": "Omuwendo gw'emiwendo",
-    "valueCountHelp": "Kireke nga tekiriimu okukkiriza omuwendo gwonna ogw'okusoma. Teeka omuwendo okugaana ebifo ebitagwana ddala."
+    "valueCountHelp": "Kireke nga tekiriimu okukkiriza omuwendo gwonna ogw'okusoma. Teeka omuwendo okugaana ebifo ebitagwana ddala.",
+    "layoutSaved": "Enteekateeka eterekeddwa; ensengeka y'okufuna tekiteekeddwa mu nkola.", "apply": "Teeka ensengeka y'okufuna mu nkola", "rollback": "Zzaayo ensengeka y'okufuna", "rollingBack": "Ezzibwayo…", "confirmApply": "Kakasa okutandika", "applyConfirmation": "Enteekateeka ennene esobola okutwala essaawa nga munaana ku kadde ka bulijjo ka ddakiika 20 era ekozesa eddirisa lya 12 V ery'amasekkondi munaana buli mulundi. Tewali masannyalaze agatasalako oba kadde katono.", "deploymentQueued": "Enteekateeka y'okufuna eri mu lunyiriri (enkyusa {{version}}; {{status}}).", "rollbackQueued": "Okuzzaayo kuli mu lunyiriri (enkyusa {{version}}; {{status}}).", "degraded": "Enteekateeka y'okufuna eriko obuzibu", "active": "Enteekateeka y'okufuna ekola", "deploymentStatus": "Enteekateeka y'okufuna: {{status}}"
   },
   "sdi12Soil": {
     "removeConfirm": "Ggyawo ekyuma kino?",
