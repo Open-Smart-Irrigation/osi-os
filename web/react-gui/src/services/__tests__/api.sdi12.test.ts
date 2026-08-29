@@ -67,7 +67,7 @@ describe('SDI-12 device API normalization', () => {
     }).sdi12_recipe_deployment).toBeNull();
   });
 
-  it('posts empty apply and rollback bodies to encoded device paths', async () => {
+  it('posts apply and rollback with no body to encoded device paths', async () => {
     const post = vi.spyOn(api, 'post').mockResolvedValue({ data: {
       desired_version: 2, status: 'queueing', desired_layout_hash: null, queued_at: null,
       queue_drained_at: null, commissioning_deadline_at: null, last_observed_at: null,
@@ -75,8 +75,8 @@ describe('SDI-12 device API normalization', () => {
     } });
     await expect(postSdi12RecipeApply('ab/c')).resolves.toMatchObject({ desired_version: 2, status: 'queueing' });
     await expect(postSdi12RecipeRollback('ab/c')).resolves.toMatchObject({ desired_version: 2, status: 'queueing' });
-    expect(post).toHaveBeenNthCalledWith(1, '/api/devices/ab%2Fc/sdi12/recipe/apply', {});
-    expect(post).toHaveBeenNthCalledWith(2, '/api/devices/ab%2Fc/sdi12/recipe/rollback', {});
+    expect(post).toHaveBeenNthCalledWith(1, '/api/devices/ab%2Fc/sdi12/recipe/apply');
+    expect(post).toHaveBeenNthCalledWith(2, '/api/devices/ab%2Fc/sdi12/recipe/rollback');
     post.mockRestore();
   });
 });

@@ -412,12 +412,12 @@ export const postSdi12Identify = async (deveui: string): Promise<void> => {
 };
 
 export const postSdi12RecipeApply = async (deveui: string): Promise<Sdi12RecipeDeployment | null> => {
-  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/apply`, {});
+  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/apply`);
   return normaliseSdi12RecipeDeployment(response.data);
 };
 
 export const postSdi12RecipeRollback = async (deveui: string): Promise<Sdi12RecipeDeployment | null> => {
-  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/rollback`, {});
+  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/rollback`);
   return normaliseSdi12RecipeDeployment(response.data);
 };
 
