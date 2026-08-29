@@ -23,10 +23,11 @@ defects still need repair so future commissioning state is represented honestly.
 
 - Identify a configured Sentek probe at the address stored in its canonical
   channel layout.
-- Compile the bench-approved Sentek acquisition recipe on the edge. The browser
-  cannot submit command strings, byte cuts, or arbitrary downlink bytes.
-- Acquire VWC from all eight installed modules and VIC from the two installed
-  TriSCAN modules at response positions 1 and 5.
+- Compile Sentek acquisition recipes on the edge from the documented command
+  families, anchored by the bench-captured eight-VWC/two-VIC recipe. The
+  browser cannot submit command strings, byte cuts, or arbitrary downlink bytes.
+- Acquire VWC from every configured module and VIC from every configured
+  TriSCAN module for any one-to-ten-module EnviroSCAN/TriSCAN combination.
 - Make recipe application an explicit operator action after layout save.
 - Record desired, queued, and observed recipe state in SQLite.
 - Keep the switched 12 V window at 8000 ms and the ordinary 1200-second
@@ -42,8 +43,6 @@ defects still need repair so future commissioning state is represented honestly.
   authoritative for probe-internal state.
 - Recipe deployment state is local operational state. It is not copied into the
   edge-to-cloud farm resource contract.
-- The first release does not apply recipes for nine or ten modules. Those layouts
-  remain valid and saveable, but `D3!` framing needs a bench capture first.
 - The workflow does not use continuous 12 V power.
 - The workflow does not flush the ChirpStack device queue.
 
@@ -68,18 +67,33 @@ defects still need repair so future commissioning state is represented honestly.
 
 ## Supported recipe shapes
 
-The first compiler accepts these shapes:
+The compiler accepts every valid layout containing one through ten modules.
+Each response position may be EnviroSCAN or TriSCAN independently. Every module
+produces one VWC value; each TriSCAN module adds one VIC value.
 
-| Layout | Apply support | Evidence |
-|---|---:|---|
-| 1–8 EnviroSCAN modules, no TriSCAN | yes | Five- and eight-value bench captures plus the Sentek three-values-per-data-response boundary |
-| Eight modules with exactly two TriSCAN modules | yes | Complete 2026-08-28 VWC/VIC bench capture |
-| Any layout with 9–10 modules | no | `D3!` response framing has not been captured |
-| Mixed layout with one or more than two TriSCAN modules | no | Compact `M2!` cardinality has not been captured for those shapes |
+Valid response positions are contiguous from 1 through the module count, as
+enforced by the existing `validateSentekLayout()` implementation. Stable channel
+IDs may be any unique values from 1 through 10 and need not equal response
+positions. The compiler uses response positions for wire order and never uses
+depth or channel ID to choose an SDI-12 command.
 
-An unsupported but valid layout returns HTTP 409 with
-`recipe_shape_unverified`. It remains stored and usable for manual converter
-commissioning.
+| Response positions | VWC measurement | VIC measurement |
+|---|---|---|
+| 1–9 | `aM!` | `aM2!` for configured TriSCAN modules |
+| 10 | `aM1!` | `aM3!` when position 10 is TriSCAN |
+
+This split follows the Sentek command map: `M!` and `M2!` address moisture and
+salinity positions 1–9, while `M1!` and `M3!` address positions 10–16. The
+product limit remains ten modules even though the interface protocol extends to
+sixteen. Sources: [Sentek SDI-12 Series II manual](https://sentektechnologies.com/download/sentek-sdi-12-series-ii-manual-ver-1-1/)
+and the [Campbell Scientific EnviroSCAN command appendix](https://s.campbellsci.com/documents/ca/manuals/enviroscan_man.pdf).
+
+The command-family split is vendor-defined. The exact current field recipe is
+bench-captured; arbitrary module-type masks are protocol-derived rather than
+individually bench-tested. Exhaustive compiler tests prove deterministic frame
+composition, while the observation state machine below prevents a new recipe
+from being labelled active until its exact cardinality and ordering have been
+observed on the target probe.
 
 ## First field probe
 
@@ -139,7 +153,7 @@ compileSentekRecipe(layout) -> {
 
 compileSentekRecipe(layout) -> {
   ok: false,
-  code: 'recipe_shape_unverified' | 'invalid_layout',
+  code: 'invalid_layout',
   message: string
 }
 
@@ -150,21 +164,13 @@ The module calls the existing `validateSentekLayout()` implementation before
 compilation. It hashes canonical JSON produced from the validated layout; input
 property order cannot change the hash.
 
-### VWC commands and cuts
+### Response-group compiler
 
-Sentek returns at most three VWC values per `D` response. For `N` configured
-modules, the compiler partitions `N` into groups of at most three:
-
-```text
-group 1: address + M! with automatic D0 access
-group 2: address + D1!
-group 3: address + D2!
-```
-
-The first group uses `<address>M!,1,1,2`. Later groups use
-`<address>D1!,0,0,2` and `<address>D2!,0,0,2`. A group containing `k` values
-has a total response length of `3 + 9*k` bytes: one address byte, nine bytes per
-signed value, then CR/LF. Its cut is:
+Sentek returns at most three values per `D` response. The compiler uses one
+measurement command with automatic `D0!` access, then adds `D1!` and `D2!` slots
+when that measurement family contains more than three or six values. A response
+group containing `k` values has a total length of `3 + 9*k` bytes: one address
+byte, nine bytes per signed value, then CR/LF. Its cut is:
 
 ```text
 AT+DATACUTx=(3 + 9*k),2,2~(1 + 9*k)
@@ -174,12 +180,27 @@ This reproduces the bench values `30,2,2~28` for three readings and
 `21,2,2~19` for two readings. The cut removes the address and CR/LF, preserving
 the normalizer grammar.
 
-### TriSCAN command and cut
+### VWC slot generation
 
-For the supported mixed shape, slot 4 uses
-`<address>M2!,1,1,2`. Two compact VIC values use the captured cut
-`21,2,2~19`. The VWC slots are unchanged because every TriSCAN module also
-contributes VWC to the ordinary `M!` group.
+For response positions 1–9, the first VWC slot is
+`<address>M!,1,1,2`. The compiler adds `<address>D1!,0,0,2` and
+`<address>D2!,0,0,2` for the remaining three-value groups. When response
+position 10 exists, the next slot is `<address>M1!,1,1,2`; its automatic
+`D0!` response contains that position's single VWC value.
+
+### TriSCAN VIC slot generation
+
+The compiler counts TriSCAN modules at response positions 1–9. When the count
+is non-zero, it emits `<address>M2!,1,1,2`, followed by `D1!` and `D2!` slots
+when the compact VIC sequence exceeds three or six values. If response position
+10 is TriSCAN, the compiler adds `<address>M3!,1,1,2`; its automatic `D0!`
+response contains the tenth module's VIC value.
+
+All VWC slots precede all VIC slots. The resulting payload is therefore exactly
+`N` VWC values followed by `T` VIC values, where `N` is the module count and
+`T` is the TriSCAN count. VIC values retain TriSCAN response-position order.
+The current field fixture produces the four-slot recipe shown above, but
+the compiler contains no branch for its specific depths, address, or type mask.
 
 ### Downlink frame order
 
@@ -195,7 +216,8 @@ The compiler emits frames in this order:
 8. `010004B0` (`TDC=1200`).
 
 No frame sets a shorter TDC. At the normal 20-minute cadence, the largest
-supported recipe needs at most fifteen Class A cycles, or about five hours.
+recipe uses eight command/cut slots and needs at most 23 Class A cycles, or
+about seven hours and forty minutes.
 This delay is preferable to a partial-enqueue failure that could strand a solar
 node at a one-minute interval.
 
@@ -269,7 +291,7 @@ device-scoped endpoint pattern. The request body is empty.
 The handler:
 
 1. Loads the canonical stored layout and device ChirpStack registration data.
-2. Refuses malformed, absent, or unsupported layouts before any external effect.
+2. Refuses malformed or absent layouts before any external effect.
 3. Compiles the recipe and writes `queueing` in SQLite.
 4. Verifies that the device queue is empty, then enqueues every frame through an
    extended `osi-chirpstack-helper` gRPC method.
@@ -322,8 +344,8 @@ When none of the stored recipe queue-item IDs remain, it records
 `queue_drained_at`. This means ChirpStack no longer holds the frames; it does not
 claim that an unconfirmed downlink was interpreted by the converter. A recipe
 whose IDs remain queued beyond `commissioning_deadline_at` becomes `degraded`
-with `queue_delivery_timeout`. The deadline is eight hours after enqueue, which
-covers fifteen cycles at the normal 20-minute interval plus network delay.
+with `queue_delivery_timeout`. The deadline is twelve hours after enqueue, which
+covers 23 cycles at the normal 20-minute interval plus network delay.
 
 The existing SDI-12 writer receives the deployment row alongside the device
 configuration. Compatibility observation starts only after `queue_drained_at`
@@ -375,11 +397,11 @@ For a device without a saved layout, the address input starts empty. A completed
 discovery may prefill it, but the operator still saves the canonical layout
 before recipe application.
 
-Before enqueueing, the GUI confirms that commissioning can take about five
-hours at the ordinary 20-minute interval. Each cycle uses an eight-second 12 V
-window. The workflow never shortens the interval or offers continuous power.
-Unsupported layouts explain which framing evidence is missing and leave the
-apply button disabled.
+Before enqueueing, the GUI confirms that a ten-module commissioning can take
+about eight hours at the ordinary 20-minute interval. Each cycle uses an
+eight-second 12 V window. The workflow never shortens the interval or offers
+continuous power. Invalid or incomplete layouts leave the apply button disabled
+and show the validator's bounded error.
 
 The modal and soil card show these states: not applied, queueing, queued,
 observed once, active, and degraded. Only `observed_compatible` is labelled
@@ -393,8 +415,10 @@ ordered migration runner; `/data/db/farming.db` is never replaced.
 
 Before live deployment:
 
-- Unit-test the compiler against the captured eight-VWC and eight-VWC/two-VIC
-  recipes, alternative addresses, unsupported shapes, and exact frame bytes.
+- Unit-test all 2,046 EnviroSCAN/TriSCAN type masks across module counts 1–10.
+  Assert the captured eight-VWC/two-VIC fixture, alternative addresses, group
+  boundaries at 3, 6, 9, and 10, stable channel IDs that differ from response
+  positions, output ordering, and exact frame bytes.
 - Test the ChirpStack helper against protobuf request construction and bounded
   partial failure.
 - Test endpoint authentication, device scoping, idempotent retry, and state
