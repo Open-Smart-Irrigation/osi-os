@@ -1559,16 +1559,20 @@ test('IB1: denied SDI-12 config cannot write, authorized config does write', asy
       env: ENV,
       db,
     });
-    assert.equal(denied.result.at(-1).statusCode, 403);
-    const denialWireTarget = guard.wires[25] && guard.wires[25][0];
-    if (denialWireTarget === 'sdi12-config-auth-fn') {
-      const bypass = await executeFunction(configAuth, {
-        msg: denied.result[25],
-        env: ENV,
-        db,
-      });
-      await executeFunction(configAction, { msg: bypass.result[0], env: ENV, db });
+    const errorOutput = guard.outputs - 1;
+    assert.equal(denied.result[errorOutput].statusCode, 403);
+    for (let output = 0; output < errorOutput; output += 1) {
+      assert.equal(
+        denied.result[output],
+        null,
+        `scope denial must not emit action output ${output}`
+      );
     }
+    assert.deepEqual(
+      guard.wires[errorOutput],
+      ['device-response'],
+      'only the actual denial message may continue to the HTTP response'
+    );
     assert.equal(
       db.prepare('SELECT sdi12_probe_profile FROM devices WHERE deveui = ?').get(deveui).sdi12_probe_profile,
       'GENERIC_VWC',

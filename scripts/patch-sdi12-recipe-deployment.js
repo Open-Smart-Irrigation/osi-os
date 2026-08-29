@@ -63,6 +63,44 @@ function preservePrefix(node, marker, replacement, label) {
   node.func = node.func.slice(0, first) + replacement;
 }
 
+function tagVerifyBearer(node, sourceId) {
+  if (node.func.includes('_osiAuthFailure')) {
+    fail(`${sourceId}: auth failure tags already exist`);
+  }
+  const header = node.func.match(/function\s+verifyBearer\s*\([^)]*\)\s*\{/);
+  if (!header) fail(`${sourceId}: verifyBearer function is missing`);
+  const bodyStart = header.index + header[0].length;
+  let bodyEnd = bodyStart;
+  let depth = 1;
+  for (; bodyEnd < node.func.length && depth > 0; bodyEnd += 1) {
+    if (node.func[bodyEnd] === '{') depth += 1;
+    else if (node.func[bodyEnd] === '}') depth -= 1;
+  }
+  if (depth !== 0) fail(`${sourceId}: verifyBearer braces are unbalanced`);
+  const closingBrace = bodyEnd - 1;
+  let body = node.func.slice(bodyStart, closingBrace);
+  const codes = new Map([
+    ['Unauthorized', 'MISSING_BEARER'],
+    ['Invalid token', 'INVALID_TOKEN'],
+    ['Token expired', 'TOKEN_EXPIRED'],
+  ]);
+  let tagged = 0;
+  for (const [message, code] of codes) {
+    const escaped = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(
+      `((?:var|const)\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*=\\s*new Error\\('${escaped}'\\);\\s*\\2\\.statusCode\\s*=\\s*401\\s*;\\s*)(throw\\s+\\2\\s*;)`,
+      'g'
+    );
+    body = body.replace(pattern, (_whole, before, _variable, throwStatement) => {
+      tagged += 1;
+      return `${before}msg._osiAuthFailure = { format: 1, code: '${code}', sourceId: '${sourceId}' }; ${throwStatement}`;
+    });
+  }
+  if (tagged !== 6) fail(`${sourceId}: expected six auth throw tags, found ${tagged}`);
+  body = ` delete msg._osiAuthFailure;${body}`;
+  node.func = node.func.slice(0, bodyStart) + body + node.func.slice(closingBrace);
+}
+
 function functionNode({ id, z, name, func, outputs, x, y, wires }) {
   return {
     id,
@@ -101,7 +139,7 @@ function deploymentAction(methodName, label) {
     "    var commissioningLoad = osiLib.require('sdi12-commissioning');",
     "    var chirpstackLoad = osiLib.require('chirpstack');",
     '    if (!commissioningLoad.ok || !chirpstackLoad.ok) {',
-    `      node.error('${label}: required helper unavailable', msg);`,
+    `      node.warn('${label}: required helper unavailable');`,
     "      throw Object.assign(new Error('deployment unavailable'), { statusCode: 500, code: 'deployment_unavailable' });",
     '    }',
     "    var deveui = String(msg.deviceRow && msg.deviceRow.deveui || '').trim().toUpperCase();",
@@ -186,6 +224,8 @@ const configSqlite = one(flows, 'sdi12-config-sqlite', 'sqlite');
 const writer = one(flows, 'sdi12-write-fn', 'function');
 const getDevices = one(flows, 'get-devices-query', 'function');
 const mergeDevices = one(flows, 'merge-device-data', 'function');
+const profilesScope = one(flows, 'sdi12-profiles-scope-fn', 'function');
+const deviceApiHttp500 = one(flows, 'device-api-http500', 'function');
 
 if (guard.outputs !== 26) fail('scoped-device-config-guard outputs must start at 26');
 same(guard.wires.slice(23), [
@@ -207,6 +247,8 @@ same(configSqlite.wires, [['sdi12-write-fn']], 'config sqlite wires');
 same(writer.wires, [['sdi12-debug'], ['sdi12-firstjoin-link-out']], 'writer wires');
 same(getDevices.wires, [['get-devices-db'], ['device-response']], 'device-list query wires');
 same(mergeDevices.wires, [['device-response']], 'device-list merge wires');
+same(profilesScope.wires, [['sdi12-profiles-fn'], ['device-response']], 'profile-list auth wires');
+same(deviceApiHttp500.wires, [['device-response']], 'device API error responder wires');
 if (!identifyTrigger.func.includes('0x30, 0x49, 0x21')) {
   fail('identify trigger no longer has the expected pre-patch hardcoded frame');
 }
@@ -217,10 +259,31 @@ if (configSqlite.sqlquery !== 'prepared'
   || configSqlite.sql !== 'SELECT sdi12_probe_profile, sdi12_probe_status, soil_moisture_probe_depths_json, chirpstack_app_id, sdi12_value_count, sdi12_channel_layout_json FROM devices WHERE deveui = $deveui') {
   fail('sdi12 config SQLite query drifted');
 }
+if (!profilesScope.func.includes("scope.verifyBearer(")
+  || !profilesScope.func.includes("if (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];")) {
+  fail('SDI-12 profile auth source drifted');
+}
+if (identifyAction.func.includes('_osiAuthFailure')
+  || configAuth.func.includes('_osiAuthFailure')
+  || profilesScope.func.includes('_osiAuthFailure')) {
+  fail('SDI-12 auth sources unexpectedly already contain auth failure tags');
+}
+const authPrefixMarker = 'return (async () => {';
+const authPrefixEnd = identifyAction.func.indexOf(authPrefixMarker);
+if (authPrefixEnd < 0 || identifyAction.func.indexOf(authPrefixMarker, authPrefixEnd + 1) >= 0) {
+  fail('SDI-12 Identify auth prefix marker drifted');
+}
+const authPrefix = identifyAction.func.slice(0, authPrefixEnd);
 
 const oldRouteTable = 'const routeTable = [{"method":"PUT","suffix":"/dendro","index":0},{"method":"PUT","suffix":"/temp","index":1},{"method":"PUT","suffix":"/reference-tree","index":2},{"method":"PUT","suffix":"/lsn50/mode","index":3},{"method":"PUT","suffix":"/lsn50/interval","index":4},{"method":"PUT","suffix":"/kiwi/interval","index":5},{"method":"POST","suffix":"/kiwi/temperature-humidity/enable","index":6},{"method":"PUT","suffix":"/strega/interval","index":7},{"method":"PUT","suffix":"/lsn50/interrupt-mode","index":8},{"method":"PUT","suffix":"/lsn50/5v-warmup","index":9},{"method":"PUT","suffix":"/strega/model","index":10},{"method":"PUT","suffix":"/strega/timed-action","index":11},{"method":"PUT","suffix":"/strega/magnet","index":12},{"method":"PUT","suffix":"/strega/partial-opening","index":13},{"method":"PUT","suffix":"/strega/flushing","index":14},{"method":"PUT","suffix":"/rain-gauge","index":15},{"method":"PUT","suffix":"/flow-meter","index":16},{"method":"PUT","suffix":"/soil-moisture-depths","index":17},{"method":"PUT","suffix":"/chameleon","index":18},{"method":"PUT","suffix":"/dendro-config","index":19},{"method":"POST","suffix":"/dendro-baseline/reset","index":20},{"method":"POST","suffix":"/chameleon/refresh-calibration","index":21},{"method":"PUT","suffix":"/chameleon/depth","index":22},{"method":"POST","suffix":"/sdi12/identify","index":23},{"method":"PUT","suffix":"/sdi12/config","index":24}];';
 const newRouteTable = 'const routeTable = [{"method":"PUT","suffix":"/dendro","index":0},{"method":"PUT","suffix":"/temp","index":1},{"method":"PUT","suffix":"/reference-tree","index":2},{"method":"PUT","suffix":"/lsn50/mode","index":3},{"method":"PUT","suffix":"/lsn50/interval","index":4},{"method":"PUT","suffix":"/kiwi/interval","index":5},{"method":"POST","suffix":"/kiwi/temperature-humidity/enable","index":6},{"method":"PUT","suffix":"/strega/interval","index":7},{"method":"PUT","suffix":"/lsn50/interrupt-mode","index":8},{"method":"PUT","suffix":"/lsn50/5v-warmup","index":9},{"method":"PUT","suffix":"/strega/model","index":10},{"method":"PUT","suffix":"/strega/timed-action","index":11},{"method":"PUT","suffix":"/strega/magnet","index":12},{"method":"PUT","suffix":"/strega/partial-opening","index":13},{"method":"PUT","suffix":"/strega/flushing","index":14},{"method":"PUT","suffix":"/rain-gauge","index":15},{"method":"PUT","suffix":"/flow-meter","index":16},{"method":"PUT","suffix":"/soil-moisture-depths","index":17},{"method":"PUT","suffix":"/chameleon","index":18},{"method":"PUT","suffix":"/dendro-config","index":19},{"method":"POST","suffix":"/dendro-baseline/reset","index":20},{"method":"POST","suffix":"/chameleon/refresh-calibration","index":21},{"method":"PUT","suffix":"/chameleon/depth","index":22},{"method":"POST","suffix":"/sdi12/identify","index":23},{"method":"PUT","suffix":"/sdi12/config","index":24},{"method":"POST","suffix":"/sdi12/recipe/apply","index":25},{"method":"POST","suffix":"/sdi12/recipe/rollback","index":26}];';
 guard.func = replaceOnce(guard.func, oldRouteTable, newRouteTable, 'device config route table');
+guard.func = replaceOnce(
+  guard.func,
+  "    node.error('device config scope: module unavailable: ' + scopeLoad.error, msg);",
+  "    node.warn('device config scope: module unavailable');",
+  'device config handled helper warning'
+);
 guard.outputs = 28;
 guard.wires = [
   ...guard.wires.slice(0, 25),
@@ -228,12 +291,29 @@ guard.wires = [
   ['sdi12-config-auth-fn'],
   guard.wires[25],
 ];
+deviceApiHttp500.func = replaceOnce(
+  deviceApiHttp500.func,
+  "  's2120-zones-put-auth-fn',\n  'sensor-history-fn',",
+  [
+    "  's2120-zones-put-auth-fn',",
+    "  'sdi12-config-auth-fn',",
+    "  'sdi12-identify-action-fn',",
+    "  'sdi12-profiles-scope-fn',",
+    "  'sensor-history-fn',",
+  ].join('\n'),
+  'device API SDI-12 auth allowlist'
+);
 
 preservePrefix(configAuth, 'return (async () => {', [
   'return (async () => {',
   '  var db = null;',
   "  var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';",
   '  try {',
+  '    var userId = null;',
+  '    if (!scopedOn) {',
+  '      var auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);',
+  '      userId = auth.userId;',
+  '    }',
   "    var deveui = String(msg.req && msg.req.params && msg.req.params.deveui || '').trim().toUpperCase();",
   '    if (!/^[0-9A-F]{16}$/.test(deveui)) {',
   '      msg.statusCode = 400;',
@@ -251,11 +331,6 @@ preservePrefix(configAuth, 'return (async () => {', [
   '      msg.statusCode = 404;',
   "      msg.payload = { message: 'SDI-12 config route not found' };",
   '      return [null, null, null, msg];',
-  '    }',
-  '    var userId = null;',
-  '    if (!scopedOn) {',
-  '      var auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);',
-  '      userId = auth.userId;',
   '    }',
   '    var body = msg.req && msg.req.body;',
   '    var plainBody = body && typeof body === \'object\' && !Array.isArray(body);',
@@ -364,7 +439,7 @@ configAction.func = [
   '    if (sentekLayout) {',
   "      var commissioningLoad = osiLib.require('sdi12-commissioning');",
   '      if (!commissioningLoad.ok) {',
-  "        node.error('sdi12 config: commissioning helper unavailable', msg);",
+  "        node.warn('sdi12 config: commissioning helper unavailable');",
   "        msg.statusCode = 500; msg.payload = { message: 'commissioning helper unavailable' }; return msg;",
   '      }',
   '      try {',
@@ -421,7 +496,7 @@ configAction.func = [
   '    return msg;',
   '  } catch (error) {',
   '    if (transactionStarted) {',
-  "      try { await db.run('ROLLBACK'); } catch (rollbackError) { node.error('sdi12 config rollback failed: ' + (rollbackError && rollbackError.message ? rollbackError.message : rollbackError), msg); }",
+  "      try { await db.run('ROLLBACK'); } catch (rollbackError) { node.warn('sdi12 config rollback failed'); }",
   '    }',
   '    msg.statusCode = 500;',
   "    msg.payload = { message: 'Unable to save SDI-12 config' };",
@@ -437,16 +512,16 @@ preservePrefix(identifyAction, 'return (async () => {', [
   '  var db = null;',
   "  var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';",
   '  try {',
+  '    var userId = null;',
+  '    if (!scopedOn) {',
+  '      var auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);',
+  '      userId = auth.userId;',
+  '    }',
   "    var deveui = String(msg.req && msg.req.params && msg.req.params.deveui || '').trim().toUpperCase();",
   '    if (!/^[0-9A-F]{16}$/.test(deveui)) {',
   '      msg.statusCode = 400;',
   "      msg.payload = { message: 'Invalid deveui' };",
   '      return [null, msg];',
-  '    }',
-  '    var userId = null;',
-  '    if (!scopedOn) {',
-  '      var auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);',
-  '      userId = auth.userId;',
   '    }',
   "    db = new osiDb.Database('/data/db/farming.db');",
   '    var row = userId === null',
@@ -481,7 +556,7 @@ preservePrefix(identifyAction, 'return (async () => {', [
   '    } else {',
   "      var normalizeLoad = osiLib.require('sdi12-normalize');",
   '      if (!normalizeLoad.ok) {',
-  "        node.error('SDI12 identify: normalizer unavailable', msg);",
+  "        node.warn('SDI12 identify: normalizer unavailable');",
   "        throw Object.assign(new Error('identify unavailable'), { statusCode: 500 });",
   '      }',
   '      var validated = normalizeLoad.value.validateSentekLayout(rawLayout);',
@@ -513,6 +588,52 @@ preservePrefix(identifyAction, 'return (async () => {', [
   '  }',
   '})();',
 ].join('\n'), 'sdi12 identify action');
+
+profilesScope.func = authPrefix + [
+  'return (async () => {',
+  '  var db = null;',
+  '  try {',
+  '    var auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);',
+  "    var scopeLoad = osiLib.require('scope');",
+  '    if (!scopeLoad.ok) {',
+  "      node.warn('sdi12 profiles: scope module unavailable');",
+  "      throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });",
+  '    }',
+  "    db = new osiDb.Database('/data/db/farming.db');",
+  '    var user = await db.get(',
+  "      'SELECT user_uuid FROM users WHERE id = ? AND username = ? LIMIT 1',",
+  '      [auth.userId, auth.username]',
+  '    );',
+  '    if (!user || !user.user_uuid) {',
+  "      throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });",
+  '    }',
+  '    await scopeLoad.value.assertEnabledAccount(db, user.user_uuid, { scopedMode: true });',
+  '    return [msg, null];',
+  '  } catch (error) {',
+  '    var rawStatus = Number(error && (error.statusCode || error.status) || 500) || 500;',
+  '    msg.statusCode = [401, 403, 500].indexOf(rawStatus) >= 0 ? rawStatus : 500;',
+  "    msg.payload = { message: msg.statusCode >= 500 ? 'Unable to authorize SDI-12 profiles' : (msg.statusCode === 403 ? 'Forbidden' : String(error && error.message ? error.message : error)) };",
+  '    return [null, msg];',
+  '  } finally {',
+  '    if (db) {',
+  '      try {',
+  '        await db.close();',
+  '      } catch (closeError) {',
+  "        node.warn('sdi12 profiles DB close failed');",
+  '      }',
+  '    }',
+  '  }',
+  '})();',
+].join('\n');
+profilesScope.libs = [
+  { var: 'crypto', module: 'crypto' },
+  { var: 'osiLib', module: 'osi-lib' },
+  { var: 'osiDb', module: 'osi-db-helper' },
+];
+
+tagVerifyBearer(configAuth, 'sdi12-config-auth-fn');
+tagVerifyBearer(identifyAction, 'sdi12-identify-action-fn');
+tagVerifyBearer(profilesScope, 'sdi12-profiles-scope-fn');
 
 identifyTrigger.func = [
   'var inputRow = msg.deviceRow || {};',

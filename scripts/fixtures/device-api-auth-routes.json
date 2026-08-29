@@ -1,6 +1,6 @@
 {
   "$schema": "device-api-auth-routes.v1",
-  "description": "Reviewed inventory of every protected Device API HTTP route on device-api-tab (43 entries), the verifyBearer-bearing function node each route must reach first, and the three deliberately public routes. Reviewed against origin/main at f50950b1767a1aa6302ef2553d68a4e379b5b142. A new http-in node on device-api-tab must be added to exactly one of routes/unprotectedRoutes here or scripts/test-device-api-auth-status.js fails closed.",
+  "description": "Reviewed inventory of every protected Device API HTTP route on device-api-tab (49 entries), the verifyBearer-bearing function node each route must reach first, and the three deliberately public routes. Reviewed through the SDI-12 recipe deployment correction against synthetic baseline 9e6d06850dd9791ffea2249ac8bee067717c268e. A new http-in node on device-api-tab must be added to exactly one of routes/unprotectedRoutes here or scripts/test-device-api-auth-status.js fails closed.",
   "routes": [
     {
       "method": "PUT",
@@ -109,6 +109,30 @@
       "url": "/api/devices/:deveui/soil-moisture-depths",
       "httpNodeId": "put-soil-depth-http",
       "authNodeId": "put-soil-depth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/sdi12/config",
+      "httpNodeId": "sdi12-config-http",
+      "authNodeId": "sdi12-config-auth-fn"
+    },
+    {
+      "method": "POST",
+      "url": "/api/devices/:deveui/sdi12/identify",
+      "httpNodeId": "sdi12-identify-http",
+      "authNodeId": "sdi12-identify-action-fn"
+    },
+    {
+      "method": "POST",
+      "url": "/api/devices/:deveui/sdi12/recipe/apply",
+      "httpNodeId": "sdi12-recipe-apply-http",
+      "authNodeId": "sdi12-config-auth-fn"
+    },
+    {
+      "method": "POST",
+      "url": "/api/devices/:deveui/sdi12/recipe/rollback",
+      "httpNodeId": "sdi12-recipe-rollback-http",
+      "authNodeId": "sdi12-config-auth-fn"
     },
     {
       "method": "PUT",
@@ -265,6 +289,12 @@
       "url": "/api/me",
       "httpNodeId": "api-me-http",
       "authNodeId": "api-me-auth"
+    },
+    {
+      "method": "GET",
+      "url": "/api/sdi12/probe-profiles",
+      "httpNodeId": "sdi12-profiles-http",
+      "authNodeId": "sdi12-profiles-scope-fn"
     }
   ],
   "unprotectedRoutes": [

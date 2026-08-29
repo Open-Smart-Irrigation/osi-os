@@ -648,10 +648,10 @@ test('fixture is self-consistent', () => {
   const fixture = loadFixtureRaw();
   const problems = validateFixtureShape(fixture);
   assert.deepEqual(problems, []);
-  assert.equal(fixture.routes.length, 44, 'expected 44 reviewed protected routes');
+  assert.equal(fixture.routes.length, 49, 'expected 49 reviewed protected routes');
   assert.equal(fixture.unprotectedRoutes.length, 3, 'expected 3 reviewed unprotected routes');
   const distinctSources = new Set(fixture.routes.map((r) => r.authNodeId));
-  assert.equal(distinctSources.size, 42, 'expected 42 distinct reviewed auth sources');
+  assert.equal(distinctSources.size, 45, 'expected 45 distinct reviewed auth sources');
   const expectedUnprotected = new Set(['GET /api/catalog', 'GET /api/v1/devices/:deveui/today-liters', 'OPTIONS /api/*']);
   const actualUnprotected = new Set(fixture.unprotectedRoutes.map((r) => r.method + ' ' + r.url));
   assert.deepEqual(actualUnprotected, expectedUnprotected);
