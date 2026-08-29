@@ -23,6 +23,7 @@ const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
     'agroscope-uplink-transform',
+    'chirpstack',
     'dendro-analytics',
     'device-commands',
     'device-writer',
@@ -57,6 +58,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['osi-command-ledger'], 'osi-command-ledger');
   assert.equal(osiLib.NAME_TO_PATH['osi-journal'], 'osi-journal');
   assert.equal(osiLib.NAME_TO_PATH['journal-replication'], 'osi-journal-replication');
+  assert.equal(osiLib.NAME_TO_PATH.chirpstack, 'osi-chirpstack-helper');
 });
 
 test('unknown name returns a typed failure, never throws', () => {
@@ -85,6 +87,7 @@ test('journal flow helpers load from OSI_LIB_BASE and cache successful modules',
     ['osi-command-ledger', 'osi-command-ledger'],
     ['journal-replication', 'osi-journal-replication'],
     ['sdi12-recipe', 'osi-sdi12-recipe'],
+    ['chirpstack', 'osi-chirpstack-helper'],
   ]) {
     const helperDirectory = path.join(FIXTURE_BASE, directory);
     const helperPath = path.join(helperDirectory, 'index.js');

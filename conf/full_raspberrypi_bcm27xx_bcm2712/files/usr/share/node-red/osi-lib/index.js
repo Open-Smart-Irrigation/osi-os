@@ -12,6 +12,7 @@ const COOLDOWN_MS = Number(process.env.OSI_LIB_COOLDOWN_MS || 30000); // test ov
 // three-surface registration checked by scripts/verify-helper-registration.js;
 // codec entries ride the wholesale codecs copy/fetch.
 const NAME_TO_PATH = {
+  chirpstack: 'osi-chirpstack-helper',
   'history-sync': 'osi-history-sync-helper',
   'installation': 'osi-installation-helper',
   'history-router': 'osi-history-router',

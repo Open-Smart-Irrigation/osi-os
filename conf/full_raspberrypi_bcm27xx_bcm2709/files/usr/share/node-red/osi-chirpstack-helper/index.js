@@ -48,6 +48,8 @@ const OPERATION_STEPS = new Set([
   'getGateway',
   'updateGatewayLocation',
   'flushDeviceQueue',
+  'enqueueDeviceDownlink',
+  'listDeviceQueue',
   'close',
   'grpc_call',
 ]);
@@ -946,6 +948,52 @@ class ChirpStackClient {
       devEui: normalizedDevEui,
       method: 'DeviceService.FlushQueue'
     };
+  }
+
+  async enqueueDeviceDownlink(input) {
+    const normalizedDevEui = normalizeDevEui(input && input.devEui);
+    if (!/^[0-9A-F]{16}$/.test(normalizedDevEui)
+      || !Number.isInteger(input && input.fPort)
+      || input.fPort < 1
+      || input.fPort > 255
+      || typeof input.confirmed !== 'boolean'
+      || !Buffer.isBuffer(input.data)
+      || input.data.length === 0) {
+      throw boundedError('validate', 'INVALID_ARGUMENT');
+    }
+
+    const queueItem = new devicePb.DeviceQueueItem();
+    queueItem.setDevEui(normalizedDevEui);
+    queueItem.setFPort(input.fPort);
+    queueItem.setConfirmed(input.confirmed);
+    queueItem.setData(input.data);
+    const request = new devicePb.EnqueueDeviceQueueItemRequest();
+    request.setQueueItem(queueItem);
+    const response = await grpcInvoke(this.deviceClient, 'enqueue', request, this.metadata, 'enqueueDeviceDownlink');
+    const id = response && typeof response.getId === 'function' ? String(response.getId() || '').trim() : '';
+    if (!id) {
+      throw boundedError('enqueueDeviceDownlink', 'UNKNOWN');
+    }
+    return { id };
+  }
+
+  async listDeviceQueue(devEui) {
+    const normalizedDevEui = normalizeDevEui(devEui);
+    if (!/^[0-9A-F]{16}$/.test(normalizedDevEui)) {
+      throw boundedError('validate', 'INVALID_ARGUMENT');
+    }
+
+    const request = new devicePb.GetDeviceQueueItemsRequest();
+    request.setDevEui(normalizedDevEui);
+    request.setCountOnly(false);
+    const response = await grpcInvoke(this.deviceClient, 'getQueue', request, this.metadata, 'listDeviceQueue');
+    return response.getResultList().map((item) => ({
+      id: String(item.getId() || ''),
+      devEui: normalizeDevEui(item.getDevEui()),
+      fPort: item.getFPort(),
+      confirmed: item.getConfirmed(),
+      data: Buffer.from(item.getData_asU8()),
+    }));
   }
 
   // Idempotent, close-all, data-free. Every distinct underlying service

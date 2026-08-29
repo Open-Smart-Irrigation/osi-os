@@ -963,6 +963,128 @@ test('[rpc-shape] deleteDevice and deleteKeys send DeleteDeviceRequest/DeleteDev
   assert.equal(deviceClient._calls[1].request.getDevEui(), DEVEUI);
 });
 
+test('[rpc-shape] enqueueDeviceDownlink sends a generated DeviceQueueItem with normalized EUI and returns its response ID', async () => {
+  const payload = Buffer.from([0x03, 0x17, 0x2A]);
+  const { client, deviceClient } = makeShapeClient({
+    enqueue(request, metadata, options, callback) {
+      const response = new devicePb.EnqueueDeviceQueueItemResponse();
+      response.setId('queue-item-42');
+      callback(null, response);
+    },
+  });
+
+  const result = await client.enqueueDeviceDownlink({
+    devEui: ' a8404101fd5ecf41 ', fPort: 2, confirmed: false, data: payload,
+  });
+
+  assert.deepEqual(result, { id: 'queue-item-42' });
+  assert.equal(deviceClient._calls.length, 1);
+  const call = deviceClient._calls[0];
+  assert.equal(call.method, 'enqueue');
+  assert.ok(call.request instanceof devicePb.EnqueueDeviceQueueItemRequest);
+  const queueItem = call.request.getQueueItem();
+  assert.ok(queueItem instanceof devicePb.DeviceQueueItem);
+  assert.equal(queueItem.getDevEui(), DEVEUI);
+  assert.equal(queueItem.getFPort(), 2);
+  assert.equal(queueItem.getConfirmed(), false);
+  assert.deepEqual(Buffer.from(queueItem.getData_asU8()), payload);
+  assertDeadline(call.options);
+});
+
+test('[rpc-shape] listDeviceQueue sends GetDeviceQueueItemsRequest and converts generated queue items to safe values', async () => {
+  const { client, deviceClient } = makeShapeClient({
+    getQueue(request, metadata, options, callback) {
+      const first = new devicePb.DeviceQueueItem();
+      first.setId('queue-item-1');
+      first.setDevEui(DEVEUI);
+      first.setFPort(2);
+      first.setConfirmed(false);
+      first.setData(Uint8Array.from([0x03, 0x17]));
+      const second = new devicePb.DeviceQueueItem();
+      second.setId('queue-item-2');
+      second.setDevEui(DEVEUI);
+      second.setFPort(3);
+      second.setConfirmed(true);
+      second.setData(Uint8Array.from([0x2A]));
+      const response = new devicePb.GetDeviceQueueItemsResponse();
+      response.setResultList([first, second]);
+      callback(null, response);
+    },
+  });
+
+  const result = await client.listDeviceQueue(' a8404101fd5ecf41 ');
+
+  assert.deepEqual(result, [
+    { id: 'queue-item-1', devEui: DEVEUI, fPort: 2, confirmed: false, data: Buffer.from([0x03, 0x17]) },
+    { id: 'queue-item-2', devEui: DEVEUI, fPort: 3, confirmed: true, data: Buffer.from([0x2A]) },
+  ]);
+  assert.equal(deviceClient._calls.length, 1);
+  const call = deviceClient._calls[0];
+  assert.equal(call.method, 'getQueue');
+  assert.ok(call.request instanceof devicePb.GetDeviceQueueItemsRequest);
+  assert.equal(call.request.getDevEui(), DEVEUI);
+  assert.equal(call.request.getCountOnly(), false);
+  assertDeadline(call.options);
+});
+
+test('[rpc-shape] queue methods reject invalid input and all queue failures stay bounded', async () => {
+  const payloadSecret = Buffer.from('PAYLOAD-SECRET-2A');
+  const credentialSecret = 'credential-secret-2A';
+  const { client, deviceClient } = makeShapeClient({
+    enqueue(request, metadata, options, callback) {
+      callback({ code: grpc.status.PERMISSION_DENIED, message: credentialSecret, details: credentialSecret });
+    },
+    getQueue(request, metadata, options, callback) { callback(null, new devicePb.GetDeviceQueueItemsResponse()); },
+  });
+  const valid = { devEui: DEVEUI, fPort: 2, confirmed: false, data: Buffer.from([0x03]) };
+
+  for (const input of [
+    Object.assign({}, valid, { devEui: 'not-an-eui' }),
+    Object.assign({}, valid, { fPort: 0 }),
+    Object.assign({}, valid, { fPort: 256 }),
+    Object.assign({}, valid, { fPort: 2.5 }),
+    Object.assign({}, valid, { confirmed: 'false' }),
+    Object.assign({}, valid, { data: Buffer.alloc(0) }),
+    Object.assign({}, valid, { data: Uint8Array.from([0x03]) }),
+  ]) {
+    await assert.rejects(client.enqueueDeviceDownlink(input), (error) => {
+      assert.equal(error.message, 'chirpstack_helper_bounded_error');
+      assert.equal(error.step, 'validate');
+      assert.equal(error.code, 'INVALID_ARGUMENT');
+      assert.ok(!JSON.stringify(error).includes(payloadSecret.toString('utf8')));
+      assert.ok(!JSON.stringify(error).includes(credentialSecret));
+      return true;
+    });
+  }
+
+  await assert.rejects(client.listDeviceQueue('not-an-eui'), (error) => {
+    assert.equal(error.message, 'chirpstack_helper_bounded_error');
+    assert.equal(error.step, 'validate');
+    assert.equal(error.code, 'INVALID_ARGUMENT');
+    return true;
+  });
+
+  await assert.rejects(client.enqueueDeviceDownlink(Object.assign({}, valid, { data: payloadSecret })), (error) => {
+    assert.equal(error.message, 'chirpstack_helper_bounded_error');
+    assert.equal(error.step, 'enqueueDeviceDownlink');
+    assert.equal(error.code, 'PERMISSION_DENIED');
+    assert.ok(!JSON.stringify(error).includes(payloadSecret.toString('utf8')));
+    assert.ok(!JSON.stringify(error).includes(credentialSecret));
+    return true;
+  });
+
+  const missingIdClient = makeShapeClient({
+    enqueue(request, metadata, options, callback) { callback(null, new devicePb.EnqueueDeviceQueueItemResponse()); },
+  }).client;
+  await assert.rejects(missingIdClient.enqueueDeviceDownlink(valid), (error) => {
+    assert.equal(error.message, 'chirpstack_helper_bounded_error');
+    assert.equal(error.step, 'enqueueDeviceDownlink');
+    assert.equal(error.code, 'UNKNOWN');
+    return true;
+  });
+  assert.equal(deviceClient._calls.filter((call) => call.method === 'flushQueue').length, 0);
+});
+
 // Stateful in-memory fake DeviceService for integrated ensureDeviceProvisioned
 // runs across the real protobuf boundary.
 function makeInMemoryDeviceService(options = {}) {
