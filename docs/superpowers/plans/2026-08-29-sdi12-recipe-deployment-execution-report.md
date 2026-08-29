@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-29
 **Verifier:** independent Task 7 pass
-**Scope:** commits `5c36eda1` through `57a3c196`
+**Scope:** commits `5c36eda1` through `57a3c196`, plus final-review synthetic
+snapshot `8b4d7298..c5f35e22`
 
 ## Result
 
@@ -29,9 +30,15 @@ missing, and the GUI retains prior readings. The migration is additive and
 local-only; the frozen boot DDL and edge/cloud sync contracts were not changed.
 Maintained bcm2712 and bcm2709 runtime payloads are byte-identical.
 
-No new defect was found by this review. The test suite provides direct coverage
-for the hazard cases above; a live downlink/probe test still has to prove the
-bench-derived recipe on the target hardware.
+The final independent review found that an already-open settings modal did not
+prefill a newly discovered SDI-12 address. Task 6 round 2 fixed that component
+and its test in the unstaged worktree, using the required RED run followed by 43
+focused GREEN tests. The scoped synthetic review of that unstaged component/test
+change is `8b4d7298..c5f35e22`; it is identified separately because it is not a
+committed feature-range change. The follow-up typecheck, full GUI unit suite,
+build, and diff check passed. There are no open review findings. A live
+downlink/probe test still has to prove the bench-derived recipe on the target
+hardware.
 
 ## Verification
 
@@ -55,11 +62,13 @@ All commands ran from `/home/phil/Repos/osi-os-agrolink` unless stated otherwise
 | `node scripts/verify-profile-parity.js` | PASS: `All parity checks passed.` |
 | `node scripts/verify-sync-flow.js` | PASS; chained checks completed with profile parity. |
 | `node scripts/verify-no-new-silent-catch.js` | PASS: 88 empty catches in each maintained profile, equal to the baseline. |
-| `node scripts/verify-flows-size-ratchet.js` | PASS: exact reviewed ceilings held at 1,321,101 bytes. |
+| `node scripts/verify-flows-size-ratchet.js` | PASS: exact reviewed function-character ceilings held at 1,321,101 characters. |
 | `node scripts/verify-communication-contract.js` | PASS. |
 | `scripts/check-mqtt-topics.sh` | PASS: no hardcoded MQTT application UUIDs in the three flow copies. |
 | `cd web/react-gui && npm run test:unit` | PASS: 128 tsx tests and 1,762 Vitest tests. |
 | `cd web/react-gui && npm run build` | PASS: Vite built 1,723 modules in 7.60 seconds. |
+| Task 6 round 2: `npm run test:unit:vitest -- src/services/__tests__/api.sdi12.test.ts src/components/farming/__tests__/Sdi12SettingsModal.test.tsx src/components/farming/__tests__/Sdi12SoilCard.test.tsx` | PASS: 43 focused tests after the RED run. |
+| Task 6 round 2: `npm run typecheck`, `npm run test:unit`, `npm run build`, and `git diff --check` | PASS. |
 
 The Node tests print Node's experimental SQLite warning. GUI commands print
 `baseline-browser-mapping` and `caniuse-lite` age notices. Vite also warns that
