@@ -342,6 +342,13 @@ path as Apply. It returns HTTP 409 when no compatible pair has been observed.
 Rollback cannot reprogram the converter while leaving the GUI on a different
 logical layout.
 
+The rollback transaction retains the pre-rollback layout and deployment state
+until queue preflight succeeds. If a non-empty queue is found before any recipe
+frame is accepted, a compensating transaction restores that complete pair. If
+enqueueing fails after accepting one or more frames, the compatible layout
+remains desired and the deployment becomes `degraded`, because converter state
+may already be changing.
+
 ## Observation state machine
 
 An edge-local 60-second worker polls `listDeviceQueue()` for active deployments.
@@ -351,6 +358,9 @@ claim that an unconfirmed downlink was interpreted by the converter. A recipe
 whose IDs remain queued beyond `commissioning_deadline_at` becomes `degraded`
 with `queue_delivery_timeout`. The deadline is twelve hours after enqueue, which
 covers 23 cycles at the normal 20-minute interval plus network delay.
+A `queueing` claim that has no stored IDs when the same deadline expires becomes
+`degraded` with `queueing_interrupted`, covering a process stop between the
+SQLite claim and durable queue-ID storage.
 
 The existing SDI-12 writer receives the deployment row alongside the device
 configuration. Compatibility observation starts only after `queue_drained_at`
