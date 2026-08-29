@@ -2,6 +2,7 @@
 
 const { isDeepStrictEqual } = require('node:util');
 const { compileSentekRecipe } = require('../osi-sdi12-recipe');
+const { validateSentekLayout } = require('../osi-sdi12-normalize');
 
 const ACTIVE_STATUSES = new Set(['queueing', 'queued']);
 const CHIRPSTACK_CODES = new Set([
@@ -61,21 +62,11 @@ function boundedStoredCode(value) {
 }
 
 function canonicalFromLayout(layout) {
-  const compiled = compileSentekRecipe(layout);
+  const validated = validateSentekLayout(layout);
+  if (!validated.ok) throw commissioningError(400, 'invalid_layout');
+  const compiled = compileSentekRecipe(validated.layout);
   if (!compiled.ok) throw commissioningError(400, 'invalid_layout');
-  const sensors = layout.sensors.map((sensor) => ({
-    channel: sensor.channel,
-    response_position: sensor.response_position,
-    depth_cm: sensor.depth_cm,
-    type: sensor.type,
-  })).sort((first, second) => first.response_position - second.response_position);
-  const canonicalLayout = { version: 1, address: compiled.recipe.address, sensors };
-  const canonicalDepths = {};
-  for (const sensor of sensors) {
-    canonicalDepths['vwc_' + sensor.channel] = sensor.depth_cm;
-    if (sensor.type === 'TRISCAN') canonicalDepths['soil_vic_' + sensor.channel] = sensor.depth_cm;
-  }
-  return { layout: canonicalLayout, depths: canonicalDepths, recipe: compiled.recipe };
+  return { layout: validated.layout, depths: validated.depths, recipe: compiled.recipe };
 }
 
 function canonicalObjectJson(value) {
@@ -207,17 +198,61 @@ async function claimDesiredRecipe(db, deveui, now, deadline) {
       throw commissioningError(409, 'desired_recipe_mismatch');
     }
     await tx.run(
-      'UPDATE sdi12_recipe_deployments SET status = ?, queue_item_ids_json = ?, ' +
-        'queued_at = ?, queue_drained_at = ?, commissioning_deadline_at = ?, ' +
-        'observed_count = ?, failed_observation_count = ?, last_observed_at = ?, ' +
-        'last_error_code = ?, updated_at = ? WHERE deveui = ? AND desired_version = ? ' +
+      'UPDATE sdi12_recipe_deployments SET status = ?, commissioning_deadline_at = ?, ' +
+        'updated_at = ? WHERE deveui = ? AND desired_version = ? ' +
         'AND status NOT IN (?, ?)',
-      ['queueing', null, null, null, deadline, 0, 0, null, null, now, deveui,
-        deployment.desired_version, 'queueing', 'queued']
+      ['queueing', deadline, now, deveui, deployment.desired_version, 'queueing', 'queued']
     );
     if (await changes(tx) !== 1) throw commissioningError(409, 'deployment_in_progress');
-    return { recipe: canonical.recipe, desiredVersion: deployment.desired_version };
+    return {
+      recipe: canonical.recipe,
+      desiredVersion: deployment.desired_version,
+      deploymentBefore: deployment,
+    };
   });
+}
+
+async function restoreDeploymentSnapshot(db, deveui, claim) {
+  const row = claim.deploymentBefore;
+  await db.transaction(async (tx) => {
+    await tx.run(
+      'UPDATE sdi12_recipe_deployments SET desired_version = ?, desired_layout_hash = ?, ' +
+        'desired_recipe_json = ?, status = ?, queue_item_ids_json = ?, queued_at = ?, ' +
+        'queue_drained_at = ?, commissioning_deadline_at = ?, observed_count = ?, ' +
+        'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, ' +
+        'compatible_recipe_json = ?, compatible_layout_json = ?, compatible_at = ?, updated_at = ? ' +
+        'WHERE deveui = ? AND desired_version = ? AND status = ?',
+      [row.desired_version, row.desired_layout_hash, row.desired_recipe_json, row.status,
+        row.queue_item_ids_json, row.queued_at, row.queue_drained_at,
+        row.commissioning_deadline_at, row.observed_count, row.failed_observation_count,
+        row.last_observed_at, row.last_error_code, row.compatible_recipe_json,
+        row.compatible_layout_json, row.compatible_at, row.updated_at, deveui,
+        claim.desiredVersion, 'queueing']
+    );
+    if (await changes(tx) !== 1) throw commissioningError(409, 'deployment_claim_lost');
+  });
+}
+
+async function prepareClaimForEnqueue(db, deveui, claim, now, deadline) {
+  await db.transaction(async (tx) => {
+    await tx.run(
+      'UPDATE sdi12_recipe_deployments SET queue_item_ids_json = ?, queued_at = ?, ' +
+        'queue_drained_at = ?, commissioning_deadline_at = ?, observed_count = ?, ' +
+        'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, updated_at = ? ' +
+        'WHERE deveui = ? AND desired_version = ? AND status = ?',
+      [null, null, null, deadline, 0, 0, null, null, now, deveui,
+        claim.desiredVersion, 'queueing']
+    );
+    if (await changes(tx) !== 1) throw commissioningError(409, 'deployment_claim_lost');
+  });
+}
+
+async function settleApplyPreflightFailure(db, deveui, claim, now, code) {
+  if (claim.deploymentBefore.status === 'degraded') {
+    await restoreDeploymentSnapshot(db, deveui, claim);
+    return;
+  }
+  await settleApplyFailure(db, deveui, claim, [], now, code);
 }
 
 async function settleApplyFailure(db, deveui, claim, ids, now, code) {
@@ -248,13 +283,14 @@ async function applyDesiredRecipe(db, client, deveuiInput, options) {
     queue = await client.listDeviceQueue(deveui);
   } catch (error) {
     const bounded = chirpStackFailure(error);
-    await settleApplyFailure(db, deveui, claim, [], now, bounded.code);
+    await settleApplyPreflightFailure(db, deveui, claim, now, bounded.code);
     throw bounded;
   }
   if (!Array.isArray(queue) || queue.length > 0) {
-    await settleApplyFailure(db, deveui, claim, [], now, 'device_queue_not_empty');
+    await settleApplyPreflightFailure(db, deveui, claim, now, 'device_queue_not_empty');
     throw commissioningError(409, 'device_queue_not_empty');
   }
+  await prepareClaimForEnqueue(db, deveui, claim, now, deadline);
 
   const ids = [];
   try {
@@ -291,13 +327,7 @@ async function applyDesiredRecipe(db, client, deveuiInput, options) {
 
 async function claimRollback(db, deveui, now, deadline) {
   return db.transaction(async (tx) => {
-    const device = await tx.get(
-      'SELECT type_id, sdi12_probe_profile, sdi12_probe_status, sdi12_value_count, ' +
-        'sdi12_channel_layout_json, soil_moisture_probe_depths_json, ' +
-        'soil_moisture_probe_depths_configured, sync_version, updated_at ' +
-        'FROM devices WHERE deveui = ?',
-      [deveui]
-    );
+    const device = await tx.get('SELECT type_id FROM devices WHERE deveui = ?', [deveui]);
     if (!device) throw commissioningError(404, 'device_not_found');
     if (device.type_id !== 'DRAGINO_SDI12') throw commissioningError(409, 'wrong_device_type');
     const deployment = await tx.get('SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?', [deveui]);
@@ -317,81 +347,50 @@ async function claimRollback(db, deveui, now, deadline) {
       throw commissioningError(409, 'compatible_pair_mismatch');
     }
 
-    const nextVersion = Number(deployment.desired_version) + 1;
+    const retryingCompatibleTarget = deployment.status === 'degraded'
+      && deployment.desired_layout_hash === compatible.recipe.layoutHash
+      && isDeepStrictEqual(parseJson(deployment.desired_recipe_json), compatible.recipe);
+    const nextVersion = retryingCompatibleTarget
+      ? Number(deployment.desired_version)
+      : Number(deployment.desired_version) + 1;
     const layoutJson = JSON.stringify(compatible.layout);
     const depthsJson = JSON.stringify(compatible.depths);
     const recipeJson = JSON.stringify(compatible.recipe);
     await tx.run(
-      'UPDATE devices SET sdi12_probe_profile = ?, sdi12_probe_status = ?, ' +
-        'sdi12_value_count = ?, sdi12_channel_layout_json = ?, ' +
-        'soil_moisture_probe_depths_json = ?, soil_moisture_probe_depths_configured = ?, ' +
-        'sync_version = COALESCE(sync_version, ?) + ?, updated_at = ? WHERE deveui = ?',
-      ['SENTEK_ENVIROSCAN', 'manual', null, layoutJson, depthsJson, 1, 0, 1, now, deveui]
-    );
-    await tx.run(
       'UPDATE sdi12_recipe_deployments SET desired_version = ?, desired_layout_hash = ?, ' +
-        'desired_recipe_json = ?, status = ?, queue_item_ids_json = ?, queued_at = ?, ' +
-        'queue_drained_at = ?, commissioning_deadline_at = ?, observed_count = ?, ' +
-        'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, updated_at = ? ' +
+        'desired_recipe_json = ?, status = ?, commissioning_deadline_at = ?, updated_at = ? ' +
         'WHERE deveui = ? AND desired_version = ? AND status NOT IN (?, ?)',
-      [nextVersion, compatible.recipe.layoutHash, recipeJson, 'queueing', null, null, null,
-        deadline, 0, 0, null, null, now, deveui, deployment.desired_version, 'queueing', 'queued']
+      [nextVersion, compatible.recipe.layoutHash, recipeJson, 'queueing', deadline, now,
+        deveui, deployment.desired_version, 'queueing', 'queued']
     );
     if (await changes(tx) !== 1) throw commissioningError(409, 'deployment_in_progress');
     return {
       recipe: compatible.recipe,
       desiredVersion: nextVersion,
-      appliedLayoutJson: layoutJson,
-      appliedSyncVersion: Number(device.sync_version || 0) + 1,
-      deviceBefore: device,
+      layoutJson,
+      depthsJson,
       deploymentBefore: deployment,
     };
   });
 }
 
-async function compensateRollback(db, deveui, claim) {
+async function finishRollbackDeployment(db, deveui, claim, ids, now, deadline) {
   await db.transaction(async (tx) => {
-    const device = claim.deviceBefore;
     await tx.run(
       'UPDATE devices SET sdi12_probe_profile = ?, sdi12_probe_status = ?, ' +
         'sdi12_value_count = ?, sdi12_channel_layout_json = ?, ' +
         'soil_moisture_probe_depths_json = ?, soil_moisture_probe_depths_configured = ?, ' +
-        'sync_version = ?, updated_at = ? WHERE deveui = ? AND sync_version = ? ' +
-        'AND sdi12_channel_layout_json IS ?',
-      [device.sdi12_probe_profile, device.sdi12_probe_status, device.sdi12_value_count,
-        device.sdi12_channel_layout_json, device.soil_moisture_probe_depths_json,
-        device.soil_moisture_probe_depths_configured, device.sync_version, device.updated_at,
-        deveui, claim.appliedSyncVersion, claim.appliedLayoutJson]
+        'sync_version = COALESCE(sync_version, ?) + ?, updated_at = ? WHERE deveui = ?',
+      ['SENTEK_ENVIROSCAN', 'manual', null, claim.layoutJson, claim.depthsJson,
+        1, 0, 1, now, deveui]
     );
-    if (await changes(tx) !== 1) throw commissioningError(409, 'rollback_compensation_conflict');
-
-    const row = claim.deploymentBefore;
-    await tx.run(
-      'UPDATE sdi12_recipe_deployments SET desired_version = ?, desired_layout_hash = ?, ' +
-        'desired_recipe_json = ?, status = ?, queue_item_ids_json = ?, queued_at = ?, ' +
-        'queue_drained_at = ?, commissioning_deadline_at = ?, observed_count = ?, ' +
-        'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, ' +
-        'compatible_recipe_json = ?, compatible_layout_json = ?, compatible_at = ?, updated_at = ? ' +
-        'WHERE deveui = ? AND desired_version = ? AND status = ?',
-      [row.desired_version, row.desired_layout_hash, row.desired_recipe_json, row.status,
-        row.queue_item_ids_json, row.queued_at, row.queue_drained_at,
-        row.commissioning_deadline_at, row.observed_count, row.failed_observation_count,
-        row.last_observed_at, row.last_error_code, row.compatible_recipe_json,
-        row.compatible_layout_json, row.compatible_at, row.updated_at, deveui,
-        claim.desiredVersion, 'queueing']
-    );
-    if (await changes(tx) !== 1) throw commissioningError(409, 'rollback_compensation_conflict');
-  });
-}
-
-async function finishQueuedDeployment(db, deveui, desiredVersion, ids, now, deadline) {
-  await db.transaction(async (tx) => {
+    if (await changes(tx) !== 1) throw commissioningError(409, 'device_not_found');
     await tx.run(
       'UPDATE sdi12_recipe_deployments SET status = ?, queue_item_ids_json = ?, ' +
         'queued_at = ?, queue_drained_at = ?, commissioning_deadline_at = ?, ' +
         'last_error_code = ?, updated_at = ? WHERE deveui = ? AND desired_version = ? AND status = ?',
       ['queued', JSON.stringify(ids), now, null, deadline, null, now, deveui,
-        desiredVersion, 'queueing']
+        claim.desiredVersion, 'queueing']
     );
     if (await changes(tx) !== 1) throw commissioningError(409, 'deployment_claim_lost');
   });
@@ -407,13 +406,14 @@ async function rollbackCompatibleRecipe(db, client, deveuiInput, options) {
     queue = await client.listDeviceQueue(deveui);
   } catch (error) {
     const bounded = chirpStackFailure(error);
-    await compensateRollback(db, deveui, claim);
+    await restoreDeploymentSnapshot(db, deveui, claim);
     throw bounded;
   }
   if (!Array.isArray(queue) || queue.length > 0) {
-    await compensateRollback(db, deveui, claim);
+    await restoreDeploymentSnapshot(db, deveui, claim);
     throw commissioningError(409, 'device_queue_not_empty');
   }
+  await prepareClaimForEnqueue(db, deveui, claim, now, deadline);
 
   const ids = [];
   try {
@@ -430,12 +430,12 @@ async function rollbackCompatibleRecipe(db, client, deveuiInput, options) {
     }
   } catch (error) {
     const bounded = chirpStackFailure(error);
-    if (ids.length === 0) await compensateRollback(db, deveui, claim);
+    if (ids.length === 0) await restoreDeploymentSnapshot(db, deveui, claim);
     else await settleApplyFailure(db, deveui, claim, ids, now, bounded.code);
     throw bounded;
   }
 
-  await finishQueuedDeployment(db, deveui, claim.desiredVersion, ids, now, deadline);
+  await finishRollbackDeployment(db, deveui, claim, ids, now, deadline);
   const row = await db.get('SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?', [deveui]);
   return { statusCode: 202, deployment: projectDeployment(row) };
 }
@@ -449,6 +449,11 @@ function storedQueueIds(value) {
 function deadlineReached(row, now) {
   const deadline = Date.parse(String(row.commissioning_deadline_at || ''));
   return Number.isFinite(deadline) && Date.parse(now) >= deadline;
+}
+
+function strictlyAfter(value, boundary) {
+  const boundaryTime = Date.parse(String(boundary || ''));
+  return Number.isFinite(boundaryTime) && Date.parse(value) > boundaryTime;
 }
 
 async function updatePolledState(db, row, now, fields) {
@@ -473,7 +478,7 @@ async function pollDeployments(db, client, options) {
   for (const row of active) {
     const ids = storedQueueIds(row.queue_item_ids_json);
     if (row.status === 'queueing') {
-      if (ids.length === 0 && deadlineReached(row, now)) {
+      if (deadlineReached(row, now)) {
         await updatePolledState(db, row, now, {
           status: 'degraded', queueDrainedAt: null, lastErrorCode: 'queueing_interrupted',
         });
@@ -572,6 +577,9 @@ async function observeAcquisition(db, input) {
     const deployment = await tx.get('SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?', [deveui]);
     if (!deployment || !deployment.queue_drained_at
       || (deployment.status !== 'queued' && deployment.status !== 'observed_once')) return null;
+    if (!strictlyAfter(observedAt, deployment.queue_drained_at)
+      || (deployment.last_observed_at
+        && !strictlyAfter(observedAt, deployment.last_observed_at))) return null;
 
     if (observationMatches(input, device, deployment)) {
       const observedCount = Number(deployment.observed_count || 0) + 1;

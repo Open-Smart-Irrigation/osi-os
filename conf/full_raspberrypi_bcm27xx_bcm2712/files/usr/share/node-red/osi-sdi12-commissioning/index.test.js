@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const commissioning = require('./index.js');
 const recipeCompiler = require('../osi-sdi12-recipe');
@@ -19,6 +21,48 @@ const DEPLOYMENT_COLUMNS = [
 
 function values(count) {
   return Array.from({ length: count }, () => '?').join(', ');
+}
+
+function wrapNative(native, options = {}) {
+  let operationQueue = Promise.resolve();
+  function prepared(method, sql, params) {
+    if (options.failSql && options.failSql.test(sql)) throw new Error('injected_sql_failure');
+    const statement = native.prepare(sql);
+    const args = Array.isArray(params) ? params : [];
+    return statement[method](...args);
+  }
+  function enqueue(work) {
+    const current = operationQueue.then(work, work);
+    operationQueue = current.then(() => undefined, () => undefined);
+    return current;
+  }
+  function scope() {
+    return {
+      async run(sql, params) { prepared('run', sql, params); },
+      async get(sql, params) { return prepared('get', sql, params); },
+      async all(sql, params) { return prepared('all', sql, params); },
+    };
+  }
+  const db = {
+    native,
+    async run(sql, params) { return enqueue(() => scope().run(sql, params)); },
+    async get(sql, params) { return enqueue(() => scope().get(sql, params)); },
+    async all(sql, params) { return enqueue(() => scope().all(sql, params)); },
+    transaction(executor) {
+      return enqueue(async () => {
+        native.exec('BEGIN IMMEDIATE');
+        try {
+          const result = await executor(scope());
+          native.exec('COMMIT');
+          return result;
+        } catch (error) {
+          native.exec('ROLLBACK');
+          throw error;
+        }
+      });
+    },
+  };
+  return db;
 }
 
 function createDb(options = {}) {
@@ -74,46 +118,14 @@ function createDb(options = {}) {
       soil_vic_1 REAL
     );
   `);
+  return wrapNative(native, options);
+}
 
-  let operationQueue = Promise.resolve();
-  function prepared(method, sql, params) {
-    if (options.failSql && options.failSql.test(sql)) throw new Error('injected_sql_failure');
-    const statement = native.prepare(sql);
-    const args = Array.isArray(params) ? params : [];
-    return statement[method](...args);
-  }
-  function enqueue(work) {
-    const current = operationQueue.then(work, work);
-    operationQueue = current.then(() => undefined, () => undefined);
-    return current;
-  }
-  function scope() {
-    return {
-      async run(sql, params) { prepared('run', sql, params); },
-      async get(sql, params) { return prepared('get', sql, params); },
-      async all(sql, params) { return prepared('all', sql, params); },
-    };
-  }
-  const db = {
-    native,
-    async run(sql, params) { return enqueue(() => scope().run(sql, params)); },
-    async get(sql, params) { return enqueue(() => scope().get(sql, params)); },
-    async all(sql, params) { return enqueue(() => scope().all(sql, params)); },
-    transaction(executor) {
-      return enqueue(async () => {
-        native.exec('BEGIN IMMEDIATE');
-        try {
-          const result = await executor(scope());
-          native.exec('COMMIT');
-          return result;
-        } catch (error) {
-          native.exec('ROLLBACK');
-          throw error;
-        }
-      });
-    },
-  };
-  return db;
+function createProductionDb() {
+  const native = new DatabaseSync(':memory:');
+  const seedPath = path.resolve(__dirname, '../../../../../../../database/seed-blank.sql');
+  native.exec(fs.readFileSync(seedPath, 'utf8'));
+  return wrapNative(native);
 }
 
 function sentekLayout(overrides = {}) {
@@ -246,6 +258,51 @@ function seedRollbackReady(db, deploymentOverrides = {}, deviceOverrides = {}) {
   return { desired, compatible };
 }
 
+function seedProductionRollbackReady(db) {
+  const desired = canonical(sentekLayout({ address: 'C' }));
+  const compatible = canonical();
+  db.native.prepare(
+    'INSERT OR REPLACE INTO sync_link_state ' +
+      '(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)'
+  ).run('cloud', 1, 'https://example.invalid', '7', '0016C001F11715E2', NOW);
+  db.native.prepare(
+    'INSERT INTO devices (' +
+      'deveui, name, type_id, created_at, updated_at, gateway_device_eui, ' +
+      'sdi12_probe_profile, sdi12_probe_status, sdi12_value_count, ' +
+      'sdi12_channel_layout_json, soil_moisture_probe_depths_json, ' +
+      'soil_moisture_probe_depths_configured, sync_version' +
+      ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(
+    DEVEUI, 'Production-trigger fixture', 'DRAGINO_SDI12',
+    '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z',
+    '0016C001F11715E2', 'SENTEK_ENVIROSCAN', 'identified', null,
+    JSON.stringify(desired.layout), JSON.stringify(desired.depths), 1, 7
+  );
+  seedDeployment(db, {
+    desired_layout_hash: desired.recipe.layoutHash,
+    desired_recipe_json: JSON.stringify(desired.recipe),
+    status: 'observed_once',
+    queue_item_ids_json: JSON.stringify(['delivered-current']),
+    queued_at: '2026-08-28T01:00:00.000Z',
+    queue_drained_at: '2026-08-28T02:00:00.000Z',
+    commissioning_deadline_at: '2026-08-28T13:00:00.000Z',
+    observed_count: 1,
+    compatible_recipe_json: JSON.stringify(compatible.recipe),
+    compatible_layout_json: JSON.stringify(compatible.layout),
+    compatible_at: '2026-08-27T02:40:00.000Z',
+  });
+  db.native.exec('DELETE FROM sync_outbox');
+  return { desired, compatible };
+}
+
+function readDeviceOutbox(db) {
+  return db.native.prepare(
+    'SELECT aggregate_key, sync_version, payload_json FROM sync_outbox ' +
+      'WHERE aggregate_type = ? ORDER BY rowid'
+  ).all('DEVICE');
+}
+
 function makeClient(options = {}) {
   const calls = { list: [], enqueue: [], flush: [] };
   let enqueueIndex = 0;
@@ -328,6 +385,35 @@ test('saveSentekLayout atomically stores canonical layout and recipe while prese
   assert.equal(deployment.compatible_layout_json, before.compatible_layout_json);
   assert.equal(deployment.compatible_at, before.compatible_at);
   assert.equal(db.native.prepare('SELECT count(*) AS count FROM sdi12_identify_attempts').get().count, 0);
+});
+
+test('saveSentekLayout consumes the validator canonical layout and depth result', async () => {
+  const db = createDb();
+  seedDevice(db);
+  const input = sentekLayout();
+  const expected = canonical(input);
+
+  await commissioning.saveSentekLayout(db, {
+    deveui: DEVEUI,
+    profileId: 'SENTEK_ENVIROSCAN',
+    layout: JSON.stringify(input),
+    depths: expected.depths,
+  });
+
+  const device = readDevice(db);
+  assert.deepEqual(JSON.parse(device.sdi12_channel_layout_json), {
+    version: 1,
+    address: '0',
+    sensors: [
+      { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
+      { channel: 2, response_position: 2, depth_cm: 30, type: 'ENVIROSCAN' },
+    ],
+  });
+  assert.deepEqual(JSON.parse(device.soil_moisture_probe_depths_json), {
+    vwc_1: 10,
+    soil_vic_1: 10,
+    vwc_2: 30,
+  });
 });
 
 test('saveSentekLayout rolls back every table when the final identify-attempt delete fails', async () => {
@@ -537,6 +623,56 @@ test('partial enqueue retains accepted IDs, degrades, and permits a same-version
   assert.equal(retryClient.calls.enqueue.length, ready.recipe.frames.length);
 });
 
+test('a premature degraded retry preserves all prior queue evidence when the queue is still non-empty', async () => {
+  const db = createDb();
+  seedReadyDeployment(db, {
+    status: 'degraded',
+    queue_item_ids_json: JSON.stringify(['accepted-0']),
+    queued_at: NOW,
+    commissioning_deadline_at: '2026-08-29T20:00:00.000Z',
+    last_error_code: 'chirpstack_unavailable',
+  });
+  const before = readDeployment(db);
+  const client = makeClient({ queue: [{ id: 'accepted-0' }] });
+
+  await assert.rejects(
+    () => commissioning.applyDesiredRecipe(db, client, DEVEUI, {
+      now: '2026-08-29T09:00:00.000Z',
+    }),
+    (error) => error.statusCode === 409 && error.code === 'device_queue_not_empty'
+  );
+
+  assert.deepEqual(readDeployment(db), before);
+  assert.equal(client.calls.enqueue.length, 0);
+});
+
+test('a degraded retry preserves all prior queue evidence when queue listing fails', async () => {
+  const db = createDb();
+  seedReadyDeployment(db, {
+    status: 'degraded',
+    queue_item_ids_json: JSON.stringify(['accepted-0']),
+    queued_at: NOW,
+    commissioning_deadline_at: '2026-08-29T20:00:00.000Z',
+    last_error_code: 'chirpstack_unavailable',
+  });
+  const before = readDeployment(db);
+  const client = makeClient({
+    async listDeviceQueue() {
+      throw Object.assign(new Error('transport'), { code: 'UNAVAILABLE' });
+    },
+  });
+
+  await assert.rejects(
+    () => commissioning.applyDesiredRecipe(db, client, DEVEUI, {
+      now: '2026-08-29T09:00:00.000Z',
+    }),
+    (error) => error.statusCode === 502 && error.code === 'chirpstack_unavailable'
+  );
+
+  assert.deepEqual(readDeployment(db), before);
+  assert.equal(client.calls.enqueue.length, 0);
+});
+
 test('rollbackCompatibleRecipe validates the compatible pair, restores canonical device state, and queues a new desired version', async () => {
   const db = createDb();
   const state = seedRollbackReady(db);
@@ -632,7 +768,59 @@ test('rollbackCompatibleRecipe also compensates the complete pair when the first
   assert.deepEqual(client.calls.flush, []);
 });
 
-test('rollbackCompatibleRecipe keeps the compatible layout desired and degrades after partial enqueue', async () => {
+test('rollback rejection leaves the production device trigger and outbox untouched', async () => {
+  const db = createProductionDb();
+  seedProductionRollbackReady(db);
+  const deviceBefore = readDevice(db);
+  const client = makeClient({ queue: [{ id: 'operator-command' }] });
+
+  await assert.rejects(
+    () => commissioning.rollbackCompatibleRecipe(db, client, DEVEUI, { now: NOW }),
+    (error) => error.statusCode === 409 && error.code === 'device_queue_not_empty'
+  );
+
+  assert.deepEqual(readDevice(db), deviceBefore);
+  assert.deepEqual(readDeviceOutbox(db), []);
+});
+
+test('zero-frame rollback failure leaves the production device trigger and outbox untouched', async () => {
+  const db = createProductionDb();
+  seedProductionRollbackReady(db);
+  const deviceBefore = readDevice(db);
+  const client = makeClient({
+    async enqueueDeviceDownlink() {
+      throw Object.assign(new Error('transport'), { code: 'UNAVAILABLE' });
+    },
+  });
+
+  await assert.rejects(
+    () => commissioning.rollbackCompatibleRecipe(db, client, DEVEUI, { now: NOW }),
+    (error) => error.statusCode === 502 && error.code === 'chirpstack_unavailable'
+  );
+
+  assert.deepEqual(readDevice(db), deviceBefore);
+  assert.deepEqual(readDeviceOutbox(db), []);
+});
+
+test('successful rollback emits one monotonic canonical mutation through production triggers', async () => {
+  const db = createProductionDb();
+  const state = seedProductionRollbackReady(db);
+  const client = makeClient();
+
+  await commissioning.rollbackCompatibleRecipe(db, client, DEVEUI, { now: NOW });
+
+  const device = readDevice(db);
+  assert.equal(device.sync_version, 8);
+  assert.deepEqual(JSON.parse(device.sdi12_channel_layout_json), state.compatible.layout);
+  assert.deepEqual(JSON.parse(device.soil_moisture_probe_depths_json), state.compatible.depths);
+  const outbox = readDeviceOutbox(db);
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].aggregate_key, DEVEUI);
+  assert.equal(outbox[0].sync_version, 8);
+  assert.equal(JSON.parse(outbox[0].payload_json).sync_version, 8);
+});
+
+test('partial rollback keeps its target durable but delays the canonical device mutation until retry succeeds', async () => {
   const db = createDb();
   const state = seedRollbackReady(db);
   const client = makeClient({
@@ -649,14 +837,23 @@ test('rollbackCompatibleRecipe keeps the compatible layout desired and degrades 
 
   const device = readDevice(db);
   const deployment = readDeployment(db);
-  assert.deepEqual(JSON.parse(device.sdi12_channel_layout_json), state.compatible.layout);
-  assert.deepEqual(JSON.parse(device.soil_moisture_probe_depths_json), state.compatible.depths);
+  assert.deepEqual(JSON.parse(device.sdi12_channel_layout_json), state.desired.layout);
+  assert.deepEqual(JSON.parse(device.soil_moisture_probe_depths_json), state.desired.depths);
+  assert.equal(device.sync_version, 7);
   assert.equal(deployment.desired_version, 5);
   assert.equal(deployment.desired_layout_hash, state.compatible.recipe.layoutHash);
   assert.equal(deployment.status, 'degraded');
   assert.deepEqual(JSON.parse(deployment.queue_item_ids_json), ['rollback-accepted-0']);
   assert.equal(deployment.last_error_code, 'chirpstack_unavailable');
   assert.deepEqual(client.calls.flush, []);
+
+  const retry = await commissioning.rollbackCompatibleRecipe(db, makeClient(), DEVEUI, {
+    now: '2026-08-29T09:00:00.000Z',
+  });
+  assert.equal(retry.statusCode, 202);
+  assert.equal(readDeployment(db).desired_version, 5);
+  assert.deepEqual(JSON.parse(readDevice(db).sdi12_channel_layout_json), state.compatible.layout);
+  assert.equal(readDevice(db).sync_version, 8);
 });
 
 test('pollDeployments waits for every stored ID, then records drain despite unrelated later queue items', async () => {
@@ -723,6 +920,24 @@ test('pollDeployments degrades an interrupted queueing claim with no stored IDs 
   assert.deepEqual(client.calls.list, []);
 });
 
+test('pollDeployments degrades an interrupted retry claim without erasing its preserved IDs', async () => {
+  const db = createDb();
+  seedReadyDeployment(db, {
+    status: 'queueing',
+    queue_item_ids_json: JSON.stringify(['accepted-before-retry']),
+    queued_at: '2026-08-28T20:00:00.000Z',
+    commissioning_deadline_at: NOW,
+    last_error_code: 'chirpstack_unavailable',
+  });
+
+  await commissioning.pollDeployments(db, makeClient(), { now: NOW });
+
+  const deployment = readDeployment(db);
+  assert.equal(deployment.status, 'degraded');
+  assert.equal(deployment.last_error_code, 'queueing_interrupted');
+  assert.deepEqual(JSON.parse(deployment.queue_item_ids_json), ['accepted-before-retry']);
+});
+
 test('pollDeployments surfaces a bounded queue-list failure without mutating deployment state', async () => {
   const db = createDb();
   seedReadyDeployment(db, {
@@ -759,6 +974,41 @@ test('observeAcquisition ignores matching telemetry until the stored recipe queu
 
   assert.equal(result, null);
   assert.deepEqual(readDeployment(db), before);
+});
+
+test('observeAcquisition ignores pre-drain, drain-equal, and duplicate timestamps without advancing either streak', async () => {
+  const db = createDb();
+  seedReadyDeployment(db, {
+    status: 'queued',
+    queue_item_ids_json: JSON.stringify(['recipe-1']),
+    queue_drained_at: '2026-08-29T08:10:00.000Z',
+  });
+  const initial = readDeployment(db);
+  const failed = successfulObservation({
+    normalization: { channels: {}, unknown: {}, noResponse: true },
+  });
+
+  for (const observedAt of [
+    '2026-08-29T08:09:59.000Z',
+    '2026-08-29T08:10:00.000Z',
+  ]) {
+    assert.equal(await commissioning.observeAcquisition(db, { ...failed, observedAt }), null);
+    assert.deepEqual(readDeployment(db), initial);
+  }
+
+  await commissioning.observeAcquisition(db, successfulObservation());
+  const afterFirst = readDeployment(db);
+  assert.equal(afterFirst.status, 'observed_once');
+  assert.equal(afterFirst.observed_count, 1);
+  assert.equal(afterFirst.failed_observation_count, 0);
+
+  for (const observedAt of [
+    '2026-08-29T08:19:59.000Z',
+    '2026-08-29T08:20:00.000Z',
+  ]) {
+    assert.equal(await commissioning.observeAcquisition(db, { ...failed, observedAt }), null);
+    assert.deepEqual(readDeployment(db), afterFirst);
+  }
 });
 
 test('two consecutive exact finite observations activate compatibility and copy recipe plus current canonical layout', async () => {
