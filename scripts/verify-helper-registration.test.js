@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { collectHelperNames, checkSurfaces, checkCodecs, inspectModuleDir } = require('./verify-helper-registration');
+const { collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir } = require('./verify-helper-registration');
 
 const NAME_TO_PATH = {
   'history-sync': 'osi-history-sync-helper',
@@ -36,6 +36,11 @@ test('collectHelperNames: unions file: deps with non-codec NAME_TO_PATH values',
     nameToPath: NAME_TO_PATH,
   });
   assert.deepEqual(names, ['osi-db-helper', 'osi-history-sync-helper']); // codec entry excluded
+});
+
+test('checkRegistryParity: mirrored osi-lib registries must be byte-for-byte equivalent mappings', () => {
+  assert.deepEqual(checkRegistryParity(NAME_TO_PATH, { ...NAME_TO_PATH }), []);
+  assert.match(checkRegistryParity(NAME_TO_PATH, { ...NAME_TO_PATH, 'sdi12-recipe': 'osi-sdi12-recipe' })[0], /NAME_TO_PATH/);
 });
 
 test('checkSurfaces: fully registered helper produces no issues', () => {
