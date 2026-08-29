@@ -24,6 +24,7 @@ const NAME_TO_PATH = {
   'uc512-normalize': 'osi-uc512-normalize',
   'lsn50-normalize': 'osi-lsn50-normalize',
   'sdi12-normalize': 'osi-sdi12-normalize',
+  'sdi12-recipe': 'osi-sdi12-recipe',
   'sdi12-reassemble': 'osi-sdi12-reassemble',
   'osi-valve-control': 'osi-valve-control',
   'osi-system-settings': 'osi-system-settings',

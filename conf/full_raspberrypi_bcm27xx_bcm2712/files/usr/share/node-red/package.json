@@ -26,6 +26,7 @@
     "osi-uc512-normalize": "file:osi-uc512-normalize",
     "osi-lsn50-normalize": "file:osi-lsn50-normalize",
     "osi-sdi12-normalize": "file:osi-sdi12-normalize",
+    "osi-sdi12-recipe": "file:osi-sdi12-recipe",
     "osi-sdi12-reassemble": "file:osi-sdi12-reassemble",
     "osi-valve-control": "file:osi-valve-control",
     "osi-system-settings": "file:osi-system-settings"
