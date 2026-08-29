@@ -27,5 +27,6 @@
   "0026__sdi12_columns.sql": "a146f3616c275cf4f853a4536dd895e14168dc83d9279ee5035e0f50148aae6b",
   "0027__add_dragino_sdi12_type.sql": "653362d45eb35744f661c64eb44bf82b4015a464c8422e3979012a17ef4c9831",
   "0028__sdi12_value_count.sql": "c8807ca90e0e83e14018017b1756e9b02417c9e1528f5bb0c06218122e3cc5e9",
-  "0029__sentek_vwc_vic_channels.sql": "d93d874711627da7e3cc98332324fd5e36c6bf3b32ba9c8330909ed23d722a21"
+  "0029__sentek_vwc_vic_channels.sql": "d93d874711627da7e3cc98332324fd5e36c6bf3b32ba9c8330909ed23d722a21",
+  "0030__sdi12_recipe_deployments.sql": "dc67fa5b3c5b4db76cf8d9d3b7b8e7f24b67793819cef9b4af02c7cb30b4d1a1"
 }

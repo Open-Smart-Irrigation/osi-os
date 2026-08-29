@@ -782,6 +782,32 @@ const schemaContract = {
     'computed_at',
     'sync_version',
   ],
+  sdi12_recipe_deployments: [
+    'deveui',
+    'desired_version',
+    'desired_layout_hash',
+    'desired_recipe_json',
+    'status',
+    'queue_item_ids_json',
+    'queued_at',
+    'queue_drained_at',
+    'commissioning_deadline_at',
+    'observed_count',
+    'failed_observation_count',
+    'last_observed_at',
+    'last_error_code',
+    'compatible_recipe_json',
+    'compatible_layout_json',
+    'compatible_at',
+    'updated_at',
+  ],
+  sdi12_identify_attempts: [
+    'deveui',
+    'stage',
+    'discovered_address',
+    'requested_at',
+    'updated_at',
+  ],
 };
 
 const requiredIndexes = {
@@ -853,6 +879,7 @@ const requiredIndexes = {
   journal_plot_groups: [
     'idx_journal_plot_groups_owner_gateway',
   ],
+  sdi12_recipe_deployments: ['idx_sdi12_recipe_deployments_status'],
 };
 
 const requiredIndexSqlFragments = {
@@ -871,6 +898,9 @@ const requiredIndexSqlFragments = {
   ],
   idx_gateway_health_hourly_time: [
     'on gateway_health_hourly(hour_start)',
+  ],
+  idx_sdi12_recipe_deployments_status: [
+    'on sdi12_recipe_deployments(status)',
   ],
   idx_zone_seasons_zone_range: [
     'on zone_seasons(zone_id, starts_on, ends_on)',
