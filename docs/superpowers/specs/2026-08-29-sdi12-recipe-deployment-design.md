@@ -64,6 +64,10 @@ defects still need repair so future commissioning state is represented honestly.
 9. Automated deployment never shortens the reporting interval. The final queued
    frame idempotently enforces `TDC=1200` seconds.
 10. The 12 V configuration frame is always `07031F40` (`AT+12VT=8000`).
+11. A rollback changes the canonical device layout and increments its
+    `sync_version` only after ChirpStack accepts every frame. Rejected and
+    partial attempts cannot emit a speculative or decreasing device outbox
+    version.
 
 ## Supported recipe shapes
 
@@ -316,7 +320,10 @@ command, the row returns to `not_applied` and records
 If enqueue fails after some frames were accepted, the handler records
 `degraded`, the accepted IDs, and a bounded `last_error_code`. It does not flush
 the queue. Re-applying the same desired version is allowed because all frames
-are idempotent.
+are idempotent. A retry claim retains the degraded attempt's queue IDs and
+timestamps through queue preflight. A queue-list error or non-empty queue
+restores the complete degraded row; an empty preflight clears the old evidence
+before the first new enqueue.
 
 An existing `queueing` or `queued` deployment for the same desired version
 returns HTTP 409. This prevents two browser requests from interleaving recipe
@@ -334,20 +341,25 @@ other device types and is not added to sync resource schemas.
 ## Rollback endpoint
 
 `POST /api/devices/:deveui/sdi12/recipe/rollback` validates
-`compatible_recipe_json` against `compatible_layout_json`. In one SQLite
-transaction it restores that layout to `devices.sdi12_channel_layout_json`,
-regenerates the depth projection, makes the compatible recipe the new desired
-version, and enters `queueing`; it then follows the same empty-queue and enqueue
-path as Apply. It returns HTTP 409 when no compatible pair has been observed.
-Rollback cannot reprogram the converter while leaving the GUI on a different
-logical layout.
+`compatible_recipe_json` against `compatible_layout_json`. The first
+transaction claims only local deployment state: it makes the compatible recipe
+the rollback target, creates a new desired version, and enters `queueing`.
+`devices` remains unchanged while the helper lists the queue and enqueues the
+target frames.
 
-The rollback transaction retains the pre-rollback layout and deployment state
-until queue preflight succeeds. If a non-empty queue is found before any recipe
-frame is accepted, a compensating transaction restores that complete pair. If
-enqueueing fails after accepting one or more frames, the compatible layout
-remains desired and the deployment becomes `degraded`, because converter state
-may already be changing.
+After ChirpStack accepts every frame, one final transaction stores all queue
+IDs, changes the deployment to `queued`, writes the compatible layout and depth
+projection to `devices`, and increments device `sync_version` once. The device
+outbox trigger therefore emits one monotonic canonical mutation. A queue-list
+failure, non-empty preflight, or rejection of the first frame restores only the
+pre-claim deployment row; no device compensation is needed because the device
+and its outbox were never touched.
+
+If enqueueing fails after accepting one or more frames, the deployment retains
+the compatible recipe as its degraded rollback target and stores the accepted
+IDs. The canonical device layout remains the old layout until a retry accepts
+every frame. That retry reuses the rollback target's desired version and
+retains its old IDs and timestamps until an empty queue preflight succeeds.
 
 ## Observation state machine
 
@@ -358,13 +370,17 @@ claim that an unconfirmed downlink was interpreted by the converter. A recipe
 whose IDs remain queued beyond `commissioning_deadline_at` becomes `degraded`
 with `queue_delivery_timeout`. The deadline is twelve hours after enqueue, which
 covers 23 cycles at the normal 20-minute interval plus network delay.
-A `queueing` claim that has no stored IDs when the same deadline expires becomes
-`degraded` with `queueing_interrupted`, covering a process stop between the
-SQLite claim and durable queue-ID storage.
+A `queueing` claim still present when the same deadline expires becomes
+`degraded` with `queueing_interrupted`. This covers a process stop between the
+SQLite claim and durable queue-ID storage, including retry claims that retain
+older accepted IDs through preflight; those IDs remain available as evidence.
 
 The existing SDI-12 writer receives the deployment row alongside the device
 configuration. Compatibility observation starts only after `queue_drained_at`
-is set. After normal parsing and storage:
+is set. Its `observedAt` must also be strictly later than `queue_drained_at` and
+strictly later than `last_observed_at`. Pre-drain, drain-equal, out-of-order,
+and duplicate timestamps are ignored without advancing either streak. After
+normal parsing and storage:
 
 - A complete reading with the desired profile, layout hash, and exact VWC/VIC
   cardinality moves `queued` to `observed_once` and sets `observed_count=1`.
