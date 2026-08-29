@@ -21,6 +21,10 @@ const MIRROR = path.join(
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'
 );
 const flows = JSON.parse(fs.readFileSync(CANONICAL, 'utf8'));
+const NORMALIZE = require(path.join(
+  ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize'
+));
 
 function nodesById(id) {
   return flows.filter((node) => node.id === id);
@@ -55,6 +59,26 @@ function insertDevice(db, {
       sdi12_probe_status, sdi12_channel_layout_json, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')
   `).run(deveui, `Device ${deveui}`, typeId, userId, appId, status, layout);
+}
+
+function assertOneBoundedHttpResponse(execution, expectedStatus, label) {
+  const explicit = Array.isArray(execution.result)
+    ? execution.result.filter((message) => message !== null && message !== undefined)
+    : (execution.result == null ? [] : [execution.result]);
+  assert.equal(
+    explicit.length + execution.errors.length,
+    1,
+    `${label} must emit exactly one explicit-or-Catch HTTP response`
+  );
+  assert.equal(
+    execution.errors.length,
+    0,
+    `${label} must not send a handled HTTP message into the tab-wide Catch`
+  );
+  assert.equal(explicit.length, 1, `${label} must return one explicit response`);
+  assert.equal(explicit[0].statusCode, expectedStatus, `${label} status`);
+  assert.equal(typeof explicit[0].payload, 'object', `${label} payload must be an object`);
+  assert.ok(JSON.stringify(explicit[0].payload).length <= 256, `${label} payload must stay bounded`);
 }
 
 test('maintained flow files retain canonical serialization and byte parity', () => {
@@ -96,6 +120,158 @@ test('recipe Apply and Rollback routes share the scoped/authenticated SDI-12 pat
     ['sdi12-recipe-rollback-action-fn'],
     ['device-response'],
   ]);
+});
+
+test('handled SDI-12 HTTP failures emit one bounded response without a Catch duplicate', async (t) => {
+  const deveui = 'A840410000000131';
+  const layout = JSON.stringify({
+    version: 1,
+    address: 'C',
+    sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' }],
+  });
+
+  const scenarios = [
+    {
+      name: 'scoped route guard helper load',
+      nodeId: 'scoped-device-config-guard',
+      expectedStatus: 500,
+      msg: {
+        req: {
+          method: 'PUT',
+          path: requestPath(deveui, '/sdi12/config'),
+          params: { deveui },
+          headers: {},
+        },
+      },
+      env: { OSI_SCOPED_ACCESS: '1' },
+      libOverrides: {
+        osiLib: { require: () => ({ ok: false, error: 'scope unavailable' }) },
+      },
+    },
+    {
+      name: 'Identify normalizer load',
+      nodeId: 'sdi12-identify-action-fn',
+      expectedStatus: 500,
+      insertLayout: true,
+      msg: {
+        req: {
+          method: 'POST',
+          path: requestPath(deveui, '/sdi12/identify'),
+          params: { deveui },
+          headers: {},
+        },
+      },
+      env: { OSI_SCOPED_ACCESS: '1' },
+      libOverrides: {
+        osiLib: { require: () => ({ ok: false, error: 'normalizer unavailable' }) },
+      },
+    },
+    {
+      name: 'config auth database failure',
+      nodeId: 'sdi12-config-auth-fn',
+      expectedStatus: 500,
+      msg: {
+        req: {
+          method: 'PUT',
+          path: requestPath(deveui, '/sdi12/config'),
+          params: { deveui },
+          headers: {},
+          body: { probe_profile: 'TENSIOMARK' },
+        },
+      },
+      env: { OSI_SCOPED_ACCESS: '1' },
+      libOverrides: {
+        osiDb: {
+          Database: function Database() {
+            return {
+              get: async () => { throw new Error('database unavailable'); },
+              close: async () => undefined,
+            };
+          },
+        },
+      },
+    },
+    {
+      name: 'Sentek save helper load',
+      nodeId: 'sdi12-config-action-fn',
+      expectedStatus: 500,
+      msg: {
+        deviceRow: { deveui },
+        req: {
+          body: {
+            probe_profile: 'SENTEK_ENVIROSCAN',
+            address: 'C',
+            sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' }],
+          },
+        },
+      },
+      libOverrides: {
+        osiLib: {
+          require: (name) => name === 'sdi12-normalize'
+            ? { ok: true, value: NORMALIZE }
+            : { ok: false, error: 'commissioning unavailable' },
+        },
+      },
+    },
+    {
+      name: 'legacy config rollback failure',
+      nodeId: 'sdi12-config-action-fn',
+      expectedStatus: 500,
+      msg: {
+        deviceRow: { deveui },
+        req: { body: { probe_profile: 'TENSIOMARK' } },
+      },
+      libOverrides: {
+        osiDb: {
+          Database: function Database() {
+            return {
+              get: async () => null,
+              run: async (sql) => {
+                if (sql === 'BEGIN IMMEDIATE') return undefined;
+                if (sql === 'ROLLBACK') throw new Error('rollback unavailable');
+                throw new Error('write unavailable');
+              },
+              close: async () => undefined,
+            };
+          },
+        },
+      },
+    },
+    ...[
+      ['sdi12-recipe-apply-action-fn', 'Apply helper load'],
+      ['sdi12-recipe-rollback-action-fn', 'Rollback helper load'],
+    ].map(([nodeId, name]) => ({
+      name,
+      nodeId,
+      expectedStatus: 500,
+      msg: { deviceRow: { deveui }, req: { body: {} } },
+      libOverrides: {
+        osiLib: { require: () => ({ ok: false, error: 'deployment unavailable' }) },
+      },
+    })),
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const db = seedScopedDb();
+      try {
+        if (scenario.insertLayout) insertDevice(db, { deveui, layout });
+        const execution = await executeFunction(loadNode(scenario.nodeId), {
+          msg: scenario.msg,
+          env: scenario.env || {},
+          db,
+          libOverrides: scenario.libOverrides || {},
+        });
+        assertOneBoundedHttpResponse(
+          execution,
+          scenario.expectedStatus,
+          `${scenario.nodeId}/${scenario.name}`
+        );
+      } finally {
+        db.close();
+      }
+    });
+  }
 });
 
 test('deployment adapters use declared helpers, bound EUI data, and visible resource cleanup', () => {
@@ -361,6 +537,185 @@ test('SDI-12 acquisition query and writer carry exact best-effort observation ou
     assert.equal(observations[0].observedAt, normalizeResult.recordedAt);
   } finally {
     db.close();
+  }
+});
+
+test('observation adapter preserves telemetry across pre-drain and failed acquisition classes', async (t) => {
+  const deveui = 'A840410000000132';
+  const observedAt = '2026-08-29T12:04:00.000Z';
+  const layout = JSON.stringify({
+    version: 1,
+    address: 'C',
+    sensors: [
+      { channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' },
+      { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
+    ],
+  });
+  const cases = [
+    {
+      name: 'pre-drain telemetry suppresses observation',
+      queueDrainedAt: null,
+      normalization: {
+        channels: { vwc_1: 20.1, vwc_2: 21.2 },
+        unknown: {},
+        recordedAt: observedAt,
+        noResponse: false,
+      },
+      writeResult: {
+        inserted: true,
+        deadLettered: [],
+        columns: ['deveui', 'recorded_at', 'vwc_1', 'vwc_2'],
+      },
+      observationCount: 0,
+      outcome: null,
+    },
+    {
+      name: 'noResponse carries no sensor columns',
+      queueDrainedAt: '2026-08-29T12:00:00.000Z',
+      normalization: {
+        channels: {},
+        unknown: {},
+        recordedAt: observedAt,
+        noResponse: true,
+      },
+      writeResult: {
+        inserted: false,
+        deadLettered: [],
+        columns: ['deveui', 'recorded_at'],
+      },
+      observationCount: 1,
+      outcome: {
+        inserted: false,
+        deadLettered: [],
+        quarantined: false,
+        writeFailed: false,
+      },
+    },
+    {
+      name: 'cardinality mismatch preserves only the observed channel',
+      queueDrainedAt: '2026-08-29T12:00:00.000Z',
+      normalization: {
+        channels: { vwc_1: 20.1 },
+        unknown: {},
+        recordedAt: observedAt,
+        noResponse: false,
+      },
+      writeResult: {
+        inserted: true,
+        deadLettered: [],
+        columns: ['deveui', 'recorded_at', 'vwc_1'],
+      },
+      observationCount: 1,
+      outcome: {
+        inserted: true,
+        deadLettered: [],
+        quarantined: false,
+        writeFailed: false,
+      },
+    },
+    {
+      name: 'unknown channel is reported as quarantined without a fabricated column',
+      queueDrainedAt: '2026-08-29T12:00:00.000Z',
+      normalization: {
+        channels: { vwc_1: 20.1 },
+        unknown: { sdi12_extra_2: '+99.9' },
+        recordedAt: observedAt,
+        noResponse: false,
+      },
+      writeResult: {
+        inserted: true,
+        deadLettered: [{ channel: 'sdi12_extra_2', reason: 'unknown_channel' }],
+        columns: ['deveui', 'recorded_at', 'vwc_1'],
+      },
+      observationCount: 1,
+      outcome: {
+        inserted: true,
+        deadLettered: [{ channel: 'sdi12_extra_2', reason: 'unknown_channel' }],
+        quarantined: true,
+        writeFailed: false,
+      },
+    },
+    {
+      name: 'writer dead letter preserves accepted telemetry and exact rejection',
+      queueDrainedAt: '2026-08-29T12:00:00.000Z',
+      normalization: {
+        channels: { vwc_1: 20.1, vwc_2: 21.2 },
+        unknown: {},
+        recordedAt: observedAt,
+        noResponse: false,
+      },
+      writeResult: {
+        inserted: true,
+        deadLettered: [{ channel: 'vwc_2', reason: 'manifest_denied' }],
+        columns: ['deveui', 'recorded_at', 'vwc_1'],
+      },
+      observationCount: 1,
+      outcome: {
+        inserted: true,
+        deadLettered: [{ channel: 'vwc_2', reason: 'manifest_denied' }],
+        quarantined: true,
+        writeFailed: false,
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const db = seedScopedDb();
+      const observations = [];
+      const writerInputs = [];
+      try {
+        const response = await executeFunction(loadNode('sdi12-write-fn'), {
+          msg: {
+            sdi12: { deveui, decoded: { data_sum: '+20.1+21.2' }, recordedAt: observedAt },
+            payload: [{
+              sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+              sdi12_probe_status: 'manual',
+              sdi12_channel_layout_json: layout,
+              sdi12_deployment_status: 'queued',
+              sdi12_deployment_queue_drained_at: scenario.queueDrainedAt,
+            }],
+          },
+          env: {},
+          db,
+          globals: { fs: { readFileSync: () => '[]' } },
+          osiLibModules: {
+            'sdi12-normalize': { normalize: () => scenario.normalization },
+            'device-writer': {
+              clampRecordedAt: (value) => ({ recordedAt: value, clamped: false }),
+              writeDeviceData: async (_db, _manifest, normalization) => {
+                writerInputs.push(normalization);
+                return scenario.writeResult;
+              },
+            },
+            'sdi12-commissioning': {
+              observeAcquisition: async (_db, input) => { observations.push(input); return null; },
+            },
+          },
+        });
+
+        assert.deepEqual(writerInputs, [scenario.normalization], 'normalization must reach the writer unchanged');
+        assert.deepEqual(response.result[0].payload, scenario.writeResult, 'writer telemetry outcome must be preserved');
+        assert.deepEqual(
+          response.result[0].payload.columns,
+          scenario.writeResult.columns,
+          'the adapter must not fabricate sensor columns'
+        );
+        assert.equal(observations.length, scenario.observationCount);
+        if (scenario.observationCount === 1) {
+          assert.deepEqual(observations[0], {
+            deveui,
+            observedAt,
+            profileId: 'SENTEK_ENVIROSCAN',
+            layout,
+            normalization: scenario.normalization,
+            outcome: scenario.outcome,
+          });
+        }
+      } finally {
+        db.close();
+      }
+    });
   }
 });
 
