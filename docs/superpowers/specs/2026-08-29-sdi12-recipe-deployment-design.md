@@ -1,7 +1,7 @@
 # SDI-12 recipe deployment design
 
 **Date:** 2026-08-29  
-**Status:** Draft for operator review  
+**Status:** Approved for implementation
 **Scope:** OSI OS edge and React GUI  
 **Related design:** `docs/superpowers/specs/2026-08-25-sentek-enviroscan-vwc-vic-design.md`
 
@@ -256,6 +256,7 @@ CREATE TABLE sdi12_recipe_deployments (
   last_observed_at TEXT,
   last_error_code TEXT,
   compatible_recipe_json TEXT,
+  compatible_layout_json TEXT,
   compatible_at TEXT,
   updated_at TEXT NOT NULL
 );
@@ -276,10 +277,11 @@ CREATE TABLE sdi12_identify_attempts (
 The migration updates `database/seed-blank.sql` and all bundled database copies.
 It does not touch the frozen Node-RED boot DDL.
 
-Saving a valid Sentek layout upserts `not_applied`, increments
-`desired_version`, stores the new layout hash, resets observation fields, and
-preserves `compatible_recipe_json`. The save and device update occur in one
-SQLite transaction. The save returns HTTP 409 while the current deployment is
+Saving a valid Sentek layout compiles and stores `desired_recipe_json`, upserts
+`not_applied`, increments `desired_version`, stores the new layout hash, resets
+observation fields, and preserves both `compatible_recipe_json` and
+`compatible_layout_json`. The save and device update occur in one SQLite
+transaction. The save returns HTTP 409 while the current deployment is
 `queueing` or `queued`; an in-flight physical recipe cannot be relabelled with a
 new logical layout.
 
@@ -293,8 +295,8 @@ The handler:
 1. Loads the canonical stored layout and device ChirpStack registration data.
 2. Refuses malformed or absent layouts before any external effect.
 3. Compiles the recipe and writes `queueing` in SQLite.
-4. Verifies that the device queue is empty, then enqueues every frame through an
-   extended `osi-chirpstack-helper` gRPC method.
+4. Verifies that the device queue is empty, then enqueues every frame on FPort 2
+   through an extended `osi-chirpstack-helper` gRPC method.
 5. Stores all returned queue-item IDs and changes the state to `queued`.
 6. Returns HTTP 202 with the recipe version, layout hash, frame count, and state.
 
@@ -331,11 +333,14 @@ other device types and is not added to sync resource schemas.
 
 ## Rollback endpoint
 
-`POST /api/devices/:deveui/sdi12/recipe/rollback` validates the stored recipe
-version and enqueues the exact frames in `compatible_recipe_json`. It returns
-HTTP 409 when no compatible recipe has been observed. Rollback is an explicit
-reapplication; it does not claim that the converter exposes readable
-command-slot state.
+`POST /api/devices/:deveui/sdi12/recipe/rollback` validates
+`compatible_recipe_json` against `compatible_layout_json`. In one SQLite
+transaction it restores that layout to `devices.sdi12_channel_layout_json`,
+regenerates the depth projection, makes the compatible recipe the new desired
+version, and enters `queueing`; it then follows the same empty-queue and enqueue
+path as Apply. It returns HTTP 409 when no compatible pair has been observed.
+Rollback cannot reprogram the converter while leaving the GUI on a different
+logical layout.
 
 ## Observation state machine
 
@@ -355,7 +360,8 @@ is set. After normal parsing and storage:
   cardinality moves `queued` to `observed_once` and sets `observed_count=1`.
 - The next consecutive matching reading moves the state to
   `observed_compatible`, copies `desired_recipe_json` into
-  `compatible_recipe_json`, and records `compatible_at`.
+  `compatible_recipe_json`, copies the current canonical layout into
+  `compatible_layout_json`, and records `compatible_at`.
 - A no-response, incomplete segment set, parser quarantine, or cardinality
   mismatch resets `observed_count` to zero but does not delete readings.
 - Three consecutive failed desired-shape acquisition cycles after the queue has
@@ -377,6 +383,11 @@ then sends `<discovered_address>I!` and moves to stage `identifying`. The normal
 identity response completes the existing profile match. Discovery rejects an
 empty response, more than one returned address, or any byte outside the
 one-character SDI-12 address grammar.
+
+The latest attempt row remains available after identity matching so the device
+projection can expose `discovered_address` to the settings modal. A later
+Identify request replaces it. Saving a manual layout deletes it after the new
+canonical address has committed.
 
 A malformed stored layout returns HTTP 409 instead of falling back to another
 address. Saving a manual layout cancels an older discovery attempt. A pending
