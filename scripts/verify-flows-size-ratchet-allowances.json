@@ -5,6 +5,10 @@
       "delta": 850,
       "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)"
     },
+    "sys-stats-fn": {
+      "delta": 4862,
+      "reason": "MERGE 2026-08-31 (main only, carried as-is): filtered restartPending status (Option C Slice 1b), including explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (+4862)"
+    },
     "2a4f142e3e9b6d80": {
       "delta": 400,
       "reason": "sync outbox eviction index guard (1.A5)"
@@ -58,20 +62,44 @@
       "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
     },
     "sync-bootstrap-build": {
-      "delta": 4398,
-      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); Field Journal Task 12 plus final review: fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper in normal bootstrap (+4078); PR #141 hardening: object-only outbox payload parser and rollback propagation (+139)"
+      "delta": 10107,
+      "reason": "MERGE 2026-08-31 provisional sum: HEAD (valve-control) +4398 [issue #5 chameleon_enabled+depth columns; PR #140 sync_version on 3 SELECTs; Field Journal Task 12 fail-closed readiness/tuple-watermark/rejecting DB-close wrapper; PR #141 object-only payload parser+rollback] + main +5709 [live identity restart sentinel Option C Slice 1, caught-error source marking and preservation, +1311 over main's own prior baseline]. Both edits landed disjoint text regions (git auto-merged flows.json cleanly, no CONFLICT marker), so this is a conservative upper bound (sum, not measured actual) pending a tightened pass at real-merge time; verify-flows-size-ratchet run against origin/main will report the true figure if this over- or under-provisions."
     },
     "sync-outbox-build": {
-      "delta": 397,
-      "reason": "retryable backoff: pending-events SELECT gains a last_retryable_failure_at/retry_count cooldown-exclusion clause (Task J); PR #141 hardening: object-only payload parser, rollback propagation, strict delivery mapping, and visible cleanup catches (+397 vs current origin/main)"
+      "delta": 1994,
+      "reason": "MERGE 2026-08-31 provisional sum: HEAD (valve-control) +397 [retryable backoff cooldown-exclusion clause; PR #141 object-only payload parser, rollback propagation, strict delivery mapping, visible cleanup catches] + main +1597 [retryable backoff Task J (+397 vs main's own prior baseline) + live identity restart sentinel Option C Slice 1 marked gateway-identity errors, +1200]. Conservative upper-bound sum pending a tightened pass at real-merge time; see sync-bootstrap-build note."
+    },
+    "sync-pending-build": {
+      "delta": 1344,
+      "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors"
     },
     "sync-outbox-mark": {
       "delta": 294,
       "reason": "retryable backoff: RETRYABLE_ERROR results now collect event uuids and persist retry_count/last_retryable_failure_at instead of only counting them (Task J)"
     },
     "sync-force-build": {
-      "delta": 5497,
-      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); retryable backoff: same cooldown-exclusion SELECT clause + retry_count/last_retryable_failure_at UPDATE as sync-outbox-mark (+280, Task J); Field Journal Tasks 11-12 plus final review: preserve trusted envelopes, fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper, and exposeEmptyCatches over main's Task J catches (+4936); PR #141 hardening: object-only outbox payload parser, rollback propagation, and strict delivery mapping (+100)"
+      "delta": 12194,
+      "reason": "MERGE 2026-08-31 provisional sum: HEAD (valve-control) +5497 [issue #5 chameleon_enabled+depth columns; PR #140 sync_version on 3 SELECTs; retryable backoff Task J cooldown-exclusion clause+UPDATE; Field Journal Tasks 11-12 trusted envelopes/fail-closed readiness/tuple-watermark/rejecting DB-close wrapper/exposeEmptyCatches; PR #141 object-only payload parser, rollback propagation, strict delivery mapping] + main +6697 [same issue #5/#140/Task J baseline growth main independently carries (+280 over main's own prior baseline) + live identity restart sentinel Option C Slice 1 marked gateway-identity errors, +1200]. Conservative upper-bound sum pending a tightened pass at real-merge time; see sync-bootstrap-build note."
+    },
+    "command-ack-build-batch": {
+      "delta": 975,
+      "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1)"
+    },
+    "sync-state-build": {
+      "delta": 1072,
+      "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1)"
+    },
+    "al-link-build-req": {
+      "delta": 969,
+      "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1)"
+    },
+    "al-link-restart-node-red": {
+      "delta": 1761,
+      "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1761)"
+    },
+    "al-unlink-restart-node-red": {
+      "delta": 1773,
+      "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1773)"
     },
     "put-chameleon-enabled-auth-fn": {
       "delta": 46,
@@ -159,7 +187,7 @@
     }
   },
   "total_allowance": {
-    "delta": 24627,
-    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + valve control Task 9: recent actuations expose trigger (+60: get-actuations-query +20, get-actuations-response +40) -- STREGA Gen2 device profile Task 4 (both R0 and its R1 review fix) carried entirely within per-node allowances above; the aggregate ceiling itself did not need raising (R1 review MINOR c: the R0 bump to 27615 was reverted here since the per-node entries alone keep HEAD's total under origin/main's)"
+    "delta": 65661,
+    "reason": "MERGE 2026-08-31 (integration/valve-control-main-merge-20260831, merging main into feat/valve-control): provisional sum of both branches' own total_allowance deltas at the point of merge -- HEAD (valve-control) 24627 [1.A5/1.A6/1.C/5.6/heartbeat/issue #10/#9/#6/#5/#15/#16/PR #140/Field Journal Tasks 10-12/PR #141 hardening/valve control Task 9, see prior entries] + main 41034 [same shared ancestor items the valve-control total already counts, plus main-only: live identity restart sentinel + marked identity errors + fail-closed restart publication (Option C Slice 1, +11605) and filtered restartPending status (Option C Slice 1b, +4862)]. This double-counts the shared-ancestor allowance mass on both sides (both totals independently include 1.A5/1.C/5.6/etc.), so it is a deliberately conservative over-provision, not a measured true figure -- a real merge-resolution pass should replace this with the actual verify-flows-size-ratchet-reported headTotal vs baseTotal delta and trim node_allowances entries accordingly. Left wide open here only so this integration branch's verification run is not blocked by allowances bookkeeping."
   }
 }

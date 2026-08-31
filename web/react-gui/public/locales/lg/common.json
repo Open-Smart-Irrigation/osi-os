@@ -91,5 +91,13 @@
       "insufficient": "tekimala (n={{n}})",
       "exploratory": "Kya kugezesa kyokka — Pearson r ku buckets ezitereezeddwa; si kugezesa kwa significance."
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Endagamuntu ya getwaya etereezeddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "chirpstack_bootstrap": "Okuteekateeka LoRaWAN kuwedde. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "account_link": "Akawunti eyungiddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "account_unlink": "Akawunti eggyiddwa ku kuyungibwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "generic": "Empeereza za getwaya zijja kuddamu okutandika mu sikonda {{count}}.",
+    "in_progress": "Empeereza za getwaya ziddamu okutandika kati…"
   }
 }

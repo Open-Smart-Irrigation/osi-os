@@ -62,11 +62,18 @@ start() {
 	fi
 
 	if [ "$provisioned_this_boot" = 1 ]; then
-		logger -t osi-bootstrap "restarting Node-RED after bootstrap"
-		if /etc/init.d/node-red restart; then
-			logger -t osi-bootstrap "Node-RED restarted after bootstrap"
+		logger -t osi-bootstrap "requesting coordinated Node-RED restart after bootstrap"
+		if ! /etc/init.d/osi-identityd ready; then
+			rm -f /etc/osi-bootstrap.done
+			logger -t osi-bootstrap "identityd is not ready; bootstrap will retry"
+			return 0
+		fi
+		if /usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60; then
+			logger -t osi-bootstrap "Node-RED restart requested after bootstrap"
 		else
-			logger -t osi-bootstrap "Node-RED restart after bootstrap failed"
+			rm -f /etc/osi-bootstrap.done
+			logger -t osi-bootstrap "Node-RED restart request failed; bootstrap will retry"
+			return 0
 		fi
 	fi
 	return 0

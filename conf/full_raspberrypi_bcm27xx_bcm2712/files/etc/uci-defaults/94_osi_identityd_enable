@@ -1,0 +1,16 @@
+#!/bin/sh
+
+identityd_queued=0
+[ -e /etc/rc.d/S98osi-identityd ] && identityd_queued=1
+
+/etc/init.d/osi-identityd enable || exit 1
+if [ "$identityd_queued" -eq 0 ]; then
+    /etc/init.d/osi-identityd start
+    identityd_ready_attempts=0
+    while ! /etc/init.d/osi-identityd ready; do
+        identityd_ready_attempts=$((identityd_ready_attempts + 1))
+        [ "$identityd_ready_attempts" -lt 5 ] || exit 1
+        sleep 1
+    done
+fi
+exit 0

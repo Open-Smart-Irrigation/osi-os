@@ -9,6 +9,7 @@ import { HistoryDashboard } from './pages/HistoryDashboard';
 import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
 import { SettingsPage } from './pages/SettingsPage';
+import { GatewayRestartBanner } from './components/GatewayRestartBanner';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -17,6 +18,7 @@ const AnalysisRoute = lazy(() =>
 function App() {
   return (
     <AuthProvider>
+      <GatewayRestartBanner />
       <HashRouter>
         <Routes>
           {/* Public Routes */}

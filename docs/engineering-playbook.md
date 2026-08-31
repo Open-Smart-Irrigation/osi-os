@@ -131,9 +131,40 @@ down where the next person will trip.
   mobile grid, an auth block), write a static guard test that fails when someone
   changes it casually. When you *intend* the change, update the pin in the same
   commit with a message saying why.
+- **A guard proves only what it scans — its scope silently becomes the fix's scope.**
+  A page-shell guard that globbed `src/pages` went green while the reported defect
+  was still live in `src/components`, because the page rendered a *second* viewport
+  shell inside itself. After a guard passes, confirm the defect is gone in the
+  rendered artifact, not just in the files the glob happened to reach. State a
+  guard's blind spot in a comment next to its predicate.
+- **Guards belong in the canonical repo first.** Three token guards lived only in the
+  mirror (osi-server) while the thing they guard is authored in osi-os; porting them
+  back surfaced 18 defects the mirror had already fixed, including two pages
+  referencing a token that does not exist. Enforcement weaker at the source than
+  downstream means the source can author defects and vendor them outward.
+- **Audit the shared primitive, not only its callers.** Every consumer can be
+  individually correct while the thing they all compose is wrong: one hardcoded
+  `bg-white` in a shared form field made every input in both GUIs unreadable in dark
+  theme. Sibling-grepping (§6) finds copies of a bug; it does not find the one place
+  that makes all the correct copies wrong.
 - **Never assert success on text you didn't produce.** Check exit codes directly;
   in pipelines the last command wins. In fish, `$status`; in scripts, `set -eu` and
   explicit `ls-remote --exit-code`-style confirmation for remote effects.
+- **A verification command that can pass without examining anything is worse than
+  none** — it manufactures confidence and survives review. Two in one slice: a
+  "no mutating handlers changed" proof used bare `git diff` with no rev-range, which
+  post-commit inspects zero lines and always passes; and `grep -coE` was used for a
+  match count, where `-c` overrides `-o` and silently counts *lines*. Both exited 0.
+  Before trusting a check, make it fail on purpose: run it against a known-bad input
+  and confirm it goes red. If it cannot be made to fail, it is not a check.
+- **A contrast ratio must be same-theme, and measured against the surface the thing
+  actually renders on.** Both halves have been got wrong here, in one ruling: a
+  *light* token hex was measured against the *dark* card (giving a token's opposite
+  a fabricated 5.34 and its correct answer a fabricated 1.02), and the element turned
+  out to render on `--surface`, not `--card`, because nobody walked the parent chain.
+  A cross-theme figure is not an inaccurate number, it is a meaningless one — and it
+  reads as authoritative. Read the token's value for the theme you are measuring, and
+  `grep` the ancestors for the background that is really behind the pixel.
 - **Stacked PRs:** merge the base *without* deleting its branch (GitHub auto-CLOSES
   children on base-branch deletion and they cannot be reopened) → rebase the child
   `--onto origin/main <old-base-sha>` → force-push → retarget → merge child → then
@@ -193,6 +224,22 @@ down where the next person will trip.
 - **Verify agent reports.** Trust structure, not claims: clean tree, expected commit
   list, gates re-run by the verifier. Agents (and engineers) sincerely report
   successes that didn't happen — the report is a hypothesis, the repo is the truth.
+  This includes *reviewers*: recompute any measured value before shipping it. A
+  review supplied a contrast ratio as 5.57:1 that measured 2.77:1 — the implementer
+  refused the instruction and reported, which is the behaviour to reward.
+- **Reviewers who see one artifact cannot see relations between artifacts.** Diff
+  review is blind to page-A-disagrees-with-page-B by construction, so eleven task
+  reviews and a whole-branch review all missed defects the maintainer found by
+  looking at the running app. Any property that lives *between* artifacts —
+  cross-page cohesion, cross-repo parity, whole-surface accessibility — needs a
+  review whose unit is the whole surface, scheduled as work, not as a final glance.
+- **A self-contradicting plan is normal at scale; make reporting cheaper than
+  forcing.** Ten instructions in one 12-task plan turned out to be wrong (a type
+  required elsewhere marked for deletion, a prescribed enum value that does not
+  compile, a test asserting on ordering rather than content). Every time, the
+  implementer that stopped and reported was right. Say so in the brief explicitly —
+  "if an instruction does not fit the code, report rather than force it" — and treat
+  a documented deviation as a success, not a defect.
 - **Expect interruption.** Quota walls and network flaps killed agents mid-write
   this month. Design work to be resumable: plans on disk, commits early, state in
   the branch — then inspect leftovers before resuming (the half-executed worktree
@@ -202,9 +249,11 @@ down where the next person will trip.
 
 A change is done when: the issue's claim was re-verified against reality; the plan
 and its review live in the repo; tests exist that fail without the change; every
-gate is green *as re-run by a non-author*; both profiles/seeds are in parity where
-applicable; the PR body carries root cause, tradeoffs, and evidence; stale docs and
-memory touched by the change are corrected; and follow-ups you chose not to do are
-filed as issues, not left as silences.
+gate is green *as re-run by a non-author*; **a user can actually reach the
+behaviour** — a fully-tested component that nothing mounts is zero delivered
+capability, and its suite is green precisely because nothing exercises it; both
+profiles/seeds are in parity where applicable; the PR body carries root cause,
+tradeoffs, and evidence; stale docs and memory touched by the change are corrected;
+and follow-ups you chose not to do are filed as issues, not left as silences.
 
 Anything less is work in progress wearing a green checkmark.

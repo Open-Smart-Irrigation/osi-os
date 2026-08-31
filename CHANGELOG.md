@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- Live gateway identity convergence: `osi-identityd` reconciles provisional
+  boot identity to concentratord's authoritative EUI, persists it through the
+  shared helper, warns operators for 60 seconds, and restarts Node-RED once so
+  `DEVICE_EUI`, MQTT credentials/client ID, sync triggers, link requests, and
+  sync requests switch together.
+- Global GUI restart banner: `/api/system/stats` now exposes a filtered
+  `restartPending` object and the React GUI shows a localized countdown or
+  in-progress message before the daemon restarts Node-RED.
+
+### Changed
+- `osi-bootstrap`, account link, and account unlink publish restart requests
+  for `osi-identityd` instead of starting their own Node-RED restart paths.
+
+### Fixed
+- Fresh flashes with concentratord enabled no longer stay stuck on a
+  MAC-derived provisional gateway identity until an operator restarts Node-RED.
+  Link and sync builders fail closed while an identity transition is healing or
+  waiting for the warned restart.
+
+---
+
 ## [0.7.0] — 2026-07-13
 
 ### Added
