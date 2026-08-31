@@ -1075,11 +1075,16 @@ test('queueCommandAck durably stores and exactly replays the first normalized te
   let hookAck = null;
   const rawAck = {
     commandId: 803,
+    eventUuid: 'event-803',
+    aggregateType: 'ZONE_CONFIG',
+    aggregateKey: 'zone-803',
     commandType: 'CONFIG_UPDATE',
     effectKey: 'config:' + GATEWAY_EUI + ':irrigation_interval:1',
     deviceEui: GATEWAY_EUI,
     status: 'ACKED',
     result: 'SUCCESS',
+    requestedSyncVersion: 7,
+    appliedSyncVersion: 8,
     duplicate: false,
   };
   const queued = await ledger.queueCommandAck(db, rawAck, {
@@ -1088,10 +1093,15 @@ test('queueCommandAck durably stores and exactly replays the first normalized te
 
   assert.deepEqual(queued, {
     commandId: 803,
+    eventUuid: 'event-803',
+    aggregateType: 'ZONE_CONFIG',
+    aggregateKey: 'zone-803',
+    commandType: 'CONFIG_UPDATE',
     status: 'ACKED',
     result: 'APPLIED',
     appliedAt: queued.appliedAt,
-    appliedSyncVersion: null,
+    requestedSyncVersion: 7,
+    appliedSyncVersion: 8,
     duplicate: false,
     reason: null,
     detail: null,

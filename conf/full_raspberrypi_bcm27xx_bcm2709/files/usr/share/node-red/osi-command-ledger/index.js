@@ -582,11 +582,23 @@ async function queueCommandAck(db, rawAck, runtime) {
   const appliedSyncVersion = Number.isSafeInteger(syncVersionCandidate) && syncVersionCandidate >= 0
     ? syncVersionCandidate
     : null;
+  const requestedSyncVersionCandidate = ack.requestedSyncVersion == null
+    ? ack.requested_sync_version
+    : ack.requestedSyncVersion;
+  const requestedSyncVersionNumber = Number(requestedSyncVersionCandidate);
+  const requestedSyncVersion = Number.isSafeInteger(requestedSyncVersionNumber) && requestedSyncVersionNumber >= 0
+    ? requestedSyncVersionNumber
+    : appliedSyncVersion;
   const initial = {
     commandId: commandId.ack,
+    eventUuid: ack.eventUuid == null ? null : ack.eventUuid,
+    aggregateType: ack.aggregateType == null ? null : ack.aggregateType,
+    aggregateKey: ack.aggregateKey == null ? null : ack.aggregateKey,
+    commandType: String(ack.commandType || '').trim().toUpperCase() || null,
     status: replayStatus(result),
     result,
     appliedAt,
+    requestedSyncVersion,
     appliedSyncVersion,
     duplicate,
     reason: errorText || ack.reason || null,
