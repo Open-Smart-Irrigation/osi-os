@@ -74,8 +74,8 @@
       "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
     },
     "sync-bootstrap-build": {
-      "delta": 0,
-      "reason": "live identity restart sentinel (Option C Slice 1) (main, 2026-08) + valve-control growth (issue #5 chameleon_enabled+depth columns; PR #140 sync_version on 3 SELECTs; Field Journal Task 12 fail-closed readiness/tuple-watermark/rejecting DB-close wrapper; PR #141 object-only payload parser+rollback); re-measured at merge 2026-08-31 against origin/main (3c7b95bc) using verify-flows-size-ratchet's nodeSizes: HEAD's node body (34,126 chars) is byte-identical to origin/main's (34,126 chars) on both maintained profiles. valve-control's branch tip (e2bc5ce0) is itself byte-identical to the valve-control/main merge-base (60b82a36) for this node, so its historical +4398 already predates this merge-base and needs no additional headroom here; main's identity-sentinel growth is fully carried by the origin/main baseline itself. Net allowance required beyond origin/main: 0."
+      "delta": 5786,
+      "reason": "re-measured on integration/valve-focused-portback-20260831 against origin/main using verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709 mirrors): origin/main 34126 chars -> HEAD 39912 chars = +5786. feat/valve-control's own copy of this node is byte-identical to origin/main's (34126), so the whole delta is the ported valve work, attributed per pick: valve_schedules in the bootstrap/force snapshot (+820), UPSERT_VALVE_SETTINGS applier + snapshot (+684), VALVE_ACTUATION_ARCHIVED terminal emission + backfill (+3147), P4-E1 review fixes -- status derivation, backfill emit, LWW ties (+1158), P5-3 i18n retranslation (-11), branding scrub (-12). Sums to +5786 exactly."
     },
     "sync-outbox-build": {
       "delta": 0,
@@ -90,8 +90,8 @@
       "reason": "retryable backoff: RETRYABLE_ERROR results now collect event uuids and persist retry_count/last_retryable_failure_at instead of only counting them (Task J)"
     },
     "sync-force-build": {
-      "delta": 0,
-      "reason": "live identity restart sentinel (Option C Slice 1) (main, 2026-08) + valve-control growth (issue #5 chameleon_enabled+depth columns; PR #140 sync_version on 3 SELECTs; retryable backoff Task J cooldown-exclusion clause+UPDATE; Field Journal Tasks 11-12 trusted envelopes/fail-closed readiness/tuple-watermark/rejecting DB-close wrapper/exposeEmptyCatches; PR #141 object-only payload parser, rollback propagation, strict delivery mapping); re-measured at merge 2026-08-31 against origin/main (3c7b95bc) using verify-flows-size-ratchet's nodeSizes: HEAD's node body (52,929 chars) is byte-identical to origin/main's (52,929 chars) on both maintained profiles. valve-control's branch tip (e2bc5ce0) is itself byte-identical to the valve-control/main merge-base (60b82a36) for this node, so its historical +5497 already predates this merge-base and needs no additional headroom here; main's identity-sentinel growth is fully carried by the origin/main baseline itself. Net allowance required beyond origin/main: 0."
+      "delta": 5786,
+      "reason": "re-measured on integration/valve-focused-portback-20260831 against origin/main using verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709 mirrors): origin/main 52929 chars -> HEAD 58715 chars = +5786. feat/valve-control's own copy of this node is byte-identical to origin/main's (52929), so the whole delta is the ported valve work, attributed per pick: valve_schedules in the bootstrap/force snapshot (+820), UPSERT_VALVE_SETTINGS applier + snapshot (+684), VALVE_ACTUATION_ARCHIVED terminal emission + backfill (+3147), P4-E1 review fixes -- status derivation, backfill emit, LWW ties (+1158), P5-3 i18n retranslation (-11), branding scrub (-12). Sums to +5786 exactly."
     },
     "command-ack-build-batch": {
       "delta": 975,
@@ -215,7 +215,7 @@
     }
   },
   "total_allowance": {
-    "delta": 20196,
-    "reason": "live identity restart sentinel + marked identity errors + fail-closed restart publication (Option C Slice 1, main, 2026-08) + filtered restartPending status (Option C Slice 1b, main, 2026-08, sys-stats-fn +4862) + valve-control growth (1.A5/1.A6/1.C/5.6/heartbeat/issue #6/#9/#10/#15/#16/PR #140/Field Journal Tasks 10-12/PR #141 hardening/valve control Task 9, see node_allowances entries); re-measured at merge 2026-08-31 against origin/main (3c7b95bc) using verify-flows-size-ratchet's totalChars over both maintained flows.json profiles (byte-identical bcm2712/bcm2709 mirrors): HEAD total 1,089,441 chars vs origin/main total 1,069,245 chars, a net growth of 20,196 chars. Replaces the double-counted sum of both branches' own total_allowance deltas (valve-control 24,627 + main 41,034 = 65,661) with the actual measured post-merge delta."
+    "delta": 44286,
+    "reason": "re-measured on integration/valve-focused-portback-20260831 against origin/main (base ref of verify-flows-size-ratchet) using its totalChars over both maintained flows.json profiles: origin/main total 1,069,245 chars -> HEAD total 1,113,531 chars = +44,286. Dual provenance: 20,196 of that is the feat/valve-control baseline itself (main's live-identity restart sentinel + Slice 1b filtered restartPending + valve-control's own accumulated growth, as measured at the 2026-08-31 merge 48c8ab47 -- feat/valve-control's measured total is 1,089,441); the remaining 24,090 is this port-back's 54 cherry-picked valve commits, whose two largest contributors (sync-bootstrap-build +5,786 and sync-force-build +5,786) are itemised per pick in their node_allowances entries above. Measured, not estimated: 1,069,245 + 44,286 = 1,113,531."
   }
 }
