@@ -225,7 +225,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
   };
 
   const eui = valve.deviceEui;
-  // I-3 (Bovey final fix wave review): these keys now exist in every locale's devices.json
+  // I-3 (final fix wave review): these keys now exist in every locale's devices.json
   // (ported from the cloud's serviceDialog.motorizedLocked/motorizedNote, which had already
   // been through a real translation pass) -- the English-only inline `defaultValue` that used
   // to paper over their absence is gone.

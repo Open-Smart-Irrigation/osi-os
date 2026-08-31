@@ -13,7 +13,7 @@ test('listValvesForUser: valve with no valve_settings row defaults to GEN1/ACTIV
   db.close();
 });
 
-test('upsertSettings bumps sync_version when the patch touches a synced column (Bovey cloud full-parity Task P2-E1)', async () => {
+test('upsertSettings bumps sync_version when the patch touches a synced column (cloud full-parity Task P2-E1)', async () => {
   const { db } = await tempDb();
   await store.upsertSettings(db, '0016C001F1000001', { strega_generation: 'GEN2' });
   const row = await db.get('SELECT strega_generation, sync_version FROM valve_settings WHERE device_eui=?', ['0016C001F1000001']);

@@ -58,7 +58,7 @@ async function getSettings(db, deviceEui) {
 
 const SETTINGS_COLUMNS = ['strega_generation', 'flow_rate_lpm', 'flow_rate_source', 'flow_rate_updated_at', 'default_open_minutes', 'scheduler_status', 'skip_today_date', 'last_clock_sync_queued_at', 'last_clock_sync_acked_at'];
 
-// Subset of SETTINGS_COLUMNS that is part of the synced ValveSettings resource (Bovey
+// Subset of SETTINGS_COLUMNS that is part of the synced ValveSettings resource (
 // cloud full-parity Task P2-E1, migration 0025's trigger pair). last_clock_sync_queued_at/
 // acked_at are edge-local push-tracking bookkeeping written on nearly every scheduler tick
 // for a GEN2 valve (push.js/workers.js), and flow_rate_updated_at is a companion timestamp

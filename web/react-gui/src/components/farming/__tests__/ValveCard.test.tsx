@@ -274,7 +274,7 @@ describe('StregaValveCard', () => {
         expect(container.textContent).not.toMatch(/Enclosure|no reading yet|not measured on Gen2|°C/);
     });
 
-    // C-1 (Bovey final fix wave review): the confirm-remove flow's own devicesAPI.remove
+    // C-1 (final fix wave review): the confirm-remove flow's own devicesAPI.remove
     // call must be gated on removeContext, not unconditional -- the zone-card placement
     // (removeContext="zone") relies on the caller's onRemove to do the actual
     // irrigationZonesAPI.removeDevice zone-detach; it must never also unclaim the device

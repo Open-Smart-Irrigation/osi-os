@@ -224,7 +224,7 @@ test('emitRuntimeChanged: as_of/occurred_at default to a real current timestamp 
   assert.ok(stamped >= before - 1000 && stamped <= after + 1000, 'as_of must be a real current-time snapshot, not derived from an unrelated event timestamp');
 });
 
-// --- Bovey cloud full-parity Task P4-E1: buildActuationPayload / emitActuationArchived ---
+// --- cloud full-parity Task P4-E1: buildActuationPayload / emitActuationArchived ---
 
 async function insertZone(db, name) {
   await db.run("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES (?,1,datetime('now'),datetime('now'))", [name || 'Z1']);

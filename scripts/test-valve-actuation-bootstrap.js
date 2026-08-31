@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Bovey cloud full-parity Task P4-E1: the sync-bootstrap-build / sync-force-build flows.json
+// cloud full-parity Task P4-E1: the sync-bootstrap-build / sync-force-build flows.json
 // nodes both gained a `valve_actuations` bootstrap array (operator ruling: history DOES
 // backfill). Extracts the REAL query + shaping block out of the node source (rather than
 // duplicating it here, which would let the two drift silently) and runs it against a real

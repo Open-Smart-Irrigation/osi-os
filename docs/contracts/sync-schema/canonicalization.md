@@ -184,7 +184,7 @@ with a canonical form beyond the general rules above:
 
 ## Valve actuation archive
 
-`ValveActuation` (`docs/contracts/sync-schema/resources.schema.json`, Bovey
+`ValveActuation` (`docs/contracts/sync-schema/resources.schema.json`,
 cloud full-parity Task P4-E1) fields with a canonical form beyond the general
 rules above:
 

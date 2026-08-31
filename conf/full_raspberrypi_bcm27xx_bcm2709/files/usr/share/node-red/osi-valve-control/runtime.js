@@ -1,5 +1,5 @@
 'use strict';
-// Derived valve runtime-state sync (Bovey cloud full-parity Task P3-E1). Unlike
+// Derived valve runtime-state sync (cloud full-parity Task P3-E1). Unlike
 // valve_settings/valve_schedules (migrations 0024/0025 -- an SQL AFTER INSERT/UPDATE trigger
 // pair keyed off a real backing table), ValveRuntime has no table of its own: it is assembled
 // at emit time from valve_actuation_expectations and valve_schedule_pushes, mirroring the same
@@ -147,7 +147,7 @@ async function emitRuntimeChanged(db, deviceEui, warn, now) {
   return { event_uuid: eventUuid, payload };
 }
 
-// --- Bovey cloud full-parity Task P4-E1: terminal actuation history (VALVE_ACTUATION_ARCHIVED) ---
+// --- cloud full-parity Task P4-E1: terminal actuation history (VALVE_ACTUATION_ARCHIVED) ---
 //
 // The reconciliation_state values a TERMINAL valve_actuation_expectations row can carry --
 // PENDING_OBSERVATION/OBSERVED_RUNNING are active, not archived, and are intentionally absent

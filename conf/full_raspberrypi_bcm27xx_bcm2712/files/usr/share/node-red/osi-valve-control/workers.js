@@ -301,7 +301,7 @@ async function runTriggerBackfill({ db, warn }) {
     LEFT JOIN valve_settings vs ON vs.device_eui = vae.device_eui
     LEFT JOIN zone_irrigation_calibration zic ON zic.zone_id = vae.zone_id
     WHERE vae.volume_source='unknown' AND vae.commanded_duration_seconds > 0`);
-  // Bovey cloud full-parity Task P4-E1 review fix (Important 2): this loop mutates
+  // cloud full-parity Task P4-E1 review fix (Important 2): this loop mutates
   // flow_rate_lpm/estimated_gross_liters/volume_source with NO reconciliation_state filter --
   // it fires routinely well after a row has already archived (e.g. an operator entering a
   // valve's flow rate in Settings any time after the run finished), so an already-shipped

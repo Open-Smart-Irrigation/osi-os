@@ -2587,7 +2587,7 @@ expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'incl
 expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
 expectIncludes('Cancel STREGA Actuation', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack helper configuration');
 expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes the ChirpStack device queue');
-// Bovey cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved out
+// cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved out
 // of this HTTP route and into cancel.js's cancelActuation(), shared with the new
 // CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points - see
 // cloud-commands.js's header comment). This node now delegates instead of inlining the

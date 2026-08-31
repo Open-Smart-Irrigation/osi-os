@@ -147,7 +147,7 @@ export const FarmingDashboard: React.FC = () => {
     () => new Map((valves ?? []).map((v) => [v.deviceEui, v])),
     [valves],
   );
-  // I-1 (Bovey final fix wave review): ValveTile's battery footer (I6) needs
+  // I-1 (final fix wave review): ValveTile's battery footer (I6) needs
   // Device.latest_data, which ValveSummary doesn't carry -- build it once from the device
   // list this page already polls and hand it to the panel.
   const batteryByEui = useMemo(

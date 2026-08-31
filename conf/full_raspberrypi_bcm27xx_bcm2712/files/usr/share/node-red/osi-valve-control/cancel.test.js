@@ -61,7 +61,7 @@ test('cancelActuation emits a VALVE_RUNTIME_CHANGED sync_outbox row on a linked 
   db.close();
 });
 
-// Bovey cloud full-parity Task P4-E1: CANCELLED is a terminal reconciliation_state -- cancelActuation
+// cloud full-parity Task P4-E1: CANCELLED is a terminal reconciliation_state -- cancelActuation
 // is the ONLY code seam that ever writes it, so it must also archive it.
 test('cancelActuation emits a VALVE_ACTUATION_ARCHIVED sync_outbox row (status=CANCELLED) on a linked gateway, and none on an unlinked one', async () => {
   const { db } = await tempDb();

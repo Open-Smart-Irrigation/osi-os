@@ -1,6 +1,6 @@
 'use strict';
 // Applies the cloud->edge valve commands (Valve control Phase B: the four schedule
-// commands; Bovey cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION) via the SAME
+// commands; cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION) via the SAME
 // store/push/plan/cancel calls api.js's REST routes use, so a cloud edit and a local edit
 // compile identically - one code path, two entry points. There is no HTTP auth wrapper
 // here (no verifyBearer/ownedValve): these commands carry no end-user identity, only a
@@ -113,7 +113,7 @@ async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, 
 
 // Cloud->edge partial settings update: reuses the SAME store.upsertSettings() call api.js's
 // PUT /api/valves/:eui/settings route uses - one code path, two entry points, same as the
-// four schedule appliers above. Validation mirrors that route exactly (Bovey cloud
+// four schedule appliers above. Validation mirrors that route exactly (cloud
 // full-parity Task P2-E1): strega_generation GEN1|GEN2, flow_rate_lpm > 0 (or null, which
 // clears flow_rate_lpm/flow_rate_source/flow_rate_updated_at together), flow_rate_source
 // coerces to 'estimated' unless it is exactly 'measured' (the REST route does not validate

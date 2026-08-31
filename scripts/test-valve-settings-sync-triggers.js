@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Guard for migration 0025__valve_settings_sync_triggers.sql (Bovey cloud
+// Guard for migration 0025__valve_settings_sync_triggers.sql (cloud
 // full-parity Task P2-E1, edge half). Builds a DB by replaying every ordered
 // migration (the same mechanism verify-seed-replay.js uses) and asserts the
 // trg_sync_valve_settings_outbox_ai/_au pair emits VALVE_SETTINGS_UPSERTED

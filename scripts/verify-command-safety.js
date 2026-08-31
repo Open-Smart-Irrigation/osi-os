@@ -24,7 +24,7 @@ const SEED_DB_PATHS = [
     path.join(REPO, 'web/react-gui/farming.db'),
 ];
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
-// Bovey final fix wave (C2, "one ValveTile everywhere") deleted StregaValveCard.tsx and
+// final fix wave (C2, "one ValveTile everywhere") deleted StregaValveCard.tsx and
 // ValveCancelButton.tsx; a follow-on operator ruling then restored them as the devices-tab
 // card (zone card + unassigned grid) while the tile stays the Valve control panel's control
 // surface. Both surfaces are DD17-relevant, so both are asserted below.
@@ -203,7 +203,7 @@ function assertCancelPath() {
     if (!fn.func.includes('flushDeviceQueue(deveui)')) {
         throw new Error('Cancel function must flush the ChirpStack device queue');
     }
-    // Bovey cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved
+    // cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved
     // out of this HTTP route and into cancel.js's cancelActuation(), shared with the new
     // CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points). The
     // node now delegates instead of inlining the SQL, so verify the delegation call here
@@ -298,7 +298,7 @@ function assertFrontendValveControls() {
         throw new Error('StregaValveCard must gate cancel rendering on an active VAE row');
     }
 
-    // C-1 (Bovey final fix wave review): the devices-tab card's own farm-level device
+    // C-1 (final fix wave review): the devices-tab card's own farm-level device
     // removal must be gated on removeContext -- the zone-card placement (removeContext=
     // "zone") must only ever detach from the zone (its caller's onRemove does that), never
     // also unclaim the device from the whole farm.
@@ -367,12 +367,12 @@ const ACTUATOR_PATTERN_FALSE_POSITIVES = [
     'DELETE_VALVE_SCHEDULE',
     'RESEND_VALVE_PLAN',
     'SET_VALVE_SCHEDULER_STATUS',
-    // Bovey cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION matches on "VALVE"/"ACTUAT"
+    // cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION matches on "VALVE"/"ACTUAT"
     // but never itself opens or closes a valve - it flushes the ChirpStack downlink queue
     // and marks the newest active valve_actuation_expectations row CANCELLED (cancel.js's
     // cancelActuation, shared with the REST cancel route). Correctly actuator=false.
     'CANCEL_VALVE_ACTUATION',
-    // Bovey cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS matches on "VALVE" but only
+    // cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS matches on "VALVE" but only
     // ever writes valve_settings columns (strega_generation, flow_rate_lpm/source,
     // default_open_minutes) via store.upsertSettings() -- the same call the REST PUT
     // /settings route uses, which never sends a downlink. Correctly actuator=false.

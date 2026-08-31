@@ -145,7 +145,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   const isPaused = valve.schedulerStatus === 'DEACTIVATED';
   const alreadySkipped = valve.schedulerStatus === 'SKIP_TODAY';
 
-  // M-2 (Bovey final fix wave review): a queued-but-unconfirmed open is cancelled by this
+  // M-2 (final fix wave review): a queued-but-unconfirmed open is cancelled by this
   // button, but `cancel` is also the generic dismiss/close-dialog label used all over this
   // file family -- sharing it here read as "Cancel" out of context. Own key, ported from the
   // cloud's `tile.cancelQueuedOpen` wording (itself ported from the legacy

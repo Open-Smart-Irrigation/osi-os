@@ -2,7 +2,7 @@ import type { Device, StregaModel } from '../../../types/farming';
 
 /**
  * Pure, CSS-free helpers shared by the valve tile family. Split out of `StregaValveCard.tsx`
- * (Bovey final fix wave, C2 "one ValveTile everywhere") so `ValveServiceDialog` -- which still
+ * (final fix wave, C2 "one ValveTile everywhere") so `ValveServiceDialog` -- which still
  * needs `normaliseStregaModel`/`getRecognizedStregaModel` to gate its motorized-only commands --
  * keeps a home for them once that card is deleted. `describeLastSeen`/`renderLastSeen` are new
  * here (I6), ported from the OSI Server cloud's own `valveCardHelpers.ts`

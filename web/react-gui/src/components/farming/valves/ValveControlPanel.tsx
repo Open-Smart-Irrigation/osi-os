@@ -13,7 +13,7 @@ import { ValveServiceDialog } from './ValveServiceDialog';
 
 export interface ValveControlPanelProps {
   onUpdate: () => void;
-  // I-1 (Bovey final fix wave review): ValveSummary (GET /api/valves) carries no battery
+  // I-1 (final fix wave review): ValveSummary (GET /api/valves) carries no battery
   // field -- only Device.latest_data does -- so the caller must build this from the device
   // list it already polls and key it by deviceEui (uppercased, matching normaliseValveSummary/
   // normaliseDevice). Undefined/missing entries render the tile with no battery line, same

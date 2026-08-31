@@ -1,5 +1,5 @@
 -- risk: additive
--- 0025: valve_settings -> sync_outbox triggers + sync_version column (Bovey cloud
+-- 0025: valve_settings -> sync_outbox triggers + sync_version column (cloud
 -- full-parity Task P2-E1, edge half). Mirrors trg_sync_valve_schedules_outbox_* (migration
 -- 0024), but valve_settings' primary key IS device_eui (no separate UUID column), so
 -- aggregate_key = device_eui directly.

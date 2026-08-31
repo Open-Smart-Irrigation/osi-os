@@ -302,7 +302,7 @@ describe('ValveTile #171 disclosures', () => {
   });
 });
 
-// I6 (Bovey final fix wave): last-seen top-right label + battery footer, ported from the
+// I6 (final fix wave): last-seen top-right label + battery footer, ported from the
 // OSI Server cloud's ValveTile.tsx placement. Tier logic itself (describeLastSeen) is unit
 // tested directly in valveCardHelpers.test.ts; these assert the tile actually renders what
 // that helper produces, and that the battery line is honestly omitted rather than "—".
@@ -362,7 +362,7 @@ describe('ValveTile battery footer (I6)', () => {
   });
 });
 
-// M-2 (Bovey final fix wave review): the pending-state primary action used to share the
+// M-2 (final fix wave review): the pending-state primary action used to share the
 // generic `cancel` key with every dismiss/close-dialog button in this file family, which read
 // as a bare "Cancel" out of context. It now has its own key.
 describe('ValveTile pending-cancel label (M-2)', () => {

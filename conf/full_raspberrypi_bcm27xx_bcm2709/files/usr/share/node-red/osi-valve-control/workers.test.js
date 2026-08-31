@@ -361,7 +361,7 @@ test('runTriggerBackfill: unknown-volume row backfilled from zone calibration fl
   assert.equal(row.volume_source, 'estimated_duration_flow_rate');
 });
 
-// Bovey cloud full-parity Task P4-E1 review fix (Important 2): the volume-backfill loop above
+// cloud full-parity Task P4-E1 review fix (Important 2): the volume-backfill loop above
 // mutates estimated_gross_liters on ALREADY-TERMINAL rows with no state filter -- a shipped
 // VALVE_ACTUATION_ARCHIVED payload can be carrying the stale 'unknown' figure. This pins that a
 // correction to an already-archived row re-emits with the corrected liters.

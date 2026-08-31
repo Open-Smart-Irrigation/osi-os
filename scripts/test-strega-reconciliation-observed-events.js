@@ -219,7 +219,7 @@ async function main() {
     assert.equal(events.length, 0);
   });
 
-  // --- Bovey cloud full-parity Task P4-E1: VALVE_ACTUATION_ARCHIVED on terminal transitions ---
+  // --- cloud full-parity Task P4-E1: VALVE_ACTUATION_ARCHIVED on terminal transitions ---
 
   await test('OBSERVED_COMPLETE on a linked gateway emits a VALVE_ACTUATION_ARCHIVED sync_outbox row (status=COMPLETED); unlinked emits nothing', async () => {
     const { db, raw } = await tempDb();

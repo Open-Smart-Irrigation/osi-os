@@ -1154,7 +1154,7 @@ CREATE TABLE IF NOT EXISTS valve_settings (
   updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
 , sync_version INTEGER DEFAULT 0);
 
--- valve_settings -> sync_outbox triggers (Bovey cloud full-parity Task P2-E1, migration
+-- valve_settings -> sync_outbox triggers (cloud full-parity Task P2-E1, migration
 -- 0025). See 0025__valve_settings_sync_triggers.sql for the full rationale: aggregate_key
 -- is device_eui directly (valve_settings' own primary key), sync_version is bumped by
 -- store.upsertSettings() only when a write touches one of the six synced columns (not on

@@ -96,7 +96,7 @@ const SQL_OWNED_EVENT_OPS = new Set([
 // to osi-journal only). Unlike SQL_OWNED_EVENT_OPS, there is no SQL/DB source this script can
 // cross-check the op literal against -- the op is a bound parameter (`?`), not SQL text -- so
 // this allowlist is trusted on the strength of the emitting module's own test suite rather than
-// independently re-verified here. Bovey cloud full-parity Task P3-E1.
+// independently re-verified here. cloud full-parity Task P3-E1.
 const JS_MODULE_OWNED_EVENT_OPS = new Set([
   // Emitted by osi-valve-control/runtime.js's emitRuntimeChanged() (called from workers.js,
   // cancel.js, push.js, and the write-strega-expectation/strega-reconciliation-monitor flows.json
@@ -104,7 +104,7 @@ const JS_MODULE_OWNED_EVENT_OPS = new Set([
   'VALVE_RUNTIME_CHANGED',
   // Emitted by osi-valve-control/runtime.js's emitActuationArchived() (called from cancel.js and
   // the strega-reconciliation-monitor flows.json node's terminal-transition branch); verified by
-  // osi-valve-control/runtime.test.js and cancel.test.js. Bovey cloud full-parity Task P4-E1.
+  // osi-valve-control/runtime.test.js and cancel.test.js. cloud full-parity Task P4-E1.
   'VALVE_ACTUATION_ARCHIVED',
 ]);
 
