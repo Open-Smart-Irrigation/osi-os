@@ -992,10 +992,10 @@ if (silentCatchBaseline) {
 }
 if (sizeAllowances) {
   const expectedGrowth = {
-    'sync-bootstrap-build': 5709,
-    'sync-outbox-build': 1597,
+    'sync-bootstrap-build': 0,
+    'sync-outbox-build': 0,
     'sync-pending-build': 1344,
-    'sync-force-build': 6697,
+    'sync-force-build': 0,
     'command-ack-build-batch': 975,
     'sync-state-build': 1072,
     'al-link-build-req': 969,
@@ -1012,10 +1012,10 @@ if (sizeAllowances) {
     'size allowance sys-stats-fn: exact Task 5 delta 4862',
     'size allowance sys-stats-fn: expected exact Task 5 delta 4862');
   expectIncludes('size allowance sys-stats-fn', String(sizeAllowances.node_allowances?.['sys-stats-fn']?.reason || ''), 'filtered restartPending status (Option C Slice 1b)', 'declares Task 5 growth');
-  expectCondition(sizeAllowances.total_allowance?.delta === 41034,
-    'size total allowance: exact cumulative delta 41034',
-    'size total allowance: expected exact cumulative delta 41034');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862)', 'declares exact Task 5 total growth');
+  expectCondition(sizeAllowances.total_allowance?.delta === 20196,
+    'size total allowance: exact cumulative delta 20196',
+    'size total allowance: expected exact cumulative delta 20196');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Option C Slice 1b, main, 2026-08, sys-stats-fn +4862', 'declares Task 5 (sys-stats-fn) provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',
