@@ -9,6 +9,10 @@
       "delta": 400,
       "reason": "sync outbox eviction index guard (1.A5)"
     },
+    "4f4a765f36cee6f3": {
+      "delta": 428,
+      "reason": "Task 3 preserves the pending command envelope for the verified postcondition query after the apply SQLite node"
+    },
     "prune-sync-outbox": {
       "delta": 3000,
       "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)"
