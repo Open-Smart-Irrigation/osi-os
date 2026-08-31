@@ -223,24 +223,27 @@ const journalApply = byId['journal-command-apply-fn'];
 const ackQueue = byId['command-ack-queue-rest'];
 const commandUpdate = byId['4f4a765f36cee6f3'];
 const commandApply = byId['78d3d38be30a8741'];
+const commandPostconditionRoute = byId['command-postcondition-route'];
 const commandPostcondition = byId['command-postcondition-build'];
 const commandVerify = byId['command-postcondition-verify-db'];
 const commandVerifiedAck = byId['command-postcondition-ack'];
 const legacyScheduleAck = byId['e2e139678c3ddded'];
-if (!commandUpdate || !commandApply || !commandPostcondition || !commandVerify || !commandVerifiedAck || !legacyScheduleAck) {
+if (!commandUpdate || !commandApply || !commandPostconditionRoute || !commandPostcondition || !commandVerify || !commandVerifiedAck || !legacyScheduleAck) {
     failures.push('command ACK postconditions: required apply/verify/ACK nodes are missing');
 } else if (JSON.stringify(commandUpdate.wires || []) !== JSON.stringify([['78d3d38be30a8741']]) ||
-    JSON.stringify(commandApply.wires || []) !== JSON.stringify([['command-postcondition-build']]) ||
+    JSON.stringify(commandApply.wires || []) !== JSON.stringify([['command-postcondition-route']]) ||
+    JSON.stringify(commandPostconditionRoute.wires || []) !== JSON.stringify([['command-postcondition-build'], ['e2e139678c3ddded']]) ||
     JSON.stringify(commandPostcondition.wires || []) !== JSON.stringify([['command-postcondition-verify-db']]) ||
     JSON.stringify(commandVerify.wires || []) !== JSON.stringify([['command-postcondition-ack']]) ||
     JSON.stringify(commandVerifiedAck.wires || []) !== JSON.stringify([['command-ack-queue-rest']])) {
-    failures.push('command ACK postconditions: apply must flow exactly once through verification into the durable ACK queue');
-} else if (JSON.stringify(legacyScheduleAck.wires || []) !== JSON.stringify([[]])) {
-    failures.push('command ACK postconditions: legacy Schedule ACK must not publish directly to MQTT');
+    failures.push('command ACK postconditions: supported mutations must verify once and unrelated mutations must retain their ACK route');
+} else if (JSON.stringify(legacyScheduleAck.wires || []) !== JSON.stringify([['d83e38164efbb860']])) {
+    failures.push('command ACK postconditions: legacy direct ACK must retain its MQTT route');
 } else if (!/FAILED_RETRYABLE/.test(commandVerifiedAck.func || '') ||
     !/postcondition_not_met/.test(commandVerifiedAck.func || '') ||
     !/stale_sync_version/.test(commandVerifiedAck.func || '') ||
-    !/state = 'PENDING'/.test(commandVerifiedAck.func || '')) {
+    !/state = 'PENDING'/.test(commandVerifiedAck.func || '') ||
+    !/devices\/' \+ String\(env\.get\('DEVICE_EUI'\)/.test(commandVerifiedAck.func || '')) {
     failures.push('command ACK postconditions: retryable and stale verification outcomes are not fail-closed');
 } else {
     console.log('OK  command mutations verify postconditions before the durable ACK queue');
