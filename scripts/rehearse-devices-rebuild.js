@@ -64,7 +64,7 @@ function seed(db, mode) {
   sh(db, fs.readFileSync(SEED, 'utf8'));
   const now = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
   const row = (eui, type) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at) VALUES ('${eui}','n','${type}',${now},${now});`;
-  const sdi12Row = (eui) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at,sdi12_probe_profile,sdi12_probe_status,sdi12_identity,sdi12_value_count) VALUES ('${eui}','n','KIWI_SENSOR',${now},${now},'SENTINEL_P','manual','SENTINEL_I',5);`;
+  const sdi12Row = (eui) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at,sdi12_probe_profile,sdi12_probe_status,sdi12_identity,sdi12_value_count,sdi12_channel_layout_json) VALUES ('${eui}','n','KIWI_SENSOR',${now},${now},'SENTINEL_P','manual','SENTINEL_I',5,'{"version":1,"address":"0"}');`;
   if (mode === 'healthy') sh(db, row('AAAA000000000001', 'AQUASCOPE_LORAIN') + row('AAAA000000000002', 'KIWI_SENSOR'));
   else if (mode === 'would-drop') {
     reseedDevicesCheck(db, REQUIRED.filter((t) => t !== 'AQUASCOPE_LORAIN').concat(['BOGUS_TYPE']));
@@ -99,7 +99,7 @@ async function main() {
   await runFuncAgainst(copyDb, errors);
   const after = readDevices(copyDb);
   const verifyDb = new DatabaseSync(copyDb);
-  const sentinel = verifyDb.prepare('SELECT sdi12_probe_profile, sdi12_probe_status, sdi12_identity, sdi12_value_count FROM devices WHERE deveui = ?').get('AAAA000000000009');
+  const sentinel = verifyDb.prepare('SELECT sdi12_probe_profile, sdi12_probe_status, sdi12_identity, sdi12_value_count, sdi12_channel_layout_json FROM devices WHERE deveui = ?').get('AAAA000000000009');
   const sdi12Columns = new Set(verifyDb.prepare('PRAGMA table_info(devices)').all().map((row) => row.name));
   verifyDb.close();
   const result = {
@@ -107,8 +107,8 @@ async function main() {
     skipped: before.ddl === after.ddl,
     rowsPreserved: after.count === before.count,
     hasLorain: /'AQUASCOPE_LORAIN'/.test(after.ddl),
-    sdi12Preserved: Boolean(sentinel && sentinel.sdi12_probe_profile === 'SENTINEL_P' && sentinel.sdi12_probe_status === 'manual' && sentinel.sdi12_identity === 'SENTINEL_I' && sentinel.sdi12_value_count === 5),
-    hasSdi12Columns: ['sdi12_probe_profile', 'sdi12_probe_status', 'sdi12_identity', 'sdi12_value_count'].every((column) => sdi12Columns.has(column)),
+    sdi12Preserved: Boolean(sentinel && sentinel.sdi12_probe_profile === 'SENTINEL_P' && sentinel.sdi12_probe_status === 'manual' && sentinel.sdi12_identity === 'SENTINEL_I' && sentinel.sdi12_value_count === 5 && sentinel.sdi12_channel_layout_json === '{"version":1,"address":"0"}'),
+    hasSdi12Columns: ['sdi12_probe_profile', 'sdi12_probe_status', 'sdi12_identity', 'sdi12_value_count', 'sdi12_channel_layout_json'].every((column) => sdi12Columns.has(column)),
     // Specifically the rebuild-abort message, not just any node.error (e.g. the outer catch).
     errorSurfaced: errors.some((m) => /rebuild ABORTED/.test(m)),
   };

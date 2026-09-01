@@ -1,7 +1,12 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { executeFunction, loadNode, seedScopedDb } = require('./lib/scoped-access-harness');
+const {
+  executeFunction,
+  loadNode,
+  makeAuthHeader,
+  seedScopedDb,
+} = require('./lib/scoped-access-harness');
 // REGISTER_ENV / applyRegister / fakeChirpstackLib below are duplicated from
 // scripts/test-scoped-access-writes.js:2227-2323 (not exported there) --
 // keep in sync if that file's harness shape changes.
@@ -279,7 +284,7 @@ test('Sentek layout save is canonical, bound, and updates its compatibility proj
     assert.deepEqual(JSON.parse(row.sdi12_channel_layout_json).sensors.map((sensor) => sensor.channel), [9, 7]);
     assert.deepEqual(JSON.parse(row.soil_moisture_probe_depths_json), { vwc_9: 70, soil_vic_9: 70, vwc_7: 80 });
     assert.equal(row.sync_version, 2);
-    assert.equal(response.result.payload.layout_status, 'vic_framing_unverified');
+    assert.equal(response.result.payload.layout_status, 'configured');
   } finally { db.close(); }
 });
 
@@ -299,4 +304,203 @@ test('Sentek layout save rejects mixed legacy fields and invalid duplicate posit
     assert.equal(duplicate.result.statusCode, 400);
     assert.equal(db.prepare("SELECT sdi12_channel_layout_json FROM devices WHERE deveui='A840410000000111'").get().sdi12_channel_layout_json, null);
   } finally { db.close(); }
+});
+
+test('recipe auth routes empty Apply/Rollback bodies and rejects bodies on the wrong action', async () => {
+  const db = seedScopedDb();
+  const deveui = 'A840410000000131';
+  const authHeader = makeAuthHeader({ userId: 1, username: 'admin1' });
+  const env = {
+    OSI_SCOPED_ACCESS: '0',
+    AUTH_TOKEN_SECRET: 'scoped-access-test-secret',
+  };
+  const run = (suffix, method, body) => executeFunction(loadNode('sdi12-config-auth-fn'), {
+    msg: {
+      req: {
+        method,
+        path: `/api/devices/${deveui}${suffix}`,
+        params: { deveui },
+        headers: { authorization: authHeader },
+        body,
+      },
+    },
+    env,
+    db,
+  });
+  try {
+    db.exec(`
+      INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at)
+      VALUES ('${deveui}', 'Recipe auth', 'DRAGINO_SDI12', 1, '2026-01-01', '2026-01-01')
+    `);
+
+    const apply = await run('/sdi12/recipe/apply', 'POST', {});
+    assert.equal(apply.result.length, 4);
+    assert.equal(apply.result[0], null);
+    assert.equal(apply.result[1].deviceRow.deveui, deveui);
+    assert.equal(apply.result[2], null);
+    assert.equal(apply.result[3], null);
+
+    const rollback = await run('/sdi12/recipe/rollback', 'POST', null);
+    assert.equal(rollback.result[2].deviceRow.deveui, deveui);
+
+    const applyWithInput = await run('/sdi12/recipe/apply', 'POST', { recipe: 'browser bytes' });
+    assert.equal(applyWithInput.result[3].statusCode, 400);
+
+    const emptySave = await run('/sdi12/config', 'PUT', {});
+    assert.equal(emptySave.result[3].statusCode, 400);
+
+    const save = await run('/sdi12/config', 'PUT', { probe_profile: 'HYDRASCOUT' });
+    assert.equal(save.result[0].deviceRow.deveui, deveui);
+  } finally {
+    db.close();
+  }
+});
+
+test('recipe auth uses stable 400/401/404/409/500 mappings before any deployment action', async () => {
+  const db = seedScopedDb();
+  const ownedSdi12 = 'A840410000000132';
+  const inaccessibleSdi12 = 'A840410000000133';
+  const wrongType = 'A840410000000134';
+  const validAuth = makeAuthHeader({ userId: 1, username: 'admin1' });
+  const env = {
+    OSI_SCOPED_ACCESS: '0',
+    AUTH_TOKEN_SECRET: 'scoped-access-test-secret',
+  };
+  const run = (deveui, authorization, globals) => executeFunction(loadNode('sdi12-config-auth-fn'), {
+    msg: {
+      req: {
+        method: 'POST',
+        path: `/api/devices/${deveui}/sdi12/recipe/apply`,
+        params: { deveui },
+        headers: authorization ? { authorization } : {},
+        body: {},
+      },
+    },
+    env,
+    db,
+    globals,
+  });
+  try {
+    db.exec(`
+      INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at) VALUES
+        ('${ownedSdi12}', 'Owned SDI-12', 'DRAGINO_SDI12', 1, '2026-01-01', '2026-01-01'),
+        ('${inaccessibleSdi12}', 'Other SDI-12', 'DRAGINO_SDI12', 2, '2026-01-01', '2026-01-01'),
+        ('${wrongType}', 'Owned LSN50', 'DRAGINO_LSN50', 1, '2026-01-01', '2026-01-01')
+    `);
+
+    const invalid = await run('bad-eui', validAuth);
+    assert.equal(invalid.result[3].statusCode, 400);
+
+    const unauthorized = await run(ownedSdi12, null);
+    assert.equal(unauthorized.result[3].statusCode, 401);
+
+    const inaccessible = await run(inaccessibleSdi12, validAuth);
+    assert.equal(inaccessible.result[1], null, 'inaccessible EUI must not reach Apply');
+    assert.equal(inaccessible.result[2], null, 'inaccessible EUI must not reach Rollback');
+    assert.equal(inaccessible.result[3].statusCode, 404);
+
+    const wrong = await run(wrongType, validAuth);
+    assert.equal(wrong.result[3].statusCode, 409);
+
+    const unavailableSecret = await executeFunction(loadNode('sdi12-config-auth-fn'), {
+      msg: {
+        req: {
+          method: 'POST',
+          path: `/api/devices/${ownedSdi12}/sdi12/recipe/apply`,
+          params: { deveui: ownedSdi12 },
+          headers: { authorization: 'Bearer a.b' },
+          body: {},
+        },
+      },
+      env: { OSI_SCOPED_ACCESS: '0', AUTH_TOKEN_SECRET: '', JWT_SECRET: '' },
+      db,
+      globals: {
+        fs: {
+          readFileSync: () => { throw new Error('unavailable'); },
+          writeFileSync: () => { throw new Error('unavailable'); },
+        },
+      },
+    });
+    assert.equal(unavailableSecret.result[3].statusCode, 500);
+  } finally {
+    db.close();
+  }
+});
+
+test('scoped recipe route denies a viewer with 403 before device lookup', async () => {
+  const db = seedScopedDb();
+  const deveui = 'A840410000000135';
+  try {
+    const response = await executeFunction(loadNode('scoped-device-config-guard'), {
+      msg: {
+        req: {
+          method: 'POST',
+          path: `/api/devices/${deveui}/sdi12/recipe/apply`,
+          url: `/api/devices/${deveui}/sdi12/recipe/apply`,
+          params: { deveui },
+          headers: {
+            authorization: makeAuthHeader({ userId: 3, username: 'view1' }),
+          },
+          body: {},
+        },
+      },
+      env: {
+        OSI_SCOPED_ACCESS: '1',
+        AUTH_TOKEN_SECRET: 'scoped-access-test-secret',
+      },
+      db,
+    });
+    assert.equal(response.result.length, 28);
+    assert.equal(response.result[25], null);
+    assert.equal(response.result[26], null);
+    assert.equal(response.result[27].statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('manual Sentek layout save cancels discovery and states that hardware is not applied', async () => {
+  const db = seedScopedDb();
+  const deveui = 'A840410000000136';
+  try {
+    db.exec(`
+      INSERT INTO devices (
+        deveui, name, type_id, user_id, sdi12_probe_profile, created_at, updated_at
+      ) VALUES (
+        '${deveui}', 'Manual layout', 'DRAGINO_SDI12', 1,
+        'SENTEK_ENVIROSCAN', '2026-01-01', '2026-01-01'
+      );
+      INSERT INTO sdi12_identify_attempts (
+        deveui, stage, discovered_address, requested_at, updated_at
+      ) VALUES (
+        '${deveui}', 'discovering', NULL,
+        '2026-08-29T10:00:00.000Z', '2026-08-29T10:00:00.000Z'
+      );
+    `);
+    const response = await executeFunction(loadNode('sdi12-config-action-fn'), {
+      msg: {
+        req: {
+          body: {
+            probe_profile: 'SENTEK_ENVIROSCAN',
+            address: 'C',
+            sensors: [
+              { channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' },
+            ],
+          },
+        },
+        deviceRow: { deveui },
+      },
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result.statusCode, undefined, JSON.stringify(response.result.payload));
+    assert.equal(response.result.payload.message, 'Layout saved; acquisition configuration not applied.');
+    assert.equal(response.result.payload.deployment_status, 'not_applied');
+    assert.equal(
+      db.prepare('SELECT 1 FROM sdi12_identify_attempts WHERE deveui = ?').get(deveui),
+      undefined
+    );
+  } finally {
+    db.close();
+  }
 });

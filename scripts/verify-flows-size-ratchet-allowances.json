@@ -86,8 +86,8 @@
       "reason": "issue #10: sim INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version"
     },
     "sync-init-fn": {
-      "max_chars": 75555,
-      "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A); AgroLink SDI-12 schema slice adds DRAGINO_SDI12 and the SDI-12 device columns/trigger payload (+1010); the 2026-08-14 arg-limit fix splits trg_dp_device_data_outbox_ai's 150-arg payload json_object into json_insert(json_object(...), ...) so it parses under the gateway sqlite3's SQLITE_MAX_FUNCTION_ARG=127 (+91). A6 review fix (walkthrough fix wave 1): trg_sync_devices_outbox_au's boot-owned literal gains sdi12_value_count in the WHEN clause and payload_json, mirroring migration 0047 and seed-blank.sql byte-for-byte (fingerprint-drift correction -- see 0047's header comment) (+120). Fable A6 review SHOULD-FIX 3: DEVICES_NEW_DDL and DEVICES_COPY_SQL (the guarded devices rebuild) extended with sdi12_value_count so a live rebuild no longer drops the column, mirroring 0046's own DDL/copy-SQL extension pattern (+117)"
+      "max_chars": 75613,
+      "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A); AgroLink SDI-12 schema slice adds DRAGINO_SDI12 and the SDI-12 device columns/trigger payload (+1010); the 2026-08-14 arg-limit fix splits trg_dp_device_data_outbox_ai's 150-arg payload json_object into json_insert(json_object(...), ...) so it parses under the gateway sqlite3's SQLITE_MAX_FUNCTION_ARG=127 (+91). A6 review fix (walkthrough fix wave 1): trg_sync_devices_outbox_au's boot-owned literal gains sdi12_value_count in the WHEN clause and payload_json, mirroring migration 0047 and seed-blank.sql byte-for-byte (fingerprint-drift correction -- see 0047's header comment) (+120). Fable A6 review SHOULD-FIX 3: DEVICES_NEW_DDL and DEVICES_COPY_SQL (the guarded devices rebuild) extended with sdi12_value_count so a live rebuild no longer drops the column, mirroring 0046's own DDL/copy-SQL extension pattern (+117). Sentek live-deploy repair preserves sdi12_channel_layout_json through that rebuild (+58)."
     },
     "sync-bootstrap-build": {
       "max_chars": 38000,
@@ -150,8 +150,8 @@
       "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
     },
     "device-api-http500": {
-      "max_chars": 2219,
-      "reason": "Device API auth/status repair plus AgroLink Phase B /api/me auth-source registration (+17)."
+      "max_chars": 2304,
+      "reason": "Device API auth/status repair plus AgroLink Phase B /api/me auth-source registration (+17). SDI-12 recipe deployment fix round 1 registers every authenticated SDI-12 route with the shared bounded error handler (+85)."
     },
     "dendro-raw-fn": {
       "max_chars": 6515,
@@ -202,16 +202,16 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "get-devices-query": {
-      "max_chars": 3811,
-      "reason": "AgroLink Phase B: owned-plus-granted device filtering with the shared-weather exception (+1449). AgroLink review E4: deny disabled accounts before building the SQL instead of relying on the zone-membership half of the predicate collapsing to '0' -- the weather-device OR-branch was not itself gated on account state, so a disabled account with an unexpired token could still list every weather station (+649). Write-only scoping Task 1 makes device reads account-wide while preserving the owner-or-zone lifecycle filter (+214). E3 covers cloud-assigned devices that have a zone but no local owner (+310)."
+      "max_chars": 4967,
+      "reason": "AgroLink Phase B: owned-plus-granted device filtering with the shared-weather exception (+1449). AgroLink review E4: deny disabled accounts before building the SQL instead of relying on the zone-membership half of the predicate collapsing to '0' -- the weather-device OR-branch was not itself gated on account state, so a disabled account with an unexpired token could still list every weather station (+649). Write-only scoping Task 1 makes device reads account-wide while preserving the owner-or-zone lifecycle filter (+214). E3 covers cloud-assigned devices that have a zone but no local owner (+310). SDI-12 recipe deployment Task 5 binds the owner predicate through the shipped msg.topic SQLite contract and joins bounded deployment/address projection data (+1156)."
     },
     "format-devices": {
       "max_chars": 4647,
       "reason": "Inherited f50950b1 baseline at exact measured size; Task 13 explicitly enumerates the 24 SDI-12 latest-data channels in the device SELECT (+488); Sentek ten-channel latest-data query adds VWC 9-10 and VIC 1-10 (+256)."
     },
     "merge-device-data": {
-      "max_chars": 13236,
-      "reason": "Inherited f50950b1 baseline at exact measured size; Task 13 carries the 24 SDI-12 channels through the latest-data map and response (+1448); review IB2 carries four persisted SDI-12 device fields through the response (+194). Fable A6 review SHOULD-FIX 1 projects sdi12_value_count (+52); Sentek ten-channel response adds layout/status, VWC 9-10, VIC 1-10, and malformed-layout visibility (+1150)."
+      "max_chars": 14764,
+      "reason": "Inherited f50950b1 baseline at exact measured size; Task 13 carries the 24 SDI-12 channels through the latest-data map and response (+1448); review IB2 carries four persisted SDI-12 device fields through the response (+194). Fable A6 review SHOULD-FIX 1 projects sdi12_value_count (+52); Sentek ten-channel response adds layout/status, VWC 9-10, VIC 1-10, and malformed-layout visibility (+1150). SDI-12 recipe deployment Task 5 projects only bounded deployment status plus a validated discovered address, and makes touched catches visible (+1528)."
     },
     "catalog-response": {
       "max_chars": 551,
@@ -446,8 +446,8 @@
       "reason": "AgroLink SDI-12 ingest: prepared bound-parameter device configuration query."
     },
     "sdi12-write-fn": {
-      "max_chars": 4843,
-      "reason": "AgroLink SDI-12 ingest: normalizer, manifest, narrow-waist writer, visible failure stages, and the reviewed dead-letter warning cooldown; first-join identify, legacy value-count, and multi-segment quarantine behavior remain intact. Sentek canonical ingest passes the stored layout to the shared normalizer (+51)."
+      "max_chars": 6296,
+      "reason": "AgroLink SDI-12 ingest: normalizer, manifest, narrow-waist writer, visible failure stages, and the reviewed dead-letter warning cooldown; first-join identify, legacy value-count, and multi-segment quarantine behavior remain intact. Sentek canonical ingest passes the stored layout to the shared normalizer (+51). SDI-12 recipe deployment Task 5 reports exact successful, quarantined, dead-lettered, no-response, and write-failed acquisition outcomes without blocking telemetry (+1453)."
     },
     "934bf2bc19a8ce22": {
       "max_chars": 23053,
@@ -1074,28 +1074,28 @@
       "reason": "AgroLink Phase C atomically replaces shared-weather zone assignments after fresh device and target-zone checks. AgroLink review E1: the router's own transaction now also upserts weather_station_zone_state (insert at sync_version=0 on first assignment so the AI trigger bumps it to 1, else increment) so a scoped GUI edit actually publishes WEATHER_STATION_ZONES_REPLACED instead of leaving the cloud mirror stale and vulnerable to a later stale-base-version cloud replace silently discarding the edit (+1595). AgroLink review E6: replaced the actorScope.role==='viewer' denylist with an explicit scope.canMutate() allowlist so an unrecognized/corrupted role fails closed instead of being treated as write-capable (+5)."
     },
     "scoped-device-config-guard": {
-      "max_chars": 4358,
-      "reason": "AgroLink Phase C: fresh device-config scope checks across every maintained device configuration route. AgroLink review E6: replaced the actorScope.role==='viewer' denylist with an explicit scope.canMutate() allowlist so an unrecognized/corrupted role fails closed instead of being treated as write-capable (+5)."
+      "max_chars": 4455,
+      "reason": "AgroLink Phase C: fresh device-config scope checks across every maintained device configuration route. AgroLink review E6: replaced the actorScope.role==='viewer' denylist with an explicit scope.canMutate() allowlist so an unrecognized/corrupted role fails closed instead of being treated as write-capable (+5). SDI-12 recipe deployment Task 5 registers Apply and Rollback behind this same scoped write gate; fix round 1 makes handled helper-load failures warn-only so they cannot also enter the tab-wide Catch (-26)."
     },
     "sdi12-post-reg-hook-fn": {
       "max_chars": 391,
       "reason": "Task 11 starts the shared SDI-12 identify trigger after successful DRAGINO_SDI12 registration without affecting the registration HTTP response."
     },
     "sdi12-identify-fn": {
-      "max_chars": 1407,
-      "reason": "Task 10 FPort 100 identity handler: bound pending-state transition with profile matching and guarded identified/unmatched outcomes."
+      "max_chars": 4101,
+      "reason": "Task 10 FPort 100 identity handler: bound pending-state transition with profile matching and guarded identified/unmatched outcomes. SDI-12 recipe deployment Task 5 validates one-character discovery replies, persists the discovered address, and dispatches the addressed identity command (+2694)."
     },
     "sdi12-identify-trigger-fn": {
-      "max_chars": 1395,
-      "reason": "Task 10 shared SDI-12 identify trigger: validates ChirpStack registration data, marks pending_identify with bound SQL, and builds the approved 0xA8 downlink."
+      "max_chars": 5218,
+      "reason": "Task 10 shared SDI-12 identify trigger: validates ChirpStack registration data, marks pending_identify with bound SQL, and builds the approved 0xA8 downlink. SDI-12 recipe deployment Task 5 validates saved layouts/attempt state and compiles discovery or addressed frames through the registered recipe helper (+3823)."
     },
     "sdi12-identify-mqtt-adapter": {
       "max_chars": 228,
       "reason": "Task 10 maps the shared trigger downlink envelope to the standard MQTT-out message shape."
     },
     "sdi12-identify-action-fn": {
-      "max_chars": 5688,
-      "reason": "Task 10 identify endpoint action: bearer/ownership fallback plus bound DRAGINO_SDI12 lookup before invoking the shared trigger. walkthrough fix wave 1 Task A2: self-heal legacy NULL chirpstack_app_id rows (+660)."
+      "max_chars": 7126,
+      "reason": "Task 10 identify endpoint action: bearer/ownership fallback plus bound DRAGINO_SDI12 lookup before invoking the shared trigger. walkthrough fix wave 1 Task A2: self-heal legacy NULL chirpstack_app_id rows (+660). SDI-12 recipe deployment Task 5 selects validated saved-address or discovery behavior and returns 409 for malformed saved layouts. Fix round 1 authenticates before request validation, tags bounded auth failures for the shared handler, and keeps handled normalizer failures out of the tab-wide Catch (+611 from the Task 5 allowance)."
     },
     "sdi12-identify-http-success": {
       "max_chars": 123,
@@ -1106,20 +1106,32 @@
       "reason": "Task 10 routes shared identify trigger validation errors to HTTP callers and visibly warns for non-HTTP callers."
     },
     "sdi12-profiles-scope-fn": {
-      "max_chars": 1613,
-      "reason": "Task 12 clones the shipped catalog authenticated-read scope preamble for the session-scoped SDI-12 profile registry listing; review IN2 relabels its diagnostics."
+      "max_chars": 5039,
+      "reason": "Task 12 serves the session-scoped SDI-12 profile registry. SDI-12 recipe deployment fix round 1 removes the stale unauthenticated feature-disabled bypass and applies the same fail-closed bearer, enabled-account, and bounded-auth-failure contract as the other protected SDI-12 routes (+3426)."
     },
     "sdi12-profiles-fn": {
       "max_chars": 306,
       "reason": "Task 12 serves the normalized SDI-12 probe-profile registry after the cloned session scope guard."
     },
     "sdi12-config-auth-fn": {
-      "max_chars": 4868,
-      "reason": "Task 12 validates the SDI-12 config device identity with bound ownership lookup and the approved scoped/legacy auth fallback."
+      "max_chars": 7114,
+      "reason": "Task 12 validates the SDI-12 config device identity with bound ownership lookup and the approved scoped/legacy auth fallback. SDI-12 recipe deployment Task 5 routes Save, Apply, Rollback, and bounded errors while enforcing action-specific empty-body rules. Fix round 1 authenticates before request validation and tags bounded auth failures for the shared handler (+593 from the Task 5 allowance). Live Apply fix accepts Node-RED's zero-length string or Buffer representation of an empty HTTP body (+117)."
     },
     "sdi12-config-action-fn": {
-      "max_chars": 6038,
-      "reason": "Task 12 validates profile-specific depth slots and persists bound updates; A6 retains legacy value_count compatibility and clears stale fixed-shape counts. Sentek layout saving adds strict shared validation, mutual-exclusivity checks, bound transactional JSON/projection persistence, rollback visibility, and sync-version advancement (+1295)."
+      "max_chars": 6836,
+      "reason": "Task 12 validates profile-specific depth slots and persists bound updates; A6 retains legacy value_count compatibility and clears stale fixed-shape counts. Sentek layout saving adds strict shared validation, mutual-exclusivity checks, bound transactional JSON/projection persistence, rollback visibility, and sync-version advancement (+1295). SDI-12 recipe deployment Task 5 delegates canonical Sentek saves to the commissioning helper and explicitly reports saved-but-not-applied state while preserving the legacy path. Fix round 1 uses bounded warn-only diagnostics for handled helper and rollback failures so one request produces one HTTP response (-97 from the Task 5 allowance)."
+    },
+    "sdi12-recipe-apply-action-fn": {
+      "max_chars": 1909,
+      "reason": "SDI-12 recipe deployment Task 5 thin Apply adapter: registered helpers, bounded status projection, and visible DB/ChirpStack cleanup. Fix round 1 makes handled helper-load failures warn-only so they cannot also enter the tab-wide Catch (-6)."
+    },
+    "sdi12-recipe-rollback-action-fn": {
+      "max_chars": 1927,
+      "reason": "SDI-12 recipe deployment Task 5 thin Rollback adapter: registered helpers, bounded status projection, and visible DB/ChirpStack cleanup. Fix round 1 makes handled helper-load failures warn-only so they cannot also enter the tab-wide Catch (-6)."
+    },
+    "sdi12-recipe-poll-fn": {
+      "max_chars": 1191,
+      "reason": "SDI-12 recipe deployment Task 5 isolated 60-second queue poll adapter with visible warnings and resource cleanup."
     },
     "scoped-zone-config-guard": {
       "max_chars": 3724,
@@ -1155,7 +1167,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1297389,
-    "reason": "Raised through the SDI-12 program; Sentek ten-channel layout, latest-data, bootstrap, and transactional configuration paths add 3641 reviewed characters across five existing nodes."
+    "max_total": 1321218,
+    "reason": "Raised through the SDI-12 program; SDI-12 recipe deployment Task 5 adds authenticated Apply/Rollback, polling, address-aware Identify, best-effort acquisition observation, and parameter-bound device projection. Fix round 1 adds 4580 measured characters for complete fail-closed SDI-12 auth inventory and single-response error handling. Live Apply fix adds 117 measured characters for zero-length parsed HTTP bodies."
   }
 }

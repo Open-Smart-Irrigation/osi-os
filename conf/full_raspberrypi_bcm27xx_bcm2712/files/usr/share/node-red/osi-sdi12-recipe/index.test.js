@@ -39,7 +39,7 @@ function valuesInCut(cut) {
   return (Number(match[1]) - 3) / 9;
 }
 
-function assertAfLengthsMatchAscii(compiledRecipe) {
+function assertAfDeclaredLengthsMatchPayload(compiledRecipe) {
   for (const entry of compiledRecipe.frames.filter((frame) => frame.hex.startsWith('AF'))) {
     const bytes = Buffer.from(entry.hex, 'hex');
     assert.equal(bytes[3], bytes.length - 5, entry.hex);
@@ -105,7 +105,7 @@ test('all 2,046 Sentek type masks compile response-position-only recipes within 
 
       assert.equal(compiledRecipe.address, layout.address);
       assert.equal(compiledRecipe.slots.length <= 8, true);
-      assertAfLengthsMatchAscii(compiledRecipe);
+      assertAfDeclaredLengthsMatchPayload(compiledRecipe);
       const vwcEnd = commands.findIndex((command) => command.includes('M2!') || command.includes('M3!'));
       const vicStart = vwcEnd === -1 ? commands.length : vwcEnd;
       assert.equal(compiledRecipe.slots.slice(0, vicStart).reduce((sum, slot) => sum + valuesInCut(slot.cut), 0), expectedVwc);
@@ -163,21 +163,46 @@ test('the bench fixture produces the exact four-slot ordered recipe and Dragino 
   ]);
   assert.equal(compiledRecipe.slots.slice(0, 3).reduce((sum, slot) => sum + valuesInCut(slot.cut), 0), 8);
   assert.equal(compiledRecipe.slots.slice(3).reduce((sum, slot) => sum + valuesInCut(slot.cut), 0), 2);
+  assert.equal(compiledRecipe.version, 2);
   assert.deepEqual(compiledRecipe.frames.map(frameHex), [
-    '07031F40', 'AB01', 'AE02', 'AD01', 'A90D09',
-    'AF010109304D212C312C312C3200', 'AF01020933302C322C327E323800',
-    'AF02010A304431212C302C302C3200', 'AF02020933302C322C327E323800',
-    'AF03010A304432212C302C302C3200', 'AF03020932312C322C327E313900',
-    'AF04010A304D32212C312C312C3200', 'AF04020932312C322C327E313900',
+    '07031F40', 'AB01', 'AE02', 'AD01', 'A500', 'A90D09',
+    'AF010106304D2101010200', 'AF0102041E02021C00',
+    'AF0201073044312100000200', 'AF0202041E02021C00',
+    'AF0301073044322100000200', 'AF0302041502021300',
+    'AF040107304D322101010200', 'AF0402041502021300',
     '09050F', '010004B0',
   ]);
-  assertAfLengthsMatchAscii(compiledRecipe);
+  assertAfDeclaredLengthsMatchPayload(compiledRecipe);
+});
+
+test('0xAF encoders reproduce the Dragino binary command and DATACUT wire examples', () => {
+  assert.equal(
+    recipe.encodeCommandFrame(3, '0MC!,1,1,1').toString('hex').toUpperCase(),
+    'AF030107304D432101010100'
+  );
+  assert.equal(
+    recipe.encodeDataCutFrame(3, '30,2,2~28').toString('hex').toUpperCase(),
+    'AF0302041E02021C00'
+  );
+});
+
+test('0xAF encoders reject values that cannot be represented by the Dragino binary fields', () => {
+  for (const input of ['', '0M!', '0M!,1,1', '0M!,1,1,256', '0M!,x,1,2', '0M!,1,1,2,3']) {
+    assert.throws(() => recipe.encodeCommandFrame(1, input), /command/);
+  }
+  for (const input of ['', '30,2,2', '30,2,2~256', '-1,2,2~28', '30,x,2~28']) {
+    assert.throws(() => recipe.encodeDataCutFrame(1, input), /cut/);
+  }
+  for (const slot of [0, 9, 1.5]) {
+    assert.throws(() => recipe.encodeCommandFrame(slot, '0M!,1,1,2'), /slot/);
+    assert.throws(() => recipe.encodeDataCutFrame(slot, '30,2,2~28'), /slot/);
+  }
 });
 
 test('global frames bracket active command/cut pairs and only clear the unused tail', () => {
   const compiledRecipe = compiled(buildLayout(8, 0b00010001, '0'));
   const frames = compiledRecipe.frames.map(frameHex);
-  assert.deepEqual(frames.slice(0, 5), ['07031F40', 'AB01', 'AE02', 'AD01', 'A90D09']);
+  assert.deepEqual(frames.slice(0, 6), ['07031F40', 'AB01', 'AE02', 'AD01', 'A500', 'A90D09']);
   assert.equal(frames.at(-1), '010004B0');
   const activeSlots = compiledRecipe.slots.map((slot) => slot.slot);
   for (const slot of activeSlots) {

@@ -1,20 +1,80 @@
 # Dragino SDI-12 soil node
 
-`DRAGINO_SDI12` represents a Dragino SDI-12-LB or SDI-12-LS converter with one SDI-12 probe at address `0`. The edge stores battery voltage and the probe channels in `device_data`; the probe profile supplies the meaning and order of the ASCII values.
+`DRAGINO_SDI12` represents a Dragino SDI-12-LB or SDI-12-LS converter with one SDI-12 probe. The probe address is saved layout data, never an edge default. The edge stores battery voltage and the probe channels in `device_data`; the probe profile supplies the meaning and order of the ASCII values.
 
 The LB uses an 8500 mAh Li-SOCl2 battery. The LS uses solar charging with a 3000 mAh Li-ion battery. Their SDI-12 and LoRaWAN payloads are the same, so both use this device type.
 
-Probe layouts, identity matchers, and the AT recipes below are **unverified until bench capture**. The shipped profiles are provisional where the registry marks them provisional. A bench capture must settle the value order, units, response length, and whether a profile can be selected automatically.
+Probe layouts, identity matchers, and AT recipes remain provisional where the registry marks them provisional. The Sentek EnviroSCAN and TriSCAN recipe below was bench-verified on 2026-08-28 and field-verified on 2026-08-30; the other probe recipes still require their own captures. The full investigation record is [Sentek EnviroSCAN/TriSCAN and Dragino SDI-12 commissioning](../operations/sentek-dragino-sdi12-commissioning-2026-08-31.md).
 
 ## Commissioning
 
 1. Register the node in the GUI as `DRAGINO_SDI12` under the `Sensors` application. The successful registration starts the identify flow.
-2. Wait for the next Class A receive window. The edge sends an `aI!` request through the Dragino `0xA8` command path; the converter returns the probe identity on FPort `100` on a later uplink.
+2. Wait for the next Class A receive window. With no saved layout, the edge sends
+   discovery `?!` through the Dragino `0xA8` command path. A valid one-character
+   response triggers `<address>I!`; a valid saved layout skips discovery and sends
+   that layout's addressed request directly. The converter returns the probe
+   identity on FPort `100` on a later uplink.
 3. If a bench-enabled identity matcher returns a unique profile, the device becomes `identified`. With the v1 provisional registry, the usual result is `unmatched`; keep the raw identity and choose the profile manually after confirming the probe wiring and recipe.
 4. Set physical depths in the device settings modal. The modal stores channel-keyed depths, while the UI accepts one value per physical depth slot.
 5. The profile list endpoint is `GET /api/sdi12/probe-profiles`. It requires the same signed-in enabled session as the device catalog. It is not a public registry endpoint.
 
 The manual path is safe when identification is unavailable: select the profile, enter its depth values, and trigger a normal uplink. A profile mismatch writes the battery row but quarantines the sensor values, which leaves the node visible without fabricating measurements.
+
+## Sentek recipe deployment
+
+For a Sentek EnviroSCAN or TriSCAN layout, saving the layout and applying its
+acquisition recipe are separate actions. Save validates and stores the address,
+response positions, module types, and depths. It does not send a downlink or
+change converter slots. The modal reports `Layout saved; acquisition
+configuration not applied.` until an operator selects **Apply acquisition
+configuration**.
+
+Apply compiles the command and cut frames on the edge. The browser cannot submit
+frame bytes, slot commands, queue IDs, or an FPort. The edge first requires an
+empty ChirpStack device queue, then enqueues confirmed FPort 2 frames in order.
+It never flushes, reorders, or overwrites an existing queue item. A maximum
+ten-module recipe can take about eight hours at the normal 20-minute interval;
+each cycle keeps the switched 12 V window at eight seconds. The process does not
+offer continuous power or a shorter reporting interval.
+
+The deployment state is local to the gateway and has six values:
+
+- **Not applied**: the saved layout has no queued hardware recipe.
+- **Queueing**: the gateway has claimed the request and is checking or adding
+  queue items.
+- **Queued**: ChirpStack accepted every recipe frame. This does not prove that
+  the Class A node received or interpreted them.
+- **Observed once**: one complete post-drain reading matches the saved layout.
+- **Active**: two consecutive complete matching post-drain readings were stored;
+  this is the UI label for `observed_compatible`.
+- **Degraded**: queueing, delivery, or observed acquisition failed. The prior
+  finite readings and their timestamps remain visible.
+
+The gateway polls its stored queue-item IDs every minute. If they remain queued
+for twelve hours, it records `queue_delivery_timeout`; an interrupted
+`queueing` claim reaches `queueing_interrupted` after the same deadline. Do not
+apply repeatedly while an attempt is queued or degraded. Inspect the bounded
+error shown by the modal, wait for any accepted frames to drain, then retry the
+same saved layout when the device queue is empty.
+
+Rollback is available only after the gateway has observed a compatible recipe.
+It queues that preserved recipe first, without changing the canonical device
+layout. Only after ChirpStack accepts every rollback frame does the gateway
+restore the matching saved layout and increment its device sync version. A
+rejected or partial rollback keeps the current canonical layout and preserves
+the accepted queue IDs as recovery evidence.
+
+Identify also has two stages. With no saved layout, the edge sends `?!`; it
+accepts exactly one alphanumeric address and then sends `<address>I!`. With a
+valid saved layout, it sends that layout's `<address>I!` directly. A malformed
+saved layout returns an error and sends no downlink. Discovery can prefill the
+address input, but the operator must still save the canonical layout before
+applying a recipe.
+
+PConfig remains authoritative for probe calibration, the probe's SDI-12
+address, and its physical depth configuration. Recipe deployment changes only
+the Dragino converter's acquisition slots, cuts, power window, payload mode,
+and normal reporting interval.
 
 ## Bench setup
 
@@ -38,7 +98,7 @@ AT+COMMAND1=0M!,5,1,1
 
 The fourth argument asks the converter to validate printable response bytes. The third argument asks it to issue `0D0!` after the measurement timeout. Increase the timeout for a probe whose datasheet or capture requires it.
 
-`AT+DATACUT1` must remove the address byte and the trailing CR/LF. If the command requests a CRC, it must also remove the three CRC characters. The resulting payload must match `^([+-][0-9.]+)+$`; an address digit such as `0+30.5` is invalid for the edge normalizer.
+`AT+DATACUT1` must remove the address byte and the trailing CR/LF. If the command requests a CRC, it must also remove the three CRC characters. The resulting payload must match `^([+-]\d+(?:\.\d+)?)+$`; an address digit such as `0+30.5` is invalid for the edge normalizer.
 
 For a raw 13-byte response `0+2.48+21.5\r\n`, the exact no-CRC cut is:
 
@@ -50,12 +110,12 @@ The cut keeps bytes 2 through 11, producing `+2.48+21.5`. For any other response
 
 ## Multi-segment uplinks
 
-`AT+DATAUP=1` splits one probe response across up to 15 LoRaWAN frames instead of one, for profiles whose value count would otherwise exceed the 51-byte DR0 uplink budget. The 8-depth EnviroSCAN recipe below is the first case that needs it; the registry marks that profile `maxUplinks: 2` to document the intent — every other profile stays single-uplink until it has its own reviewed reason to change.
+`AT+DATAUP=1` splits one probe response across up to 15 LoRaWAN frames instead of one, for profiles whose value count would otherwise exceed the 51-byte DR0 uplink budget. The field converter split the verified eight-module/two-TriSCAN vector into three 42-character ASCII slices. The registry allows five for the supported worst case of ten TriSCAN modules: ten moisture plus ten VIC values. Every other profile stays single-uplink until it has its own reviewed reason to change.
 
 A device set to `AT+DATAUP=1` must also be set `AT+PAYVER=2`. The codec reads the header layout from the `payver` byte, never from frame length:
 
 - `payver=1`: 3-byte header, `[bat_hi][bat_lo][payver][ascii...]`.
-- `payver=2`: 5-byte header, `[bat_hi][bat_lo][payver][count][index][ascii-slice...]` — `count` is the total segment count (1–15), `index` is zero-based, and each segment carries at most 46 data bytes (6 in 11-byte dwell-limited regions). The full sequence is capped at 1500 bytes across 15 segments.
+- `payver=2`: 5-byte header, `[bat_hi][bat_lo][payver][count][index][ascii-slice...]` — `count` is the total segment count (1–15) and `index` is zero-based. The current converter produced 42-character slices for the field vector; budget the Sentek profile against that observed size. The reassembler accepts the protocol limit of 15 segments and caps the full sequence at 1500 bytes.
 
 Leaving `AT+PAYVER=1` while `AT+DATAUP=1` is set is a misconfiguration, not a silent failure: the codec reads a 5-byte header as a 3-byte one, so the count and index bytes land inside the ASCII slice as garbage. That garbage fails the normalizer's strict `^([+-]\d+(?:\.\d+)?)+$` grammar and quarantines as `unparseable_sdi12` — it is never mis-assembled into a plausible-looking reading.
 
@@ -67,7 +127,7 @@ Frames carry no sequence id, so a late-delivered tail segment of one sequence ca
 
 ## Probe recipes
 
-Each section gives a concrete starting command and a cut for the sample response length shown. Every line in this section remains **unverified until bench capture**. The sample cuts assume address `0`, one decimal place, no CRC, and CR/LF termination. If the capture differs, update the recipe and the corresponding golden vector together.
+Each section gives a concrete starting command and a cut for the sample response length shown. Unless a section says it is bench-verified, its sample cuts assume address `0`, one decimal place, no CRC, and CR/LF termination. If the capture differs, update the recipe and the corresponding golden vector together.
 
 ### Sentek EnviroSCAN
 
@@ -75,9 +135,9 @@ Each section gives a concrete starting command and a cut for the sample response
 
 - Identity (`0I!`): `012SENTEK  XEPI  139D938D7150000` — address 0, SDI-12 v1.2, vendor `SENTEK`, model `XEPI` (the EnviroSCAN variant; the Sentek manual names `XPI` for EnviroSMART and `IPI` for EasyAG — all three auto-match `SENTEK_ENVIROSCAN`), firmware 1.3.9, then the serial.
 - Measurement: `0M!` answers `0tttn` then needs `0D0!` (and `0D1!` above 3 values) — the Dragino's `aD0!` flag (third `AT+COMMANDx` field = `1`) handles that. Live response with the sensor count learned as 5: `+0.000000+0.000000+0.000000+0.104748+0.339201`.
-- **Unit:** per the *Sentek SDI-12 Probe Interface Manual v3.4*, soil-moisture values are volumetric water content in **mm per 10 cm of soil**. That is numerically identical to VWC percent (1 mm / 100 mm = 1 %), so values map straight onto `vwc_N` with no transform. Three leading `+0.000000` values are sensors not yet in soil, not a fault.
+- **Unit:** calibrated EnviroSCAN soil-moisture values are **mm per 10 cm of soil**, numerically identical to VWC percent (1 mm / 100 mm = 1%), and map directly to `vwc_N`. Legacy TriSCAN moisture rows auto-configured with `A=1`, `B=1`, `C=0` instead return normalized scaled frequency. For layout entries marked `TRISCAN`, the normalizer derives VWC with Sentek's default curve `SF = 0.1957 × VWC^0.404 + 0.02852`. This conversion does not apply to EnviroSCAN entries or to VIC.
 - Value count is variable per probe build (1–9 per `aM!`, `aM1!` for 10–16): the system learns it per device (`devices.sdi12_value_count`) from the settings modal; frames with a different count quarantine as `sdi12_value_count` until the count is saved.
-- Salinity (TriSCAN) rides `0M2!`/`0M3!` — a separate recipe slot, not mapped in v1.
+- TriSCAN Volumetric Ion Content (VIC) uses `0M2!`. The returned VIC group contains only configured TriSCAN modules, in response-position order, after the complete VWC group.
 
 Recipe as deployed (five sensors, cut keeps the sign-delimited values and drops the address):
 
@@ -96,7 +156,35 @@ AT+DATAUP=1
 AT+COMMAND1=0M!,10,1,1
 ```
 
-The Sentek manual's `aM!`/`aD0!` pair returns the first three values; a continuation `aD1!` (and `aD2!` for probes wider than six sensors) reads the remaining values. The exact `AT+COMMAND2` cut that issues the `aD1!` continuation on this converter is **unverified — confirm at bench** before shipping an 8-sensor deployment.
+The eight-module mixed VWC/VIC recipe was bench-verified on 2026-08-28 with TriSCAN modules at response positions 1 and 5:
+
+```text
+AT+COMMAND1=0M!,1,1,2
+AT+COMMAND2=0D1!,0,0,2
+AT+COMMAND3=0D2!,0,0,2
+AT+COMMAND4=0M2!,1,1,2
+AT+DATACUT1=30,2,2~28
+AT+DATACUT2=30,2,2~28
+AT+DATACUT3=21,2,2~19
+AT+DATACUT4=21,2,2~19
+```
+
+The field three-segment payload contained eight VWC values followed by the two
+TriSCAN VIC values:
+
+```text
++0.732840+28.27938+37.45271+41.05683+0.969157+46.21098+38.87460+44.38053+1615.877+4237.622
+```
+
+In this capture, positions 1 and 5 are the legacy TriSCAN scaled-frequency
+outputs. The default curve converts them to `23.81%` and `48.72%` VWC. The
+other six values are already calibrated VWC and remain unchanged. The last two
+values are nominal, unitless VIC indices; they must not be labelled EC or
+assigned an EC unit without a site-specific soil-sampling regression.
+
+This recipe is address-specific. Replace the leading `0` in every command only
+when the probe itself has another confirmed SDI-12 address. The Dragino does not
+have a separate SDI-12 address to set.
 
 ### Delta-T PR2/4
 
@@ -159,15 +247,34 @@ The six-value order and EC conversion are **unverified until bench capture**. Mo
 
 ## Identify and downlink frames
 
-The shipped identify request is:
+Identify is address-agnostic until the edge has a validated address. With no
+saved layout, the edge compiles `?!` with `encodeIdentifyFrame('?!')` and sends:
 
 ```text
-0xA8 0x03 0x30 0x49 0x21 0x01 0x01 0x00
+A8 02 3F 21 01 01 00
 ```
 
-This is `0I!` at address `0`, with a one-second wait, FPort 100 echo enabled, and no automatic `D0!` access. The node is Class A, so the command is delivered in the next receive window rather than immediately.
+The frame requests a one-second wait, enables the FPort 100 echo, and disables
+automatic `D0!`. The Node-RED downlink uses FPort 2; the identity response
+arrives later in a Class A receive cycle. After discovery returns exactly one
+alphanumeric address, or when a saved layout already validates, the edge compiles
+that address's `<address>I!` frame. No runtime path substitutes `0`, `L`, `C`, or
+another probe-specific address.
 
-`0xAF` is reserved for phase-2 remote recipe updates. Its documented form is `AF MM NN LL ... YY`: command slot, command-vs-cut selector, byte length, ASCII command bytes, and an uplink flag. Do not send it until a bench capture has approved both the `AT+COMMANDx` and `AT+DATACUTx` strings.
+The Sentek recipe compiler owns `0xAF` frames for active converter slots. It
+emits one selector-`01` command frame and one selector-`02` cut frame per active
+slot, then clears only the unused tail. The browser cannot supply raw `0xAF`
+bytes, slot commands, cuts, or queue IDs; Apply and Rollback use only frames
+compiled from a validated saved layout.
+
+The `0xAF` value is not an ASCII copy of the console line. For selector `01`,
+the command characters run through `!`, followed by the wait, automatic-data,
+and validation settings as three raw bytes. Selector `02` carries the four
+DATACUT numbers as raw bytes. For example, the vendor's
+`AT+COMMAND3=0MC!,1,1,1` frame is
+`AF 03 01 07 30 4D 43 21 01 01 01 00`. Encoding the commas and decimal digits
+inside the frame can drain the queue successfully while leaving acquisition
+non-functional.
 
 `0x01` sets the converter's transmit interval. The documented payload uses three interval bytes after the command code; for example, `01 00 00 3C` requests 60 seconds. Use the console or the normal edge configuration path during commissioning. A 20-minute default is `AT+TDC=1200000`.
 
@@ -175,7 +282,11 @@ This is `0I!` at address `0`, with a one-second wait, FPort 100 echo enabled, an
 
 ### `NULL` on FPort 100
 
-`NULL` means the probe did not answer the debug command. Check probe power, the SDI-12 data line, address `0`, and the command's wait timeout. The normalizer treats the exact string `NULL` as battery-only telemetry with no quarantine row.
+`NULL` on FPort 100 means the probe did not answer a debug or Identify command.
+Check probe power, the SDI-12 data line, the configured probe address, and the
+command's wait timeout. FPort 100 routes its `datas_sum` to Identify rather than
+the periodic telemetry writer, so it writes no periodic telemetry. Discovery
+rejects `NULL`, and an addressed Identify response cannot match it.
 
 ### Quarantine rows
 
@@ -192,7 +303,13 @@ The edge retains the newest 1,000 quarantine rows. A yellow SDI-12 node status m
 
 ### FPort 100 debugging
 
-Use the identify button for `0I!`. For another command, use the documented `0xA8` frame with echo enabled and inspect the raw FPort 100 string. Capture the full response before changing a cut. A debug response is not a periodic FPort 2 golden vector until the address and terminators have been removed.
+Use the Identify button to send discovery `?!` when no valid layout is saved; a
+valid discovery response triggers the addressed `<address>I!` request. With a
+valid saved layout, Identify sends that layout's address directly. For another
+command, use the documented `0xA8` frame with echo enabled and inspect the raw
+FPort 100 string. Capture the full response before changing a cut. A debug
+response is not a periodic FPort 2 golden vector until the address and
+terminators have been removed.
 
 ### `unmatched` identify status
 

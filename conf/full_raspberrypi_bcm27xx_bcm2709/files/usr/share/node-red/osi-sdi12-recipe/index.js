@@ -43,9 +43,58 @@ function frame(purpose, bytes) {
   return { purpose, hex: value.toString('hex').toUpperCase(), base64: value.toString('base64') };
 }
 
-function afFrame(slot, selector, ascii, purpose) {
-  const payload = Buffer.from(ascii, 'ascii');
-  return frame(purpose, Buffer.concat([Buffer.from([0xAF, slot, selector, payload.length]), payload, Buffer.from([0x00])]));
+function slotOrThrow(slot) {
+  if (!Number.isInteger(slot) || slot < 1 || slot > MAX_SLOTS) {
+    throw new Error('invalid command slot');
+  }
+  return slot;
+}
+
+function byteOrThrow(value, label) {
+  if (!/^\d+$/.test(value)) throw new Error('invalid ' + label);
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xFF) {
+    throw new Error('invalid ' + label);
+  }
+  return parsed;
+}
+
+function encodeCommandFrame(slot, value) {
+  slotOrThrow(slot);
+  if (typeof value !== 'string') throw new Error('invalid command');
+  const parts = value.split(',');
+  if (parts.length !== 4 || !/^[0-9A-Za-z][0-9A-Za-z]*!$/.test(parts[0])) {
+    throw new Error('invalid command');
+  }
+  const command = Buffer.from(parts[0], 'ascii');
+  const parameters = Buffer.from(parts.slice(1).map((part) => byteOrThrow(part, 'command parameter')));
+  const payload = Buffer.concat([command, parameters]);
+  if (payload.length > 0xFF) throw new Error('invalid command length');
+  return Buffer.concat([
+    Buffer.from([0xAF, slot, 0x01, payload.length]),
+    payload,
+    Buffer.from([0x00]),
+  ]);
+}
+
+function encodeDataCutFrame(slot, value) {
+  slotOrThrow(slot);
+  if (typeof value !== 'string') throw new Error('invalid cut');
+  const match = /^(\d+),(\d+),(\d+)~(\d+)$/.exec(value);
+  if (!match) throw new Error('invalid cut');
+  const payload = Buffer.from(match.slice(1).map((part) => byteOrThrow(part, 'cut parameter')));
+  return Buffer.concat([
+    Buffer.from([0xAF, slot, 0x02, payload.length]),
+    payload,
+    Buffer.from([0x00]),
+  ]);
+}
+
+function afFrame(slot, selector, value, purpose) {
+  const bytes = selector === 0x01
+    ? encodeCommandFrame(slot, value)
+    : encodeDataCutFrame(slot, value);
+  return frame(purpose, bytes);
 }
 
 function compileSentekRecipe(layout) {
@@ -72,6 +121,7 @@ function compileSentekRecipe(layout) {
     frame('all_data_mode', [0xAB, 0x01]),
     frame('payload_version', [0xAE, 0x02]),
     frame('data_uplink', [0xAD, 0x01]),
+    frame('newline_disabled', [0xA5, 0x00]),
     frame('sdi12_timing', [0xA9, 0x0D, 0x09]),
   ];
   for (const active of slots) {
@@ -84,7 +134,7 @@ function compileSentekRecipe(layout) {
   return {
     ok: true,
     recipe: {
-      version: 1,
+      version: 2,
       profile: 'SENTEK_ENVIROSCAN',
       address: canonical.address,
       layoutHash: crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex'),
@@ -104,4 +154,10 @@ function encodeIdentifyFrame(command) {
   return Buffer.concat([Buffer.from([0xA8, ascii.length]), ascii, Buffer.from([0x01, 0x01, 0x00])]);
 }
 
-module.exports = { compileSentekRecipe, canonicalLayoutHash, encodeIdentifyFrame };
+module.exports = {
+  compileSentekRecipe,
+  canonicalLayoutHash,
+  encodeCommandFrame,
+  encodeDataCutFrame,
+  encodeIdentifyFrame,
+};

@@ -338,6 +338,9 @@ const localRestartReader = [
 ].join('\n');
 const protectedNodeHashes = {
   'al-link-validate': 'a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc',
+  // Re-pinned 2026-08-28: migration 0048 added the Sentek channel-layout
+  // column, so the guarded devices rebuild must preserve it with the other
+  // SDI-12 fields. The rebuild rehearsal carries a non-null layout sentinel.
   // Re-pinned 2026-08-18 #2 (Fable A6 review, SHOULD-FIX 3): the guarded devices
   // rebuild's DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry
   // sdi12_value_count, so a live rebuild (if the CHECK-convergence guard ever
@@ -352,7 +355,7 @@ const protectedNodeHashes = {
   // (itself re-pinned from e7c2cbb10c8e3117dc5c059cb5f5b2f7db1b88763f53e3d2f04edd3456e395e4, and
   // before that 2026-08-14's json_insert split, previous pin
   // 2168cd5a1c5db035404ea73bc3677b2846ce580b6c512932b207ef0380a6f222)
-  'sync-init-fn': 'b0f432fb7c972905a0d45797537d69ef16c04a64024de624638a561f68400c69',
+  'sync-init-fn': '69aed774a08b5372c251d1c22c1f70ee7f983b7dbe1f17ff9ee01e5d0b944bbf',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
@@ -1006,12 +1009,13 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 89 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 89,
-    'silent-catch baseline records 89 for both maintained profiles',
-    'silent-catch baseline must be 89 for both maintained profiles after shared auth-secret cleanup');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 88 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 88,
+    'silent-catch baseline records 88 for both maintained profiles',
+    'silent-catch baseline must be 88 for both maintained profiles after the SDI-12 recipe-deployment cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'registration compensation now reports failures instead of swallowing them', 'records the PR #149 compensation cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase A', 'records the scoped-access auth cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase B shared reads', 'records the scoped-access shared-read cleanup');
+  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'SDI-12 recipe deployment Task 5', 'records the recipe-deployment device-list cleanup');
 }
 // Ownership split (refactor-program A0 repair commit 3): the numeric ceilings
 // (max_chars / max_total) in scripts/verify-flows-size-ratchet-allowances.json are now

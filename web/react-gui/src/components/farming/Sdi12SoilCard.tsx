@@ -89,6 +89,10 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   const profile = device.sdi12_probe_profile || 'No probe profile';
   const pendingMinutesAgo = status === 'pending_identify' ? minutesSince(device.updated_at) : null;
   const pendingNoResponse = pendingMinutesAgo != null && pendingMinutesAgo > SDI12_IDENTIFY_TIMEOUT_MINUTES;
+  const deployment = device.sdi12_recipe_deployment;
+  const deploymentLabel = deployment?.status === 'observed_compatible'
+    ? t('sdi12.active')
+    : deployment ? t('sdi12.deploymentStatus', { status: deployment.status }) : null;
 
   const handleRemove = async () => {
     setIsRemoving(true);
@@ -103,7 +107,6 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   };
 
   const configuredSensors = device.sdi12_channel_layout_json?.sensors ?? [];
-  const hasTriScan = configuredSensors.some((sensor) => sensor.type === 'TRISCAN');
   const rows = configuredSensors.length > 0
     ? [...configuredSensors]
       .sort((left, right) => left.depth_cm - right.depth_cm)
@@ -217,9 +220,11 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
         </p>
       )}
 
-      {hasTriScan && (
-        <p className="mb-3 rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
-          TriSCAN VIC acquisition is disabled until the Dragino response framing is bench-verified.
+      {deploymentLabel && (
+        <p className={`mb-3 rounded-lg px-3 py-2 text-sm ${deployment?.status === 'degraded'
+          ? 'bg-[var(--error-bg)] text-[var(--error-text)]'
+          : 'bg-[var(--secondary-bg)] text-[var(--text-secondary)]'}`}>
+          {deploymentLabel}{deployment?.last_error_code ? ` (${deployment.last_error_code})` : ''}
         </p>
       )}
 

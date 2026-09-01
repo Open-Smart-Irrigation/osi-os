@@ -3,9 +3,12 @@ import { useTranslation } from 'react-i18next';
 
 import type { Device, Sdi12Profile, SentekChannelSensor, SentekSensorType } from '../../types/farming';
 import {
+  devicesAPI,
   fetchSdi12Profiles,
   getApiErrorMessage,
   postSdi12Identify,
+  postSdi12RecipeApply,
+  postSdi12RecipeRollback,
   putSdi12Config,
 } from '../../services/api';
 import type { Sdi12ConfigRequest } from '../../services/api';
@@ -60,6 +63,32 @@ function pendingAgeLabel(minutes: number | null): string {
   return `Identification pending for ${minutes} minute${minutes === 1 ? '' : 's'}.`;
 }
 
+function canonicalSentekLayout(address: string, sensors: SentekChannelSensor[]): string | null {
+  if (!/^[0-9A-Za-z]$/.test(address) || sensors.length < 1 || sensors.length > 10) return null;
+  const channels = new Set<number>();
+  const positions = new Set<number>();
+  const depths = new Set<number>();
+  for (const sensor of sensors) {
+    if (!Number.isInteger(sensor.channel) || sensor.channel < 1 || sensor.channel > 10 || channels.has(sensor.channel)
+      || !Number.isInteger(sensor.response_position) || sensor.response_position < 1 || sensor.response_position > sensors.length || positions.has(sensor.response_position)
+      || !Number.isInteger(sensor.depth_cm) || sensor.depth_cm < 1 || sensor.depth_cm > 1000 || depths.has(sensor.depth_cm)
+      || (sensor.type !== 'ENVIROSCAN' && sensor.type !== 'TRISCAN')) return null;
+    channels.add(sensor.channel);
+    positions.add(sensor.response_position);
+    depths.add(sensor.depth_cm);
+  }
+  return JSON.stringify({ version: 1, address, sensors: [...sensors].sort((left, right) => left.response_position - right.response_position) });
+}
+
+function canonicalStoredSentekLayout(device: Device): string | null {
+  const layout = device.sdi12_channel_layout_json;
+  return layout ? canonicalSentekLayout(layout.address, layout.sensors) : null;
+}
+
+function normalizedDiscoveredSdi12Address(address: string | null | undefined): string | null {
+  return typeof address === 'string' && /^[0-9A-Za-z]$/.test(address) ? address : null;
+}
+
 export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   device,
   onClose,
@@ -71,7 +100,10 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   const [depthInputs, setDepthInputs] = useState<Record<string, string>>({});
   const [initialDepthInputs, setInitialDepthInputs] = useState<Record<string, string>>({});
   const [valueCountInput, setValueCountInput] = useState('');
-  const [sentekAddress, setSentekAddress] = useState(device.sdi12_channel_layout_json?.address ?? 'L');
+  const [sentekAddress, setSentekAddress] = useState(
+    device.sdi12_channel_layout_json?.address ?? normalizedDiscoveredSdi12Address(device.sdi12_discovered_address) ?? '',
+  );
+  const [sentekAddressTouched, setSentekAddressTouched] = useState(false);
   const [sentekSensors, setSentekSensors] = useState<SentekChannelSensor[]>(() => {
     if (device.sdi12_channel_layout_json?.sensors?.length) return device.sdi12_channel_layout_json.sensors;
     const count = Math.max(1, Math.min(8, device.sdi12_value_count ?? 1));
@@ -83,7 +115,9 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
     }));
   });
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'identify' | 'save' | null>(null);
+  const [busy, setBusy] = useState<'identify' | 'save' | 'apply' | 'rollback' | null>(null);
+  const [showApplyConfirm, setShowApplyConfirm] = useState(false);
+  const [confirmedLayout, setConfirmedLayout] = useState(() => canonicalStoredSentekLayout(device));
   const [identifyPending, setIdentifyPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -124,6 +158,17 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
     }
   }, [device, selectedProfile]);
 
+  useEffect(() => {
+    setConfirmedLayout(canonicalStoredSentekLayout(device));
+  }, [device]);
+
+  useEffect(() => {
+    const discoveredAddress = normalizedDiscoveredSdi12Address(device.sdi12_discovered_address);
+    if (!sentekAddressTouched && sentekAddress === '' && !device.sdi12_channel_layout_json && discoveredAddress) {
+      setSentekAddress(discoveredAddress);
+    }
+  }, [device.sdi12_channel_layout_json, device.sdi12_discovered_address, sentekAddress, sentekAddressTouched]);
+
   // Variable-count profiles have no fixed expectedValues -- this is the same
   // set the edge normalizer treats as learnable (SENTEK_ENVIROSCAN,
   // DELTAT_PR2_4, DELTAT_PR2_6, and the pre-existing GENERIC_VWC escape
@@ -152,19 +197,10 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
         setError('Configure between one and ten connected modules.');
         return;
       }
-      const channels = new Set<number>();
-      const positions = new Set<number>();
-      const depthsSeen = new Set<number>();
-      for (const sensor of sentekSensors) {
-        if (!Number.isInteger(sensor.channel) || sensor.channel < 1 || sensor.channel > 10 || channels.has(sensor.channel)
-          || !Number.isInteger(sensor.response_position) || sensor.response_position < 1 || sensor.response_position > sentekSensors.length || positions.has(sensor.response_position)
-          || !Number.isInteger(sensor.depth_cm) || sensor.depth_cm < 1 || sensor.depth_cm > 1000 || depthsSeen.has(sensor.depth_cm)) {
-          setError('Channels, response positions, and positive depths must be unique and valid.');
-          return;
-        }
-        channels.add(sensor.channel);
-        positions.add(sensor.response_position);
-        depthsSeen.add(sensor.depth_cm);
+      const savedLayout = canonicalSentekLayout(sentekAddress, sentekSensors);
+      if (!savedLayout) {
+        setError('Channels, response positions, and positive depths must be unique and valid.');
+        return;
       }
       setBusy('save');
       setError(null);
@@ -175,7 +211,17 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
           address: sentekAddress,
           sensors: sentekSensors,
         });
-        setInfo('SDI-12 configuration saved.');
+        setInfo(t('sdi12.layoutSaved'));
+        setConfirmedLayout(null);
+        try {
+          const refreshed = await devicesAPI.getAll();
+          const refreshedDevice = refreshed.find((candidate) => candidate.deveui === device.deveui);
+          if (refreshedDevice && canonicalStoredSentekLayout(refreshedDevice) === savedLayout) {
+            setConfirmedLayout(savedLayout);
+          }
+        } catch {
+          setError(t('sdi12.refreshRequired'));
+        }
         onUpdate();
       } catch (err: unknown) {
         setError(getApiErrorMessage(err, 'Failed to save SDI-12 configuration.'));
@@ -229,6 +275,32 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
     } finally {
       setBusy(null);
     }
+  };
+
+  const deployment = device.sdi12_recipe_deployment;
+  const draftLayout = canonicalSentekLayout(sentekAddress, sentekSensors);
+  const canApply = isSentekProfile && draftLayout !== null && draftLayout === confirmedLayout && busy === null;
+  const handleApply = async () => {
+    if (!canApply) return;
+    setBusy('apply'); setShowApplyConfirm(false); setError(null); setInfo(null);
+    try {
+      const result = await postSdi12RecipeApply(device.deveui);
+      setInfo(t('sdi12.requestAccepted', { version: result?.desired_version ?? 'unknown', status: result?.status ?? 'unknown' }));
+      onUpdate();
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to apply acquisition configuration.'));
+    } finally { setBusy(null); }
+  };
+  const handleRollback = async () => {
+    if (busy !== null || !deployment?.compatible_available) return;
+    setBusy('rollback'); setError(null); setInfo(null);
+    try {
+      const result = await postSdi12RecipeRollback(device.deveui);
+      setInfo(t('sdi12.rollbackRequestAccepted', { version: result?.desired_version ?? 'unknown', status: result?.status ?? 'unknown' }));
+      onUpdate();
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to roll back acquisition configuration.'));
+    } finally { setBusy(null); }
   };
 
   const handleIdentify = async () => {
@@ -333,7 +405,10 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Connected Sentek modules</p>
               <label htmlFor={`sdi12-address-${device.deveui}`} className="mt-3 block text-xs font-semibold text-[var(--text-secondary)]">SDI-12 address</label>
               <input id={`sdi12-address-${device.deveui}`} value={sentekAddress} maxLength={1} disabled={busy !== null}
-                onChange={(event) => setSentekAddress(event.target.value)}
+                onChange={(event) => {
+                  setSentekAddressTouched(true);
+                  setSentekAddress(event.target.value);
+                }}
                 className="mt-1 w-20 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]" />
               <div className="mt-3 space-y-2">
                 {sentekSensors.map((sensor, rowIndex) => (
@@ -364,9 +439,6 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
                   return [...rows, { channel, response_position: rows.length + 1, depth_cm: (rows.length + 1) * 10, type: 'ENVIROSCAN' }];
                 })}
                 className="mt-3 rounded border border-[var(--border)] px-3 py-1.5 text-sm">Add module</button>
-              <p className="mt-3 rounded bg-[var(--warn-bg)] px-3 py-2 text-xs text-[var(--warn-text)]">
-                Saving activates the explicit layout. TriSCAN VIC decoding remains disabled until Dragino response framing is bench-verified.
-              </p>
             </div>
           )}
 
@@ -413,7 +485,35 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
             >
               {busy === 'save' ? 'Saving…' : 'Save'}
             </button>
+            {isSentekProfile && (
+              <button type="button" onClick={() => setShowApplyConfirm(true)} disabled={!canApply}
+                className="rounded-lg border border-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary)] disabled:cursor-not-allowed disabled:opacity-60">
+                {t('sdi12.apply')}
+              </button>
+            )}
+            {isSentekProfile && deployment?.compatible_available && (
+              <button type="button" onClick={handleRollback} disabled={busy !== null}
+                className="rounded-lg border border-[var(--warn-border)] px-3 py-2 text-sm font-semibold text-[var(--warn-text)] disabled:cursor-not-allowed disabled:opacity-60">
+                {busy === 'rollback' ? t('sdi12.rollingBack') : t('sdi12.rollback')}
+              </button>
+            )}
           </div>
+
+          {showApplyConfirm && (
+            <div className="mt-3 rounded-lg bg-[var(--warn-bg)] p-3 text-sm text-[var(--warn-text)]">
+              {t('sdi12.applyConfirmation')}
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={handleApply} disabled={busy !== null} className="rounded border px-3 py-1 disabled:opacity-60">{t('sdi12.confirmApply')}</button>
+                <button type="button" onClick={() => setShowApplyConfirm(false)} disabled={busy !== null} className="rounded border px-3 py-1 disabled:opacity-60">Cancel</button>
+              </div>
+            </div>
+          )}
+          {deployment && <p className="mt-3 text-sm text-[var(--text-tertiary)]">Deployment status: {deployment.status}</p>}
+          {deployment?.status === 'degraded' && (
+            <p className="mt-3 rounded-lg bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
+              {t('sdi12.degraded')}{deployment.last_error_code ? `: ${deployment.last_error_code}` : '.'}
+            </p>
+          )}
 
           {pending && !identifyPending && (
             pendingNoResponse ? (
