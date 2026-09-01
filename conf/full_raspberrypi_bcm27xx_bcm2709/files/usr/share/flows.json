@@ -13824,6 +13824,82 @@
     ]
   },
   {
+    "id": "command-postcondition-build",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Build command postcondition query",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1050,
+    "y": 340,
+    "func": "var cmd = msg._postconditionCommand || {};\nvar ack = msg.syncAck || {};\nvar commandType = String(ack.commandType || cmd.commandType || cmd.command_type || '').toUpperCase();\nfunction s(v) { return (v === null || v === undefined) ? 'NULL' : (\"'\" + String(v).replace(/'/g, \"''\") + \"'\"); }\nfunction deviceEui(value) { return String(value.deviceEui || value.device_eui || value.devEui || '').trim().toUpperCase(); }\nif (commandType === 'UPDATE_SCHEDULE' || commandType === 'UPSERT_SCHEDULE') {\n  msg.topic = 'SELECT s.trigger_metric, s.threshold_kpa, s.duration_minutes, s.enabled, s.response_mode, s.sync_version FROM irrigation_schedules s JOIN irrigation_zones z ON z.id = s.irrigation_zone_id WHERE ' + (cmd.zoneUuid ? ('z.zone_uuid = ' + s(cmd.zoneUuid)) : ('z.id = ' + Number(cmd.zoneId || 0))) + ' LIMIT 1';\n  return msg;\n}\nif (commandType === 'ASSIGN_DEVICE_TO_ZONE') {\n  msg.topic = 'SELECT d.irrigation_zone_id, d.gateway_device_eui, d.sync_version, z.zone_uuid FROM devices d LEFT JOIN irrigation_zones z ON z.id = d.irrigation_zone_id WHERE d.deveui = ' + s(deviceEui(cmd)) + ' LIMIT 1';\n  return msg;\n}\nif (commandType === 'REMOVE_DEVICE_FROM_ZONE') {\n  msg.topic = 'SELECT irrigation_zone_id, sync_version FROM devices WHERE deveui = ' + s(deviceEui(cmd)) + ' LIMIT 1';\n  return msg;\n}\nnode.error('No postcondition query for command type ' + commandType, msg);\nreturn null;",
+    "wires": [
+      [
+        "command-postcondition-verify-db"
+      ]
+    ]
+  },
+  {
+    "id": "command-postcondition-verify-db",
+    "type": "sqlite",
+    "z": "93b1537a596e0e6d",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "DB: verify command postcondition",
+    "x": 1280,
+    "y": 340,
+    "wires": [
+      [
+        "command-postcondition-ack"
+      ]
+    ]
+  },
+  {
+    "id": "command-postcondition-ack",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Build verified command ACK",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1510,
+    "y": 340,
+    "func": "var cmd = msg._postconditionCommand || {};\nvar ack = msg.syncAck || {};\nvar commandType = String(ack.commandType || cmd.commandType || cmd.command_type || '').toUpperCase();\nvar requestedVersion = Number(ack.requestedSyncVersion || ack.appliedSyncVersion || cmd.appliedSyncVersion || cmd.syncVersion || 0);\nack.requestedSyncVersion = requestedVersion;\nvar row = Array.isArray(msg.payload) && msg.payload.length ? msg.payload[0] : null;\nfunction deviceEui(value) { return String(value.deviceEui || value.device_eui || value.devEui || '').trim().toUpperCase(); }\nfunction sameNumber(left, right) { return Number(left) === Number(right); }\nfunction stale() { return row && Number(row.sync_version) > requestedVersion; }\nvar verified = false;\nif (commandType === 'UPDATE_SCHEDULE' || commandType === 'UPSERT_SCHEDULE') {\n  verified = !!row && String(row.trigger_metric) === String(cmd.triggerMetric || 'SWT_WM1') && sameNumber(row.threshold_kpa, Number(cmd.thresholdKpa) || 0) && sameNumber(row.duration_minutes, parseInt(cmd.durationMinutes, 10) || 0) && sameNumber(row.enabled, cmd.enabled ? 1 : 0) && String(row.response_mode) === String(cmd.responseMode || 'proportional') && Number(row.sync_version) >= requestedVersion;\n} else if (commandType === 'ASSIGN_DEVICE_TO_ZONE') {\n  verified = !!row && String(row.zone_uuid || '') === String(cmd.zoneUuid || cmd.zone_uuid || '') && String(row.gateway_device_eui || '') === String(env.get('DEVICE_EUI') || 'UNKNOWN').toUpperCase() && Number(row.sync_version) >= requestedVersion;\n} else if (commandType === 'REMOVE_DEVICE_FROM_ZONE') {\n  verified = !!row && row.irrigation_zone_id === null && Number(row.sync_version) >= requestedVersion;\n}\nif (verified) {\n  ack.result = 'SUCCESS';\n  ack.state = 'APPLIED';\n  ack.error = null;\n} else if (stale()) {\n  ack.result = 'REJECTED_PERMANENT';\n  ack.state = 'REJECTED';\n  ack.error = 'stale_sync_version';\n} else {\n  ack.result = 'FAILED_RETRYABLE';\n  ack.state = 'PENDING';\n  ack.error = 'postcondition_not_met';\n}\nmsg.syncAck = ack;\nmsg.topic = 'devices/' + String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase() + '/command_ack';\nmsg.payload = ack;\nreturn msg;",
+    "wires": [
+      [
+        "command-ack-queue-rest"
+      ]
+    ]
+  },
+  {
+    "id": "command-postcondition-route",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Route command ACK verification",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1040,
+    "y": 300,
+    "func": "var ack = msg.syncAck || {};\nvar commandType = String(ack.commandType || '').toUpperCase();\nvar verifiedTypes = ['UPDATE_SCHEDULE', 'UPSERT_SCHEDULE', 'ASSIGN_DEVICE_TO_ZONE', 'REMOVE_DEVICE_FROM_ZONE'];\nvar deferredTypes = [\n  'SET_LSN50_MODE', 'SET_LSN50_INTERVAL', 'SET_LSN50_INTERRUPT_MODE', 'SET_LSN50_5V_WARMUP',\n  'SET_KIWI_INTERVAL', 'ENABLE_KIWI_TEMP_HUMIDITY', 'SET_STREGA_INTERVAL', 'SET_STREGA_TIMED_ACTION',\n  'SET_STREGA_MAGNET_MODE', 'SET_STREGA_PARTIAL_OPENING', 'SET_STREGA_FLUSHING'\n];\nif (verifiedTypes.includes(commandType)) return [msg, null];\nif (deferredTypes.includes(commandType)) return [null, null];\nreturn [null, msg];",
+    "wires": [
+      [
+        "command-postcondition-build"
+      ],
+      [
+        "e2e139678c3ddded"
+      ]
+    ]
+  },
+  {
     "id": "journal-v2-replication-tab",
     "type": "tab",
     "label": "Journal V2 Replication",
@@ -13940,82 +14016,6 @@
     "y": 200,
     "wires": [
       []
-    ]
-  },
-  {
-    "id": "command-postcondition-build",
-    "type": "function",
-    "z": "93b1537a596e0e6d",
-    "name": "Build command postcondition query",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 1050,
-    "y": 340,
-    "func": "var cmd = msg._postconditionCommand || {};\nvar ack = msg.syncAck || {};\nvar commandType = String(ack.commandType || cmd.commandType || cmd.command_type || '').toUpperCase();\nfunction s(v) { return (v === null || v === undefined) ? 'NULL' : (\"'\" + String(v).replace(/'/g, \"''\") + \"'\"); }\nfunction deviceEui(value) { return String(value.deviceEui || value.device_eui || value.devEui || '').trim().toUpperCase(); }\nif (commandType === 'UPDATE_SCHEDULE' || commandType === 'UPSERT_SCHEDULE') {\n  msg.topic = 'SELECT s.trigger_metric, s.threshold_kpa, s.duration_minutes, s.enabled, s.response_mode, s.sync_version FROM irrigation_schedules s JOIN irrigation_zones z ON z.id = s.irrigation_zone_id WHERE ' + (cmd.zoneUuid ? ('z.zone_uuid = ' + s(cmd.zoneUuid)) : ('z.id = ' + Number(cmd.zoneId || 0))) + ' LIMIT 1';\n  return msg;\n}\nif (commandType === 'ASSIGN_DEVICE_TO_ZONE') {\n  msg.topic = 'SELECT d.irrigation_zone_id, d.gateway_device_eui, d.sync_version, z.zone_uuid FROM devices d LEFT JOIN irrigation_zones z ON z.id = d.irrigation_zone_id WHERE d.deveui = ' + s(deviceEui(cmd)) + ' LIMIT 1';\n  return msg;\n}\nif (commandType === 'REMOVE_DEVICE_FROM_ZONE') {\n  msg.topic = 'SELECT irrigation_zone_id, sync_version FROM devices WHERE deveui = ' + s(deviceEui(cmd)) + ' LIMIT 1';\n  return msg;\n}\nnode.error('No postcondition query for command type ' + commandType, msg);\nreturn null;",
-    "wires": [
-      [
-        "command-postcondition-verify-db"
-      ]
-    ]
-  },
-  {
-    "id": "command-postcondition-verify-db",
-    "type": "sqlite",
-    "z": "93b1537a596e0e6d",
-    "mydb": "734737e846d06893",
-    "sqlquery": "msg.topic",
-    "sql": "",
-    "name": "DB: verify command postcondition",
-    "x": 1280,
-    "y": 340,
-    "wires": [
-      [
-        "command-postcondition-ack"
-      ]
-    ]
-  },
-  {
-    "id": "command-postcondition-ack",
-    "type": "function",
-    "z": "93b1537a596e0e6d",
-    "name": "Build verified command ACK",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 1510,
-    "y": 340,
-    "func": "var cmd = msg._postconditionCommand || {};\nvar ack = msg.syncAck || {};\nvar commandType = String(ack.commandType || cmd.commandType || cmd.command_type || '').toUpperCase();\nvar requestedVersion = Number(ack.requestedSyncVersion || ack.appliedSyncVersion || cmd.appliedSyncVersion || cmd.syncVersion || 0);\nack.requestedSyncVersion = requestedVersion;\nvar row = Array.isArray(msg.payload) && msg.payload.length ? msg.payload[0] : null;\nfunction deviceEui(value) { return String(value.deviceEui || value.device_eui || value.devEui || '').trim().toUpperCase(); }\nfunction sameNumber(left, right) { return Number(left) === Number(right); }\nfunction stale() { return row && Number(row.sync_version) > requestedVersion; }\nvar verified = false;\nif (commandType === 'UPDATE_SCHEDULE' || commandType === 'UPSERT_SCHEDULE') {\n  verified = !!row && String(row.trigger_metric) === String(cmd.triggerMetric || 'SWT_WM1') && sameNumber(row.threshold_kpa, Number(cmd.thresholdKpa) || 0) && sameNumber(row.duration_minutes, parseInt(cmd.durationMinutes, 10) || 0) && sameNumber(row.enabled, cmd.enabled ? 1 : 0) && String(row.response_mode) === String(cmd.responseMode || 'proportional') && Number(row.sync_version) >= requestedVersion;\n} else if (commandType === 'ASSIGN_DEVICE_TO_ZONE') {\n  verified = !!row && String(row.zone_uuid || '') === String(cmd.zoneUuid || cmd.zone_uuid || '') && String(row.gateway_device_eui || '') === String(env.get('DEVICE_EUI') || 'UNKNOWN').toUpperCase() && Number(row.sync_version) >= requestedVersion;\n} else if (commandType === 'REMOVE_DEVICE_FROM_ZONE') {\n  verified = !!row && row.irrigation_zone_id === null && Number(row.sync_version) >= requestedVersion;\n}\nif (verified) {\n  ack.result = 'SUCCESS';\n  ack.state = 'APPLIED';\n  ack.error = null;\n} else if (stale()) {\n  ack.result = 'REJECTED_PERMANENT';\n  ack.state = 'REJECTED';\n  ack.error = 'stale_sync_version';\n} else {\n  ack.result = 'FAILED_RETRYABLE';\n  ack.state = 'PENDING';\n  ack.error = 'postcondition_not_met';\n}\nmsg.syncAck = ack;\nmsg.topic = 'devices/' + String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase() + '/command_ack';\nmsg.payload = ack;\nreturn msg;",
-    "wires": [
-      [
-        "command-ack-queue-rest"
-      ]
-    ]
-  },
-  {
-    "id": "command-postcondition-route",
-    "type": "function",
-    "z": "93b1537a596e0e6d",
-    "name": "Route command ACK verification",
-    "outputs": 2,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 1040,
-    "y": 300,
-    "func": "var ack = msg.syncAck || {};\nvar commandType = String(ack.commandType || '').toUpperCase();\nvar verifiedTypes = ['UPDATE_SCHEDULE', 'UPSERT_SCHEDULE', 'ASSIGN_DEVICE_TO_ZONE', 'REMOVE_DEVICE_FROM_ZONE'];\nvar deferredTypes = [\n  'SET_LSN50_MODE', 'SET_LSN50_INTERVAL', 'SET_LSN50_INTERRUPT_MODE', 'SET_LSN50_5V_WARMUP',\n  'SET_KIWI_INTERVAL', 'ENABLE_KIWI_TEMP_HUMIDITY', 'SET_STREGA_INTERVAL', 'SET_STREGA_TIMED_ACTION',\n  'SET_STREGA_MAGNET_MODE', 'SET_STREGA_PARTIAL_OPENING', 'SET_STREGA_FLUSHING'\n];\nif (verifiedTypes.includes(commandType)) return [msg, null];\nif (deferredTypes.includes(commandType)) return [null, null];\nreturn [null, msg];",
-    "wires": [
-      [
-        "command-postcondition-build"
-      ],
-      [
-        "e2e139678c3ddded"
-      ]
     ]
   }
 ]
