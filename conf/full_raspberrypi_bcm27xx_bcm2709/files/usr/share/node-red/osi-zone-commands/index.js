@@ -327,9 +327,14 @@ async function applyOnce(db, envelope, runtime) {
     // preserving effectKey, and that re-delivery must replay the original terminal result rather
     // than fall through to base_version_conflict against the (by-then-advanced) current version.
     if (terraEffectBindingMatches(command)) {
+      // Only a successful apply may be replayed. Every NACK path also persists a row
+      // under this effect key, so replaying the newest-or-oldest terminal row regardless
+      // of result would let a transient NACK -- a missing_resource recorded before the
+      // zone existed locally -- be replayed for every later retry, permanently blocking
+      // the mutation it was meant to protect.
       const effectRow = await tx.get(
-        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ' +
-          'ORDER BY applied_at,command_id LIMIT 1',
+        "SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? " +
+          "AND result='APPLIED' ORDER BY applied_at,command_id LIMIT 1",
         [command.effectKey, command.commandType]
       );
       if (effectRow) {

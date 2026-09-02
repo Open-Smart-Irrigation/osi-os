@@ -699,6 +699,60 @@ test('rejects the Terra marker when present but not exactly boolean true', async
   }
 });
 
+test('a transient NACK under an effect key does not block a later retry of the same mutation', async () => {
+  const commands = loadCommands();
+  if (typeof commands._resetForTests === 'function') commands._resetForTests();
+  const db = database();
+  try {
+    const effectKey = 'terra-selection:' + ZONE_UUID + ':42:44';
+
+    // The zone has not synced down yet, so the first delivery NACKs missing_resource and
+    // persists a terminal row under this effect key.
+    const zoneRow = db.raw.prepare(
+      'SELECT * FROM irrigation_zones WHERE zone_uuid=?'
+    ).get(ZONE_UUID);
+    db.raw.prepare('DELETE FROM irrigation_zones WHERE zone_uuid=?').run(ZONE_UUID);
+
+    const first = envelope(4601, 42, 44);
+    first.effectKey = effectKey;
+    const nacked = await apply(commands, db, first);
+    assert.equal(nacked.ack.result, 'NACKED');
+    assert.equal(nacked.ack.reasonCode, 'missing_resource');
+
+    // The zone arrives, and the cloud retries the same mutation under a new command id.
+    // Replaying the stored NACK here would strand the selection permanently, so only an
+    // APPLIED row may be replayed by effect key.
+    db.raw.prepare(`
+      INSERT INTO irrigation_zones (
+        name, user_id, zone_uuid, gateway_device_eui, timezone,
+        phenological_stage, crop_type, variety, sync_version,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      zoneRow.name, zoneRow.user_id, zoneRow.zone_uuid, zoneRow.gateway_device_eui,
+      zoneRow.timezone, zoneRow.phenological_stage, zoneRow.crop_type, zoneRow.variety,
+      zoneRow.sync_version, zoneRow.created_at, zoneRow.updated_at
+    );
+
+    const retry = envelope(4602, 42, 44);
+    retry.effectKey = effectKey;
+    const applied = await apply(commands, db, retry);
+
+    assert.equal(applied.handled, true);
+    assert.equal(applied.ack.result, 'APPLIED');
+    assert.equal(applied.ack.commandId, 4602);
+    assert.equal(applied.ack.appliedSyncVersion, 44);
+    assert.equal(
+      db.raw.prepare(
+        'SELECT sync_version FROM irrigation_zones WHERE zone_uuid=?'
+      ).get(ZONE_UUID).sync_version,
+      44
+    );
+  } finally {
+    db.raw.close();
+  }
+});
+
 test('replays the terminal ACK when a re-delivery reuses the Terra effect key under a new command id', async () => {
   const commands = loadCommands();
   if (typeof commands._resetForTests === 'function') commands._resetForTests();
