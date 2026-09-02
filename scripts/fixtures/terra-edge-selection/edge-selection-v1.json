@@ -1,0 +1,152 @@
+{
+  "contractVersion": 1,
+  "sourceNode": "terra-edge-selection-v1",
+  "gatewayDeviceEui": "10AA10AA10AA10AD",
+  "zoneUuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "selection": {
+    "cropType": "maize",
+    "variety": null,
+    "phenologicalStage": "development"
+  },
+  "events": [
+    {
+      "eventUuid": "44000000000040008000000000000044",
+      "aggregateType": "ZONE",
+      "aggregateKey": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "op": "ZONE_CONFIG_UPSERTED",
+      "syncVersion": 44,
+      "occurredAt": "2026-08-03T20:00:44.000Z",
+      "payload": {
+        "contract_version": 1,
+        "zone_uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "North",
+        "gateway_device_eui": "10AA10AA10AA10AD",
+        "timezone": "Europe/Zurich",
+        "latitude": null,
+        "longitude": null,
+        "phenological_stage": "development",
+        "calibration_key": "default",
+        "crop_type": "maize",
+        "variety": null,
+        "soil_type": null,
+        "irrigation_method": null,
+        "area_m2": null,
+        "irrigation_efficiency_pct": null,
+        "scheduling_mode": "local",
+        "prediction_card_enabled": 0,
+        "notes": null,
+        "sync_version": 44,
+        "deleted_at": null,
+        "user": {
+          "user_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "username": "grower",
+          "cloudUserId": null
+        }
+      }
+    },
+    {
+      "eventUuid": "45000000000040008000000000000045",
+      "aggregateType": "ZONE",
+      "aggregateKey": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "op": "ZONE_LOCATION_UPSERTED",
+      "syncVersion": 45,
+      "occurredAt": "2026-08-03T20:00:45.000Z",
+      "payload": {
+        "contract_version": 1,
+        "zone_uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "North",
+        "gateway_device_eui": "10AA10AA10AA10AD",
+        "timezone": "Europe/Zurich",
+        "latitude": 47.25,
+        "longitude": 8.55,
+        "phenological_stage": "development",
+        "calibration_key": "default",
+        "crop_type": "maize",
+        "variety": null,
+        "soil_type": null,
+        "irrigation_method": null,
+        "area_m2": null,
+        "irrigation_efficiency_pct": null,
+        "scheduling_mode": "local",
+        "prediction_card_enabled": 0,
+        "notes": null,
+        "sync_version": 45,
+        "deleted_at": null,
+        "user": {
+          "user_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "username": "grower",
+          "cloudUserId": null
+        }
+      }
+    },
+    {
+      "eventUuid": "46000000000040008000000000000046",
+      "aggregateType": "ZONE",
+      "aggregateKey": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "op": "ZONE_UPSERTED",
+      "syncVersion": 46,
+      "occurredAt": "2026-08-03T20:00:46.000Z",
+      "payload": {
+        "contract_version": 1,
+        "zone_uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "name": "North Field",
+        "gateway_device_eui": "10AA10AA10AA10AD",
+        "timezone": "Europe/Zurich",
+        "latitude": 47.25,
+        "longitude": 8.55,
+        "phenological_stage": "development",
+        "calibration_key": "default",
+        "crop_type": "maize",
+        "variety": null,
+        "soil_type": null,
+        "irrigation_method": null,
+        "area_m2": null,
+        "irrigation_efficiency_pct": null,
+        "scheduling_mode": "local",
+        "prediction_card_enabled": 0,
+        "notes": null,
+        "sync_version": 46,
+        "deleted_at": null,
+        "user": {
+          "user_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "username": "grower",
+          "cloudUserId": null
+        }
+      }
+    }
+  ],
+  "commandAck": {
+    "commandId": 91044001,
+    "eventUuid": "11111111-1111-4111-8111-000091044001",
+    "commandType": "UPSERT_ZONE_CONFIG",
+    "aggregateType": "ZONE",
+    "aggregateKey": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "effectKey": null,
+    "status": "ACKED",
+    "result": "APPLIED",
+    "appliedSyncVersion": 44,
+    "duplicate": false,
+    "gatewayDeviceEui": "10AA10AA10AA10AD",
+    "appliedAt": "2026-08-03T20:00:00.000Z",
+    "resourceUuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "payloadHash": "75326bce6122584bfb64c83870dd4d44ccaf9205a620e4dc4f528cb4068ddb1a"
+  },
+  "lateCommandAck": {
+    "commandId": 91043001,
+    "eventUuid": "11111111-1111-4111-8111-000091043001",
+    "commandType": "UPSERT_ZONE_CONFIG",
+    "aggregateType": "ZONE",
+    "aggregateKey": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "effectKey": null,
+    "status": "NACKED",
+    "result": "NACKED",
+    "appliedSyncVersion": 44,
+    "duplicate": false,
+    "gatewayDeviceEui": "10AA10AA10AA10AD",
+    "appliedAt": "2026-08-03T20:00:00.000Z",
+    "resourceUuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "payloadHash": null,
+    "reason": "base version 42 does not match current version 44",
+    "reasonCode": "base_version_conflict"
+  }
+}

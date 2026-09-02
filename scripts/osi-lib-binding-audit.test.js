@@ -11,11 +11,13 @@ const bindings = {
   db: { variable: 'osiDb', module: 'osi-db-helper' },
   journal: { variable: 'osiJournal', module: 'osi-journal' },
   ledger: { variable: 'osiCommandLedger', module: 'osi-command-ledger' },
+  zoneCommands: { variable: 'osiZoneCommands', module: 'zone-commands' },
 };
 const expectedById = {
   'journal-api-router-fn': [bindings.db, bindings.journal],
   'command-dedupe-dispatch': [bindings.db, bindings.journal, bindings.ledger],
   'journal-command-apply-fn': [bindings.db, bindings.journal],
+  'terra-zone-config-command-apply-fn': [bindings.db, bindings.zoneCommands],
   'command-ack-queue-rest': [bindings.db, bindings.ledger],
 };
 const exactLibs = [{ var: 'osiLib', module: 'osi-lib' }];
@@ -58,7 +60,7 @@ test('exports one pinned policy for each approved Task 9 node', () => {
   );
 });
 
-test('accepts the four complete approved function-node surfaces', () => {
+test('accepts the five complete approved function-node surfaces', () => {
   for (const [id, node] of Object.entries(approvedNodes)) {
     assert.ok(node, `missing approved node ${id}`);
     assert.deepEqual(audit(node), { ok: true, errors: [] }, id);
