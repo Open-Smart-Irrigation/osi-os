@@ -1,5 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import * as echarts from 'echarts';
+import { LineChart, ScatterChart } from 'echarts/charts';
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { init, use, type EChartsType } from 'echarts/core';
+import { CanvasRenderer } from 'echarts/renderers';
+
+use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 interface EChartProps {
   option: Record<string, unknown>;
@@ -15,7 +20,7 @@ export interface EChartHandle {
 
 export const EChart = forwardRef<EChartHandle, EChartProps>(function EChart({ option, exportOption, className, onAxisNameClick }, ref) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<EChartsType | null>(null);
   const optionRef = useRef(option);
   optionRef.current = option;
   const exportOptionRef = useRef(exportOption);
@@ -25,7 +30,7 @@ export const EChart = forwardRef<EChartHandle, EChartProps>(function EChart({ op
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const chart = echarts.init(containerRef.current);
+    const chart = init(containerRef.current);
     chartRef.current = chart;
 
     chart.on('click', (params: any) => {
@@ -65,7 +70,7 @@ export const EChart = forwardRef<EChartHandle, EChartProps>(function EChart({ op
         const div = document.createElement('div');
         div.style.cssText = `position:absolute;left:-99999px;top:0;width:${Math.max(1, Math.round(rect.width))}px;height:${Math.max(320, Math.round(rect.height))}px;`;
         document.body.appendChild(div);
-        const offscreen = echarts.init(div);
+        const offscreen = init(div);
         try {
           offscreen.setOption({ ...(exportOptionRef.current as Record<string, unknown>), animation: false });
           return offscreen.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
