@@ -12,6 +12,12 @@ function keyPaths(value: unknown, prefix = ''): string[] {
   );
 }
 
+test('English analysis layout actions use imperative labels', () => {
+  const analysis = JSON.parse(readFileSync(join(localesRoot, 'en', 'common.json'), 'utf8')).analysis;
+  assert.equal(analysis.layout.stacked, 'Stack');
+  assert.equal(analysis.layout.overlaid, 'Overlay');
+});
+
 test('all edge locales expose the same analysis translation key shape', () => {
   const languages = readdirSync(localesRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
