@@ -1,4 +1,3 @@
-import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -10,10 +9,7 @@ import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
 import { SettingsPage } from './pages/SettingsPage';
 import { GatewayRestartBanner } from './components/GatewayRestartBanner';
-
-const AnalysisRoute = lazy(() =>
-  import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
-);
+import { AnalysisRoute } from './pages/AnalysisRoute';
 
 function App() {
   return (
@@ -75,9 +71,7 @@ function App() {
             path="/analysis"
             element={
               <PrivateRoute>
-                <Suspense fallback={<div className="p-6 text-sm text-[var(--text-secondary)]">Loading analysis...</div>}>
-                  <AnalysisRoute />
-                </Suspense>
+                <AnalysisRoute />
               </PrivateRoute>
             }
           />

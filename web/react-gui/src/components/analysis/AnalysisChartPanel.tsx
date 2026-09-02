@@ -1,11 +1,13 @@
-import { useMemo, useState, type Ref } from 'react';
+import { lazy, Suspense, useMemo, useState, type Ref } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AnalysisSeries, AnalysisWorkspaceMode, TimelineLayout } from '../../analysis/types';
 import { groupByUnit } from '../../analysis/unitGrouping';
 import { buildSmallMultiplesOption, buildTimeSeriesOption } from '../../analysis/echartsOptions';
 import type { ChannelMeta } from '../../analysis/channelLabels';
-import { EChart, type EChartHandle } from './EChart';
-import { CorrelationPanel } from './CorrelationPanel';
+import type { EChartHandle } from './EChart';
+
+const EChart = lazy(() => import('./EChart').then((module) => ({ default: module.EChart })));
+const CorrelationPanel = lazy(() => import('./CorrelationPanel').then((module) => ({ default: module.CorrelationPanel })));
 
 type AnalysisTranslate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -88,20 +90,26 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
   const minHeight = chartMinHeight(layout, heightPanelCount);
 
   if (series.length === 0) return <div className="analysis-empty">{t('analysis.empty')}</div>;
-  if (mode === 'correlation') return <CorrelationPanel series={series} channelMeta={channelMeta} zoneNameById={zoneNameById} chartRef={chartRef} />;
+  if (mode === 'correlation') return (
+    <Suspense fallback={<div className="analysis-loading">{t('loading')}</div>}>
+      <CorrelationPanel series={series} channelMeta={channelMeta} zoneNameById={zoneNameById} chartRef={chartRef} />
+    </Suspense>
+  );
   return (
     <div
       data-testid="analysis-chart-frame"
       className="analysis-chart-frame h-full"
       style={{ minHeight, position: 'relative' }}
     >
-      <EChart
-        ref={chartRef}
-        option={option as Record<string, unknown>}
-        exportOption={exportOption as Record<string, unknown> | undefined}
-        className="analysis-chart h-full"
-        onAxisNameClick={(channelKey, pos) => { setEditing({ channelKey, ...pos }); setDraft(''); }}
-      />
+      <Suspense fallback={<div className="analysis-loading">{t('loading')}</div>}>
+        <EChart
+          ref={chartRef}
+          option={option as Record<string, unknown>}
+          exportOption={exportOption as Record<string, unknown> | undefined}
+          className="analysis-chart h-full"
+          onAxisNameClick={(channelKey, pos) => { setEditing({ channelKey, ...pos }); setDraft(''); }}
+        />
+      </Suspense>
       {editing && (
         <input
           autoFocus
