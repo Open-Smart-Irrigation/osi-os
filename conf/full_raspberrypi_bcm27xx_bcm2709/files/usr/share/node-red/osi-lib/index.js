@@ -16,6 +16,7 @@ const NAME_TO_PATH = {
   'history-router': 'osi-history-router',
   'osi-db-helper': 'osi-db-helper',
   'osi-command-ledger': 'osi-command-ledger',
+  'zone-commands': 'osi-zone-commands',
   'osi-journal': 'osi-journal',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',

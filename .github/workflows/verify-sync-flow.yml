@@ -41,5 +41,15 @@ jobs:
           # gitignore must stay narrow: arbitrary .agents/ files ignored, symlink tracked
           git check-ignore -q .agents/notes.txt
           git ls-files --error-unmatch .agents/skills > /dev/null
+      # The Terra zone-config command path: the acceptance generator pins the
+      # cross-repo contract fixture, and the flow test runs the real generated
+      # function-node source to prove a legacy zone-config command still passes
+      # through to the v1 router instead of being swallowed by the Terra applier.
+      - name: Terra zone-config command gates
+        run: |
+          node --test scripts/test-terra-selection-edge-acceptance.js \
+            scripts/test-terra-zone-config-command-flow.js
+          node --test scripts/osi-lib-binding-audit.test.js
+          node scripts/test-flows-wiring.js
       - name: Guard against silent upgrade-leg skip
         run: node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out && grep -q "base seed + history migration" /tmp/schema.out
