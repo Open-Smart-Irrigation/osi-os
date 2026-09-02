@@ -1628,11 +1628,12 @@ expectOrderedIncludesById('journal-command-apply-fn', [
 ], 'passes non-journal commands toward legacy dispatch before loading journal helpers');
 expectOrderedIncludesById('terra-zone-config-command-apply-fn', [
   'const envelope = cmd._pendingCommandEnvelope;',
-  "if (commandType !== 'UPSERT_ZONE_CONFIG') return [msg, null];",
+  'rawPayload.terraConfigurationOperation === true;',
+  'if (!isTerraPayload) return [msg, null];',
   "const dbLoad = osiLib.require('osi-db-helper');",
   "const zoneLoad = osiLib.require('zone-commands');",
   'applyZoneCommand(db, envelope, {',
-], 'passes protected Terra zone-config commands through the transactional helper');
+], 'gates on Terra payload shape (not command type) before the transactional helper, so legacy UPSERT_ZONE_CONFIG payloads pass through untouched');
 expectIncludesById(
   'terra-zone-config-command-apply-fn',
   'Terra zone-config command helpers unavailable:',

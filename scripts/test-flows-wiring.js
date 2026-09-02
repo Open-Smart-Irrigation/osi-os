@@ -303,6 +303,9 @@ async function runJournalHelperFailureMatrix() {
             label: 'Terra helper failure: apply',
             helpers: ['osi-db-helper', 'zone-commands'],
             commandType: 'UPSERT_ZONE_CONFIG',
+            // Gated on payload shape (terraConfigurationOperation === true), not commandType --
+            // the marker must be present or this case never reaches helper loading at all.
+            envelopePayload: { terraConfigurationOperation: true },
             errorPrefix: 'Terra zone-config command helpers unavailable: ',
             expected: [null, null],
         },
@@ -330,7 +333,7 @@ async function runJournalHelperFailureMatrix() {
                 _pendingCommandEnvelope: {
                     commandId: 'helper-failure-test',
                     commandType: testCase.commandType || 'UPSERT_JOURNAL_ENTRY',
-                    payload: {},
+                    payload: testCase.envelopePayload || {},
                 },
             },
         };

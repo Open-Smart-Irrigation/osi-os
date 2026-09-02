@@ -23,7 +23,10 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
     bindings: Object.freeze([DB_BINDING, JOURNAL_BINDING]),
   }),
   'terra-zone-config-command-apply-fn': Object.freeze({
-    funcSha256: '8b71f7617d508c28f862583990af30f39f5b58777260f607653d1823c215a75e',
+    // P1 fix (Codex review on PR #191): gates on payload shape
+    // (terraConfigurationOperation === true) instead of commandType, so a legacy
+    // UPSERT_ZONE_CONFIG payload passes through unhandled instead of throwing.
+    funcSha256: '363e3707e9bd9025184b9a08d6c167d2b8ac1bbba9bd58d6b5c670e8b8284f26',
     bindings: Object.freeze([DB_BINDING, ZONE_COMMAND_BINDING]),
   }),
   'command-ack-queue-rest': Object.freeze({
