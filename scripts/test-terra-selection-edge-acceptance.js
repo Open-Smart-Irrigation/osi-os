@@ -153,6 +153,9 @@ function envelope(commandId, baseSyncVersion, targetSyncVersion, overrides = {})
       cropType: 'maize',
       variety: null,
       phenologicalStage: 'development',
+      // osi-server #68: every Terra-created UPSERT_ZONE_CONFIG command stamps this marker. It is
+      // required and must be exactly boolean true (see osi-zone-commands/index.js validate()).
+      terraConfigurationOperation: true,
       ...overrides,
     },
   };
@@ -644,3 +647,55 @@ test('rolls back canonical state and trigger outbox when terminal ledger persist
     db.raw.close();
   }
 });
+
+test('rejects a Terra payload that claims the marker but is otherwise malformed', async () => {
+  const commands = loadCommands();
+  if (typeof commands._resetForTests === 'function') commands._resetForTests();
+  const db = database();
+  try {
+    // terraConfigurationOperation: true (via envelope()'s default), but zoneUuid is garbage --
+    // the marker alone must not exempt a command from the rest of validate().
+    const command = envelope(4602, 42, 44, { zoneUuid: 'not-a-uuid' });
+    await assert.rejects(
+      apply(commands, db, command),
+      /payload\.zoneUuid must be a canonical UUID/
+    );
+    assert.equal(
+      db.raw.prepare(
+        'SELECT sync_version FROM irrigation_zones WHERE zone_uuid=?'
+      ).get(ZONE_UUID).sync_version,
+      42
+    );
+    assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, 0);
+    assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0);
+    assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 0);
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('rejects the Terra marker when present but not exactly boolean true', async (t) => {
+  const commands = loadCommands();
+  const cases = [
+    ['string "true"', 'true'],
+    ['numeric 1', 1],
+    ['boolean false', false],
+  ];
+  for (const [label, value] of cases) {
+    await t.test(label, async () => {
+      if (typeof commands._resetForTests === 'function') commands._resetForTests();
+      const db = database();
+      try {
+        const command = envelope(4603, 42, 44, { terraConfigurationOperation: value });
+        await assert.rejects(
+          apply(commands, db, command),
+          /payload\.terraConfigurationOperation must be true/
+        );
+        assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0);
+      } finally {
+        db.raw.close();
+      }
+    });
+  }
+});
+

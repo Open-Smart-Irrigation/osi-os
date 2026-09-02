@@ -88,7 +88,7 @@ function validate(envelope, runtime) {
   const fields = [
     'commandType', 'zoneUuid', 'gatewayDeviceEui', 'ownerUserUuid',
     'baseSyncVersion', 'syncVersion', 'cropType', 'variety',
-    'phenologicalStage',
+    'phenologicalStage', 'terraConfigurationOperation',
   ];
   const allowed = new Set(fields);
   const missing = fields.filter(function(field) { return !own(payload, field); });
@@ -98,6 +98,12 @@ function validate(envelope, runtime) {
       'malformed_command',
       'payload shape mismatch; missing=' + (missing.join(',') || 'none') +
         ', extra=' + (extra.join(',') || 'none')
+    );
+  }
+  if (payload.terraConfigurationOperation !== true) {
+    throw commandError(
+      'malformed_command',
+      'payload.terraConfigurationOperation must be true'
     );
   }
   if (text(payload.commandType, 'payload.commandType', 64).toUpperCase() !== TYPE) {
