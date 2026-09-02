@@ -469,7 +469,7 @@ const PRIOR_CURRENT_COMMAND_SURFACES = Object.freeze({
 });
 const expectedCommandShapeHashes = {
   'command-dedupe-dispatch': 'e31f40f714b31ec6bad434d36f130f2e28107db4d9f1df717cd95c0bd07c5c92',
-  'journal-command-apply-fn': '18e8af185bc218be8edfad11b1d7ef8a299c4509639151c6ab536b540744d967',
+  'journal-command-apply-fn': 'abd359b17cb8289bd1cef95ab36ff2da68b1da66d768acaa040c387234892072',
   'command-ack-queue-rest': '28368a33749674b0bc1036143c42f98dea5ea10535c437735175e83cc670650e',
 };
 
@@ -576,6 +576,7 @@ function migrate(buffer) {
     const queue = byId.get('command-ack-queue-rest');
     handler.func = journalApplySource;
     handler.libs = osiLibOnly;
+    handler.wires = [['scoped-access-command-apply-fn'], ['9d5e3035c3d069c4']];
     dedupe.func = dedupeSource;
     dedupe.libs = osiLibOnly;
     queue.func = queueAckSource;
@@ -645,7 +646,7 @@ function migrate(buffer) {
     libs: osiLibOnly,
     x: 1470,
     y: 1060,
-    wires: [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']],
+    wires: [['scoped-access-command-apply-fn'], ['9d5e3035c3d069c4']],
   });
   assertUnique(flows);
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');

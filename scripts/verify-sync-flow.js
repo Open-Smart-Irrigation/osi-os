@@ -1910,8 +1910,8 @@ expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync 
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
 expectWireById('reject-indefinite-open', 'command-ack-queue-rest', 'routes permanent rejection ACKs around the command deduper and into the durable ACK queue');
 expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
-expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'preserves the legacy output while routing non-journal commands onward');
 expectWireById('journal-command-apply-fn', 'scoped-access-command-apply-fn', 'routes non-journal commands through scoped-access handling');
+expectWireById('journal-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted journal ACKs');
 expectWireById('scoped-access-command-apply-fn', 'zone-command-apply-fn', 'routes non-access commands through protected zone handling');
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
 expectWireById('zone-command-apply-fn', 'irrigation-config-command-apply-fn', 'routes non-zone commands through protected irrigation-config handling');

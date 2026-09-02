@@ -99,7 +99,7 @@ function current(byId) {
     JSON.stringify(node.libs) === JSON.stringify([{ var: 'osiLib', module: 'osi-lib' }]) &&
     JSON.stringify(node.wires) === JSON.stringify([['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']]) &&
     JSON.stringify(byId.get('journal-command-apply-fn').wires) ===
-      JSON.stringify([['934bf2bc19a8ce22'], ['scoped-access-command-apply-fn']]) &&
+      JSON.stringify([['scoped-access-command-apply-fn'], ['9d5e3035c3d069c4']]) &&
     ['cmd-type-registry', 'reject-indefinite-open', 'write-strega-expectation']
       .every((id) => byId.get(id).func.includes('UPSERT_SCOPED_USER:'));
 }
@@ -127,7 +127,7 @@ function migrate(buffer) {
       node.func.slice(first + marker.length);
   }
   byId.get('journal-command-apply-fn').wires =
-    [['934bf2bc19a8ce22'], ['scoped-access-command-apply-fn']];
+    [['scoped-access-command-apply-fn'], ['9d5e3035c3d069c4']];
   flows.push({
     id: 'scoped-access-command-apply-fn',
     type: 'function',

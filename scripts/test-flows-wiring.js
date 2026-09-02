@@ -337,10 +337,10 @@ if (!journalApply || !requireOsiLibContract(
     [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
     'journal commands: applier'
 ) || JSON.stringify(journalApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
     ['scoped-access-command-apply-fn'],
+    ['9d5e3035c3d069c4'],
 ]) || !/applyJournalCommand/.test(journalApply.func || '') || !/\.close\s*\(/.test(journalApply.func || '')) {
-    failures.push('journal commands: journal applier must delegate, close DB, and pass non-journal commands to scoped access handling');
+    failures.push('journal commands: journal applier must pass non-journal commands to protected handlers and publish journal ACKs');
 }
 if (!scopedAccessApply || !requireOsiLibContract(
     scopedAccessApply,
