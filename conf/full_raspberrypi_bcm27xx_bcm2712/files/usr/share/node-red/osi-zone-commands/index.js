@@ -5,6 +5,12 @@ const crypto = require('node:crypto');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EUI64 = /^[0-9A-F]{16}$/;
 const TYPE = 'UPSERT_ZONE_CONFIG';
+// Terra-originated replays reuse this grammar (see docs/contracts/sync-schema/effect-keys.md
+// conventions): terra-selection:<zoneUuid>:<baseSyncVersion>:<targetSyncVersion>. Binding the
+// embedded zone/base/target back to the command under validation before trusting a match keeps a
+// spoofed or stale effect key from replaying an unrelated result.
+const TERRA_EFFECT_KEY =
+  /^terra-selection:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(0|[1-9]\d*):(0|[1-9]\d*)$/;
 
 function commandError(code, message) {
   const error = new Error(message);
@@ -100,6 +106,8 @@ function validate(envelope, runtime) {
         ', extra=' + (extra.join(',') || 'none')
     );
   }
+  // Terra is the only originator of this command shape (osi-server #68); the marker must be
+  // present (enforced by `fields` above) and exactly boolean true, never a truthy stand-in.
   if (payload.terraConfigurationOperation !== true) {
     throw commandError(
       'malformed_command',
@@ -228,7 +236,7 @@ async function queueAck(tx, value, createdAt) {
   );
 }
 
-async function replay(tx, row) {
+function replayFacts(row) {
   let stored;
   try {
     stored = JSON.parse(row.result_detail);
@@ -242,8 +250,40 @@ async function replay(tx, row) {
   if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
     throw commandError('invalid_replay', 'stored result is not replayable');
   }
+  return stored;
+}
+
+async function replay(tx, row) {
+  const stored = replayFacts(row);
   await queueAck(tx, stored, stored.appliedAt || new Date().toISOString());
   return stored;
+}
+
+// Replays a terminal result found under a different delivery command_id (matched by Terra
+// effect key, not by command_id). Follows the same shape osi-command-ledger's replayAck uses for
+// a non-exact-delivery match: the new delivery id replaces the stored one and `duplicate` is set,
+// while the rest of the terminal facts (result, appliedSyncVersion, payloadHash, resourceUuid,
+// aggregate identity) carry over unchanged so the cloud sees the original outcome, not a
+// reclassification.
+async function replayForEffectKey(tx, row, command) {
+  const stored = replayFacts(row);
+  const value = Object.assign({}, stored, {
+    commandId: command.id,
+    effectKey: stored.effectKey == null ? row.effect_key : stored.effectKey,
+    appliedAt: stored.appliedAt || row.applied_at,
+    duplicate: true,
+  });
+  await queueAck(tx, value, new Date().toISOString());
+  return value;
+}
+
+function terraEffectBindingMatches(command) {
+  if (!command.effectKey) return false;
+  const match = TERRA_EFFECT_KEY.exec(command.effectKey);
+  if (!match) return false;
+  return match[1] === command.zoneUuid &&
+    Number(match[2]) === command.base &&
+    Number(match[3]) === command.target;
 }
 
 async function persist(tx, command, terminal) {
@@ -281,6 +321,21 @@ async function applyOnce(db, envelope, runtime) {
       [String(command.id)]
     );
     if (prior) return { handled: true, ack: await replay(tx, prior) };
+
+    // Bind and deduplicate on the Terra effect key before classifying a version conflict: the
+    // cloud can recreate the same logical mutation under a new delivery command_id while
+    // preserving effectKey, and that re-delivery must replay the original terminal result rather
+    // than fall through to base_version_conflict against the (by-then-advanced) current version.
+    if (terraEffectBindingMatches(command)) {
+      const effectRow = await tx.get(
+        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ' +
+          'ORDER BY applied_at,command_id LIMIT 1',
+        [command.effectKey, command.commandType]
+      );
+      if (effectRow) {
+        return { handled: true, ack: await replayForEffectKey(tx, effectRow, command) };
+      }
+    }
 
     const current = await currentZone(tx, command.zoneUuid);
     if (!current) {

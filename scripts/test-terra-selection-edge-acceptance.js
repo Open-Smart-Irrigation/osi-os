@@ -699,3 +699,79 @@ test('rejects the Terra marker when present but not exactly boolean true', async
   }
 });
 
+test('replays the terminal ACK when a re-delivery reuses the Terra effect key under a new command id', async () => {
+  const commands = loadCommands();
+  if (typeof commands._resetForTests === 'function') commands._resetForTests();
+  const db = database();
+  try {
+    const effectKey = 'terra-selection:' + ZONE_UUID + ':42:44';
+    const first = envelope(4501, 42, 44);
+    first.effectKey = effectKey;
+    const applied = await apply(commands, db, first);
+    assert.equal(applied.ack.result, 'APPLIED');
+    assert.equal(applied.ack.appliedSyncVersion, 44);
+    assert.equal(applied.ack.commandId, 4501);
+
+    // Cloud recreates the same logical mutation under a brand new delivery command_id, keeping
+    // the same effectKey. base/target still read 42/44 (the values that were true when the
+    // mutation was decided), but the zone is now already at sync_version 44 -- without the P2
+    // fix this would misclassify as base_version_conflict instead of replaying.
+    const redelivered = envelope(4502, 42, 44);
+    redelivered.effectKey = effectKey;
+    const replayed = await apply(commands, db, redelivered);
+
+    assert.equal(replayed.handled, true);
+    assert.equal(replayed.ack.result, 'APPLIED');
+    assert.notEqual(replayed.ack.reasonCode, 'base_version_conflict');
+    assert.equal(replayed.ack.commandId, 4502);
+    assert.equal(replayed.ack.duplicate, true);
+    assert.equal(replayed.ack.appliedSyncVersion, applied.ack.appliedSyncVersion);
+    assert.equal(replayed.ack.payloadHash, applied.ack.payloadHash);
+    assert.equal(replayed.ack.effectKey, effectKey);
+
+    assert.equal(
+      db.raw.prepare(
+        'SELECT sync_version FROM irrigation_zones WHERE zone_uuid=?'
+      ).get(ZONE_UUID).sync_version,
+      44
+    );
+    assert.equal(
+      db.raw.prepare(
+        "SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='ZONE' AND aggregate_key=?"
+      ).get(ZONE_UUID).n,
+      1
+    );
+    assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
+    assert.equal(
+      db.raw.prepare(
+        'SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?'
+      ).get('4502').n,
+      1
+    );
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('does not replay across a Terra effect key whose bound zone/base/target disagrees with the command', async () => {
+  const commands = loadCommands();
+  if (typeof commands._resetForTests === 'function') commands._resetForTests();
+  const db = database();
+  try {
+    const first = envelope(4503, 42, 44);
+    first.effectKey = 'terra-selection:' + ZONE_UUID + ':42:44';
+    await apply(commands, db, first);
+
+    // Same effectKey grammar, but the command's own base/target (42/43) disagree with the
+    // effect key's embedded base/target (42/44) -- must not be treated as the same effect.
+    const mismatched = envelope(4504, 42, 43);
+    mismatched.effectKey = 'terra-selection:' + ZONE_UUID + ':42:44';
+    const result = await apply(commands, db, mismatched);
+
+    assert.equal(result.ack.result, 'NACKED');
+    assert.equal(result.ack.reasonCode, 'base_version_conflict');
+    assert.equal(result.ack.duplicate, false);
+  } finally {
+    db.raw.close();
+  }
+});
