@@ -5,13 +5,12 @@ import test from 'node:test';
 
 const appPath = join(import.meta.dirname, '..', 'src', 'App.tsx');
 const analysisRoutePath = join(import.meta.dirname, '..', 'src', 'pages', 'AnalysisRoute.tsx');
+const chartPanelPath = join(import.meta.dirname, '..', 'src', 'components', 'analysis', 'AnalysisChartPanel.tsx');
 
-test('analysis route is lazy-loaded and not statically imported by App', () => {
+test('App imports only the small analysis route guard', () => {
   const source = readFileSync(appPath, 'utf8');
-  assert.match(source, /lazy\s*\(/, 'App.tsx should use React.lazy');
-  assert.match(source, /import\(['"]\.\/pages\/AnalysisRoute['"]\)/, 'AnalysisRoute must be dynamically imported');
-  assert.doesNotMatch(source, /import\s+\{?\s*AnalysisRoute\b/, 'AnalysisRoute must not be statically imported');
-  assert.doesNotMatch(source, /from ['"][^'"]*analysis[^'"]*['"]/, 'App.tsx must not import analysis modules directly');
+  assert.match(source, /import\s+\{\s*AnalysisRoute\s*\}\s+from\s+['"]\.\/pages\/AnalysisRoute['"]/, 'App.tsx should import the desktop guard directly');
+  assert.doesNotMatch(source, /import\(['"]\.\/pages\/AnalysisRoute['"]\)/, 'App.tsx must not add a second lazy route hop');
   assert.doesNotMatch(source, /from ['"][^'"]*CrossZoneAnalysisPage[^'"]*['"]/, 'App.tsx must not import CrossZoneAnalysisPage directly');
 });
 
@@ -28,6 +27,14 @@ test('analysis route guard lazy-loads the analysis page after desktop detection'
     /import\s+\{?\s*CrossZoneAnalysisPage\b/,
     'AnalysisRoute must not statically import CrossZoneAnalysisPage',
   );
+});
+
+test('analysis chart engines are lazy-loaded behind the selected-series boundary', () => {
+  const source = readFileSync(chartPanelPath, 'utf8');
+  assert.match(source, /import\(['"]\.\/EChart['"]\)/, 'AnalysisChartPanel should lazy-load EChart');
+  assert.match(source, /import\(['"]\.\/CorrelationPanel['"]\)/, 'AnalysisChartPanel should lazy-load CorrelationPanel');
+  assert.doesNotMatch(source, /import\s+\{\s*EChart\b/, 'AnalysisChartPanel must not statically import EChart');
+  assert.doesNotMatch(source, /import\s+\{\s*CorrelationPanel\b/, 'AnalysisChartPanel must not statically import CorrelationPanel');
 });
 
 test('built default index chunk does not contain echarts after build', (t) => {
@@ -47,4 +54,10 @@ test('built default index chunk does not contain echarts after build', (t) => {
     assert.doesNotMatch(sourceWithoutChunkFileNames, /\becharts\b|zrender|ECharts/, `${file} should not contain ECharts`);
   }
   assert.ok(files.some((file) => /^analysis-echarts-[\w-]+\.js$/.test(file)), 'build should contain an analysis-echarts chunk');
+  const workspaceChunk = files.find((file) => /^CrossZoneAnalysisPage-[\w-]+\.js$/.test(file));
+  assert.ok(workspaceChunk, 'build should contain a lazy Analysis workspace chunk');
+  assert.ok(
+    readFileSync(join(assetsDir, workspaceChunk)).byteLength < 100 * 1024,
+    'the Analysis workspace shell should remain below 100 KiB before charts load',
+  );
 });
