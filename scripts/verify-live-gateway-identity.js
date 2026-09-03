@@ -992,11 +992,13 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  // 214, not 215: the port-back's c7d94cb6 converted strega-reconciliation-monitor's close()
-  // catch to a visible node.warn (touched-node ratchet), one below the Task 5 sys-stats figure.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 214 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 214,
-    'silent-catch baseline records 214 for both maintained profiles',
-    'silent-catch baseline must be 214 for both maintained profiles after three sys-stats fan catches and the strega-reconciliation-monitor close() catch are removed');
+  // 213, not 214: on top of the port-back's c7d94cb6 (strega-reconciliation-monitor's
+  // close() catch), the SDI-12 field-hardening wave converted merge-device-data's
+  // remaining silent catch to a visible node.warn -- one further removal, not a
+  // weakening of the ratchet.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 213 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 213,
+    'silent-catch baseline records 213 for both maintained profiles',
+    'silent-catch baseline must be 213 for both maintained profiles after three sys-stats fan catches, the strega-reconciliation-monitor close() catch and merge-device-data\'s catch are removed');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
 }
 if (sizeAllowances) {
@@ -1004,7 +1006,10 @@ if (sizeAllowances) {
     // sync-bootstrap-build / sync-force-build were 0 at merge 48c8ab47 (byte-identical to
     // origin/main). The port-back's valve snapshot work grew each by exactly +5786; the
     // allowance reasons still declare the live-identity provenance this guard checks for.
-    'sync-bootstrap-build': 5786,
+    // sync-bootstrap-build is 5859, not 5786: the SDI-12 port added a measured +73 when
+    // the bootstrap devices snapshot gained sdi12_probe_profile, sdi12_value_count and
+    // sdi12_channel_layout_json. The other pins are unchanged by that port.
+    'sync-bootstrap-build': 5859,
     'sync-outbox-build': 0,
     'sync-pending-build': 1344,
     'sync-force-build': 5786,
@@ -1024,10 +1029,13 @@ if (sizeAllowances) {
     'size allowance sys-stats-fn: exact Task 5 delta 4862',
     'size allowance sys-stats-fn: expected exact Task 5 delta 4862');
   expectIncludes('size allowance sys-stats-fn', String(sizeAllowances.node_allowances?.['sys-stats-fn']?.reason || ''), 'filtered restartPending status (Option C Slice 1b)', 'declares Task 5 growth');
-  // 20196 was the measured total at merge 48c8ab47; the port-back adds a measured 24090.
-  expectCondition(sizeAllowances.total_allowance?.delta === 44286,
-    'size total allowance: exact cumulative delta 44286',
-    'size total allowance: expected exact cumulative delta 44286');
+  // 20196 was the measured total at merge 48c8ab47; the port-back added a measured 24090
+  // (44286 combined). The SDI-12 port adds a further measured 61232, re-measured
+  // three-way against origin/main, the branch base a38c9db6 and HEAD: 1071852 ->
+  // 1116138 -> 1177370.
+  expectCondition(sizeAllowances.total_allowance?.delta === 105518,
+    'size total allowance: exact cumulative delta 105518',
+    'size total allowance: expected exact cumulative delta 105518');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Option C Slice 1b, main, 2026-08, sys-stats-fn +4862', 'declares Task 5 (sys-stats-fn) provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,

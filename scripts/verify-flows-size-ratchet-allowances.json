@@ -240,7 +240,7 @@
   },
   "total_allowance": {
     "delta": 105518,
-    "reason": "Measured on port/sdi12-edge using verify-flows-size-ratchet's totalChars over both maintained profiles: origin/main 1071852 -> branch base a38c9db6 1116138 -> HEAD 1177370 = +105518. Dual provenance: +44286 is the pre-existing feat/valve-control baseline (unchanged from the previously committed figure, which re-measures exactly), and +61232 is this SDI-12 port -- the SDI-12 ingest/identify/config/recipe node set, the recipe deployment and commissioning nodes, the boot-owned devices literals, and the SDI-12 columns threaded through bootstrap, device list and telemetry. Measured, not estimated: 1071852 + 105518 = 1177370."
+    "reason": "Measured on port/sdi12-edge using verify-flows-size-ratchet's totalChars over both maintained profiles: origin/main 1071852 -> branch base a38c9db6 1116138 -> HEAD 1177370 = +105518. Dual provenance: +44286 is the pre-existing feat/valve-control baseline (unchanged from the previously committed figure, which re-measures exactly), and +61232 is this SDI-12 port -- the SDI-12 ingest/identify/config/recipe node set, the recipe deployment and commissioning nodes, the boot-owned devices literals, and the SDI-12 columns threaded through bootstrap, device list and telemetry. Measured, not estimated: 1071852 + 105518 = 1177370. Provenance carried forward from the superseded entry: the pre-existing baseline includes the live identity restart sentinel + marked identity errors + fail-closed restart publication (Option C Slice 1, main, 2026-08) and the filtered restartPending status (Option C Slice 1b, main, 2026-08, sys-stats-fn +4862)."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
