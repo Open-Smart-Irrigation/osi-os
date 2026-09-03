@@ -199,6 +199,19 @@ async function executeFunction(node, options) {
   };
 }
 
+// Builds the Bearer token shape this edge's auth nodes verify: a base64url
+// payload of { userId, username, exp } plus an HMAC-SHA256 signature over it.
+function makeAuthHeader({
+  userId,
+  username,
+  secret = 'scoped-access-test-secret',
+  expiresAt = Date.now() + 60000,
+}) {
+  const payload = Buffer.from(JSON.stringify({ userId, username, exp: expiresAt })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return `Bearer ${payload}.${signature}`;
+}
+
 // A fresh in-memory database on this branch's seed, with the minimum fixture
 // rows the flow nodes under test expect (a user id 1 to own devices, and two
 // zones). Deliberately does NOT seed scoped-access or journal-plot tables:
@@ -229,5 +242,6 @@ module.exports = {
   executeFunction,
   facadeDb,
   loadNode,
+  makeAuthHeader,
   seedTestDb,
 };

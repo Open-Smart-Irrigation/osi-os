@@ -91,5 +91,13 @@
       "insufficient": "insufficient (n={{n}})",
       "exploratory": "Exploratory only — Pearson r over aligned buckets; not a significance test."
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Gateway identity updated. Services will restart in {{count}} s.",
+    "chirpstack_bootstrap": "LoRaWAN setup completed. Services will restart in {{count}} s.",
+    "account_link": "Account linked. Services will restart in {{count}} s.",
+    "account_unlink": "Account unlinked. Services will restart in {{count}} s.",
+    "generic": "Gateway services will restart in {{count}} s.",
+    "in_progress": "Gateway services are restarting now…"
   }
 }

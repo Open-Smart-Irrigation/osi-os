@@ -91,5 +91,13 @@
       "insufficient": "unzureichend (n={{n}})",
       "exploratory": "Nur explorativ — Pearson-r über ausgerichtete Buckets; kein Signifikanztest."
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Gateway-Identität aktualisiert. Die Dienste starten in {{count}} s neu.",
+    "chirpstack_bootstrap": "LoRaWAN-Einrichtung abgeschlossen. Die Dienste starten in {{count}} s neu.",
+    "account_link": "Konto verknüpft. Die Dienste starten in {{count}} s neu.",
+    "account_unlink": "Kontoverknüpfung aufgehoben. Die Dienste starten in {{count}} s neu.",
+    "generic": "Die Gateway-Dienste starten in {{count}} s neu.",
+    "in_progress": "Die Gateway-Dienste werden jetzt neu gestartet…"
   }
 }
