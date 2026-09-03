@@ -8,8 +8,8 @@ const path = require('node:path');
 const {
   executeFunction,
   loadNode,
-  seedScopedDb,
-} = require('./lib/scoped-access-harness');
+  seedTestDb,
+} = require('./lib/flow-node-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const CANONICAL = path.join(
@@ -97,20 +97,26 @@ test('recipe Apply and Rollback routes share the scoped/authenticated SDI-12 pat
   const rollback = nodeById('sdi12-recipe-rollback-http', 'http in');
   assert.equal(apply.method, 'post');
   assert.equal(apply.url, '/api/devices/:deveui/sdi12/recipe/apply');
-  assert.deepEqual(apply.wires, [['scoped-device-config-guard']]);
+  assert.deepEqual(apply.wires, [['sdi12-config-auth-fn']]);
   assert.equal(rollback.method, 'post');
   assert.equal(rollback.url, '/api/devices/:deveui/sdi12/recipe/rollback');
-  assert.deepEqual(rollback.wires, [['scoped-device-config-guard']]);
+  assert.deepEqual(rollback.wires, [['sdi12-config-auth-fn']]);
 
-  const guard = nodeById('scoped-device-config-guard', 'function');
-  assert.equal(guard.outputs, 28);
-  assert.equal(guard.wires.length, 28);
-  assert.deepEqual(guard.wires[24], ['sdi12-config-auth-fn']);
-  assert.deepEqual(guard.wires[25], ['sdi12-config-auth-fn']);
-  assert.deepEqual(guard.wires[26], ['sdi12-config-auth-fn']);
-  assert.deepEqual(guard.wires[27], ['device-response']);
-  assert.match(guard.func, /"suffix":"\/sdi12\/recipe\/apply","index":25/);
-  assert.match(guard.func, /"suffix":"\/sdi12\/recipe\/rollback","index":26/);
+  // Port adaptation: AgroLink fans these routes out through its scoped-access
+  // node `scoped-device-config-guard`, which does not exist on this line. Here
+  // both routes enter sdi12-config-auth-fn directly -- the same node AgroLink's
+  // guard forwarded them to (guard outputs 25/26) -- which is both the bearer
+  // authenticator and the suffix router. Pin that: neither recipe action node
+  // performs its own bearer check, so a route that skipped this node would be
+  // an unauthenticated recipe-apply endpoint.
+  const authRouter = nodeById('sdi12-config-auth-fn', 'function');
+  assert.match(authRouter.func, /verifyBearer/);
+  assert.match(authRouter.func, /'\/sdi12\/recipe\/apply'/);
+  assert.match(authRouter.func, /'\/sdi12\/recipe\/rollback'/);
+  for (const id of ['sdi12-recipe-apply-action-fn', 'sdi12-recipe-rollback-action-fn']) {
+    const inbound = flows.filter((n) => JSON.stringify(n.wires || []).includes(id)).map((n) => n.id);
+    assert.deepEqual(inbound, ['sdi12-config-auth-fn'], `${id} must only be reachable through sdi12-config-auth-fn`);
+  }
 
   const auth = nodeById('sdi12-config-auth-fn', 'function');
   assert.equal(auth.outputs, 4);
@@ -123,7 +129,7 @@ test('recipe Apply and Rollback routes share the scoped/authenticated SDI-12 pat
 });
 
 test('recipe Apply accepts zero-byte request bodies after Node-RED parsing', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   const deveui = 'A840410000000132';
   try {
     insertDevice(db, { deveui });
@@ -157,23 +163,9 @@ test('handled SDI-12 HTTP failures emit one bounded response without a Catch dup
   });
 
   const scenarios = [
-    {
-      name: 'scoped route guard helper load',
-      nodeId: 'scoped-device-config-guard',
-      expectedStatus: 500,
-      msg: {
-        req: {
-          method: 'PUT',
-          path: requestPath(deveui, '/sdi12/config'),
-          params: { deveui },
-          headers: {},
-        },
-      },
-      env: { OSI_SCOPED_ACCESS: '1' },
-      libOverrides: {
-        osiLib: { require: () => ({ ok: false, error: 'scope unavailable' }) },
-      },
-    },
+    // (AgroLink's scoped-device-config-guard scenario is not portable: the node
+    // does not exist on this line. The remaining scenarios still cover the
+    // helper-load-failure -> single bounded 500 contract.)
     {
       name: 'Identify normalizer load',
       nodeId: 'sdi12-identify-action-fn',
@@ -279,7 +271,7 @@ test('handled SDI-12 HTTP failures emit one bounded response without a Catch dup
 
   for (const scenario of scenarios) {
     await t.test(scenario.name, async () => {
-      const db = seedScopedDb();
+      const db = seedTestDb();
       try {
         if (scenario.insertLayout) insertDevice(db, { deveui, layout });
         const execution = await executeFunction(loadNode(scenario.nodeId), {
@@ -337,7 +329,7 @@ test('the 60-second recipe poller is isolated and failure-visible', async () => 
   assert.match(poll.func, /db\.close\(/);
   assert.deepEqual(poll.wires, [[]]);
 
-  const db = seedScopedDb();
+  const db = seedTestDb();
   let clientClosed = false;
   try {
     const response = await executeFunction(poll, {
@@ -386,7 +378,7 @@ test('Identify compiles discovery/address frames and never carries a hardcoded a
 });
 
 test('Identify discovers one address, then enqueues the addressed I command', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   const deveui = 'A840410000000121';
   try {
     insertDevice(db, { deveui, layout: null, status: null });
@@ -448,7 +440,7 @@ test('Identify discovers one address, then enqueues the addressed I command', as
 });
 
 test('Identify rejects malformed saved layouts and ambiguous discovery replies without a downlink', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   const malformedEui = 'A840410000000122';
   const discoveryEui = 'A840410000000123';
   try {
@@ -505,7 +497,7 @@ test('SDI-12 acquisition query and writer carry exact best-effort observation ou
   assert.match(writer.func, /writeFailed/);
   assert.match(writer.func, /quarantined/);
 
-  const db = seedScopedDb();
+  const db = seedTestDb();
   const observations = [];
   try {
     const normalizeResult = {
@@ -687,7 +679,7 @@ test('observation adapter preserves telemetry across pre-drain and failed acquis
 
   for (const scenario of cases) {
     await t.test(scenario.name, async () => {
-      const db = seedScopedDb();
+      const db = seedTestDb();
       const observations = [];
       const writerInputs = [];
       try {
@@ -748,7 +740,7 @@ test('observation adapter preserves telemetry across pre-drain and failed acquis
 test('incomplete reassembly and writer failure are observed without invented readings', async () => {
   const writer = nodeById('sdi12-write-fn', 'function');
   for (const scenario of ['incomplete', 'writer_failure']) {
-    const db = seedScopedDb();
+    const db = seedTestDb();
     const observations = [];
     try {
       const incomplete = scenario === 'incomplete';
@@ -812,7 +804,7 @@ test('incomplete reassembly and writer failure are observed without invented rea
 });
 
 test('an observation-state failure warns without rejecting a valid telemetry write', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     const normalizeResult = {
       channels: { vwc_1: 12.3 },
@@ -869,7 +861,7 @@ test('device list exposes only the bounded deployment projection and a valid dis
   assert.equal(hasLib(merge, 'osiLib', 'osi-lib'), true);
   assert.doesNotMatch(merge.func, /catch\s*\([^)]*\)\s*\{\s*\}/);
 
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     const built = await executeFunction(query, {
       msg: { payload: [{ id: 7 }] },
@@ -946,7 +938,7 @@ test('Apply and Rollback action nodes return 202 projections and map non-contrac
     ['sdi12-recipe-apply-action-fn', 'applyDesiredRecipe'],
     ['sdi12-recipe-rollback-action-fn', 'rollbackCompatibleRecipe'],
   ]) {
-    const db = seedScopedDb();
+    const db = seedTestDb();
     let clientClosed = false;
     const calls = [];
     try {

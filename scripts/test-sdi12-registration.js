@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { executeFunction, loadNode, seedScopedDb } = require('./lib/scoped-access-harness');
+const { executeFunction, loadNode, seedTestDb } = require('./lib/flow-node-harness');
 // REGISTER_ENV / applyRegister / fakeChirpstackLib below are duplicated from
 // scripts/test-scoped-access-writes.js:2227-2323 (not exported there) --
 // keep in sync if that file's harness shape changes.
@@ -9,7 +9,7 @@ const { executeFunction, loadNode, seedScopedDb } = require('./lib/scoped-access
 const ENV = { OSI_SCOPED_ACCESS: '1', DEVICE_EUI: '0016C001F1000001', CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid', CHIRPSTACK_APP_ACTUATORS: 'app-actuators-uuid', CHIRPSTACK_PROFILE_SDI12: 'profile-sdi12-uuid' };
 
 test('A1: post-devices-insert persists chirpstack_app_id on a fresh SDI-12 registration', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     // Drive the node exactly as the local /api/devices POST handler chain does:
     // seed the flow-context values post-devices-insert reads instead of msg.payload.
@@ -40,7 +40,7 @@ test('A1: post-devices-insert persists chirpstack_app_id on a fresh SDI-12 regis
 });
 
 test('A1: cs-reg-cloud-fn supports DRAGINO_SDI12 and persists chirpstack_app_id', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
       msg: { payload: JSON.stringify({ commandType: 'REGISTER_DEVICE', params: { devEui: 'A840410000000102', name: 'Cloud SDI-12', deviceType: 'DRAGINO_SDI12', appKey: '00000000000000000000000000000002', userUuid: 'u-admin' } }) },
@@ -57,7 +57,7 @@ test('A1: cs-reg-cloud-fn supports DRAGINO_SDI12 and persists chirpstack_app_id'
 });
 
 test('A2: identify self-heals a legacy row with NULL chirpstack_app_id', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     db.exec(`
       INSERT INTO devices (deveui, name, type_id, user_id, chirpstack_app_id, created_at, updated_at)
@@ -77,7 +77,7 @@ test('A2: identify self-heals a legacy row with NULL chirpstack_app_id', async (
 });
 
 test('A2: identify still 409s when CHIRPSTACK_APP_SENSORS is unset (no fabricated fallback)', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     db.exec(`
       INSERT INTO devices (deveui, name, type_id, user_id, chirpstack_app_id, created_at, updated_at)
@@ -104,7 +104,7 @@ test('A2: identify still 409s when CHIRPSTACK_APP_SENSORS is unset (no fabricate
 });
 
 test('A4: a cloud-registered SDI-12 device also gets an auto-identify trigger', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
       msg: { payload: JSON.stringify({ commandType: 'REGISTER_DEVICE', params: { devEui: 'A840410000000105', name: 'Cloud SDI-12 auto', deviceType: 'DRAGINO_SDI12', appKey: '00000000000000000000000000000005', userUuid: 'u-admin' } }) },
@@ -130,7 +130,7 @@ test('A4: a cloud-registered SDI-12 device also gets an auto-identify trigger', 
 });
 
 test('A4: sdi12-write-fn fires a first-join identify trigger when the device has never been attempted', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     const fakeNormalize = { normalize: () => ({ noResponse: false, values: { vwc_1: 12.3 } }) };
     const fakeWriter = { writeDeviceData: async () => ({ deadLettered: [], columns: ['vwc_1'] }) };
@@ -152,7 +152,7 @@ test('A4: sdi12-write-fn fires a first-join identify trigger when the device has
 });
 
 test('A4: sdi12-write-fn does not re-trigger identify once an attempt has already happened', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     const fakeNormalize = { normalize: () => ({ noResponse: false, values: { vwc_1: 12.3 } }) };
     const fakeWriter = { writeDeviceData: async () => ({ deadLettered: [], columns: ['vwc_1'] }) };
@@ -192,7 +192,7 @@ test('B1: GET /api/devices projects legacy count, canonical layout, and ten-chan
       payload: [{ deveui: 'A840410000000108', vwc_10: 27.5, soil_vic_10: 0.041 }],
     },
     env: {},
-    db: seedScopedDb(),
+    db: seedTestDb(),
   });
   assert.equal(response.result.payload[0].sdi12_value_count, 5,
     'GET /api/devices must return the learned sdi12_value_count, not silently drop it');
@@ -203,7 +203,7 @@ test('B1: GET /api/devices projects legacy count, canonical layout, and ten-chan
 });
 
 test('B1: GET /api/devices latest-data SQL includes all Sentek columns and prepares successfully', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     const response = await executeFunction(loadNode('format-devices'), {
       msg: { payload: [{ deveui: 'A840410000000108' }] },
@@ -228,14 +228,14 @@ test('B1: GET /api/devices surfaces malformed stored Sentek layouts', async () =
       payload: [],
     },
     env: {},
-    db: seedScopedDb(),
+    db: seedTestDb(),
   });
   assert.equal(response.result.payload[0].sdi12_channel_layout_json, null);
   assert.equal(response.result.payload[0].sdi12_layout_status, 'invalid');
 });
 
 test('B2 (Fable A6 review SHOULD-FIX 2): PUT /sdi12/config nulls a stale value_count when switching to a fixed-shape profile', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     db.exec(`
       INSERT INTO devices (deveui, name, type_id, user_id, sdi12_probe_profile, sdi12_probe_status, sdi12_value_count, created_at, updated_at)
@@ -260,7 +260,7 @@ test('B2 (Fable A6 review SHOULD-FIX 2): PUT /sdi12/config nulls a stale value_c
 });
 
 test('Sentek layout save is canonical, bound, and updates its compatibility projection atomically', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     db.exec(`INSERT INTO devices (deveui,name,type_id,user_id,sdi12_probe_profile,sdi12_value_count,created_at,updated_at)
       VALUES ('A840410000000110','Sentek layout','DRAGINO_SDI12',1,'SENTEK_ENVIROSCAN',5,'2026-01-01','2026-01-01')`);
@@ -284,7 +284,7 @@ test('Sentek layout save is canonical, bound, and updates its compatibility proj
 });
 
 test('Sentek layout save rejects mixed legacy fields and invalid duplicate positions without writing', async () => {
-  const db = seedScopedDb();
+  const db = seedTestDb();
   try {
     db.exec(`INSERT INTO devices (deveui,name,type_id,user_id,created_at,updated_at)
       VALUES ('A840410000000111','Sentek invalid','DRAGINO_SDI12',1,'2026-01-01','2026-01-01')`);
