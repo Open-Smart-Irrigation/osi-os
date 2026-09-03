@@ -344,7 +344,6 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onOpenSettings={() => setSdi12SettingsDevice(device)}
                             onRemove={handleUpdate}
-                            readOnly={!canWrite}
                           />
                         ))}
                       </div>

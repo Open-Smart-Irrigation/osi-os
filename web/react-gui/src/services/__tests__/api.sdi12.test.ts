@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { api, normaliseDevice, postSdi12RecipeApply, postSdi12RecipeRollback } from '../api';
+import api, { normaliseDevice, postSdi12RecipeApply, postSdi12RecipeRollback } from '../api';
 
 describe('SDI-12 device API normalization', () => {
   it('narrows a canonical snake-case Sentek layout and preserves status', () => {

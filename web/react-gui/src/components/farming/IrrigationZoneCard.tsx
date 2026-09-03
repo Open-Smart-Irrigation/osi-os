@@ -506,7 +506,6 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onOpenSettings={() => setSdi12SettingsDevice(device)}
                           onRemove={() => handleRemoveDevice(device.deveui)}
-                          readOnly={!canWrite}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
