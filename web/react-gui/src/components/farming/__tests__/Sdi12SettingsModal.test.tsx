@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
-import { fetchSdi12Profiles, postSdi12Identify, putSdi12Config } from '../../../services/api';
+import { devicesAPI, fetchSdi12Profiles, postSdi12Identify, postSdi12RecipeApply, postSdi12RecipeRollback, putSdi12Config } from '../../../services/api';
 import { Sdi12SettingsModal } from '../Sdi12SettingsModal';
 
 vi.mock('../../../services/api', async () => {
@@ -12,6 +12,9 @@ vi.mock('../../../services/api', async () => {
     ...actual,
     fetchSdi12Profiles: vi.fn(),
     postSdi12Identify: vi.fn(),
+    postSdi12RecipeApply: vi.fn(),
+    postSdi12RecipeRollback: vi.fn(),
+    devicesAPI: { getAll: vi.fn() },
     putSdi12Config: vi.fn(),
   };
 });
@@ -47,6 +50,9 @@ describe('Sdi12SettingsModal', () => {
     });
     vi.mocked(putSdi12Config).mockResolvedValue(undefined);
     vi.mocked(postSdi12Identify).mockResolvedValue(undefined);
+    vi.mocked(postSdi12RecipeApply).mockResolvedValue({ desired_version: 1, status: 'queueing' } as never);
+    vi.mocked(postSdi12RecipeRollback).mockResolvedValue({ desired_version: 1, status: 'queueing' } as never);
+    vi.mocked(devicesAPI.getAll).mockResolvedValue([]);
   });
 
   it('lists profiles from the API and saves profile + depths', async () => {
@@ -157,7 +163,9 @@ describe('Sdi12SettingsModal', () => {
 
     fireEvent.change(screen.getByLabelText('Probe profile'), { target: { value: 'SENTEK_ENVIROSCAN' } });
     expect(screen.queryByLabelText('sdi12.valueCount')).not.toBeInTheDocument();
-    expect(await screen.findByLabelText('SDI-12 address')).toHaveValue('L');
+    expect(await screen.findByLabelText('SDI-12 address')).toHaveValue('');
+    expect(screen.queryByText(/TriSCAN VIC decoding remains disabled/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('SDI-12 address'), { target: { value: 'L' } });
     fireEvent.change(screen.getByLabelText('Depth 1 (cm)'), { target: { value: '15' } });
     fireEvent.change(screen.getByLabelText('Module type 1'), { target: { value: 'TRISCAN' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -230,6 +238,7 @@ describe('Sdi12SettingsModal', () => {
     render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add module' }));
+    fireEvent.change(screen.getByLabelText('SDI-12 address'), { target: { value: 'L' } });
     fireEvent.change(screen.getByLabelText('Channel 2'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -249,4 +258,156 @@ describe('Sdi12SettingsModal', () => {
       expect(screen.getByText('Depths must be whole centimeters between 0 and 500.')).toBeInTheDocument(),
     );
   });
+
+  it('prefills only a valid discovered Sentek address and keeps an unsaved layout unapplied', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    render(<Sdi12SettingsModal device={{ ...device, sdi12_discovered_address: '7' }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    expect(await screen.findByLabelText('SDI-12 address')).toHaveValue('7');
+    expect(screen.getByRole('button', { name: 'sdi12.apply' })).toBeDisabled();
+  });
+
+  it('prefills an untouched empty Sentek address when discovery arrives while the modal remains open', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    const undiscovered: Device = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN' };
+    const { rerender } = render(<Sdi12SettingsModal device={undiscovered} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    expect(await screen.findByLabelText('SDI-12 address')).toHaveValue('');
+    rerender(<Sdi12SettingsModal device={{ ...undiscovered, sdi12_discovered_address: '7' }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    expect(screen.getByLabelText('SDI-12 address')).toHaveValue('7');
+  });
+
+  it('does not overwrite a manually edited Sentek address when discovery arrives', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    const undiscovered: Device = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN' };
+    const { rerender } = render(<Sdi12SettingsModal device={undiscovered} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    const address = await screen.findByLabelText('SDI-12 address');
+    fireEvent.change(address, { target: { value: 'A' } });
+    rerender(<Sdi12SettingsModal device={{ ...undiscovered, sdi12_discovered_address: '7' }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    expect(screen.getByLabelText('SDI-12 address')).toHaveValue('A');
+  });
+
+  it('does not replace a manually cleared Sentek address when discovery arrives', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    const undiscovered: Device = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN' };
+    const { rerender } = render(<Sdi12SettingsModal device={undiscovered} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    const address = await screen.findByLabelText('SDI-12 address');
+    fireEvent.change(address, { target: { value: 'A' } });
+    fireEvent.change(address, { target: { value: '' } });
+    rerender(<Sdi12SettingsModal device={{ ...undiscovered, sdi12_discovered_address: '7' }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    expect(screen.getByLabelText('SDI-12 address')).toHaveValue('');
+  });
+
+  it('does not replace a saved Sentek layout address when discovery arrives', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    const saved: Device = {
+      ...device,
+      sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+      sdi12_channel_layout_json: {
+        version: 1,
+        address: 'A',
+        sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' }],
+      },
+    };
+    const { rerender } = render(<Sdi12SettingsModal device={saved} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    expect(await screen.findByLabelText('SDI-12 address')).toHaveValue('A');
+    rerender(<Sdi12SettingsModal device={{ ...saved, sdi12_discovered_address: '7' }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    expect(screen.getByLabelText('SDI-12 address')).toHaveValue('A');
+  });
+
+  it('saves before Apply, confirms the normal cadence, prevents double clicks, and exposes compatible rollback', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    const saved = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_channel_layout_json: {
+      version: 1 as const, address: '7', sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' as const }],
+    }, sdi12_recipe_deployment: { desired_version: 1, desired_layout_hash: 'abc', status: 'degraded' as const, queued_at: null, queue_drained_at: null, commissioning_deadline_at: null, last_observed_at: null, compatible_at: null, updated_at: null, frame_count: 1, compatible_available: true, last_error_code: 'queue_delivery_timeout' } };
+    const onUpdate = vi.fn();
+    render(<Sdi12SettingsModal device={saved} onClose={vi.fn()} onUpdate={onUpdate} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'sdi12.apply' }));
+    expect(screen.getByText('sdi12.applyConfirmation')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'sdi12.confirmApply' }));
+    await waitFor(() => expect(postSdi12RecipeApply).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/queue_delivery_timeout/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'sdi12.rollback' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['address', () => fireEvent.change(screen.getByLabelText('SDI-12 address'), { target: { value: '8' } })],
+    ['channel', () => fireEvent.change(screen.getByLabelText('Channel 1'), { target: { value: '2' } })],
+    ['depth', () => fireEvent.change(screen.getByLabelText('Depth 1 (cm)'), { target: { value: '20' } })],
+    ['duplicate channel', () => { fireEvent.click(screen.getByRole('button', { name: 'Add module' })); fireEvent.change(screen.getByLabelText('Channel 2'), { target: { value: '1' } }); }],
+    ['response position', () => fireEvent.change(screen.getByLabelText('Response position 1'), { target: { value: '2' } })],
+  ])('disables Apply when the persisted layout is edited by %s', async (_change, change) => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    const persisted: Device = { ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_channel_layout_json: {
+      version: 1, address: '7', sensors: [
+        { channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' },
+        { channel: 2, response_position: 2, depth_cm: 30, type: 'TRISCAN' },
+      ],
+    } };
+    render(<Sdi12SettingsModal device={persisted} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    expect(await screen.findByRole('button', { name: 'sdi12.apply' })).toBeEnabled();
+    change();
+    expect(screen.getByRole('button', { name: 'sdi12.apply' })).toBeDisabled();
+  });
+
+  it('keeps Apply disabled after Save until a refreshed device confirms the saved layout', async () => {
+    vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+      id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+      expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+    }] });
+    let resolveRefresh: (rows: Device[]) => void = () => undefined;
+    vi.mocked(devicesAPI.getAll).mockImplementation(() => new Promise((resolve) => { resolveRefresh = resolve; }));
+    render(<Sdi12SettingsModal device={{ ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN' }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    const address = await screen.findByLabelText('SDI-12 address');
+    fireEvent.change(address, { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(putSdi12Config).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'sdi12.apply' })).toBeDisabled();
+    resolveRefresh([{ ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_channel_layout_json: {
+      version: 1, address: '7', sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' }],
+    } }]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'sdi12.apply' })).toBeEnabled());
+  });
+
+  it.each(['not_applied', 'queueing', 'queued', 'observed_once', 'observed_compatible', 'degraded'] as const)(
+    'shows the bounded %s deployment state', async (status) => {
+      vi.mocked(fetchSdi12Profiles).mockResolvedValue({ profiles: [{
+        id: 'SENTEK_ENVIROSCAN', label: 'Sentek EnviroSCAN', provisional: true,
+        expectedValues: null, defaultDepthsCm: [], channels: ['vwc_1'],
+      }] });
+      render(<Sdi12SettingsModal device={{ ...device, sdi12_probe_profile: 'SENTEK_ENVIROSCAN', sdi12_recipe_deployment: {
+        desired_version: 1, desired_layout_hash: null, status, queued_at: null, queue_drained_at: null,
+        commissioning_deadline_at: null, last_observed_at: null, compatible_at: null, updated_at: null,
+        frame_count: null, compatible_available: false, last_error_code: status === 'degraded' ? 'queue_delivery_timeout' : null,
+      } }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+      expect(await screen.findByText(`Deployment status: ${status}`)).toBeInTheDocument();
+    },
+  );
 });

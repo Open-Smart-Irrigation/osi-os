@@ -932,16 +932,27 @@ echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
 /etc/init.d/node-red restart || true
 
 PROBE_OK=1
-if pgrep -f 'node-red' >/dev/null 2>&1; then
-    sleep 5
-    if wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
-        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable)"
+NODE_RED_HEALTH_TIMEOUT="${NODE_RED_HEALTH_TIMEOUT:-30}"
+case "$NODE_RED_HEALTH_TIMEOUT" in
+    ''|*[!0-9]*|0) NODE_RED_HEALTH_TIMEOUT=30 ;;
+esac
+probe_elapsed=0
+while [ "$probe_elapsed" -lt "$NODE_RED_HEALTH_TIMEOUT" ]; do
+    if pgrep -f 'node-red' >/dev/null 2>&1 && \
+       wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
+        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable after ${probe_elapsed}s)"
         PROBE_OK=0
-    else
-        echo "WARN: Node-RED process alive but /gui not reachable after 5s" >&2
+        break
     fi
-else
-    echo "ALERT: Node-RED process not found after restart" >&2
+    sleep 1
+    probe_elapsed=$((probe_elapsed + 1))
+done
+if [ "$PROBE_OK" != "0" ]; then
+    if pgrep -f 'node-red' >/dev/null 2>&1; then
+        echo "WARN: Node-RED process alive but /gui not reachable after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
+    else
+        echo "ALERT: Node-RED process not found after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
+    fi
 fi
 
 if [ "$PROBE_OK" = "0" ]; then

@@ -298,7 +298,7 @@ async function applyDesiredRecipe(db, client, deveuiInput, options) {
       const accepted = await client.enqueueDeviceDownlink({
         devEui: deveui,
         fPort: 2,
-        confirmed: false,
+        confirmed: true,
         data: Buffer.from(frame.base64, 'base64'),
       });
       const id = String(accepted && accepted.id || '').trim();
@@ -421,7 +421,7 @@ async function rollbackCompatibleRecipe(db, client, deveuiInput, options) {
       const accepted = await client.enqueueDeviceDownlink({
         devEui: deveui,
         fPort: 2,
-        confirmed: false,
+        confirmed: true,
         data: Buffer.from(frame.base64, 'base64'),
       });
       const id = String(accepted && accepted.id || '').trim();

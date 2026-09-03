@@ -122,6 +122,32 @@ test('recipe Apply and Rollback routes share the scoped/authenticated SDI-12 pat
   ]);
 });
 
+test('recipe Apply accepts zero-byte request bodies after Node-RED parsing', async () => {
+  const db = seedScopedDb();
+  const deveui = 'A840410000000132';
+  try {
+    insertDevice(db, { deveui });
+    for (const body of ['', Buffer.alloc(0)]) {
+      const execution = await executeFunction(loadNode('sdi12-config-auth-fn'), {
+        msg: {
+          req: {
+            method: 'POST',
+            path: requestPath(deveui, '/sdi12/recipe/apply'),
+            params: { deveui },
+            body,
+          },
+        },
+        env: { OSI_SCOPED_ACCESS: '1' },
+        db,
+      });
+      assert.equal(execution.result[1]?.deviceRow?.deveui, deveui);
+      assert.equal(execution.result[3], null);
+    }
+  } finally {
+    db.close();
+  }
+});
+
 test('handled SDI-12 HTTP failures emit one bounded response without a Catch duplicate', async (t) => {
   const deveui = 'A840410000000131';
   const layout = JSON.stringify({

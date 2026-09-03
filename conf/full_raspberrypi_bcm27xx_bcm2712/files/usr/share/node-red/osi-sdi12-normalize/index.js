@@ -10,7 +10,20 @@ var EXTRACT_RE = /[+-]\d+(?:\.\d+)?/g;
 
 var TRANSFORMS = {
   pf_to_kpa: function (v) { return Math.pow(10, v) / 10; },
-  hpa_to_kpa: function (v) { return v / 10; }
+  hpa_to_kpa: function (v) { return v / 10; },
+  // Legacy EnviroSCAN TriSCAN moisture rows are auto-configured with the
+  // identity coefficients A=1, B=1, C=0. Their aM! value is therefore the
+  // normalized scaled frequency, not VWC percent. Convert it with Sentek's
+  // default moisture curve: SF = A * VWC^B + C. VIC from aM2! is already the
+  // probe's nominal ion-content value and must not pass through this curve.
+  sentek_sf_to_vwc: function (sf) {
+    var a = 0.1957;
+    var b = 0.404;
+    var c = 0.02852;
+    if (!Number.isFinite(sf) || sf < 0) return NaN;
+    if (sf <= c) return 0;
+    return Math.pow((sf - c) / a, 1 / b);
+  }
 };
 
 // Budget assumption: 3 header bytes + worst-case 9 ASCII chars per value
@@ -21,6 +34,7 @@ var TRANSFORMS = {
 // frames are dropped by the device. Fixed-cardinality profiles must fit.
 var UPLINK_HEADER_BYTES = 3;
 var WORST_CHARS_PER_VALUE = 9;
+var MULTI_SEGMENT_ASCII_CHARS = 42;
 
 // Profiles whose value-mapping entries are recomputed per call from a
 // learned deviceConfig.sdi12ValueCount (task A6, option b). Only these three
@@ -127,9 +141,10 @@ function worstCaseUplinkBytes(profile) {
   return UPLINK_HEADER_BYTES + n * WORST_CHARS_PER_VALUE;
 }
 
-// Multi-segment (AT+DATAUP=1, payver 2) budget check: k segments carry a
-// 5-byte header each instead of the single-uplink 3-byte header, so the
-// worst case is 5*k + n*WORST_CHARS_PER_VALUE against a k*51-byte envelope.
+// The field converter split PAYVER=2 data into 42-character ASCII slices.
+// Budget against that observed application slice instead of subtracting only
+// the five-byte header from the LoRaWAN DR0 envelope: the latter predicted two
+// frames for the 90-character Sentek vector that arrived in three.
 // k defaults to 1 (today's single-uplink budget, matching worstCaseUplinkBytes
 // exactly). This does not change what the fixed-cardinality budget test
 // evaluates -- it stays profile.maxUplinks-unaware and still skips variable
@@ -140,7 +155,7 @@ function uplinkBudgetOk(profile) {
   var n = profile.expectedValues == null ? profile.values.length : profile.expectedValues;
   var k = profile.maxUplinks || 1;
   if (k === 1) return UPLINK_HEADER_BYTES + n * WORST_CHARS_PER_VALUE <= 51;
-  return 5 * k + n * WORST_CHARS_PER_VALUE <= 51 * k;
+  return n * WORST_CHARS_PER_VALUE <= MULTI_SEGMENT_ASCII_CHARS * k;
 }
 
 function seq(prefix, n, opts) {
@@ -171,15 +186,14 @@ var PROFILES = [
     // Bench-verified 2026-08-19 on agrolink-test-01 (A8404161D1886837):
     // live aI! = "012SENTEK  XEPI  139D938D7150000" (vendor SENTEK, model XEPI,
     // fw 1.3.9); live aM!/aD0! frame = 5 values, e.g.
-    // "+0.000000+0.000000+0.000000+0.104748+0.339201". Unit per the Sentek
-    // SDI-12 Probe Interface Manual v3.4: volumetric water content in
-    // mm per 10 cm of soil -- numerically identical to VWC-percent
-    // (1 mm / 100 mm = 1 %), so values map to vwc_N with NO scaling.
+    // "+0.000000+0.000000+0.000000+0.104748+0.339201". Calibrated
+    // EnviroSCAN values are mm per 10 cm, numerically identical to VWC
+    // percent. Layout entries marked TRISCAN use the legacy identity
+    // coefficients and are converted from scaled frequency below.
     // Model family per the manual: XPI = EnviroSMART, IPI = EasyAG; XEPI is
     // the EnviroSCAN variant observed live. aM!/aD0! also accepts 1..9 values
     // per measurement command (aM1! for sensors 10-16), consistent with the
-    // variable count below. Salinity rides aM2!/aM3! (separate recipe slot,
-    // not mapped in v1).
+    // variable count below. TriSCAN VIC rides aM2!/aM3! after the VWC group.
     provisional: false,
     identityMatch: /\bSENTEK\b.*\b(XEPI|XPI|IPI)\b/i,
     // Variable: no fixed depth count on the wire. Per-device count is learned
@@ -190,7 +204,10 @@ var PROFILES = [
     // intent for uplinkBudgetOk()/callers -- the fixed-cardinality budget
     // test above does not evaluate variable profiles either way.
     expectedValues: null,
-    maxUplinks: 2,
+    // The verified eight-module/two-TriSCAN rail used three slices. Five also
+    // covers the supported worst case of ten TriSCAN modules: 20 values at
+    // nine ASCII characters each over the observed 42-character slices.
+    maxUplinks: 5,
     values: seq('vwc', 8),
     defaultDepthsCm: []
   },
@@ -394,7 +411,11 @@ function normalize(decoded, deviceConfig, meta) {
         // followed by the compact M2 salinity group containing TriSCAN modules
         // in that same order. Every command DATACUT strips address + CR/LF.
         var mixedEntries = sentekSensors.map(function (sensor) {
-          return { index: sensor.response_position - 1, channel: 'vwc_' + sensor.channel };
+          return {
+            index: sensor.response_position - 1,
+            channel: 'vwc_' + sensor.channel,
+            transform: sensor.type === 'TRISCAN' ? 'sentek_sf_to_vwc' : null
+          };
         });
         triScanSensors.forEach(function (sensor, index) {
           mixedEntries.push({ index: sentekSensors.length + index, channel: 'soil_vic_' + sensor.channel });

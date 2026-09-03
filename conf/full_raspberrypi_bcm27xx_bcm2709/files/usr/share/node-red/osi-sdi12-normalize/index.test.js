@@ -12,13 +12,16 @@ test('parseSdi12Values: strict grammar', () => {
   assert.strictEqual(m.parseSdi12Values(''), null);
 });
 
-test('transforms: pf_to_kpa and hpa_to_kpa with swt clamp', () => {
+test('transforms: tension units and Sentek scaled frequency', () => {
   const r = m.normalize({ BatV: 3.3, data_sum: '+2.48+21.5' }, { probeProfile: 'TENSIOMARK' }, {});
   assert.strictEqual(r.channels.swt_1, 30.2);        // 10^2.48/10 rounded to 2dp
   assert.strictEqual(r.channels.soil_temp_1, 21.5);
   assert.strictEqual(r.channels.bat_v, 3.3);
   const dry = m.normalize({ BatV: 3.3, data_sum: '+7.0+21.5' }, { probeProfile: 'TENSIOMARK' }, {});
   assert.strictEqual(dry.channels.swt_1, 300);       // pF 7 clamps to 300 kPa
+  assert.strictEqual(m.TRANSFORMS.sentek_sf_to_vwc(0), 0);
+  assert.ok(Number.isNaN(m.TRANSFORMS.sentek_sf_to_vwc(-999.9999)));
+  assert.ok(Math.abs(m.TRANSFORMS.sentek_sf_to_vwc(0.73284) - 23.8057) < 0.0001);
 });
 
 test('exact cardinality rejects the frame atomically', () => {
@@ -106,10 +109,15 @@ test('every fixed-cardinality profile fits the 51-byte DR0 uplink budget', () =>
   }
 });
 
-test('uplinkBudgetOk: single-uplink (k=1) vs multi-segment (k=2) envelopes', () => {
+test('uplinkBudgetOk uses the field-observed 42-character multi-segment slice', () => {
   assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 5 }), true);              // 3 + 5*9 = 48 <= 51
   assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 8 }), false);             // 3 + 8*9 = 75 > 51
-  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 8, maxUplinks: 2 }), true); // 5*2 + 8*9 = 82 <= 102
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 8, maxUplinks: 2 }), true); // 8*9 = 72 <= 2*42
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 10, maxUplinks: 2 }), false); // 10*9 = 90 > 2*42
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 10, maxUplinks: 3 }), true);  // field fixture used 3 slices
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 20, maxUplinks: 4 }), false); // 20*9 = 180 > 4*42
+  assert.strictEqual(m.uplinkBudgetOk({ expectedValues: 20, maxUplinks: 5 }), true);  // ten TriSCAN modules
+  assert.strictEqual(m.getProfile('SENTEK_ENVIROSCAN').maxUplinks, 5);
 });
 
 test('A6: SENTEK_ENVIROSCAN with a learned sdi12ValueCount enforces strict atomic cardinality', () => {
@@ -332,7 +340,7 @@ test('canonical Sentek layout has atomic cardinality and malformed-layout failur
   assert.ok(malformed.unknown.sdi12_layout_invalid);
 });
 
-test('TriSCAN layout fails closed until VIC response framing is bench-verified', () => {
+test('TriSCAN layout fails closed when a VWC-only payload omits required VIC values', () => {
   const layout = m.validateSentekLayout({ version: 1, address: 'L', sensors: [
     { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
     { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
@@ -345,7 +353,7 @@ test('TriSCAN layout fails closed until VIC response framing is bench-verified',
   assert.strictEqual(r.unknown.sdi12_vic_framing_unverified, '+12.3+14.5');
 });
 
-test('Sentek mixed layout maps an exact VWC-then-VIC vector atomically', () => {
+test('Sentek mixed layout converts TriSCAN scaled frequency and maps VIC atomically', () => {
   const layout = m.validateSentekLayout({ version: 1, address: 'L', sensors: [
     { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
     { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
@@ -367,7 +375,7 @@ test('Sentek mixed layout maps an exact VWC-then-VIC vector atomically', () => {
   assert.deepStrictEqual(
     [r.channels.vwc_1, r.channels.vwc_2, r.channels.vwc_3, r.channels.vwc_4,
       r.channels.vwc_5, r.channels.vwc_6, r.channels.vwc_7, r.channels.vwc_8],
-    [0.05, 0.12, 0, 0, 0.09, 0.1, 0.2, 0.3],
+    [0, 0.12, 0, 0, 0.06, 0.1, 0.2, 0.3],
   );
   assert.strictEqual(r.channels.soil_vic_1, 201.78);
   assert.strictEqual(r.channels.soil_vic_5, 216.7);
@@ -375,6 +383,7 @@ test('Sentek mixed layout maps an exact VWC-then-VIC vector atomically', () => {
   for (const malformed of [
     raw.replace('+216.6983', ''),
     raw + '+999.0000',
+    raw.replace('+0.046458', '-999.9999'),
     raw.replace('+201.7789', '-999.9999'),
   ]) {
     const rejected = m.normalize(
@@ -382,6 +391,34 @@ test('Sentek mixed layout maps an exact VWC-then-VIC vector atomically', () => {
       { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ChannelLayout: layout }, {},
     );
     assert.deepStrictEqual(Object.keys(rejected.channels), ['bat_v']);
-    assert.ok(Object.keys(rejected.unknown).some((key) => key.startsWith('sdi12_vic_')));
+    assert.ok(Object.keys(rejected.unknown).some((key) =>
+      key.startsWith('sdi12_vic_') || key.startsWith('vwc_')));
   }
+});
+
+test('field 2026-08-30: TriSCAN moisture identity output becomes default-calibrated VWC', () => {
+  const layout = m.validateSentekLayout({ version: 1, address: '0', sensors: [
+    { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
+    { channel: 2, response_position: 2, depth_cm: 20, type: 'ENVIROSCAN' },
+    { channel: 3, response_position: 3, depth_cm: 30, type: 'ENVIROSCAN' },
+    { channel: 4, response_position: 4, depth_cm: 40, type: 'ENVIROSCAN' },
+    { channel: 5, response_position: 5, depth_cm: 50, type: 'TRISCAN' },
+    { channel: 6, response_position: 6, depth_cm: 60, type: 'ENVIROSCAN' },
+    { channel: 7, response_position: 7, depth_cm: 80, type: 'ENVIROSCAN' },
+    { channel: 8, response_position: 8, depth_cm: 100, type: 'ENVIROSCAN' },
+  ] }).layout;
+  const raw = '+0.732840+28.27938+37.45271+41.05683+0.969157+46.21098+38.87460+44.38053+1615.877+4237.622';
+  const result = m.normalize(
+    { BatV: 3.414, data_sum: raw },
+    { probeProfile: 'SENTEK_ENVIROSCAN', sdi12ChannelLayout: layout }, {},
+  );
+
+  assert.deepStrictEqual(result.unknown, {});
+  assert.deepStrictEqual(
+    [result.channels.vwc_1, result.channels.vwc_2, result.channels.vwc_3, result.channels.vwc_4,
+      result.channels.vwc_5, result.channels.vwc_6, result.channels.vwc_7, result.channels.vwc_8],
+    [23.81, 28.28, 37.45, 41.06, 48.72, 46.21, 38.87, 44.38],
+  );
+  assert.strictEqual(result.channels.soil_vic_1, 1615.88);
+  assert.strictEqual(result.channels.soil_vic_5, 4237.62);
 });

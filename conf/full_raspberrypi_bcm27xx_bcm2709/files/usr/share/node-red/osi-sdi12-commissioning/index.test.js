@@ -499,7 +499,7 @@ test('applyDesiredRecipe claims once, preflights an empty queue, and enqueues ev
   })), ready.recipe.frames.map((frame) => ({
     devEui: DEVEUI,
     fPort: 2,
-    confirmed: false,
+    confirmed: true,
     base64: frame.base64,
   })));
   assert.deepEqual(client.calls.flush, []);
@@ -701,7 +701,13 @@ test('rollbackCompatibleRecipe validates the compatible pair, restores canonical
   assert.equal(deployment.compatible_at, '2026-08-27T02:40:00.000Z');
   assert.equal(result.statusCode, 202);
   assert.equal(result.deployment.desired_version, 5);
-  assert.deepEqual(client.calls.enqueue.map((input) => input.data.toString('base64')), state.compatible.recipe.frames.map((frame) => frame.base64));
+  assert.deepEqual(client.calls.enqueue.map((input) => ({
+    confirmed: input.confirmed,
+    base64: input.data.toString('base64'),
+  })), state.compatible.recipe.frames.map((frame) => ({
+    confirmed: true,
+    base64: frame.base64,
+  })));
   assert.deepEqual(client.calls.flush, []);
 });
 

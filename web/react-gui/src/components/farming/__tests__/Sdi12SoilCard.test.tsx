@@ -62,7 +62,7 @@ describe('Sdi12SoilCard', () => {
     expect(screen.getByText('22.5 %')).toBeInTheDocument();
     expect(screen.getByText('0.125')).toBeInTheDocument();
     expect(screen.getAllByText('—')).toHaveLength(1);
-    expect(screen.getByText(/TriSCAN VIC acquisition is disabled/)).toBeInTheDocument();
+    expect(screen.queryByText(/TriSCAN VIC acquisition is disabled/)).not.toBeInTheDocument();
   });
 
   it('surfaces an invalid stored Sentek layout status', () => {
@@ -71,6 +71,18 @@ describe('Sdi12SoilCard', () => {
       sdi12_layout_status: 'invalid',
     })} />);
     expect(screen.getByText(/saved Sentek channel layout is invalid/)).toBeInTheDocument();
+  });
+
+  it('shows commissioning state without hiding old readings and labels only compatible deployment as active', () => {
+    render(<Sdi12SoilCard device={makeDevice({
+      sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+      sdi12_channel_layout_json: { version: 1, address: '7', sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' }] },
+      sdi12_recipe_deployment: { desired_version: 2, desired_layout_hash: 'abc', status: 'observed_compatible', queued_at: null, queue_drained_at: null, commissioning_deadline_at: null, last_observed_at: null, compatible_at: null, updated_at: null, frame_count: 1, compatible_available: true, last_error_code: null },
+      latest: { vwc_1: 0, soil_vic_1: 0 },
+    })} />);
+    expect(screen.getByText('sdi12.active')).toBeInTheDocument();
+    expect(screen.getByText('0.0 %')).toBeInTheDocument();
+    expect(screen.getByText('0.000')).toBeInTheDocument();
   });
 
   it('shows pending state when unidentified', () => {

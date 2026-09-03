@@ -6,11 +6,11 @@
 
 ## Result
 
-The paired implementation adds a versioned Sentek channel layout with up to ten modules, VWC channels 9–10, and VIC channels 1–10. The edge validates and stores the layout, maps verified VWC-only frames, exposes configured rows in the GUI, and carries the new state through history, export, bootstrap, and outbox sync. The cloud accepts the layout and telemetry without adding a cloud SDI-12 card.
+The paired implementation adds a versioned Sentek channel layout with up to ten modules, VWC channels 9–10, and VIC channels 1–10. The edge validates and stores the layout, maps VWC-only and mixed VWC/VIC frames, exposes configured rows in the GUI, and carries the new state through history, export, bootstrap, and outbox sync. The cloud accepts the layout and telemetry without adding a cloud SDI-12 card.
 
 TriSCAN decoding now accepts one strict mixed vector: all configured VWC values in response-position order, followed by VIC values for configured TriSCAN modules in the same order. The installed rail therefore requires exactly eight VWC plus two VIC values. Legacy eight-value VWC-only frames remain quarantined as `sdi12_vic_framing_unverified`; every other count mismatch or invalid VIC rejects the complete soil sample while retaining battery telemetry.
 
-The live Pi and its LoRaWAN queue were used with operator authorization. Diagnostic `LM2!`, `LC1!`, and explicit `LD0!` recipes returned no salinity bytes; Dragino raw framing reported `F1 00`. The software mapping fixture combines VWC values captured over LoRaWAN with the two VIC values observed in Sentek Probe Configuration Utility. It proves the codec, reassembler, normalizer, writer, SQLite, sync, and GUI path, but is not a successful live combined-radio capture.
+The first live attempt used `LM2!`, `LC1!`, and explicit `LD0!` recipes, which returned no salinity bytes. Bench work on 2026-08-28 established the required command boundaries and DATACUT values. A subsequent LoRaWAN transmission carried eight VWC values followed by two TriSCAN VIC values through the production codec, reassembler, normalizer, writer, SQLite database, and GUI.
 
 ## Review corrections made during execution
 
@@ -87,7 +87,7 @@ The branch baseline failed only `ArchitectureTest.noNewPackageCycles` because Ar
 
 No feature-introduced test failure remains. `git diff --check` passed in both worktrees, the maintained edge runtime mirrors are byte-identical, and the paired sync-contract and channel-manifest files match.
 
-Cloud acceptance was deployed first, followed by the edge implementation. The complete cloud backend gate remains baseline-red for the proven ArchUnit freeze-store condition. Live VIC acceptance remains open because the installed Dragino/Sentek path has not emitted the required ten-value vector.
+Cloud acceptance was deployed first, followed by the edge implementation. The complete cloud backend gate remains baseline-red for the proven ArchUnit freeze-store condition. Live VIC acceptance closed on 2026-08-28 with a complete ten-value LoRaWAN vector and two consecutive stored rows.
 
 ## Live edge deployment
 
@@ -140,10 +140,97 @@ Frame 100 arrived at `2026-08-26T09:52:22Z`, 24 minutes 16 seconds after frame
 configured SDI-12 waits and retries. Frame 100 was also an empty segment and
 raised the preserved `device_data` row count to 2,262.
 
-## Deferred bench and deployment gates
+## Live bench closure on 2026-08-28
 
-- Obtain a non-empty salinity response from the installed probe and capture the complete eight-VWC/two-VIC vector.
-- Resolve whether the empty salinity response is caused by probe configuration or the Dragino 12 V rail. Sentek documents a 200 mA startup requirement while Dragino rates its 12 V output at 100 mA.
-- Prove the ten-module polling recipe and payload segmentation at the intended EU868 data rates.
-- Keep the 12 V window at the deployed 60 seconds unless electrical testing
-  proves a shorter window reliable.
+The successful node was `A84041E3EC611C56`, using Sentek address `0`, `PAYVER=2`,
+and `DATAUP=1`. The working recipe was:
+
+```text
+AT+COMMAND1=0M!,1,1,2
+AT+COMMAND2=0D1!,0,0,2
+AT+COMMAND3=0D2!,0,0,2
+AT+COMMAND4=0M2!,1,1,2
+AT+DATACUT1=30,2,2~28
+AT+DATACUT2=30,2,2~28
+AT+DATACUT3=21,2,2~19
+AT+DATACUT4=21,2,2~19
+```
+
+The reassembled payload was:
+
+```text
++0.027675+0.002684+0.000303+0.000190+0.042583+0.003221+0.006823+0.011044+204.9202+208.4880
+```
+
+Rows recorded at `2026-08-28T17:23:45.199017464Z` and
+`2026-08-28T17:25:25.691808833Z` stored `vwc_1=0.03`, `vwc_5=0.04`,
+`soil_vic_1=204.92`, and `soil_vic_5=208.49`. The remaining low VWC values
+matched the probe's above-ground bench condition. The GUI displayed eight
+depth rows and placed VIC beside VWC at 10 cm and 50 cm. The later field review
+showed that `0.03` and `0.04` were the TriSCAN modules' scaled-frequency values,
+not percent VWC; the semantic correction is recorded below.
+
+The exact two-segment payload is now an end-to-end golden vector in
+`scripts/fixtures/device-integration/sdi12/golden-vectors.json`.
+
+## Residual hardware boundaries
+
+The field node now proves the saved address, eight-module recipe, 8-second
+power window, 20-minute cadence, and repeated edge-to-cloud delivery. Software
+coverage compiles every one- through ten-module EnviroSCAN/TriSCAN combination
+and persists a worst-case five-segment, ten-TriSCAN vector. A physical
+ten-module rail still needs its own payload and power-timing capture before it
+inherits the field node's 8-second setting. Removing or failing a middle module
+also remains a bench test because its effect on Sentek response positions has
+not been observed.
+
+## Field closure and compiler correction, 2026-08-30
+
+The installed eight-module probe was re-tested on field Dragino
+`A8404135955C327D`. The probe identity, saved address `0`, response order, and
+two TriSCAN positions matched the lab fixture. Complete eight-VWC/two-VIC rows
+were stored repeatedly, including two measurements with the switched 12 V
+window reduced from 45 seconds to eight seconds. The latest two proof rows were
+recorded at `22:30:49Z` and `22:40:48Z` with battery voltage 3.414 V. Both rows
+contained every configured channel; the second stored VIC values 1627.09 and
+4237.62 at 10 and 50 cm. A further complete row at `23:01:05Z`, 20 minutes 17
+seconds after the previous row, proved the 1200-second reporting interval.
+
+This test corrected the prior hardware-fault hypothesis. The original recipe
+compiler copied full console values such as `0M!,1,1,2` and `30,2,2~28` into
+the `0xAF` payload as ASCII. Dragino's binary frame stores the command through
+`!` as ASCII but stores the three command settings and four DATACUT settings as
+raw bytes. Queue drain therefore proved delivery without proving a valid slot
+configuration. Manual compact binary frames restored acquisition immediately.
+
+The field converter split the 90-character ten-value vector across three
+42-character PAYVER 2 slices, not two. The normalizer budget and Sentek profile
+allow five slices so the supported ten-TriSCAN worst case can carry ten VWC and
+ten VIC values. Recipe version 2 also sends `A500` to suppress
+inserted newlines, uses confirmed downlinks, and ends with `010004B0` to restore
+the 1200-second interval. The exact evidence, frames, calibration counts, and
+future diagnostic order are recorded in
+`docs/operations/sentek-dragino-sdi12-commissioning-2026-08-31.md`.
+
+## TriSCAN moisture correction and recipe version 2 deployment
+
+PConfig had stored `A=1`, `B=1`, and `C=0` for the two legacy TriSCAN moisture
+rows. Their field values of about `0.73` and `0.97` were therefore normalized
+scaled frequency. Treating them as percent VWC created the near-zero readings
+shown by the first field GUI. The normalizer now applies Sentek's default
+moisture curve only to configured TriSCAN positions. The exact field fixture
+maps them to about `23.81%` and `48.72%`; the six EnviroSCAN values and two VIC
+values are unchanged.
+
+Recipe version 2 and the corrected normalizer are deployed on the field
+gateway. The first corrected live row at `2026-08-30T23:46:38Z` stored
+`vwc_1=23.62`, `vwc_5=48.73`, `soil_vic_1=1615.59`, and
+`soil_vic_5=4243.75`, along with all six EnviroSCAN VWC values. The cloud
+accepted its matching outbox event at `23:47:03Z`. ChirpStack's queue was empty
+and the deployment poller recorded drain at the same time. The first post-drain
+row at `00:06:37Z` repeated all eight VWC and both VIC values, synced without a
+retry or rejection, and moved commissioning to `observed_once`. The second row
+at `00:26:37Z` also contained the complete profile, moved commissioning to
+`observed_compatible`, and was accepted by the cloud at `00:26:57Z` with zero
+retries and no rejection. The field node is therefore Active at the normal
+20-minute cadence.
