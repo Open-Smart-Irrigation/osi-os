@@ -3,7 +3,9 @@
 // verify-flows-size-ratchet - refactor-program 1.A2, DD3.
 // Git-anchored ratchets over maintained flows.json profiles:
 // 1. Existing function nodes (by id) may not grow vs --base-ref.
-// 2. A newly-added function node must be <= NEW_NODE_CEILING.
+// 2. A newly-added function node must be <= NEW_NODE_CEILING, unless it carries an
+//    explicit committed ceiling (new_node_ceilings.<id> = { max_chars, reason }),
+//    which is an exact absolute maximum, not a delta.
 // 3. Per-profile total embedded function JS may only decrease.
 // 4. Large new nodes may not re-embed oversized SQL unless loading via osi-lib.
 const fs = require('node:fs');
@@ -91,6 +93,7 @@ function loadAllowances(allowancesPath) {
     const a = JSON.parse(raw);
     return {
       node: a.node_allowances || {},
+      newNodeCeilings: a.new_node_ceilings || {},
       totalDelta: (a.total_allowance && a.total_allowance.delta) || 0,
     };
   } catch {
@@ -102,7 +105,7 @@ function checkSurface(rel, headFlows, baseFlows, allowances) {
   const failures = [];
   const head = measure(headFlows);
   const base = measure(baseFlows);
-  const allow = allowances || { node: {}, totalDelta: 0 };
+  const allow = allowances || { node: {}, newNodeCeilings: {}, totalDelta: 0 };
 
   for (const [id, { chars }] of head.sizes) {
     const baseEntry = base.sizes.get(id);
@@ -112,7 +115,18 @@ function checkSurface(rel, headFlows, baseFlows, allowances) {
         failures.push(rel + ': node ' + id + ' grew (' + chars + ' > ' + baseEntry.chars + (nodeAllow ? ' + ' + nodeAllow + ' allowance' : '') + ' at base)');
       }
     } else {
-      if (chars > NEW_NODE_CEILING) {
+      // A new node may exceed the default ceiling only with an explicit,
+      // committed absolute max_chars + reason in new_node_ceilings. This is a
+      // reviewed exemption, not a delta: the node may never exceed the exact
+      // number recorded, so later growth still fails closed. (Upstream's A0
+      // rewrite of this ratchet generalises the same shape to every node.)
+      const ceilingEntry = allow.newNodeCeilings[id];
+      if (ceilingEntry && Number.isSafeInteger(ceilingEntry.max_chars) && ceilingEntry.max_chars >= 0
+          && typeof ceilingEntry.reason === 'string' && ceilingEntry.reason.trim() !== '') {
+        if (chars > ceilingEntry.max_chars) {
+          failures.push(rel + ': new node ' + id + ' is ' + chars + ' chars, exceeding its committed ceiling of ' + ceilingEntry.max_chars + ' (+' + (chars - ceilingEntry.max_chars) + ')');
+        }
+      } else if (chars > NEW_NODE_CEILING) {
         failures.push(rel + ': new node ' + id + ' exceeds the ' + NEW_NODE_CEILING + '-char ceiling (' + chars + ')');
       }
       const node = headFlows.find((n) => n && n.id === id);
@@ -159,7 +173,7 @@ function writeBaselineFile(o) {
 
 function verifyDocBaseline(o, allowances) {
   const baseline = JSON.parse(fs.readFileSync(o.baselinePath, 'utf8'));
-  const allow = allowances || { node: {}, totalDelta: 0 };
+  const allow = allowances || { node: {}, newNodeCeilings: {}, totalDelta: 0 };
   const failures = [];
   const notes = [];
   for (const rel of o.surfaces) {
