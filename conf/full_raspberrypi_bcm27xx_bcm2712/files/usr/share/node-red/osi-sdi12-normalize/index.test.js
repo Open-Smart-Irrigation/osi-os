@@ -214,7 +214,7 @@ test('listProfiles is GUI-serializable and slot-aware', () => {
 });
 
 test('bench 2026-08-19: SENTEK_ENVIROSCAN live identity auto-matches, foreign vendor with same model does not', () => {
-  // Live aI! captured on agrolink-test-01 (device A8404161D1886837).
+  // Live aI! captured on the SDI-12 bench gateway (device A8404161D1886837).
   const hit = m.matchProfile('012SENTEK  XEPI  139D938D7150000');
   assert.strictEqual(hit.profileId, 'SENTEK_ENVIROSCAN');
   assert.strictEqual(hit.vendor.trim(), 'SENTEK');

@@ -183,7 +183,7 @@ var PROFILES = [
   {
     id: 'SENTEK_ENVIROSCAN',
     label: 'Sentek EnviroSCAN / TriSCAN (configured layout up to 10 modules)',
-    // Bench-verified 2026-08-19 on agrolink-test-01 (A8404161D1886837):
+    // Bench-verified 2026-08-19 on the SDI-12 bench gateway (A8404161D1886837):
     // live aI! = "012SENTEK  XEPI  139D938D7150000" (vendor SENTEK, model XEPI,
     // fw 1.3.9); live aM!/aD0! frame = 5 values, e.g.
     // "+0.000000+0.000000+0.000000+0.104748+0.339201". Calibrated

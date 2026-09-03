@@ -245,31 +245,31 @@
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
       "max_chars": 7126,
-      "reason": "SDI-12 port: new function node measured at exactly 7126 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the AgroLink SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. Upstream's own ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+      "reason": "SDI-12 port: new function node measured at exactly 7126 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
     },
     "sdi12-config-auth-fn": {
       "max_chars": 7114,
-      "reason": "SDI-12 port: new function node measured at exactly 7114 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the AgroLink SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. Upstream's own ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+      "reason": "SDI-12 port: new function node measured at exactly 7114 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
     },
     "sdi12-config-action-fn": {
       "max_chars": 6836,
-      "reason": "SDI-12 port: new function node measured at exactly 6836 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the AgroLink SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. Upstream's own ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+      "reason": "SDI-12 port: new function node measured at exactly 6836 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
     },
     "sdi12-write-fn": {
       "max_chars": 6296,
-      "reason": "SDI-12 port: new function node measured at exactly 6296 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the AgroLink SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. Upstream's own ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+      "reason": "SDI-12 port: new function node measured at exactly 6296 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
     },
     "sdi12-identify-trigger-fn": {
       "max_chars": 5218,
-      "reason": "SDI-12 port: new function node measured at exactly 5218 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the AgroLink SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. Upstream's own ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+      "reason": "SDI-12 port: new function node measured at exactly 5218 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
     },
     "sdi12-profiles-scope-fn": {
       "max_chars": 5039,
-      "reason": "SDI-12 port: new function node measured at exactly 5039 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the AgroLink SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. Upstream's own ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+      "reason": "SDI-12 port: new function node measured at exactly 5039 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
     },
     "sdi12-identify-fn": {
       "max_chars": 4101,
-      "reason": "SDI-12 port: new function node measured at exactly 4101 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the AgroLink SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. Upstream's own ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+      "reason": "SDI-12 port: new function node measured at exactly 4101 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
     }
   }
 }

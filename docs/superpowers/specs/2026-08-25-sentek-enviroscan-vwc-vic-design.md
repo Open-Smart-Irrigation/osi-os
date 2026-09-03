@@ -2,8 +2,8 @@
 
 - **Status:** Implemented; bench-verified 2026-08-28 and field-verified 2026-08-30
 - **Date:** 2026-08-25
-- **Edge branch:** `AgroLink` in `/home/phil/Repos/osi-os-agrolink`
-- **Cloud branch:** paired AgroLink worktree in `/home/phil/Repos/osi-server/.worktrees/agrolink`
+- **Edge branch:** `the source branch` in `<edge-checkout>`
+- **Cloud branch:** paired the source branch worktree in `<cloud-worktree>`
 - **Builds on:** `2026-08-13-dragino-sdi12-soil-node-design.md` and `2026-08-19-sdi12-multi-segment-uplinks-design.md`
 - **Bench hardware:** Sentek EnviroSCAN Series II PCB 2.4, firmware 1.3.9; Dragino SDI-12-LB/LS hardware 1.3
 
@@ -306,7 +306,7 @@ does not silently rewrite a saved layout or probe calibration.
 
 ## Verification boundary
 
-Tests cover schema consistency, migration upgrade from the current AgroLink
+Tests cover schema consistency, migration upgrade from the current the source branch
 head, exact sync-trigger payloads, channel-manifest parity, writer allowlisting,
 history/export discovery, GUI layout validation, stable channel identity, and
 missing-value rendering. Normalizer golden values include the complete live

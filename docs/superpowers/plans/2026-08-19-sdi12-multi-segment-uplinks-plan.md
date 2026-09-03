@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Repo `/home/phil/Repos/osi-os-agrolink`, branch `AgroLink`. `bcm2712` is canonical; mirror `bcm2709` byte-identically for flows.json and node-red modules; `node scripts/verify-profile-parity.js` after every mirror. Never touch `bcm2708`.
+- Repo `<edge-checkout>`, branch `the source branch`. `bcm2712` is canonical; mirror `bcm2709` byte-identically for flows.json and node-red modules; `node scripts/verify-profile-parity.js` after every mirror. Never touch `bcm2708`.
 - Any flows.json edit: read `.claude/skills/osi-flows-json-editing/SKILL.md` FIRST; one-shot Node script in the scratchpad, byte-identical `JSON.stringify(flows, null, 2)+'\n'` roundtrip guard before and after, never an Edit-tool string replacement. All SDI-12 nodes stay BEFORE the `journal-v2-replication-*` cluster in the array (you are editing existing nodes, not adding — verify order is unchanged).
 - Do NOT touch `sync-init-fn` or any node hash-pinned in `scripts/verify-live-gateway-identity.js` (~L339). A hash mismatch there is a HALT.
 - New helper module needs the three-surface registration (`osi-lib` `NAME_TO_PATH`, node-red `package.json` + `package-lock.json` both profiles, `98_osi_node_red_seed` module loop) plus `deploy.sh` `fetch_required` pairs — copy exactly how `osi-sdi12-normalize` is registered (grep it in each file). `node scripts/verify-helper-registration.js` gates.

@@ -2,7 +2,7 @@
 
 - **Status:** Approved in chat 2026-08-19 (reassembly placement A, `payver=2` discriminator, atomic-or-quarantine); implementation not started
 - **Date:** 2026-08-19
-- **Branch:** `AgroLink` in `/home/phil/Repos/osi-os-agrolink` (head `19ca945e` or descendant)
+- **Branch:** `the source branch` in `<edge-checkout>` (head `19ca945e` or descendant)
 - **Builds on:** `docs/superpowers/specs/2026-08-13-dragino-sdi12-soil-node-design.md` (the v1 device type) — this is its reserved "phase 2 multi-segment" item
 - **Why now:** the sensor trial runs on external power, which removes the only real cost of multi-segment uplinks (airtime/battery), and 8-depth EnviroSCAN / 3-quantity HydraScout configurations exceed the 51-byte single-uplink budget at DR0
 
@@ -151,7 +151,7 @@ flagging them phase-2-blocked. Their "phase 2" comments are rewritten to
 - `osi-sdi12-reassemble/index.test.js` (`node --test`): in-order, out-of-order, passthrough, duplicate index, count mismatch, index out of range, window timeout (injected `nowMs`), bounded state, `quarantine.raw` format.
 - Gate logic exercised via `scripts/verify-device-integration.js` golden vectors: a 2-segment 8-value EnviroSCAN sequence (two `bytes` arrays in one vector, runner concatenates through the helper) round-trips to 8 `vwc_N` values; a 3-segment sequence with the middle one missing produces only the quarantine row.
 - Flows gates: the standard battery (fn-parse, wiring, size ratchet measure-and-raise, silent-catch, bare-require, profile parity, journal-v2 ordering, live-identity hash pins untouched).
-- **Bench gate (acceptance):** the live EnviroSCAN on agrolink-test-01 switched to `AT+DATAUP=1`, `AT+PAYVER=2`, 8 sensors enabled (`AT+COMMAND1=0M!`, `AT+COMMAND2=0D1!` or the `aC!` path per the Sentek manual) — first reassembled frame observed in `device_data` with `vwc_1..8`, and the `node.warn` line in the log.
+- **Bench gate (acceptance):** the live EnviroSCAN on the SDI-12 bench gateway switched to `AT+DATAUP=1`, `AT+PAYVER=2`, 8 sensors enabled (`AT+COMMAND1=0M!`, `AT+COMMAND2=0D1!` or the `aC!` path per the Sentek manual) — first reassembled frame observed in `device_data` with `vwc_1..8`, and the `node.warn` line in the log.
 
 ## Out of scope
 

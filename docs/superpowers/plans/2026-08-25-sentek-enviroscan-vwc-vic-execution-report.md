@@ -1,8 +1,8 @@
 # Sentek EnviroSCAN VWC and VIC execution report
 
 **Date:** 2026-08-26
-**Edge:** `/home/phil/Repos/osi-os-agrolink` (`AgroLink`)
-**Cloud:** `/home/phil/Repos/osi-server/.worktrees/agrolink` (`feat/journal-cloud-primary`)
+**Edge:** `<edge-checkout>` (`the source branch`)
+**Cloud:** `<cloud-worktree>` (`feat/journal-cloud-primary`)
 
 ## Result
 

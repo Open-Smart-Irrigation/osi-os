@@ -428,7 +428,7 @@ test('recipe auth uses stable 400/401/404/409/500 mappings before any deployment
 });
 
 // Not ported: 'scoped recipe route denies a viewer with 403 before device lookup'
-// drives AgroLink's scoped-device-config-guard (a 28-output scoped-access fan-out)
+// drives the source branch's scoped-device-config-guard (a 28-output scoped-access fan-out)
 // with OSI_SCOPED_ACCESS=1 and a viewer-role token. This line has no scoped-access
 // schema -- no users.role, no guard node -- so the test has no subject here. The
 // recipe routes' authentication is covered instead by test-sdi12-recipe-flow.js,

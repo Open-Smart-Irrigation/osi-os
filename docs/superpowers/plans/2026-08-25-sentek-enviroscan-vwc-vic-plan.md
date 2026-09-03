@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- Edge worktree: `/home/phil/Repos/osi-os-agrolink`, branch `AgroLink`. Cloud worktree: `/home/phil/Repos/osi-server/.worktrees/agrolink`, branch `feat/journal-cloud-primary`.
+- Edge worktree: `<edge-checkout>`, branch `the source branch`. Cloud worktree: `<cloud-worktree>`, branch `feat/journal-cloud-primary`.
 - Preserve the user-owned untracked `node_modules/` on edge and `docs/superpowers/prompts/` on cloud.
 - The original no-SSH/downlink constraint was superseded by explicit operator authorization on 2026-08-26. Production `osicloud.ch` access remains out of scope.
 - `bcm2712` is canonical. Mirror every maintained runtime payload to `bcm2709`; do not add the new runtime implementation to `bcm2708`. Update all seven committed seed DB copies through the migration/seed workflow because `verify-db-schema-consistency.js` treats them as one schema contract.

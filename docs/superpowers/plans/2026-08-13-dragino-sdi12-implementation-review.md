@@ -1,6 +1,6 @@
 # SDI-12 implementation review — consolidated verdict (2026-08-13)
 
-Two independent Opus reviewers over `441c5146..AgroLink` (21 commits), adjudicated
+Two independent Opus reviewers over `441c5146..the source branch` (21 commits), adjudicated
 by the orchestrating session; six gates independently re-run and green. Every
 finding below was verified against committed code before acceptance.
 

@@ -1,10 +1,10 @@
 # Dragino SDI-12 execution report
 
-Status: COMPLETE through Tasks 0–18 and the post-review fix wave. Tasks 0–18 and four review-fix implementation commits are committed on branch AgroLink. No push, merge, PR, SSH, live gateway access, osicloud.ch access, or remote database access was performed.
+Status: COMPLETE through Tasks 0–18 and the post-review fix wave. Tasks 0–18 and four review-fix implementation commits are committed on branch the source branch. No push, merge, PR, SSH, live gateway access, osicloud.ch access, or remote database access was performed.
 
 Execution date: 2026-08-13
-Checkout: /home/phil/Repos/osi-os-agrolink
-Branch: AgroLink
+Checkout: <edge-checkout>
+Branch: the source branch
 Last implementation commit: 2cda6ae8
 Historical Task 18 halt: node scripts/verify-sync-contract.js reported:
 `FAIL: commands.schema.json enum drift: missing=SET_SDI12_IDENTIFY extra=(none) duplicates=(none)`
@@ -1001,15 +1001,15 @@ OK conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json (64 function
 verify-flows-fn-parse: OK
 
 $ node scripts/verify-trigger-body-parity.js
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
 verify-trigger-body-parity: OK
 (node:3895724) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 $ node scripts/verify-boot-ddl-interpolation.js
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
 verify-boot-ddl-interpolation: OK
 (node:3895734) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
@@ -3623,8 +3623,8 @@ OK aquascope_lorain_decoder.js accepts current LoRain FPort 10 and legacy FPort 
 OK osi-db-helper/index.js exposes the helper-scoped transaction primitive
 OK DB helper source present despite missing local runtime deps: Cannot find module 'sqlite3'
 Require stack:
-- /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js
-- /home/phil/Repos/osi-os-agrolink/scripts/verify-sync-flow.js
+- <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js
+- <edge-checkout>/scripts/verify-sync-flow.js
 OK DB helper source includes Database
 OK DB helper source includes getHealth
 OK DB helper source includes quickCheck
@@ -5035,7 +5035,7 @@ $ (cd web/react-gui && npx vitest run)
 npm notice run open-smart-irrigation@1.0.0 npx
 npm notice run 'vitest' run
 
- RUN  v4.1.6 /home/phil/Repos/osi-os-agrolink/web/react-gui
+ RUN  v4.1.6 <edge-checkout>/web/react-gui
 
 [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
 Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
@@ -5065,10 +5065,6 @@ Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
 rendering chunks...
 computing gzip size...
 build/index.html                                     0.46 kB │ gzip:   0.31 kB
-build/assets/balken-horizontal-it-Ou2XHCRY.png      19.33 kB
-build/assets/balken-horizontal-de-CqhCszv6.png      19.91 kB
-build/assets/balken-horizontal-en-D-ArRzMS.png      20.30 kB
-build/assets/balken-horizontal-fr-7SkApz9y.png      23.99 kB
 build/assets/noto-sans-latin-var-BYSzYMf3.woff2     35.82 kB
 build/assets/logo-it-hoch-vq__SgqK.png              60.63 kB
 build/assets/logo-fr-hoch-DAKzGB1G.png              60.94 kB
@@ -5530,15 +5526,15 @@ OK conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json (64 function
 verify-flows-fn-parse: OK
 
 $ node scripts/verify-trigger-body-parity.js
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (all boot-managed trigger bodies match seed-blank.sql after canonicalization)
 verify-trigger-body-parity: OK
 (node:4118668) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 $ node scripts/verify-boot-ddl-interpolation.js
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
-OK /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
+OK <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json (60 boot statements; no gatewaySql leak; versioned outbox triggers pass NEW.sync_version)
 verify-boot-ddl-interpolation: OK
 (node:4118678) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
@@ -8152,8 +8148,8 @@ OK aquascope_lorain_decoder.js accepts current LoRain FPort 10 and legacy FPort 
 OK osi-db-helper/index.js exposes the helper-scoped transaction primitive
 OK DB helper source present despite missing local runtime deps: Cannot find module 'sqlite3'
 Require stack:
-- /home/phil/Repos/osi-os-agrolink/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js
-- /home/phil/Repos/osi-os-agrolink/scripts/verify-sync-flow.js
+- <edge-checkout>/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js
+- <edge-checkout>/scripts/verify-sync-flow.js
 OK DB helper source includes Database
 OK DB helper source includes getHealth
 OK DB helper source includes quickCheck
@@ -9941,7 +9937,7 @@ $ (cd web/react-gui && npx vitest run)
 npm notice run open-smart-irrigation@1.0.0 npx
 npm notice run 'vitest' run
 
- RUN  v4.1.6 /home/phil/Repos/osi-os-agrolink/web/react-gui
+ RUN  v4.1.6 <edge-checkout>/web/react-gui
 
 [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
 Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
@@ -9975,10 +9971,6 @@ Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
 rendering chunks...
 computing gzip size...
 build/index.html                                     0.46 kB │ gzip:   0.30 kB
-build/assets/balken-horizontal-it-Ou2XHCRY.png      19.33 kB
-build/assets/balken-horizontal-de-CqhCszv6.png      19.91 kB
-build/assets/balken-horizontal-en-D-ArRzMS.png      20.30 kB
-build/assets/balken-horizontal-fr-7SkApz9y.png      23.99 kB
 build/assets/noto-sans-latin-var-BYSzYMf3.woff2     35.82 kB
 build/assets/logo-it-hoch-vq__SgqK.png              60.63 kB
 build/assets/logo-fr-hoch-DAKzGB1G.png              60.94 kB

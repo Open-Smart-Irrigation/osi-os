@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- Work in `/home/phil/Repos/osi-os-agrolink` on branch `AgroLink`. Preserve all unrelated modified and untracked files, especially `node_modules/`.
+- Work in `<edge-checkout>` on branch `the source branch`. Preserve all unrelated modified and untracked files, especially `node_modules/`.
 - Address is data. It must come from a validated saved layout or a validated one-character discovery response. No runtime path may default to `0`, `L`, `C`, or another address.
 - Support every EnviroSCAN/TriSCAN type mask for module counts 1 through 10: 2,046 layouts in total. VWC is present for every module; VIC is present only for TriSCAN modules and follows TriSCAN response-position order.
 - Stable channel IDs remain independent of response positions. Wire compilation uses response positions, never depth or channel ID.
@@ -384,7 +384,7 @@ postSdi12RecipeRollback(deveui: string)
 - [ ] Request an independent code review against the approved design. Resolve findings with new failing tests before live deployment.
 - [ ] Commit Task 7: `docs(sdi12): record recipe deployment verification`.
 
-### Task 8: Deploy to the AgroLink Pi only after the field fixture is confirmed
+### Task 8: Deploy to the the source branch Pi only after the field fixture is confirmed
 
 **Target:** `100.121.141.64`
 

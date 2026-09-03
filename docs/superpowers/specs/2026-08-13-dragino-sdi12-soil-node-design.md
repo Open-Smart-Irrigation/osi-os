@@ -2,7 +2,7 @@
 
 - **Status:** Draft for review; no implementation started
 - **Date:** 2026-08-13
-- **Base branch:** `AgroLink` (`origin/AgroLink` = `441c5146`; the former `design-sync/agrolink` ref was folded in, its head `f5ca4a1f` is an ancestor)
+- **Base branch:** `the source branch` (`origin/<source-branch>` = `441c5146`; the former `design-sync/<source>` ref was folded in, its head `f5ca4a1f` is an ancestor)
 - **Depends on:** vendor payload facts verified against the Dragino wiki manual and the official decoder (sources at the end); per-probe response layouts still need bench capture
 
 ## What this adds
@@ -195,7 +195,7 @@ downlinks (true zero-touch commissioning) is phase 2 and out of scope here.
 ## Schema
 
 Two ordered migrations, numbered from `ls database/migrations/ordered/` on the
-base branch at execution time (the AgroLink lineage is past 0032; do not
+base branch at execution time (the the source branch lineage is past 0032; do not
 hardcode).
 
 **Additive migration.** New columns:
@@ -332,7 +332,7 @@ node's `getProfileKind()` gains an explicit `DRAGINO_SDI12` mapping.
   code even though older LSN50 chains still string-build.
 
 Registration inherits `ensureDeviceProvisioned` from whichever ChirpStack
-helper version the branch carries; on AgroLink that is the rewritten helper
+helper version the branch carries; on the source branch that is the rewritten helper
 with key read-back verification, which this type gets for free.
 
 ## GUI

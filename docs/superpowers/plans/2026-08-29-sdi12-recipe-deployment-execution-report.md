@@ -8,7 +8,7 @@ snapshot `8b4d7298..c5f35e22`
 ## Result
 
 The local verification gate passed, and the software payload was deployed to the
-`agrolink-test-01` edge gateway at `100.121.141.64`. Migration 0049 and the new
+`the SDI-12 bench gateway` edge gateway at `100.121.141.64`. Migration 0049 and the new
 runtime/UI payload are live. No SDI-12 layout was saved, no recipe was applied,
 and no downlink was enqueued; physical probe replacement and commissioning remain
 deferred.
@@ -45,7 +45,7 @@ hardware.
 
 ## Verification
 
-All commands ran from `/home/phil/Repos/osi-os-agrolink` unless stated otherwise.
+All commands ran from `<edge-checkout>` unless stated otherwise.
 
 | Command | Result |
 |---|---|

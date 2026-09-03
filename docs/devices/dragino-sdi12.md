@@ -131,7 +131,7 @@ Each section gives a concrete starting command and a cut for the sample response
 
 ### Sentek EnviroSCAN
 
-**Bench-verified 2026-08-19** on agrolink-test-01 (device `A8404161D1886837`), so this section is fact, not hypothesis.
+**Bench-verified 2026-08-19** on the SDI-12 bench gateway (device `A8404161D1886837`), so this section is fact, not hypothesis.
 
 - Identity (`0I!`): `012SENTEK  XEPI  139D938D7150000` — address 0, SDI-12 v1.2, vendor `SENTEK`, model `XEPI` (the EnviroSCAN variant; the Sentek manual names `XPI` for EnviroSMART and `IPI` for EasyAG — all three auto-match `SENTEK_ENVIROSCAN`), firmware 1.3.9, then the serial.
 - Measurement: `0M!` answers `0tttn` then needs `0D0!` (and `0D1!` above 3 values) — the Dragino's `aD0!` flag (third `AT+COMMANDx` field = `1`) handles that. Live response with the sensor count learned as 5: `+0.000000+0.000000+0.000000+0.104748+0.339201`.

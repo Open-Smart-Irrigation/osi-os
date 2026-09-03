@@ -3,7 +3,7 @@
  * Test harness for executing a flows.json function node in-process against a
  * real in-memory SQLite database.
  *
- * Ported from AgroLink's scripts/lib/scoped-access-harness.js and adapted to
+ * Ported from the source branch's scripts/lib/scoped-access-harness.js and adapted to
  * this branch: there is no scoped-access schema here (no users.role, no
  * user_zone_assignments, no journal_plots), so the fixture seeds only what
  * this branch's seed-blank.sql actually defines. Renamed accordingly -- the

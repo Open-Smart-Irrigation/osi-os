@@ -12,12 +12,12 @@
 
 ## Global Constraints
 
-- Base branch: `AgroLink` (work directly on it, per Phil). Checkout: `/home/phil/Repos/osi-os-agrolink`.
+- Base branch: `the source branch` (work directly on it, per Phil). Checkout: `<edge-checkout>`.
 - `conf/full_raspberrypi_bcm27xx_bcm2712` is canonical; `bcm2709` must stay byte-identical for flows.json, node-red/, db/, and `98_osi_node_red_seed` (`node scripts/verify-profile-parity.js` gates it). The bcm2708 tree is stale — never touch it.
 - Any flows.json edit: invoke the `osi-flows-json-editing` skill first. Any schema edit: invoke `osi-schema-change-control` first. Both skills live in `.claude/skills/`.
 - ChirpStack profile name is exactly `OSI SDI-12 Soil Node` — it must NOT contain "Dragino" or "LSN50" (the LSN50/STREGA/telemetry dispatchers name-match on those substrings).
 - Type id is exactly `DRAGINO_SDI12`. Channel keys are exactly `vwc_1..vwc_8`, `soil_temp_1..soil_temp_8`, `soil_ec_1..soil_ec_8`.
-- Migration numbers are computed at execution time (`ls database/migrations/ordered/`), never hardcoded — the AgroLink lineage is past 0032.
+- Migration numbers are computed at execution time (`ls database/migrations/ordered/`), never hardcoded — the the source branch lineage is past 0032.
 - Never hand-edit `edge-channels.json` (generated) or `schema_object_fingerprints` (runner-owned).
 - Frontend: run tests with `npx vitest run <paths>`; never run two frontend builds concurrently on this workstation (zram swap, OOM risk); reviewers must not build at all.
 - Function nodes must use `osiLib.require(...)`, never bare `require` (`scripts/flows-bare-require-scan.js` gates), and must not add silent catches (`scripts/verify-no-new-silent-catch.js`).
@@ -35,21 +35,21 @@
 - No source files; git state only.
 
 **Interfaces:**
-- Produces: local `AgroLink` at `origin/AgroLink` (`441c5146` or later), spec + this plan committed.
+- Produces: local `the source branch` at `origin/<source-branch>` (`441c5146` or later), spec + this plan committed.
 
-- [x] **Step 1: Stash the build residue and fast-forward AgroLink**
+- [x] **Step 1: Stash the build residue and fast-forward the source branch**
 
 The checkout is on a detached HEAD (`f5ca4a1f`) with build residue under `feeds/`. Preserve it in a stash rather than discarding:
 
 ```bash
-cd /home/phil/Repos/osi-os-agrolink
+cd <edge-checkout>
 git stash push -u -m "feeds gui build residue (pre-sdi12)" -- feeds/
 git fetch origin
-git switch AgroLink
-git merge --ff-only origin/AgroLink
+git switch the source branch
+git merge --ff-only origin/<source-branch>
 ```
 
-If `--ff-only` fails, STOP and report — local `AgroLink` has diverged from origin and a human decision is needed.
+If `--ff-only` fails, STOP and report — local `the source branch` has diverged from origin and a human decision is needed.
 
 - [x] **Step 2: Verify a clean baseline**
 
@@ -1367,7 +1367,7 @@ Add `"SET_SDI12_IDENTIFY"` to the command-type enum in
 `verify-sync-contract.js` cross-checks the flows `cmd-type-registry` against
 that enum and fails on drift in either direction; Step 3 registered the
 command without its contract half. The contract entry makes the command
-cloud-issuable later (AgroLink parity: remote identification via
+cloud-issuable later (the source branch parity: remote identification via
 pending-commands) but nothing cloud-side consumes it yet; it rides the
 existing osi-server lockstep gate. Then:
 

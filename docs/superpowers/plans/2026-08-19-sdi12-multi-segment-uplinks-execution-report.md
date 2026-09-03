@@ -2,7 +2,7 @@
 
 - **Plan:** `docs/superpowers/plans/2026-08-19-sdi12-multi-segment-uplinks-plan.md`
 - **Spec:** `docs/superpowers/specs/2026-08-19-sdi12-multi-segment-uplinks-design.md`
-- **Repo/branch:** `/home/phil/Repos/osi-os-agrolink`, `AgroLink`
+- **Repo/branch:** `<edge-checkout>`, `the source branch`
 - **Range:** `19ca945e..f73df304` (starting head `fb7bfbe1`, a descendant of `19ca945e`)
 - **Result:** Tasks 0–7 complete. Every gate in the plan's battery is green. No HALT condition was hit.
 

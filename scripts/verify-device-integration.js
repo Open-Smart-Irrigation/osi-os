@@ -150,7 +150,7 @@ describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', ()
 
           const syncDb = createTestDb('DRAGINO_SDI12');
           // This branch's osi-device-writer is synchronous and takes a node:sqlite
-      // DatabaseSync directly (AgroLink's is async and wraps it in a facade).
+      // DatabaseSync directly (the source branch's is async and wraps it in a facade).
       const writerDb = syncDb;
           try {
             await writer.quarantineOnly(writerDb, TEST_DEVEUI, forced.quarantine.channel, forced.quarantine.raw);
@@ -192,7 +192,7 @@ describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', ()
 
       const syncDb = createTestDb('DRAGINO_SDI12');
       // This branch's osi-device-writer is synchronous and takes a node:sqlite
-      // DatabaseSync directly (AgroLink's is async and wraps it in a facade).
+      // DatabaseSync directly (the source branch's is async and wraps it in a facade).
       const writerDb = syncDb;
       try {
         writer.resetColumnCache();

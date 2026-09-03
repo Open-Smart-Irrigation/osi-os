@@ -102,9 +102,9 @@ test('recipe Apply and Rollback routes share the scoped/authenticated SDI-12 pat
   assert.equal(rollback.url, '/api/devices/:deveui/sdi12/recipe/rollback');
   assert.deepEqual(rollback.wires, [['sdi12-config-auth-fn']]);
 
-  // Port adaptation: AgroLink fans these routes out through its scoped-access
+  // Port adaptation: the source branch fans these routes out through its scoped-access
   // node `scoped-device-config-guard`, which does not exist on this line. Here
-  // both routes enter sdi12-config-auth-fn directly -- the same node AgroLink's
+  // both routes enter sdi12-config-auth-fn directly -- the same node the source branch's
   // guard forwarded them to (guard outputs 25/26) -- which is both the bearer
   // authenticator and the suffix router. Pin that: neither recipe action node
   // performs its own bearer check, so a route that skipped this node would be
@@ -163,7 +163,7 @@ test('handled SDI-12 HTTP failures emit one bounded response without a Catch dup
   });
 
   const scenarios = [
-    // (AgroLink's scoped-device-config-guard scenario is not portable: the node
+    // (the source branch's scoped-device-config-guard scenario is not portable: the node
     // does not exist on this line. The remaining scenarios still cover the
     // helper-load-failure -> single bounded 500 contract.)
     {

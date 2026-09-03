@@ -340,7 +340,7 @@ const protectedNodeHashes = {
   'al-link-validate': 'c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7',
   // Re-pinned #3 (port adaptation, migration 0029): the guarded devices rebuild's
   // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_channel_layout_json.
-  // AgroLink's own history never closed this gap -- a live rebuild would have created
+  // The source branch's own history never closed this gap -- a live rebuild would have created
   // devices_new without the column and silently dropped every stored Sentek probe
   // layout. Same sanctioned class of edit as 0027/0028's literal extensions, applied in
   // the same commit as the migration. Hash re-derived on this branch.
