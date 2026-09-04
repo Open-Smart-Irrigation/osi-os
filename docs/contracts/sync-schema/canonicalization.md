@@ -138,6 +138,94 @@ Golden vectors (all implementations - edge JS, GUI TS, server Java - must match)
 | -5 | null | null | null |
 | null | null | null | null |
 
+## Valve schedule
+
+`ValveSchedule` (`docs/contracts/sync-schema/resources.schema.json`) fields
+with a canonical form beyond the general rules above:
+
+- `weekdays_mask` — bit0=Sunday … bit6=Saturday, the same bit order the
+  STREGA on-valve scheduler uses. Golden vector: `weekdays_mask 3` =
+  Sunday + Monday (bit0 | bit1).
+- `start_time` — local time, zero-padded `HH:MM` (`06:05`, not `6:5`).
+- `fire_at` — UTC instant, canonical millisecond-precision ISO
+  (`YYYY-MM-DDTHH:MM:SS.sssZ`) per the Timestamps rule above.
+- `timezone` — IANA timezone name (`Europe/Zurich`), never a fixed UTC
+  offset.
+
+The edge GUI renders Monday-first (Swiss convention) purely as a display
+ordering over the same 0=Sunday indices — see `WEEKDAY_DISPLAY_ORDER` in
+`web/react-gui/src/components/farming/valves/valveState.ts`. Any consumer that
+re-derives day names MUST use the 0=Sunday origin above; treating bit0 as
+Monday shifts a farmer's irrigation by one day.
+
+`start_time` is local wall-clock `HH:MM` interpreted in the schedule's own
+`timezone`. It is NOT a UTC instant. `fire_at` (ONCE schedules) IS a UTC
+ISO-8601 instant, canonicalized per the Timestamps rule above.
+
+## Valve settings
+
+`ValveSettings` (`docs/contracts/sync-schema/resources.schema.json`) fields
+with a canonical form beyond the general rules above:
+
+- `skip_today_date` — local calendar date, zero-padded `YYYY-MM-DD`
+  (`2026-08-25`, not `2026-8-25`). It is NOT a UTC instant. Unlike
+  `ValveSchedule`, `ValveSettings` carries no `timezone` field of its own:
+  the date is computed and interpreted in the owning device's zone
+  timezone (the same `irrigation_zones.timezone` lookup the schedule
+  compiler uses, falling back to the gateway default when the device has
+  no zone), set only while `scheduler_status = SKIP_TODAY` and cleared
+  (`null`) otherwise.
+- `updated_at` — UTC instant, canonical millisecond-precision ISO
+  (`YYYY-MM-DDTHH:MM:SS.sssZ`) per the Timestamps rule above. The edge
+  column itself stores `datetime('now')`'s space-separated form; the
+  `trg_sync_valve_settings_outbox_ai`/`_au` triggers reformat it via
+  `strftime('%Y-%m-%dT%H:%M:%fZ', updated_at)` before it reaches the
+  payload, so every synced value is already canonical.
+
+## Valve actuation archive
+
+`ValveActuation` (`docs/contracts/sync-schema/resources.schema.json`,
+cloud full-parity Task P4-E1) fields with a canonical form beyond the general
+rules above:
+
+- `archived_at` — UTC instant, canonical millisecond-precision ISO. This
+  table (`valve_actuation_expectations`) has no `sync_version`/`updated_at`
+  bookkeeping column of its own (unlike `ValveSettings`), so the cloud
+  applier is last-write-wins on this field instead, the same role
+  `ValveRuntime.as_of` plays. Unlike `as_of` (stamped from wall-clock `now`
+  at emission time), `archived_at` is deterministic from the row's OWN
+  terminal timestamps — `COALESCE(observed_close_at, expected_close_at,
+  commanded_at)` — never wall-clock `now`: a terminal row never changes
+  again, so a repeated emission (bootstrap replay, a later trigger-backfill
+  touching the same row) must resolve to the SAME `archived_at` rather than
+  drift forward on every re-run.
+  **Tie-break rule (diverges from `ValveRuntime.as_of`):** because a
+  correction re-emit ties on `archived_at` instead of advancing past it, the
+  cloud applier MUST use `>=` (a later-arriving event with an EQUAL
+  `archived_at` still wins and replaces the row already applied), not a
+  strict `>`. `as_of` stays strict-`>` (P3-E1 ruling) because it is a fresh
+  wall-clock read every emission and effectively never ties; `archived_at`
+  is deliberately reused verbatim across corrections, so it needs the
+  opposite tie behavior to let a correction (e.g. `runTriggerBackfill`
+  fixing `estimated_gross_liters` on an already-archived row) actually land.
+- `status` — the edge panel's 8-state vocabulary, restricted to its 5
+  terminal values (`COMPLETED`, `CANCELLED`, `COMMAND_FAILED`,
+  `OPEN_TIMEOUT`, `CLOSE_TIMEOUT`); `PENDING_OPEN`/`RUNNING`/`UNKNOWN` never
+  appear here because this resource only exists once an expectation is
+  archived. Derived with the SAME precedence the edge panel's own read-time
+  `deriveStatus()` uses (`get-actuations-response`, flows.json) — checked in
+  order: `reconciliation_state = CANCELLED` first, then
+  `applied_commands.result` (case-insensitively, anything but `APPLIED`) for
+  `COMMAND_FAILED`, then `observed_open_at`/`observed_close_at` for
+  `COMPLETED`/`CLOSE_TIMEOUT`/`OPEN_TIMEOUT` — never a
+  `reconciliation_state`-only lookup: that shape mislabelled a failed
+  command as `OPEN_TIMEOUT` (a failed command still ages the expectation
+  out to `STALE_NO_OBSERVATION` on the normal grace clock, so it does reach
+  archiving — just under the wrong label) and a never-confirmed-open CLOSE
+  uplink (`reconciliation_state = OBSERVED_COMPLETE` with `observed_open_at`
+  still null) as `COMPLETED` with `estimated_gross_liters` attached — the
+  phantom-litres class this repo has reverted once already.
+
 ## Conformance
 
 A new runtime must pass every test vector before its hashes are accepted by other systems. Hashes computed by a non-conformant runtime are discarded.

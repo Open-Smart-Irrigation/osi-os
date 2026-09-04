@@ -166,6 +166,9 @@ export interface AddDeviceRequest {
   name: string;
   type_id: DeviceType;
   appkey?: string;
+  strega_generation?: StregaGeneration;
+  /** Optional target zone (W5). Absent means the device lands unassigned. */
+  zone_id?: number;
 }
 
 export interface ValveActionRequest {
@@ -676,6 +679,122 @@ export interface SupportRequestCreateResponse {
   request_id: string;
   local_status: SupportRequestLocalStatus;
   status_secret: string;
+}
+
+// ---- Valve control types ----
+export type StregaGeneration = 'GEN1' | 'GEN2';
+export type ValveSchedulerStatus = 'ACTIVE' | 'SKIP_TODAY' | 'DEACTIVATED';
+
+export interface ValveNextRun {
+  at: string;
+  kind: 'WEEKLY' | 'ONCE';
+  minutes: number;
+  scheduleUuid: string;
+}
+
+export interface ValveActiveActuation {
+  expectationId: string;
+  reconciliationState: string;
+  commandedAt: string;
+  expectedCloseAt: string;
+  durationSeconds: number | null;
+  trigger: string | null;
+}
+
+export interface ValvePushState {
+  queued: number;
+  acked: number;
+  failed: number;
+  lastPlanQueuedAt: string | null;
+  lastPlanAckedAt: string | null;
+}
+
+export interface ValveSummary {
+  deviceEui: string;
+  name: string;
+  zoneId: number | null;
+  zoneName: string | null;
+  zoneUuid: string | null;
+  timezone: string;
+  currentState: 'OPEN' | 'CLOSED' | null;
+  targetState: 'OPEN' | 'CLOSED' | null;
+  stregaGeneration: StregaGeneration;
+  flowRateLpm: number | null;
+  flowRateSource: 'measured' | 'estimated' | 'zone' | null;
+  defaultOpenMinutes: number | null;
+  schedulerStatus: ValveSchedulerStatus;
+  skipTodayDate: string | null;
+  lastUplinkAt: string | null;
+  activeActuation: ValveActiveActuation | null;
+  recentStaleState: string | null;
+  nextRun: ValveNextRun | null;
+  scheduleCount: number;
+  pushState: ValvePushState;
+  lastClockSyncAckedAt: string | null;
+  enclosureTemperatureC: number | null;
+  enclosureHumidityPct: number | null;
+  enclosureMeasuredAt: string | null;
+}
+
+export interface ValveSchedule {
+  scheduleUuid: string;
+  deviceEui: string;
+  kind: 'WEEKLY' | 'ONCE';
+  label: string | null;
+  weekdaysMask: number | null;
+  startTime: string | null;
+  fireAt: string | null;
+  durationMinutes: number;
+  timezone: string;
+  enabled: boolean;
+  onceState: 'PENDING' | 'FIRED' | 'SKIPPED' | 'CANCELLED' | null;
+}
+
+export interface ValveCompiledWindow {
+  onH: number;
+  onM: number;
+  offH: number;
+  offM: number;
+  scheduleUuid: string;
+  label: string | null;
+}
+
+export interface ValvePlanError {
+  code: 'too_many_windows' | 'overlap' | 'invalid_start_time';
+  weekday: number | null;
+  conflicts: string[];
+  labels: (string | null)[];
+}
+
+export interface ValveWeekdayPush {
+  purpose: string;
+  weekday: number | null;
+  state: 'QUEUED' | 'ACKED' | 'FAILED';
+  queuedAt: string;
+  ackedAt: string | null;
+  error: string | null;
+}
+
+export interface ValveSchedulesResponse {
+  schedules: ValveSchedule[];
+  compiled: { days: ValveCompiledWindow[][]; errors: ValvePlanError[] };
+  pushState: ValveWeekdayPush[];
+  settings: {
+    stregaGeneration: StregaGeneration;
+    flowRateLpm: number | null;
+    flowRateSource: 'measured' | 'estimated' | null;
+    defaultOpenMinutes: number | null;
+  };
+}
+
+export interface ValveScheduleInput {
+  kind: 'WEEKLY' | 'ONCE';
+  label?: string | null;
+  weekdaysMask?: number;
+  startTime?: string;
+  fireAt?: string;
+  durationMinutes: number;
+  enabled?: boolean;
 }
 
 /** One raw dendrometer reading from dendrometer_readings table */

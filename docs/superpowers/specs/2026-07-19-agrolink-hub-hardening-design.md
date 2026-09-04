@@ -34,7 +34,7 @@ H2 is therefore redefined:
 One large export must not stall the event loop or the queue for everyone else. Four measures on the history and export endpoints:
 
 1. **Range caps.** History queries without an explicit range default to the last 31 days; maximum 400 days per request. Larger spans go through pagination.
-2. **Keyset pagination with snapshot semantics.** Exports paginate on `(recorded_at, id)` cursors, stable under concurrent inserts; the first page pins a snapshot timestamp so later pages read a consistent cut. Chunks (e.g. 10k rows) yield between iterations instead of materializing the full result in one `db.all`, and the HTTP response applies backpressure rather than buffering the whole export in memory.
+2. **Keyset pagination with short read transactions.** Exports paginate on `(recorded_at, id)` cursors, stable under concurrent inserts. Consistency comes from a logical timestamp ceiling fixed on the first page, not from a held WAL snapshot: each page runs as its own short read transaction on the pool, so a long export never pins the WAL or blocks checkpoint truncation. Chunks (e.g. 10k rows) yield between iterations instead of materializing the full result in one `db.all`, and the HTTP response applies backpressure rather than buffering the whole export in memory.
 3. **Query audit.** Each request-path query is checked against available indexes (`device_data(deveui, recorded_at)` and friends); any sequential scan over a telemetry table gets an index or a rewrite.
 4. **Gate matches the mechanism.** The H3 acceptance test exercises the paginated workflow: a full 2-year export via cursor pages completes while a concurrent dashboard request stays within its latency budget. It does not assert a single 2-year request succeeds — that contradicts the range cap by design.
 
@@ -46,8 +46,8 @@ H4 stays disabled until all of these exist:
 
 - **Verified lossless off-hub archive** of the raw tables (§2's off-hub copy, or a table-level export), with a documented and rehearsed restore path into an edge DB.
 - **Per-table/channel coverage manifests** stating exactly which ranges the archive holds, plus archive acknowledgements the prune job checks before deleting.
-- **Delivered-cursor gate:** the prune additionally requires `sync_history_cursors` to show the affected ranges delivered, because pruned rows are permanently unavailable to cloud re-link backfill and to rollup recomputation if a rollup bug surfaces later.
-- **Batched deletion with WAL hygiene:** small delete batches inside the latency budget, followed by checkpoint/vacuum behavior that keeps the file from growing past the freed pages without holding a long write lock.
+- **Delivered-cursor gate where a cursor exists:** `sync_history_cursors` is keyed per `(peer_node, table_name)`, but a table only has a cursor row once history sync has processed it, and `chameleon_readings` or `dendrometer_readings` may have none, making a cursor-only gate vacuous for them. The coverage manifest is the deletion authority; the cursor check is an additional signal for tables that have one. Pruned rows are permanently unavailable to cloud re-link backfill and to rollup recomputation if a rollup bug surfaces later.
+- **Batched deletion with honest space accounting:** small delete batches inside the latency budget, each followed by a WAL checkpoint. Note what deletion does and does not reclaim on this DB: it runs `auto_vacuum=NONE` (no pragma is set anywhere in the shipped payload), so deleted pages return to the freelist for reuse — growth stops — but the file does not shrink. Shrinking requires a full `VACUUM` under an exclusive whole-file lock, which is a maintenance-window operation on a quiesced hub, never a daily-job step. Switching to `incremental_vacuum` would itself require that one-time full VACUUM and is not proposed.
 
 Rollups and daily tables (`dendrometer_daily`, `zone_daily_*`, `gateway_health_hourly`) are never pruned. If Agroscope requires indefinite raw retention, leave the tier off: NVMe capacity is not the constraint, and query latency degrades gradually enough to revisit.
 
@@ -75,5 +75,7 @@ H1–H3 are prerequisites for the hub going live; H4 requires H1's off-hub copy 
 
 ## 9. Revision history
 
+- **v4 (2026-07-19):** folded in the fourth external review. Changes: §5 space accounting corrected — deletes free pages for reuse but cannot shrink the file under `auto_vacuum=NONE`; file shrink is a maintenance-window VACUUM, not a job step.
+- **v3 (2026-07-19):** folded in the third external review. Changes: export pages are short read transactions under a logical timestamp ceiling, never a held WAL snapshot (§4); the cursor gate applies only where a per-table cursor exists, with the manifest as deletion authority (§5).
 - **v2 (2026-07-19):** folded in two external reviews. Changes: §3 rewritten around the verified facade/queue topology (v1's connection-sprawl premise was wrong; H2 redefined as benchmark + read snapshots); backup durability hardened (budget, disk pressure, mandatory off-hub copy); §4 gate contradiction resolved via keyset pagination; §5 retention re-gated from rollup coverage to archive-first with cursor gate and unrecoverability notes; §6 branding corrected to a new config seam.
 - v1 (2026-07-19): initial approved direction.

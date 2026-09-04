@@ -4,8 +4,8 @@
  *
  * Creates (or reuses if already present):
  *   • 3 ChirpStack applications:  OSI Sensors, OSI Actuators, OSI Field Tester
- *   • 7 device profiles:          KIWI Sensor, STREGA Valve, Dragino LSN50, RAK Field Tester,
- *                                 SenseCAP S2120, Aqua-Scope LoRain, Milesight UC512
+ *   • 8 device profiles:          KIWI Sensor, STREGA Valve, STREGA Valve Gen2, Dragino LSN50,
+ *                                 RAK Field Tester, SenseCAP S2120, Aqua-Scope LoRain, Milesight UC512
  *   • 1 API key:                  osi-nodered  (used by Node-RED function nodes)
  *
  * Writes results to:
@@ -34,12 +34,14 @@
  * Profile name overrides (use to reuse an existing device profile):
  *   CS_PROFILE_KIWI_NAME     (default: "OSI KIWI Sensor")
  *   CS_PROFILE_STREGA_NAME   (default: "OSI STREGA Valve")
+ *   CS_PROFILE_STREGA_GEN2_NAME (default: "OSI STREGA Valve Gen2")
  *   CS_PROFILE_LSN50_NAME    (default: "OSI Dragino LSN50")
  *   CS_PROFILE_RAK_NAME      (default: "OSI RAK Field Tester")
  *   CS_PROFILE_S2120_NAME    (default: "OSI SenseCAP S2120")
  *   CS_PROFILE_LORAIN_NAME   (default: "OSI Aqua-Scope LoRain")
  *   CS_PROFILE_UC512_NAME    (default: "OSI Milesight UC512")
  *   STREGA_CODEC_PATH        (default: "/srv/node-red/codecs/strega_gen1_decoder.js")
+ *   STREGA_GEN2_CODEC_PATH   (default: "/srv/node-red/codecs/strega_gen2_decoder.js")
  *   LSN50_CODEC_PATH         (default: "/srv/node-red/codecs/dragino_lsn50_decoder.js")
  *   S2120_CODEC_PATH         (default: "/srv/node-red/codecs/sensecap_s2120_decoder.js")
  *   LORAIN_CODEC_PATH        (default: "/srv/node-red/codecs/aquascope_lorain_decoder.js")
@@ -86,12 +88,14 @@ const CFG = {
   appFieldTesterName: process.env.CS_APP_FIELD_TESTER_NAME || 'OSI Field Tester',
   profileKiwiName: process.env.CS_PROFILE_KIWI_NAME || 'OSI KIWI Sensor',
   profileStregaName: process.env.CS_PROFILE_STREGA_NAME || 'OSI STREGA Valve',
+  profileStregaGen2Name: process.env.CS_PROFILE_STREGA_GEN2_NAME || 'OSI STREGA Valve Gen2',
   profileLsn50Name: process.env.CS_PROFILE_LSN50_NAME || 'OSI Dragino LSN50',
   profileRakName: process.env.CS_PROFILE_RAK_NAME || 'OSI RAK Field Tester',
   profileS2120Name: process.env.CS_PROFILE_S2120_NAME || 'OSI SenseCAP S2120',
   profileLorainName: process.env.CS_PROFILE_LORAIN_NAME || 'OSI Aqua-Scope LoRain',
   profileUc512Name: process.env.CS_PROFILE_UC512_NAME || 'OSI Milesight UC512',
   stregaCodecPath: process.env.STREGA_CODEC_PATH || '/srv/node-red/codecs/strega_gen1_decoder.js',
+  stregaGen2CodecPath: process.env.STREGA_GEN2_CODEC_PATH || '/srv/node-red/codecs/strega_gen2_decoder.js',
   lsn50CodecPath: process.env.LSN50_CODEC_PATH || '/srv/node-red/codecs/dragino_lsn50_decoder.js',
   s2120CodecPath: process.env.S2120_CODEC_PATH || '/srv/node-red/codecs/sensecap_s2120_decoder.js',
   lorainCodecPath: process.env.LORAIN_CODEC_PATH || '/srv/node-red/codecs/aquascope_lorain_decoder.js',
@@ -296,6 +300,7 @@ function toUciCloudKey(envKey) {
     CHIRPSTACK_APP_FIELD_TESTER: 'chirpstack_app_field_tester',
     CHIRPSTACK_PROFILE_KIWI: 'chirpstack_profile_kiwi',
     CHIRPSTACK_PROFILE_STREGA: 'chirpstack_profile_strega',
+    CHIRPSTACK_PROFILE_STREGA_GEN2: 'chirpstack_profile_strega_gen2',
     CHIRPSTACK_PROFILE_LSN50: 'chirpstack_profile_lsn50',
     CHIRPSTACK_PROFILE_CLOVER: 'chirpstack_profile_clover',
     CHIRPSTACK_PROFILE_RAK10701: 'chirpstack_profile_rak10701',
@@ -444,6 +449,8 @@ async function main() {
   const kiwiProfileId = await getOrCreateProfile(client, tenantId, CFG.profileKiwiName, 'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
   const stregaCodecScript = readCodecScript(CFG.stregaCodecPath, 'STREGA');
   const stregaProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaName, 'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)', stregaCodecScript);
+  const stregaGen2CodecScript = readCodecScript(CFG.stregaGen2CodecPath, 'STREGA Gen2');
+  const stregaGen2ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaGen2Name, 'Strega SV2 smart irrigation valve, Gen2 scheduler (LoRaWAN 1.0.3 OTAA)', stregaGen2CodecScript);
   const lsn50CodecScript = readCodecScript(CFG.lsn50CodecPath, 'LSN50');
   const lsn50ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name, 'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)', lsn50CodecScript);
   const rak10701ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileRakName, 'RAK10701 LoRaWAN coverage field tester');
@@ -469,6 +476,7 @@ async function main() {
     CHIRPSTACK_APP_FIELD_TESTER: fieldTesterAppId,
     CHIRPSTACK_PROFILE_KIWI: kiwiProfileId,
     CHIRPSTACK_PROFILE_STREGA: stregaProfileId,
+    CHIRPSTACK_PROFILE_STREGA_GEN2: stregaGen2ProfileId,
     CHIRPSTACK_PROFILE_LSN50: lsn50ProfileId,
     // CLOVER is a compatibility alias for the RAK10701 field tester profile.
     // Both keys intentionally point to the same ChirpStack device profile ID.
@@ -496,6 +504,7 @@ async function main() {
   console.log('  Device profiles:');
   console.log(`    ${CFG.profileKiwiName.padEnd(24)} ${kiwiProfileId}`);
   console.log(`    ${CFG.profileStregaName.padEnd(24)} ${stregaProfileId}`);
+  console.log(`    ${CFG.profileStregaGen2Name.padEnd(24)} ${stregaGen2ProfileId}`);
   console.log(`    ${CFG.profileLsn50Name.padEnd(24)} ${lsn50ProfileId}`);
   console.log(`    ${CFG.profileRakName.padEnd(24)} ${rak10701ProfileId}`);
   console.log(`    ${CFG.profileS2120Name.padEnd(24)} ${s2120ProfileId}`);

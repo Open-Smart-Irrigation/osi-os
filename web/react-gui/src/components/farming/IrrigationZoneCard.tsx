@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation } from '../../types/farming';
+import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation, ValveSummary } from '../../types/farming';
 import type { IrrigationActuation } from '../../services/api';
 import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../services/api';
 import { KiwiSensorCard } from './KiwiSensorCard';
@@ -9,7 +9,7 @@ import { StregaValveCard } from './StregaValveCard';
 import { SenseCapWeatherCard } from './SenseCapWeatherCard';
 import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { ScheduleSection } from './ScheduleSection';
-import { AssignDeviceModal } from './AssignDeviceModal';
+import { ZoneDeviceModal } from './ZoneDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
@@ -26,6 +26,7 @@ interface IrrigationZoneCardProps {
   onUpdate: () => void;
   allZones?: Array<{ id: number; name: string }>;
   irrigationActuations?: IrrigationActuation[];
+  valvesByEui?: Map<string, ValveSummary>;
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -84,6 +85,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   onUpdate,
   allZones,
   irrigationActuations = [],
+  valvesByEui,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
@@ -451,8 +453,10 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onUpdate={onUpdate}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          removeContext="zone"
                           irrigationActuations={irrigationActuations}
                           timeZone={zone.timezone}
+                          valve={valvesByEui?.get(device.deveui)}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -550,11 +554,16 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       </>
       )} {/* end !zoneCollapsed */}
 
-      {/* Assign Device Modal */}
-      <AssignDeviceModal
+      {/* Zone device modal: assign an existing device or register a new one. */}
+      {/* Cherry-pick note: fcf70de4 gated this on `canWrite`, which comes from the
+          write-only-scoping work on feat/journal-cloud-primary and is NOT on this branch.
+          Taking that gate verbatim would reference an undefined identifier, so the modal is
+          opened unconditionally here, matching this branch's existing behaviour. Restore the
+          gate when scoping lands. */}
+      <ZoneDeviceModal
         isOpen={showAssignModal}
         onClose={() => setShowAssignModal(false)}
-        onDeviceAssigned={onUpdate}
+        onChanged={onUpdate}
         zoneId={zone.id}
         zoneName={zone.name}
         availableDevices={unassignedDevices}

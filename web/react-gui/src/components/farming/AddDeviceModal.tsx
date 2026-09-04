@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import type { DeviceType, DeviceCatalogItem } from '../../types/farming';
+import React, { useEffect, useState } from 'react';
+import type { DeviceCatalogItem, DeviceType, StregaGeneration } from '../../types/farming';
 import { devicesAPI } from '../../services/api';
 import { useTranslation } from 'react-i18next';
+import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
 
 interface AddDeviceModalProps {
   isOpen: boolean;
@@ -17,36 +18,38 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const [catalog, setCatalog] = useState<DeviceCatalogItem[]>([]);
-  const [selectedType, setSelectedType] = useState<DeviceType>('KIWI_SENSOR');
+  const [selectedType, setSelectedType] = useState<DeviceType | ''>('');
   const [name, setName] = useState('');
   const [deveui, setDeveui] = useState('');
   const [appkey, setAppkey] = useState('');
+  const [stregaGeneration, setStregaGeneration] = useState<StregaGeneration>('GEN1');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (isOpen) {
-      loadCatalog();
-    }
+    if (!isOpen) return;
+    setName('');
+    setDeveui('');
+    setAppkey('');
+    setStregaGeneration('GEN1');
+    setError('');
+    // Clearing catalog/selectedType up front (8fc83874) is what makes a failed or empty
+    // catalog fetch fall through to the "select a device type" guard below, instead of
+    // leaving the previous session's pick (e.g. a stale STREGA_VALVE) selected on reopen.
+    setCatalog([]);
+    setSelectedType('');
+    devicesAPI.getCatalog()
+      .then((data) => {
+        setCatalog(data);
+        if (data.length > 0) setSelectedType(data[0].id);
+      })
+      .catch((err) => console.error('Failed to load catalog:', err));
   }, [isOpen]);
-
-  const loadCatalog = async () => {
-    try {
-      const data = await devicesAPI.getCatalog();
-      setCatalog(data);
-      if (data.length > 0) {
-        setSelectedType(data[0].id);
-      }
-    } catch (err) {
-      console.error('Failed to load catalog:', err);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Validate DevEUI (16 hex characters)
     if (!/^[0-9A-Fa-f]{16}$/.test(deveui)) {
       setError(t('addModal.deveuiInvalid'));
       return;
@@ -56,141 +59,133 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
       return;
     }
 
+    if (catalog.length === 0 || !selectedType) {
+      setError(t('addModal.deviceTypeRequired', 'Select a device type'));
+      return;
+    }
+
     setLoading(true);
     try {
+      // The dropdown is the source of truth. The catalog effect already seeds
+      // selectedType with data[0].id when the modal opens, so there is nothing
+      // to re-fetch here -- and re-deriving from catalog[0] discarded the pick.
+      const typeId = selectedType;
       await devicesAPI.add({
         deveui,
         name,
-        type_id: selectedType,
+        type_id: typeId,
         appkey: appkey || undefined,
+        ...(selectedType === 'STREGA_VALVE' ? { strega_generation: stregaGeneration } : {}),
       });
-      // Reset form
       setName('');
       setDeveui('');
       setAppkey('');
+      setStregaGeneration('GEN1');
       onDeviceAdded();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || t('addModal.failed'));
+      setError(err?.response?.data?.message || t('addModal.failed'));
     } finally {
       setLoading(false);
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--card)] rounded-2xl shadow-2xl border-2 border-[var(--border)] max-w-lg w-full p-8">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-3xl font-bold text-[var(--text)] high-contrast-text">{t('addModal.title')}</h2>
-          <button
-            onClick={onClose}
-            className="text-[var(--text-tertiary)] hover:text-[var(--text)] text-3xl leading-none"
-          >
-            ×
-          </button>
+    <Modal isOpen={isOpen} title={t('addModal.title')} onClose={onClose}>
+      {error && (
+        <div className="mb-4 bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm">
+          {error}
         </div>
+      )}
 
-        {error && (
-          <div className="mb-4 bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm">
-            {error}
-          </div>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <FormField id="device-type" label={t('addModal.deviceType')}>
+          <select
+            id="device-type"
+            value={selectedType}
+            onChange={(e) => setSelectedType(e.target.value as DeviceType)}
+            className={INPUT_CLASS}
+          >
+            {catalog.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}</option>
+            ))}
+          </select>
+        </FormField>
+
+        {/* Strega generation (valves only). Re-inserted on top of fcf70de4's ui-core
+            refactor: that commit predates valve generation support and dropped this field. */}
+        {selectedType === 'STREGA_VALVE' && (
+          <FormField id="stregaGeneration" label={t('addModal.generation')}>
+            <select
+              id="stregaGeneration"
+              value={stregaGeneration}
+              onChange={(e) => setStregaGeneration(e.target.value as StregaGeneration)}
+              className={INPUT_CLASS}
+            >
+              <option value="GEN1">{t('addModal.generationGen1')}</option>
+              <option value="GEN2">{t('addModal.generationGen2')}</option>
+            </select>
+          </FormField>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Device Type */}
-          <div>
-            <label className="block text-[var(--text)] text-lg font-semibold mb-2">
-              {t('addModal.deviceType')}
-            </label>
-            <select
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value as DeviceType)}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-            >
-              {catalog.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <FormField id="name" label={t('addModal.deviceName')}>
+          <input
+            id="name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            placeholder={t('addModal.deviceNamePlaceholder')}
+            className={INPUT_CLASS}
+          />
+        </FormField>
 
-          {/* Name */}
-          <div>
-            <label htmlFor="name" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              {t('addModal.deviceName')}
-            </label>
-            <input
-              id="name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              placeholder={t('addModal.deviceNamePlaceholder')}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-            />
-          </div>
+        <FormField
+          id="deveui"
+          label={t('addModal.deveui')}
+          hint={t('addModal.deveuiHint')}
+        >
+          <input
+            id="deveui"
+            type="text"
+            value={deveui}
+            onChange={(e) => setDeveui(e.target.value.toUpperCase())}
+            required
+            maxLength={16}
+            placeholder={t('addModal.deveuiPlaceholder')}
+            className={`${INPUT_CLASS} font-mono`}
+          />
+        </FormField>
 
-          {/* DevEUI */}
-          <div>
-            <label htmlFor="deveui" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              {t('addModal.deveui')}
-            </label>
-            <input
-              id="deveui"
-              type="text"
-              value={deveui}
-              onChange={(e) => setDeveui(e.target.value.toUpperCase())}
-              required
-              maxLength={16}
-              placeholder={t('addModal.deveuiPlaceholder')}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-            />
-            <p className="text-[var(--text-tertiary)] text-sm mt-1">
-              {t('addModal.deveuiHint')}
-            </p>
-          </div>
+        <FormField
+          id="appkey"
+          label={t('addModal.appkey', 'AppKey')}
+          hint={t('addModal.appkeyHint', '32 hex characters printed on the device label')}
+        >
+          <input
+            id="appkey"
+            type="text"
+            value={appkey}
+            onChange={(e) => setAppkey(e.target.value.toUpperCase())}
+            maxLength={32}
+            placeholder={t('addModal.appkeyPlaceholder', 'AABBCCDDEEFF00112233445566778899')}
+            className={`${INPUT_CLASS} font-mono`}
+          />
+        </FormField>
 
-          {/* AppKey */}
-          <div>
-            <label htmlFor="appkey" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              {t('addModal.appkey', 'AppKey')}
-            </label>
-            <input
-              id="appkey"
-              type="text"
-              value={appkey}
-              onChange={(e) => setAppkey(e.target.value.toUpperCase())}
-              maxLength={32}
-              placeholder={t('addModal.appkeyPlaceholder', 'AABBCCDDEEFF00112233445566778899')}
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-            />
-            <p className="text-[var(--text-tertiary)] text-sm mt-1">
-              {t('addModal.appkeyHint', '32 hex characters printed on the device label')}
-            </p>
-          </div>
-
-          {/* Buttons */}
-          <div className="flex gap-4 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg py-4 touch-target rounded-lg transition-colors"
-            >
-              {tc('cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
-            >
-              {loading ? t('addModal.adding') : t('addModal.submit')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex gap-4 pt-4">
+          <Button variant="secondary" onClick={onClose} className="flex-1 text-lg py-4">
+            {tc('cancel')}
+          </Button>
+          <Button
+            type="submit"
+            disabled={loading || catalog.length === 0 || !selectedType}
+            className="flex-1 text-lg py-4 shadow-lg"
+          >
+            {loading ? t('addModal.adding') : t('addModal.submit')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 };

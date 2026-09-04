@@ -19,5 +19,9 @@
   "0018__field_journal.sql": "7f3a542510ed71a944843334a563d6df1b8396e23c4d959ddd90e84db8b87d69",
   "0019__journal_catalog_v1.sql": "c7cb59d92908926c6b3ed2222dc4a81d45df113ef31a7c1ebb2b3935944b19c7",
   "0020__journal_resource_owner_scope.sql": "85249a25aa9ed6d0cfdca029a35efc249e1f0f3152817357b37d884b5dff1ad2",
-  "0021__journal_plot_lookup_indexes.sql": "21591c7a050c46331f1d2ed9494d6883a0c421866f5f65168b7c5fccd9862c8c"
+  "0021__journal_plot_lookup_indexes.sql": "21591c7a050c46331f1d2ed9494d6883a0c421866f5f65168b7c5fccd9862c8c",
+  "0022__valve_control.sql": "a687fad8708c1f8ebc6397adbd215be1a19d272b3d1d1b08b511670578e130d2",
+  "0023__app_settings.sql": "885d2d68d4d2c65e02398fabf35072062e95743ffc90a9a59274c2d043c2a022",
+  "0024__valve_schedule_sync_triggers.sql": "5d527e6eb1ded61e4c6b6ddf20ff6d16375b958d3e8ef3b427c92778eb4a055f",
+  "0025__valve_settings_sync_triggers.sql": "337f8a252a88b8c71621c560cad1ee3842600e3afe5e2aec51736aa377ce68dd"
 }

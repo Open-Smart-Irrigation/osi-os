@@ -55,6 +55,7 @@ function actuationFixture(overrides: Partial<IrrigationActuation> = {}): Irrigat
     flowRateLpm: 8.4,
     reconciliationState: 'OBSERVED_RUNNING',
     cancelReason: null,
+    trigger: null,
     commandResult: 'APPLIED',
     commandResultDetail: null,
     commandAppliedAt: new Date(Date.now() - 4.5 * 60_000).toISOString(),
@@ -164,6 +165,23 @@ test('actuationFixture builds a row the API contract accepts', () => {
   assert.equal(a.status, 'OPEN_TIMEOUT');
   assert.equal(a.observedOpenAt, null);
   assert.equal(a.commandResultDetail, 'Downlink not acked');
+});
+
+test('actuation rows default trigger to null and accept every trigger value', () => {
+  const defaulted = actuationFixture();
+  assert.equal(defaulted.trigger, null);
+
+  const triggers: NonNullable<IrrigationActuation['trigger']>[] = [
+    'manual',
+    'cloud_command',
+    'trigger_based',
+    'one_time',
+    'on_valve_schedule',
+    'unexplained',
+  ];
+  for (const trigger of triggers) {
+    assert.equal(actuationFixture({ trigger }).trigger, trigger);
+  }
 });
 
 test('default view shows commanded date, duration, and effective irrigation depth', async () => {

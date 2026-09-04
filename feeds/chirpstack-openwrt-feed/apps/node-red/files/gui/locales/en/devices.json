@@ -23,6 +23,15 @@
     "pleaseSelect": "Please select a device",
     "failed": "Failed to assign device"
   },
+  "zoneDeviceModal": {
+    "title": "Add a device to {{zoneName}}",
+    "tabAssign": "Assign existing",
+    "tabRegister": "New device",
+    "assignConflict": "That device is now in zone \"{{zoneName}}\". Unassign it there first.",
+    "registerZoneNotice": "This device will be registered directly into {{zoneName}}.",
+    "registerSubmit": "Register into zone",
+    "registering": "Registering..."
+  },
   "createZoneModal": {
     "title": "Create Irrigation Zone",
     "zoneName": "Zone Name",

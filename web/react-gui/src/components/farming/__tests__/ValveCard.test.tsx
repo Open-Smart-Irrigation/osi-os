@@ -6,7 +6,7 @@ import React from 'react';
 import { StregaValveCard } from '../StregaValveCard';
 import { devicesAPI } from '../../../services/api';
 import type { IrrigationActuation } from '../../../services/api';
-import type { Device } from '../../../types/farming';
+import type { Device, ValveSummary } from '../../../types/farming';
 
 const { translateForTest } = vi.hoisted(() => {
     const testTranslations: Record<string, string> = {
@@ -38,6 +38,7 @@ vi.mock('../../../services/api', () => ({
     devicesAPI: {
         controlValve: vi.fn().mockResolvedValue(undefined),
         cancelIrrigation: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
     },
     valveAPI: {
         getTodayLiters: vi.fn().mockResolvedValue({ liters: null, source: 'unknown' }),
@@ -63,6 +64,36 @@ const mockDevice: Device = {
     last_seen: '2026-05-17T12:00:00Z',
 } as unknown as Device;
 
+function makeValveSummary(overrides: Partial<ValveSummary> = {}): ValveSummary {
+    return {
+        deviceEui: mockDevice.deveui,
+        name: mockDevice.name,
+        zoneId: null,
+        zoneName: null,
+        zoneUuid: null,
+        timezone: 'UTC',
+        currentState: 'CLOSED',
+        targetState: null,
+        stregaGeneration: 'GEN1',
+        flowRateLpm: null,
+        flowRateSource: null,
+        defaultOpenMinutes: null,
+        schedulerStatus: 'ACTIVE',
+        skipTodayDate: null,
+        lastUplinkAt: null,
+        activeActuation: null,
+        recentStaleState: null,
+        nextRun: null,
+        scheduleCount: 0,
+        pushState: { queued: 0, acked: 0, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+        lastClockSyncAckedAt: null,
+        enclosureTemperatureC: null,
+        enclosureHumidityPct: null,
+        enclosureMeasuredAt: null,
+        ...overrides,
+    };
+}
+
 function actuationFixture(overrides: Partial<IrrigationActuation> = {}): IrrigationActuation {
     return {
         expectationId: 'exp-1',
@@ -80,6 +111,7 @@ function actuationFixture(overrides: Partial<IrrigationActuation> = {}): Irrigat
         flowRateLpm: null,
         reconciliationState: 'PENDING_OBSERVATION',
         cancelReason: null,
+        trigger: null,
         commandResult: null,
         commandResultDetail: null,
         commandAppliedAt: null,
@@ -100,10 +132,19 @@ function renderCard(overrides: Partial<Device> = {}, props: Record<string, unkno
 }
 
 describe('StregaValveCard', () => {
-    it('sends timed OPEN with duration_seconds', async () => {
+    it('does not move water on a single tap — Open must be confirmed', async () => {
+        // osi-os#171: the Valve control panel requires an explicit confirm
+        // (ValveOpenDialog) before opening. This card went straight to controlValve, so the
+        // same valve was laxer here than on the panel. First tap arms only.
+        renderCard();
+        fireEvent.click(await screen.findByText(/5 min/));
+        expect(devicesAPI.controlValve).not.toHaveBeenCalled();
+    });
+
+    it('sends timed OPEN with duration_seconds once confirmed', async () => {
         const { onUpdate } = renderCard();
-        const openBtn = await screen.findByText(/5 min/);
-        fireEvent.click(openBtn);
+        fireEvent.click(await screen.findByText(/5 min/));           // arm
+        fireEvent.click(await screen.findByText(/Confirm/i));        // confirm
         await waitFor(() => {
             expect(devicesAPI.controlValve).toHaveBeenCalledWith(mockDevice.deveui, {
                 action: 'OPEN_FOR_DURATION',
@@ -195,5 +236,66 @@ describe('StregaValveCard', () => {
             minute: '2-digit',
         }).format(new Date('2026-05-29T10:09:00Z'));
         expect(await screen.findByText(`Translated closed at ${expectedCloseLabel}`)).toBeInTheDocument();
+    });
+
+    it('shows the labelled enclosure reading when the valve-list row carries one', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ enclosureTemperatureC: 21.5, enclosureHumidityPct: 48.2 }),
+        });
+        expect(await screen.findByText('21.5 °C · 48.2 % RH')).toBeInTheDocument();
+    });
+
+    it('renders a measured zero enclosure reading rather than treating it as missing', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ enclosureTemperatureC: 0, enclosureHumidityPct: 0 }),
+        });
+        expect(await screen.findByText('0 °C · 0 % RH')).toBeInTheDocument();
+    });
+
+    it('shows "no reading yet" for a GEN1 valve whose list row has no enclosure values', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ stregaGeneration: 'GEN1', enclosureTemperatureC: null, enclosureHumidityPct: null }),
+        });
+        expect(await screen.findByText('no reading yet')).toBeInTheDocument();
+    });
+
+    it('shows "not measured on Gen2" for a GEN2 valve, even if the row somehow carries a value', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ stregaGeneration: 'GEN2', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48 }),
+        });
+        expect(await screen.findByText('not measured on Gen2')).toBeInTheDocument();
+        expect(screen.queryByText('21.5 °C · 48 % RH')).not.toBeInTheDocument();
+        expect(screen.queryByText('no reading yet')).not.toBeInTheDocument();
+    });
+
+    it('renders nothing for the enclosure row when no valve-list row exists for this device', async () => {
+        const { container } = renderCard();
+        await screen.findByText(/5 min/); // wait for the card to finish its initial render
+        expect(container.textContent).not.toMatch(/Enclosure|no reading yet|not measured on Gen2|°C/);
+    });
+
+    // C-1 (final fix wave review): the confirm-remove flow's own devicesAPI.remove
+    // call must be gated on removeContext, not unconditional -- the zone-card placement
+    // (removeContext="zone") relies on the caller's onRemove to do the actual
+    // irrigationZonesAPI.removeDevice zone-detach; it must never also unclaim the device
+    // from the whole farm.
+    it('removeContext="zone": confirming remove only calls onRemove, never devicesAPI.remove', async () => {
+        const { onRemove } = renderCard({}, { removeContext: 'zone' });
+        fireEvent.click(await screen.findByTitle('stregaValve.removeDeviceTitle'));
+        fireEvent.click(await screen.findByText('stregaValve.yesRemove'));
+        await waitFor(() => {
+            expect(onRemove).toHaveBeenCalled();
+        });
+        expect(devicesAPI.remove).not.toHaveBeenCalled();
+    });
+
+    it('default removeContext ("farm"): confirming remove calls devicesAPI.remove, then onRemove', async () => {
+        const { onRemove } = renderCard();
+        fireEvent.click(await screen.findByTitle('stregaValve.removeDeviceTitle'));
+        fireEvent.click(await screen.findByText('stregaValve.yesRemove'));
+        await waitFor(() => {
+            expect(devicesAPI.remove).toHaveBeenCalledWith(mockDevice.deveui);
+        });
+        expect(onRemove).toHaveBeenCalled();
     });
 });

@@ -21,6 +21,7 @@ describe('display preferences', () => {
       environment: true,
       waterCard: true,
       schedulerUi: true,
+      valveControl: true,
     },
   };
 
@@ -52,6 +53,7 @@ describe('display preferences', () => {
         environment: false,
         waterCard: false,
         schedulerUi: false,
+        valveControl: false,
       },
     });
 
@@ -61,6 +63,7 @@ describe('display preferences', () => {
       environment: false,
       waterCard: false,
       schedulerUi: false,
+      valveControl: false,
     });
   });
 

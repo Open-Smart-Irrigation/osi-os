@@ -156,7 +156,35 @@ function eventClue(event: HistoryEvent, metadata: Record<string, unknown>): stri
     .toLowerCase();
 }
 
+// Maps the actuation `trigger` (carried in event.metadata.trigger once the history
+// API delivers it — see valve_actuation_expectations.trigger / IrrigationTrigger in
+// services/api.ts) to its history-timeline label key. Absent/unrecognised trigger
+// falls back to the existing label heuristics below (null-safe).
+function triggerEventLabelKey(trigger: unknown): string | null {
+  const normalized = typeof trigger === 'string' ? trigger.trim() : '';
+  switch (normalized) {
+    case 'on_valve_schedule':
+      return 'history.irrigationTimeline.eventLabel.onValveSchedule';
+    case 'one_time':
+      return 'history.irrigationTimeline.eventLabel.oneTime';
+    case 'unexplained':
+      return 'history.irrigationTimeline.eventLabel.unexplained';
+    // Without this case a service action falls through to the clue-based
+    // heuristics below and gets labelled "Scheduled" — actively wrong for a
+    // manual maintenance flush.
+    case 'service_action':
+      return 'history.irrigationTimeline.eventLabel.serviceAction';
+    case 'trigger_based':
+      return 'history.irrigationTimeline.eventLabel.scheduled';
+    default:
+      return null;
+  }
+}
+
 function displayEventLabel(t: HistoryTranslate, event: HistoryEvent, metadata: Record<string, unknown>): string {
+  const triggerLabelKey = triggerEventLabelKey(metadata.trigger);
+  if (triggerLabelKey) return t(triggerLabelKey);
+
   const explicitLabel = normalizeText(event.label);
   if (explicitLabel && isSafeLabel(explicitLabel)) return explicitLabel;
 

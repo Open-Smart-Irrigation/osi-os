@@ -31,6 +31,8 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'osi-command-ledger',
     'osi-db-helper',
     'osi-journal',
+    'osi-system-settings',
+    'osi-valve-control',
     'uc512-normalize',
     'zone-commands',
     'zone-env',
@@ -40,6 +42,8 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['zone-env'], 'osi-zone-env');
   assert.equal(osiLib.NAME_TO_PATH['device-writer'], 'osi-device-writer');
   assert.equal(osiLib.NAME_TO_PATH['uc512-normalize'], 'osi-uc512-normalize');
+  assert.equal(osiLib.NAME_TO_PATH['osi-valve-control'], 'osi-valve-control');
+  assert.equal(osiLib.NAME_TO_PATH['osi-system-settings'], 'osi-system-settings');
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');

@@ -1,0 +1,10 @@
+{
+  "deviceName": "Valve White",
+  "deviceEui": "70B3D57708000334",
+  "fPort": 2,
+  "base64": "MjA1MDBAMGMwMA==",
+  "expected": {
+    "RTC_Port": 12,
+    "RTC_status": "00"
+  }
+}

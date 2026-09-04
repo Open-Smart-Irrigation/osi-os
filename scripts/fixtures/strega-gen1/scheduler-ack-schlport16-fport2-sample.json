@@ -1,0 +1,10 @@
+{
+  "deviceName": "Valve White",
+  "deviceEui": "70B3D57708000334",
+  "fPort": 2,
+  "base64": "MjA1MDBAMTAwMA==",
+  "expected": {
+    "Schl_Port": 16,
+    "Schl_status": "00"
+  }
+}

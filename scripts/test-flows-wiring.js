@@ -35,6 +35,25 @@ if (journalBootstrapResult.status !== 0) {
     console.log('OK  journal bootstrap behavior harness');
 }
 
+// Execution-based pin for the STREGA Gen2 device-profile reconciliation feature
+// (valve-ack-fn, strega-process-fn, Build Telemetry). A static regex on these nodes'
+// `func` strings can be defeated by a behavior-preserving-looking refactor (e.g. hoisting
+// the stored-generation check into a named const and inverting it) that still contains the
+// pinned literal; this harness extracts each node's real func and executes it under a stub
+// Node-RED environment, so it pins what the node actually does. See the file for detail.
+const gen2ReconcileResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'test-strega-gen2-reconcile.js')],
+    { encoding: 'utf8', timeout: 30000 }
+);
+if (gen2ReconcileResult.status !== 0) {
+    if (gen2ReconcileResult.stdout) process.stderr.write(gen2ReconcileResult.stdout);
+    if (gen2ReconcileResult.stderr) process.stderr.write(gen2ReconcileResult.stderr);
+    failures.push('STREGA Gen2 profile-reconciliation behavior harness failed');
+} else {
+    console.log('OK  STREGA Gen2 profile-reconciliation behavior harness (valve-ack-fn, strega-process-fn, Build Telemetry)');
+}
+
 function hasLib(node, varName, moduleName) {
     const libs = Array.isArray(node && node.libs) ? node.libs : [];
     return libs.some((lib) => lib.var === varName && lib.module === moduleName);
@@ -824,6 +843,187 @@ if (!reconcNode) {
     console.log('OK  H2: STALE_OPEN_OBSERVED present in reconciliation monitor');
 }
 
+// H2b: reconciliation monitor must not treat a missing uplink as an observation.
+// The uplink query LEFT JOINs devices to device_data, so a device that has
+// never uplinked still returns one row with dd.recorded_at = NULL and
+// d.current_state = the stale devices.current_state default. State
+// derivation must be gated on a real uplink row (uplink.recorded_at truthy),
+// not just on `uplink` being non-null, or a never-uplinked valve gets
+// falsely marked OBSERVED_COMPLETE/OBSERVED_RUNNING with a null observed_*_at.
+const RECONCILIATION_UPLINK_GUARD_RE =
+    /if\s*\(\s*uplink\s*&&\s*uplink\.recorded_at\s*\)\s*\{\s*\n\s*const stateUpdatedMs\s*=\s*Date\.parse\(uplink\.state_updated_at\)/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
+    if (!profileReconcNode) {
+        failures.push(`H2b ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!RECONCILIATION_UPLINK_GUARD_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2b ${profile}: strega-reconciliation-monitor must gate state derivation on ` +
+            `'uplink && uplink.recorded_at' (a missing uplink must not be treated as an observation)`
+        );
+    } else {
+        console.log(`OK  H2b ${profile}: reconciliation monitor gates state derivation on uplink.recorded_at`);
+    }
+}
+
+// H2c: reconciliation monitor must also require the paired devices.current_state
+// to be FRESH (state_updated_at >= commanded_at) before treating it as an
+// observation. devices.current_state is a live column only rewritten by
+// strega-sql-fn when a state-bearing uplink CHANGES it; the FIRST uplink
+// after commanded_at for a real valve (Class A, still reporting the OLD
+// state) pairs a fresh dd.recorded_at with a stale current_state, which
+// without this gate falsely completes the expectation instantly. Comparison
+// must be epoch-millis (Date.parse + Number.isFinite), never a string/lexical
+// compare — devices.updated_at and commanded_at may differ in ISO-'T' vs
+// space-form and a lexical compare is a known repo bug class.
+const RECONCILIATION_FRESHNESS_GATE_RE =
+    /const\s+stateUpdatedMs\s*=\s*Date\.parse\(uplink\.state_updated_at\);\s*\n\s*const\s+commandedMs\s*=\s*Date\.parse\(exp\.commanded_at\);\s*\n\s*const\s+stateIsFresh\s*=\s*Number\.isFinite\(stateUpdatedMs\)\s*&&\s*Number\.isFinite\(commandedMs\)\s*&&\s*stateUpdatedMs\s*>=\s*commandedMs;/;
+const RECONCILIATION_STATE_UPDATED_COLUMN_RE = /d\.updated_at\s+AS\s+state_updated_at/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
+    if (!profileReconcNode) {
+        failures.push(`H2c ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!RECONCILIATION_STATE_UPDATED_COLUMN_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2c ${profile}: strega-reconciliation-monitor query must select d.updated_at AS state_updated_at`
+        );
+    } else if (!RECONCILIATION_FRESHNESS_GATE_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2c ${profile}: strega-reconciliation-monitor must gate state derivation on ` +
+            `state_updated_at (devices.updated_at) being >= commanded_at via epoch-millis comparison ` +
+            `(a stale current_state paired with a fresh uplink row must not be treated as an observation)`
+        );
+    } else {
+        console.log(`OK  H2c ${profile}: reconciliation monitor gates state derivation on state_updated_at >= commanded_at`);
+    }
+}
+
+// H2d: litres accounting must exclude STALE_NO_OBSERVATION (never-observed
+// commands) alongside CANCELLED, so a command that timed out unobserved does
+// not credit phantom litres to today's totals or the zone water balance.
+// get-actuations-query is intentionally NOT checked here: the GUI actuations
+// list should keep showing stale rows as a distinct, honest state.
+const TODAY_LITERS_EXCLUSION_RE = /reconciliation_state\s+NOT\s+IN\s*\(\s*'CANCELLED'\s*,\s*'STALE_NO_OBSERVATION'\s*\)/;
+const ZONE_ENV_EXCLUSION_RE = /COALESCE\(reconciliation_state,\s*''\)\s+NOT\s+IN\s*\(\s*'CANCELLED'\s*,\s*'STALE_NO_OBSERVATION'\s*\)/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+
+    const litersNode = profileFlows.find((node) => node.id === 'strega-today-liters-fn');
+    if (!litersNode) {
+        failures.push(`H2d ${profile}: strega-today-liters-fn not found`);
+    } else if (!TODAY_LITERS_EXCLUSION_RE.test(litersNode.func || '')) {
+        failures.push(`H2d ${profile}: strega-today-liters-fn must exclude STALE_NO_OBSERVATION rows from litres sums`);
+    } else {
+        console.log(`OK  H2d ${profile}: strega-today-liters-fn excludes STALE_NO_OBSERVATION from litres`);
+    }
+
+    const zoneEnvNode = profileFlows.find((node) => node.id === 'zone-env-fn');
+    if (!zoneEnvNode) {
+        failures.push(`H2d ${profile}: zone-env-fn not found`);
+    } else if (!ZONE_ENV_EXCLUSION_RE.test(zoneEnvNode.func || '')) {
+        failures.push(`H2d ${profile}: zone-env-fn must exclude STALE_NO_OBSERVATION rows from estimated irrigation litres`);
+    } else {
+        console.log(`OK  H2d ${profile}: zone-env-fn excludes STALE_NO_OBSERVATION from estimated irrigation litres`);
+    }
+}
+
+// H2e: the reconciliation grace must be widened to 1800s (30 min). STREGA
+// valves are LoRaWAN Class A with a default 600s uplink interval: the OPEN
+// downlink itself only reaches the valve at the next uplink, and the
+// state-bearing CLOSE confirmation arrives at the uplink after the run ends,
+// so a genuine run can confirm 600-1500s after expected_close_at. The old
+// 300s grace turned real runs into the terminal STALE_NO_OBSERVATION, which
+// (per H2d above) is excluded from litres sums - i.e. real irrigation water
+// silently vanished from the zone water balance. Both STALE transitions
+// share the one constant, so a single change covers both.
+const RECONCILIATION_GRACE_VALUE_RE = /const\s+RECONCILIATION_GRACE_SEC\s*=\s*1800\s*;/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
+    if (!profileReconcNode) {
+        failures.push(`H2e ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!RECONCILIATION_GRACE_VALUE_RE.test(profileReconcNode.func || '')) {
+        failures.push(
+            `H2e ${profile}: strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC must be 1800 ` +
+            `(a full Class-A uplink cycle plus margin on both the OPEN-delivery and CLOSE-confirmation legs)`
+        );
+    } else {
+        console.log(`OK  H2e ${profile}: RECONCILIATION_GRACE_SEC = 1800`);
+    }
+}
+
+// H2f: the Recent-irrigations display grace (get-actuations-response) must match the
+// reconciler's RECONCILIATION_GRACE_SEC (1800s). The reconciler was widened to 1800s (H2e)
+// precisely because a Class-A STREGA valve's OPEN/CLOSE confirmation each ride the next uplink
+// cycle; a shorter display grace here badges a still-healthy, still-reconciling run
+// OPEN_TIMEOUT/CLOSE_TIMEOUT well before the reconciler itself would call it stale.
+const DISPLAY_GRACE_VALUE_RE = /const\s+GRACE_MS\s*=\s*1800\s*\*\s*1000\s*;/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileGetActuationsNode = profileFlows.find((node) => node.id === 'get-actuations-response');
+    if (!profileGetActuationsNode) {
+        failures.push(`H2f ${profile}: get-actuations-response not found`);
+    } else if (!DISPLAY_GRACE_VALUE_RE.test(profileGetActuationsNode.func || '')) {
+        failures.push(
+            `H2f ${profile}: get-actuations-response's GRACE_MS must be 1800 * 1000, matching ` +
+            `strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC (a healthy run must not be ` +
+            `badged OPEN_TIMEOUT/CLOSE_TIMEOUT before the reconciler itself would call it stale)`
+        );
+    } else {
+        console.log(`OK  H2f ${profile}: get-actuations-response GRACE_MS = 1800 * 1000`);
+    }
+}
+
+// H2g: write-strega-expectation must persist the trigger the command payload carries (the
+// one-time-open builder in workers.js sets data.trigger='one_time'; a cloud command may set
+// raw.trigger) so the FW-T4 TriggerChip can ever render for an operator/one-time open.
+const WRITE_EXPECTATION_TRIGGER_COLUMN_RE = /created_at,\s*trigger\)\s*'\s*\+\s*\n\s*'VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?\)'/;
+const WRITE_EXPECTATION_TRIGGER_VALUE_RE = /const\s+trigger\s*=\s*raw\.trigger\s*\|\|\s*data\.trigger\s*\|\|\s*null\s*;/;
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileWriteExpNode = profileFlows.find((node) => node.id === 'write-strega-expectation');
+    if (!profileWriteExpNode) {
+        failures.push(`H2g ${profile}: write-strega-expectation not found`);
+    } else if (!WRITE_EXPECTATION_TRIGGER_VALUE_RE.test(profileWriteExpNode.func || '')) {
+        failures.push(
+            `H2g ${profile}: write-strega-expectation must derive trigger from raw.trigger || data.trigger || null`
+        );
+    } else if (!WRITE_EXPECTATION_TRIGGER_COLUMN_RE.test(profileWriteExpNode.func || '')) {
+        failures.push(
+            `H2g ${profile}: write-strega-expectation's INSERT must include the trigger column ` +
+            `(command payload trigger, e.g. 'one_time', is otherwise silently dropped)`
+        );
+    } else {
+        console.log(`OK  H2g ${profile}: write-strega-expectation INSERT includes trigger, sourced from the payload`);
+    }
+}
+
 // L1: write-strega-expectation and reject-indefinite-open must not fall back to {}
 for (const nodeId of ['write-strega-expectation', 'reject-indefinite-open']) {
     const n = byId[nodeId];
@@ -846,6 +1046,48 @@ for (const id of ['strega-today-liters-http-in', 'strega-today-liters-fn', 'stre
     }
     console.log(`OK  M8: ${id} present`);
 }
+
+// Valve control (2026-08): one-time opens enter the actuator path through their own link-out.
+const valveLinkOut = byId['valve-once-link-out'];
+if (!valveLinkOut || valveLinkOut.type !== 'link out' || !Array.isArray(valveLinkOut.links) || !valveLinkOut.links.includes('5974306566e99a92')) {
+    failures.push('valve-once-link-out must target the actuator link-in 5974306566e99a92');
+} else {
+    console.log('OK  valve-once-link-out → actuator link-in 5974306566e99a92');
+}
+if (!byId['5974306566e99a92'] || !Array.isArray(byId['5974306566e99a92'].links) || !byId['5974306566e99a92'].links.includes('valve-once-link-out')) {
+    failures.push('actuator link-in 5974306566e99a92 must list valve-once-link-out as a source');
+} else {
+    console.log('OK  actuator link-in 5974306566e99a92 lists valve-once-link-out as a source');
+}
+
+// Valve control: /api/valves HTTP routes must all wire to the router
+for (const id of [
+    'valve-list-get-http', 'valve-schedules-get-http', 'valve-schedules-post-http',
+    'valve-schedule-put-http', 'valve-schedule-delete-http', 'valve-plan-resend-post-http',
+    'valve-scheduler-status-post-http', 'valve-settings-put-http',
+]) {
+    assertWires(id, [['valve-api-router-fn']], `Valve control: ${id} → valve-api-router-fn`);
+}
+
+// Valve control: router outputs are [http response, mqtt out] in that order
+assertWires('valve-api-router-fn',
+    [['valve-api-response'], ['valve-push-mqtt-out']],
+    'Valve control: valve-api-router-fn outputs (response, mqtt out)');
+
+// Valve control: ACK ingest must use the standard wildcard uplink topic, not a UUID-pinned one
+if (!byId['valve-ack-mqtt-in'] || byId['valve-ack-mqtt-in'].topic !== 'application/+/device/+/event/up') {
+    failures.push('valve-ack-mqtt-in must use the wildcard uplink topic application/+/device/+/event/up');
+} else {
+    console.log('OK  valve-ack-mqtt-in uses the wildcard uplink topic');
+}
+
+// System settings: /api/system/settings GET+PUT HTTP routes must both wire to the thin router
+// (FW-T5 review R1, M4), which itself has exactly one output wired to the shared sys-admin
+// response node.
+for (const id of ['sys-settings-get-in', 'sys-settings-put-in']) {
+    assertWires(id, [['sys-settings-router-fn']], `System settings: ${id} → sys-settings-router-fn`);
+}
+assertWires('sys-settings-router-fn', [['sys-resp']], 'System settings: sys-settings-router-fn → sys-resp');
 
 // === WS2/WS3 osiDb.Database close audit ===
 
@@ -971,6 +1213,170 @@ if (!disableAllSchedulesFn || typeof disableAllSchedulesFn.func !== 'string') {
     const libs = Array.isArray(disableAllSchedulesFn.libs) ? disableAllSchedulesFn.libs : [];
     if (!libs.some((lib) => lib.var === 'osiDb' && lib.module === 'osi-db-helper')) {
         failures.push('settings modules: Disable All Schedules must use osi-db-helper');
+    }
+}
+
+// STREGA Gen2 decoder field alias: the Gen2 vendor decoder
+// (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up)
+// emits the valve state under `Actuator` instead of `Valve`. strega-process-fn
+// must accept both so a Gen2 uplink does not decode its valve state as null.
+const stregaProcessFn = byId['strega-process-fn'];
+if (!stregaProcessFn) {
+    failures.push('strega-process-fn not found');
+} else {
+    const stregaProcessFunc = stregaProcessFn.func || '';
+    const hasActuatorAlias = /Actuator/.test(stregaProcessFunc);
+    // Pin the explicit null/undefined-check idiom, not just the presence of
+    // the string `Actuator`. A `decodedObject.Valve || decodedObject.Actuator`
+    // rewrite would also match a bare /Actuator/ substring test but silently
+    // breaks valve state `0` (a real CLOSED reading is falsy, so `||` would
+    // wrongly fall through to Actuator).
+    const hasExplicitNullCheck =
+        /decodedObject\.Valve\s*!==\s*undefined/.test(stregaProcessFunc) &&
+        /decodedObject\.Valve\s*!==\s*null/.test(stregaProcessFunc);
+    const usesFalsyOrFallback = /decodedObject\.Valve\s*\|\|\s*decodedObject\.Actuator/.test(stregaProcessFunc);
+    if (!hasActuatorAlias) {
+        failures.push('strega-process-fn must accept the Gen2 decoder alias `Actuator` for `Valve`');
+    } else if (usesFalsyOrFallback || !hasExplicitNullCheck) {
+        failures.push('strega-process-fn must select the Gen2 `Actuator` alias via an explicit `!== undefined && !== null` check on `decodedObject.Valve`, not a `||` fallback (a real valve state `0` is falsy and would wrongly fall through to Actuator)');
+    } else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(stregaProcessFunc)) {
+        // MAJOR-2/NEW-MINOR-B: the STREGA-profile gate must whitelist the Gen2 profile UUID
+        // explicitly, not rely solely on the 'STREGA' substring in the profile name
+        // (CS_PROFILE_STREGA_GEN2_NAME is operator-overridable). Real acceptance behavior is
+        // proven by execution in test-strega-gen2-reconcile.js.
+        failures.push('strega-process-fn must whitelist CHIRPSTACK_PROFILE_STREGA_GEN2 in its STREGA-profile gate');
+    } else {
+        console.log('OK  strega-process-fn accepts Gen2 decoder alias Actuator for Valve via explicit null/undefined check, and whitelists the Gen2 UUID');
+    }
+}
+
+// STREGA Gen2 device profile selection: both independent device-registration
+// paths must be able to route a Gen2 STREGA valve to the Gen2 ChirpStack
+// device profile, and the node that owns the local DB write must persist the
+// generation into valve_settings so the scheduler emits the right frame
+// format from its first push. A stored GEN2 must also be sticky across a
+// generation-omitted re-registration: ensureDeviceProvisioned actively
+// re-points a device's ChirpStack profile to match the resolved profileId, so
+// a profile decision that consults only the request field (never stored
+// state) would demote an already-promoted GEN2 valve's ChirpStack device back
+// to Gen1 the moment a caller re-registers it without the field.
+const PROMOTION_ONLY_VALVE_SETTINGS_RE = /ON CONFLICT\(device_eui\)\s*DO UPDATE SET\s*strega_generation[^;]*?WHERE[^;]*?\bAND\b[^;]*?excluded\.strega_generation\s*=\s*'GEN2'/;
+
+function assertPromotionOnlyValveSettingsUpsert(node, label) {
+    if (!node) {
+        failures.push(label + ' not found');
+        return;
+    }
+    const func = node.func || '';
+    if (!/valve_settings/.test(func)) {
+        failures.push(label + ' must seed valve_settings.strega_generation after successful provisioning');
+    } else if (!PROMOTION_ONLY_VALVE_SETTINGS_RE.test(func)) {
+        failures.push(label + " valve_settings upsert must be promotion-only (ON CONFLICT ... WHERE ... excluded.strega_generation = 'GEN2'), not a plain upsert -- a plain upsert would silently demote an already-promoted GEN2 valve back to GEN1 on any re-registration");
+    } else {
+        console.log('OK  ' + label + ' seeds valve_settings via a promotion-only (GEN1->GEN2 only) upsert');
+    }
+}
+
+// The stickiness fix spans TWO nodes: post-devices-insert consults the stored
+// generation, but only because check-existing-device supplies it. Reverting the
+// upstream SELECT alone fully reinstates the demotion defect, so pin it too.
+const checkExistingDeviceFn = byId['check-existing-device'];
+if (!checkExistingDeviceFn) {
+    failures.push('check-existing-device not found');
+} else if (!/LEFT JOIN\s+valve_settings/.test(checkExistingDeviceFn.func || '')) {
+    failures.push('check-existing-device must LEFT JOIN valve_settings so the registration path can consult a stored STREGA generation; without it a re-registration silently demotes a stored GEN2 valve to the Gen1 ChirpStack profile');
+} else {
+    console.log('OK  check-existing-device supplies the stored STREGA generation to the registration path');
+}
+
+const postDevicesInsertFn = byId['post-devices-insert'];
+if (!postDevicesInsertFn) {
+    failures.push('post-devices-insert not found');
+} else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(postDevicesInsertFn.func || '')) {
+    failures.push('post-devices-insert must select CHIRPSTACK_PROFILE_STREGA_GEN2 for Gen2 STREGA registrations');
+} else if (!/storedStregaGeneration/.test(postDevicesInsertFn.func || '')) {
+    failures.push('post-devices-insert must consult the stored (not just requested) STREGA generation so a re-registration cannot demote a stored GEN2 valve\'s ChirpStack profile back to Gen1');
+} else {
+    console.log('OK  post-devices-insert references CHIRPSTACK_PROFILE_STREGA_GEN2 and keeps a stored GEN2 sticky');
+}
+
+const csRegCloudFn = byId['cs-reg-cloud-fn'];
+if (!csRegCloudFn) {
+    failures.push('cs-reg-cloud-fn not found');
+} else if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(csRegCloudFn.func || '')) {
+    failures.push('cs-reg-cloud-fn must select CHIRPSTACK_PROFILE_STREGA_GEN2 for Gen2 STREGA registrations (its own independent registration path)');
+} else if (!/SELECT strega_generation FROM valve_settings/.test(csRegCloudFn.func || '')) {
+    failures.push('cs-reg-cloud-fn carries no generation field in its cloud payload, so it must consult stored valve_settings.strega_generation instead of hardcoding GEN1 -- otherwise every cloud-issued re-registration demotes a stored GEN2 valve\'s ChirpStack profile back to Gen1');
+} else {
+    console.log('OK  cs-reg-cloud-fn references CHIRPSTACK_PROFILE_STREGA_GEN2 and consults stored valve_settings generation');
+}
+assertPromotionOnlyValveSettingsUpsert(csRegCloudFn, 'cs-reg-cloud-fn');
+
+const csRegisterDeviceFn = byId['cs-register-device-fn'];
+assertPromotionOnlyValveSettingsUpsert(csRegisterDeviceFn, 'cs-register-device-fn');
+
+// STREGA Gen2 profile reconciliation: a valve registered as Gen1 that turns out to be Gen2
+// must have its ChirpStack profile re-pointed once the ACK path observes GEN2-shaped
+// telemetry, not just its local valve_settings row promoted.
+const valveAckFn = byId['valve-ack-fn'];
+if (!valveAckFn) {
+    failures.push('valve-ack-fn not found');
+} else if (!/client\.setDeviceProfile\(devEui,\s*gen2Profile\)/.test(valveAckFn.func || '')) {
+    // Pin the executable call shape, not a bare /setDeviceProfile/ substring: that weaker
+    // regex is satisfied by a comment mentioning the name and does not fail when the real
+    // call is renamed (same defect class as Task 1's weak /Actuator/ pin).
+    failures.push('valve-ack-fn must call client.setDeviceProfile(devEui, gen2Profile) to reconcile a GEN2 valve onto the Gen2 ChirpStack profile');
+} else if (!(Array.isArray(valveAckFn.libs) && valveAckFn.libs.some((l) => l.var === 'chirpstack' && l.module === 'osi-chirpstack-helper'))) {
+    failures.push('valve-ack-fn calls the ChirpStack helper without a libs entry providing it');
+} else if (!/settings\.strega_generation === 'GEN2'/.test(valveAckFn.func || '') || /generationPromoted/.test(valveAckFn.func || '')) {
+    // Pin the structural property the brief cared about most: reconcile from stored
+    // valve_settings state on every ACK, never from handleUplink's one-shot
+    // generationPromoted edge (a failed swap on the promoting uplink would then never retry).
+    failures.push('valve-ack-fn must reconcile from stored strega_generation state, not from handleUplink\'s one-shot generationPromoted edge');
+} else if (!/const stregaProfiles = \[String\(env\.get\('CHIRPSTACK_PROFILE_STREGA'\)[^\]]*CHIRPSTACK_PROFILE_STREGA_GEN2/.test(valveAckFn.func || '')) {
+    // MAJOR-2/NEW-MINOR-B: pin the top-of-function STREGA-profile gate's own stregaProfiles
+    // array, not a bare substring test -- valve-ack-fn's func also mentions
+    // CHIRPSTACK_PROFILE_STREGA_GEN2 later (deriving gen2Profile for the reconcile), so a bare
+    // /CHIRPSTACK_PROFILE_STREGA_GEN2/ test would keep passing even if the whitelist entry were
+    // dropped from this specific gate. Real acceptance behavior, including the renamed-name
+    // case, is proven by execution in test-strega-gen2-reconcile.js.
+    failures.push('valve-ack-fn must whitelist CHIRPSTACK_PROFILE_STREGA_GEN2 in its top-level stregaProfiles gate');
+} else if (!/hasPendingObservation/.test(valveAckFn.func || '')) {
+    // MAJOR-1/NEW-MINOR-B: the queue flush must be gated on a pending observation, so a
+    // farmer-commanded OPEN_FOR_DURATION already queued is never discarded as collateral
+    // damage from a background profile swap. Real gating behavior (flush skipped when
+    // pending, flush fires when not) is proven by execution in
+    // test-strega-gen2-reconcile.js; this is the cheap static tripwire.
+    failures.push('valve-ack-fn must gate the ChirpStack queue flush on VC.store.hasPendingObservation');
+} else {
+    console.log('OK  valve-ack-fn reconciles GEN2 valves onto the Gen2 ChirpStack profile, whitelists the Gen2 UUID, and gates its flush on a pending observation');
+}
+
+// The cloud telemetry mirror (Build Telemetry) carries its own copy of the STREGA-profile
+// gate and its own read of the valve-state field; it must stay in step with valve-ack-fn's
+// and strega-process-fn's Gen2 whitelist (MAJOR-2 / NEW-MAJOR-A) and Task 1's Actuator alias
+// (NEW-MAJOR-B), or a re-pointed Gen2 valve silently stops mirroring telemetry to the cloud
+// even though its ACK ledger and profile are correct.
+const buildTelemetryFn = byId['8809bb5239dfb3d4'];
+if (!buildTelemetryFn) {
+    failures.push('Build Telemetry (8809bb5239dfb3d4) not found');
+} else {
+    const buildTelemetryFunc = buildTelemetryFn.func || '';
+    const hasActuatorAlias = /Actuator/.test(buildTelemetryFunc);
+    // Same idiom as the strega-process-fn pin above: the explicit null/undefined check, not a
+    // `||` fallback that would wrongly treat a real valve state `0` (CLOSED) as absent.
+    const hasExplicitNullCheck =
+        /obj\.Valve\s*!==\s*undefined/.test(buildTelemetryFunc) &&
+        /obj\.Valve\s*!==\s*null/.test(buildTelemetryFunc);
+    const usesFalsyOrFallback = /obj\.Valve\s*\|\|\s*obj\.Actuator/.test(buildTelemetryFunc);
+    if (!/CHIRPSTACK_PROFILE_STREGA_GEN2/.test(buildTelemetryFunc)) {
+        failures.push('Build Telemetry (cloud MQTT mirror) must whitelist CHIRPSTACK_PROFILE_STREGA_GEN2 in its own STREGA-profile gate (NEW-MAJOR-A), or a re-pointed Gen2 valve stops mirroring telemetry to the cloud');
+    } else if (!hasActuatorAlias) {
+        failures.push('Build Telemetry (cloud MQTT mirror) must accept the Gen2 decoder\'s Actuator field as an alias for Valve (NEW-MAJOR-B), or every Gen2 valve mirrors state: null to the cloud');
+    } else if (usesFalsyOrFallback || !hasExplicitNullCheck) {
+        failures.push('Build Telemetry must select the Gen2 Actuator alias via an explicit `!== undefined && !== null` check on `obj.Valve`, not a `||` fallback (a real valve state `0` is falsy and would wrongly fall through to Actuator)');
+    } else {
+        console.log('OK  Build Telemetry whitelists the Gen2 UUID and accepts the Actuator alias via explicit null/undefined check');
     }
 }
 

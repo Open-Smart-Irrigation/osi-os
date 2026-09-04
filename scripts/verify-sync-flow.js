@@ -1936,7 +1936,7 @@ expectIncludes('Get Zone Environment Summary', 'LEFT JOIN gateway_locations gl O
 expectIncludes('Get Zone Environment Summary', 'SELECT date,rainfall_mm,flow_liters,rain_source,computed_at FROM zone_daily_environment', 'uses daily zone environment totals for water summary');
 expectIncludes('Get Zone Environment Summary', 'estimatedByDate[localDate] = ZE.round((estimatedByDate[localDate] || 0) + liters, 2);', 'sums STREGA expectation liters separately from measured flow meter totals');
 expectIncludes('Get Zone Environment Summary', 'ZE.localDateIso(row.commanded_at, zone && zone.timezone, Date.now())', 'buckets STREGA estimated liters by zone-local date');
-expectIncludes('Get Zone Environment Summary', "COALESCE(reconciliation_state,'') <> 'CANCELLED'", 'excludes cancelled STREGA expectations from estimated irrigation totals');
+expectIncludes('Get Zone Environment Summary', "COALESCE(reconciliation_state,'') NOT IN ('CANCELLED','STALE_NO_OBSERVATION')", 'excludes cancelled and stale-unobserved STREGA expectations from estimated irrigation totals');
 expectExcludes('Get Zone Environment Summary', 'substr(commanded_at,1,10)', 'UTC date slicing for STREGA estimated liters');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayMeasuredLiters', 'returns measured flow-meter liters under an honest field name');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayEstimatedLiters', 'returns estimated valve-time liters under an honest field name');
@@ -2066,6 +2066,14 @@ expectIncludesById('strega-reconciliation-monitor', 'd.current_state', 'reads ca
 expectIncludesById('strega-reconciliation-monitor', 'LEFT JOIN device_data dd ON dd.deveui = d.deveui', 'uses device_data only to find the latest observation timestamp');
 expectIncludesById('strega-reconciliation-monitor', 'ORDER BY dd.recorded_at DESC LIMIT 1', 'uses the newest matching uplink timestamp for reconciliation');
 expectExcludesById('strega-reconciliation-monitor', 'current_state FROM device_data', 'the old invalid device_data.current_state observer query');
+// Task 4b (2026-08-24 valve-advanced-controls-consolidation): osi-valve-control's
+// runObserveTick now classifies an unschedule-explained OPEN as trigger='service_action'
+// when a recent partial-opening/flushing command explains it (see workers.js). That
+// value is deliberately NOT in this OBSERVED_COMPLETE irrigation-event whitelist -
+// pinning the exact condition text here means a future edit that widens the whitelist to
+// include 'service_action' (double-counting a service action as an irrigation event) has
+// to touch this assertion too, not slip in silently.
+expectIncludesById('strega-reconciliation-monitor', "exp.trigger === 'on_valve_schedule' || exp.trigger === 'unexplained'", "OBSERVED_COMPLETE irrigation_events logging stays scoped to on_valve_schedule/unexplained; service_action (Task 4b) stays excluded so a partial-opening/flushing service action is never counted as an irrigation event");
 expectExcludesById('strega-sql-fn', 'BEGIN IMMEDIATE;', 'the old manual transaction opener inside the function node');
 expectExcludesById('strega-sql-fn', 'COMMIT;', 'the old manual transaction committer inside the function node');
 expectExcludesById('strega-sql-fn', 'ROLLBACK;', 'the old manual rollback branch inside the function node');
@@ -2621,8 +2629,13 @@ expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'incl
 expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
 expectIncludes('Cancel STREGA Actuation', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack helper configuration');
 expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes the ChirpStack device queue');
-expectIncludes('Cancel STREGA Actuation', "reconciliation_state='CANCELLED'", 'marks active actuation expectations CANCELLED');
-expectIncludes('Cancel STREGA Actuation', "WHERE expectation_id = (", 'updates only the latest active expectation');
+// cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved out
+// of this HTTP route and into cancel.js's cancelActuation(), shared with the new
+// CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points - see
+// cloud-commands.js's header comment). This node now delegates instead of inlining the
+// SQL, so the pin checks the delegation call; cancel.js's own cancel.test.js pins the
+// CANCELLED-marking and latest-active-only targeting behavior directly.
+expectIncludes('Cancel STREGA Actuation', 'VC.cancelActuation(', 'delegates actuation cancellation (mark CANCELLED, latest-active-only) to cancel.js');
 expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
 expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 // --- System Stats fan detection: hwmon preferred, raw PWM fallback ---
@@ -2715,6 +2728,101 @@ pendingChecks.push((async () => {
 })().catch((error) => {
   fail(`failed to execute VALVE_COMMAND ACK context fixture: ${error.message}`);
 }));
+
+// Task 4 (2026-08-24 valve-advanced-controls-consolidation, E2): the STREGA
+// downlink builder already computes a percentage for SET_PARTIAL_OPENING /
+// SET_FLUSHING but was dropping it before it reached actuator_log. Assert on
+// the emitted _log_ctx fields, NOT on any display label text (the label may be
+// reworded/translated and is not the contract here).
+pendingChecks.push((async () => {
+  const gatewayEui = '0016C001F11715E2';
+  const partialResult = await executeFunctionNodeById('cdbaa3891d40d7a1', {
+    payload: {
+      type: 'actuator_command',
+      device: { devEui: '70B3D57708000335' },
+      data: {
+        action: 'SET_PARTIAL_OPENING',
+        valve_action: 'OPEN',
+        percentage: 40,
+        commandType: 'SET_STREGA_PARTIAL_OPENING',
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: gatewayEui },
+  });
+  const partialLogMsg = Array.isArray(partialResult) ? partialResult[1] : null;
+  const partialCtx = partialLogMsg && partialLogMsg._log_ctx;
+  if (!partialCtx) {
+    fail('SET_PARTIAL_OPENING did not emit a log context');
+  } else if (partialCtx.percentage !== 40) {
+    fail(`SET_PARTIAL_OPENING log context dropped the percentage (got ${JSON.stringify(partialCtx.percentage)})`);
+  }
+
+  const flushResult = await executeFunctionNodeById('cdbaa3891d40d7a1', {
+    payload: {
+      type: 'actuator_command',
+      device: { devEui: '70B3D57708000335' },
+      data: {
+        action: 'SET_FLUSHING',
+        return_position: 'OPEN',
+        percentage: 40,
+        commandType: 'SET_STREGA_FLUSHING',
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: gatewayEui },
+  });
+  const flushLogMsg = Array.isArray(flushResult) ? flushResult[1] : null;
+  const flushCtx = flushLogMsg && flushLogMsg._log_ctx;
+  if (!flushCtx) {
+    fail('SET_FLUSHING did not emit a log context');
+  } else {
+    if (flushCtx.percentage !== 40) {
+      fail(`SET_FLUSHING log context dropped the percentage (got ${JSON.stringify(flushCtx.percentage)})`);
+    }
+    if (flushCtx.returnPosition !== 'OPEN') {
+      fail(`SET_FLUSHING log context dropped returnPosition (got ${JSON.stringify(flushCtx.returnPosition)})`);
+    }
+  }
+
+  // A command type that carries no percentage (e.g. a plain timed OPEN) must not
+  // have percentage/returnPosition invented for it.
+  const openResult = await executeFunctionNodeById('cdbaa3891d40d7a1', {
+    payload: {
+      type: 'actuator_command',
+      device: { devEui: '70B3D57708000335' },
+      data: { action: 'OPEN', commandType: 'OPEN' },
+    },
+  }, {
+    env: { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: gatewayEui },
+  });
+  const openLogMsg = Array.isArray(openResult) ? openResult[1] : null;
+  const openCtx = openLogMsg && openLogMsg._log_ctx;
+  if (openCtx && (openCtx.percentage !== null || openCtx.returnPosition !== null)) {
+    fail('OPEN log context should not carry a percentage/returnPosition');
+  }
+
+  // The INSERT node must actually persist the percentage into the one free-text
+  // column actuator_log has (action) — no schema change. Prefix-matchable so any
+  // consumer keying off action LIKE 'SET_PARTIAL_OPENING%' still works.
+  if (partialCtx) {
+    const partialInsertMsg = await executeFunctionNodeById('5c45136f382d501c', { _log_ctx: partialCtx });
+    const partialSql = partialInsertMsg && partialInsertMsg.topic;
+    if (!partialSql || !/SET_PARTIAL_OPENING 40%/.test(partialSql)) {
+      fail(`actuator_log INSERT did not carry the partial-opening percentage into action (got ${JSON.stringify(partialSql)})`);
+    }
+  }
+  if (flushCtx) {
+    const flushInsertMsg = await executeFunctionNodeById('5c45136f382d501c', { _log_ctx: flushCtx });
+    const flushSql = flushInsertMsg && flushInsertMsg.topic;
+    if (!flushSql || !/SET_FLUSHING 40% -> OPEN/.test(flushSql)) {
+      fail(`actuator_log INSERT did not carry the flushing percentage\\/return position into action (got ${JSON.stringify(flushSql)})`);
+    }
+  }
+})().catch((error) => {
+  fail(`failed to execute STREGA percentage log-context fixture: ${error.message}`);
+}));
+
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_heal', 'heals and persists canonical gateway identity through the shared helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway identity heal failed; resolving best available identity', 'logs the exact gateway identity heal failure');
@@ -2753,6 +2861,14 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrC
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "CFG.lsn50CodecPath", 'tracks the shipped LSN50 decoder path in bootstrap config');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lsn50CodecPath, 'LSN50')", 'loads the shipped LSN50 decoder during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name", 'creates or repairs the OSI LSN50 profile with a payload codec');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'STREGA_GEN2_CODEC_PATH', 'allows overriding the STREGA Gen2 decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CFG.stregaGen2CodecPath', 'tracks the shipped STREGA Gen2 decoder path in bootstrap config');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.stregaGen2CodecPath, 'STREGA Gen2')", 'loads the shipped STREGA Gen2 decoder during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaGen2Name", 'creates or repairs the OSI STREGA Gen2 profile with a payload codec');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPSTACK_PROFILE_STREGA_GEN2', 'writes the STREGA Gen2 ChirpStack profile ID for Node-RED');
+expectFileIncludes('deploy.sh', deployScript, 'strega_gen2_decoder.js', 'ships the STREGA Gen2 decoder to the gateway');
+expectFileIncludes('deploy.sh', deployScript, 'CHIRPSTACK_PROFILE_STREGA_GEN2=', 'guards the one-shot Gen2 provisioning step on the profile key being absent');
+expectFileIncludes('deploy.sh', deployScript, 'CHIRPSTACK_API_KEY="$cs_api_key"', 'reuses the existing ChirpStack API key when provisioning the Gen2 profile');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CS_PROFILE_LORAIN_NAME', 'allows overriding the LoRain profile name during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'LORAIN_CODEC_PATH', 'allows overriding the LoRain decoder path during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CFG.lorainCodecPath', 'tracks the shipped LoRain decoder path in bootstrap config');
@@ -3299,6 +3415,7 @@ if (!helperPath) {
   const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async setDeviceProfile(', 'lets ensureDeviceProvisioned re-point an existing device to a different device profile (Gen2 seam)');
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'new devicePb.FlushDeviceQueueRequest()', 'flushes device queues with the ChirpStack gRPC request type');
   expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, "grpcInvoke(this.deviceClient, 'flushQueue'", 'flushes device queues through DeviceService.FlushQueue');
   expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, '`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`', 'REST device queue path');
@@ -4219,5 +4336,8 @@ Promise.all(pendingChecks).finally(() => {
   if (parityResult.status !== 0) {
     console.error('verify-profile-parity.js failed');
     process.exitCode = parityResult.status || 1;
+  }
+  if (process.exitCode) {
+    console.error('FAILED: sync flow verification (exit ' + process.exitCode + ') - see FAIL lines above');
   }
 });

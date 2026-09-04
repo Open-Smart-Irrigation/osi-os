@@ -65,6 +65,12 @@
                 "UPSERT_DEVICE_SOIL_DEPTHS",
                 "UPDATE_SCHEDULE",
                 "UPSERT_SCHEDULE",
+                "UPSERT_VALVE_SCHEDULE",
+                "DELETE_VALVE_SCHEDULE",
+                "RESEND_VALVE_PLAN",
+                "SET_VALVE_SCHEDULER_STATUS",
+                "CANCEL_VALVE_ACTUATION",
+                "UPSERT_VALVE_SETTINGS",
                 "WORK_REQUEST_STATUS",
                 "UPSERT_JOURNAL_ENTRY",
                 "VOID_JOURNAL_ENTRY",
@@ -95,7 +101,19 @@
         "base_sync_version": {"type": "integer", "minimum": 0},
         "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocab"},
         "plot": {"$ref": "resources.schema.json#/definitions/JournalPlot"},
-        "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"}
+        "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"},
+        "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "kind": {"type": ["string", "null"]},
+        "weekdays_mask": {"type": ["integer", "null"]},
+        "start_time": {"type": ["string", "null"]},
+        "fire_at": {"type": ["string", "null"], "format": "date-time"},
+        "label": {"type": ["string", "null"]},
+        "enabled": {"type": ["boolean", "integer", "null"]},
+        "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+        "strega_generation": {"type": ["string", "null"]},
+        "flow_rate_lpm": {"type": ["number", "null"]},
+        "flow_rate_source": {"type": ["string", "null"]},
+        "default_open_minutes": {"type": ["integer", "null"]}
     },
     "allOf": [
         {
@@ -262,6 +280,65 @@
                         "pattern": "^journal_plot_group:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
                     },
                     "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroupCommand"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_VALVE_SCHEDULE"}}},
+            "then": {
+                "required": ["device_eui", "schedule_uuid"],
+                "properties": {
+                    "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+                    "kind": {"type": "string", "enum": ["WEEKLY", "ONCE"]},
+                    "weekdays_mask": {"type": ["integer", "null"], "minimum": 1, "maximum": 127},
+                    "start_time": {"type": ["string", "null"], "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
+                    "fire_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"},
+                    "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1439},
+                    "label": {"type": ["string", "null"], "maxLength": 80},
+                    "enabled": {"type": ["boolean", "integer"], "enum": [true, false, 0, 1]},
+                    "deleted_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "DELETE_VALVE_SCHEDULE"}}},
+            "then": {
+                "required": ["schedule_uuid"],
+                "properties": {
+                    "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "RESEND_VALVE_PLAN"}}},
+            "then": {
+                "required": ["device_eui"]
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "SET_VALVE_SCHEDULER_STATUS"}}},
+            "then": {
+                "required": ["device_eui", "status"],
+                "properties": {
+                    "status": {"type": "string", "enum": ["ACTIVE", "SKIP_TODAY", "DEACTIVATED"]}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "CANCEL_VALVE_ACTUATION"}}},
+            "then": {
+                "required": ["device_eui"]
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_VALVE_SETTINGS"}}},
+            "then": {
+                "required": ["device_eui"],
+                "properties": {
+                    "strega_generation": {"type": "string", "enum": ["GEN1", "GEN2"]},
+                    "flow_rate_lpm": {"type": ["number", "null"], "minimum": 0, "maximum": 10000},
+                    "flow_rate_source": {"type": ["string", "null"]},
+                    "default_open_minutes": {"type": "integer", "minimum": 1, "maximum": 255}
                 }
             }
         }

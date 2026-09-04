@@ -10,6 +10,10 @@
   --text-tertiary: #64748B;
   --text-disabled: #94A3B8;
   --border: #CBD5E1;
+  /* ui-core primitives (Button/FormField) read these; added with ui-core's own values
+     so the vendored slice matches upstream while still using this branch's palette. */
+  --field-border: #78899F;
+  --on-primary: #FFFFFF;
   --focus: #2563EB;
   --primary: #2563EB;
   --primary-hover: #1D4ED8;
@@ -46,6 +50,8 @@ html[data-theme='dark'] {
   --text-tertiary: #91A09A;
   --text-disabled: #65736D;
   --border: #3A4540;
+  --field-border: #66766F;
+  --on-primary: #04100E;
   --focus: #2DD4BF;
   --primary: #2DD4BF;
   --primary-hover: #14B8A6;

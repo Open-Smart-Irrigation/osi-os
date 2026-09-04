@@ -24,10 +24,19 @@ const SEED_DB_PATHS = [
     path.join(REPO, 'web/react-gui/farming.db'),
 ];
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
+// final fix wave (C2, "one ValveTile everywhere") deleted StregaValveCard.tsx and
+// ValveCancelButton.tsx; a follow-on operator ruling then restored them as the devices-tab
+// card (zone card + unassigned grid) while the tile stays the Valve control panel's control
+// surface. Both surfaces are DD17-relevant, so both are asserted below.
+const VALVE_OPEN_DIALOG = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveOpenDialog.tsx');
+const VALVE_CONTROL_PANEL = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveControlPanel.tsx');
+const VALVE_TILE = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveTile.tsx');
+const VALVE_SETTINGS_DIALOG = path.join(REPO, 'web/react-gui/src/components/farming/valves/ValveSettingsDialog.tsx');
 const STREGA_CARD = path.join(REPO, 'web/react-gui/src/components/farming/StregaValveCard.tsx');
 const VALVE_CANCEL_BUTTON = path.join(REPO, 'web/react-gui/src/components/farming/ValveCancelButton.tsx');
 const FARMING_TYPES = path.join(REPO, 'web/react-gui/src/types/farming.ts');
 const CHIRPSTACK_HELPER = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js');
+const CANCEL_JS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js');
 
 function readFlows() {
     return JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
@@ -194,11 +203,24 @@ function assertCancelPath() {
     if (!fn.func.includes('flushDeviceQueue(deveui)')) {
         throw new Error('Cancel function must flush the ChirpStack device queue');
     }
-    if (!fn.func.includes("'CANCELLED'") && !fn.func.includes('"CANCELLED"')) {
-        throw new Error('Cancel function must set reconciliation_state = CANCELLED');
+    // cloud full-parity Task 1.4: the queue-flush + mark-CANCELLED transaction moved
+    // out of this HTTP route and into cancel.js's cancelActuation(), shared with the new
+    // CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points). The
+    // node now delegates instead of inlining the SQL, so verify the delegation call here
+    // and check the actual safety invariants (CANCELLED state, cancel_reason, no bare
+    // CLOSE) against cancel.js directly rather than against this node's source text.
+    if (!fn.func.includes('VC.cancelActuation(')) {
+        throw new Error('Cancel function must delegate to cancel.js cancelActuation() (shared with the CANCEL_VALVE_ACTUATION cloud command applier)');
     }
-    if (!fn.func.includes('cancel_reason')) {
-        throw new Error('Cancel function must record cancel_reason');
+    const cancelJsSrc = fs.readFileSync(CANCEL_JS, 'utf8');
+    if (!cancelJsSrc.includes("'CANCELLED'") && !cancelJsSrc.includes('"CANCELLED"')) {
+        throw new Error('cancel.js must set reconciliation_state = CANCELLED');
+    }
+    if (!cancelJsSrc.includes('cancel_reason')) {
+        throw new Error('cancel.js must record cancel_reason');
+    }
+    if (cancelJsSrc.includes("action: 'CLOSE'") || cancelJsSrc.includes('return [closeMsg, responseMsg]')) {
+        throw new Error('cancel.js must not emit a CLOSE command');
     }
     if (!fn.func.includes('return msg')) {
         throw new Error('Cancel errors must route to the HTTP response output');
@@ -233,12 +255,37 @@ function assertQueueFlushUsesGrpc() {
 }
 
 function assertFrontendValveControls() {
+    const openDialog = fs.readFileSync(VALVE_OPEN_DIALOG, 'utf8');
+    const controlPanel = fs.readFileSync(VALVE_CONTROL_PANEL, 'utf8');
+    const valveTile = fs.readFileSync(VALVE_TILE, 'utf8');
+    const settingsDialog = fs.readFileSync(VALVE_SETTINGS_DIALOG, 'utf8');
     const stregaCard = fs.readFileSync(STREGA_CARD, 'utf8');
     const cancelButton = fs.readFileSync(VALVE_CANCEL_BUTTON, 'utf8');
     const farmingTypes = fs.readFileSync(FARMING_TYPES, 'utf8');
     if (!farmingTypes.includes("'OPEN_FOR_DURATION'")) {
         throw new Error('ValveActionRequest must allow OPEN_FOR_DURATION');
     }
+
+    // Duration bound: the shared Open dialog the top-level panel renders through --
+    // ValveOpenDialog.tsx -- must reject an out-of-range/non-integer minute count before a
+    // caller can ever dispatch OPEN_FOR_DURATION.
+    for (const required of ['const MIN_MINUTES = 1', 'const MAX_MINUTES = 255', 'Number.isInteger(minutes)', 'minutes >= MIN_MINUTES', 'minutes <= MAX_MINUTES']) {
+        if (!openDialog.includes(required)) {
+            throw new Error(`ValveOpenDialog must validate the timed-open duration is bounded (${required})`);
+        }
+    }
+
+    // The top-level panel must send OPEN_FOR_DURATION with an explicit duration, never a
+    // bare/indefinite OPEN.
+    for (const required of ["action: 'OPEN_FOR_DURATION'", 'duration_seconds']) {
+        if (!controlPanel.includes(required)) {
+            throw new Error(`ValveControlPanel must dispatch timed opens as OPEN_FOR_DURATION with a duration (${required})`);
+        }
+    }
+
+    // The devices-tab card (operator ruling: zone card + unassigned grid, alongside the
+    // tile) dispatches opens through its own duration input rather than ValveOpenDialog, so
+    // it needs its own bound check.
     for (const required of ['Number.isInteger(durationMinutes)', 'durationMinutes < 1', 'durationMinutes > 255', "action: 'OPEN_FOR_DURATION'"]) {
         if (!stregaCard.includes(required)) {
             throw new Error(`StregaValveCard must validate and send timed open controls (${required})`);
@@ -250,6 +297,51 @@ function assertFrontendValveControls() {
     if (!stregaCard.includes('hasActiveValveActuation(device)')) {
         throw new Error('StregaValveCard must gate cancel rendering on an active VAE row');
     }
+
+    // C-1 (final fix wave review): the devices-tab card's own farm-level device
+    // removal must be gated on removeContext -- the zone-card placement (removeContext=
+    // "zone") must only ever detach from the zone (its caller's onRemove does that), never
+    // also unclaim the device from the whole farm.
+    if (!/if\s*\(\s*removeContext\s*===\s*'farm'\s*\)\s*\{\s*\n\s*await devicesAPI\.remove/.test(stregaCard)) {
+        throw new Error("StregaValveCard must gate devicesAPI.remove on removeContext === 'farm' -- the zone-card placement must not unclaim the device from the farm");
+    }
+
+    // No bare CLOSE from any of the daily-use surfaces. The only sanctioned bare CLOSE is the
+    // settings-dialog manual override (stuck-open recovery, two-step confirm) -- assert it
+    // stays confined there, not merely that the daily surfaces lack it, so a future CLOSE added
+    // to any of these files fails loudly instead of silently widening the safety surface.
+    const mainControlSurfaces = [['ValveOpenDialog', openDialog], ['ValveControlPanel', controlPanel], ['ValveTile', valveTile], ['StregaValveCard', stregaCard]];
+    for (const [name, src] of mainControlSurfaces) {
+        if (src.includes("action: 'CLOSE'")) {
+            throw new Error(`${name} must not send a bare CLOSE from the main valve controls`);
+        }
+    }
+    if (!settingsDialog.includes("action: 'CLOSE'")) {
+        throw new Error('ValveSettingsDialog must retain the manual-override CLOSE path (stuck-open recovery)');
+    }
+
+    // Cancel must be gated on an actual active/unconfirmed actuation, not offered unconditionally.
+    if (!valveTile.includes("activeActuation?.reconciliationState === 'PENDING_OBSERVATION'")) {
+        throw new Error('ValveTile must gate the Cancel action on an active PENDING_OBSERVATION actuation');
+    }
+    if (!valveTile.includes('isPendingCommand') || !/primaryAction\s*=\s*isPendingCommand/.test(valveTile)) {
+        throw new Error('ValveTile must swap the primary action to Cancel only while a command is pending, never unconditionally');
+    }
+    if (!valveTile.includes('cancelQueuedOpen')) {
+        throw new Error('ValveTile must label the pending-cancel action as cancelling a queued open, not the generic Cancel/dismiss label');
+    }
+
+    // Cancel result reporting: the top-level panel must surface both outcomes -- a
+    // successful cancel updates the shared valve state, a failed one sets a visible error --
+    // never a silent fire-and-forget.
+    if (!/catch\s*\{[^}]*setActionError/.test(controlPanel) && !/catch\s*\(\s*\)\s*\{[^}]*setActionError/.test(controlPanel)) {
+        throw new Error('ValveControlPanel must set a visible error on a failed cancel/action (setActionError in its catch)');
+    }
+    if (!(controlPanel.includes('onUpdate()') || controlPanel.includes('refresh()'))) {
+        throw new Error('ValveControlPanel must refresh valve state after a successful cancel/action');
+    }
+
+    // The devices-tab card's cancel button must report both outcomes too.
     for (const required of ['onUpdate?.()', 'onError?.(message)', 'catch (err: any)']) {
         if (!cancelButton.includes(required)) {
             throw new Error(`ValveCancelButton must report cancel success/failure (${required})`);
@@ -258,6 +350,7 @@ function assertFrontendValveControls() {
     if (!cancelButton.includes('cancelQueuedOpen')) {
         throw new Error('ValveCancelButton must label the action as cancelling a queued open');
     }
+
     console.log('  ok frontend valve controls are duration-bound and report cancel results');
 }
 
@@ -265,7 +358,26 @@ function assertFrontendValveControls() {
 
 const DURATION_FREE_ACTUATOR_KEYS = ['CLOSE'];
 const ACTUATOR_NAME_PATTERN = /OPEN|VALVE|CLOS|ACTUAT/i;
-const ACTUATOR_PATTERN_FALSE_POSITIVES = ['SET_STREGA_PARTIAL_OPENING'];
+const ACTUATOR_PATTERN_FALSE_POSITIVES = [
+    'SET_STREGA_PARTIAL_OPENING',
+    // Valve *schedule* management (Valve control Phase B) - these mutate valve_schedules /
+    // valve_settings rows and re-compile the on-valve plan; they never themselves open or
+    // close a valve, so they are correctly actuator=false despite "VALVE" in the name.
+    'UPSERT_VALVE_SCHEDULE',
+    'DELETE_VALVE_SCHEDULE',
+    'RESEND_VALVE_PLAN',
+    'SET_VALVE_SCHEDULER_STATUS',
+    // cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION matches on "VALVE"/"ACTUAT"
+    // but never itself opens or closes a valve - it flushes the ChirpStack downlink queue
+    // and marks the newest active valve_actuation_expectations row CANCELLED (cancel.js's
+    // cancelActuation, shared with the REST cancel route). Correctly actuator=false.
+    'CANCEL_VALVE_ACTUATION',
+    // cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS matches on "VALVE" but only
+    // ever writes valve_settings columns (strega_generation, flow_rate_lpm/source,
+    // default_open_minutes) via store.upsertSettings() -- the same call the REST PUT
+    // /settings route uses, which never sends a downlink. Correctly actuator=false.
+    'UPSERT_VALVE_SETTINGS',
+];
 
 function extractRegistryObject(nodeFunc, constName) {
     const declaration = `const ${constName}`;

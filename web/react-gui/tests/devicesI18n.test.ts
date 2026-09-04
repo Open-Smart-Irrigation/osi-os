@@ -17,6 +17,9 @@ function getPath(obj: Record<string, any>, keyPath: string): unknown {
 }
 
 test('devices locale files include irrigation actuation translation keys', () => {
+  // `stregaValve.actuationFeedback.*` is read by StregaValveCard.tsx
+  // (getStregaActuationFeedback) -- the devices-tab card restored by the EDGE-2 operator
+  // ruling (final fix wave) that sits alongside the Valve control panel's ValveTile.
   const requiredKeys = [
     'stregaValve.actuationFeedback.closed',
     'stregaValve.actuationFeedback.closedAt',

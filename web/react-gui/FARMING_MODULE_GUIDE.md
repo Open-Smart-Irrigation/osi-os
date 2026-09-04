@@ -18,7 +18,8 @@ src/
 ├── components/
 │   ├── farming/
 │   │   ├── KiwiSensorCard.tsx      # Soil sensor display
-│   │   ├── StregaValveCard.tsx     # Valve control interface
+│   │   ├── StregaValveCard.tsx     # STREGA devices-tab card (zone card + unassigned grid)
+│   │   ├── valves/                 # Valve control panel UI (ValveTile, ValveControlPanel, dialogs)
 │   │   └── AddDeviceModal.tsx      # Device registration modal
 │   └── PrivateRoute.tsx            # Route protection
 ├── contexts/

@@ -41,7 +41,7 @@
       "comparisonMode": "Comparison",
       "addPanel": "Add panel {{title}}",
       "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
+      "panelLimitWarning": "Only {{count}} comparison panels can be shown at once.",
       "selectedTimestampNone": "No timestamp selected",
       "selectedTimestamp": "Selected timestamp: {{timestamp}}",
       "inspectorTitle": "Inspector",
@@ -117,7 +117,7 @@
       "timelineBrush": "Timeline viewport",
       "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
+      "placeholderBody": "Charts and calendar data will appear here once this card has readings.",
       "cardDataLoading": "Loading card data...",
       "cardDataError": "Card data failed to load: {{message}}",
       "cardDataUnknownError": "Unknown error"
@@ -215,12 +215,15 @@
       "emptyTitle": "No irrigation events",
       "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
       "eventsCount": "{{count}} events",
-      "eventLabel": {
+      "eventLabel": { "serviceAction": "Service action",
         "irrigation": "Irrigation event",
-        "scheduled": "Scheduled irrigation",
+        "scheduled": "Trigger-based irrigation",
         "manualOverride": "Manual override",
         "possibleIneffective": "Possible ineffective irrigation",
-        "responseWindow": "Response window"
+        "responseWindow": "Response window",
+        "onValveSchedule": "Scheduled (on valve)",
+        "oneTime": "One-time open",
+        "unexplained": "Opened on valve"
       },
       "detail": {
         "duration": "Duration: {{value}}",

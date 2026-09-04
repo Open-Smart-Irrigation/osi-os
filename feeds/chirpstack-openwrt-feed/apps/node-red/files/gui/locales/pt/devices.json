@@ -23,6 +23,15 @@
     "pleaseSelect": "Selecione um dispositivo",
     "failed": "Falha ao atribuir dispositivo"
   },
+  "zoneDeviceModal": {
+    "title": "Adicionar um dispositivo a {{zoneName}}",
+    "tabAssign": "Atribuir existente",
+    "tabRegister": "Novo dispositivo",
+    "assignConflict": "Esse dispositivo está agora na zona \"{{zoneName}}\". Primeiro remova-o dessa zona.",
+    "registerZoneNotice": "Este dispositivo será registado diretamente em {{zoneName}}.",
+    "registerSubmit": "Registar na zona",
+    "registering": "A registar..."
+  },
   "createZoneModal": {
     "title": "Criar zona de rega",
     "zoneName": "Nome da zona",

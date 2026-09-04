@@ -23,6 +23,15 @@
     "pleaseSelect": "Bitte ein Gerät auswählen",
     "failed": "Gerät konnte nicht zugewiesen werden"
   },
+  "zoneDeviceModal": {
+    "title": "Gerät zu {{zoneName}} hinzufügen",
+    "tabAssign": "Vorhandenes zuweisen",
+    "tabRegister": "Neues Gerät",
+    "assignConflict": "Das Gerät befindet sich jetzt in der Zone \"{{zoneName}}\". Entferne es zuerst dort.",
+    "registerZoneNotice": "Dieses Gerät wird direkt in {{zoneName}} registriert.",
+    "registerSubmit": "In Zone registrieren",
+    "registering": "Wird registriert..."
+  },
   "createZoneModal": {
     "title": "Bewässerungszone erstellen",
     "zoneName": "Zonenname",

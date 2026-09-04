@@ -23,6 +23,8 @@ const NAME_TO_PATH = {
   'device-writer': 'osi-device-writer',
   'uc512-normalize': 'osi-uc512-normalize',
   'lsn50-normalize': 'osi-lsn50-normalize',
+  'osi-valve-control': 'osi-valve-control',
+  'osi-system-settings': 'osi-system-settings',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
 };
 

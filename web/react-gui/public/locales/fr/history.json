@@ -41,7 +41,7 @@
       "comparisonMode": "Comparaison",
       "addPanel": "Ajouter le panneau {{title}}",
       "removePanel": "Retirer le panneau",
-      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés sur cette passerelle edge.",
+      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés à la fois.",
       "selectedTimestampNone": "Aucun horodatage sélectionné",
       "selectedTimestamp": "Horodatage sélectionné : {{timestamp}}",
       "inspectorTitle": "Inspecteur",
@@ -117,7 +117,7 @@
       "timelineBrush": "Timeline viewport",
       "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
+      "placeholderBody": "Les graphiques et le calendrier apparaîtront ici dès que cette carte aura des relevés.",
       "cardDataLoading": "Loading card data...",
       "cardDataError": "Card data failed to load: {{message}}",
       "cardDataUnknownError": "Unknown error"
@@ -196,27 +196,30 @@
       }
     },
     "irrigationTimeline": {
-      "title": "Irrigation event timeline",
-      "emptyTitle": "No irrigation events",
-      "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
-      "eventsCount": "{{count}} events",
-      "eventLabel": {
-        "irrigation": "Irrigation event",
-        "scheduled": "Scheduled irrigation",
-        "manualOverride": "Manual override",
-        "possibleIneffective": "Possible ineffective irrigation",
-        "responseWindow": "Response window"
+      "title": "Chronologie des irrigations",
+      "emptyTitle": "Aucun événement d'irrigation",
+      "emptyBody": "Les irrigations et les fenêtres de réponse apparaîtront ici dès que des données d'historique seront disponibles.",
+      "eventsCount": "Événements : {{count}}",
+      "eventLabel": { "serviceAction": "Intervention de service",
+        "irrigation": "Événement d'irrigation",
+        "scheduled": "Irrigation déclenchée par capteur",
+        "manualOverride": "Commande manuelle",
+        "possibleIneffective": "Irrigation peut-être inefficace",
+        "responseWindow": "Fenêtre de réponse",
+        "onValveSchedule": "Programme sur la vanne",
+        "oneTime": "Ouverture ponctuelle",
+        "unexplained": "Ouverture hors programme"
       },
       "detail": {
-        "duration": "Duration: {{value}}",
-        "responseWindow": "Response window: {{value}}",
-        "observedResponse": "Observed response: {{value}}"
+        "duration": "Durée : {{value}}",
+        "responseWindow": "Fenêtre de réponse : {{value}}",
+        "observedResponse": "Réponse observée : {{value}}"
       },
       "severity": {
         "info": "Info",
-        "warning": "Warning",
-        "critical": "Critical",
-        "success": "Success",
+        "warning": "Avertissement",
+        "critical": "Critique",
+        "success": "Réussite",
         "unknown": "Info"
       }
     },

@@ -1,0 +1,210 @@
+/* ── Valve glyph ─────────────────────────────────────────────────────────────
+   Geometry and water animation from the OSI OS valve-state icon package v2;
+   body paths derive from Material Symbols Rounded `valve` (Apache-2.0). See
+   docs/THIRD_PARTY_NOTICES.md.
+
+   The package ships fixed hex colours (closed #667085, open #1E3A8A). Those are
+   NOT used here. #1E3A8A is a dark navy chosen against a light ground, and on
+   our dark theme it disappears into the surface — the same class of bug as
+   osi-os#160, where the glyph followed the OS theme instead of the app's. The
+   body therefore takes app tokens (`--text-tertiary` closed, `--primary` open),
+   which are defined for both themes in index.css.
+
+   The water keeps the package's cyan family but is redefined per theme: on dark,
+   `--primary` resolves to #4FAEE3, which sits too close to the package's #38BDF8
+   to read as a separate material, so the dark water shifts toward teal.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.valve-glyph {
+  --valve-body-closed: var(--text-tertiary);
+  --valve-body-open: var(--primary);
+  --valve-water-edge: #0EA5E9;
+  --valve-water: #38BDF8;
+  --valve-water-shine: #BAE6FD;
+  --valve-water-shine-2: #E0F2FE;
+  --valve-badge-pending: #b45309;
+  --valve-badge-failed: #dc2626;
+  line-height: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .valve-glyph {
+    --valve-water-edge: #0E7490;
+    --valve-water: #22D3EE;
+    --valve-water-shine: #A5F3FC;
+    --valve-water-shine-2: #CFFAFE;
+    --valve-badge-pending: #fbbf24;
+    --valve-badge-failed: #f87171;
+  }
+}
+
+:root[data-theme='dark'] .valve-glyph {
+  --valve-water-edge: #0E7490;
+  --valve-water: #22D3EE;
+  --valve-water-shine: #A5F3FC;
+  --valve-water-shine-2: #CFFAFE;
+  --valve-badge-pending: #fbbf24;
+  --valve-badge-failed: #f87171;
+}
+
+.valve-glyph__svg {
+  display: block;
+}
+
+/* ── Body ─────────────────────────────────────────────────────────────────── */
+
+.valve-glyph__body {
+  fill: var(--valve-body-closed);
+  transition: fill 160ms ease;
+}
+
+.valve-glyph--open .valve-glyph__body,
+.valve-glyph--closing .valve-glyph__body {
+  fill: var(--valve-body-open);
+}
+
+/* `pending` and `failed` keep the muted outline but must not read as "off": a
+   dashed edge says "not settled" without borrowing the open colour. */
+.valve-glyph--pending .valve-glyph__body {
+  fill: var(--valve-body-closed);
+  opacity: 0.75;
+}
+
+.valve-glyph--failed .valve-glyph__body {
+  fill: var(--valve-body-closed);
+}
+
+/* ── Water ────────────────────────────────────────────────────────────────── */
+
+.valve-glyph__water-edge {
+  fill: none;
+  stroke: var(--valve-water-edge);
+  stroke-width: 116;
+  stroke-linecap: round;
+}
+
+.valve-glyph__water-main {
+  fill: none;
+  stroke: var(--valve-water);
+  stroke-width: 94;
+  stroke-linecap: round;
+}
+
+.valve-glyph__water-band {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.valve-glyph__water-band--a {
+  stroke: var(--valve-water-shine);
+  stroke-width: 22;
+  stroke-dasharray: 72 92;
+  stroke-dashoffset: -40;
+}
+
+.valve-glyph__water-band--b {
+  stroke: var(--valve-water-shine-2);
+  stroke-width: 10;
+  stroke-dasharray: 28 132;
+  stroke-dashoffset: -112;
+}
+
+.valve-glyph__drop circle {
+  fill: var(--valve-water);
+}
+
+.valve-glyph__drop-shine {
+  fill: var(--valve-water-shine);
+}
+
+.valve-glyph__drop {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Animation is opt-in: only a confirmed, running valve moves. */
+.valve-glyph--open:not(.valve-glyph--static) .valve-glyph__water-main {
+  animation: valve-stream-pulse 1.55s ease-in-out infinite;
+}
+
+.valve-glyph--open:not(.valve-glyph--static) .valve-glyph__water-band--a {
+  animation: valve-band-a 1.25s linear infinite;
+}
+
+.valve-glyph--open:not(.valve-glyph--static) .valve-glyph__water-band--b {
+  animation: valve-band-b 1.75s linear infinite;
+}
+
+.valve-glyph--open:not(.valve-glyph--static) .valve-glyph__drop--a {
+  animation: valve-drop 1.55s ease-in-out infinite;
+}
+
+.valve-glyph--open:not(.valve-glyph--static) .valve-glyph__drop--b {
+  animation: valve-drop 1.55s ease-in-out -0.52s infinite;
+}
+
+.valve-glyph--open:not(.valve-glyph--static) .valve-glyph__drop--c {
+  animation: valve-drop 1.55s ease-in-out -0.92s infinite;
+}
+
+/* Frozen water (`closing`, or reduced motion) still reads as wet, just not moving. */
+.valve-glyph--static .valve-glyph__drop,
+.valve-glyph--closing .valve-glyph__drop {
+  opacity: 0.72;
+}
+
+@keyframes valve-stream-pulse {
+  0%, 100% { stroke-width: 92; }
+  50% { stroke-width: 100; }
+}
+
+@keyframes valve-band-a {
+  to { stroke-dashoffset: -204; }
+}
+
+@keyframes valve-band-b {
+  to { stroke-dashoffset: -272; }
+}
+
+@keyframes valve-drop {
+  0%, 25% { opacity: 0.15; transform: scale(0.82); }
+  55% { opacity: 0.95; transform: scale(1); }
+  100% { opacity: 0.12; transform: scale(0.9); }
+}
+
+/* ── Badges ───────────────────────────────────────────────────────────────── */
+
+.valve-glyph__badge circle:first-of-type {
+  fill: var(--surface);
+  stroke-width: 26;
+}
+
+.valve-glyph__badge--pending circle:first-of-type,
+.valve-glyph__badge--pending path {
+  stroke: var(--valve-badge-pending);
+}
+
+.valve-glyph__badge--closing circle:first-of-type,
+.valve-glyph__badge--closing path {
+  stroke: var(--valve-body-closed);
+}
+
+.valve-glyph__badge--failed circle:first-of-type,
+.valve-glyph__badge--failed path {
+  stroke: var(--valve-badge-failed);
+}
+
+.valve-glyph__badge-dot {
+  fill: var(--valve-badge-failed);
+  stroke: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .valve-glyph__body { transition: none; }
+  .valve-glyph__water-main,
+  .valve-glyph__water-band,
+  .valve-glyph__drop {
+    animation: none !important;
+  }
+  .valve-glyph__drop { opacity: 0.7; }
+}

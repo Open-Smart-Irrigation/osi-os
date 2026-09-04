@@ -14,7 +14,7 @@ The Agroscope deployment (AgroLink) changes the shape: one shared Pi 5 hub serve
 
 A capacity analysis ruled out the database as a constraint: sensor write load sits far inside SQLite's WAL envelope, and swapping databases would break `osi-migrate` and the single-file backup model. The real database constraint is topological — all access serializes through one facade queue (see the hub-hardening spec) — and the real functional gap is authorization.
 
-Two external reviews of the v1 design corrected four load-bearing facts, verified against the repo: the frozen boot node recreates all 31 sync triggers on every restart, so migrations must never edit existing trigger bodies; no users outbox aggregate exists to extend; the cloud already models gateway identity per-gateway (`LinkedGatewayAccount`), not on the global user; and a fresh image has zero users at migration time, so a deploy-time backfill cannot produce the first admin.
+Two external reviews of the v1 design corrected four load-bearing facts, verified against the repo: the frozen boot node recreates all 30 sync triggers on every restart, so migrations must never edit existing trigger bodies; no users outbox aggregate exists to extend; the cloud already models gateway identity per-gateway (`LinkedGatewayAccount`), not on the global user; and a fresh image has zero users at migration time, so a deploy-time backfill cannot produce the first admin.
 
 ## Decision
 

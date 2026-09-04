@@ -75,7 +75,10 @@ screen lands here. Grouped by job:
 
 ### Scheduler (6 function nodes)
 
-The daily irrigation brain. A cron inject (**Schedule time**, 06:00) triggers:
+The daily **threshold-based** irrigation brain, labelled "Trigger-based
+irrigation" in the GUI since 2026-08 to distinguish it from the STREGA
+on-valve weekly scheduler documented under Valve Control below. A cron
+inject (**Schedule time**, 06:00) triggers:
 **Build zones query (enabled schedules)** → **Build mean query (last hour, all
 datapoints)** → **Decide + build actuator cmd + build DB logs**, which applies
 the rule *mean soil tension ≥ threshold → irrigate* and emits both the valve
@@ -256,6 +259,53 @@ into `history_channel_rollups`, plus `POST /api/history/rollups/run` for manual
 runs); **Analysis API Router** (cross-zone analysis: channel catalog, series
 data, saved views) delegating to `osi-history-helper/analysis.js`.
 
+### System Settings (1 function node)
+
+Gateway-wide defaults, today just the time zone. **System Settings API
+Router** (`GET/PUT /api/system/settings`, `osi-system-settings` module)
+stores `gateway_timezone` in the `app_settings` table; new zones inherit
+it, valve scheduling uses it when a device has no zone, and the Settings
+page can push it to all of the user's existing zones explicitly.
+
+### Valve Control (5 function nodes)
+
+The STREGA on-valve weekly scheduler: compile, push, and ACK, plus
+gateway-timed one-time opens (spec
+[2026-08-19-valve-control-design.md](../../superpowers/specs/2026-08-19-valve-control-design.md)).
+Logic lives in the `osi-valve-control` helper module; the flow nodes are thin
+adapters. **Valve API Router** serves `GET/POST/PUT/DELETE /api/valves*` (list,
+per-valve schedules, plan re-send, scheduler status, settings) and queues the
+compiled downlinks. **Valve ACK ledger** consumes STREGA uplinks behind a
+STREGA-profile gate and marks `valve_schedule_pushes` rows `ACKED`. Gen1
+weekday ACKs arrive on `Schl_Port` 14–20; Gen2 daymask ACKs arrive on
+`Ack_Port` 25 (or the raw-byte fallback); scheduler-status ACKs arrive on
+`Schl_status_Port`/`Ack_Port` 21; clock ACKs arrive on `RTC_Port`/`Ack_Port`
+12/13. **Fire due one-time opens**, **Observe valve-fired opens + trigger
+backfill**, and **Valve clock sync + stale pushes** are the module's own ticks
+(see Timers below).
+
+The same valve list also carries the newest enclosure temperature and
+humidity reading for Gen1 valves; Gen2 (SV2) payloads carry neither
+quantity, and the interface says so rather than showing a blank field
+(`osi-agronomy-sensors-reference`).
+
+STREGA valves register onto one of two ChirpStack device profiles, Gen1 or
+Gen2. Registration chooses the profile from the requested generation, and
+the choice self-corrects afterward: whenever **Valve ACK ledger** sees the
+uplink's own profile doesn't match and the valve's stored generation is
+Gen2, it re-points the ChirpStack profile, so a valve mis-registered as Gen1
+recovers on its first Gen2-shaped ACK without an operator re-registering it.
+A successful re-point also clears everything ChirpStack is still holding in
+that valve's downlink queue (ChirpStack can only clear a device's whole
+queue, not one frame), unless the valve has a commanded open still awaiting
+observation — that guard keeps a farmer's in-flight `OPEN_FOR_DURATION` from
+being discarded as collateral damage from the profile swap.
+
+Plan and clock pushes leave through a dedicated MQTT out
+node, **Valve plan downlinks → ChirpStack**, kept separate from the STREGA
+manual-open builder in Actuator_STREGA so a plan edit can never collide with
+a manual open in flight.
+
 ## HTTP API at a glance
 
 101 endpoints; the full list lives in the flow file. Families:
@@ -279,14 +329,15 @@ one HTTP response; responses for zone-scoped data verify ownership first.
 
 | Cadence | Job (inject node) | Tab |
 |---|---|---|
-| 60 s | Heartbeat → cloud; gateway health sample; STREGA reconciliation; history shadow batch | Cloud Integration / System Admin |
+| 60 s | Heartbeat → cloud; gateway health sample; STREGA reconciliation; history shadow batch; fire due one-time valve opens; observe valve-fired opens | Cloud Integration / System Admin / Valve Control |
 | 30 s | Outbox flush; pending-command poll; command-ACK flush | Cloud Integration |
 | 5 min | History manifest; support delivery | Cloud Integration |
+| 10 min | Valve clock sync + stale push sweep | Valve Control |
 | Hourly | Sync token refresh | Cloud Integration |
 | 6 h | Full bootstrap snapshot | Cloud Integration |
 | Daily 02:00 | History rollups; outbox retention | History API / Cloud Integration |
 | Daily 02:10 | Gateway health rollup | Cloud Integration |
-| Daily 06:00 | Irrigation scheduler | Scheduler |
+| Daily 06:00 | Trigger-based irrigation (threshold scheduler) | Scheduler |
 | Daily 08:00 | Dendrometer analytics | Dendrometer Analytics |
 
 ## Shared helper modules (`osi-*`)
