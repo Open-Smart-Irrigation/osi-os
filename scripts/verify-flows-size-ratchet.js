@@ -97,7 +97,7 @@ function loadAllowances(allowancesPath) {
       totalDelta: (a.total_allowance && a.total_allowance.delta) || 0,
     };
   } catch {
-    return { node: {}, totalDelta: 0 };
+    return { node: {}, newNodeCeilings: {}, totalDelta: 0 };
   }
 }
 
