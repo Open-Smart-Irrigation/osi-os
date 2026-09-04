@@ -20,7 +20,7 @@ const FLOW_PATHS = [
 ].map((rel) => path.join(REPO, rel));
 
 const TELEMETRY = ['DEVICE_DATA', 'CHAMELEON_READING', 'DENDRO_READING', 'DENDRO_DAILY', 'ZONE_ENVIRONMENT', 'ZONE_RECOMMENDATION'];
-const PROTECTED = ['IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION'];
+const PROTECTED = ['IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION', 'VALVE_SCHEDULE', 'VALVE_SETTINGS'];
 
 function nodeById(flowPath, id) {
   return JSON.parse(fs.readFileSync(flowPath, 'utf8')).find((n) => n.id === id);
@@ -73,7 +73,7 @@ test('both profiles have byte-identical prune-sync-outbox func', () => {
 });
 
 // The aggregate-partition guard: the node's declared telemetry ∪ protected sets
-// must equal EXACTLY the distinct aggregate_type literals across all 17
+// must equal EXACTLY the distinct aggregate_type literals across all 21
 // INSERT-INTO-sync_outbox triggers. Extract aggregate_type from each trigger by
 // reading the value in the position/label following the `aggregate_type` column —
 // robust to new types the node hasn't classified (the point of the guard).
@@ -99,10 +99,10 @@ function triggerAggregateTypes(seed) {
   return types;
 }
 
-test('declared sets partition exactly the trigger set aggregate_types (17 triggers)', () => {
+test('declared sets partition exactly the trigger set aggregate_types (21 triggers)', () => {
   const seed = fs.readFileSync(SEED, 'utf8');
   const blocks = seed.split(/CREATE TRIGGER/).filter((b) => b.includes('INSERT INTO sync_outbox'));
-  assert.equal(blocks.length, 17, `expected 17 outbox triggers, found ${blocks.length}`);
+  assert.equal(blocks.length, 21, `expected 21 outbox triggers, found ${blocks.length}`);
   const declared = new Set([...TELEMETRY, ...PROTECTED]);
   const types = triggerAggregateTypes(seed);
   // Every aggregate_type a trigger writes MUST be classified (this is what forces a
