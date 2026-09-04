@@ -79,6 +79,17 @@ function baseProps() {
 }
 
 describe('ScopeRail', () => {
+  it('uses a Data-style gray rail shell around white filter controls', () => {
+    render(<ScopeRail {...baseProps()} />);
+
+    expect(screen.getByRole('navigation', { name: 'title' })).toHaveClass(
+      'rounded-lg',
+      'bg-[var(--surface)]',
+    );
+    expect(screen.getByRole('searchbox', { name: 'workspace.search' })).toHaveClass('bg-[var(--card)]');
+    expect(screen.getByLabelText('filters.dateFrom')).toHaveClass('bg-[var(--card)]');
+  });
+
   it('renders a 72-plot station as a single row carrying the plot count and sensor summary', () => {
     const plots = Array.from({ length: 72 }, (_, index) => journalPlot({
       plot_uuid: `plot-${index + 1}`,

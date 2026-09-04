@@ -436,13 +436,25 @@ describe('EntryTable', () => {
       occurred_from: '2026-07-01',
     };
 
-    it('puts exactly three export controls in the table header: CSV, JSON, and research package (never ADAPT)', () => {
+    it('keeps CSV and JSON controls while removing the research-package control from the desktop table', () => {
       renderTable();
 
       expect(screen.getByRole('button', { name: 'workspace.table.exportCsv' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'workspace.table.exportJson' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'workspace.table.exportPackage' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'workspace.table.exportPackage' })).not.toBeInTheDocument();
       expect(screen.queryByText(/adapt/i)).not.toBeInTheDocument();
+    });
+
+    it('uses the Data-style gray table shell around white table content', () => {
+      mockEntries({ entries: [entry()] });
+
+      renderTable();
+
+      expect(screen.getByRole('region', { name: 'workspace.table.heading' })).toHaveClass(
+        'rounded-lg',
+        'bg-[var(--surface)]',
+      );
+      expect(screen.getByRole('table')).toHaveClass('bg-[var(--card)]');
     });
 
     it('keeps export controls available in loading, error, and empty states, not only when rows are present', () => {
@@ -479,15 +491,6 @@ describe('EntryTable', () => {
       expect(mocks.exportEntriesJson).toHaveBeenCalledWith(scopedFilters);
     });
 
-    it('exports the research package using exactly the active filters', async () => {
-      renderTable({ filters: scopedFilters });
-
-      fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportPackage' }));
-
-      await waitFor(() => expect(mocks.exportEntriesResearchPackage).toHaveBeenCalledTimes(1));
-      expect(mocks.exportEntriesResearchPackage).toHaveBeenCalledWith(scopedFilters);
-    });
-
     it('never sends the pagination cursor/limit along with a filter-scoped export', async () => {
       mockEntries({ entries: [entry()], nextCursor: 'cursor-2' });
       renderTable({ filters: scopedFilters });
@@ -521,33 +524,21 @@ describe('EntryTable', () => {
       expect(screen.queryByText('workspace.table.exportError')).not.toBeInTheDocument();
     });
 
-    // P1-c: CSV export already worked and already showed a failure banner —
-    // JSON and research-package were reported as silently inert. Reading the
-    // wiring shows all three already call the same downloadJournalExport
-    // helper (journalApi.ts), so this asserts the success confirmation now
-    // exists for JSON and package too, matching CSV, closing that gap for
-    // real regardless of what the live report's exact root cause was.
-    it.each([
-      ['json', 'exportEntriesJson'],
-      ['package', 'exportEntriesResearchPackage'],
-    ] as const)('shows a success status message after the %s export completes', async (kind, mockName) => {
-      mocks[mockName].mockResolvedValueOnce(undefined);
+    it('shows a success status message after the JSON export completes', async () => {
+      mocks.exportEntriesJson.mockResolvedValueOnce(undefined);
       renderTable({ filters: scopedFilters });
 
-      fireEvent.click(screen.getByRole('button', { name: `workspace.table.export${kind === 'json' ? 'Json' : 'Package'}` }));
+      fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportJson' }));
 
       await waitFor(() => expect(screen.getByText('workspace.table.exportSuccess')).toBeInTheDocument());
       expect(screen.queryByText('workspace.table.exportError')).not.toBeInTheDocument();
     });
 
-    it.each([
-      ['json', 'exportEntriesJson'],
-      ['package', 'exportEntriesResearchPackage'],
-    ] as const)('shows a failure status message when the %s export rejects', async (kind, mockName) => {
-      mocks[mockName].mockRejectedValueOnce(new Error('network down'));
+    it('shows a failure status message when the JSON export rejects', async () => {
+      mocks.exportEntriesJson.mockRejectedValueOnce(new Error('network down'));
       renderTable({ filters: scopedFilters });
 
-      fireEvent.click(screen.getByRole('button', { name: `workspace.table.export${kind === 'json' ? 'Json' : 'Package'}` }));
+      fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportJson' }));
 
       await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('workspace.table.exportError'));
       expect(screen.queryByText('workspace.table.exportSuccess')).not.toBeInTheDocument();

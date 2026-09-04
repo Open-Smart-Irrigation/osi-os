@@ -138,7 +138,7 @@ export function ScopeRail({
   return (
     <nav
       aria-label={t('title')}
-      className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4"
+      className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4"
     >
       <div>
         <label htmlFor="journal-scope-search" className="mb-1 block text-sm font-bold text-[var(--text)]">
@@ -151,7 +151,7 @@ export function ScopeRail({
           value={search}
           placeholder={t('workspace.searchPlaceholder')}
           onChange={(event) => onSearchChange(event.target.value)}
-          className={`w-full min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] outline-none ${FOCUS_RING}`}
+          className={`w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)] outline-none ${FOCUS_RING}`}
         />
       </div>
 
@@ -164,7 +164,7 @@ export function ScopeRail({
             aria-label={t('filters.activity')}
             value={filters.activityCode}
             onChange={(event) => onFiltersChange({ ...filters, activityCode: event.target.value })}
-            className={`mt-1 w-full min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+            className={`mt-1 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)] ${FOCUS_RING}`}
           >
             <option value="">{t('filters.allActivities')}</option>
             {activities.map((activity) => (
@@ -181,7 +181,7 @@ export function ScopeRail({
             aria-label={t('filters.status')}
             value={filters.status}
             onChange={(event) => onFiltersChange({ ...filters, status: event.target.value as EntryStatusFilter })}
-            className={`mt-1 w-full min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+            className={`mt-1 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)] ${FOCUS_RING}`}
           >
             <option value="all">{t('filters.allStatuses')}</option>
             {STATUS_OPTIONS.map((status) => (
@@ -198,7 +198,7 @@ export function ScopeRail({
               aria-label={t('filters.dateFrom')}
               value={filters.occurredFrom}
               onChange={(event) => onFiltersChange({ ...filters, occurredFrom: event.target.value })}
-              className={`mt-1 w-full min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2 text-[var(--text)] ${FOCUS_RING}`}
+              className={`mt-1 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-[var(--text)] ${FOCUS_RING}`}
             />
           </label>
           <label className="block min-w-0 flex-1 text-sm font-bold text-[var(--text)]">
@@ -208,7 +208,7 @@ export function ScopeRail({
               aria-label={t('filters.dateTo')}
               value={filters.occurredTo}
               onChange={(event) => onFiltersChange({ ...filters, occurredTo: event.target.value })}
-              className={`mt-1 w-full min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2 text-[var(--text)] ${FOCUS_RING}`}
+              className={`mt-1 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-[var(--text)] ${FOCUS_RING}`}
             />
           </label>
         </div>
@@ -220,7 +220,7 @@ export function ScopeRail({
             aria-label={t('filters.campaign')}
             value={filters.campaignUuid}
             onChange={(event) => onFiltersChange({ ...filters, campaignUuid: event.target.value })}
-            className={`mt-1 w-full min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+            className={`mt-1 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)] ${FOCUS_RING}`}
           />
         </label>
 
@@ -231,7 +231,7 @@ export function ScopeRail({
             aria-label={t('filters.protocol')}
             value={filters.protocolCode}
             onChange={(event) => onFiltersChange({ ...filters, protocolCode: event.target.value })}
-            className={`mt-1 w-full min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+            className={`mt-1 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)] ${FOCUS_RING}`}
           />
         </label>
       </fieldset>

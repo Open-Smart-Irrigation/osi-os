@@ -18,12 +18,11 @@ import {
 
 export const PAGE_SIZE = 50;
 
-type ExportKind = 'csv' | 'json' | 'package';
+type ExportKind = 'csv' | 'json';
 
 const EXPORT_METHOD: Record<ExportKind, (filters: EntryListFilters) => Promise<void>> = {
   csv: journalApi.exportEntriesCsv,
   json: journalApi.exportEntriesJson,
-  package: journalApi.exportEntriesResearchPackage,
 };
 
 type SortKey = 'occurred' | 'activity' | 'plot' | 'status';
@@ -352,7 +351,7 @@ export function EntryTable({
     );
   } else if (sortedEntries.length === 0) {
     body = (
-      <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] p-8 text-center text-[var(--text-secondary)]">
+      <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--card)] p-8 text-center text-[var(--text-secondary)]">
         {t('workspace.table.empty')}
       </div>
     );
@@ -374,8 +373,8 @@ export function EntryTable({
       }
     }
     body = (
-      <table className="min-w-full text-left text-sm">
-        <thead className="bg-[var(--surface)] text-xs uppercase text-[var(--text-secondary)]">
+      <table className="min-w-full bg-[var(--card)] text-left text-sm">
+        <thead className="bg-[var(--card)] text-xs uppercase text-[var(--text-secondary)]">
           <tr>
             {headerCell('occurred')}
             {headerCell('activity')}
@@ -391,7 +390,7 @@ export function EntryTable({
   return (
     <section
       aria-label={t('workspace.table.heading')}
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">{headerStart}</div>
@@ -400,7 +399,7 @@ export function EntryTable({
             type="button"
             onClick={() => void handleExport('csv')}
             disabled={pendingExport !== null}
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('workspace.table.exportCsv')}
           </button>
@@ -408,17 +407,9 @@ export function EntryTable({
             type="button"
             onClick={() => void handleExport('json')}
             disabled={pendingExport !== null}
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('workspace.table.exportJson')}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleExport('package')}
-            disabled={pendingExport !== null}
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {t('workspace.table.exportPackage')}
           </button>
         </div>
       </div>
@@ -444,7 +435,7 @@ export function EntryTable({
           type="button"
           onClick={handlePrevious}
           disabled={activePagination.history.length === 0}
-          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t('workspace.table.previousPage')}
         </button>
@@ -452,7 +443,7 @@ export function EntryTable({
           type="button"
           onClick={handleNext}
           disabled={!nextCursor}
-          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t('workspace.table.nextPage')}
         </button>

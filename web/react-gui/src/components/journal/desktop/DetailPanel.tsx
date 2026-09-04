@@ -214,7 +214,7 @@ export function DetailPanel({
     return (
       <aside
         aria-label={t('workspace.detail.heading')}
-        className="min-h-[240px] rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--text-secondary)]"
+        className="min-h-[240px] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--text-secondary)]"
       >
         {t('workspace.detail.placeholder')}
       </aside>
@@ -269,7 +269,7 @@ function DetailPanelForEntry({
 
   if (loading) {
     return (
-      <aside aria-label={t('workspace.detail.heading')} className="min-h-[240px] rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--text-secondary)]">
+      <aside aria-label={t('workspace.detail.heading')} className="min-h-[240px] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--text-secondary)]">
         {heading}
         <p role="status" className="mt-3">{t('workspace.detail.loading')}</p>
       </aside>
@@ -278,7 +278,7 @@ function DetailPanelForEntry({
 
   if (error) {
     return (
-      <aside aria-label={t('workspace.detail.heading')} className="min-h-[240px] rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm">
+      <aside aria-label={t('workspace.detail.heading')} className="min-h-[240px] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
         {heading}
         <div role="alert" className="mt-3 space-y-2">
           <p>{t('workspace.detail.error')}</p>
@@ -296,7 +296,7 @@ function DetailPanelForEntry({
 
   if (!aggregate) {
     return (
-      <aside aria-label={t('workspace.detail.heading')} className="min-h-[240px] rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--text-secondary)]">
+      <aside aria-label={t('workspace.detail.heading')} className="min-h-[240px] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--text-secondary)]">
         {heading}
         <p className="mt-3">{t('workspace.detail.notFound')}</p>
       </aside>
@@ -327,7 +327,7 @@ function DetailPanelForEntry({
   };
 
   return (
-    <aside aria-label={t('workspace.detail.heading')} className="flex min-h-[240px] flex-col gap-4 overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm">
+    <aside aria-label={t('workspace.detail.heading')} className="flex min-h-[240px] flex-col gap-4 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
       {heading}
 
       <div>
@@ -633,7 +633,7 @@ function VoidForm({ aggregate, plots, model, locale, onCancel, onVoided }: VoidF
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 rounded-xl border border-[var(--border)] p-3">
+    <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
       <label htmlFor={reasonId} className="block font-bold text-[var(--text)]">
         {t('workspace.detail.void.reasonLabel')}
       </label>
@@ -645,7 +645,7 @@ function VoidForm({ aggregate, plots, model, locale, onCancel, onVoided }: VoidF
         aria-invalid={touched}
         aria-describedby={touched ? reasonErrorId : undefined}
         onChange={(event) => { setReason(event.target.value); setTouched(false); }}
-        className="min-h-20 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)]"
+        className="min-h-20 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[var(--text)]"
       />
       {touched && (
         <p id={reasonErrorId} role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
@@ -829,7 +829,7 @@ function EntryCorrectionForm({
     <form
       onSubmit={handleSubmit}
       aria-label={t('workspace.detail.correction.heading')}
-      className="space-y-4 rounded-xl border border-[var(--border)] p-3"
+      className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3"
     >
       <div ref={containerRef}>
         <EntryForm
@@ -1037,7 +1037,7 @@ function EntryCopyForm({
     <form
       onSubmit={handleSubmit}
       aria-label={t('workspace.detail.copy.heading')}
-      className="space-y-4 rounded-xl border border-[var(--border)] p-3"
+      className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3"
     >
       <div ref={containerRef} className="space-y-4">
         <div className="space-y-2">
@@ -1051,7 +1051,7 @@ function EntryCopyForm({
             aria-invalid={dateError}
             aria-describedby={dateError ? occurredErrorId : undefined}
             onChange={(event) => { setOccurredLocal(event.target.value); setDateError(false); }}
-            className="min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)]"
+            className="min-h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]"
           />
           {dateError && (
             <p id={occurredErrorId} role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">

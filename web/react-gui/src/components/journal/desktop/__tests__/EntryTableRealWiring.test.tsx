@@ -53,7 +53,6 @@ describe('EntryTable real wiring (real journalApi, mocked transport only)', () =
   it.each([
     ['workspace.table.exportCsv', '/api/journal/export.csv'],
     ['workspace.table.exportJson', '/api/journal/export.json'],
-    ['workspace.table.exportPackage', '/api/journal/export.package'],
   ])('clicking %s actually issues a GET to %s and shows the success status', async (buttonName, expectedPath) => {
     render(
       <EntryTable
@@ -74,7 +73,6 @@ describe('EntryTable real wiring (real journalApi, mocked transport only)', () =
   it.each([
     ['workspace.table.exportCsv'],
     ['workspace.table.exportJson'],
-    ['workspace.table.exportPackage'],
   ])('surfaces a real transport failure for %s instead of staying silent', async (buttonName) => {
     get.mockReset().mockRejectedValue(new Error('network down'));
     render(

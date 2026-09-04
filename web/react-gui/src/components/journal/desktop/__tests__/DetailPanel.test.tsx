@@ -236,6 +236,15 @@ beforeEach(() => {
 });
 
 describe('DetailPanel — read-back states', () => {
+  it('uses a Data-style gray detail shell before an entry is selected', () => {
+    renderPanel({ selectedEntryUuid: null });
+
+    expect(screen.getByRole('complementary', { name: 'workspace.detail.heading' })).toHaveClass(
+      'rounded-lg',
+      'bg-[var(--surface)]',
+    );
+  });
+
   it('shows the placeholder when nothing is selected, without fetching anything', () => {
     renderPanel({ selectedEntryUuid: null });
 
