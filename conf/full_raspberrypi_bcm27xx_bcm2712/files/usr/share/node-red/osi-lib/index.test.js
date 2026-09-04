@@ -33,6 +33,10 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'osi-journal',
     'osi-system-settings',
     'osi-valve-control',
+    'sdi12-commissioning',
+    'sdi12-normalize',
+    'sdi12-reassemble',
+    'sdi12-recipe',
     'uc512-normalize',
     'zone-commands',
     'zone-env',
@@ -45,6 +49,8 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['osi-valve-control'], 'osi-valve-control');
   assert.equal(osiLib.NAME_TO_PATH['osi-system-settings'], 'osi-system-settings');
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
+  assert.equal(osiLib.NAME_TO_PATH['sdi12-recipe'], 'osi-sdi12-recipe');
+  assert.equal(osiLib.NAME_TO_PATH['sdi12-commissioning'], 'osi-sdi12-commissioning');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');
   assert.equal(osiLib.NAME_TO_PATH['osi-db-helper'], 'osi-db-helper');
@@ -78,6 +84,8 @@ test('command flow helpers load from OSI_LIB_BASE and cache successful modules',
     ['osi-db-helper', 'osi-db-helper'],
     ['osi-command-ledger', 'osi-command-ledger'],
     ['zone-commands', 'osi-zone-commands'],
+    ['sdi12-recipe', 'osi-sdi12-recipe'],
+    ['sdi12-commissioning', 'osi-sdi12-commissioning'],
   ]) {
     const helperDirectory = path.join(FIXTURE_BASE, directory);
     const helperPath = path.join(helperDirectory, 'index.js');

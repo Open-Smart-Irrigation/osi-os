@@ -1,5 +1,35 @@
 // The specific supported hardware types
-export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512';
+export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512' | 'DRAGINO_SDI12';
+export type Sdi12ProbeStatus = 'pending_identify' | 'identified' | 'unmatched' | 'manual';
+export type SentekSensorType = 'ENVIROSCAN' | 'TRISCAN';
+export type Sdi12RecipeDeploymentStatus =
+  | 'not_applied' | 'queueing' | 'queued'
+  | 'observed_once' | 'observed_compatible' | 'degraded';
+export interface Sdi12RecipeDeployment {
+  desired_version: number;
+  desired_layout_hash: string | null;
+  status: Sdi12RecipeDeploymentStatus;
+  queued_at: string | null;
+  queue_drained_at: string | null;
+  commissioning_deadline_at: string | null;
+  last_observed_at: string | null;
+  compatible_at: string | null;
+  updated_at: string | null;
+  frame_count: number | null;
+  compatible_available: boolean;
+  last_error_code: string | null;
+}
+export interface SentekChannelSensor {
+  channel: number;
+  response_position: number;
+  depth_cm: number;
+  type: SentekSensorType;
+}
+export interface SentekChannelLayout {
+  version: 1;
+  address: string;
+  sensors: SentekChannelSensor[];
+}
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
@@ -8,11 +38,20 @@ export interface Device {
   deveui: string;       // Unique LoRaWAN ID
   name: string;         // User-given name (e.g., "North Field")
   type_id: DeviceType;
+  updated_at?: string | null;
   last_seen?: string | null;    // ISO Date string
   soilMoistureProbeDepths?: Record<string, number>;
   soilMoistureProbeDepthsConfigured?: boolean;
   soil_moisture_probe_depths_json?: Record<string, number> | null;
   soil_moisture_probe_depths_configured?: number | boolean | null;
+  sdi12_probe_profile?: string | null;
+  sdi12_probe_status?: Sdi12ProbeStatus | null;
+  sdi12_identity?: string | null;
+  sdi12_value_count?: number | null;
+  sdi12_channel_layout_json?: SentekChannelLayout | null;
+  sdi12_recipe_deployment?: Sdi12RecipeDeployment | null;
+  sdi12_discovered_address?: string | null;
+  sdi12_layout_status?: 'legacy_count' | 'configured' | 'active_vwc' | 'vic_framing_unverified' | 'invalid' | null;
 
   // Specific data payload matching Node-RED output
   latest_data: {
@@ -21,6 +60,42 @@ export interface Device {
     swt_1?: number | null;      // Canonical SWT channel 1 (kPa)
     swt_2?: number | null;      // Canonical SWT channel 2 (kPa)
     swt_3?: number | null;      // Canonical SWT channel 3 (kPa)
+    vwc_1?: number | null;
+    vwc_2?: number | null;
+    vwc_3?: number | null;
+    vwc_4?: number | null;
+    vwc_5?: number | null;
+    vwc_6?: number | null;
+    vwc_7?: number | null;
+    vwc_8?: number | null;
+    vwc_9?: number | null;
+    vwc_10?: number | null;
+    soil_vic_1?: number | null;
+    soil_vic_2?: number | null;
+    soil_vic_3?: number | null;
+    soil_vic_4?: number | null;
+    soil_vic_5?: number | null;
+    soil_vic_6?: number | null;
+    soil_vic_7?: number | null;
+    soil_vic_8?: number | null;
+    soil_vic_9?: number | null;
+    soil_vic_10?: number | null;
+    soil_temp_1?: number | null;
+    soil_temp_2?: number | null;
+    soil_temp_3?: number | null;
+    soil_temp_4?: number | null;
+    soil_temp_5?: number | null;
+    soil_temp_6?: number | null;
+    soil_temp_7?: number | null;
+    soil_temp_8?: number | null;
+    soil_ec_1?: number | null;
+    soil_ec_2?: number | null;
+    soil_ec_3?: number | null;
+    soil_ec_4?: number | null;
+    soil_ec_5?: number | null;
+    soil_ec_6?: number | null;
+    soil_ec_7?: number | null;
+    soil_ec_8?: number | null;
     light_lux?: number;         // Light intensity
     ambient_temperature?: number;
     relative_humidity?: number;
@@ -141,6 +216,16 @@ export interface User {
 export interface DeviceCatalogItem {
   id: DeviceType;
   name: string;
+}
+
+export interface Sdi12Profile {
+  id: string;
+  label: string;
+  provisional: boolean;
+  expectedValues?: number | null;
+  defaultDepthsCm: number[];
+  channels: string[];
+  depthSlots?: number[];
 }
 
 export interface LoginRequest {

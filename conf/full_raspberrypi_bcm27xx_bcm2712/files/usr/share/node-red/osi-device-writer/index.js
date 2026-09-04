@@ -122,4 +122,9 @@ function writeDeviceData(db, manifest, normalizeResult, meta, options) {
   return { inserted: true, deadLettered, columns: cols.slice() };
 }
 
-module.exports = { writeDeviceData, clampRecordedAt, resetColumnCache };
+function quarantineOnly(db, deveui, channel, rawValue) {
+  deadLetter(db, String(deveui || '').toUpperCase().trim(), channel, 'unknown_channel', rawValue);
+  evictQuarantine(db);
+}
+
+module.exports = { writeDeviceData, quarantineOnly, clampRecordedAt, resetColumnCache };

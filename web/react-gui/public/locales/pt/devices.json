@@ -301,5 +301,21 @@
       "CLOSE_TIMEOUT": "Tempo de fecho esgotado",
       "UNKNOWN": "Desconhecido"
     }
+  },
+  "sdi12": {
+    "identify": "Identificar sonda",
+    "reCheck": "Verificar sonda novamente",
+    "actButtonHint": "Se a sonda não responder, prima o botão ACT na unidade Dragino e tente novamente.",
+    "noResponse": "A sonda não respondeu à identificação",
+    "valueCount": "Número de valores",
+    "valueCountHelp": "Deixe vazio para aceitar qualquer número de leituras. Defina um número para rejeitar quadros que não correspondam exatamente.",
+    "layoutSaved": "Esquema guardado; configuração de aquisição não aplicada.", "refreshRequired": "Esquema guardado. A atualizar o estado do dispositivo antes de aplicar.", "apply": "Aplicar configuração de aquisição", "rollback": "Repor configuração de aquisição", "rollingBack": "A repor…", "confirmApply": "Confirmar aplicação", "applyConfirmation": "Uma receita máxima demora cerca de oito horas na cadência normal de 20 minutos e usa uma janela de 12 V de oito segundos por ciclo. Não utiliza alimentação contínua nem um intervalo mais curto.", "requestAccepted": "Pedido aceite (versão {{version}}; {{status}}).", "rollbackRequestAccepted": "Pedido de reposição aceite (versão {{version}}; {{status}}).", "degraded": "Configuração de aquisição degradada", "active": "Configuração de aquisição ativa", "deploymentStatus": "Configuração de aquisição: {{status}}"
+  },
+  "sdi12Soil": {
+    "removeConfirm": "Remover este dispositivo?",
+    "removeSubtitle": "O dispositivo será desvinculado da sua conta.",
+    "yesRemove": "Sim, remover",
+    "removing": "A remover...",
+    "failedToRemove": "Falha ao remover dispositivo"
   }
 }

@@ -698,6 +698,38 @@ fetch_required "osi-uc512-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/index.js" \
     "/srv/node-red/osi-uc512-normalize/index.js"
 
+fetch_required "osi-sdi12-normalize package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/package.json" \
+    "/srv/node-red/osi-sdi12-normalize/package.json"
+
+fetch_required "osi-sdi12-normalize index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.js" \
+    "/srv/node-red/osi-sdi12-normalize/index.js"
+
+fetch_required "osi-sdi12-recipe package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/package.json" \
+    "/srv/node-red/osi-sdi12-recipe/package.json"
+
+fetch_required "osi-sdi12-recipe index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/index.js" \
+    "/srv/node-red/osi-sdi12-recipe/index.js"
+
+fetch_required "osi-sdi12-commissioning package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/package.json" \
+    "/srv/node-red/osi-sdi12-commissioning/package.json"
+
+fetch_required "osi-sdi12-commissioning index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.js" \
+    "/srv/node-red/osi-sdi12-commissioning/index.js"
+
+fetch_required "osi-sdi12-reassemble package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/package.json" \
+    "/srv/node-red/osi-sdi12-reassemble/package.json"
+
+fetch_required "osi-sdi12-reassemble index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.js" \
+    "/srv/node-red/osi-sdi12-reassemble/index.js"
+
 fetch_required "osi-valve-control package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/package.json" \
     "/srv/node-red/osi-valve-control/package.json"
@@ -795,6 +827,10 @@ fetch_required "LoRain codec" \
 fetch_required "UC512 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/milesight_uc512_decoder.js" \
     "/srv/node-red/codecs/milesight_uc512_decoder.js"
+
+fetch_required "SDI12 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
+    "/srv/node-red/codecs/dragino_sdi12_decoder.js"
 
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
@@ -896,16 +932,27 @@ echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
 /etc/init.d/node-red restart || true
 
 PROBE_OK=1
-if pgrep -f 'node-red' >/dev/null 2>&1; then
-    sleep 5
-    if wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
-        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable)"
+NODE_RED_HEALTH_TIMEOUT="${NODE_RED_HEALTH_TIMEOUT:-30}"
+case "$NODE_RED_HEALTH_TIMEOUT" in
+    ''|*[!0-9]*|0) NODE_RED_HEALTH_TIMEOUT=30 ;;
+esac
+probe_elapsed=0
+while [ "$probe_elapsed" -lt "$NODE_RED_HEALTH_TIMEOUT" ]; do
+    if pgrep -f 'node-red' >/dev/null 2>&1 && \
+       wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
+        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable after ${probe_elapsed}s)"
         PROBE_OK=0
-    else
-        echo "WARN: Node-RED process alive but /gui not reachable after 5s" >&2
+        break
     fi
-else
-    echo "ALERT: Node-RED process not found after restart" >&2
+    sleep 1
+    probe_elapsed=$((probe_elapsed + 1))
+done
+if [ "$PROBE_OK" != "0" ]; then
+    if pgrep -f 'node-red' >/dev/null 2>&1; then
+        echo "WARN: Node-RED process alive but /gui not reachable after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
+    else
+        echo "ALERT: Node-RED process not found after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
+    fi
 fi
 
 if [ "$PROBE_OK" = "0" ]; then

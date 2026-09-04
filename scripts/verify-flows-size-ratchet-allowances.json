@@ -1,17 +1,137 @@
 {
   "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
   "node_allowances": {
+    "sync-bootstrap-build": {
+      "delta": 5859,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 34126 -> branch base a38c9db6 39912 -> HEAD 39985 = +5859, +5786 the pre-existing feat/valve-control baseline and +73 this SDI-12 port. SDI-12 contribution: the bootstrap devices snapshot gains sdi12_probe_profile/sdi12_value_count/sdi12_channel_layout_json. Supersedes the previous entry: live identity restart sentinel (Option C Slice 1) (main, 2026-08) + valve-control growth: at merge 48c8ab47 this node measured byte-identical to origin/main (34126 chars) so main's identity-sentinel growth is carried by the origin/main baseline itself and the net allowance was 0. Re-measured on integration/valve-focused-portback-20260831 with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 34126 -> HEAD 39912 = +5786. feat/valve-control's copy is still byte-identical to origin/main's (34126), so the entire +5786 is this port-back's cherry-picked valve work, attributed per pick: valve_schedules in the bootstrap/force snapshot (+820), UPSERT_VALVE_SETTINGS applier + snapshot (+684), VALVE_ACTUATION_ARCHIVED terminal emission + backfill (+3147), P4-E1 review fixes (status derivation, backfill emit, LWW ties) (+1158), P5-3 i18n retranslation (-11), branding scrub (-12). Sums to +5786 exactly."
+    },
+    "sync-force-build": {
+      "delta": 5786,
+      "reason": "live identity restart sentinel (Option C Slice 1) (main, 2026-08) + valve-control growth: at merge 48c8ab47 this node measured byte-identical to origin/main (52929 chars) so main's identity-sentinel growth is carried by the origin/main baseline itself and the net allowance was 0. Re-measured on integration/valve-focused-portback-20260831 with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 52929 -> HEAD 58715 = +5786. feat/valve-control's copy is still byte-identical to origin/main's (52929), so the entire +5786 is this port-back's cherry-picked valve work, attributed per pick: valve_schedules in the bootstrap/force snapshot (+820), UPSERT_VALVE_SETTINGS applier + snapshot (+684), VALVE_ACTUATION_ARCHIVED terminal emission + backfill (+3147), P4-E1 review fixes (status derivation, backfill emit, LWW ties) (+1158), P5-3 i18n retranslation (-11), branding scrub (-12). Sums to +5786 exactly. [re-measured on port/sdi12-edge: origin/main 53121 -> HEAD 58907 = +5786, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "strega-reconciliation-monitor": {
+      "delta": 5528,
+      "reason": "FW-T1 fix wave: gate state derivation on 'uplink && uplink.recorded_at' so a never-uplinked valve's LEFT JOIN NULL row is not mistaken for a real observation (phantom OBSERVED_COMPLETE/OBSERVED_RUNNING) (+22); FW-T1b Gap A: query also selects d.updated_at AS state_updated_at, and the state-derivation block additionally gates on Date.parse(state_updated_at) >= Date.parse(commanded_at) (both Number.isFinite, epoch-millis compare) so a stale current_state paired with a fresh Class-A uplink is not mistaken for a real observation (+381); FW-T1c: RECONCILIATION_GRACE_SEC widened 300 -> 1800 (a full Class-A 600s uplink cycle plus margin on both the OPEN-delivery and CLOSE-confirmation legs) so a genuine run confirming 600-1500s after expected_close_at no longer times out to the litres-excluded STALE_NO_OBSERVATION (+1). FW-T1c R1 (review be3346a8): the late-promotion path (STALE_NO_OBSERVATION rescan + 6h window guard, +391) was reverted per review ruling - it re-opened unbounded phantom-litres exposure (MAJOR-1, any later valve activity within 6h revived a stale row regardless of which run it belonged to) and collided with osi-valve-control's runObserveTick dedupe model (MAJOR-2, race-dependent duplicate rows). The node is now byte-for-byte the a88b88dd (FW-T1b) version plus only the grace constant change; delta shrunk from 794 to 404, exact vs origin/main. Valve control Phase B Task 6 (+3809): the active-expectations SELECT LEFT JOINs devices for user_id/irrigation_zone_id (canLog guard, mirrors workers.js's runOnceTick); the OBSERVED_COMPLETE transition for trigger IN (on_valve_schedule, unexplained) now INSERTs an irrigation_events row (observed-span duration, event_uuid omitted so the sync trigger mints it, reason distinct from one_time_open) in the SAME transaction as the state UPDATE, so a crash cannot leave a completed actuation with no event or vice versa; ONCE runs are excluded (already logged at fire time by workers.js, avoiding a double count); the pre-existing empty catch on the close() call was also converted to a visible node.warn (touched-node silent-catch ratchet). cloud full-parity Task P3-E1 (+671, exact vs origin/main): loads osiLib once per tick and, inside the same per-expectation transaction as the state UPDATE, best-effort emits a VALVE_RUNTIME_CHANGED sync event via osi-valve-control's new emitRuntimeChanged() -- this is the code seam for the reconciliation-transition half of the ValveRuntime derived-state resource (the other half is the write-strega-expectation node, for new active_actuation rows). cloud full-parity Task P4-E1 (+650, exact vs origin/main): beside that same emitRuntimeChanged call, best-effort emits VALVE_ACTUATION_ARCHIVED via osi-valve-control's new emitActuationArchived() -- unconditional (it no-ops on its own for the non-terminal OBSERVED_RUNNING transition), so this is the terminal-transition half of the ValveActuation archive resource (the other half is cancel.js, for the CANCELLED transition). [re-measured on port/sdi12-edge: origin/main 2876 -> HEAD 8404 = +5528, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "merge-device-data": {
+      "delta": 4372,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 10392 -> branch base a38c9db6 10392 -> HEAD 14764 = +4372, all +4372 of it this SDI-12 port. SDI-12 contribution: the device payload gains the SDI-12 probe/layout fields and the bounded recipe-deployment projection."
+    },
+    "cs-reg-cloud-fn": {
+      "delta": 2897,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 11550 -> branch base a38c9db6 13887 -> HEAD 14447 = +2897, +2337 the pre-existing feat/valve-control baseline and +560 this SDI-12 port. SDI-12 contribution: DRAGINO_SDI12 joins the ChirpStack app/profile maps, chirpstack_app_id is persisted on register, and msg.deviceRegistration is staged so a cloud registration also auto-triggers identify. Supersedes the previous entry: STREGA Gen2 device profile Task 4: promotion-only valve_settings upsert on this independent registration path (+1260, superseding the removed dead placeholder block); R1 review fixes: MAJOR-2 -- since this cloud payload carries no generation field at all, query stored valve_settings.strega_generation inside the guarded REGISTER_DEVICE branch (via a new `all` helper reusing the branch's existing _db handle) and keep a stored GEN2 sticky, instead of hardcoding GEN1 unconditionally; MINOR a -- move the profile-selection block from above the REGISTER_DEVICE guard (where it was statically unreachable dead code) into the branch; MINOR b -- maintain updated_at on the valve_settings write (exact delta vs origin/main)"
+    },
+    "post-devices-insert": {
+      "delta": 1562,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4558 -> branch base a38c9db6 5832 -> HEAD 6120 = +1562, +1274 the pre-existing feat/valve-control baseline and +288 this SDI-12 port. SDI-12 contribution: the local register path persists chirpstack_app_id on both the claim/update and create branches. Supersedes the previous entry: STREGA Gen2 device profile Task 4: select CHIRPSTACK_PROFILE_STREGA_GEN2 for GEN2 STREGA registrations and stamp msg.deviceRegistration.stregaGeneration for cs-register-device-fn (+557); R1 review fix (MAJOR-2): resolve the effective generation from stored (LEFT JOIN valve_settings via check-existing-device) OR requested state, not the request field alone -- ensureDeviceProvisioned (Task 2) actively repoints ChirpStack to match the resolved profile, so consulting only the request field would demote an already-promoted GEN2 valve's ChirpStack profile back to Gen1 on a generation-omitted re-registration (+717) (exact delta vs origin/main)"
+    },
+    "sync-init-fn": {
+      "delta": 1396,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 74217 -> branch base a38c9db6 74217 -> HEAD 75613 = +1396, all +1396 of it this SDI-12 port. SDI-12 contribution: boot-owned literals track the seed: DRAGINO_SDI12 in the devices CHECK, the five SDI-12 columns in DEVICES_NEW_DDL/DEVICES_COPY_SQL, and sdi12_probe_profile/sdi12_value_count in trg_sync_devices_outbox_au. Supersedes the previous entry: issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
+    },
+    "strega-process-fn": {
+      "delta": 1378,
+      "reason": "STREGA Gen2 device profile Task 1: accept the Gen2 vendor decoder's `Actuator` field as an alias for `Valve` (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up emits Actuator, not Valve) via a valveRaw fallback, used in place of decodedObject.Valve at both read sites (+152); Task 6 fix round R1 (MAJOR-2): getProfileKind's stregaProfiles also matches CHIRPSTACK_PROFILE_STREGA_GEN2, so a valve already re-pointed to the Gen2 profile is still recognised as STREGA_VALVE instead of falling through to null (+64); final review fix (MAJOR-5): the empty-object fallback decoder was Gen1-only, so a Gen2 valve hitting that branch got its bytes mis-decoded and written to device_data as though it were Gen1 telemetry -- refuse the fallback decode for a Gen2 profile instead (isGen2StregaProfile helper + a guarded decodedObject expression + a node.warn on the refused path), a wrong valve state being worse than a missing one (+1162, exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 5776 -> HEAD 7154 = +1378, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "post-zone-insert": {
+      "delta": 1290,
+      "reason": "FW-T5: default a missing zone timezone to the app_settings gateway_timezone (table-missing-safe), instead of silently relying on the irrigation_zones.timezone column DEFAULT 'UTC'; adds an async osiDb read/close and error-wrapping around the existing INSERT build (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1080 -> HEAD 2370 = +1290, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "get-devices-query": {
+      "delta": 1202,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1499 -> branch base a38c9db6 1499 -> HEAD 2701 = +1202, all +1202 of it this SDI-12 port. SDI-12 contribution: the devices list joins sdi12_recipe_deployments and sdi12_identify_attempts, projects their columns, and binds the owner id instead of interpolating it."
+    },
+    "write-strega-expectation": {
+      "delta": 1034,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 10197 -> branch base a38c9db6 11108 -> HEAD 11231 = +1034, +911 the pre-existing feat/valve-control baseline and +123 this SDI-12 port. SDI-12 contribution: SET_SDI12_IDENTIFY joins the command registry surface. Supersedes the previous entry: 1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
+    },
+    "cmd-type-registry": {
+      "delta": 847,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4976 -> branch base a38c9db6 5700 -> HEAD 5823 = +847, +724 the pre-existing feat/valve-control baseline and +123 this SDI-12 port. SDI-12 contribution: SET_SDI12_IDENTIFY joins the command-type registry. Supersedes the previous entry: 1.C: expanded command-type registry from 8 to 33 types"
+    },
+    "reject-indefinite-open": {
+      "delta": 847,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 6024 -> branch base a38c9db6 6748 -> HEAD 6871 = +847, +724 the pre-existing feat/valve-control baseline and +123 this SDI-12 port. SDI-12 contribution: SET_SDI12_IDENTIFY joins the duration-bound exemption set. Supersedes the previous entry: 1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
+    },
+    "cs-register-device-fn": {
+      "delta": 808,
+      "reason": "STREGA Gen2 device profile Task 4: params-capable run() helper plus the promotion-only valve_settings upsert (GEN1->GEN2 only, never demotes a stored GEN2) after successful provisioning (+778); R1 review fix (MINOR b): maintain updated_at on the valve_settings write per osi-valve-control/store.js's documented invariant (+30) (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1678 -> HEAD 2486 = +808, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "format-devices": {
+      "delta": 744,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3903 -> branch base a38c9db6 3903 -> HEAD 4647 = +744, all +744 of it this SDI-12 port. SDI-12 contribution: device rows carry the SDI-12 probe/layout/deployment fields."
+    },
     "cdbaa3891d40d7a1": {
-      "delta": 500,
-      "reason": "Valve advanced controls consolidation Task 4 (E2): _log_ctx gains percentage/returnPosition fields for SET_PARTIAL_OPENING/SET_FLUSHING so the value the encoder already computes is no longer dropped before it reaches actuator_log (+497 exact delta vs origin/main)"
+      "delta": 497,
+      "reason": "Valve advanced controls consolidation Task 4 (E2): _log_ctx gains percentage/returnPosition fields for SET_PARTIAL_OPENING/SET_FLUSHING so the value the encoder already computes is no longer dropped before it reaches actuator_log (+497 exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 10221 -> HEAD 10718 = +497, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "post-devices-auth": {
+      "delta": 485,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3677 -> branch base a38c9db6 4106 -> HEAD 4162 = +485, +429 the pre-existing feat/valve-control baseline and +56 this SDI-12 port. SDI-12 contribution: DRAGINO_SDI12 joins the registerable device-type allow-list. Supersedes the previous entry: STREGA Gen2 device profile Task 4: validate + capture the optional strega_generation request field the same way new_device_appkey is captured (+393); R1 review fix (MINOR d): generation only applies to STREGA_VALVE, ignored (forced to '') for every other device type (+36) (exact delta vs origin/main)"
     },
     "5c45136f382d501c": {
-      "delta": 465,
-      "reason": "Valve advanced controls consolidation Task 4 (E2): actuator_log INSERT composes the percentage (and returnPosition for flushing) into the action free-text column instead of writing the bare command string -- no schema change, actuator_log has no JSON/detail column to hold it in (+462 exact delta vs origin/main)"
+      "delta": 462,
+      "reason": "Valve advanced controls consolidation Task 4 (E2): actuator_log INSERT composes the percentage (and returnPosition for flushing) into the action free-text column instead of writing the bare command string -- no schema change, actuator_log has no JSON/detail column to hold it in (+462 exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1047 -> HEAD 1509 = +462, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "8809bb5239dfb3d4": {
+      "delta": 446,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 12175 -> branch base a38c9db6 12333 -> HEAD 12621 = +446, +158 the pre-existing feat/valve-control baseline and +288 this SDI-12 port. SDI-12 contribution: Build Telemetry gains the sdi12Profiles dispatch arm for DRAGINO_SDI12. Supersedes the previous entry: STREGA Gen2 device profile Task 6 fix round R2 (NEW-MAJOR-A, NEW-MAJOR-B): Build Telemetry's getProfileKind() gains the CHIRPSTACK_PROFILE_STREGA_GEN2 whitelist entry so a re-pointed Gen2 valve is still recognised as STREGA_VALVE on the cloud telemetry path instead of falling through to the generic sensor branch (matches valve-ack-fn/strega-process-fn from earlier in this task); and the Gen2 vendor decoder's Actuator field is accepted as an alias for Valve via an explicit !== undefined && !== null check (never ||, since valve state 0/CLOSED is falsy), matching strega-process-fn's Task 1 shape exactly -- without it every Gen2 valve mirrored state: null to the cloud regardless of profile naming (exact delta vs origin/main)"
+    },
+    "fn_build_sensor_sql_params": {
+      "delta": 368,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1348 -> branch base a38c9db6 1348 -> HEAD 1716 = +368, all +368 of it this SDI-12 port. SDI-12 contribution: the sensor-history SQL gains the SDI-12 telemetry columns."
     },
     "934bf2bc19a8ce22": {
       "delta": 282,
-      "reason": "Valve control Phase B Task 3: Route Command dispatches the four cloud valve-schedule commands (UPSERT_VALVE_SCHEDULE, DELETE_VALVE_SCHEDULE, RESEND_VALVE_PLAN, SET_VALVE_SCHEDULER_STATUS) to a new sixth output, wired to a thin Valve Cloud Command Bridge node that delegates to osi-valve-control's applyCloudCommand (+223 exact delta vs origin/main). cloud full-parity Task 1.4: the same hardcoded routing array is the actual gate for reaching the bridge (neither the bridge nor this node reads cmd-type-registry's `dispatch` field for this decision), so CANCEL_VALVE_ACTUATION was added to it too (+253 exact delta vs origin/main). cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS added to the same hardcoded routing array for the same reason (+282 exact delta vs origin/main)."
+      "reason": "Valve control Phase B Task 3: Route Command dispatches the four cloud valve-schedule commands (UPSERT_VALVE_SCHEDULE, DELETE_VALVE_SCHEDULE, RESEND_VALVE_PLAN, SET_VALVE_SCHEDULER_STATUS) to a new sixth output, wired to a thin Valve Cloud Command Bridge node that delegates to osi-valve-control's applyCloudCommand (+223 exact delta vs origin/main). cloud full-parity Task 1.4: the same hardcoded routing array is the actual gate for reaching the bridge (neither the bridge nor this node reads cmd-type-registry's `dispatch` field for this decision), so CANCEL_VALVE_ACTUATION was added to it too (+253 exact delta vs origin/main). cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS added to the same hardcoded routing array for the same reason (+282 exact delta vs origin/main). [re-measured on port/sdi12-edge: origin/main 22347 -> HEAD 22629 = +282, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "post-zone-auth": {
+      "delta": 270,
+      "reason": "FW-T5: capture an optional client-supplied zone timezone alongside the existing name capture, for post-zone-insert's gateway_timezone fallback (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 3166 -> HEAD 3436 = +270, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "get-actuations-response": {
+      "delta": 214,
+      "reason": "valve control: recent-actuations response payload maps trigger alongside cancelReason (+40); final-fix-wave MAJOR-2: GRACE_MS widened from 120s to 1800s to match strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC, plus a comment naming that mirrored constant, so a still-reconciling run is not badged OPEN_TIMEOUT/CLOSE_TIMEOUT early (+174) [re-measured on port/sdi12-edge: origin/main 2538 -> HEAD 2752 = +214, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "al-link-store-mqtt": {
+      "delta": 143,
+      "reason": "Cloud MQTT broker URL fix: persist osi-server.cloud.mqtt_broker_url (from the already-validated al_mqtt_broker_url) alongside mqtt_password/server_host/link_gateway_device_eui, and back it up in _mqttConfigBackup for rollback (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 2715 -> HEAD 2858 = +143, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "al-unlink-clear-mqtt": {
+      "delta": 132,
+      "reason": "Cloud MQTT broker URL fix: clear osi-server.cloud.mqtt_broker_url on unlink and back up its prior value in _mqttConfigBackup for restore, mirroring the existing mqtt_password/server_host/link_gateway_device_eui handling (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1463 -> HEAD 1595 = +132, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "al-link-rollback-mqtt": {
+      "delta": 86,
+      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on link rollback, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1335 -> HEAD 1421 = +86, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "al-unlink-restore-mqtt": {
+      "delta": 86,
+      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on unlink failure, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1329 -> HEAD 1415 = +86, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "check-existing-device": {
+      "delta": 84,
+      "reason": "STREGA Gen2 device profile Task 4 R1 review fix (MAJOR-2): LEFT JOIN valve_settings so post-devices-insert can see the stored generation, not just the request field, and keep a stored GEN2 sticky across re-registration (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 404 -> HEAD 488 = +84, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "catalog-response": {
+      "delta": 69,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 482 -> branch base a38c9db6 482 -> HEAD 551 = +69, all +69 of it this SDI-12 port. SDI-12 contribution: the device catalog gains the DRAGINO_SDI12 row."
+    },
+    "get-actuations-query": {
+      "delta": 54,
+      "reason": "valve control: recent-actuations SELECT exposes valve_actuation_expectations.trigger (+20); final-fix-wave MINOR 3: defensive CREATE TABLE IF NOT EXISTS fallback for never-migrated Pis was missing the trigger column entirely, 500ing the SELECT vae.trigger on those gateways - added `trigger TEXT` to the fallback DDL to match the real (migrated) schema (+34) [re-measured on port/sdi12-edge: origin/main 2957 -> HEAD 3011 = +54, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "zone-env-fn": {
+      "delta": 29,
+      "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from estimated-irrigation litres so a never-observed command does not credit phantom litres to the zone water balance (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 39231 -> HEAD 39260 = +29, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "strega-today-liters-fn": {
+      "delta": 23,
+      "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from today's litres sum so a never-observed command does not credit phantom litres to today's total (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1494 -> HEAD 1517 = +23, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+    },
+    "d0b2b1c1a937e16d": {
+      "delta": 17,
+      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 2177 -> branch base a38c9db6 2177 -> HEAD 2194 = +17, all +17 of it this SDI-12 port. SDI-12 contribution: SDI-12 telemetry fields join this response shape."
     },
     "062a0f9bf66d9789": {
       "delta": 850,
@@ -41,18 +161,6 @@
       "delta": 823,
       "reason": "Field Journal Task 10: shared command-ledger replay; PR #141 hardening: guarded osiLib loading and protected-type routing keep generic commands independent from optional journal hooks (+823 exact final delta vs origin/main)"
     },
-    "cmd-type-registry": {
-      "delta": 3100,
-      "reason": "1.C: expanded command-type registry from 8 to 33 types"
-    },
-    "reject-indefinite-open": {
-      "delta": 3100,
-      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
-    },
-    "write-strega-expectation": {
-      "delta": 3300,
-      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
-    },
     "9b3afb405207302e": {
       "delta": 800,
       "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest"
@@ -69,14 +177,6 @@
       "delta": 950,
       "reason": "issue #10: sim INSERT OR REPLACE -> ON CONFLICT DO UPDATE upserts bumping sync_version"
     },
-    "sync-init-fn": {
-      "delta": 1019,
-      "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
-    },
-    "sync-bootstrap-build": {
-      "delta": 5786,
-      "reason": "live identity restart sentinel (Option C Slice 1) (main, 2026-08) + valve-control growth: at merge 48c8ab47 this node measured byte-identical to origin/main (34126 chars) so main's identity-sentinel growth is carried by the origin/main baseline itself and the net allowance was 0. Re-measured on integration/valve-focused-portback-20260831 with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 34126 -> HEAD 39912 = +5786. feat/valve-control's copy is still byte-identical to origin/main's (34126), so the entire +5786 is this port-back's cherry-picked valve work, attributed per pick: valve_schedules in the bootstrap/force snapshot (+820), UPSERT_VALVE_SETTINGS applier + snapshot (+684), VALVE_ACTUATION_ARCHIVED terminal emission + backfill (+3147), P4-E1 review fixes (status derivation, backfill emit, LWW ties) (+1158), P5-3 i18n retranslation (-11), branding scrub (-12). Sums to +5786 exactly."
-    },
     "sync-outbox-build": {
       "delta": 0,
       "reason": "live identity restart sentinel (Option C Slice 1) (main, 2026-08) + valve-control growth (retryable backoff cooldown-exclusion clause; PR #141 object-only payload parser, rollback propagation, strict delivery mapping, visible cleanup catches); re-measured at merge 2026-08-31 against origin/main (3c7b95bc) using verify-flows-size-ratchet's nodeSizes: HEAD's node body (18,056 chars) is byte-identical to origin/main's (18,056 chars) on both maintained profiles. valve-control's branch tip (e2bc5ce0) is itself byte-identical to the valve-control/main merge-base (60b82a36) for this node, so its historical +397 already predates this merge-base and needs no additional headroom here; main's identity-sentinel and retryable-backoff growth is fully carried by the origin/main baseline itself. Net allowance required beyond origin/main: 0."
@@ -88,10 +188,6 @@
     "sync-outbox-mark": {
       "delta": 294,
       "reason": "retryable backoff: RETRYABLE_ERROR results now collect event uuids and persist retry_count/last_retryable_failure_at instead of only counting them (Task J)"
-    },
-    "sync-force-build": {
-      "delta": 5786,
-      "reason": "live identity restart sentinel (Option C Slice 1) (main, 2026-08) + valve-control growth: at merge 48c8ab47 this node measured byte-identical to origin/main (52929 chars) so main's identity-sentinel growth is carried by the origin/main baseline itself and the net allowance was 0. Re-measured on integration/valve-focused-portback-20260831 with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 52929 -> HEAD 58715 = +5786. feat/valve-control's copy is still byte-identical to origin/main's (52929), so the entire +5786 is this port-back's cherry-picked valve work, attributed per pick: valve_schedules in the bootstrap/force snapshot (+820), UPSERT_VALVE_SETTINGS applier + snapshot (+684), VALVE_ACTUATION_ARCHIVED terminal emission + backfill (+3147), P4-E1 review fixes (status derivation, backfill emit, LWW ties) (+1158), P5-3 i18n retranslation (-11), branding scrub (-12). Sums to +5786 exactly."
     },
     "command-ack-build-batch": {
       "delta": 975,
@@ -140,82 +236,40 @@
     "dendro-raw-fn": {
       "delta": 10,
       "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all"
-    },
-    "get-actuations-query": {
-      "delta": 54,
-      "reason": "valve control: recent-actuations SELECT exposes valve_actuation_expectations.trigger (+20); final-fix-wave MINOR 3: defensive CREATE TABLE IF NOT EXISTS fallback for never-migrated Pis was missing the trigger column entirely, 500ing the SELECT vae.trigger on those gateways - added `trigger TEXT` to the fallback DDL to match the real (migrated) schema (+34)"
-    },
-    "get-actuations-response": {
-      "delta": 214,
-      "reason": "valve control: recent-actuations response payload maps trigger alongside cancelReason (+40); final-fix-wave MAJOR-2: GRACE_MS widened from 120s to 1800s to match strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC, plus a comment naming that mirrored constant, so a still-reconciling run is not badged OPEN_TIMEOUT/CLOSE_TIMEOUT early (+174)"
-    },
-    "strega-reconciliation-monitor": {
-      "delta": 5534,
-      "reason": "FW-T1 fix wave: gate state derivation on 'uplink && uplink.recorded_at' so a never-uplinked valve's LEFT JOIN NULL row is not mistaken for a real observation (phantom OBSERVED_COMPLETE/OBSERVED_RUNNING) (+22); FW-T1b Gap A: query also selects d.updated_at AS state_updated_at, and the state-derivation block additionally gates on Date.parse(state_updated_at) >= Date.parse(commanded_at) (both Number.isFinite, epoch-millis compare) so a stale current_state paired with a fresh Class-A uplink is not mistaken for a real observation (+381); FW-T1c: RECONCILIATION_GRACE_SEC widened 300 -> 1800 (a full Class-A 600s uplink cycle plus margin on both the OPEN-delivery and CLOSE-confirmation legs) so a genuine run confirming 600-1500s after expected_close_at no longer times out to the litres-excluded STALE_NO_OBSERVATION (+1). FW-T1c R1 (review be3346a8): the late-promotion path (STALE_NO_OBSERVATION rescan + 6h window guard, +391) was reverted per review ruling - it re-opened unbounded phantom-litres exposure (MAJOR-1, any later valve activity within 6h revived a stale row regardless of which run it belonged to) and collided with osi-valve-control's runObserveTick dedupe model (MAJOR-2, race-dependent duplicate rows). The node is now byte-for-byte the a88b88dd (FW-T1b) version plus only the grace constant change; delta shrunk from 794 to 404, exact vs origin/main. Valve control Phase B Task 6 (+3809): the active-expectations SELECT LEFT JOINs devices for user_id/irrigation_zone_id (canLog guard, mirrors workers.js's runOnceTick); the OBSERVED_COMPLETE transition for trigger IN (on_valve_schedule, unexplained) now INSERTs an irrigation_events row (observed-span duration, event_uuid omitted so the sync trigger mints it, reason distinct from one_time_open) in the SAME transaction as the state UPDATE, so a crash cannot leave a completed actuation with no event or vice versa; ONCE runs are excluded (already logged at fire time by workers.js, avoiding a double count); the pre-existing empty catch on the close() call was also converted to a visible node.warn (touched-node silent-catch ratchet). cloud full-parity Task P3-E1 (+671, exact vs origin/main): loads osiLib once per tick and, inside the same per-expectation transaction as the state UPDATE, best-effort emits a VALVE_RUNTIME_CHANGED sync event via osi-valve-control's new emitRuntimeChanged() -- this is the code seam for the reconciliation-transition half of the ValveRuntime derived-state resource (the other half is the write-strega-expectation node, for new active_actuation rows). cloud full-parity Task P4-E1 (+650, exact vs origin/main): beside that same emitRuntimeChanged call, best-effort emits VALVE_ACTUATION_ARCHIVED via osi-valve-control's new emitActuationArchived() -- unconditional (it no-ops on its own for the non-terminal OBSERVED_RUNNING transition), so this is the terminal-transition half of the ValveActuation archive resource (the other half is cancel.js, for the CANCELLED transition)."
-    },
-    "zone-env-fn": {
-      "delta": 29,
-      "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from estimated-irrigation litres so a never-observed command does not credit phantom litres to the zone water balance (exact delta vs origin/main)"
-    },
-    "strega-today-liters-fn": {
-      "delta": 23,
-      "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from today's litres sum so a never-observed command does not credit phantom litres to today's total (exact delta vs origin/main)"
-    },
-    "post-zone-auth": {
-      "delta": 270,
-      "reason": "FW-T5: capture an optional client-supplied zone timezone alongside the existing name capture, for post-zone-insert's gateway_timezone fallback (exact delta vs origin/main)"
-    },
-    "post-zone-insert": {
-      "delta": 1290,
-      "reason": "FW-T5: default a missing zone timezone to the app_settings gateway_timezone (table-missing-safe), instead of silently relying on the irrigation_zones.timezone column DEFAULT 'UTC'; adds an async osiDb read/close and error-wrapping around the existing INSERT build (exact delta vs origin/main)"
-    },
-    "strega-process-fn": {
-      "delta": 1378,
-      "reason": "STREGA Gen2 device profile Task 1: accept the Gen2 vendor decoder's `Actuator` field as an alias for `Valve` (docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up emits Actuator, not Valve) via a valveRaw fallback, used in place of decodedObject.Valve at both read sites (+152); Task 6 fix round R1 (MAJOR-2): getProfileKind's stregaProfiles also matches CHIRPSTACK_PROFILE_STREGA_GEN2, so a valve already re-pointed to the Gen2 profile is still recognised as STREGA_VALVE instead of falling through to null (+64); final review fix (MAJOR-5): the empty-object fallback decoder was Gen1-only, so a Gen2 valve hitting that branch got its bytes mis-decoded and written to device_data as though it were Gen1 telemetry -- refuse the fallback decode for a Gen2 profile instead (isGen2StregaProfile helper + a guarded decodedObject expression + a node.warn on the refused path), a wrong valve state being worse than a missing one (+1162, exact delta vs origin/main)"
-    },
-    "post-devices-auth": {
-      "delta": 429,
-      "reason": "STREGA Gen2 device profile Task 4: validate + capture the optional strega_generation request field the same way new_device_appkey is captured (+393); R1 review fix (MINOR d): generation only applies to STREGA_VALVE, ignored (forced to '') for every other device type (+36) (exact delta vs origin/main)"
-    },
-    "check-existing-device": {
-      "delta": 84,
-      "reason": "STREGA Gen2 device profile Task 4 R1 review fix (MAJOR-2): LEFT JOIN valve_settings so post-devices-insert can see the stored generation, not just the request field, and keep a stored GEN2 sticky across re-registration (exact delta vs origin/main)"
-    },
-    "post-devices-insert": {
-      "delta": 1274,
-      "reason": "STREGA Gen2 device profile Task 4: select CHIRPSTACK_PROFILE_STREGA_GEN2 for GEN2 STREGA registrations and stamp msg.deviceRegistration.stregaGeneration for cs-register-device-fn (+557); R1 review fix (MAJOR-2): resolve the effective generation from stored (LEFT JOIN valve_settings via check-existing-device) OR requested state, not the request field alone -- ensureDeviceProvisioned (Task 2) actively repoints ChirpStack to match the resolved profile, so consulting only the request field would demote an already-promoted GEN2 valve's ChirpStack profile back to Gen1 on a generation-omitted re-registration (+717) (exact delta vs origin/main)"
-    },
-    "cs-register-device-fn": {
-      "delta": 808,
-      "reason": "STREGA Gen2 device profile Task 4: params-capable run() helper plus the promotion-only valve_settings upsert (GEN1->GEN2 only, never demotes a stored GEN2) after successful provisioning (+778); R1 review fix (MINOR b): maintain updated_at on the valve_settings write per osi-valve-control/store.js's documented invariant (+30) (exact delta vs origin/main)"
-    },
-    "cs-reg-cloud-fn": {
-      "delta": 2337,
-      "reason": "STREGA Gen2 device profile Task 4: promotion-only valve_settings upsert on this independent registration path (+1260, superseding the removed dead placeholder block); R1 review fixes: MAJOR-2 -- since this cloud payload carries no generation field at all, query stored valve_settings.strega_generation inside the guarded REGISTER_DEVICE branch (via a new `all` helper reusing the branch's existing _db handle) and keep a stored GEN2 sticky, instead of hardcoding GEN1 unconditionally; MINOR a -- move the profile-selection block from above the REGISTER_DEVICE guard (where it was statically unreachable dead code) into the branch; MINOR b -- maintain updated_at on the valve_settings write (exact delta vs origin/main)"
-    },
-    "8809bb5239dfb3d4": {
-      "delta": 158,
-      "reason": "STREGA Gen2 device profile Task 6 fix round R2 (NEW-MAJOR-A, NEW-MAJOR-B): Build Telemetry's getProfileKind() gains the CHIRPSTACK_PROFILE_STREGA_GEN2 whitelist entry so a re-pointed Gen2 valve is still recognised as STREGA_VALVE on the cloud telemetry path instead of falling through to the generic sensor branch (matches valve-ack-fn/strega-process-fn from earlier in this task); and the Gen2 vendor decoder's Actuator field is accepted as an alias for Valve via an explicit !== undefined && !== null check (never ||, since valve state 0/CLOSED is falsy), matching strega-process-fn's Task 1 shape exactly -- without it every Gen2 valve mirrored state: null to the cloud regardless of profile naming (exact delta vs origin/main)"
-    },
-    "al-link-store-mqtt": {
-      "delta": 143,
-      "reason": "Cloud MQTT broker URL fix: persist osi-server.cloud.mqtt_broker_url (from the already-validated al_mqtt_broker_url) alongside mqtt_password/server_host/link_gateway_device_eui, and back it up in _mqttConfigBackup for rollback (exact delta vs origin/main)"
-    },
-    "al-unlink-clear-mqtt": {
-      "delta": 132,
-      "reason": "Cloud MQTT broker URL fix: clear osi-server.cloud.mqtt_broker_url on unlink and back up its prior value in _mqttConfigBackup for restore, mirroring the existing mqtt_password/server_host/link_gateway_device_eui handling (exact delta vs origin/main)"
-    },
-    "al-link-rollback-mqtt": {
-      "delta": 86,
-      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on link rollback, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main)"
-    },
-    "al-unlink-restore-mqtt": {
-      "delta": 86,
-      "reason": "Cloud MQTT broker URL fix: restore osi-server.cloud.mqtt_broker_url from _mqttConfigBackup on unlink failure, mirroring the existing mqtt_password/server_host/link_gateway_device_eui restore (exact delta vs origin/main)"
     }
   },
   "total_allowance": {
-    "delta": 44320,
-    "reason": "live identity restart sentinel + marked identity errors + fail-closed restart publication (Option C Slice 1, main, 2026-08) + filtered restartPending status (Option C Slice 1b, main, 2026-08, sys-stats-fn +4862) + valve-control growth, plus this port-back's 54 cherry-picked valve commits. Re-measured on integration/valve-focused-portback-20260831 against origin/main (verify-flows-size-ratchet's base ref) using its totalChars over both maintained flows.json profiles: origin/main total 1,069,245 chars -> HEAD total 1,113,531 chars = +44,286. Dual provenance: 20,196 of that is the feat/valve-control baseline as measured at merge 48c8ab47 (feat/valve-control's own measured total is 1,089,441); the remaining 24,090 is this port-back, whose two largest contributors (sync-bootstrap-build +5,786 and sync-force-build +5,786) are itemised per pick above. Measured, not estimated: 1,069,245 + 44,286 = 1,113,531. +34 (44286 -> 44320): prune-sync-outbox aggregate-partition CI repair -- VALVE_SCHEDULE and VALVE_SETTINGS (migrations 0024/0025, added by feat/valve-control's own history, not this merge) were never classified in the node's PROTECTED Set, so scripts/test-outbox-retention.js's 17-trigger partition guard failed against the real 21-trigger seed. Classified both as PROTECTED (farm-command/structural, like SCHEDULE and DEVICE) in prune-sync-outbox on both profiles; exact delta vs the pre-fix HEAD is +34 chars per profile (the two added string literals), well within prune-sync-outbox's existing 3000 per-node allowance -- this total_allowance bump is needed only because that allowance had zero total headroom remaining."
+    "delta": 105552,
+    "reason": "Merge #193 (feat/valve-control) + #196 (port/sdi12-edge) into origin/main: re-measured directly in the merge worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles (byte-identical bcm2712/bcm2709): origin/main 1,071,852 chars -> merged HEAD 1,177,404 chars = +105,552. Measured, not estimated; not a sum-of-sums of the two branches' independently-committed figures. Dual provenance: +44,320 is the feat/valve-control baseline as it actually landed at d6d8b66c -- live identity restart sentinel + marked identity errors + fail-closed restart publication (Option C Slice 1, main, 2026-08) + filtered restartPending status (Option C Slice 1b, main, 2026-08, sys-stats-fn +4862) + the valve-control port-back (24,090), plus +34 the prune-sync-outbox VALVE_SCHEDULE/VALVE_SETTINGS PROTECTED-classification fix from d0e33812/7316af9f/d6d8b66c -- three commits landed on feat/valve-control after port/sdi12-edge's branch base a38c9db6, so that branch's own recorded total (105,518) predates this +34 and undercounts by exactly that amount. The remaining +61,232 is the SDI-12 port, unaffected by the +34 fix (it does not touch prune-sync-outbox): the SDI-12 ingest/identify/config/recipe node set, the recipe deployment and commissioning nodes, the boot-owned devices literals, and the SDI-12 columns threaded through bootstrap, device list and telemetry. 44,320 + 61,232 = 105,552, confirmed by direct measurement rather than arithmetic alone."
+  },
+  "new_node_ceilings": {
+    "sdi12-identify-action-fn": {
+      "max_chars": 7126,
+      "reason": "SDI-12 port: new function node measured at exactly 7126 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    },
+    "sdi12-config-auth-fn": {
+      "max_chars": 7114,
+      "reason": "SDI-12 port: new function node measured at exactly 7114 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    },
+    "sdi12-config-action-fn": {
+      "max_chars": 6836,
+      "reason": "SDI-12 port: new function node measured at exactly 6836 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    },
+    "sdi12-write-fn": {
+      "max_chars": 6296,
+      "reason": "SDI-12 port: new function node measured at exactly 6296 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    },
+    "sdi12-identify-trigger-fn": {
+      "max_chars": 5218,
+      "reason": "SDI-12 port: new function node measured at exactly 5218 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    },
+    "sdi12-profiles-scope-fn": {
+      "max_chars": 5039,
+      "reason": "SDI-12 port: new function node measured at exactly 5039 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    },
+    "sdi12-identify-fn": {
+      "max_chars": 4101,
+      "reason": "SDI-12 port: new function node measured at exactly 4101 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    }
   }
 }

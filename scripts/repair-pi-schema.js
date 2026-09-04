@@ -231,7 +231,7 @@ function quoteIdent(identifier) {
 
 function ensureDeviceTypeCheckIncludesLorain() {
     const devicesSql = query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'devices';");
-    if (devicesSql.includes("'AQUASCOPE_LORAIN'")) {
+    if (devicesSql.includes("'AQUASCOPE_LORAIN'") && devicesSql.includes("'DRAGINO_SDI12'")) {
         return false;
     }
 
@@ -276,6 +276,9 @@ function ensureDeviceTypeCheckIncludesLorain() {
         'chameleon_swt1_depth_cm',
         'chameleon_swt2_depth_cm',
         'chameleon_swt3_depth_cm',
+        'sdi12_probe_profile',
+        'sdi12_probe_status',
+        'sdi12_identity',
     ];
     const existingColumns = new Set(columns('devices'));
     const copyColumns = deviceColumns.filter((column) => existingColumns.has(column));
@@ -314,7 +317,7 @@ function ensureDeviceTypeCheckIncludesLorain() {
           name                                  TEXT NOT NULL,
           type_id                               TEXT NOT NULL CHECK(type_id IN (
                                                   'KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50',
-                                                  'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN')),
+                                                  'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN','DRAGINO_SDI12')),
           user_id                               INTEGER NULL,
           farm_id                               TEXT NULL,
           current_state                         TEXT CHECK(current_state IN ('OPEN','CLOSED')),
@@ -351,6 +354,9 @@ function ensureDeviceTypeCheckIncludesLorain() {
           chameleon_swt1_depth_cm               REAL,
           chameleon_swt2_depth_cm               REAL,
           chameleon_swt3_depth_cm               REAL,
+          sdi12_probe_profile                   TEXT,
+          sdi12_probe_status                    TEXT CHECK(sdi12_probe_status IN ('pending_identify','identified','unmatched','manual')),
+          sdi12_identity                        TEXT,
           FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE SET NULL,
           FOREIGN KEY (farm_id)  REFERENCES farms(farm_id)        ON DELETE SET NULL
         );

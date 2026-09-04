@@ -26,6 +26,14 @@ function collectHelperNames({ packageJson, nameToPath }) {
   return [...names].sort();
 }
 
+function checkRegistryParity(canonicalNameToPath, profileNameToPath) {
+  const canonical = Object.entries(canonicalNameToPath).sort();
+  const profile = Object.entries(profileNameToPath).sort();
+  return JSON.stringify(canonical) === JSON.stringify(profile)
+    ? []
+    : ['osi-lib NAME_TO_PATH differs from the canonical bcm2712 registry'];
+}
+
 function checkSurfaces({ name, packageJson, packageLock, seedSource, deploySource, moduleDir }) {
   const issues = [];
   if ((packageJson.dependencies || {})[name] !== 'file:' + name) {
@@ -37,6 +45,9 @@ function checkSurfaces({ name, packageJson, packageLock, seedSource, deploySourc
   }
   if (!pkgs['node_modules/' + name]) {
     issues.push(name + ': missing node_modules link entry in package-lock.json');
+  }
+  if (!pkgs[name]) {
+    issues.push(name + ': missing local package metadata in package-lock.json');
   }
   const loop = seedSource.match(/^for module in (.+); do$/m);
   if (!loop || !loop[1].split(/\s+/).includes(name)) {
@@ -92,13 +103,16 @@ function inspectModuleDir(nodeRedDir, name, warn = console.warn) {
 function run() {
   const repo = path.resolve(__dirname, '..');
   const deploySource = fs.readFileSync(path.join(repo, 'deploy.sh'), 'utf8');
-  const nameToPath = require(path.join(repo, PROFILES[0], 'files/usr/share/node-red/osi-lib')).NAME_TO_PATH;
+  const canonicalNameToPath = require(path.join(repo, PROFILES[0], 'files/usr/share/node-red/osi-lib')).NAME_TO_PATH;
   const failures = [];
   for (const profile of PROFILES) {
     const nodeRedDir = path.join(repo, profile, 'files/usr/share/node-red');
+    const nameToPath = require(path.join(nodeRedDir, 'osi-lib')).NAME_TO_PATH;
     const packageJson = JSON.parse(fs.readFileSync(path.join(nodeRedDir, 'package.json'), 'utf8'));
     const packageLock = JSON.parse(fs.readFileSync(path.join(nodeRedDir, 'package-lock.json'), 'utf8'));
     const seedSource = fs.readFileSync(path.join(repo, profile, 'files/etc/uci-defaults/98_osi_node_red_seed'), 'utf8');
+    const registryIssues = checkRegistryParity(canonicalNameToPath, nameToPath);
+    if (registryIssues.length) failures.push(...registryIssues.map((i) => '[' + profile + '] ' + i));
     for (const name of collectHelperNames({ packageJson, nameToPath })) {
       const issues = checkSurfaces({
         name, packageJson, packageLock, seedSource, deploySource,
@@ -119,4 +133,4 @@ function run() {
 }
 
 if (require.main === module) run();
-module.exports = { collectHelperNames, checkSurfaces, checkCodecs, inspectModuleDir };
+module.exports = { collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir };

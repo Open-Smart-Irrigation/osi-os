@@ -43,6 +43,11 @@ import type {
   RegisterRequest,
   RegisterResponse,
   DeviceCatalogItem,
+  Sdi12Profile,
+  SentekChannelLayout,
+  SentekChannelSensor,
+  Sdi12RecipeDeployment,
+  Sdi12RecipeDeploymentStatus,
   AddDeviceRequest,
   ValveActionRequest,
   IrrigationZone,
@@ -172,7 +177,77 @@ function normaliseSchedule(sched: any): IrrigationSchedule {
   };
 }
 
-function normaliseDevice(device: any): Device {
+function normaliseSentekLayout(value: unknown): SentekChannelLayout | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const layout = value as Record<string, unknown>;
+  if (layout.version !== 1 || typeof layout.address !== 'string' || !/^[0-9A-Za-z]$/.test(layout.address)
+    || !Array.isArray(layout.sensors) || layout.sensors.length < 1 || layout.sensors.length > 10) return null;
+  const sensors: SentekChannelSensor[] = [];
+  const channels = new Set<number>();
+  const positions = new Set<number>();
+  const depths = new Set<number>();
+  for (const valueSensor of layout.sensors) {
+    if (!valueSensor || typeof valueSensor !== 'object' || Array.isArray(valueSensor)) return null;
+    const sensor = valueSensor as Record<string, unknown>;
+    if (!Number.isInteger(sensor.channel) || Number(sensor.channel) < 1 || Number(sensor.channel) > 10
+      || !Number.isInteger(sensor.response_position) || Number(sensor.response_position) < 1 || Number(sensor.response_position) > 10
+      || !Number.isInteger(sensor.depth_cm) || Number(sensor.depth_cm) < 1 || Number(sensor.depth_cm) > 1000
+      || (sensor.type !== 'ENVIROSCAN' && sensor.type !== 'TRISCAN')) return null;
+    const channel = Number(sensor.channel);
+    const responsePosition = Number(sensor.response_position);
+    const depthCm = Number(sensor.depth_cm);
+    if (channels.has(channel) || positions.has(responsePosition) || depths.has(depthCm)) return null;
+    channels.add(channel);
+    positions.add(responsePosition);
+    depths.add(depthCm);
+    sensors.push({
+      channel,
+      response_position: responsePosition,
+      depth_cm: depthCm,
+      type: sensor.type,
+    });
+  }
+  if (sensors.some((_, index) => !positions.has(index + 1))) return null;
+  return { version: 1, address: layout.address, sensors };
+}
+
+const SDI12_DEPLOYMENT_STATUSES = new Set<Sdi12RecipeDeploymentStatus>([
+  'not_applied', 'queueing', 'queued', 'observed_once', 'observed_compatible', 'degraded',
+]);
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function normaliseSdi12RecipeDeployment(value: unknown): Sdi12RecipeDeployment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const status = row.status;
+  const desiredVersion = Number(row.desired_version);
+  const frameCount = row.frame_count == null ? null : Number(row.frame_count);
+  if (typeof status !== 'string' || !SDI12_DEPLOYMENT_STATUSES.has(status as Sdi12RecipeDeploymentStatus)
+    || !Number.isInteger(desiredVersion) || desiredVersion < 0
+    || (frameCount != null && (!Number.isInteger(frameCount) || frameCount < 0))
+    || typeof row.compatible_available !== 'boolean') return null;
+  const errorCode = nullableString(row.last_error_code);
+  if (errorCode != null && !/^[a-z0-9_]{1,64}$/.test(errorCode)) return null;
+  return {
+    desired_version: desiredVersion,
+    desired_layout_hash: nullableString(row.desired_layout_hash),
+    status: status as Sdi12RecipeDeploymentStatus,
+    queued_at: nullableString(row.queued_at),
+    queue_drained_at: nullableString(row.queue_drained_at),
+    commissioning_deadline_at: nullableString(row.commissioning_deadline_at),
+    last_observed_at: nullableString(row.last_observed_at),
+    compatible_at: nullableString(row.compatible_at),
+    updated_at: nullableString(row.updated_at),
+    frame_count: frameCount,
+    compatible_available: row.compatible_available,
+    last_error_code: errorCode,
+  };
+}
+
+export function normaliseDevice(device: any): Device {
   const rawDepths = device?.soil_moisture_probe_depths_json;
   const soilMoistureProbeDepths = rawDepths && typeof rawDepths === 'object' && !Array.isArray(rawDepths)
     ? Object.fromEntries(
@@ -187,6 +262,13 @@ function normaliseDevice(device: any): Device {
     : configuredFlag === false || configuredFlag === 0
       ? false
       : undefined;
+  const rawSentekLayout = device?.sdi12_channel_layout_json;
+  const sentekLayout = normaliseSentekLayout(rawSentekLayout);
+  const deployment = normaliseSdi12RecipeDeployment(device?.sdi12_recipe_deployment);
+  const discoveredAddress = typeof device?.sdi12_discovered_address === 'string'
+    && /^[0-9A-Za-z]$/.test(device.sdi12_discovered_address)
+    ? device.sdi12_discovered_address
+    : null;
   const rawActiveActuation = device?.activeValveActuation ?? device?.active_valve_actuation ?? null;
   const activeValveActuation = rawActiveActuation && typeof rawActiveActuation === 'object' && !Array.isArray(rawActiveActuation)
     ? {
@@ -209,6 +291,14 @@ function normaliseDevice(device: any): Device {
     irrigation_zone_id: device?.irrigation_zone_id ?? null,
     zone_ids: Array.isArray(device?.zone_ids) ? device.zone_ids : null,
     zone_names: Array.isArray(device?.zone_names) ? device.zone_names : null,
+    sdi12_probe_profile: device?.sdi12_probe_profile ?? null,
+    sdi12_probe_status: device?.sdi12_probe_status ?? null,
+    sdi12_identity: device?.sdi12_identity ?? null,
+    sdi12_value_count: device?.sdi12_value_count ?? null,
+    sdi12_channel_layout_json: sentekLayout,
+    sdi12_recipe_deployment: deployment,
+    sdi12_discovered_address: discoveredAddress,
+    sdi12_layout_status: rawSentekLayout != null && !sentekLayout ? 'invalid' : (device?.sdi12_layout_status ?? null),
     soilMoistureProbeDepths,
     soilMoistureProbeDepthsConfigured,
     activeValveActuation,
@@ -252,6 +342,37 @@ export const devicesAPI = {
   remove: async (deveui: string): Promise<void> => {
     await api.delete(`/api/devices/${deveui}`);
   },
+};
+
+export interface Sdi12ConfigRequest {
+  probe_profile: string;
+  depths?: Record<string, number>;
+  value_count?: number | null;
+  address?: string;
+  sensors?: SentekChannelSensor[];
+}
+
+export const fetchSdi12Profiles = async (): Promise<{ profiles: Sdi12Profile[] }> => {
+  const response = await api.get<{ profiles: Sdi12Profile[] }>('/api/sdi12/probe-profiles');
+  return response.data;
+};
+
+export const putSdi12Config = async (deveui: string, body: Sdi12ConfigRequest): Promise<void> => {
+  await api.put(`/api/devices/${encodeURIComponent(deveui)}/sdi12/config`, body);
+};
+
+export const postSdi12Identify = async (deveui: string): Promise<void> => {
+  await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/identify`);
+};
+
+export const postSdi12RecipeApply = async (deveui: string): Promise<Sdi12RecipeDeployment | null> => {
+  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/apply`);
+  return normaliseSdi12RecipeDeployment(response.data);
+};
+
+export const postSdi12RecipeRollback = async (deveui: string): Promise<Sdi12RecipeDeployment | null> => {
+  const response = await api.post(`/api/devices/${encodeURIComponent(deveui)}/sdi12/recipe/rollback`);
+  return normaliseSdi12RecipeDeployment(response.data);
 };
 
 function normaliseZone(z: any): IrrigationZone {

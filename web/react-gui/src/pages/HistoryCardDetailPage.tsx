@@ -230,6 +230,7 @@ function exportSourceContextForCard(
   if (!source?.typeId) return undefined;
 
   if (card.cardType === 'soil') {
+    if (source.typeId === 'DRAGINO_SDI12') return { deviceType: source.typeId };
     const chameleonEnabled = metadataBoolean(card, 'chameleonEnabled') ?? metadataBoolean(card, 'chameleon_enabled');
     return chameleonEnabled === true ? { deviceType: source.typeId, chameleonEnabled } : undefined;
   }

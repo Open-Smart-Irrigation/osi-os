@@ -58,6 +58,11 @@ const schemaContract = {
     'chameleon_swt2_depth_cm',
     'chameleon_swt3_depth_cm',
     'device_mode',
+    'sdi12_probe_profile',
+    'sdi12_probe_status',
+    'sdi12_value_count',
+    'sdi12_identity',
+    'sdi12_channel_layout_json',
   ],
   device_data: [
     'id',
@@ -114,6 +119,42 @@ const schemaContract = {
     'valve_1_pulse',
     'valve_2_pulse',
     'pipe_pressure_kpa',
+    'vwc_1',
+    'vwc_2',
+    'vwc_3',
+    'vwc_4',
+    'vwc_5',
+    'vwc_6',
+    'vwc_7',
+    'vwc_8',
+    'vwc_9',
+    'vwc_10',
+    'soil_vic_1',
+    'soil_vic_2',
+    'soil_vic_3',
+    'soil_vic_4',
+    'soil_vic_5',
+    'soil_vic_6',
+    'soil_vic_7',
+    'soil_vic_8',
+    'soil_vic_9',
+    'soil_vic_10',
+    'soil_temp_1',
+    'soil_temp_2',
+    'soil_temp_3',
+    'soil_temp_4',
+    'soil_temp_5',
+    'soil_temp_6',
+    'soil_temp_7',
+    'soil_temp_8',
+    'soil_ec_1',
+    'soil_ec_2',
+    'soil_ec_3',
+    'soil_ec_4',
+    'soil_ec_5',
+    'soil_ec_6',
+    'soil_ec_7',
+    'soil_ec_8',
   ],
   dendrometer_readings: [
     'id',
@@ -741,6 +782,32 @@ const schemaContract = {
     'computed_at',
     'sync_version',
   ],
+  sdi12_recipe_deployments: [
+    'deveui',
+    'desired_version',
+    'desired_layout_hash',
+    'desired_recipe_json',
+    'status',
+    'queue_item_ids_json',
+    'queued_at',
+    'queue_drained_at',
+    'commissioning_deadline_at',
+    'observed_count',
+    'failed_observation_count',
+    'last_observed_at',
+    'last_error_code',
+    'compatible_recipe_json',
+    'compatible_layout_json',
+    'compatible_at',
+    'updated_at',
+  ],
+  sdi12_identify_attempts: [
+    'deveui',
+    'stage',
+    'discovered_address',
+    'requested_at',
+    'updated_at',
+  ],
 };
 
 const requiredIndexes = {
@@ -812,6 +879,7 @@ const requiredIndexes = {
   journal_plot_groups: [
     'idx_journal_plot_groups_owner_gateway',
   ],
+  sdi12_recipe_deployments: ['idx_sdi12_recipe_deployments_status'],
 };
 
 const requiredIndexSqlFragments = {
@@ -830,6 +898,9 @@ const requiredIndexSqlFragments = {
   ],
   idx_gateway_health_hourly_time: [
     'on gateway_health_hourly(hour_start)',
+  ],
+  idx_sdi12_recipe_deployments_status: [
+    'on sdi12_recipe_deployments(status)',
   ],
   idx_zone_seasons_zone_range: [
     'on zone_seasons(zone_id, starts_on, ends_on)',
@@ -947,6 +1018,17 @@ const requiredIndexSqlFragments = {
 };
 
 const requiredTriggerSqlFragments = {
+  trg_sentek_device_outbox_payload_ai: [
+    "new.aggregate_type = 'device'",
+    "'$.sdi12_channel_layout_json'",
+    'where event_uuid = new.event_uuid',
+  ],
+  trg_sentek_data_outbox_payload_ai: [
+    "new.aggregate_type = 'device_data'",
+    "new.op = 'device_data_appended'",
+    "'soil_vic_10', dd.soil_vic_10",
+    'order by dd.id desc',
+  ],
   trg_sync_irrigation_events_uuid_ai: [
     'missing_gateway_device_eui',
     "where peer_node = 'cloud' and linked = 1",

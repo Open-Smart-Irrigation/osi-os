@@ -8,7 +8,7 @@ const { DatabaseSync } = require('node:sqlite');
 const REPO = path.resolve(__dirname, '..');
 const SEED = path.join(REPO, 'database/seed-blank.sql');
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
-const REQUIRED = ['KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50','TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN','MILESIGHT_UC512'];
+const REQUIRED = ['KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50','TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN','MILESIGHT_UC512','DRAGINO_SDI12'];
 
 function sh(db, sql) { execFileSync('sqlite3', ['-bail', db], { input: sql, encoding: 'utf8' }); }
 function funcText() { return JSON.parse(fs.readFileSync(FLOWS, 'utf8')).find((n) => n.id === 'sync-init-fn').func; }
@@ -64,6 +64,7 @@ function seed(db, mode) {
   sh(db, fs.readFileSync(SEED, 'utf8'));
   const now = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
   const row = (eui, type) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at) VALUES ('${eui}','n','${type}',${now},${now});`;
+  const sdi12Row = (eui) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at,sdi12_probe_profile,sdi12_probe_status,sdi12_identity,sdi12_value_count,sdi12_channel_layout_json) VALUES ('${eui}','n','KIWI_SENSOR',${now},${now},'SENTINEL_P','manual','SENTINEL_I',5,'{"version":1,"address":"0"}');`;
   if (mode === 'healthy') sh(db, row('AAAA000000000001', 'AQUASCOPE_LORAIN') + row('AAAA000000000002', 'KIWI_SENSOR'));
   else if (mode === 'would-drop') {
     reseedDevicesCheck(db, REQUIRED.filter((t) => t !== 'AQUASCOPE_LORAIN').concat(['BOGUS_TYPE']));
@@ -76,6 +77,9 @@ function seed(db, mode) {
     // rebuild and CONVERGE the CHECK back to exactly the 6 canonical types (drop the extra).
     reseedDevicesCheck(db, REQUIRED.concat(['BOGUS_TYPE']));
     sh(db, row('AAAA000000000007', 'KIWI_SENSOR') + row('AAAA000000000008', 'STREGA_VALVE'));
+  } else if (mode === 'sdi12-sentinels') {
+    reseedDevicesCheck(db, REQUIRED.filter((t) => t !== 'DRAGINO_SDI12'));
+    sh(db, sdi12Row('AAAA000000000009'));
   } else if (mode !== 'existing') throw new Error(`unknown case ${mode}`);
 }
 
@@ -94,17 +98,24 @@ async function main() {
   const errors = [];
   await runFuncAgainst(copyDb, errors);
   const after = readDevices(copyDb);
+  const verifyDb = new DatabaseSync(copyDb);
+  const sentinel = verifyDb.prepare('SELECT sdi12_probe_profile, sdi12_probe_status, sdi12_identity, sdi12_value_count, sdi12_channel_layout_json FROM devices WHERE deveui = ?').get('AAAA000000000009');
+  const sdi12Columns = new Set(verifyDb.prepare('PRAGMA table_info(devices)').all().map((row) => row.name));
+  verifyDb.close();
   const result = {
     case: mode, before: before.count, after: after.count,
     skipped: before.ddl === after.ddl,
     rowsPreserved: after.count === before.count,
     hasLorain: /'AQUASCOPE_LORAIN'/.test(after.ddl),
+    sdi12Preserved: Boolean(sentinel && sentinel.sdi12_probe_profile === 'SENTINEL_P' && sentinel.sdi12_probe_status === 'manual' && sentinel.sdi12_identity === 'SENTINEL_I' && sentinel.sdi12_value_count === 5 && sentinel.sdi12_channel_layout_json === '{"version":1,"address":"0"}'),
+    hasSdi12Columns: ['sdi12_probe_profile', 'sdi12_probe_status', 'sdi12_identity', 'sdi12_value_count', 'sdi12_channel_layout_json'].every((column) => sdi12Columns.has(column)),
     // Specifically the rebuild-abort message, not just any node.error (e.g. the outer catch).
     errorSurfaced: errors.some((m) => /rebuild ABORTED/.test(m)),
   };
   if (mode === 'healthy' || mode === 'existing') result.ok = result.skipped && result.rowsPreserved;
   else if (mode === 'would-drop') result.ok = result.rowsPreserved && result.errorSurfaced; // no silent drop, surfaced as ABORTED
   else if (mode === 'legit-upgrade') result.ok = result.rowsPreserved && result.hasLorain;
+  else if (mode === 'sdi12-sentinels') result.ok = result.rowsPreserved && result.sdi12Preserved && result.hasSdi12Columns;
   // extra-type: guard must NOT skip (it rebuilt), rows preserved, and the drifted extra type is gone.
   else if (mode === 'extra-type') result.ok = !result.skipped && result.rowsPreserved && !/'BOGUS_TYPE'/.test(after.ddl);
   console.log(JSON.stringify(result));

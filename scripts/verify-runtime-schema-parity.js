@@ -23,6 +23,11 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   // same story again: seed DB + deploy-time migration runner delivery.
   'trg_sync_valve_settings_outbox_ai',
   'trg_sync_valve_settings_outbox_au',
+  // 0029__sentek_vwc_vic_channels.sql decorates existing outbox rows with additive
+  // Sentek fields. Migration-owned so the frozen sync-init-fn boot DDL does not
+  // duplicate the new schema behavior.
+  'trg_sentek_device_outbox_payload_ai',
+  'trg_sentek_data_outbox_payload_ai',
 ]);
 
 function q(db, sql) {

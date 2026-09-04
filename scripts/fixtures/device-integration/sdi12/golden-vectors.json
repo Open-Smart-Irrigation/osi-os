@@ -1,0 +1,986 @@
+[
+  {
+    "name": "Tensiomark tension and temperature",
+    "fPort": 2,
+    "probeProfile": "TENSIOMARK",
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      50,
+      46,
+      52,
+      56,
+      43,
+      50,
+      49,
+      46,
+      53
+    ],
+    "expected": {
+      "swt_1": 30.2,
+      "soil_temp_1": 21.5,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "generic VWC three values",
+    "fPort": 2,
+    "probeProfile": "GENERIC_VWC",
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      51,
+      48,
+      46,
+      53,
+      43,
+      50,
+      56,
+      46,
+      49,
+      43,
+      50,
+      53,
+      46,
+      57
+    ],
+    "expected": {
+      "vwc_1": 30.5,
+      "vwc_2": 28.1,
+      "vwc_3": 25.9,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "generic VWC no response",
+    "fPort": 2,
+    "probeProfile": "GENERIC_VWC",
+    "bytes": [
+      12,
+      228,
+      1,
+      78,
+      85,
+      76,
+      76
+    ],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [],
+    "expectedNoResponse": true
+  },
+  {
+    "name": "generic VWC address digit is unparseable",
+    "fPort": 2,
+    "probeProfile": "GENERIC_VWC",
+    "bytes": [
+      12,
+      228,
+      1,
+      48,
+      43,
+      51,
+      48,
+      46,
+      53
+    ],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [
+      {
+        "channel": "unparseable_sdi12",
+        "reason": "unknown_channel"
+      }
+    ]
+  },
+  {
+    "name": "Tensiomark cardinality mismatch is atomic",
+    "fPort": 2,
+    "probeProfile": "TENSIOMARK",
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      50,
+      46,
+      52,
+      56,
+      43,
+      50,
+      49,
+      46,
+      53,
+      43,
+      57,
+      46,
+      57
+    ],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [
+      {
+        "channel": "sdi12_value_count",
+        "reason": "unknown_channel"
+      }
+    ]
+  },
+  {
+    "name": "Sentek 5-of-8 variable count (per-device identified)",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 5
+    },
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      49,
+      50,
+      46,
+      51,
+      43,
+      49,
+      52,
+      46,
+      49,
+      43,
+      49,
+      56,
+      46,
+      55,
+      43,
+      50,
+      50,
+      46,
+      48,
+      43,
+      57,
+      46,
+      53
+    ],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek 8-of-8 variable count",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 8
+    },
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      49,
+      50,
+      46,
+      51,
+      43,
+      49,
+      52,
+      46,
+      49,
+      43,
+      49,
+      56,
+      46,
+      55,
+      43,
+      50,
+      50,
+      46,
+      48,
+      43,
+      57,
+      46,
+      53,
+      43,
+      49,
+      49,
+      46,
+      48,
+      43,
+      49,
+      51,
+      46,
+      50,
+      43,
+      49,
+      53,
+      46,
+      56
+    ],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "vwc_6": 11.0,
+      "vwc_7": 13.2,
+      "vwc_8": 15.8,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek 1-of-8 variable count",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 1
+    },
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      49,
+      50,
+      46,
+      51
+    ],
+    "expected": {
+      "vwc_1": 12.3,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek pre-identification, no sdi12ValueCount set: variable, no atomic rejection",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      49,
+      50,
+      46,
+      51,
+      43,
+      49,
+      52,
+      46,
+      49,
+      43,
+      49,
+      56,
+      46,
+      55,
+      43,
+      50,
+      50,
+      46,
+      48,
+      43,
+      57,
+      46,
+      53,
+      43,
+      49,
+      49,
+      46,
+      48
+    ],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "vwc_6": 11.0,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek learned-count mismatch is rejected atomically",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 5
+    },
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      49,
+      50,
+      46,
+      51,
+      43,
+      49,
+      52,
+      46,
+      49,
+      43,
+      49,
+      56,
+      46,
+      55,
+      43,
+      50,
+      50,
+      46,
+      48
+    ],
+    "expected": {
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": [
+      {
+        "channel": "sdi12_value_count",
+        "reason": "unknown_channel"
+      }
+    ]
+  },
+  {
+    "name": "Sentek learned count of 9 is clamped, falls back to variable (not accepted as literal 9)",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 9
+    },
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      49,
+      50,
+      46,
+      51,
+      43,
+      49,
+      52,
+      46,
+      49,
+      43,
+      49,
+      56,
+      46,
+      55,
+      43,
+      50,
+      50,
+      46,
+      48,
+      43,
+      57,
+      46,
+      53,
+      43,
+      49,
+      49,
+      46,
+      48,
+      43,
+      49,
+      51,
+      46,
+      50,
+      43,
+      49,
+      53,
+      46,
+      56
+    ],
+    "expected": {
+      "vwc_1": 12.3,
+      "vwc_2": 14.1,
+      "vwc_3": 18.7,
+      "vwc_4": 22.0,
+      "vwc_5": 9.5,
+      "vwc_6": 11.0,
+      "vwc_7": 13.2,
+      "vwc_8": 15.8,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "HydraScout stays fixed-shape (regression guard: not swept into variable-count treatment)",
+    "fPort": 2,
+    "probeProfile": "HYDRASCOUT",
+    "bytes": [
+      12,
+      228,
+      1,
+      43,
+      50,
+      53,
+      46,
+      52,
+      43,
+      49,
+      56,
+      46,
+      50,
+      43,
+      49,
+      50,
+      48,
+      48,
+      43,
+      50,
+      55,
+      46,
+      49,
+      43,
+      49,
+      55,
+      46,
+      57,
+      43,
+      49,
+      49,
+      53,
+      48
+    ],
+    "expected": {
+      "vwc_1": 25.4,
+      "soil_temp_1": 18.2,
+      "soil_ec_1": 1200,
+      "vwc_2": 27.1,
+      "soil_temp_2": 17.9,
+      "soil_ec_2": 1150,
+      "bat_v": 3.3
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek EnviroSCAN bench capture 2026-08-19 (5 values, mm/10cm == VWC %, no scaling)",
+    "fPort": 2,
+    "bytes": [
+      13,
+      200,
+      1,
+      43,
+      48,
+      46,
+      48,
+      48,
+      48,
+      48,
+      48,
+      48,
+      43,
+      48,
+      46,
+      48,
+      48,
+      48,
+      48,
+      48,
+      48,
+      43,
+      48,
+      46,
+      48,
+      48,
+      48,
+      48,
+      48,
+      48,
+      43,
+      48,
+      46,
+      49,
+      48,
+      52,
+      55,
+      52,
+      56,
+      43,
+      48,
+      46,
+      51,
+      51,
+      57,
+      50,
+      48,
+      49
+    ],
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 5
+    },
+    "expected": {
+      "bat_v": 3.528,
+      "vwc_1": 0,
+      "vwc_2": 0,
+      "vwc_3": 0,
+      "vwc_4": 0.1,
+      "vwc_5": 0.34
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek EnviroSCAN 8 values over 2 segments (payver 2)",
+    "fPort": 2,
+    "segments": [
+      [
+        13,
+        200,
+        2,
+        2,
+        0,
+        43,
+        48,
+        46,
+        49,
+        43,
+        48,
+        46,
+        50,
+        43,
+        48,
+        46,
+        51,
+        43,
+        48,
+        46,
+        52
+      ],
+      [
+        13,
+        200,
+        2,
+        2,
+        1,
+        43,
+        48,
+        46,
+        53,
+        43,
+        48,
+        46,
+        54,
+        43,
+        48,
+        46,
+        55,
+        43,
+        48,
+        46,
+        56
+      ]
+    ],
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 8
+    },
+    "expected": {
+      "bat_v": 3.528,
+      "vwc_1": 0.1,
+      "vwc_2": 0.2,
+      "vwc_3": 0.3,
+      "vwc_4": 0.4,
+      "vwc_5": 0.5,
+      "vwc_6": 0.6,
+      "vwc_7": 0.7,
+      "vwc_8": 0.8
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek canonical 10-channel VWC layout over 2 segments",
+    "fPort": 2,
+    "segments": [
+      [
+        13,
+        200,
+        2,
+        2,
+        0,
+        43,
+        49,
+        43,
+        50,
+        43,
+        51,
+        43,
+        52,
+        43,
+        53
+      ],
+      [
+        13,
+        200,
+        2,
+        2,
+        1,
+        43,
+        54,
+        43,
+        55,
+        43,
+        56,
+        43,
+        57,
+        43,
+        49,
+        48
+      ]
+    ],
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ValueCount": 5,
+      "sdi12ChannelLayout": {
+        "version": 1,
+        "address": "L",
+        "sensors": [
+          {
+            "channel": 1,
+            "response_position": 1,
+            "depth_cm": 10,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 2,
+            "response_position": 2,
+            "depth_cm": 20,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 3,
+            "response_position": 3,
+            "depth_cm": 30,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 4,
+            "response_position": 4,
+            "depth_cm": 40,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 5,
+            "response_position": 5,
+            "depth_cm": 50,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 6,
+            "response_position": 6,
+            "depth_cm": 60,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 7,
+            "response_position": 7,
+            "depth_cm": 70,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 8,
+            "response_position": 8,
+            "depth_cm": 80,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 9,
+            "response_position": 9,
+            "depth_cm": 90,
+            "type": "ENVIROSCAN"
+          },
+          {
+            "channel": 10,
+            "response_position": 10,
+            "depth_cm": 100,
+            "type": "ENVIROSCAN"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "bat_v": 3.528,
+      "vwc_1": 1,
+      "vwc_2": 2,
+      "vwc_3": 3,
+      "vwc_4": 4,
+      "vwc_5": 5,
+      "vwc_6": 6,
+      "vwc_7": 7,
+      "vwc_8": 8,
+      "vwc_9": 9,
+      "vwc_10": 10
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek mixed VWC and TriSCAN VIC over 2 segments",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "segments": [
+      [13, 176, 2, 2, 0, 43, 48, 46, 48, 52, 54, 52, 53, 56, 43, 48, 46, 49, 50, 50, 54, 49, 50, 43, 48, 46, 48, 48, 50, 56, 50, 57, 43, 48, 46, 48, 48, 48, 48, 48, 48, 43, 48, 46, 48, 57, 50, 53, 50, 57, 43],
+      [13, 176, 2, 2, 1, 48, 46, 49, 48, 48, 48, 48, 48, 43, 48, 46, 50, 48, 48, 48, 48, 48, 43, 48, 46, 51, 48, 48, 48, 48, 48, 43, 50, 48, 49, 46, 55, 55, 56, 57, 43, 50, 49, 54, 46, 54, 57, 56, 51]
+    ],
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ChannelLayout": {
+        "version": 1,
+        "address": "L",
+        "sensors": [
+          { "channel": 1, "response_position": 1, "depth_cm": 10, "type": "TRISCAN" },
+          { "channel": 2, "response_position": 2, "depth_cm": 20, "type": "ENVIROSCAN" },
+          { "channel": 3, "response_position": 3, "depth_cm": 30, "type": "ENVIROSCAN" },
+          { "channel": 4, "response_position": 4, "depth_cm": 40, "type": "ENVIROSCAN" },
+          { "channel": 5, "response_position": 5, "depth_cm": 50, "type": "TRISCAN" },
+          { "channel": 6, "response_position": 6, "depth_cm": 60, "type": "ENVIROSCAN" },
+          { "channel": 7, "response_position": 7, "depth_cm": 80, "type": "ENVIROSCAN" },
+          { "channel": 8, "response_position": 8, "depth_cm": 100, "type": "ENVIROSCAN" }
+        ]
+      }
+    },
+    "expected": {
+      "bat_v": 3.504,
+      "vwc_1": 0,
+      "vwc_2": 0.12,
+      "vwc_3": 0,
+      "vwc_4": 0,
+      "vwc_5": 0.06,
+      "vwc_6": 0.1,
+      "vwc_7": 0.2,
+      "vwc_8": 0.3,
+      "soil_vic_1": 201.78,
+      "soil_vic_5": 216.7
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek EnviroSCAN and TriSCAN live bench capture 2026-08-28",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "segments": [
+      [14, 34, 2, 2, 0, 43, 48, 46, 48, 50, 55, 54, 55, 53, 43, 48, 46, 48, 48, 50, 54, 56, 52, 43, 48, 46, 48, 48, 48, 51, 48, 51, 43, 48, 46, 48, 48, 48, 49, 57, 48, 43, 48, 46, 48, 52, 50, 53, 56, 51, 43],
+      [14, 34, 2, 2, 1, 48, 46, 48, 48, 51, 50, 50, 49, 43, 48, 46, 48, 48, 54, 56, 50, 51, 43, 48, 46, 48, 49, 49, 48, 52, 52, 43, 50, 48, 52, 46, 57, 50, 48, 50, 43, 50, 48, 56, 46, 52, 56, 56, 48]
+    ],
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ChannelLayout": {
+        "version": 1,
+        "address": "0",
+        "sensors": [
+          { "channel": 1, "response_position": 1, "depth_cm": 10, "type": "TRISCAN" },
+          { "channel": 2, "response_position": 2, "depth_cm": 20, "type": "ENVIROSCAN" },
+          { "channel": 3, "response_position": 3, "depth_cm": 30, "type": "ENVIROSCAN" },
+          { "channel": 4, "response_position": 4, "depth_cm": 40, "type": "ENVIROSCAN" },
+          { "channel": 5, "response_position": 5, "depth_cm": 50, "type": "TRISCAN" },
+          { "channel": 6, "response_position": 6, "depth_cm": 60, "type": "ENVIROSCAN" },
+          { "channel": 7, "response_position": 7, "depth_cm": 80, "type": "ENVIROSCAN" },
+          { "channel": 8, "response_position": 8, "depth_cm": 100, "type": "ENVIROSCAN" }
+        ]
+      }
+    },
+    "expected": {
+      "bat_v": 3.618,
+      "vwc_1": 0,
+      "vwc_2": 0,
+      "vwc_3": 0,
+      "vwc_4": 0,
+      "vwc_5": 0,
+      "vwc_6": 0,
+      "vwc_7": 0.01,
+      "vwc_8": 0.01,
+      "soil_vic_1": 204.92,
+      "soil_vic_5": 208.49
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek TriSCAN layout rejects a VWC-only payload that omits required VIC values",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ChannelLayout": {
+        "version": 1,
+        "address": "L",
+        "sensors": [
+          {
+            "channel": 1,
+            "response_position": 1,
+            "depth_cm": 10,
+            "type": "TRISCAN"
+          }
+        ]
+      }
+    },
+    "bytes": [
+      13,
+      200,
+      1,
+      43,
+      49,
+      50,
+      46,
+      51
+    ],
+    "expected": {
+      "bat_v": 3.528
+    },
+    "expectedQuarantine": [
+      {
+        "channel": "sdi12_vic_framing_unverified",
+        "reason": "unknown_channel"
+      }
+    ]
+  },
+  {
+    "name": "Sentek EnviroSCAN and TriSCAN live field capture over 3 segments 2026-08-30",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "segments": [
+      [13, 86, 2, 3, 0, 43, 48, 46, 55, 51, 50, 56, 52, 48, 43, 50, 56, 46, 50, 55, 57, 51, 56, 43, 51, 55, 46, 52, 53, 50, 55, 49, 43, 52, 49, 46, 48, 53, 54, 56, 51, 43, 48, 46, 57, 54, 57],
+      [13, 86, 2, 3, 1, 49, 53, 55, 43, 52, 54, 46, 50, 49, 48, 57, 56, 43, 51, 56, 46, 56, 55, 52, 54, 48, 43, 52, 52, 46, 51, 56, 48, 53, 51, 43, 49, 54, 49, 53, 46, 56, 55, 55, 43, 52, 50],
+      [13, 86, 2, 3, 2, 51, 55, 46, 54, 50, 50]
+    ],
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ChannelLayout": {
+        "version": 1,
+        "address": "0",
+        "sensors": [
+          { "channel": 1, "response_position": 1, "depth_cm": 10, "type": "TRISCAN" },
+          { "channel": 2, "response_position": 2, "depth_cm": 20, "type": "ENVIROSCAN" },
+          { "channel": 3, "response_position": 3, "depth_cm": 30, "type": "ENVIROSCAN" },
+          { "channel": 4, "response_position": 4, "depth_cm": 40, "type": "ENVIROSCAN" },
+          { "channel": 5, "response_position": 5, "depth_cm": 50, "type": "TRISCAN" },
+          { "channel": 6, "response_position": 6, "depth_cm": 60, "type": "ENVIROSCAN" },
+          { "channel": 7, "response_position": 7, "depth_cm": 80, "type": "ENVIROSCAN" },
+          { "channel": 8, "response_position": 8, "depth_cm": 100, "type": "ENVIROSCAN" }
+        ]
+      }
+    },
+    "expected": {
+      "bat_v": 3.414,
+      "vwc_1": 23.81,
+      "vwc_2": 28.28,
+      "vwc_3": 37.45,
+      "vwc_4": 41.06,
+      "vwc_5": 48.72,
+      "vwc_6": 46.21,
+      "vwc_7": 38.87,
+      "vwc_8": 44.38,
+      "soil_vic_1": 1615.88,
+      "soil_vic_5": 4237.62
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "Sentek ten TriSCAN modules reassemble VWC and VIC over 5 segments",
+    "fPort": 2,
+    "probeProfile": "SENTEK_ENVIROSCAN",
+    "segments": [
+      [13, 176, 2, 5, 0, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46, 53, 48, 48],
+      [13, 176, 2, 5, 1, 48, 48, 48, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46, 53, 48, 48, 48, 48, 48, 43, 48, 46],
+      [13, 176, 2, 5, 2, 53, 48, 48, 48, 48, 48, 43, 49, 48, 48, 48, 46, 48, 48, 48, 43, 49, 48, 48, 49, 46, 48, 48, 48, 43, 49, 48, 48, 50, 46, 48, 48, 48, 43, 49, 48, 48, 51, 46, 48, 48, 48],
+      [13, 176, 2, 5, 3, 43, 49, 48, 48, 52, 46, 48, 48, 48, 43, 49, 48, 48, 53, 46, 48, 48, 48, 43, 49, 48, 48, 54, 46, 48, 48, 48, 43, 49, 48, 48, 55, 46, 48, 48, 48, 43, 49, 48, 48, 56, 46],
+      [13, 176, 2, 5, 4, 48, 48, 48, 43, 49, 48, 48, 57, 46, 48, 48, 48]
+    ],
+    "deviceConfig": {
+      "probeProfile": "SENTEK_ENVIROSCAN",
+      "sdi12ChannelLayout": {
+        "version": 1,
+        "address": "0",
+        "sensors": [
+          { "channel": 1, "response_position": 1, "depth_cm": 10, "type": "TRISCAN" },
+          { "channel": 2, "response_position": 2, "depth_cm": 20, "type": "TRISCAN" },
+          { "channel": 3, "response_position": 3, "depth_cm": 30, "type": "TRISCAN" },
+          { "channel": 4, "response_position": 4, "depth_cm": 40, "type": "TRISCAN" },
+          { "channel": 5, "response_position": 5, "depth_cm": 50, "type": "TRISCAN" },
+          { "channel": 6, "response_position": 6, "depth_cm": 60, "type": "TRISCAN" },
+          { "channel": 7, "response_position": 7, "depth_cm": 70, "type": "TRISCAN" },
+          { "channel": 8, "response_position": 8, "depth_cm": 80, "type": "TRISCAN" },
+          { "channel": 9, "response_position": 9, "depth_cm": 90, "type": "TRISCAN" },
+          { "channel": 10, "response_position": 10, "depth_cm": 100, "type": "TRISCAN" }
+        ]
+      }
+    },
+    "expected": {
+      "bat_v": 3.504,
+      "vwc_1": 8.82,
+      "vwc_2": 8.82,
+      "vwc_3": 8.82,
+      "vwc_4": 8.82,
+      "vwc_5": 8.82,
+      "vwc_6": 8.82,
+      "vwc_7": 8.82,
+      "vwc_8": 8.82,
+      "vwc_9": 8.82,
+      "vwc_10": 8.82,
+      "soil_vic_1": 1000,
+      "soil_vic_2": 1001,
+      "soil_vic_3": 1002,
+      "soil_vic_4": 1003,
+      "soil_vic_5": 1004,
+      "soil_vic_6": 1005,
+      "soil_vic_7": 1006,
+      "soil_vic_8": 1007,
+      "soil_vic_9": 1008,
+      "soil_vic_10": 1009
+    },
+    "expectedQuarantine": []
+  },
+  {
+    "name": "3 segments, middle missing -> incomplete, quarantine only",
+    "fPort": 2,
+    "segments": [
+      [
+        12,
+        228,
+        2,
+        3,
+        0,
+        43,
+        49,
+        46,
+        48
+      ],
+      [
+        12,
+        228,
+        2,
+        3,
+        2,
+        43,
+        51,
+        46,
+        48
+      ]
+    ],
+    "expectedNoRow": true,
+    "expectedQuarantineRaw": "3:[0,2]"
+  }
+]

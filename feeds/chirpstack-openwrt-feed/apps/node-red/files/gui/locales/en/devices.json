@@ -261,5 +261,21 @@
       "CLOSE_TIMEOUT": "Close timeout",
       "UNKNOWN": "Unknown"
     }
+  },
+  "sdi12": {
+    "identify": "Identify probe",
+    "reCheck": "Re-check probe",
+    "actButtonHint": "If the probe doesn't respond, press the ACT button on the Dragino unit, then try again.",
+    "noResponse": "Probe did not respond to identification",
+    "valueCount": "Value count",
+    "valueCountHelp": "Leave empty to accept any number of readings. Set a number to reject frames that don't match exactly.",
+    "layoutSaved": "Layout saved; acquisition configuration not applied.", "refreshRequired": "Layout saved. Refreshing device state before Apply.", "apply": "Apply acquisition configuration", "rollback": "Rollback acquisition configuration", "rollingBack": "Rolling back…", "confirmApply": "Confirm apply", "applyConfirmation": "A maximum recipe takes about eight hours at the normal 20-minute cadence and uses an eight-second 12 V window per cycle. It does not use continuous power or a shorter interval.", "requestAccepted": "Request accepted (version {{version}}; {{status}}).", "rollbackRequestAccepted": "Rollback request accepted (version {{version}}; {{status}}).", "degraded": "Acquisition configuration degraded", "active": "Acquisition configuration active", "deploymentStatus": "Acquisition configuration: {{status}}"
+  },
+  "sdi12Soil": {
+    "removeConfirm": "Remove this device?",
+    "removeSubtitle": "This will unlink the device from your account.",
+    "yesRemove": "Yes, Remove",
+    "removing": "Removing...",
+    "failedToRemove": "Failed to remove device"
   }
 }

@@ -92,6 +92,145 @@ describe('UC512 round-trip: codec → normalizer → writer → DB', () => {
   }
 });
 
+describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', () => {
+  const vectors = JSON.parse(fs.readFileSync(
+    path.resolve(__dirname, 'fixtures', 'device-integration', 'sdi12', 'golden-vectors.json'), 'utf8'
+  ));
+  const codec = loadCodecViaVm(path.join(NR_ROOT, 'codecs', 'dragino_sdi12_decoder.js'));
+  const normalizer = require(path.join(NR_ROOT, 'osi-sdi12-normalize'));
+  const writer = require(path.join(NR_ROOT, 'osi-device-writer'));
+  const reassemble = require(path.join(NR_ROOT, 'osi-sdi12-reassemble'));
+  const manifest = loadEdgeManifest();
+  const sdi12Columns = [
+    'swt_1', 'swt_2', 'swt_3',
+    'vwc_1', 'vwc_2', 'vwc_3', 'vwc_4', 'vwc_5', 'vwc_6', 'vwc_7', 'vwc_8', 'vwc_9', 'vwc_10',
+    'soil_vic_1', 'soil_vic_2', 'soil_vic_3', 'soil_vic_4', 'soil_vic_5',
+    'soil_vic_6', 'soil_vic_7', 'soil_vic_8', 'soil_vic_9', 'soil_vic_10',
+    'soil_temp_1', 'soil_temp_2', 'soil_temp_3', 'soil_temp_4',
+    'soil_temp_5', 'soil_temp_6', 'soil_temp_7', 'soil_temp_8',
+    'soil_ec_1', 'soil_ec_2', 'soil_ec_3', 'soil_ec_4',
+    'soil_ec_5', 'soil_ec_6', 'soil_ec_7', 'soil_ec_8'
+  ];
+
+  for (const vector of vectors) {
+    it(`round-trip: ${vector.name}`, async () => {
+      let decodedData;
+      let lastCount;
+
+      if (vector.segments) {
+        const st = {};
+        let last;
+        for (let i = 0; i < vector.segments.length; i++) {
+          const decoded = codec.decodeUplink({ fPort: vector.fPort, bytes: vector.segments[i] });
+          assert.ok(decoded && typeof decoded === 'object', 'codec must return an object');
+          assert.ok(decoded.data && typeof decoded.data === 'object', 'codec must return data');
+          lastCount = decoded.data.SegCount;
+          last = reassemble.step(st, TEST_DEVEUI, {
+            count: decoded.data.SegCount,
+            index: decoded.data.SegIndex,
+            ascii: decoded.data.data_sum,
+            batV: decoded.data.BatV,
+            extiTrigger: decoded.data.EXTI_Trigger,
+            recordedAt: '2026-07-12T10:00:00Z',
+            nowMs: i * 1000,
+          });
+        }
+
+        if (vector.expectedNoRow === true) {
+          assert.notEqual(last.action, 'complete', 'incomplete-sequence vector must not complete');
+          // Force the lazy window closed with a same-count segment: whether
+          // this lands as a duplicate-index or window-elapsed reset, the
+          // quarantined index set captured from the stale buffer is the same.
+          const forced = reassemble.step(st, TEST_DEVEUI, {
+            count: lastCount, index: 0, ascii: '', batV: 0, extiTrigger: 'FALSE',
+            recordedAt: null, nowMs: reassemble.WINDOW_MS + 100000,
+          });
+          assert.equal(forced.action, 'reset');
+          assert.equal(forced.quarantine.raw, vector.expectedQuarantineRaw);
+
+          const syncDb = createTestDb('DRAGINO_SDI12');
+          // This branch's osi-device-writer is synchronous and takes a node:sqlite
+      // DatabaseSync directly (the source branch's is async and wraps it in a facade).
+      const writerDb = syncDb;
+          try {
+            await writer.quarantineOnly(writerDb, TEST_DEVEUI, forced.quarantine.channel, forced.quarantine.raw);
+
+            const quarantineRows = syncDb.prepare(
+              'SELECT channel, reason FROM ingest_quarantine ORDER BY id'
+            ).all().map(({ channel, reason }) => ({ channel, reason }));
+            assert.deepEqual(quarantineRows, [{ channel: 'sdi12_segments_incomplete', reason: 'unknown_channel' }]);
+
+            const rowCount = syncDb.prepare('SELECT COUNT(*) AS n FROM device_data').get().n;
+            assert.equal(rowCount, 0);
+          } finally {
+            syncDb.close();
+          }
+          return; // incomplete-sequence vector: no normalize/write/row assertions
+        }
+
+        assert.equal(last.action, 'complete', 'complete-sequence vector must reassemble to completion');
+        decodedData = last.message;
+      } else {
+        const decoded = codec.decodeUplink({
+          fPort: vector.fPort,
+          bytes: vector.bytes,
+        });
+        assert.ok(decoded && typeof decoded === 'object', 'codec must return an object');
+        assert.ok(decoded.data && typeof decoded.data === 'object', 'codec must return data');
+        decodedData = decoded.data;
+      }
+
+      const normalizeResult = normalizer.normalize(
+        decodedData,
+        vector.deviceConfig ?? { probeProfile: vector.probeProfile },
+        { recordedAt: '2026-07-12T10:00:00Z' }
+      );
+      assert.ok(normalizeResult.channels && typeof normalizeResult.channels === 'object');
+      if (vector.expectedNoResponse !== undefined) {
+        assert.equal(normalizeResult.noResponse, vector.expectedNoResponse);
+      }
+
+      const syncDb = createTestDb('DRAGINO_SDI12');
+      // This branch's osi-device-writer is synchronous and takes a node:sqlite
+      // DatabaseSync directly (the source branch's is async and wraps it in a facade).
+      const writerDb = syncDb;
+      try {
+        writer.resetColumnCache();
+        const result = await writer.writeDeviceData(writerDb, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
+
+        const row = syncDb.prepare(
+          'SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1'
+        ).get(TEST_DEVEUI);
+        assert.ok(row, 'device_data row must exist');
+        assert.equal(row.deveui, TEST_DEVEUI);
+
+        for (const column of sdi12Columns) {
+          assert.equal(
+            row[column],
+            vector.expected[column] === undefined ? null : vector.expected[column],
+            `SDI-12 column ${column} must match the golden vector`
+          );
+        }
+        for (const [column, value] of Object.entries(vector.expected)) {
+          assert.equal(row[column], value, `DB column ${column} must match the golden vector`);
+        }
+
+        const expectedQuarantine = vector.expectedQuarantine || [];
+        const quarantineRows = syncDb.prepare(
+          'SELECT channel, reason FROM ingest_quarantine ORDER BY id'
+        ).all().map(({ channel, reason }) => ({ channel, reason }));
+        assert.deepEqual(quarantineRows, expectedQuarantine);
+        assert.deepEqual(
+          result.deadLettered.map(({ channel, reason }) => ({ channel, reason })),
+          expectedQuarantine
+        );
+      } finally {
+        syncDb.close();
+      }
+    });
+  }
+});
+
 describe('LSN50 round-trip: normalizer → writer → DB (default mode)', () => {
   const normalizer = require(path.join(NR_ROOT, 'osi-lsn50-normalize'));
   const writer = require(path.join(NR_ROOT, 'osi-device-writer'));

@@ -231,5 +231,21 @@
       "CLOSE_TIMEOUT": "Schliessungs-Timeout",
       "UNKNOWN": "Unbekannt"
     }
+  },
+  "sdi12": {
+    "identify": "Sonde identifizieren",
+    "reCheck": "Sonde erneut prüfen",
+    "actButtonHint": "Falls die Sonde nicht reagiert, drücken Sie die ACT-Taste am Dragino-Gerät und versuchen Sie es erneut.",
+    "noResponse": "Sonde hat nicht auf die Identifikation reagiert",
+    "valueCount": "Anzahl Werte",
+    "valueCountHelp": "Leer lassen, um eine beliebige Anzahl Messwerte zu akzeptieren. Eine Zahl festlegen, um Rahmen abzulehnen, die nicht genau übereinstimmen.",
+    "layoutSaved": "Layout gespeichert; Messkonfiguration nicht angewendet.", "refreshRequired": "Layout gespeichert. Gerätestatus wird vor dem Anwenden aktualisiert.", "apply": "Messkonfiguration anwenden", "rollback": "Messkonfiguration zurücksetzen", "rollingBack": "Wird zurückgesetzt…", "confirmApply": "Anwenden bestätigen", "applyConfirmation": "Ein maximales Rezept dauert bei der normalen 20-Minuten-Kadenz etwa acht Stunden und nutzt pro Zyklus ein achtsekündiges 12-V-Fenster. Es gibt keine Dauerstromversorgung und kein kürzeres Intervall.", "requestAccepted": "Anfrage angenommen (Version {{version}}; {{status}}).", "rollbackRequestAccepted": "Rücksetzungsanfrage angenommen (Version {{version}}; {{status}}).", "degraded": "Messkonfiguration beeinträchtigt", "active": "Messkonfiguration aktiv", "deploymentStatus": "Messkonfiguration: {{status}}"
+  },
+  "sdi12Soil": {
+    "removeConfirm": "Dieses Gerät entfernen?",
+    "removeSubtitle": "Das Gerät wird von Ihrem Konto getrennt.",
+    "yesRemove": "Ja, entfernen",
+    "removing": "Wird entfernt...",
+    "failedToRemove": "Gerät konnte nicht entfernt werden"
   }
 }
