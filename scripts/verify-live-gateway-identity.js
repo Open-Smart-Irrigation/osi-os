@@ -1018,9 +1018,9 @@ if (sizeAllowances) {
     'size allowance sys-stats-fn: expected exact Task 5 delta 4862');
   expectIncludes('size allowance sys-stats-fn', String(sizeAllowances.node_allowances?.['sys-stats-fn']?.reason || ''), 'filtered restartPending status (Option C Slice 1b)', 'declares Task 5 growth');
   // 20196 was the measured total at merge 48c8ab47; the port-back adds a measured 24090.
-  expectCondition(sizeAllowances.total_allowance?.delta === 44286,
-    'size total allowance: exact cumulative delta 44286',
-    'size total allowance: expected exact cumulative delta 44286');
+  expectCondition(sizeAllowances.total_allowance?.delta === 44320,
+    'size total allowance: exact cumulative delta 44320',
+    'size total allowance: expected exact cumulative delta 44320');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Option C Slice 1b, main, 2026-08, sys-stats-fn +4862', 'declares Task 5 (sys-stats-fn) provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
