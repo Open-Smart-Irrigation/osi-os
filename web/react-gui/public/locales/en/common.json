@@ -58,8 +58,8 @@
     },
     "layout": {
       "label": "Layout",
-      "stacked": "Stacked",
-      "overlaid": "Overlaid",
+      "stacked": "Stack",
+      "overlaid": "Overlay",
       "smallMultiples": "Small multiples"
     },
     "toggle": {

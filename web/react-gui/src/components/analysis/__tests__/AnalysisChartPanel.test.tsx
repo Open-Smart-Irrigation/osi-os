@@ -51,9 +51,9 @@ describe('AnalysisChartPanel', () => {
     expect(screen.getByText('analysis.empty')).toBeInTheDocument();
   });
 
-  it('renders a chart for timeline mode', () => {
+  it('renders a chart for timeline mode', async () => {
     render(<AnalysisChartPanel series={[s('a', 'kPa')]} mode="timeline" layout="stacked" toggles={{ normalize: false }} channelMeta={new Map()} />);
-    expect(screen.getByTestId('fake-axis')).toBeInTheDocument();
+    expect(await screen.findByTestId('fake-axis')).toBeInTheDocument();
     expect(echartSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -96,15 +96,15 @@ describe('AnalysisChartPanel', () => {
     expect(screen.getByTestId('analysis-chart-frame')).toHaveStyle({ minHeight: '360px' });
   });
 
-  it('renders the correlation panel for correlation mode', () => {
+  it('renders the correlation panel for correlation mode', async () => {
     render(<AnalysisChartPanel series={[s('a', 'kPa')]} mode="correlation" layout="stacked" toggles={{ normalize: false }} channelMeta={new Map()} />);
-    expect(screen.getByTestId('correlation-panel')).toBeInTheDocument();
+    expect(await screen.findByTestId('correlation-panel')).toBeInTheDocument();
   });
 
-  it('opens an inline editor on axis-name click and commits an override', () => {
+  it('opens an inline editor on axis-name click and commits an override', async () => {
     const onAxisRename = vi.fn();
     render(<AnalysisChartPanel series={[mkSeries('a','swt_1','kPa')]} mode="timeline" layout="stacked" toggles={{normalize:false}} channelMeta={new Map()} resolveAxisLabel={(k)=>k} onAxisRename={onAxisRename} />);
-    fireEvent.click(screen.getByTestId('fake-axis'));
+    fireEvent.click(await screen.findByTestId('fake-axis'));
     const input = screen.getByRole('textbox', { name: 'analysis.axis.rename' });
     fireEvent.change(input, { target: { value: 'Soil tension' } });
     fireEvent.keyDown(input, { key: 'Enter' });

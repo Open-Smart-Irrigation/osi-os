@@ -226,9 +226,9 @@ test('buildAnalysisCatalog enumerates metadata-only per-source-device channels w
     assert.strictEqual(swt1.availability, 'available');
     assert.strictEqual(swt1.seriesId, helper.analysisSeriesId(swt1.zoneId, 'soil', swt1.sourceKey, 'swt_1'));
     assert.strictEqual(entriesById.get(swt1.seriesId).deveui, 'AA00000000000001');
-    const vwc = channels.find((entry) => entry.channelKey === 'vwc');
-    assert.ok(vwc, 'has manifest-valid vwc channel');
-    assert.strictEqual(vwc.availability, 'unsupported');
+    assert.ok(channels.some((entry) => entry.channelKey === 'swt_2'), 'has the second canonical Kiwi SWT channel');
+    assert.ok(!channels.some((entry) => entry.channelKey === 'swt_3'), 'does not invent a third Kiwi SWT channel');
+    assert.ok(!channels.some((entry) => entry.channelKey === 'vwc'), 'does not advertise unsupported generic VWC');
     assert.ok(!db.queries.some((query) => /\bFROM\s+device_data\b/i.test(query.sql)), 'catalog must not scan history rows');
   } finally {
     db.close();
