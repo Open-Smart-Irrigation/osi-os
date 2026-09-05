@@ -102,6 +102,62 @@ test('PASS when a large NEW node loads via osiLib.require', () => {
   assert.doesNotMatch(r.stderr, /oversized SQL literal/);
 });
 
+test('PASS when a large NEW node has a valid committed new_node_ceilings entry covering it', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [...BASE, fn('bignew', 'z'.repeat(5000))]);
+  const allowances = {
+    node_allowances: {},
+    new_node_ceilings: { bignew: { max_chars: 5000, reason: 'reviewed ceiling for test' } },
+    total_allowance: { delta: 6000, reason: 'covers the bignew addition for test' },
+  };
+  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
+  const r = run(dir);
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+});
+
+test('FAIL when a NEW node exceeds its committed new_node_ceilings entry by even one char (exact max, fail-closed)', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [...BASE, fn('bignew', 'z'.repeat(5000))]);
+  const allowances = {
+    node_allowances: {},
+    new_node_ceilings: { bignew: { max_chars: 4999, reason: 'reviewed ceiling for test' } },
+    total_allowance: { delta: 6000, reason: 'covers the bignew addition for test' },
+  };
+  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /exceeding its committed ceiling of 4999/);
+});
+
+test('FAIL when a new_node_ceilings entry has an empty reason (rejected; default 4096 ceiling still applies)', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [...BASE, fn('bignew', 'z'.repeat(5000))]);
+  const allowances = {
+    node_allowances: {},
+    new_node_ceilings: { bignew: { max_chars: 5000, reason: '' } },
+    total_allowance: { delta: 6000, reason: 'covers the bignew addition for test' },
+  };
+  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /new node bignew exceeds the 4096-char ceiling/);
+});
+
+test('PASS when the allowances file is entirely absent and a NEW node is added (regression: loadAllowances fallback must include newNodeCeilings)', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  // shrinkme shrinks enough to offset the tiny new node, so the total-chars gate
+  // also passes; this isolates the new-node code path from the allowances file
+  // that never gets written in this test.
+  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'y'.repeat(1)), fn('smallnew', 'return 1;')]);
+  const r = spawnSync(process.execPath, [
+    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
+    '--baseline', path.join(dir, 'baseline.json'),
+    '--allowances', path.join(dir, 'nonexistent.json'),
+    ...SURFACE_ARGS,
+  ], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+});
+
 test('fails closed when --base-ref is unreachable', () => {
   const dir = initRepo(BASE); writeBaseline(dir);
   const r = spawnSync(process.execPath, [

@@ -482,7 +482,21 @@ function parseSqlStringLiteral(source) {
 }
 
 function payloadHasTopLevelContractVersion(payloadExpression) {
-  const argsSource = readTopLevelFunctionArgs(payloadExpression, 'json_object');
+  let argsSource = readTopLevelFunctionArgs(payloadExpression, 'json_object');
+  if (argsSource === null) {
+    // The sqlite-arg-limit gate mandates splitting over-limit payloads as
+    // json_insert(json_object(...), '$.k', v, ...) (see verify-sqlite-cli-limits.js
+    // and lib/osi-migrate/runner-iface.js). contract_version stays in the inner
+    // json_object, so unwrap one json_insert/json_set layer and check there.
+    for (const wrapper of ['json_insert', 'json_set']) {
+      const wrapped = readTopLevelFunctionArgs(payloadExpression, wrapper);
+      if (wrapped !== null) {
+        const inner = splitTopLevelComma(wrapped)[0];
+        argsSource = inner === undefined ? null : readTopLevelFunctionArgs(inner.trim(), 'json_object');
+        break;
+      }
+    }
+  }
   if (argsSource === null) return false;
   const args = splitTopLevelComma(argsSource);
   for (let i = 0; i + 1 < args.length; i += 2) {
