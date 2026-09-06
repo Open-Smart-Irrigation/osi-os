@@ -1036,9 +1036,15 @@ if (sizeAllowances) {
   // valve-control-baseline contribution 44320. The SDI-12 port adds a further measured
   // 61232, unaffected by that +34 fix. Re-measured directly in the merge worktree
   // against origin/main: 1071852 -> merged HEAD 1177404 = +105552 (44320 + 61232).
-  expectCondition(sizeAllowances.total_allowance?.delta === 105552,
-    'size total allowance: exact cumulative delta 105552',
-    'size total allowance: expected exact cumulative delta 105552');
+  // 107574, not 105552: the Field Journal port re-measured the cumulative total in
+  // the port worktree against origin/main 23bc8547 -- committed baseline 1072974 ->
+  // HEAD 1180548. The inherited valve-control + SDI-12 figure (105552) carried 1027
+  // chars of slack against origin/main's real total of 1177499; this slice adds a
+  // measured +3049 for the six journal-v2-replication nodes, and re-pinning to the
+  // measured HEAD total absorbs that slack instead of carrying it forward.
+  expectCondition(sizeAllowances.total_allowance?.delta === 107574,
+    'size total allowance: exact cumulative delta 107574',
+    'size total allowance: expected exact cumulative delta 107574');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Option C Slice 1b, main, 2026-08, sys-stats-fn +4862', 'declares Task 5 (sys-stats-fn) provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
