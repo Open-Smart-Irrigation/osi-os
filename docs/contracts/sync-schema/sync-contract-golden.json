@@ -10,7 +10,7 @@
     {
       "name": "journal_entry_batch_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
+      "edgeProducerEnabled": true,
       "cloudIssuerEnabled": false
     },
     {

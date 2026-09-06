@@ -56,7 +56,7 @@ const SEPARATE_ROUTE_SPECS = [
     },
 ];
 const EXACT_STAGED_COMMANDS = ['UPSERT_JOURNAL_ENTRY_BATCH'];
-const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
+const EXACT_EDGE_DEFERRED_COMMANDS = [];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },

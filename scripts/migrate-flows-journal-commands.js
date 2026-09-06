@@ -30,6 +30,7 @@ const expectedNodeHashes = {
 
 const journalRegistryRows = [
   "    UPSERT_JOURNAL_ENTRY:      { dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
+  "    UPSERT_JOURNAL_ENTRY_BATCH:{ dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
   "    VOID_JOURNAL_ENTRY:        { dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
   "    UPSERT_JOURNAL_CUSTOM_VOCAB: { dispatch: 'journal_apply',           actuator: false,   requires_duration: false  },",
   "    UPSERT_JOURNAL_PLOT:       { dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
@@ -523,6 +524,7 @@ function commandScaffoldingIsCurrent(byId) {
     byId.get('sync-force-build').func.includes('_pendingCommandEnvelope') &&
     !byId.get('sync-force-build').func.includes('cmd.command_type || rawPayload.command_type') &&
     byId.get('cmd-type-registry').func.includes('UPSERT_JOURNAL_PLOT_GROUP:') &&
+    byId.get('cmd-type-registry').func.includes('UPSERT_JOURNAL_ENTRY_BATCH:') &&
     byId.get('reject-indefinite-open').func.includes('UC512_OPEN_FOR_DURATION:') &&
     byId.get('write-strega-expectation').func.includes('UC512_OPEN_FOR_DURATION:');
 }
@@ -567,13 +569,22 @@ function migrate(buffer) {
   assertUnique(flows);
   const byId = new Map(flows.filter((node) => node.id).map((node) => [node.id, node]));
   if (isCurrent(byId)) return buffer;
+  const handler = byId.get('journal-command-apply-fn');
+  let dedupe = byId.get('command-dedupe-dispatch');
+  let queue = byId.get('command-ack-queue-rest');
+  if (handler && dedupe && queue && handler.func === journalApplySource &&
+      same(handler.libs, osiLibOnly) && dedupe.func === dedupeSource &&
+      same(dedupe.libs, osiLibOnly) && queue.func === queueAckSource &&
+      same(queue.libs, osiLibOnly)) {
+    const registry = byId.get('cmd-type-registry');
+    const registryMarker = "    SET_KIWI_INTERVAL:         { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },";
+    registry.func = addCommandRows(registry.func, registryMarker, false);
+    return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
+  }
   if (byId.has('journal-command-apply-fn')) {
     if (!isLegacyDirectHelperState(byId) && !isPriorCurrentState(byId)) {
       throw new Error('Refusing non-exact journal command handler collision');
     }
-    const handler = byId.get('journal-command-apply-fn');
-    const dedupe = byId.get('command-dedupe-dispatch');
-    const queue = byId.get('command-ack-queue-rest');
     handler.func = journalApplySource;
     handler.libs = osiLibOnly;
     handler.wires = [['scoped-access-command-apply-fn'], ['9d5e3035c3d069c4']];
@@ -622,13 +633,13 @@ function migrate(buffer) {
     'unknown journal guard'
   );
 
-  const dedupe = byId.get('command-dedupe-dispatch');
+  dedupe = byId.get('command-dedupe-dispatch');
   dedupe.func = dedupeSource;
   dedupe.libs = osiLibOnly;
   dedupe.outputs = 1;
   dedupe.wires = [['journal-command-apply-fn']];
 
-  const queue = byId.get('command-ack-queue-rest');
+  queue = byId.get('command-ack-queue-rest');
   queue.func = queueAckSource;
   queue.libs = osiLibOnly;
 

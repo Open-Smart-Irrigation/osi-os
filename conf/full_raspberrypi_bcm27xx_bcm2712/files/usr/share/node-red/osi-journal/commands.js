@@ -197,6 +197,16 @@ function submittedIntent(type, payload) {
     author_label: payload.author_label == null ? null : payload.author_label,
   };
   if (type === 'UPSERT_JOURNAL_ENTRY') intent.entry = payload.entry;
+  else if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') {
+    intent.batch_uuid = payload.batch_uuid;
+    intent.shared = payload.shared;
+    intent.members = Array.isArray(payload.members)
+      ? payload.members.slice().sort(function(left, right) {
+        return String(left.plot_uuid).localeCompare(String(right.plot_uuid)) ||
+          String(left.entry_uuid).localeCompare(String(right.entry_uuid));
+      })
+      : payload.members;
+  }
   else if (type === 'VOID_JOURNAL_ENTRY') {
     intent.void_entry = {
       entry_uuid: payload.entry_uuid,
@@ -318,6 +328,7 @@ async function persistedAck(db, deliveryId) {
 }
 
 function resourceReference(type, payload) {
+  if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') return null;
   if (type === 'UPSERT_JOURNAL_ENTRY') {
     return { aggregate_type: 'JOURNAL_ENTRY', key: payload.entry && payload.entry.entry_uuid,
       table: 'journal_entries', key_column: 'entry_uuid' };
@@ -342,6 +353,7 @@ function resourceReference(type, payload) {
 
 async function currentResourceFacts(db, type, payload, owner, gateway) {
   const reference = resourceReference(type, payload);
+  if (!reference) return { currentSyncVersion: null, currentPayloadHash: null };
   if (!UUID.test(reference.key || '') || !UUID.test(owner || '') || !EUI64.test(gateway || '')) {
     return { currentSyncVersion: null, currentPayloadHash: null };
   }
@@ -419,6 +431,11 @@ async function validJournalEffectBinding(db, envelope, runtime, type) {
         resource.author_principal_uuid !== payload.author_principal_uuid ||
         resource.author_label !== payload.author_label ||
         resource.gateway_device_eui !== gateway) return false;
+  } else if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') {
+    key = payload.batch_uuid;
+    baseVersion = payload.base_sync_version;
+    prefix = 'journal_entry_batch';
+    if (!payload.shared || !Array.isArray(payload.members)) return false;
   } else if (type === 'VOID_JOURNAL_ENTRY') {
     key = payload.entry_uuid;
     baseVersion = payload.base_sync_version;
@@ -446,6 +463,97 @@ async function validJournalEffectBinding(db, envelope, runtime, type) {
         resource.gateway_device_eui !== gateway)) return false;
   return UUID.test(key || '') && Number.isInteger(baseVersion) && baseVersion >= 0 &&
     payload.effect_key === prefix + ':' + key + ':' + baseVersion;
+}
+
+function batchInput(payload) {
+  const shared = object(payload.shared, 'shared');
+  if (!UUID.test(payload.batch_uuid || '') || payload.base_sync_version !== 0 ||
+      !Array.isArray(payload.members) || payload.members.length < 1 || payload.members.length > 100) {
+    throw commandError('malformed_command', 'Journal batch identity or members are malformed');
+  }
+  const start = localOccurrence(
+    shared.occurred_start, shared.occurred_timezone, shared.occurred_utc_offset_minutes, 'shared.occurred_start'
+  );
+  const end = shared.occurred_end == null
+    ? null
+    : localOccurrence(shared.occurred_end, shared.occurred_timezone, null, 'shared.occurred_end');
+  const members = payload.members.map(function(member) {
+    member = object(member, 'member');
+    if (!UUID.test(member.entry_uuid || '') || !UUID.test(member.plot_uuid || '') ||
+        member.base_sync_version !== 0 ||
+        (member.cycle_uuid != null && !UUID.test(member.cycle_uuid)) ||
+        ![null, 'continue', 'new'].includes(member.cycle_action)) {
+      throw commandError('malformed_command', 'Journal batch member is malformed');
+    }
+    return {
+      entry_uuid: member.entry_uuid,
+      plot_uuid: member.plot_uuid,
+      cycle_uuid: member.cycle_uuid,
+      cycle_action: member.cycle_action,
+    };
+  });
+  const canonical = members.slice().sort(function(left, right) {
+    return left.plot_uuid.localeCompare(right.plot_uuid) || left.entry_uuid.localeCompare(right.entry_uuid);
+  });
+  if (JSON.stringify(members) !== JSON.stringify(canonical) ||
+      new Set(members.map(function(member) { return member.entry_uuid + '\u0000' + member.plot_uuid; })).size !== members.length) {
+    throw commandError('malformed_command', 'Journal batch members must be unique and canonical ordered');
+  }
+  return {
+    input: Object.assign({}, shared, {
+      batch_uuid: payload.batch_uuid,
+      occurred_start_local: start.local,
+      occurred_end_local: end && end.local,
+      occurred_utc_offset_minutes: start.offset_minutes,
+      occurred_end_utc_offset_minutes: end && end.offset_minutes,
+    }),
+    members: canonical,
+  };
+}
+
+async function applyBatchInTransaction(tx, catalog, batch, principal, deliveryId, type, intentHash) {
+  const result = await lifecycle.finalizeBatchInTransaction(
+    tx, catalog, batch.input, batch.members, principal,
+    { suppressCommandTerminal: true, includeAggregate: true }
+  );
+  const appliedAt = new Date().toISOString();
+  const members = result.entries.map(function(entry) {
+    return {
+      entryUuid: entry.entry_uuid,
+      plotUuid: entry.plot_uuid,
+      syncVersion: entry.sync_version,
+      payloadHash: aggregateHash(entry.aggregate),
+    };
+  });
+  const ack = {
+    commandId: deliveryId,
+    commandType: type,
+    status: 'ACKED',
+    result: 'APPLIED',
+    duplicate: false,
+    effectKey: principal.effect_key,
+    submittedIntentHash: intentHash,
+    ownerUserUuid: principal.owner_user_uuid,
+    authorPrincipalUuid: principal.author_principal_uuid,
+    authorLabel: principal.author_label,
+    gatewayDeviceEui: principal.gateway_device_eui,
+    batchUuid: result.batch_uuid,
+    members,
+    appliedAt,
+  };
+  await tx.run(
+    'INSERT INTO applied_commands (' +
+      'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
+    ') VALUES (?,?,?,?,?,?,?,?)',
+    [String(deliveryId), principal.gateway_device_eui, type, principal.effect_key,
+      appliedAt, 'APPLIED', JSON.stringify(ack), 'edge']
+  );
+  await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [String(deliveryId)]);
+  await tx.run(
+    'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
+    [String(deliveryId), JSON.stringify(ack), appliedAt]
+  );
+  return ack;
 }
 
 // Thin, signature-identical wrappers over osi-command-ledger's generic
@@ -536,6 +644,7 @@ async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
   const type = commandType(envelope);
   const supported = new Set([
     'UPSERT_JOURNAL_ENTRY',
+    'UPSERT_JOURNAL_ENTRY_BATCH',
     'VOID_JOURNAL_ENTRY',
     'UPSERT_JOURNAL_CUSTOM_VOCAB',
     'UPSERT_JOURNAL_PLOT',
@@ -568,10 +677,21 @@ async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
     }
     assertDuplicateGuardControl(type, payload);
     intentHash = submittedIntentHash(type, payload);
+    if (type === 'UPSERT_JOURNAL_ENTRY_BATCH' &&
+        (intentHash == null || payload.submitted_intent_hash !== intentHash)) {
+      throw commandError('invalid_intent_hash', 'Journal batch submitted intent hash does not match canonical payload');
+    }
     const principal = await trustedPrincipal(db, payload, runtime, type, deliveryId, intentHash);
     if (type === 'UPSERT_JOURNAL_ENTRY') {
       const catalog = await loadCatalog(db, principal);
       await lifecycle.finalize(db, catalog, entryInput(payload, principal), principal);
+    } else if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') {
+      const batch = batchInput(payload);
+      const catalog = await loadCatalog(db, principal);
+      const ack = await db.transaction(function(tx) {
+        return applyBatchInTransaction(tx, catalog, batch, principal, deliveryId, type, intentHash);
+      });
+      return { handled: true, ack };
     } else if (type === 'VOID_JOURNAL_ENTRY') {
       if (!UUID.test(payload.entry_uuid || '') || !Number.isInteger(payload.base_sync_version) ||
           payload.base_sync_version < 0) {

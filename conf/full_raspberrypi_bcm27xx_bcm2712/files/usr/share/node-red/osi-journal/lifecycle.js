@@ -2431,12 +2431,16 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     sync_version: finalSyncVersion,
     gateway_device_eui: row.gateway_device_eui,
   };
-  assertCommandJournalEntryEffectKey(principal, terminal);
-  await recordTerminalCommand(tx, principal, terminal);
-  return Object.assign({
+  if (!(options && options.suppressCommandTerminal)) {
+    assertCommandJournalEntryEffectKey(principal, terminal);
+    await recordTerminalCommand(tx, principal, terminal);
+  }
+  const result = Object.assign({
     entry_uuid: row.entry_uuid,
     sync_version: finalSyncVersion,
   }, journalReceipt(emission));
+  if (options && options.includeAggregate) result.aggregate = emission.aggregate;
+  return result;
 }
 
 async function saveDraft(db, catalog, input, principal) {
@@ -2515,6 +2519,12 @@ async function finalizeBatch(db, catalog, input, members, principal) {
   validateRequestLimit(input);
   input = normalizeInputIdentities(input);
   members = normalizeBatchMembers(members, input.pass_uuid);
+  return db.transaction(function(tx) {
+    return finalizeBatchInTransaction(tx, catalog, input, members, principal);
+  });
+}
+
+async function finalizeBatchInTransaction(tx, catalog, input, members, principal, options) {
   const isPassBatch = Boolean(input.pass_uuid);
   const acknowledgementValues = input.duplicate_guard_ack_entry_uuids == null
     ? []
@@ -2525,8 +2535,7 @@ async function finalizeBatch(db, catalog, input, members, principal) {
     throw lifecycleError('invalid_duplicate_ack', 'Batch duplicate acknowledgements are invalid');
   }
   const acknowledgements = new Set(acknowledgementValues);
-  return db.transaction(async function(tx) {
-    const duplicateCandidates = [];
+  const duplicateCandidates = [];
     const existingEntries = new Map();
     const newMembers = [];
     for (const member of members) {
@@ -2601,7 +2610,7 @@ async function finalizeBatch(db, catalog, input, members, principal) {
       error.details = { duplicateCandidates: unacknowledged };
       throw error;
     }
-    const batchUuid = crypto.randomUUID();
+    const batchUuid = input.batch_uuid || crypto.randomUUID();
     const contextCache = new Map();
     const entries = [];
     for (let index = 0; index < members.length; index += 1) {
@@ -2637,15 +2646,14 @@ async function finalizeBatch(db, catalog, input, members, principal) {
         principal,
         index,
         contextCache,
-        {
+        Object.assign({
           duplicateAcknowledgements: acknowledgements,
           outbox_event_uuid: batchMemberEventUuid(input, member),
-        }
+        }, options || {})
       );
       entries.push(Object.assign({ plot_uuid: member.plot_uuid }, result));
     }
-    return { batch_uuid: batchUuid, entries };
-  });
+  return { batch_uuid: batchUuid, entries };
 }
 
 async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal, options) {
@@ -2757,6 +2765,7 @@ module.exports = {
   finalize,
   finalizeCreate,
   finalizeBatch,
+  finalizeBatchInTransaction,
   openCyclesCoveringPlot,
   resolveClosedCropCycleOverrides,
   resolveLiveCropOverrides,

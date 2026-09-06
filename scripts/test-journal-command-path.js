@@ -325,6 +325,49 @@ function commandEnvelope(overrides) {
   }, overrides || {});
 }
 
+function batchCommandEnvelope(overrides) {
+  const batchUuid = '99999999-9999-4999-8999-999999999999';
+  const entryUuid = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const source = entryAggregate({ entry_uuid: entryUuid, batch_uuid: batchUuid });
+  const shared = {
+    activity_code: source.activity_code,
+    template_code: source.template_code,
+    template_version: source.template_version,
+    layout_code: source.layout_code,
+    layout_version: source.layout_version,
+    catalog_version: source.catalog_version,
+    occurred_start: source.occurred_start,
+    occurred_end: source.occurred_end,
+    occurred_timezone: source.occurred_timezone,
+    occurred_utc_offset_minutes: source.occurred_utc_offset_minutes,
+    device_eui: source.device_eui,
+    season_crop: source.season_crop,
+    season_variety: source.season_variety,
+    campaign_uuid: source.campaign_uuid,
+    protocol_code: source.protocol_code,
+    protocol_version: source.protocol_version,
+    observation_unit_code: source.observation_unit_code,
+    pass_uuid: source.pass_uuid,
+    note: source.note,
+    values: source.values,
+  };
+  const payload = {
+    command_id: LOGICAL_COMMAND_UUID,
+    command_type: 'UPSERT_JOURNAL_ENTRY_BATCH',
+    contract_version: 1,
+    owner_user_uuid: OWNER_UUID,
+    author_principal_uuid: ACTOR_UUID,
+    author_label: 'Cloud researcher',
+    batch_uuid: batchUuid,
+    base_sync_version: 0,
+    effect_key: 'journal_entry_batch:' + batchUuid + ':0',
+    shared,
+    members: [{ entry_uuid: entryUuid, base_sync_version: 0, plot_uuid: PLOT_UUID, cycle_uuid: null, cycle_action: null }],
+  };
+  payload.submitted_intent_hash = journal.submittedIntentHash(payload.command_type, payload);
+  return Object.assign({ commandId: 811, commandType: payload.command_type, payload }, overrides || {});
+}
+
 function trustedPayload(type, effectKey, body) {
   return Object.assign({
     command_id: LOGICAL_COMMAND_UUID,
@@ -817,6 +860,86 @@ test('UPSERT_JOURNAL_ENTRY applies through lifecycle and atomically records nume
     assert.equal(ack.commandId, 101);
     assert.equal(typeof ack.commandId, 'number');
     assert.equal(await db.get('SELECT COUNT(*) AS n FROM sync_outbox').then((row) => row.n), 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH commits its member, ledger, and one receipt atomically', async () => {
+  const db = fixtureDb('batch-applied');
+  try {
+    const result = await journal.applyJournalCommand(db, batchCommandEnvelope(), {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(result.ack.result, 'APPLIED');
+    assert.equal(result.ack.batchUuid, '99999999-9999-4999-8999-999999999999');
+    assert.equal(result.ack.members.length, 1);
+    assert.equal(result.ack.members[0].syncVersion, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['811'])).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['811'])).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH exact replay returns the stored receipt without new writes', async () => {
+  const db = fixtureDb('batch-replay');
+  try {
+    const envelope = batchCommandEnvelope({ commandId: 812 });
+    const first = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    const replay = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    assert.deepEqual(replay.ack, first.ack);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entry_values')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH rejects a changed intent at its same effect key without writes', async () => {
+  const db = fixtureDb('batch-intent-conflict');
+  try {
+    const first = batchCommandEnvelope({ commandId: 813 });
+    await journal.applyJournalCommand(db, first, { gateway_device_eui: GATEWAY_EUI });
+    const changed = batchCommandEnvelope({ commandId: 814 });
+    changed.payload.shared.note = 'Changed after first submit';
+    changed.payload.submitted_intent_hash = journal.submittedIntentHash(changed.commandType, changed.payload);
+    const result = await journal.applyJournalCommand(db, changed, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'idempotency_conflict');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH rolls back members and ledger when ACK persistence faults', async () => {
+  const db = fixtureDb('batch-ack-fault');
+  try {
+    const run = db.run.bind(db);
+    db.run = function(sql, params) {
+      if (/INSERT INTO command_ack_outbox/.test(sql)) {
+        const error = new Error('injected ACK outbox fault');
+        error.code = 'SQLITE_IOERR';
+        return Promise.reject(error);
+      }
+      return run(sql, params);
+    };
+    await assert.rejects(
+      journal.applyJournalCommand(db, batchCommandEnvelope({ commandId: 815 }), {
+        gateway_device_eui: GATEWAY_EUI,
+      }),
+      /injected ACK outbox fault/
+    );
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entry_values')).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
   } finally {
     db.close();
   }
