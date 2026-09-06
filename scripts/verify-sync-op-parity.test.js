@@ -208,8 +208,8 @@ function exactRolloutStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: [],
-      cloudDeferred: [],
+      edgeDeferred: ['UPSERT_JOURNAL_ENTRY_BATCH'],
+      cloudDeferred: ['UPSERT_JOURNAL_ENTRY_BATCH'],
     },
     eventOps: {
       edgeModuleOwned: [

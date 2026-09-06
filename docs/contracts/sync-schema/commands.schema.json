@@ -6,6 +6,9 @@
         "UPSERT_JOURNAL_ENTRY": {
             "effect_key": {"prefix": "journal_entry", "uuid_path": "entry.entry_uuid", "version_path": "entry.base_sync_version"}
         },
+        "UPSERT_JOURNAL_ENTRY_BATCH": {
+            "effect_key": {"prefix": "journal_entry_batch", "uuid_path": "batch_uuid", "version_path": "base_sync_version"}
+        },
         "VOID_JOURNAL_ENTRY": {
             "effect_key": {"prefix": "journal_entry", "uuid_path": "entry_uuid", "version_path": "base_sync_version"}
         },
@@ -116,6 +119,7 @@
                 "UPSERT_DEVICE",
                 "WORK_REQUEST_STATUS",
                 "UPSERT_JOURNAL_ENTRY",
+                "UPSERT_JOURNAL_ENTRY_BATCH",
                 "VOID_JOURNAL_ENTRY",
                 "UPSERT_JOURNAL_CUSTOM_VOCAB",
                 "UPSERT_JOURNAL_PLOT",
@@ -147,6 +151,17 @@
         "released_version": {"type": ["string", "null"]},
         "updated_at": {"type": ["string", "null"], "format": "date-time"},
         "entry": {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+        "contract_version": {"type": "integer"},
+        "batch_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "submitted_intent_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "shared": {"$ref": "resources.schema.json#/definitions/JournalEntryBatchShared"},
+        "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {"$ref": "resources.schema.json#/definitions/JournalEntryBatchMember"}
+        },
         "entry_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
         "base_sync_version": {"type": "integer", "minimum": 0},
         "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocab"},
@@ -174,6 +189,7 @@
                     "command_type": {
                         "enum": [
                             "UPSERT_JOURNAL_ENTRY",
+                            "UPSERT_JOURNAL_ENTRY_BATCH",
                             "VOID_JOURNAL_ENTRY",
                             "UPSERT_JOURNAL_CUSTOM_VOCAB",
                             "UPSERT_JOURNAL_PLOT",
@@ -205,6 +221,7 @@
                     "command_type": {
                         "enum": [
                             "UPSERT_JOURNAL_ENTRY",
+                            "UPSERT_JOURNAL_ENTRY_BATCH",
                             "VOID_JOURNAL_ENTRY",
                             "UPSERT_JOURNAL_CUSTOM_VOCAB",
                             "UPSERT_JOURNAL_PLOT",
@@ -238,6 +255,31 @@
         {
             "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
             "else": {"not": {"required": ["duplicate_guard_ack_entry_uuid"]}}
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY_BATCH"}}},
+            "then": {
+                "required": [
+                    "owner_user_uuid", "author_principal_uuid", "author_label", "effect_key",
+                    "contract_version", "batch_uuid", "base_sync_version", "submitted_intent_hash",
+                    "shared", "members"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id", "command_type", "owner_user_uuid", "author_principal_uuid",
+                        "author_label", "effect_key", "issued_at", "expires_at", "contract_version",
+                        "batch_uuid", "base_sync_version", "submitted_intent_hash", "shared", "members"
+                    ]
+                },
+                "properties": {
+                    "contract_version": {"const": 1},
+                    "base_sync_version": {"const": 0},
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_entry_batch:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:0$"
+                    }
+                }
+            }
         },
         {
             "if": {"properties": {"command_type": {"const": "OPEN_FOR_DURATION"}}},

@@ -55,11 +55,14 @@ const SEPARATE_ROUTE_SPECS = [
         applierCommandPattern: /['"]REPLACE_WEATHER_STATION_ZONES['"]/,
     },
 ];
-const EXACT_STAGED_COMMANDS = [];
+const EXACT_STAGED_COMMANDS = ['UPSERT_JOURNAL_ENTRY_BATCH'];
 const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
+    },
+    UPSERT_JOURNAL_ENTRY_BATCH: {
+        effect_key: { prefix: 'journal_entry_batch', uuid_path: 'batch_uuid', version_path: 'base_sync_version' },
     },
     VOID_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry_uuid', version_path: 'base_sync_version' },
@@ -287,6 +290,7 @@ function verifyGoldenFixture(commandSchema, eventsSchema) {
         'command_ack_results_v1',
         'desired_state_conflicts_v1',
         'device_desired_state_v1',
+        'journal_entry_batch_v1',
         'journal_sync_v1',
         'irrigation_config_desired_state_v1',
         'scoped_access_commands_v1',

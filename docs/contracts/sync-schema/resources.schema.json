@@ -687,6 +687,51 @@
                 }
             ]
         },
+        "JournalEntryBatchShared": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "activity_code", "template_code", "template_version", "layout_code", "layout_version",
+                "catalog_version", "occurred_start", "occurred_end", "occurred_timezone",
+                "occurred_utc_offset_minutes", "device_eui", "season_crop", "season_variety",
+                "campaign_uuid", "protocol_code", "protocol_version", "observation_unit_code",
+                "pass_uuid", "note", "values"
+            ],
+            "properties": {
+                "activity_code": {"type": "string", "minLength": 1},
+                "template_code": {"type": "string", "minLength": 1},
+                "template_version": {"type": "integer", "minimum": 1},
+                "layout_code": {"type": "string", "minLength": 1},
+                "layout_version": {"type": "integer", "minimum": 1},
+                "catalog_version": {"type": "integer", "minimum": 1},
+                "occurred_start": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "occurred_end": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "occurred_timezone": {"type": "string", "minLength": 1},
+                "occurred_utc_offset_minutes": {"type": "integer", "minimum": -840, "maximum": 840},
+                "device_eui": {"$ref": "#/definitions/NullableEui64"},
+                "season_crop": {"type": ["string", "null"]},
+                "season_variety": {"type": ["string", "null"]},
+                "campaign_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "protocol_code": {"type": ["string", "null"]},
+                "protocol_version": {"type": ["string", "null"]},
+                "observation_unit_code": {"type": ["string", "null"]},
+                "pass_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "note": {"type": ["string", "null"], "maxLength": 4000},
+                "values": {"type": "array", "maxItems": 128, "items": {"$ref": "#/definitions/JournalEntryValue"}}
+            }
+        },
+        "JournalEntryBatchMember": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["entry_uuid", "base_sync_version", "plot_uuid", "cycle_uuid", "cycle_action"],
+            "properties": {
+                "entry_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "base_sync_version": {"const": 0},
+                "plot_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "cycle_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "cycle_action": {"type": ["string", "null"], "enum": ["continue", "new", null]}
+            }
+        },
         "JournalVocabMapping": {
             "type": "object",
             "additionalProperties": false,

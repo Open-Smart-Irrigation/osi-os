@@ -35,6 +35,12 @@ The `action:` grammar is implemented by `osi-command-ledger` package version `1.
 
 Entry upsert and void commands. `base_sync_version` is the version the originator read before issuing the mutation; creates use `0`. Optimistic concurrency permits only one mutation to win for an entry at a given base version. A new intentional mutation after that result must read the current version and generate a new key.
 
+### `journal_entry_batch:{batch_uuid}:0`
+
+Gateway-backed final-entry batches use one client-generated `batch_uuid` and always use base version `0`. The command carries a separately stored `submitted_intent_hash` over shared facts and members sorted by `(plot_uuid, entry_uuid)`. Reusing the key with another submitted intent is permanently rejected.
+
+The applied receipt contains one record per member: `entry_uuid`, `plot_uuid`, edge-assigned `sync_version`, edge-computed aggregate `payload_hash`, and an optional duplicate-candidate result. The submitted intent hash is not an applied payload hash; the edge derives zone, season, and context separately for each plot before hashing its canonical aggregate.
+
 ### `journal_vocab:{custom_field_uuid}:{base_sync_version}`
 
 Custom-vocabulary upserts. The UUID identifies the farm-owned field and `base_sync_version` identifies the state being replaced. Creates use `0`.

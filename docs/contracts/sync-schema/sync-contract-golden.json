@@ -8,6 +8,12 @@
       "cloudIssuerEnabled": true
     },
     {
+      "name": "journal_entry_batch_v1",
+      "schemaAccepted": true,
+      "edgeProducerEnabled": false,
+      "cloudIssuerEnabled": false
+    },
+    {
       "name": "scoped_access_sync_v1",
       "schemaAccepted": true,
       "edgeProducerEnabled": true,
@@ -190,6 +196,7 @@
       "UPSERT_DEVICE",
       "WORK_REQUEST_STATUS",
       "UPSERT_JOURNAL_ENTRY",
+      "UPSERT_JOURNAL_ENTRY_BATCH",
       "VOID_JOURNAL_ENTRY",
       "UPSERT_JOURNAL_CUSTOM_VOCAB",
       "UPSERT_JOURNAL_PLOT",
@@ -254,7 +261,9 @@
       "DELETE_USER_PLOT_ASSIGNMENT",
       "REPLACE_WEATHER_STATION_ZONES"
     ],
-    "staged": []
+    "staged": [
+      "UPSERT_JOURNAL_ENTRY_BATCH"
+    ]
   },
   "commandAckResults": [
     {
