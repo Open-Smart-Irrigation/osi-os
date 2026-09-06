@@ -79,7 +79,7 @@
 - Modify: `scripts/journal-catalog-core.js`
 - Modify: `scripts/test-journal-catalog-generator.js`
 - Modify: `scripts/test-journal-schema.js`
-- Add: `database/migrations/ordered/0033__journal_catalog_v11.sql` unless repository inspection shows the next ordered number differs.
+- Add: `database/migrations/ordered/0050__journal_catalog_v11.sql`; immediately before generation, recheck that `0049__sdi12_recipe_deployments.sql` is still the ordered head and update the plan if another migration has landed.
 - Modify generated seed/bundled database artifacts only with existing generator/apply scripts.
 - Add/update the generated requirement fixture at the repository's existing catalog fixture location.
 

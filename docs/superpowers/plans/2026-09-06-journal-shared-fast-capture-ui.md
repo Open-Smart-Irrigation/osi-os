@@ -55,7 +55,27 @@
 - [ ] Add Drafts / Needs completion and Waiting for farm trays with visible counts, resume/discard/receipt actions, and no general Status filter.
 - [ ] Commit as `feat: align cloud journal capture with edge`.
 
-### Task 3: Build the responsive desktop capture shell
+### Task 3: Convert both capture surfaces to route semantics
+
+**Files:**
+- Modify: `web/react-gui/src/App.tsx`
+- Modify: `web/react-gui/src/pages/JournalPage.tsx`
+- Modify: `web/react-gui/src/pages/__tests__/JournalPage.test.tsx`
+- Modify: `/home/phil/Repos/osi-server/.worktrees/integrate-agrolink-analysis-cloud/frontend/src/App.tsx`
+- Modify: `/home/phil/Repos/osi-server/.worktrees/integrate-agrolink-analysis-cloud/frontend/src/pages/JournalPage.tsx`
+- Modify: `/home/phil/Repos/osi-server/.worktrees/integrate-agrolink-analysis-cloud/frontend/src/pages/__tests__/JournalPage.test.tsx`
+- Modify: `/home/phil/Repos/osi-server/.worktrees/integrate-agrolink-analysis-cloud/frontend/src/__tests__/AppRouting.test.tsx`
+
+**Route contract:** `/journal?capture=1` is the canonical capture location on both surfaces. Optional initial scope uses canonical query parameters such as `zone_uuid`, `station_code`, `group_uuid`, or `plot_uuid`; conflicting scope is rejected visibly. Opening capture records the prior Journal URL plus an invoker token in navigation state, while a direct deep link uses `/journal` and the Journal heading as fallbacks.
+
+- [ ] Add edge and cloud router tests for opening from every Log activity control, browser Back/Forward, direct `/journal?capture=1` deep link, initial scope, conflicting scope, and reload while a durable draft exists.
+- [ ] Add guarded Cancel/Escape/success tests proving the capture query is removed, the prior non-capture query/filter location is restored, and focus returns to the actual invoking control. If the invoker is gone after rerender, require focus on the Journal heading.
+- [ ] Replace cloud `captureOpen`-only modal state with URL-derived capture state. Remove `JournalCaptureModal`'s generic dialog shell and render the route workspace through the shared capture shell.
+- [ ] Align edge's existing query-driven capture with the same return-location/invoker navigation-state contract; do not regress its existing plot/cycle revalidation on close.
+- [ ] Convert the capture component import to `React.lazy` on both pages. Add a source/bundle test proving `JournalPage` no longer statically imports the capture bundle and that the bundle is not requested until `capture=1`.
+- [ ] Run page/router/focus tests and commit as `fix: give journal capture route semantics`.
+
+### Task 4: Build the responsive desktop capture shell
 
 **Files:**
 - Modify shared/copy-adapted capture shell components and Journal workspace styles.
@@ -69,7 +89,7 @@
 - [ ] Keep grey workspace background, white fields/cards, and Data-tab font/color tokens on edge and cloud while preserving the already-approved background.
 - [ ] Run geometry and screenshot checks at each fixture and commit as `feat: use full workspace for journal capture`.
 
-### Task 4: Accessibility, resilience, and speed contract
+### Task 5: Accessibility, resilience, and speed contract
 
 **Files:**
 - Modify capture grids, validation summary, disclosure, tray, and autosave/receipt announcement components.
@@ -86,7 +106,7 @@
 - [ ] Run automated accessibility checks and all frontend unit/build gates. Record deterministic counts; do not claim human p75 without the required field-worker/research-technician pilot.
 - [ ] Commit as `fix: polish journal capture accessibility and speed`.
 
-### Task 5: Cross-repository drift prevention
+### Task 6: Cross-repository drift prevention
 
 - [ ] Extend existing provenance tests to every copied pure module and shared capture component.
 - [ ] Add semantic parity fixtures for template resolution, field derivation, filters, adapter results, and receipt rendering.

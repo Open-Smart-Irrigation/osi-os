@@ -63,7 +63,37 @@ cd ../backend
 
 - [ ] Using only `ssh -i /home/phil/.ssh/osicloud_rsa rocky@agro-link.ch`, inspect the Compose model from `/home/rocky/docker/agrolink/osi-server/docker` with project `agrolink`. Confirm backend resolves to `ghcr.io/open-smart-irrigation/osi-server-backend:dev-local` and the target container is `agrolink-backend`.
 - [ ] Record current container ID, image ID/digest, health, start time, and recent error baseline.
-- [ ] Create the mandatory timestamped backup under `/home/rocky/backups/` exactly as the cloud repository `AGENTS.md` prescribes. Verify the backup exists and is non-empty.
+- [ ] Resolve `AGROLINK_BACKUP=/home/rocky/backups/agrolink-$(date -u +%Y%m%dT%H%M%SZ)` on the host, create it with mode `0700`, and create this manifest before any image retag or container recreation:
+  - `repo.tar.gz`: archive of `/home/rocky/docker/agrolink/osi-server`, including its deployment `.env` and Compose overrides, with ownership/permissions preserved;
+  - `compose-images.txt`: output of the scoped `docker compose -p agrolink ... config --images` command (not rendered environment values);
+  - `containers-before.txt`: scoped container names, IDs, images, states, and mount declarations;
+  - `postgres.dump`: custom-format `pg_dump` executed read-only inside the PostgreSQL container resolved by `docker compose ... ps -q postgres`, using that container's existing `POSTGRES_USER` and `POSTGRES_DB` without printing them;
+  - `persistent-mounts.txt`: the scoped Mosquitto and OpenAgri container mount source/destination list so their unchanged persistent state is recoverable through the existing volume snapshots/backups; if no maintained snapshot exists, archive each resolved bind-mount source read-only into this backup before proceeding.
+- [ ] Use the following scoped commands for the repository, Compose, container, and PostgreSQL artifacts; keep the task-specific variables in the same remote shell:
+
+```bash
+cd /home/rocky/docker/agrolink/osi-server/docker
+AGROLINK_BACKUP=/home/rocky/backups/agrolink-$(date -u +%Y%m%dT%H%M%SZ)
+install -d -m 0700 "$AGROLINK_BACKUP"
+tar --acls --xattrs --numeric-owner -czf "$AGROLINK_BACKUP/repo.tar.gz" \
+  -C /home/rocky/docker/agrolink osi-server
+docker compose -p agrolink -f docker-compose.yml -f docker-compose.agrolink.yml \
+  config --images >"$AGROLINK_BACKUP/compose-images.txt"
+docker inspect $(docker compose -p agrolink -f docker-compose.yml \
+  -f docker-compose.agrolink.yml ps -q) \
+  --format '{{.Name}} {{.Id}} {{.Image}} {{.State.Status}} {{json .Mounts}}' \
+  >"$AGROLINK_BACKUP/containers-before.txt"
+cp "$AGROLINK_BACKUP/containers-before.txt" "$AGROLINK_BACKUP/persistent-mounts.txt"
+AGROLINK_PG_CONTAINER=$(docker compose -p agrolink -f docker-compose.yml \
+  -f docker-compose.agrolink.yml ps -q postgres)
+test -n "$AGROLINK_PG_CONTAINER"
+docker exec "$AGROLINK_PG_CONTAINER" sh -c \
+  'exec pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  >"$AGROLINK_BACKUP/postgres.dump"
+chmod 0600 "$AGROLINK_BACKUP/repo.tar.gz" "$AGROLINK_BACKUP/postgres.dump"
+```
+
+- [ ] Write `SHA256SUMS` for every regular backup artifact, set files containing environment/database content to mode `0600`, run `pg_restore --list postgres.dump`, test the tar archive with `tar -tzf`, verify every checksum, and abort deployment if any artifact is empty or invalid. Do not print `.env` or dump contents.
 - [ ] Add a unique immutable rollback tag to the current backend image and verify it resolves to the recorded image ID.
 
 ### Task 4: Build and transfer the reviewed backend image
@@ -107,7 +137,7 @@ docker compose -p agrolink \
 - [ ] Inspect startup and subsequent backend logs for new Flyway, API, WebSocket, authorization, schema, or uncaught errors relative to baseline.
 - [ ] Confirm gateway `0016C001F116EBF2` retains fresh REST and MQTT activity without exposing credentials.
 - [ ] In a private browser context, prove the asset hashes changed and verify: shared edge-like Journal layout; grey background/white fields; no duplicate header, Status selector, dashboard/refresh buttons, or Export research package button.
-- [ ] Verify ST72 shows 72 plots and ST12 shows 12; select each independently and prove list plus CSV/JSON use the same station scope. Verify unknown scope fails closed.
+- [ ] Verify ST72 shows 72 plots and ST12 shows 12; select each independently, trigger both CSV and JSON downloads from the deployed browser UI, and inspect the requests and downloaded entry UUID sets to prove the UI sent the same station scope as the visible table. Verify unknown scope fails closed.
 - [ ] Verify default Quick capture, operation-filtered Lysimeter machinery, More details disclosure, station range/all selection, draft tray, visible desktop Save, keyboard/focus basics, and deterministic activation ceilings.
 - [ ] Verify cloud-primary attachments/conflicts remain present and gateway-backed attachments remain absent.
 - [ ] If the live gateway lacks `journal_entry_batch_v1`, verify multi-plot gateway batch is clearly unavailable while single-entry remains usable. If present, verify a safe non-destructive receipt flow according to the agreed test fixture; do not create misleading production records merely to test it.
