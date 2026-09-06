@@ -985,14 +985,6 @@ const requiredIndexes = {
     'idx_journal_media_files_eviction',
     'idx_journal_media_files_parent_mutation',
   ],
-  user_zone_assignments: [
-    'uq_user_zone_active',
-    'idx_user_zone_by_zone',
-  ],
-  user_plot_assignments: [
-    'uq_user_plot_active',
-    'idx_user_plot_by_plot',
-  ],
 };
 
 const requiredIndexSqlFragments = {
@@ -1147,7 +1139,7 @@ const requiredTriggerSqlFragments = {
     'order by dd.id desc',
   ],
   trg_journal_attachment_edge_binding_immutable_bu: [
-    'before update of workspace_uuid,entry_uuid,entry_revision_uuid,parent_mutation_uuid,parent_disposition,cloud_registration_state',
+    'before update of workspace_uuid,entry_uuid,entry_revision_uuid,parent_mutation_uuid, parent_disposition,cloud_registration_state',
     "old.source='edge'",
     "old.cloud_registration_state <> 'not_registered'",
     'old.workspace_uuid is not new.workspace_uuid',
@@ -1173,15 +1165,6 @@ const requiredTriggerSqlFragments = {
     "new.source='edge'",
     'm.resource_uuid=new.entry_uuid',
     'm.result_revision_uuid=new.entry_revision_uuid',
-  ],
-  trg_sync_zones_outbox_ai: [
-    "where peer_node = 'cloud' and linked = 1",
-    "new.zone_uuid is not null",
-    "new.gateway_device_eui is not null",
-    "'zone_upserted'",
-    "'soil_type', new.soil_type",
-    "'sync_version', new.sync_version",
-    "'user', json_object(",
   ],
   trg_sync_irrigation_events_uuid_ai: [
     'missing_gateway_device_eui',
