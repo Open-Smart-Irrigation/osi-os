@@ -68,7 +68,9 @@ cd ../backend
   - `compose-images.txt`: output of the scoped `docker compose -p agrolink ... config --images` command (not rendered environment values);
   - `containers-before.txt`: scoped container names, IDs, images, states, and mount declarations;
   - `postgres.dump`: custom-format `pg_dump` executed read-only inside the PostgreSQL container resolved by `docker compose ... ps -q postgres`, using that container's existing `POSTGRES_USER` and `POSTGRES_DB` without printing them;
-  - `persistent-mounts.txt`: the scoped Mosquitto and OpenAgri container mount source/destination list so their unchanged persistent state is recoverable through the existing volume snapshots/backups; if no maintained snapshot exists, archive each resolved bind-mount source read-only into this backup before proceeding.
+  - `persistent-mounts.txt`: the scoped Mosquitto and OpenAgri container mount source/destination list;
+  - `volume-<name>.tar.gz`: a read-only archive of every scoped named volume unless an existing snapshot with a timestamp and verified checksum from this deployment window is copied into the backup instead;
+  - `bind-<index>.tar.gz`: a read-only archive of every scoped persistent bind-mount source.
 - [ ] Use the following scoped commands for the repository, Compose, container, and PostgreSQL artifacts; keep the task-specific variables in the same remote shell:
 
 ```bash
@@ -93,7 +95,28 @@ docker exec "$AGROLINK_PG_CONTAINER" sh -c \
 chmod 0600 "$AGROLINK_BACKUP/repo.tar.gz" "$AGROLINK_BACKUP/postgres.dump"
 ```
 
-- [ ] Write `SHA256SUMS` for every regular backup artifact, set files containing environment/database content to mode `0600`, run `pg_restore --list postgres.dump`, test the tar archive with `tar -tzf`, verify every checksum, and abort deployment if any artifact is empty or invalid. Do not print `.env` or dump contents.
+- [ ] Resolve named volumes only from containers returned by the scoped Compose `ps -q`. Verify each volume's `com.docker.compose.project` label is `agrolink`, and archive it with a pinned helper image mounted as `-v <volume>:/source:ro`, `--network none`, and `--read-only`. For example, after recording the locally present helper image digest, run one archive per validated volume:
+
+```bash
+AGROLINK_HELPER_IMAGE=alpine:3.20
+docker image inspect "$AGROLINK_HELPER_IMAGE" >/dev/null
+AGROLINK_VOLUME_NAMES=$(docker inspect $(docker compose -p agrolink \
+  -f docker-compose.yml -f docker-compose.agrolink.yml ps -q) \
+  --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' |
+  sort -u)
+for AGROLINK_VOLUME_NAME in $AGROLINK_VOLUME_NAMES; do
+  test "$(docker volume inspect "$AGROLINK_VOLUME_NAME" \
+    --format '{{index .Labels "com.docker.compose.project"}}')" = agrolink
+  docker run --rm --network none --read-only \
+    -v "$AGROLINK_VOLUME_NAME:/source:ro" \
+    -v "$AGROLINK_BACKUP:/backup" \
+    "$AGROLINK_HELPER_IMAGE" \
+    tar -C /source -czf "/backup/volume-$AGROLINK_VOLUME_NAME.tar.gz" .
+done
+```
+
+- [ ] Resolve persistent bind mounts from the same scoped container set, validate that every source is an absolute path outside `/home/rocky/backups`, and archive each source read-only with `tar` under a stable numbered filename. Abort rather than expanding an empty/unresolved source.
+- [ ] Write `SHA256SUMS` for every regular backup artifact, set files containing environment/database/volume content to mode `0600`, run `pg_restore --list postgres.dump`, test every `.tar.gz` with `tar -tzf`, compare the expected mount count with the number of volume/bind archives, verify every checksum, and abort deployment if any artifact is empty, invalid, or missing. Do not print `.env`, dump, or volume contents.
 - [ ] Add a unique immutable rollback tag to the current backend image and verify it resolves to the recorded image ID.
 
 ### Task 4: Build and transfer the reviewed backend image
