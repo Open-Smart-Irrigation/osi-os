@@ -1,9 +1,9 @@
 name: Journal Catalog Vendor Parity
 on:
   push:
-    branches: [ AgroLink ]
+    branches: [ main ]
   pull_request:
-    branches: [ AgroLink ]
+    branches: [ main ]
 jobs:
   catalog-parity:
     runs-on: ubuntu-latest
@@ -24,7 +24,7 @@ jobs:
         with:
           repository: Open-Smart-Irrigation/osi-server
           token: ${{ secrets.OSI_SERVER_RO_TOKEN }}
-          ref: AgroLink
+          ref: main
           path: .vendor/osi-server
           persist-credentials: false
           fetch-depth: 1
@@ -43,7 +43,7 @@ jobs:
             git checkout --detach FETCH_HEAD
             echo "Using osi-server branch ${OSI_SERVER_REF}"
           else
-            echo "No osi-server branch ${OSI_SERVER_REF}; using AgroLink checkout"
+            echo "No osi-server branch ${OSI_SERVER_REF}; using main checkout"
           fi
       - name: Reject a stale vendored journal catalog
         env:

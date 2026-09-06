@@ -2,7 +2,7 @@
 set -eu
 
 if [ -z "${OSI_SERVER_ROOT:-}" ]; then
-  echo "OSI_SERVER_ROOT is required (path to an osi-server checkout on the AgroLink branch)" >&2
+  echo "OSI_SERVER_ROOT is required (path to an osi-server checkout on the main branch)" >&2
   exit 2
 fi
 

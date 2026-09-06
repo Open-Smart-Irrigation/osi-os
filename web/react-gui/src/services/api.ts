@@ -380,7 +380,6 @@ export const postSdi12RecipeRollback = async (deveui: string): Promise<Sdi12Reci
   return normaliseSdi12RecipeDeployment(response.data);
 };
 
-function normaliseZone(z: any): IrrigationZone {
 type RawIrrigationZone = Omit<Partial<IrrigationZone>, 'schedule'> & {
   id: number;
   name: string;
@@ -1708,5 +1707,9 @@ export const s2120API = {
     await api.put(`/api/devices/${deveui}/zone-assignments`, { zone_ids: zoneIds });
   },
 };
+
+// Named export for modules that take the configured axios instance directly
+// (journalApi.ts). Mirrors the AgroLink source of the journal client.
+export { api };
 
 export default api;
