@@ -5449,7 +5449,7 @@ test('voiding a harvest refuses with a clear error when a reseed already opened 
 // cascade runs so the returned/ACK'd version always matches the DB.
 
 test(
-  'a cycle-closing harvest returns the entry\'s true post-cascade sync_version and emits one coherent outbox event',
+  'a cycle-closing harvest returns the entry\'s true post-cascade sync_version and emits entry plus edge-cycle projection events',
   async () => {
     const db = createJournalDb('cc-b1-harvest-self-freeze-fix');
     seedJournalTestIdentity(db);
@@ -5486,6 +5486,16 @@ test(
     const membership = readCycleMemberships(db, plot)[0];
     assert.equal(membership.ends_on, '2026-08-01');
     assert.equal(membership.close_reason, 'harvest');
+
+    const cycleOutboxRows = db.prepare(
+      "SELECT aggregate_key,sync_version,payload_json FROM sync_outbox WHERE aggregate_type='JOURNAL_CROP_CYCLE' AND op='JOURNAL_CROP_CYCLE_UPSERTED'"
+    ).all();
+    assert.equal(cycleOutboxRows.length, 2, 'seeding open and harvest close each project the authoritative cycle');
+    const closedCycle = JSON.parse(cycleOutboxRows[1].payload_json);
+    assert.equal(cycleOutboxRows[1].aggregate_key, membership.cycle_uuid);
+    assert.equal(cycleOutboxRows[1].sync_version, 2, 'closing a membership increments the cycle projection version');
+    assert.equal(closedCycle.plots[0].ends_on, '2026-08-01');
+    assert.equal(closedCycle.plots[0].close_reason, 'harvest');
   }
 );
 

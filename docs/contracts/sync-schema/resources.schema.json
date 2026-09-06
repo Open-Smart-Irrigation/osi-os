@@ -867,6 +867,45 @@
                 }
             ]
         },
+        "JournalCropCyclePlot": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cycle_uuid", "plot_uuid", "ends_on", "closed_by_entry_uuid", "close_reason"],
+            "properties": {
+                "cycle_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "plot_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "ends_on": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                "closed_by_entry_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "close_reason": {"type": ["string", "null"], "enum": ["harvest", "reseed", "manual", null]}
+            }
+        },
+        "JournalCropCycle": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_CROP_CYCLE",
+            "x-watermark-key": "cycle_uuid",
+            "required": ["contract_version", "cycle_uuid", "owner_user_uuid", "crop_code", "variety", "group_uuid", "opened_by_entry_uuid", "starts_on", "gateway_device_eui", "created_by_principal_uuid", "sync_version", "created_at", "updated_at", "deleted_at", "plots"],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "cycle_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
+                "crop_code": {"type": "string", "minLength": 1},
+                "variety": {"type": ["string", "null"]},
+                "group_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "opened_by_entry_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "starts_on": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "created_by_principal_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "created_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "updated_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "plots": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/JournalCropCyclePlot"}}
+            }
+        },
+        "JournalCropCycleAggregate": {
+            "allOf": [{"$ref": "#/definitions/JournalCropCycle"}]
+        },
         "JournalPlotGroup": {
             "type": "object",
             "additionalProperties": false,

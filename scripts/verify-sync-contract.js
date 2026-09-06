@@ -128,6 +128,7 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_VOCAB_UPSERTED: { aggregate_key_path: 'payload.custom_field_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_UPSERTED: { aggregate_key_path: 'payload.plot_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_GROUP_UPSERTED: { aggregate_key_path: 'payload.group_uuid', sync_version_path: 'payload.sync_version' },
+    JOURNAL_CROP_CYCLE_UPSERTED: { aggregate_key_path: 'payload.cycle_uuid', sync_version_path: 'payload.sync_version' },
     USER_UPSERTED: { aggregate_key_path: 'payload.user_uuid', sync_version_path: 'payload.sync_version' },
     USER_ZONE_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     USER_ZONE_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },

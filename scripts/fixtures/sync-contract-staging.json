@@ -12,7 +12,8 @@
       "JOURNAL_ENTRY_VOIDED",
       "JOURNAL_VOCAB_UPSERTED",
       "JOURNAL_PLOT_UPSERTED",
-      "JOURNAL_PLOT_GROUP_UPSERTED"
+      "JOURNAL_PLOT_GROUP_UPSERTED",
+      "JOURNAL_CROP_CYCLE_UPSERTED"
     ],
     "edgeDeferred": [],
     "cloudDeferred": [

@@ -24,6 +24,7 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_VOCAB_UPSERTED',
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
+  'JOURNAL_CROP_CYCLE_UPSERTED',
 ];
 const EXACT_EDGE_DEFERRED_OPS = [];
 // Temporary rollout capability matrix. After the cloud deploy answers, Phase 4

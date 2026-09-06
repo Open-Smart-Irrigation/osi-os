@@ -878,6 +878,10 @@ async function closeCycleMembership(tx, cycle, plotUuid, endsOn, closingEntryUui
     'WHERE cycle_uuid=? AND plot_uuid=? AND ends_on IS NULL',
     [endsOn, closingEntryUuid, closeReason, cycle.cycle_uuid, plotUuid]
   );
+  await tx.run(
+    'UPDATE journal_crop_cycles SET sync_version=sync_version+1,updated_at=? WHERE cycle_uuid=?',
+    [new Date().toISOString(), cycle.cycle_uuid]
+  );
   await freezeClosedSpan(
     tx, plotUuid, cycle.starts_on, endsOn, cycle.crop_code, nullable(cycle.variety), closingEntryUuid
   );
@@ -954,7 +958,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
   const continuing = isMatch && effectiveAction === 'continue';
   const toClose = target != null && !continuing ? [target] : [];
 
-  if (continuing) return;
+  if (continuing) return [];
   if (cropCode == null) {
     throw lifecycleError(
       'crop_required_for_seeding',
@@ -977,7 +981,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
     'INSERT INTO journal_crop_cycles(' +
       'cycle_uuid,crop_code,variety,group_uuid,opened_by_entry_uuid,starts_on,gateway_device_eui,' +
       'created_by_principal_uuid,sync_version,created_at,updated_at,deleted_at' +
-    ') VALUES (?,?,?,NULL,?,?,?,?,0,?,?,NULL)',
+    ') VALUES (?,?,?,NULL,?,?,?,?,1,?,?,NULL)',
     [
       cycleUuid, cropCode, normalizedVariety, entryUuid, localDate,
       plot.gateway_device_eui, principal.author_principal_uuid, now, now,
@@ -991,6 +995,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
   for (const cycle of toClose) {
     await closeCycleMembership(tx, cycle, plot.plot_uuid, localDate, entryUuid, 'reseed');
   }
+  return [cycleUuid].concat(toClose.map(function(cycle) { return cycle.cycle_uuid; }));
 }
 
 // D2.1/D10/R7: a final harvest entry closes the covering membership for its
@@ -1001,7 +1006,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
 // harvesting cycle-less plots until the "assign crop" flow exists).
 async function applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input) {
   const covering = await openCyclesCoveringPlot(tx, plot.plot_uuid, localDate);
-  if (!covering.length) return;
+  if (!covering.length) return [];
   const target = selectTargetCycle(
     covering,
     input,
@@ -1009,6 +1014,7 @@ async function applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input) {
     'Multiple open crop cycles cover this plot; specify cycle_uuid to select which one this harvest closes'
   );
   await closeCycleMembership(tx, target, plot.plot_uuid, localDate, entryUuid, 'harvest');
+  return [target.cycle_uuid];
 }
 
 // R3: a tillage_soil_work/mowing/plant_protection_application entry carrying
@@ -1027,25 +1033,27 @@ async function applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input
     'Multiple open crop cycles cover this plot; specify cycle_uuid to select which one this closes'
   );
   await closeCycleMembership(tx, target, plot.plot_uuid, localDate, entryUuid, 'manual');
+  return [target.cycle_uuid];
 }
 
 // Single dispatch point called after a final entry (create or draft
 // promotion) is persisted: routes to the seeding/harvest/manual-close cycle
 // effect for its activity, or does nothing for every other activity code.
 async function applyActivityCycleCascade(tx, principal, plot, occurrence, entryUuid, activityCode, input, values) {
-  if (plot.plot_uuid == null) return;
+  if (plot.plot_uuid == null) return [];
   const localDate = occurrence.start.localDate;
   if (SEEDING_ACTIVITY_CODES.has(activityCode)) {
-    await applySeedingCycleEffect(
+    return applySeedingCycleEffect(
       tx, plot, localDate, entryUuid, principal, input,
       findAttributeValue(values, 'attr.crop'),
       findAttributeValue(values, 'attr.variety')
     );
   } else if (activityCode === 'harvest') {
-    await applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input);
+    return applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input);
   } else if (MANUAL_CLOSE_ACTIVITY_CODES.has(activityCode) && input.ends_crop_cycle === true) {
-    await applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input);
+    return applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input);
   }
+  return [];
 }
 
 // S2 (review fix -- a minimum guard, NOT a full correction-cascade): there
@@ -1121,24 +1129,25 @@ async function assertCorrectionWontDesyncCycle(tx, existing, occurrence, normali
 // membership. A correction that clears the crop entirely is ignored rather
 // than blanking a tracked cycle's crop_code (which is NOT NULL).
 async function applySeedingCorrectionCascade(tx, existing, plot, normalized) {
-  if (!SEEDING_ACTIVITY_CODES.has(existing.activity_code)) return;
-  if (nullable(plot.plot_uuid) !== nullable(existing.plot_uuid)) return;
+  if (!SEEDING_ACTIVITY_CODES.has(existing.activity_code)) return [];
+  if (nullable(plot.plot_uuid) !== nullable(existing.plot_uuid)) return [];
   const cycle = await tx.get(
     'SELECT cycle_uuid,crop_code,variety FROM journal_crop_cycles ' +
     'WHERE opened_by_entry_uuid=? AND deleted_at IS NULL',
     [existing.entry_uuid]
   );
-  if (!cycle) return;
+  if (!cycle) return [];
   const cropCode = findAttributeValue(normalized.values, 'attr.crop');
   const variety = findAttributeValue(normalized.values, 'attr.variety');
-  if (cropCode == null) return;
-  if (cropCode === cycle.crop_code && nullable(variety) === nullable(cycle.variety)) return;
+  if (cropCode == null) return [];
+  if (cropCode === cycle.crop_code && nullable(variety) === nullable(cycle.variety)) return [];
   const now = new Date().toISOString();
   await tx.run(
     'UPDATE journal_crop_cycles SET crop_code=?,variety=?,updated_at=?,sync_version=sync_version+1 ' +
     'WHERE cycle_uuid=?',
     [cropCode, nullable(variety), now, cycle.cycle_uuid]
   );
+  return [cycle.cycle_uuid];
 }
 
 // D13/R7 void cascades:
@@ -1178,6 +1187,7 @@ async function findCycleDependents(tx, membership, cycle, excludeEntryUuid) {
 }
 
 async function applyVoidCycleCascade(tx, entry, principal, options) {
+  const affected = [];
   const opened = await tx.get(
     'SELECT * FROM journal_crop_cycles WHERE opened_by_entry_uuid=? AND deleted_at IS NULL',
     [entry.entry_uuid]
@@ -1204,6 +1214,7 @@ async function applyVoidCycleCascade(tx, entry, principal, options) {
       'UPDATE journal_crop_cycles SET deleted_at=?,updated_at=?,sync_version=sync_version+1 WHERE cycle_uuid=?',
       [now, now, opened.cycle_uuid]
     );
+    affected.push(opened.cycle_uuid);
   }
 
   const closedMemberships = await tx.all(
@@ -1235,11 +1246,17 @@ async function applyVoidCycleCascade(tx, entry, principal, options) {
       'WHERE cycle_uuid=? AND plot_uuid=?',
       [membership.cycle_uuid, membership.plot_uuid]
     );
+    await tx.run(
+      'UPDATE journal_crop_cycles SET sync_version=sync_version+1,updated_at=? WHERE cycle_uuid=?',
+      [new Date().toISOString(), membership.cycle_uuid]
+    );
     await unfreezeClosedSpan(
       tx, membership.plot_uuid, membership.starts_on, membership.ends_on,
       membership.crop_code, nullable(membership.variety)
     );
+    affected.push(membership.cycle_uuid);
   }
+  return affected;
 }
 
 function parsedDefinition(row) {
@@ -1726,7 +1743,20 @@ async function emitJournalOutbox(tx, source, op) {
   const authority = await journalAuthority(tx, gatewayDeviceEui);
   // The V2 union has no plot-group mutation. Preserve that existing V1 route
   // until the paired contract defines an authoritative group representation.
-  const v2Compatible = aggregateType !== 'JOURNAL_PLOT_GROUP';
+  const v2Compatible = aggregateType !== 'JOURNAL_PLOT_GROUP' &&
+    aggregateType !== 'JOURNAL_CROP_CYCLE';
+  // Crop cycles are an edge-authored V1 evidence projection. A cloud-primary
+  // V2 workspace must not fall through to the V1 outbox: its current cycle
+  // state is already canonical in V2 and no V2 crop-cycle mutation exists.
+  if (authority.mode === 'v2' && aggregateType === 'JOURNAL_CROP_CYCLE') {
+    return {
+      aggregate,
+      entry,
+      event_uuid: eventUuid,
+      mutation_uuid: null,
+      replication_mode: 'v2',
+    };
+  }
   if (authority.mode === 'v2' && v2Compatible) {
     const mutationSource = entry
       ? { aggregate }
@@ -1765,6 +1795,62 @@ async function emitJournalOutbox(tx, source, op) {
     ]
   );
   return { aggregate, entry, event_uuid: eventUuid, mutation_uuid: null, replication_mode: 'v1' };
+}
+
+// The crop-cycle projection is edge-owned evidence. It has a separate
+// aggregate/version because a seeding or harvest changes cycle membership
+// without changing the plot resource itself; reusing plot sync_version would
+// make cloud watermarking reject the updated cycle as an equal-version replay.
+async function emitCropCycleProjection(tx, cycleUuid) {
+  const cycle = await tx.get(
+    'SELECT cc.*,je.owner_user_uuid FROM journal_crop_cycles AS cc ' +
+    'JOIN journal_entries AS je ON je.entry_uuid=cc.opened_by_entry_uuid WHERE cc.cycle_uuid=?',
+    [cycleUuid]
+  );
+  if (!cycle) throw lifecycleError('cycle_not_found', 'Crop cycle was not found for projection');
+  const memberships = await tx.all(
+    'SELECT cycle_uuid,plot_uuid,ends_on,closed_by_entry_uuid,close_reason ' +
+    'FROM journal_crop_cycle_plots WHERE cycle_uuid=? ORDER BY plot_uuid',
+    [cycleUuid]
+  );
+  const aggregate = {
+    contract_version: 1,
+    cycle_uuid: cycle.cycle_uuid,
+    owner_user_uuid: cycle.owner_user_uuid,
+    crop_code: cycle.crop_code,
+    variety: nullable(cycle.variety),
+    group_uuid: nullable(cycle.group_uuid),
+    opened_by_entry_uuid: cycle.opened_by_entry_uuid,
+    starts_on: cycle.starts_on,
+    gateway_device_eui: cycle.gateway_device_eui,
+    created_by_principal_uuid: cycle.created_by_principal_uuid,
+    sync_version: Number(cycle.sync_version),
+    created_at: cycle.created_at,
+    updated_at: cycle.updated_at,
+    deleted_at: nullable(cycle.deleted_at),
+    plots: memberships.map(function(row) {
+      return {
+        cycle_uuid: row.cycle_uuid,
+        plot_uuid: row.plot_uuid,
+        ends_on: nullable(row.ends_on),
+        closed_by_entry_uuid: nullable(row.closed_by_entry_uuid),
+        close_reason: nullable(row.close_reason),
+      };
+    }),
+  };
+  return emitJournalOutbox(tx, {
+    aggregate,
+    aggregate_type: 'JOURNAL_CROP_CYCLE',
+    aggregate_key: cycle.cycle_uuid,
+    sync_version: Number(cycle.sync_version),
+    occurred_at: cycle.updated_at,
+    gateway_device_eui: cycle.gateway_device_eui,
+  }, 'JOURNAL_CROP_CYCLE_UPSERTED');
+}
+
+async function emitAffectedCropCycles(tx, cycleUuids) {
+  const unique = Array.from(new Set(cycleUuids || [])).sort();
+  for (const cycleUuid of unique) await emitCropCycleProjection(tx, cycleUuid);
 }
 
 function journalReceipt(emission) {
@@ -2244,7 +2330,9 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
   );
   // D13 (narrow scope, see applySeedingCorrectionCascade): propagate a
   // corrected seeding's crop/variety into the cycle it opened.
-  await applySeedingCorrectionCascade(tx, existing, plot, normalized);
+  await emitAffectedCropCycles(
+    tx, await applySeedingCorrectionCascade(tx, existing, plot, normalized)
+  );
   return result;
 }
 
@@ -2315,9 +2403,9 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   );
   // A draft's first finalization is functionally a create: run the same
   // seeding/harvest/manual-close cascade createFinalInTransaction runs.
-  await applyActivityCycleCascade(
+  await emitAffectedCropCycles(tx, await applyActivityCycleCascade(
     tx, principal, plot, occurrence, existing.entry_uuid, normalized.activity_code, input, normalized.values
-  );
+  ));
   // B1(c) (review fix): replaceExistingWithFinal already emitted the outbox
   // event and recorded the terminal command BEFORE the cascade above ran, so
   // re-read the entry's sync_version now and make the RETURNED payload agree
@@ -2409,9 +2497,9 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     batch_uuid: row.batch_uuid,
     sync_version: row.sync_version,
   });
-  await applyActivityCycleCascade(
+  await emitAffectedCropCycles(tx, await applyActivityCycleCascade(
     tx, principal, plot, occurrence, row.entry_uuid, normalized.activity_code, input, normalized.values
-  );
+  ));
   const emission = await emitJournalOutbox(
     tx,
     options && options.outbox_event_uuid
@@ -2678,7 +2766,7 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
     // dependents) or a harvest/manual-close (reopen + un-freeze, guarded by
     // a reopen collision). Runs before the status flip so either guard abort
     // rolls back the whole transaction, leaving nothing changed.
-    await applyVoidCycleCascade(tx, entry, principal, options);
+    const affectedCycles = await applyVoidCycleCascade(tx, entry, principal, options);
     // B1(c) (review fix): re-read the sync_version AFTER the cascade rather
     // than trusting `entry` as fetched before it ran. findCycleDependents
     // already excludes this entry_uuid from its own dependents, and (for a
@@ -2712,6 +2800,7 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
       entryUuid,
       'JOURNAL_ENTRY_VOIDED'
     );
+    await emitAffectedCropCycles(tx, affectedCycles);
     const terminal = {
       aggregate: emission.aggregate,
       entry_uuid: entryUuid,

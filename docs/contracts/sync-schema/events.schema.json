@@ -8,6 +8,7 @@
         "JOURNAL_VOCAB_UPSERTED": {"aggregate_key_path": "payload.custom_field_uuid", "sync_version_path": "payload.sync_version"},
         "JOURNAL_PLOT_UPSERTED": {"aggregate_key_path": "payload.plot_uuid", "sync_version_path": "payload.sync_version"},
         "JOURNAL_PLOT_GROUP_UPSERTED": {"aggregate_key_path": "payload.group_uuid", "sync_version_path": "payload.sync_version"},
+        "JOURNAL_CROP_CYCLE_UPSERTED": {"aggregate_key_path": "payload.cycle_uuid", "sync_version_path": "payload.sync_version"},
         "USER_UPSERTED": {"aggregate_key_path": "payload.user_uuid", "sync_version_path": "payload.sync_version"},
         "USER_ZONE_ASSIGNMENT_UPSERTED": {"aggregate_key_path": "payload.assignment_uuid", "sync_version_path": "payload.sync_version"},
         "USER_ZONE_ASSIGNMENT_DELETED": {"aggregate_key_path": "payload.assignment_uuid", "sync_version_path": "payload.sync_version"},
@@ -60,7 +61,8 @@
                 "JOURNAL_ENTRY_VOIDED",
                 "JOURNAL_VOCAB_UPSERTED",
                 "JOURNAL_PLOT_UPSERTED",
-                "JOURNAL_PLOT_GROUP_UPSERTED"
+                "JOURNAL_PLOT_GROUP_UPSERTED",
+                "JOURNAL_CROP_CYCLE_UPSERTED"
             ]
         },
         "syncVersion": {"type": "integer", "minimum": 0},
@@ -88,7 +90,8 @@
                             "JOURNAL_ENTRY_VOIDED",
                             "JOURNAL_VOCAB_UPSERTED",
                             "JOURNAL_PLOT_UPSERTED",
-                            "JOURNAL_PLOT_GROUP_UPSERTED"
+                            "JOURNAL_PLOT_GROUP_UPSERTED",
+                            "JOURNAL_CROP_CYCLE_UPSERTED"
                         ]
                     }
                 },
@@ -184,6 +187,19 @@
                     "aggregateType": {"const": "JOURNAL_PLOT_GROUP"},
                     "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
                     "payload": {"$ref": "resources.schema.json#/definitions/JournalPlotGroupAggregate"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"op": {"const": "JOURNAL_CROP_CYCLE_UPSERTED"}},
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "JOURNAL_CROP_CYCLE"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/JournalCropCycleAggregate"}
                 }
             }
         },

@@ -56,6 +56,7 @@ const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_VOCAB_UPSERTED: ['JOURNAL_VOCAB', 'JournalVocab', 'custom_field_uuid'],
     JOURNAL_PLOT_UPSERTED: ['JOURNAL_PLOT', 'JournalPlot', 'plot_uuid'],
     JOURNAL_PLOT_GROUP_UPSERTED: ['JOURNAL_PLOT_GROUP', 'JournalPlotGroup', 'group_uuid'],
+    JOURNAL_CROP_CYCLE_UPSERTED: ['JOURNAL_CROP_CYCLE', 'JournalCropCycle', 'cycle_uuid'],
 };
 const SCOPED_ACCESS_EVENT_OPS = [
     'USER_PLOT_ASSIGNMENT_DELETED',
@@ -1130,6 +1131,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_VOCAB_UPSERTED',
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
+            'JOURNAL_CROP_CYCLE_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([
@@ -1936,18 +1938,43 @@ const plotGroup = {
     deleted_at: null,
     members: [UUID],
 };
+const cropCycle = {
+    contract_version: 1,
+    cycle_uuid: UUID,
+    owner_user_uuid: COMPACT_UUID,
+    crop_code: 'agroscope.crop.barley_spring',
+    variety: 'Golden Promise',
+    group_uuid: null,
+    opened_by_entry_uuid: '12345678-1234-4234-8234-123456789abd',
+    starts_on: '2026-07-13',
+    gateway_device_eui: '0016C001F11715E2',
+    created_by_principal_uuid: '12345678-1234-4234-8234-123456789abe',
+    sync_version: 1,
+    created_at: '2026-07-13T08:00:00.000Z',
+    updated_at: '2026-07-13T08:00:00.000Z',
+    deleted_at: null,
+    plots: [{
+        cycle_uuid: UUID,
+        plot_uuid: '12345678-1234-4234-8234-123456789abf',
+        ends_on: null,
+        closed_by_entry_uuid: null,
+        close_reason: null,
+    }],
+};
 
 const resourceSamples = {
     JournalEntry: journalEntry,
     JournalVocab: customVocab,
     JournalPlot: plot,
     JournalPlotGroup: plotGroup,
+    JournalCropCycle: cropCycle,
 };
 const eventResourceSamples = Object.assign({}, resourceSamples, {
     JournalEntry: Object.assign({}, journalEntry),
     JournalVocab: Object.assign({}, customVocab),
     JournalPlot: Object.assign({}, plot),
     JournalPlotGroup: Object.assign({}, plotGroup),
+    JournalCropCycle: Object.assign({}, cropCycle),
 });
 for (const sample of Object.values(eventResourceSamples)) delete sample.base_sync_version;
 
@@ -2085,6 +2112,9 @@ const journalIdentityCases = [
     ['JournalPlotAggregate', eventResourceSamples.JournalPlot, 'plot_uuid'],
     ['JournalPlotGroupAggregate', eventResourceSamples.JournalPlotGroup, 'group_uuid'],
     ['JournalPlotGroupAggregate', eventResourceSamples.JournalPlotGroup, 'members.0'],
+    ['JournalCropCycleAggregate', eventResourceSamples.JournalCropCycle, 'cycle_uuid'],
+    ['JournalCropCycleAggregate', eventResourceSamples.JournalCropCycle, 'plots.0.plot_uuid'],
+    ['JournalCropCycleAggregate', eventResourceSamples.JournalCropCycle, 'opened_by_entry_uuid'],
 ];
 for (const [definitionName, sample, identityPath] of journalIdentityCases) {
     for (const invalidUuid of [
