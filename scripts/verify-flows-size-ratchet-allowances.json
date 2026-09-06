@@ -239,8 +239,8 @@
     }
   },
   "total_allowance": {
-    "delta": 105552,
-    "reason": "Merge #193 (feat/valve-control) + #196 (port/sdi12-edge) into origin/main: re-measured directly in the merge worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles (byte-identical bcm2712/bcm2709): origin/main 1,071,852 chars -> merged HEAD 1,177,404 chars = +105,552. Measured, not estimated; not a sum-of-sums of the two branches' independently-committed figures. Dual provenance: +44,320 is the feat/valve-control baseline as it actually landed at d6d8b66c -- live identity restart sentinel + marked identity errors + fail-closed restart publication (Option C Slice 1, main, 2026-08) + filtered restartPending status (Option C Slice 1b, main, 2026-08, sys-stats-fn +4862) + the valve-control port-back (24,090), plus +34 the prune-sync-outbox VALVE_SCHEDULE/VALVE_SETTINGS PROTECTED-classification fix from d0e33812/7316af9f/d6d8b66c -- three commits landed on feat/valve-control after port/sdi12-edge's branch base a38c9db6, so that branch's own recorded total (105,518) predates this +34 and undercounts by exactly that amount. The remaining +61,232 is the SDI-12 port, unaffected by the +34 fix (it does not touch prune-sync-outbox): the SDI-12 ingest/identify/config/recipe node set, the recipe deployment and commissioning nodes, the boot-owned devices literals, and the SDI-12 columns threaded through bootstrap, device list and telemetry. 44,320 + 61,232 = 105,552, confirmed by direct measurement rather than arithmetic alone."
+    "delta": 107574,
+    "reason": "Port of the Field Journal arc onto origin/main 23bc8547 (branch port/wave3-edge-journal). Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD 1,180,548 chars = 107,574. Measured, not estimated, and not a sum-of-sums. Dual provenance: 105,552 is the pre-existing valve-control + SDI-12 allowance as recorded on origin/main, and it carried 1,027 chars of slack -- origin/main's real measured total is 1,177,499, which is 1,027 below its own baseline-plus-allowance ceiling of 1,178,526. The remaining +3,049 is this journal slice, and it is exactly the sum of the six new journal-v2-replication node bodies: worker 2,727 + error status 240 + success status 82, with the tab, inject tick and catch nodes carrying no func text. No existing node grew and none was removed: a node-by-node diff of flows.json against origin/main reports 6 added, 0 changed, 0 removed. Setting the allowance to 107,574 re-tightens the ratchet to exactly HEAD, absorbing the 1,027 of inherited slack rather than carrying it forward."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
@@ -270,5 +270,6 @@
     "sdi12-identify-fn": {
       "max_chars": 4101,
       "reason": "SDI-12 port: new function node measured at exactly 4101 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
-    }  }
+    }
+  }
 }
