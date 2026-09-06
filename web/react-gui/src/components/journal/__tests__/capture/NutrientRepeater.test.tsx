@@ -63,6 +63,35 @@ describe('NutrientRepeater', () => {
     }]);
   });
 
+  it('clears the missing-observation status when a nutrient value is entered', () => {
+    const onChange = vi.fn();
+    render(
+      <NutrientRepeater
+        attributeCode="attr.amount_nutrient_rate"
+        label="Nutrient rate"
+        locale="en-GB"
+        units={units}
+        values={[{
+          attribute_code: 'attr.amount_nutrient_rate',
+          group_index: 0,
+          value_status: 'not_observed',
+          unit_code: 'unit.kg_n_per_ha_nutrient',
+          entered_unit_code: 'unit.kg_n_per_ha_nutrient',
+        }]}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'capture.form.value' }), { target: { value: '12' } });
+
+    expect(onChange).toHaveBeenLastCalledWith([{
+      attribute_code: 'attr.amount_nutrient_rate',
+      group_index: 0,
+      entered_value_num: 12,
+      entered_unit_code: 'unit.kg_n_per_ha_nutrient',
+    }]);
+  });
+
   it('preserves explicit group indices and uses fixed nutrient-unit chips', () => {
     const onChange = vi.fn();
     render(
