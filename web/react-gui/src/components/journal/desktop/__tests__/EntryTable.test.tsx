@@ -491,6 +491,21 @@ describe('EntryTable', () => {
       expect(mocks.exportEntriesJson).toHaveBeenCalledWith(scopedFilters);
     });
 
+    it('exports the selected station or group scope without adding a plot scope', async () => {
+      const stationFilters: EntryListFilters = { status: 'all', station_code: 'ST72' };
+      const groupFilters: EntryListFilters = { status: 'all', group_uuid: 'group-72' };
+
+      const { rerender } = renderTable({ filters: stationFilters });
+      fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportCsv' }));
+      await waitFor(() => expect(mocks.exportEntriesCsv).toHaveBeenCalledWith(stationFilters));
+
+      rerender(
+        <EntryTable filters={groupFilters} plots={[plot()]} selectedEntryUuid={null} onSelectEntry={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportJson' }));
+      await waitFor(() => expect(mocks.exportEntriesJson).toHaveBeenCalledWith(groupFilters));
+    });
+
     it('never sends the pagination cursor/limit along with a filter-scoped export', async () => {
       mockEntries({ entries: [entry()], nextCursor: 'cursor-2' });
       renderTable({ filters: scopedFilters });

@@ -280,6 +280,8 @@ export interface EntryDiscardReceipt {
 export interface EntryListFilters {
   entry_uuid?: string;
   plot_uuid?: string;
+  station_code?: string;
+  group_uuid?: string;
   zone_uuid?: string;
   activity_code?: string;
   status?: EntryStatus | 'all';

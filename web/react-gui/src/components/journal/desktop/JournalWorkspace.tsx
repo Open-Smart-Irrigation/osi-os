@@ -61,21 +61,13 @@ function zoneDeviceCount(zone: ZoneLike): number {
   return zone.device_count ?? zone.deviceCount ?? 0;
 }
 
-// Combines the rail's scope selection and filter fields into the
-// EntryListFilters the shipped `/api/journal/entries` (and export) routes
-// accept, so the entry table's active scope is exactly what the rail shows.
-//
-// Station and group scope span multiple plots, but the edge API only accepts
-// a single plot_uuid/zone_uuid filter (osi-journal/api.js
-// `normalizeEntryFilters`) — there is no multi-plot filter to send without
-// inventing a new endpoint. Narrowing the entry list to a station's or
-// group's plots is left unfiltered here as a known, deliberate gap; only
-// single-plot scope narrows the query.
 function toEntryListFilters(scope: ScopeSelection, filters: ScopeRailFilters): EntryListFilters {
   // Status-specific work belongs in the Drafts and waiting-for-farm trays.
   // The workspace table intentionally stays on the complete journal timeline.
   const result: EntryListFilters = { status: 'all' };
   if (scope.kind === 'plot') result.plot_uuid = scope.plotUuid;
+  if (scope.kind === 'station') result.station_code = scope.stationCode;
+  if (scope.kind === 'group') result.group_uuid = scope.groupUuid;
   if (filters.activityCode) result.activity_code = filters.activityCode;
   if (filters.occurredFrom) result.occurred_from = filters.occurredFrom;
   if (filters.occurredTo) result.occurred_to = filters.occurredTo;
@@ -251,20 +243,14 @@ export function JournalWorkspace({
     [scope, filters],
   );
 
-  // Station and group scope cannot be sent to the shipped single-plot_uuid
-  // API (see toEntryListFilters above), so the list and every export are
-  // silently unfiltered for those two scopes. Surface that honestly instead
-  // of leaving it as an undisclosed gap.
-  const scopeNotNarrowed = scope.kind === 'station' || scope.kind === 'group';
-
   // Own the post-save refresh. EntryTable manages its own paginated
   // useJournalEntries call internally; this instance mirrors its unpaginated
   // (first-page, no cursor) query exactly — same filters, same PAGE_SIZE —
   // so calling retry() after a save revalidates the same SWR cache entry
   // EntryTable reads from when the user is on page 1, which is the common
   // desktop case (save while looking at the table, see the new entry appear).
-  // A page 2+ view isn't invalidated by this; a known, accepted gap, the same
-  // shape as the scopeNotNarrowed gap documented above.
+  // A page 2+ view isn't invalidated by this; it remains on its current
+  // cursor until the operator changes page or scope.
   const { retry: retryEntries } = useJournalEntries({ ...entryListFilters, limit: PAGE_SIZE }, true);
 
   useEffect(() => {
@@ -354,11 +340,6 @@ export function JournalWorkspace({
       </div>
 
       <div className="flex h-full min-h-0 flex-col gap-2">
-        {scopeNotNarrowed && (
-          <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text-secondary)]">
-            {t('workspace.table.scopeNotNarrowed')}
-          </p>
-        )}
         <div className="min-h-0 flex-1">
           <EntryTable
             filters={entryListFilters}

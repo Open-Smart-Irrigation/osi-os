@@ -229,6 +229,18 @@ function entryInput(uuid, plotUuid, localTime, overrides) {
   }, overrides || {});
 }
 
+function farmWideMaintenanceEntryInput(uuid, localTime, note) {
+  return entryInput(uuid, null, localTime, {
+    activity_code: 'equipment_maintenance',
+    template_code: 'full_record',
+    template_version: 11,
+    layout_code: 'farm_wide',
+    layout_version: 1,
+    values: [],
+    note,
+  });
+}
+
 function base64url(value) {
   return Buffer.from(value).toString('base64url');
 }
@@ -638,7 +650,7 @@ test('W2: scoped journal reads are account-wide while flag-off stays owner-only'
   );
 });
 
-test('W2: a plot-less entry is still listed in scoped mode', async () => {
+test('W2: a farm-wide maintenance entry is still listed in scoped mode', async () => {
   const db = new TestDb('scoped-plotless-entry');
   seedIdentity(db);
   const plotlessEntryUuid = '22120000-0000-4000-8000-000000000001';
@@ -646,13 +658,13 @@ test('W2: a plot-less entry is still listed in scoped mode', async () => {
   const secondPlotlessEntryUuid = '22120000-0000-4000-8000-000000000002';
   await journal.saveEntry(
     db,
-    entryInput(plotlessEntryUuid, null, '2026-07-13T08:00:00', { season_crop: 'barley' }),
+    farmWideMaintenanceEntryInput(plotlessEntryUuid, '2026-07-13T08:00:00', 'Serviced mower'),
     owner,
     { mode: 'create' }
   );
   await journal.saveEntry(
     db,
-    entryInput(secondPlotlessEntryUuid, null, '2026-07-13T09:00:00', { season_crop: 'wheat' }),
+    farmWideMaintenanceEntryInput(secondPlotlessEntryUuid, '2026-07-13T09:00:00', 'Checked sprayer'),
     owner,
     { mode: 'create' }
   );
@@ -2684,9 +2696,7 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
   assert.equal(metadata.schema.lossless_member, 'records.ndjson');
   assert.deepEqual(metadata.catalog, {
     hash_scope: 'core_catalog_state',
-    // Slice F: the seeded catalog is now at v6 (BBCH growth stage + manual
-    // weather-at-application attrs + farmer_quick@6/full_record@6).
-    core_version: 10,
+    core_version: 11,
     core_hash: metadata.catalog.core_hash,
     scoped_effective_hash: {
       value: null,

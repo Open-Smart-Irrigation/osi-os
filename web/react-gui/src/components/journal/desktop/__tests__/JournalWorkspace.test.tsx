@@ -312,37 +312,28 @@ describe('JournalWorkspace', () => {
     });
   });
 
-  it('does not narrow the entry-list filters by plot for station or group scope (the shipped API only accepts one plot_uuid)', () => {
+  it('sends exactly the selected station, group, or plot scope to the entry table', () => {
     renderWorkspace();
 
     act(() => lastScopeRailProps().onScopeChange({ kind: 'station', stationCode: 'ST-1' }));
-    expect(lastEntryTableProps().filters).not.toHaveProperty('plot_uuid');
+    expect(lastEntryTableProps().filters).toEqual({ status: 'all', station_code: 'ST-1' });
 
     act(() => lastScopeRailProps().onScopeChange({ kind: 'group', groupUuid: 'group-1' }));
-    expect(lastEntryTableProps().filters).not.toHaveProperty('plot_uuid');
+    expect(lastEntryTableProps().filters).toEqual({ status: 'all', group_uuid: 'group-1' });
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'plot', plotUuid: 'plot-1' }));
+    expect(lastEntryTableProps().filters).toEqual({ status: 'all', plot_uuid: 'plot-1' });
 
     act(() => lastScopeRailProps().onScopeChange({ kind: 'all' }));
-    expect(lastEntryTableProps().filters).not.toHaveProperty('plot_uuid');
+    expect(lastEntryTableProps().filters).toEqual({ status: 'all' });
   });
 
-  it('discloses that the list and exports cover all plots when the scope cannot narrow them (station or group), and stays quiet otherwise', () => {
+  it('forwards an unknown scope verbatim so the server can fail it closed', () => {
     renderWorkspace();
 
-    // Global view: no notice.
-    expect(screen.queryByText('workspace.table.scopeNotNarrowed')).not.toBeInTheDocument();
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'station', stationCode: 'ST-missing' }));
 
-    act(() => lastScopeRailProps().onScopeChange({ kind: 'station', stationCode: 'ST-1' }));
-    expect(screen.getByText('workspace.table.scopeNotNarrowed')).toBeInTheDocument();
-
-    act(() => lastScopeRailProps().onScopeChange({ kind: 'group', groupUuid: 'group-1' }));
-    expect(screen.getByText('workspace.table.scopeNotNarrowed')).toBeInTheDocument();
-
-    // Single-plot scope: the filter really does narrow the list, no notice.
-    act(() => lastScopeRailProps().onScopeChange({ kind: 'plot', plotUuid: 'plot-a' }));
-    expect(screen.queryByText('workspace.table.scopeNotNarrowed')).not.toBeInTheDocument();
-
-    act(() => lastScopeRailProps().onScopeChange({ kind: 'all' }));
-    expect(screen.queryByText('workspace.table.scopeNotNarrowed')).not.toBeInTheDocument();
+    expect(lastEntryTableProps().filters).toEqual({ status: 'all', station_code: 'ST-missing' });
   });
 
   it('passes the real plots, active groups, and activities straight through to the scope rail', () => {
