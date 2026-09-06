@@ -1,5 +1,9 @@
 -- risk: destructive
 -- Extends closed V2 operation/kind checks while preserving queue and replay history.
+DROP VIEW journal_v2_pending_proposal_overlay;
+DROP TRIGGER trg_journal_attachment_edge_parent_bi;
+DROP TRIGGER trg_journal_attachment_edge_parent_bu;
+
 CREATE TABLE journal_edge_mutations_next (
   mutation_uuid TEXT PRIMARY KEY,
   workspace_uuid TEXT NOT NULL,
@@ -22,6 +26,56 @@ DROP TABLE journal_edge_mutations;
 ALTER TABLE journal_edge_mutations_next RENAME TO journal_edge_mutations;
 CREATE INDEX idx_journal_edge_mutations_pending ON journal_edge_mutations(status,next_attempt_at,created_at,mutation_uuid);
 CREATE INDEX idx_journal_edge_mutations_workspace_resource ON journal_edge_mutations(workspace_uuid,resource_uuid,status,created_at);
+
+CREATE VIEW journal_v2_pending_proposal_overlay AS
+SELECT workspace_uuid,
+       resource_uuid AS entry_uuid,
+       mutation_uuid,
+       operation,
+       payload_json,
+       status,
+       created_at
+  FROM journal_edge_mutations
+ WHERE operation IN ('ENTRY_CREATE','ENTRY_CORRECT','ENTRY_VOID')
+   AND status IN ('pending','in_flight','conflict');
+
+CREATE TRIGGER trg_journal_attachment_edge_parent_bi
+BEFORE INSERT ON journal_attachment_replicas
+FOR EACH ROW
+WHEN NEW.source='edge' AND NEW.cloud_registration_state <> 'not_registered'
+BEGIN
+  SELECT CASE WHEN NEW.parent_mutation_uuid IS NULL OR NOT EXISTS (
+    SELECT 1 FROM journal_edge_mutations AS m
+     WHERE m.mutation_uuid=NEW.parent_mutation_uuid
+       AND m.workspace_uuid=NEW.workspace_uuid
+       AND m.resource_uuid=NEW.entry_uuid
+       AND m.result_revision_uuid=NEW.entry_revision_uuid
+       AND (
+         (m.status IN ('applied','already-applied') AND NEW.parent_disposition='canonical')
+         OR (m.status='conflict' AND NEW.parent_disposition='conflict')
+       )
+  ) THEN RAISE(ABORT,'journal attachment parent outcome is not bound') END;
+END;
+
+CREATE TRIGGER trg_journal_attachment_edge_parent_bu
+BEFORE UPDATE OF cloud_registration_state,entry_revision_uuid,parent_mutation_uuid,
+  workspace_uuid,entry_uuid,source,parent_disposition
+ON journal_attachment_replicas
+FOR EACH ROW
+WHEN NEW.source='edge' AND NEW.cloud_registration_state <> 'not_registered'
+BEGIN
+  SELECT CASE WHEN NEW.parent_mutation_uuid IS NULL OR NOT EXISTS (
+    SELECT 1 FROM journal_edge_mutations AS m
+     WHERE m.mutation_uuid=NEW.parent_mutation_uuid
+       AND m.workspace_uuid=NEW.workspace_uuid
+       AND m.resource_uuid=NEW.entry_uuid
+       AND m.result_revision_uuid=NEW.entry_revision_uuid
+       AND (
+         (m.status IN ('applied','already-applied') AND NEW.parent_disposition='canonical')
+         OR (m.status='conflict' AND NEW.parent_disposition='conflict')
+       )
+  ) THEN RAISE(ABORT,'journal attachment parent outcome is not bound') END;
+END;
 
 CREATE TABLE journal_replication_applied_next (
   workspace_uuid TEXT NOT NULL, sequence TEXT NOT NULL,
