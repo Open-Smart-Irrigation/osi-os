@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   assertCaptureAdapterContract,
+  createEdgeLocalJournalCaptureAdapter,
   type JournalCaptureAdapter,
 } from '../journalCaptureAdapter';
+import { journalApi } from '../../services/journalApi';
 
 type Scope = { plotUuid: string | null };
 type Draft = { draftUuid: string };
@@ -72,5 +74,29 @@ describe('JournalCaptureAdapter semantic authority contract', () => {
       finalization: 'gateway_command',
     }).lookupReceipt('receipt-1');
     expect(receipt.kind).not.toBe('confirmed');
+  });
+
+  it('submits final batches through the edge-local adapter and confirms its canonical receipt', async () => {
+    const api = vi.spyOn(journalApi, 'createFinalBatch').mockResolvedValue({
+      batch_uuid: 'batch-1',
+      entries: [],
+    });
+    const adapter = createEdgeLocalJournalCaptureAdapter();
+    const result = await adapter.submit({
+      status: 'final',
+      base_sync_version: 0,
+      members: [],
+      activity_code: 'general_observation',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'farm_wide',
+      layout_version: 1,
+      occurred_start_local: '2026-09-06T10:00',
+      occurred_timezone: 'Europe/Zurich',
+      values: [],
+    });
+
+    expect(api).toHaveBeenCalledOnce();
+    expect(result).toEqual({ kind: 'confirmed', receipt: { batch_uuid: 'batch-1', entries: [] } });
   });
 });

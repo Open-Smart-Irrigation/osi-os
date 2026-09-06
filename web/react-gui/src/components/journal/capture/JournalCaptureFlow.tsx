@@ -95,6 +95,7 @@ import { SaveState } from './SaveState';
 import { SeedingCropFields } from './SeedingCropFields';
 import { randomUuid } from '../../../utils/uuid';
 import { useDisplayPreferences } from '../../../utils/displayPreferences';
+import { createEdgeLocalJournalCaptureAdapter } from '../../../journal/journalCaptureAdapter';
 
 export interface JournalCaptureFlowProps {
   catalog: JournalCatalog;
@@ -930,6 +931,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const mountedRef = useRef(true);
   const preparationTokenRef = useRef(0);
   const batchPayloadSnapshotRef = useRef<Parameters<typeof journalApi.createFinalBatch>[0] | null>(null);
+  const captureAdapter = useMemo(() => createEdgeLocalJournalCaptureAdapter(), []);
   const batchEntryUuidsRef = useRef(new Map<string, string>());
   const contextKeyRef = useRef('');
   const automaticPrefillRef = useRef(new Map<string, CaptureEntryValueInput>());
@@ -2071,7 +2073,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       setSaving(true);
       setBatchError(null);
       try {
-        const receipt = await journalApi.createFinalBatch(payload);
+        const submitted = await captureAdapter.submit(payload);
+        if (submitted.kind !== 'confirmed') {
+          throw new Error('The local gateway did not confirm the journal batch');
+        }
+        const receipt = submitted.receipt;
         setDuplicateCandidates([]);
         setDuplicateAckEntryUuids([]);
         setStickyLossWarning(false);
