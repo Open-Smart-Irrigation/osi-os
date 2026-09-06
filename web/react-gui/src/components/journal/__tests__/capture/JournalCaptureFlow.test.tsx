@@ -3768,6 +3768,18 @@ describe('JournalCaptureFlow', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('closes an unlocked capture with Escape', async () => {
+    const onClose = vi.fn();
+    render(<JournalCaptureFlow {...baseProps} onClose={onClose} initialPlot={plot} />);
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await Promise.resolve();
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('serializes repeated Close clicks while onSaved is still pending', async () => {
     let resolveSaved: (() => void) | undefined;
     const onClose = vi.fn();

@@ -2300,6 +2300,16 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return promise;
   }, [closeLocked, finalReceipt, onClose, onSaved]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || closeLocked) return;
+      event.preventDefault();
+      void close();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [close, closeLocked]);
+
   const saveSeparately = () => {
     if (!duplicateCandidate || interactionLocked) return;
     if (!duplicateWarningShown) setDuplicateWarningShown(true);
