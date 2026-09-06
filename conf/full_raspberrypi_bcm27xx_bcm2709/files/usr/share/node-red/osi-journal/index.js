@@ -30,7 +30,24 @@ function errorResult(field, code, message) {
   return { ok: false, errors: [{ field, code, message }] };
 }
 
-function requiredErrors(requirement, present) {
+function missingFamilyAllowsNotObserved(requirement, alternatives, values) {
+  const allowed = (requirement && requirement.missing) || [];
+  const isAllowed = allowed.some(function(family) {
+    return Array.isArray(family) && family.length === alternatives.length &&
+      family.every(function(field) { return alternatives.includes(field); });
+  });
+  if (!isAllowed) return false;
+  return values.filter(function(value) {
+    return alternatives.includes(value.attribute_code) && value.value_status === 'not_observed';
+  }).length === 1;
+}
+
+function requiredFamilySatisfied(requirement, alternatives, present, values) {
+  return alternatives.some(function(field) { return present.has(field); }) ||
+    missingFamilyAllowsNotObserved(requirement, alternatives, values);
+}
+
+function requiredErrors(requirement, present, values) {
   const errors = [];
   for (const field of (requirement && requirement.required) || []) {
     if (!present.has(field)) {
@@ -38,7 +55,7 @@ function requiredErrors(requirement, present) {
     }
   }
   for (const alternatives of (requirement && requirement.required_any) || []) {
-    if (!alternatives.some(function(field) { return present.has(field); })) {
+    if (!requiredFamilySatisfied(requirement, alternatives, present, values)) {
       errors.push({
         field: alternatives.join('|'),
         code: 'required',
@@ -69,7 +86,7 @@ function requiredGroupErrors(requirement, values) {
     for (const alternatives of families) {
       const satisfied = groupValues.some(function(value) {
         return alternatives.includes(value.attribute_code) && isSemanticallyPresentValue(value);
-      });
+      }) || missingFamilyAllowsNotObserved(requirement, alternatives, groupValues);
       if (!satisfied) {
         errors.push({
           field: 'values[group=' + groupIndex + '].' + alternatives.join('|'),
@@ -941,9 +958,13 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     return value.attribute_code === 'attr.agroscope.operation' && isSemanticallyPresentValue(value);
   });
   const operationRequirements = definition.operation_requirements;
-  const requirements = (operationValue && operationRequirements && operationRequirements[operationValue.value]) ||
-    (activityRequirements && activityRequirements[entryInput.activity_code]);
-  const errors = requiredErrors(requirements, present);
+  const finalMatrix = definition.final_requirement_matrix;
+  const requirements = finalMatrix
+    ? ((operationValue && finalMatrix.leaves && finalMatrix.leaves[operationValue.value]) ||
+      (finalMatrix.activities && finalMatrix.activities[entryInput.activity_code]))
+    : ((operationValue && operationRequirements && operationRequirements[operationValue.value]) ||
+      (activityRequirements && activityRequirements[entryInput.activity_code]));
+  const errors = requiredErrors(requirements, present, normalizedValues);
   errors.push(...requiredGroupErrors(requirements, normalizedValues));
   for (const group of definition.conditional_groups || []) {
     if (Array.isArray(group.activity_codes) && group.activity_codes.includes(entryInput.activity_code)) {

@@ -1323,11 +1323,8 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  // operation-level field/requirement/product scoping plan: the seeded
-  // catalog is now at v10 (full_record@10 adds operation_fields_by_operation/
-  // operation_requirements/operation_product_kinds + restores attr.equipment
-  // for the 9 Agroscope-uncovered activities, 0032).
-  assert.equal(catalog.version, 10);
+  // The generated final-requirement matrix publishes the current v11 catalog.
+  assert.equal(catalog.version, 11);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -1387,7 +1384,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 10);
+  assert.equal(catalog.version, 11);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 
@@ -2197,6 +2194,43 @@ test('validateEntry: full_record@10 fertilization with no operation falls back t
     ],
   }));
   assert.equal(withDose.ok, true, JSON.stringify(withDose.errors));
+});
+
+test('validateEntry: full_record@11 uses the generated final matrix and permits only listed not_observed families', async () => {
+  const { catalog } = await loadedFixture('final-requirement-matrix-v11');
+  const fullRecordV11 = catalog.templates.get('full_record').get(11);
+  const openFieldV11 = catalog.layouts.get('open_field').get(11);
+  assert.ok(fullRecordV11, 'catalog must publish full_record@11');
+  assert.ok(openFieldV11, 'catalog must publish open_field@11');
+
+  const missingIrrigation = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11, values: [],
+  }));
+  assert.equal(missingIrrigation.ok, false);
+  assert.ok(missingIrrigation.errors.some((error) => error.code === 'required'));
+
+  const unobservedIrrigation = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11,
+    values: [{
+      attribute_code: 'attr.irrigation_depth', group_index: 0,
+      unit_code: 'unit.mm_water', value_status: 'not_observed',
+    }],
+  }));
+  assert.equal(unobservedIrrigation.ok, true, JSON.stringify(unobservedIrrigation.errors));
+
+  const unobservedProduct = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    activity_code: 'fertilization', template_code: 'full_record', template_version: 11,
+    layout_version: 11,
+    values: [{
+      attribute_code: 'attr.product', group_index: 0, value_status: 'not_observed',
+    }, {
+      attribute_code: 'attr.amount_mass_area_product', group_index: 0,
+      unit_code: 'unit.kg_per_ha_product', value_status: 'not_observed',
+    }],
+  }));
+  assert.equal(unobservedProduct.ok, false);
+  assert.ok(unobservedProduct.errors.some((error) =>
+    error.field === 'attr.product_uuid|attr.product' && error.code === 'required'));
 });
 
 // Version-pinned control: an entry pinned to the frozen full_record@9 keeps
