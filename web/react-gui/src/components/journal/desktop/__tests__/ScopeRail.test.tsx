@@ -237,15 +237,14 @@ describe('ScopeRail', () => {
     expect(onSearchChange).toHaveBeenCalledWith('north');
   });
 
-  it('exposes activity, status, date range, campaign, and protocol filter controls', () => {
+  it('exposes activity, date range, campaign, and protocol filters without a general status selector', () => {
     const onFiltersChange = vi.fn();
     render(<ScopeRail {...baseProps()} onFiltersChange={onFiltersChange} />);
 
     fireEvent.change(screen.getByLabelText('filters.activity'), { target: { value: 'irrigation' } });
     expect(onFiltersChange).toHaveBeenLastCalledWith({ ...DEFAULT_SCOPE_RAIL_FILTERS, activityCode: 'irrigation' });
 
-    fireEvent.change(screen.getByLabelText('filters.status'), { target: { value: 'final' } });
-    expect(onFiltersChange).toHaveBeenLastCalledWith({ ...DEFAULT_SCOPE_RAIL_FILTERS, status: 'final' });
+    expect(screen.queryByLabelText('filters.status')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('filters.dateFrom'), { target: { value: '2026-07-01' } });
     expect(onFiltersChange).toHaveBeenLastCalledWith({ ...DEFAULT_SCOPE_RAIL_FILTERS, occurredFrom: '2026-07-01' });
@@ -258,14 +257,6 @@ describe('ScopeRail', () => {
 
     fireEvent.change(screen.getByLabelText('filters.protocol'), { target: { value: 'proto-1' } });
     expect(onFiltersChange).toHaveBeenLastCalledWith({ ...DEFAULT_SCOPE_RAIL_FILTERS, protocolCode: 'proto-1' });
-  });
-
-  it('lists every active-status option under the status filter', () => {
-    render(<ScopeRail {...baseProps()} />);
-
-    const status = screen.getByLabelText('filters.status') as HTMLSelectElement;
-    const optionValues = within(status).getAllByRole('option').map((option) => (option as HTMLOptionElement).value);
-    expect(optionValues).toEqual(['all', 'draft', 'final', 'voided']);
   });
 
   // P2-c: most activity codes (e.g. crop_care, mowing, tillage_soil_work)

@@ -902,6 +902,10 @@ export function allowedChoices(
   if (!attribute || attribute.kind !== 'attribute' || attribute.value_type !== 'choice') return [];
   const resolved = resolveDependencies(layout, selections);
   if (resolved.has(attributeCode)) return [...(resolved.get(attributeCode)?.choices ?? [])];
+  // Machinery is an operation-specific, server-materialized compatibility
+  // intersection. It must never fall back to every active device choice:
+  // historical layouts without an applicable dependency are review-only.
+  if (attributeCode === 'attr.agroscope.device') return [];
   return [...model.vocabByCode.values()]
     .filter((row) => row.kind === 'choice' && row.parent_code === attributeCode && isActive(row))
     .sort((left, right) => left.sort_order - right.sort_order || left.code.localeCompare(right.code))

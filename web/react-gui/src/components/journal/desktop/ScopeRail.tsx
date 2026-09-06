@@ -13,11 +13,8 @@ export type ScopeSelection =
   | { kind: 'group'; groupUuid: string }
   | { kind: 'plot'; plotUuid: string };
 
-export type EntryStatusFilter = 'all' | 'draft' | 'final' | 'voided';
-
 export interface ScopeRailFilters {
   activityCode: string;
-  status: EntryStatusFilter;
   occurredFrom: string;
   occurredTo: string;
   campaignUuid: string;
@@ -26,14 +23,11 @@ export interface ScopeRailFilters {
 
 export const DEFAULT_SCOPE_RAIL_FILTERS: ScopeRailFilters = {
   activityCode: '',
-  status: 'all',
   occurredFrom: '',
   occurredTo: '',
   campaignUuid: '',
   protocolCode: '',
 };
-
-const STATUS_OPTIONS: readonly Exclude<EntryStatusFilter, 'all'>[] = ['draft', 'final', 'voided'];
 
 export interface ScopeRailActivityOption {
   code: string;
@@ -171,21 +165,6 @@ export function ScopeRail({
               <option key={activity.code} value={activity.code}>
                 {catalogLabel(activity, locale)}
               </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block text-sm font-bold text-[var(--text)]">
-          {t('filters.status')}
-          <select
-            aria-label={t('filters.status')}
-            value={filters.status}
-            onChange={(event) => onFiltersChange({ ...filters, status: event.target.value as EntryStatusFilter })}
-            className={`mt-1 w-full min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)] ${FOCUS_RING}`}
-          >
-            <option value="all">{t('filters.allStatuses')}</option>
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>{t(`row.status.${status}`)}</option>
             ))}
           </select>
         </label>

@@ -72,7 +72,9 @@ function zoneDeviceCount(zone: ZoneLike): number {
 // group's plots is left unfiltered here as a known, deliberate gap; only
 // single-plot scope narrows the query.
 function toEntryListFilters(scope: ScopeSelection, filters: ScopeRailFilters): EntryListFilters {
-  const result: EntryListFilters = { status: filters.status };
+  // Status-specific work belongs in the Drafts and waiting-for-farm trays.
+  // The workspace table intentionally stays on the complete journal timeline.
+  const result: EntryListFilters = { status: 'all' };
   if (scope.kind === 'plot') result.plot_uuid = scope.plotUuid;
   if (filters.activityCode) result.activity_code = filters.activityCode;
   if (filters.occurredFrom) result.occurred_from = filters.occurredFrom;

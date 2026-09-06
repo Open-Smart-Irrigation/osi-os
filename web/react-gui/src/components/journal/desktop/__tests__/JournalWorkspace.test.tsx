@@ -295,7 +295,6 @@ describe('JournalWorkspace', () => {
     act(() => lastScopeRailProps().onFiltersChange({
       ...DEFAULT_SCOPE_RAIL_FILTERS,
       activityCode: 'irrigation',
-      status: 'final',
       occurredFrom: '2026-07-01',
       occurredTo: '2026-07-31',
       campaignUuid: 'campaign-1',
@@ -304,7 +303,7 @@ describe('JournalWorkspace', () => {
 
     expect(lastEntryTableProps().filters).toEqual({
       plot_uuid: 'plot-a',
-      status: 'final',
+      status: 'all',
       activity_code: 'irrigation',
       occurred_from: '2026-07-01',
       occurred_to: '2026-07-31',

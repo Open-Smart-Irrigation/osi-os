@@ -414,6 +414,10 @@ describe('catalog model', () => {
       activity_code: activity,
       'attr.agroscope.operation': operation,
     })).toContain(device);
+    // Devices are a catalog-materialized compatibility intersection. Before
+    // an operation selects an applicable rule, capture must not invent a
+    // global machinery list from active vocab rows.
+    expect(allowedChoices(result.model, layout, 'attr.agroscope.device', {})).toEqual([]);
     const units = allowedUnits(result.model, layout, unitRule.restrict.attribute_code, {
       activity_code: activity,
       'attr.agroscope.operation': operation,
