@@ -604,12 +604,23 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
   if (compatibilityErrors.length) return { ok: false, errors: compatibilityErrors };
   if (context.enforceScope) {
     const farmWide = _layoutDef.code === 'farm_wide';
-    if (farmWide && entryInput.plot_uuid != null) {
-      return errorResult(
-        'plot_uuid',
-        'farm_wide_requires_no_plot',
-        'Farm-wide entries cannot be assigned to a plot'
-      );
+    if (farmWide) {
+      // Farm-wide records describe work on the farm, not a hidden plot/zone
+      // context. Keeping any linkage here would make later exports look more
+      // precise than the farmer entered, so reject it rather than deriving it.
+      for (const field of [
+        'plot_uuid', 'zone_uuid', 'season_uuid', 'season_crop', 'season_variety',
+        'cycle_uuid', 'campaign_uuid', 'protocol_code', 'protocol_version',
+        'observation_unit_code', 'pass_uuid', 'batch_uuid', 'device_eui', 'context', 'context_json',
+      ]) {
+        if (entryInput[field] != null) {
+          return errorResult(
+            field,
+            field === 'plot_uuid' ? 'farm_wide_requires_no_plot' : 'farm_wide_requires_no_context',
+            'Farm-wide entries cannot carry ' + field
+          );
+        }
+      }
     }
     if (!farmWide && entryInput.plot_uuid == null) {
       return errorResult(

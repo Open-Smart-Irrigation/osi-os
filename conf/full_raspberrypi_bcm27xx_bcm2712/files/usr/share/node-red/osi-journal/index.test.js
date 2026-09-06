@@ -2258,6 +2258,22 @@ test('validateEntry: final v11 scope permits farm-wide only for maintenance and 
   }), { enforceScope: true });
   assert.equal(farmWideWithPlot.ok, false);
   assert.ok(farmWideWithPlot.errors.some((error) => error.code === 'farm_wide_requires_no_plot'));
+
+  for (const field of [
+    'zone_uuid', 'season_uuid', 'season_crop', 'season_variety', 'cycle_uuid',
+    'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code',
+    'pass_uuid', 'batch_uuid', 'device_eui', 'context', 'context_json',
+  ]) {
+    const candidate = validIrrigation({
+      activity_code: 'equipment_maintenance', template_code: 'full_record', template_version: 11,
+      layout_code: 'farm_wide', layout_version: 1, values: [], note: 'Serviced mower',
+    });
+    candidate[field] = field === 'context' ? {} : field === 'context_json' ? '{}'
+      : '11111111-1111-4111-8111-111111111111';
+    const scoped = validateEntry(catalog, farmWide, fullRecordV11, candidate, { enforceScope: true });
+    assert.equal(scoped.ok, false, field);
+    assert.ok(scoped.errors.some((error) => error.field === field && error.code === 'farm_wide_requires_no_context'), field);
+  }
 });
 
 // Version-pinned control: an entry pinned to the frozen full_record@9 keeps
