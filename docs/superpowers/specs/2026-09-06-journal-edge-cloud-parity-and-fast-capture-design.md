@@ -1,7 +1,7 @@
 # Journal Edge/Cloud Parity and Fast Capture
 
 **Date:** 2026-09-06  
-**Status:** Approved in conversation; revised after independent UX/farmer review
+**Status:** Approved in conversation; revision under independent UX/farmer re-review
 **Scope:** `osi-os` edge Journal, `osi-server` cloud Journal, and the paired gateway-backed API behavior  
 **Supersedes:** cloud capture deviations that deliberately pinned `full_record` and omitted the edge capture workflow  
 **Builds on:** [Field Journal design](2026-07-12-field-journal-design.md) and [Field Journal UX addendum](2026-07-12-field-journal-ux-addendum.md)
@@ -113,8 +113,10 @@ not change the shared capture sequence.
 allowed scope, activity/operation, and occurrence time. The scope is one or more
 plots, except `equipment_maintenance` and `general_observation`, which also permit
 an explicit **Farm-wide** selection. Plot-dependent activities fail closed when no
-plot is selected. The time defaults to now and the plot layout comes from plot
-settings.
+plot is selected. The time defaults to now. Plot entries resolve layout from plot
+settings. Farm-wide entries resolve only to the seeded `farm_wide@1` layout, which
+supports `equipment_maintenance` and `general_observation`, allows Quick and Full
+templates, and produces no zone, season, plot, or sensor-context snapshot.
 
 The following operation facts remain blocking because omitting them makes the
 record unusable:
@@ -141,12 +143,11 @@ future named compliance profile. A normal `full_record` entry uses the same
 blocking policy; it reveals more fields but does not manufacture stricter
 compliance rules. Useful missing details appear as non-blocking review suggestions.
 
-This table is the authoritative baseline and supersedes the parent design §4.4
-`full_record` requiredness matrix where the two disagree. A generated, code-level
-activity/operation matrix records `required`, `required_any`, accepted missing
-statuses, and denominator rules. Total quantities do not require a denominator;
-area-, plant-, or time-based rates require the denominator implied by their chosen
-unit unless it is already fixed by the typed quantity kind.
+This table is explanatory. The normative matrix in Appendix A supersedes the parent
+design §4.4 `full_record` requiredness matrix where the two disagree. Total
+quantities do not require a denominator; area-, plant-, or time-based rates require
+the denominator implied by their chosen unit unless it is already fixed by the
+typed quantity kind.
 
 Required-any families are presented as one task, such as “Enter a dose,” rather
 than marking every alternative field as independently required. Catalog generation,
@@ -175,14 +176,14 @@ The machinery/device picker shows the intersection:
 `global operation-compatible devices ∩ layout-available devices ∩ active choices`.
 
 The global relation has one generated source. Each layout carries an explicit
-availability set; an absent set means “not curated” and produces the global
-operation-compatible set with a catalog warning, never an empty picker or an
-invented restriction. Because the repository has no authoritative AgroLink
-facility-equipment inventory, the initial Lysimeter availability set is explicitly
-the union of its globally compatible active devices; the operation relation still
-narrows the visible picker. Facility-specific narrowing is deferred until a
-maintained equipment profile exists rather than guessed in seed data. Within the
-effective set the picker orders choices as:
+`available_device_codes` set or `availability_mode: all_compatible`. Absence of both
+is an invalid active capture layout and blocks new capture; it never broadens the
+picker. Because the repository has no authoritative AgroLink facility-equipment
+inventory, the initial Lysimeter revision explicitly declares
+`availability_mode: all_compatible`; the operation relation still narrows the
+visible picker. Facility-specific narrowing is deferred until a maintained
+equipment profile exists rather than guessed in seed data. Within the effective
+set the picker orders choices as:
 
 1. choices used on every selected plot, most recent first;
 2. choices used on the greatest number of selected plots, then most recent;
@@ -215,7 +216,7 @@ The near-full-screen workspace is bounded by the existing application maximum wi
 +----------------------+--------------------------------+----------------------+
 | Where                | Activity and details           | Review               |
 | station/group/plots  | shortlist/search + fields      | selected scope       |
-| 280–360 px           | flexible main column           | sticky save, 320 px  |
+| 280–340 px           | flexible main column           | sticky save, 320 px  |
 +----------------------+--------------------------------+----------------------+
 ```
 
@@ -300,14 +301,15 @@ A new additive catalog revision separates global operation/device compatibility
 from per-layout device availability. Existing catalog rows remain immutable.
 
 A generator/helper owns the canonical compatibility relation and builds each
-layout's effective dependency rows from it plus `available_device_codes`. New
-layout definition JSON is produced rather than manually retyping choices. A static
-verifier fails when a supporting layout omits an operation, references an unknown
-choice, or emits a dependency outside the computed intersection. It includes
-positive, negative, empty-set, and retained-historical-choice fixtures. Edge seed
-copies and both Pi profiles remain byte-identical. Cloud consumes the catalog
-delivered for the gateway/workspace; it does not maintain a second hand-authored
-compatibility list.
+layout's effective dependency rows from it plus `available_device_codes` or the
+explicit `availability_mode: all_compatible`. New layout definition JSON is
+produced rather than manually retyping choices. A static verifier fails when an
+active capture layout omits both declarations, omits an operation, references an
+unknown choice, or emits a dependency outside the computed intersection. It
+includes positive, negative, empty-set, and retained-historical-choice fixtures.
+Edge seed copies and both Pi profiles remain byte-identical. Cloud consumes the
+catalog delivered for the gateway/workspace; it does not maintain a second
+hand-authored compatibility list.
 
 Server-side entry validation uses the same selected layout dependency rules as the
 clients. A stale client cannot submit an incompatible operation/device pair without
@@ -327,9 +329,11 @@ membership in the selected group; resolved groups remain selectable only from th
 resolved-groups section. Pagination happens after the scope predicate.
 
 `station_code` is Unicode-NFKC normalized, trimmed, case-sensitive after
-normalization, and limited to the existing plot-schema maximum. `group_uuid` must
-be a canonical UUID. Stable errors are `conflicting_scope_filters` (400),
-`scope_not_found` (404), and `scope_forbidden` (404 to avoid existence disclosure).
+normalization, and limited to 240 UTF-8 bytes. `group_uuid` must be a canonical
+UUID. Stable external errors are `conflicting_scope_filters` (400) and
+`scope_not_found` (404). Unknown and inaccessible scope return the same status,
+code, and message; a PII-safe `scope_forbidden` reason may exist only in internal
+diagnostics.
 
 A group filter always means **entries for the group's current member plots at the
 time of this request**. It does not claim that the entries were authored through
@@ -354,17 +358,27 @@ versioned command contract and edge applier ship:
 
 - command type: `UPSERT_JOURNAL_ENTRY_BATCH`;
 - `contract_version: 1`, one canonical `batch_uuid`, and 1–100 members;
-- each member contains a stable client-generated `entry_uuid`,
-  `base_sync_version: 0`, plot UUID, and the same complete canonical fields used by
-  a single final entry;
-- one effect key `JOURNAL_ENTRY_BATCH:<batch_uuid>:<payload_sha256>` and one payload
-  hash over canonical member order by `(plot_uuid, entry_uuid)`;
+- `shared` contains the single activity, template/layout pins, occurrence,
+  canonical values, and other fields common to every entry;
+- each compact member contains only stable client-generated `entry_uuid`,
+  `base_sync_version: 0`, and `plot_uuid`; the edge derives and validates zone,
+  season, and context independently per plot;
+- the serialized command is limited to 256 KiB and existing single-entry limits
+  still apply to shared strings/values; a golden 100-member maximum fixture and the
+  AgroLink 84-member fixture must fit below the cap;
+- one effect key `journal_entry_batch:{batch_uuid}:0` and one separately stored
+  payload hash over shared fields plus canonical member order by
+  `(plot_uuid, entry_uuid)`; same-key/different-hash replay is permanently rejected;
 - the edge validates every member before writing, then commits all entries, values,
   outbox aggregates, terminal ledger result, and ACK outbox row in one transaction;
 - replay returns the exact stored receipt, including each member UUID/version and
   duplicate-candidate result, without writing again;
 - an edge without the capability returns durable
   `REJECTED_PERMANENT / unsupported_command_type`.
+
+The command, capability, and effect key are added together to the edge-owned sync
+schemas, `effect-keys.md`, golden capability metadata, cloud vendor copies, and
+command-path fixtures.
 
 Cloud deploys contract acceptance and pending-state storage first. Edge support and
 capability advertisement deploy second. The cloud UI enables gateway-backed
@@ -387,20 +401,21 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
 3. Selecting a station/group chooses a scope. Selecting plots derives their common
    layout; mixed-layout batch selection is rejected before activity entry. For a
    multi-plot selection, a default or carry-forward value is applied only when its
-   value, source entry/default, catalog semantics, crop-cycle context, and validity
-   are identical for every selected plot. Otherwise the field starts empty and a
-   differences summary offers **Split selection**, **Remove plots**, or **Continue
-   without prefill**.
+   value, catalog semantics, crop-cycle context, and validity are identical for
+   every selected plot. Provenance may be either the same source entry or one source
+   entry per plot where all sources share one prior `batch_uuid` and the carried
+   value is identical. Otherwise the field starts empty and a differences summary
+   offers **Split selection**, **Remove plots**, or **Continue without prefill**.
 4. Activity selection resolves the leaf operation and compatible machinery.
 5. The form derives blocking and optional fields from the active catalog definition.
 6. Autosave persists a draft through the adapter after a 750ms idle interval and on
    step transitions. Edge and cloud-primary drafts are durable canonical drafts.
-   Gateway-backed cloud coalesces changes into one cloud-durable working copy and
-   never queues an edge command per keystroke. **Save draft / Finish later** queues
-   at most one edge draft command; edits made while it is in flight remain in the
-   working copy and coalesce into the next explicit save. The UI distinguishes
-   browser working copy, cloud-durable pending draft, edge-applied draft, and
-   volatile-only state.
+   Gateway-backed cloud drafts are cloud-durable working copies only: they never
+   queue an edge command, never appear in the edge journal, and are discarded only
+   from cloud. **Save draft / Finish later** confirms that cloud working-copy save.
+   Finalization sends the existing single-final command or the capability-gated
+   batch command. The UI distinguishes browser working copy, cloud-durable working
+   copy, canonical edge/cloud-primary draft, and volatile-only state.
 7. Review summarizes plot scope, operation, time, and entered facts. Optional
    omissions are suggestions, not errors.
 8. A multi-plot review summarizes compactly, for example
@@ -408,14 +423,21 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
    Duplicate review is one table with per-plot **Exclude**, **Open existing**, and
    **Save separately** choices plus safe apply-to-all actions. It never opens 84
    sequential dialogs.
-9. Save creates a final entry or atomic batch. Its receipt enters this state machine:
-   - `APPLIED`: update canonical table/export/recents and remove the draft;
-   - `PENDING`: update only **Waiting for farm**;
-   - `REJECTED`: keep the submitted payload in **Waiting for farm** with correct,
-     reselect, retry-when-safe, and discard actions;
-   - `UNKNOWN_AFTER_TIMEOUT`: perform receipt lookup before enabling a retry.
-10. Only `APPLIED` updates recent-choice ranking. After close, focus returns to the
-    actual invoking control, with the Journal heading as fallback.
+9. Save creates a final entry or atomic batch. Protocol state maps to presentation
+   state exactly:
+   - queued, leased, or `FAILED_RETRYABLE` ACK → `PENDING` in **Waiting for farm**;
+   - `REJECTED_PERMANENT` → terminal **Rejected**, retaining payload and correction/
+     discard actions;
+   - `CONFLICT` → terminal **Needs conflict resolution**, retaining both versions;
+   - `EXPIRED` → terminal **Expired**, offering a fresh revalidation/resubmit action;
+   - transport ambiguity → `UNKNOWN_AFTER_TIMEOUT`, with receipt lookup required
+     before retry;
+   - edge `APPLIED` before mirror convergence → **Applied on farm, syncing**;
+   - matching mirror entry version and payload hash observed → canonical `APPLIED`.
+10. Only canonical `APPLIED` updates table/export/recents and removes the working
+    copy. Delayed, reordered, or missing ACK/outbox events cannot materialize an
+    optimistic canonical entry. After close, focus returns to the actual invoking
+    control, with the Journal heading as fallback.
 
 ## 6. Error handling
 
@@ -481,9 +503,11 @@ Component tests pin the activation paths and confirm the prefilled time is not
 focused or changed. A pilot usability pass runs five attempts per fixture with at
 least four representative users (two field workers and two research technicians);
 the p75 target determines whether the under-ten-second product outcome may be
-claimed, but does not block a technically green AgroLink rollout. A valid recent
-product/dose appears as one consequential carry-forward card and requires one
-confirming activation, preserving the parent AGR-7 safety rule.
+claimed. Technical deployment and enablement require the deterministic activation
+ceilings and live functional checks; human timing is a reported product KPI, not a
+rollback trigger. A valid recent product/dose appears as one consequential
+carry-forward card and requires one confirming activation, preserving the parent
+AGR-7 safety rule.
 
 ## 8. Delivery slices
 
@@ -512,8 +536,10 @@ confirming activation, preserving the parent AGR-7 safety rule.
 
 - publish additive template/layout catalog revisions implementing the code-level
   balanced requiredness matrix;
+- seed `farm_wide@1` with only maintenance and general-observation activities and
+  no context-producing fields;
 - generate global operation/device compatibility and explicit per-layout
-  availability, including the permissive initial Lysimeter set defined in §3.4;
+  availability, including `all_compatible` for the initial Lysimeter revision;
 - enforce compatible pairs on edge and cloud-backed validation paths;
 - add catalog generation/parity verification.
 
@@ -537,7 +563,7 @@ deployed consumer-first before a producer depends on it.
 - Quick is the default in both clients;
 - balanced requiredness for every activity/operation family;
 - farm-wide maintenance and general observations work while plot-dependent
-  activities fail closed;
+  activities fail closed, and farm-wide entries contain no plot/zone/season/context;
 - `not_observed` satisfies only the explicitly allowed numeric families;
 - empty observations and maintenance records cannot become Final;
 - machinery choices equal the global/layout/active intersection on open-field,
@@ -557,6 +583,8 @@ deployed consumer-first before a producer depends on it.
   report a pending gateway command as a confirmed save;
 - `APPLIED`, `PENDING`, `REJECTED`, and `UNKNOWN_AFTER_TIMEOUT` receipts affect only
   their specified views and ranking;
+- gateway-backed drafts stay cloud-only and never emit per-keystroke or draft edge
+  commands;
 - cloud-primary attachments remain available and recoverable, while gateway-backed
   capture contains no attachment section;
 - automated accessibility checks cover grid navigation, first-error focus,
@@ -570,13 +598,16 @@ deployed consumer-first before a producer depends on it.
 - group filters are explicitly current-membership views and resolved membership is
   frozen;
 - the versioned gateway batch command is capability-gated, atomic, idempotent, and
-  returns exact replay receipts;
+  returns exact replay receipts, while both 84- and 100-member fixtures remain below
+  the 256 KiB cap;
 - catalog dependency and requiredness validation rejects stale incompatible input;
 - catalog seeds, generated fragments, bundled databases, and profile copies pass
   parity checks;
 - cloud plot-snapshot listing is workspace-scoped and read-only;
 - authorization loss, plot deactivation, layout change, and catalog refresh preserve
-  drafts and block stale finalization.
+  drafts and block stale finalization;
+- delayed, reordered, and missing ACK/outbox sequences cannot materialize an
+  optimistic canonical entry.
 
 ### 9.3 Required repository gates
 
@@ -584,6 +615,10 @@ Edge minimum:
 
 ```bash
 node scripts/test-journal-schema.js
+node scripts/verify-sync-contract.js
+node scripts/test-contract-schemas.js
+node scripts/verify-sync-op-parity.js
+node scripts/test-journal-command-path.js
 node scripts/verify-sync-flow.js
 node scripts/verify-profile-parity.js
 node scripts/verify-db-schema-consistency.js
@@ -604,6 +639,76 @@ cd ../backend
 
 Targeted tests run first during TDD. `git diff --check` and the repo's TypeScript
 overlays are mandatory in both repositories.
+
+## Appendix A — Normative final-entry requirement matrix
+
+`scripts/generate-journal-catalog.js` owns and exports
+`FINAL_REQUIREMENT_MATRIX_V11`. The generator emits the matrix into additive
+template rows and a JSON fixture consumed byte-for-byte by edge validator tests and
+vendored cloud tests. Activity rules apply when no listed leaf override is selected;
+leaf rules replace, rather than merge with, their activity rule.
+
+Every Final entry first requires `activity_code`, `occurred_start`, and a permitted
+scope. `equipment_maintenance` and `general_observation` permit either a plot or the
+`farm_wide@1` layout; every other activity requires at least one plot.
+
+Notation: `A | B` is one `required_any` family. `missing` names statuses that may
+satisfy that family through exactly one status-only value row.
+
+| Activity code | Required | Required-any | Allowed missing |
+|---|---|---|---|
+| `irrigation` | — | `attr.irrigation_depth | attr.irrigation_volume_area | attr.per_plant_volume` | `not_observed` for that family |
+| `fertilization` | — | `attr.product_uuid | attr.product`; `attr.amount_mass_area_product | attr.amount_volume_area_product | attr.amount_nutrient_rate` | `not_observed` for amount family only |
+| `fertigation` | — | product family; fertilizer amount family; irrigation amount family | `not_observed` for both amount families |
+| `plant_protection_application` | — | `attr.product_uuid | attr.product`; `attr.amount_mass_area_product | attr.amount_volume_area_product | attr.amount_biological_count_area` | `not_observed` for amount family only |
+| `weed_control_nonchemical` | — | — | — |
+| `seeding` | `attr.crop` | `attr.amount_mass_area_product | attr.amount_count_area` | `not_observed` for amount family |
+| `planting_transplanting` | `attr.crop` | `attr.amount_count_area` | `not_observed` for amount family |
+| `pruning` | — | — | — |
+| `crop_care` | — | — | — |
+| `tillage_soil_work` | — | — | — |
+| `mowing` | — | — | — |
+| `harvest` | `attr.crop` | `attr.harvest_yield_area` | `not_observed` for yield family |
+| `sampling` | — | — | — |
+| `general_observation` | — | `note | attr.observation_text | attr.growth_stage_bbch` | none; at least one observed value/text |
+| `pest_disease_observation` | — | `note | attr.observation_text | attr.target` | none; at least one observed value/text |
+| `equipment_maintenance` | — | `attr.equipment | attr.agroscope.device | note` | none; at least one observed value/text |
+
+The exact leaf replacements are:
+
+| Leaf operation codes | Required | Required-any | Allowed missing |
+|---|---|---|---|
+| `primary_tillage`, `seedbed_preparation`, `stubble_cultivation`, `weed_mechanical`, `weed_other`, `cleaning_cut` (all under `agroscope.operation.*`) | — | — | — |
+| `sowing_main_crop`, `sowing_cover_crop` | `attr.crop` | `attr.amount_mass_area_product | attr.amount_count_area` | `not_observed` for amount family |
+| `organic_fertilization`, `mineral_fertilization`, `other_fertilization` | — | product family; fertilizer amount family | `not_observed` for amount family |
+| `fungicide`, `insecticide`, `growth_regulator`, `weed_herbicide`, `total_herbicide` | — | product family; `attr.amount_mass_area_product | attr.amount_volume_area_product` | `not_observed` for amount family |
+| `biocontrol` | — | product family; `attr.amount_biological_count_area | attr.amount_mass_area_product | attr.amount_volume_area_product` | `not_observed` for amount family |
+| `pest_control` | — | product family; `attr.amount_mass_area_product | attr.amount_volume_area_product` | `not_observed` for amount family |
+| `harvest_main_crop`, `harvest_cover_crop` | `attr.crop` | `attr.harvest_yield_area` | `not_observed` for yield family |
+| `hay_removal`, `straw_removal` | — | `attr.harvest_yield_area` | `not_observed` for yield family |
+| `watering` | — | irrigation amount family | `not_observed` for amount family |
+| `sampling` | — | `note | attr.observation_text | attr.growth_stage_bbch` | none; at least one observed value/text |
+| `note` | — | `note | attr.observation_text` | none; at least one observed value/text |
+
+Here “product family,” “fertilizer amount family,” and “irrigation amount family”
+mean the exact attribute lists in the activity table above. Machinery remains
+optional for every leaf.
+
+All quantity attributes in this matrix encode their denominator in the typed
+attribute and allowed unit: `_area_` is area-based and `per_plant` is plant-based.
+They therefore never make generic `attr.denominator` blocking. The UI offers only
+units compatible with that typed denominator, and server validation rejects a
+dimension mismatch. A later generic total/rate attribute must declare its exact
+denominator dependency in this matrix before it can be used for Final.
+
+For an allowed missing quantity, **Not observed** is a secondary action on the
+required-any task, not one action per alternative field. Activating it selects the
+first applicable quantity attribute in the matrix order, writes exactly one row
+with `value_status: not_observed` and all value/unit columns null, collapses the
+other alternatives, and displays “Not observed” in Review. **Enter value** removes
+that status-only row and restores the alternatives. `not_observed` never satisfies
+a product, crop, note, target, equipment, or observation family. Component tests
+exercise the control and serialized payload in addition to pure validator tests.
 
 ## 10. Deployment and live acceptance
 
@@ -637,7 +742,8 @@ Live acceptance requires:
 - cloud-primary attachments and conflict controls remain available; gateway-backed
   capture shows no attachment section;
 - pending gateway entries appear only in **Waiting for farm** until edge ACK;
-- the three fast-entry fixtures meet their activation and live timing targets;
+- the three fast-entry fixtures meet their deterministic activation ceilings; the
+  measured human p75 is reported separately and controls only the speed claim;
 - Status and Export research package controls remain absent.
 
 If any acceptance check fails, restore the preserved image to `dev-local`, recreate
