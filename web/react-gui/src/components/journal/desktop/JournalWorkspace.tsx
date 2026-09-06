@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { refreshDraftsQueue } from '../../../journal/useDraftsQueue';
@@ -15,7 +15,7 @@ import type {
   JournalVocabRow,
   PlotGroup,
 } from '../../../types/journal';
-import { JournalCaptureFlow, type JournalSavedReceipt } from '../capture/JournalCaptureFlow';
+import type { JournalSavedReceipt } from '../capture/JournalCaptureFlow';
 import { DraftsQueue } from '../DraftsQueue';
 import { DetailPanel } from './DetailPanel';
 import { EntryTable, PAGE_SIZE } from './EntryTable';
@@ -25,6 +25,11 @@ import {
   type ScopeRailFilters,
   type ScopeSelection,
 } from './ScopeRail';
+
+const JournalCaptureFlow = lazy(async () => {
+  const module = await import('../capture/JournalCaptureFlow');
+  return { default: module.JournalCaptureFlow };
+});
 
 export interface JournalWorkspaceProps {
   plots: readonly JournalPlot[];
@@ -374,7 +379,8 @@ export function JournalWorkspace({
 
       {canWrite && captureOpen && (
         <CaptureModal accessibleName={t('capture.title')} onRequestClose={closeCapture}>
-          <JournalCaptureFlow
+          <Suspense fallback={<p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>}>
+            <JournalCaptureFlow
             catalog={catalog}
             // JournalCaptureFlow reads (find/map/filter) but never mutates
             // plots; JournalWorkspace's own `plots` prop is readonly (shared
@@ -390,8 +396,9 @@ export function JournalWorkspace({
             groupState={groupState}
             onClose={closeCapture}
             onOpenExisting={handleCaptureOpenExisting}
-            onSaved={handleCaptureSaved}
-          />
+              onSaved={handleCaptureSaved}
+            />
+          </Suspense>
         </CaptureModal>
       )}
     </div>

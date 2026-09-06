@@ -410,7 +410,7 @@ describe('JournalWorkspace', () => {
   });
 
   describe('Log activity capture', () => {
-    it('renders a Log activity button in the entry table header that opens an accessible dialog wrapping the capture flow', () => {
+    it('renders a Log activity button in the entry table header that opens an accessible dialog wrapping the capture flow', async () => {
       renderWorkspace();
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -422,7 +422,7 @@ describe('JournalWorkspace', () => {
 
       const dialog = screen.getByRole('dialog');
       expect(dialog).toBeInTheDocument();
-      expect(screen.getByTestId('capture-flow')).toBeInTheDocument();
+      expect(await screen.findByTestId('capture-flow')).toBeInTheDocument();
     });
 
     it('gives the dialog an accessible name, marks it aria-modal, and starts focus inside it', () => {
