@@ -360,19 +360,24 @@ versioned command contract and edge applier ship:
 - `contract_version: 1`, one canonical `batch_uuid`, and 1–100 members;
 - `shared` contains the single activity, template/layout pins, occurrence,
   canonical values, and other fields common to every entry;
-- each compact member contains only stable client-generated `entry_uuid`,
-  `base_sync_version: 0`, and `plot_uuid`; the edge derives and validates zone,
-  season, and context independently per plot;
+- each compact member contains stable client-generated `entry_uuid`,
+  `base_sync_version: 0`, `plot_uuid`, and optional validated `cycle_uuid` plus
+  `cycle_action`; the edge derives and validates zone, season, and context
+  independently per plot;
 - the serialized command is limited to 256 KiB and existing single-entry limits
   still apply to shared strings/values; a golden 100-member maximum fixture and the
   AgroLink 84-member fixture must fit below the cap;
 - one effect key `journal_entry_batch:{batch_uuid}:0` and one separately stored
-  payload hash over shared fields plus canonical member order by
-  `(plot_uuid, entry_uuid)`; same-key/different-hash replay is permanently rejected;
+  `submitted_intent_hash` over shared fields plus canonical member order by
+  `(plot_uuid, entry_uuid)`; same-key/different-intent replay is permanently
+  rejected;
 - the edge validates every member before writing, then commits all entries, values,
   outbox aggregates, terminal ledger result, and ACK outbox row in one transaction;
-- replay returns the exact stored receipt, including each member UUID/version and
-  duplicate-candidate result, without writing again;
+- replay returns the exact stored receipt without writing again. Each applied member
+  receipt contains `entry_uuid`, `plot_uuid`, `sync_version`, and the edge-computed
+  canonical aggregate `payload_hash`, plus any duplicate-candidate result. The
+  submitted intent hash and applied aggregate hashes are distinct because the edge
+  adds plot-derived zone, season, and context;
 - an edge without the capability returns durable
   `REJECTED_PERMANENT / unsupported_command_type`.
 
@@ -406,6 +411,11 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
    entry per plot where all sources share one prior `batch_uuid` and the carried
    value is identical. Otherwise the field starts empty and a differences summary
    offers **Split selection**, **Remove plots**, or **Continue without prefill**.
+   Crop-cycle preflight resolves an unambiguous cycle/action independently for each
+   plot and stores it on that compact member. If any plot has multiple valid cycles
+   or needs a different human decision, finalization is blocked and the differences
+   summary offers **Choose per plot**, **Split selection**, or **Remove plots**; the
+   first plot's cycle is never copied across the batch.
 4. Activity selection resolves the leaf operation and compatible machinery.
 5. The form derives blocking and optional fields from the active catalog definition.
 6. Autosave persists a draft through the adapter after a 750ms idle interval and on
@@ -433,11 +443,16 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
    - transport ambiguity → `UNKNOWN_AFTER_TIMEOUT`, with receipt lookup required
      before retry;
    - edge `APPLIED` before mirror convergence → **Applied on farm, syncing**;
-   - matching mirror entry version and payload hash observed → canonical `APPLIED`.
-10. Only canonical `APPLIED` updates table/export/recents and removes the working
-    copy. Delayed, reordered, or missing ACK/outbox events cannot materialize an
-    optimistic canonical entry. After close, focus returns to the actual invoking
-    control, with the Journal heading as fallback.
+   - matching mirror entry version and per-member applied aggregate hash observed →
+     that member has converged; the batch becomes canonical `APPLIED` only when all
+     members have converged.
+10. Partially or out-of-order mirrored batches show a count such as **63 of 84
+    synced** in **Waiting for farm**, but do not materialize missing members or mark
+    the batch complete. Only canonical `APPLIED` updates recents and removes the
+    working copy; each actually mirrored member may appear in the canonical table
+    and export as it arrives. Delayed, reordered, or missing ACK/outbox events cannot
+    create an optimistic canonical entry. After close, focus returns to the actual
+    invoking control, with the Journal heading as fallback.
 
 ## 6. Error handling
 
@@ -577,8 +592,9 @@ deployed consumer-first before a producer depends on it.
 - mobile retains the ordered four-step flow;
 - the three fast-entry fixture paths stay within their activation ceilings;
 - multi-plot prefills apply only when value and provenance agree across every plot;
-- batch review handles mixed crop cycles, conflicting carry-forward, 0/1/84
-  duplicates, and all-84 selection without sequential dialogs;
+- batch review handles independently resolved cycles, per-plot ambiguous cycle
+  decisions, conflicting carry-forward, 0/1/84 duplicates, and all-84 selection
+  without copying first-plot context or opening sequential dialogs;
 - cloud authority adapters neither mutate edge-owned plots in cloud-primary mode nor
   report a pending gateway command as a confirmed save;
 - `APPLIED`, `PENDING`, `REJECTED`, and `UNKNOWN_AFTER_TIMEOUT` receipts affect only
@@ -606,7 +622,8 @@ deployed consumer-first before a producer depends on it.
 - cloud plot-snapshot listing is workspace-scoped and read-only;
 - authorization loss, plot deactivation, layout change, and catalog refresh preserve
   drafts and block stale finalization;
-- delayed, reordered, and missing ACK/outbox sequences cannot materialize an
+- delayed, reordered, partially mirrored, and missing ACK/outbox sequences converge
+  only by member UUID/version/applied aggregate hash and cannot materialize an
   optimistic canonical entry.
 
 ### 9.3 Required repository gates
@@ -702,13 +719,22 @@ dimension mismatch. A later generic total/rate attribute must declare its exact
 denominator dependency in this matrix before it can be used for Final.
 
 For an allowed missing quantity, **Not observed** is a secondary action on the
-required-any task, not one action per alternative field. Activating it selects the
-first applicable quantity attribute in the matrix order, writes exactly one row
-with `value_status: not_observed` and all value/unit columns null, collapses the
-other alternatives, and displays “Not observed” in Review. **Enter value** removes
-that status-only row and restores the alternatives. `not_observed` never satisfies
-a product, crop, note, target, equipment, or observation family. Component tests
-exercise the control and serialized payload in addition to pure validator tests.
+required-any task, not one action per alternative field. It may apply directly only
+when dependency resolution leaves exactly one semantic quantity attribute and one
+allowed unit. Otherwise it opens **Which amount was not observed?**, requiring the
+user to select one applicable quantity meaning; if that meaning has multiple units,
+the user also selects the unit. Nutrient-rate selection always requires the nutrient
+unit (for example N or P₂O₅). The resulting single row has
+`value_status: not_observed`; `value_num`, `value_text`, and `entered_value_num` are
+null, while required `unit_code`/`entered_unit_code` metadata is retained.
+
+The control collapses the other alternatives and Review displays the semantic
+label and unit, for example **Application mass — Not observed — kg/ha**. **Enter
+value** removes the status-only row and restores the alternatives. `not_observed`
+never satisfies a product, crop, note, target, equipment, or observation family.
+Component and payload tests cover every quantity-family alternative, multiple-unit
+and nutrient-unit selection, reversal, and single- and multi-plot capture in
+addition to pure validator tests.
 
 ## 10. Deployment and live acceptance
 
