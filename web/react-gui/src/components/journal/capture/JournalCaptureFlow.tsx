@@ -1842,6 +1842,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     }
   };
 
+  const selectFarmWide = () => {
+    if (interactionLocked) return;
+    selectPlot('', []);
+    chooseLayout('farm_wide');
+  };
+
   const chooseLayout = (code: string) => {
     if (interactionLocked) return;
     const contextValues = code !== layoutCode
@@ -1956,7 +1962,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       return;
     }
     if (step === 'where') {
-      if (!selectedPlot && !layoutCode) {
+      if (!selectedPlot && layoutCode !== 'farm_wide') {
         setWhereError('capture.validation.invalidDefinition');
         return;
       }
@@ -2599,6 +2605,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             onCreateGroup={groupState.createPlotGroup}
             onUpdateGroup={groupState.updatePlotGroup}
           />
+          <button
+            type="button"
+            aria-pressed={!selectedPlot && layoutCode === 'farm_wide'}
+            disabled={interactionLocked}
+            onClick={selectFarmWide}
+            className={`min-h-[56px] rounded-xl border border-[var(--border)] px-4 font-bold text-[var(--text)] ${FOCUS_RING}`}
+          >
+            {t('capture.where.farmLevel')}
+          </button>
           {plotEditor ? (
             <PlotForm
               mode={plotEditor.mode}
@@ -2630,7 +2645,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               {t('capture.where.layout')}
               <select aria-label={t('capture.where.layout')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
                 <option value="">{t('capture.where.selectPlot')}</option>
-                {layoutChoices.map((candidate) => <option key={`${candidate.code}:${candidate.version}`} value={candidate.code}>{catalogLabel(catalog.layouts.find((row) => row.code === candidate.code) ?? { code: candidate.code }, locale)} · v{candidate.version}</option>)}
+                {layoutChoices.filter((candidate) => candidate.code === 'farm_wide').map((candidate) => <option key={`${candidate.code}:${candidate.version}`} value={candidate.code}>{catalogLabel(catalog.layouts.find((row) => row.code === candidate.code) ?? { code: candidate.code }, locale)} · v{candidate.version}</option>)}
               </select>
             </label>
           )}
