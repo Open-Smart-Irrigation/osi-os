@@ -564,7 +564,14 @@ function parseSqlStringLiteral(source) {
 }
 
 function payloadHasTopLevelContractVersion(payloadExpression) {
-  const argsSource = readTopLevelFunctionArgs(payloadExpression, 'json_object');
+  let argsSource = readTopLevelFunctionArgs(payloadExpression, 'json_object');
+  if (argsSource === null) {
+    const insertArgsSource = readTopLevelFunctionArgs(payloadExpression, 'json_insert');
+    if (insertArgsSource === null) return false;
+    const insertArgs = splitTopLevelComma(insertArgsSource);
+    if (insertArgs.length === 0) return false;
+    argsSource = readTopLevelFunctionArgs(insertArgs[0], 'json_object');
+  }
   if (argsSource === null) return false;
   const args = splitTopLevelComma(argsSource);
   for (let i = 0; i + 1 < args.length; i += 2) {

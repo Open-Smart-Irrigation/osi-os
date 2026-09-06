@@ -17,6 +17,7 @@ const {
   resolveServerSourceWithProvenance,
   resolveServerGoldenFromSource,
   compareSyncContractGolden,
+  payloadHasTopLevelContractVersion,
 } = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -42,6 +43,27 @@ if (serverSourceResolution.matchedWorktree === false) {
   );
 }
 const SERVER_SOURCE = serverSourceResolution.source;
+
+test('payload contract-version detection unwraps only json_insert root arguments', () => {
+  assert.equal(
+    payloadHasTopLevelContractVersion(
+      "json_insert(json_object('contract_version', 1, 'device_eui', NEW.deveui), '$.i', NEW.id)"
+    ),
+    true
+  );
+  assert.equal(
+    payloadHasTopLevelContractVersion(
+      "json_insert(json_object('device_eui', NEW.deveui), '$.contract_version', 1)"
+    ),
+    false
+  );
+  assert.equal(
+    payloadHasTopLevelContractVersion(
+      "json_insert(json_object('metadata', json_object('contract_version', 1)), '$.i', NEW.id)"
+    ),
+    false
+  );
+});
 
 test('server golden path is derived from the resolved server source root', () => {
   const sourceMarker = path.join(
