@@ -1,8 +1,9 @@
-# PocketMaestro: product specification (draft 0.4)
+# PocketMaestro: product specification (draft 0.5)
 
-Status: brainstorming draft after three interview rounds. Section 17 records
-the decisions (`D-n`). The launch catalogue is detailed in
-[catalogue.md](catalogue.md). Statements marked `A-n` are assumptions
+Status: consolidated after four interview rounds; ready to freeze for the
+phase 0 spike. Section 17 records the decisions (`D-n`). The launch
+catalogue is detailed in [catalogue.md](catalogue.md); the technical
+architecture in [architecture.md](architecture.md). Statements marked `A-n` are assumptions
 still awaiting confirmation; `Q-n` are open questions for the next round.
 This document is unrelated to OSI OS firmware; it lives here because the
 brainstorming session ran in this repository.
@@ -20,9 +21,11 @@ the same lessons with self-assessment instead of automatic scoring. Content is
 authored in house by a professional organist from public-domain sources. The
 first lesson is free for everyone; the rest need a monthly or annual
 subscription (D-17). Two-hour one-to-one tutor sessions are bookable in the
-app at any time for 100 USD (D-19). The organist builds the product alone
-with AI assistance (D-22), which shapes the stack in section 14. Piano is not
-part of this product (D-14).
+app at any time for 100 USD (D-19). The launch is device-local: no user
+accounts, progress stays on the phone, and sync arrives with the iOS port
+(D-38). The organist builds the product alone with AI assistance (D-22),
+which shapes the stack in section 14. Piano is not part of this product
+(D-14).
 
 ## 2. Target users
 
@@ -330,8 +333,8 @@ records the outcome once a direction is chosen.
 
 | Tier | What it includes |
 |---|---|
-| Free | The first lesson of the ladder (BWV 639) with every feature: scoring, both selection modes, reference performance, achievements. No time limit, no account required until the learner wants sync. |
-| Subscription | The whole catalogue, new lessons as they are published, progress sync across devices. CHF 12 monthly or CHF 96 annually, the annual price equal to eight monthly payments (D-27). |
+| Free | The first lesson of the ladder (BWV 639) with every feature: scoring, both selection modes, reference performance, achievements. No time limit and no account; accounts do not exist at launch (D-38). |
+| Subscription | The whole catalogue and new lessons as they are published. CHF 12 monthly or CHF 96 annually, the annual price equal to eight monthly payments (D-27). Progress sync across devices joins the benefits when accounts arrive with iOS (D-38). |
 | Tutor session | Bought per session, subscription not required (section 13). |
 
 The free lesson is the trial: it shows the full system on a piece a pianist
@@ -414,14 +417,14 @@ spike fails, the fallback is Flutter with the rest of the stack unchanged.
 | Adaptivity engine | Pure TypeScript package, same discipline. |
 | Content schema | Zod schemas shared by mobile, API, and authoring tool; lesson packages are validated at authoring time and at load time. |
 | Local store | `expo-sqlite` with Drizzle ORM. |
-| Backend API | Small Hono service on Node, in a container. Accounts, catalogue metadata, progress sync, tutor bookings, achievement definitions. |
-| Auth | Self-hosted library (Better Auth) with Sign in with Apple, Google, and email; sessions stored in Postgres. |
+| Backend API | Small Hono service on Node, in a container, for tutor slots and bookings only (D-38). Catalogue and lessons are static files on the CDN; details in architecture.md. |
+| Auth | None at launch (D-38). Accounts and progress sync arrive with the iOS port; attempts are append-only with device-generated ULIDs so they merge cleanly then. Until then a backup export protects against phone loss (architecture.md 4.1). |
 | Database and storage | Managed PostgreSQL and S3-compatible object storage at a Swiss provider (Exoscale, Zurich or Geneva zones; Infomaniak as alternative), D-23. Lesson packages and reference audio served from object storage through the provider's CDN. |
 | Hosting | One container host at the same provider running the API, the authoring web tool, and nightly backups to object storage. |
-| Subscriptions | RevenueCat over App Store and Google Play billing (`react-native-purchases`). RevenueCat receives store identifiers, not personal data. |
+| Subscriptions | RevenueCat with anonymous app user IDs over Play Billing (`react-native-purchases`), App Store at the port. RevenueCat receives store identifiers, not personal data. |
 | Tutor payments | Stripe Checkout (A-14). |
 | Authoring and tutor tool | React web app (Vite) served from the same host. |
-| Push and email | Expo push notifications; transactional email through a provider with EU or Swiss processing. |
+| Push and email | No push at launch. Transactional email (booking confirmations) through a provider with EU or Swiss processing. |
 | Analytics | None at launch beyond the app's own attempt data; PostHog self-hosted later if needed. |
 | CI and release | GitHub Actions running tests and schema checks; EAS Build for store binaries; weekly TestFlight and Play internal builds. |
 
@@ -445,30 +448,23 @@ spike fails, the fallback is Flutter with the rest of the stack unchanged.
   data in the country; RevenueCat and Stripe are foreign processors and go
   in the policy.
 
-### 14.4 Development plan for a solo AI-assisted builder (D-22)
+### 14.4 Build order (D-22, D-37)
 
-Each phase ends with something testable on a real console. The order puts
-the riskiest unknowns first and the free lesson early, so a store listing
-can exist before scoring or subscriptions are finished.
-
-| Phase | Deliverable | Exit test |
-|---|---|---|
-| 0. Spikes (2 weeks) | Expo app receiving USB and Bluetooth MIDI on the Android test phone; Verovio rendering a three-staff system in landscape; sample playback with acceptable latency. | Note events with timestamps logged from a real console. |
-| 1. Lesson player | One lesson (BWV 639) hand-built as a package; orientation, exercises, metronome, reference playback, per-part self-rating, local progress. | A learner without MIDI completes the lesson end to end. |
-| 2. Scoring | Note alignment, heat map, timing plot, articulation profile. | Fixture tests pass; a scored attempt on the console produces a believable heat map. |
-| 3. Adaptivity | Skill profile, both selection modes, loop drills, retention probes. | Simulated learners in tests progress through the lesson as designed. |
-| 4. Authoring tool | MusicXML import, sectioning, annotations, per-piece achievements, package export, on-device preview. | Second lesson authored in the tool, not by hand. |
-| 5. Accounts and subscriptions | Auth, sync, RevenueCat, free first lesson, catalogue. | Purchase flow passes in the Play sandbox. |
-| 6. Beta | Six lessons, Google closed test with twenty testers. | Fourteen days of test data; thresholds in section 5.3 tuned. |
-| 7. Tutor sessions | Availability, booking, Stripe, tutor view, pinned exercises. | One real session booked and delivered. |
-| 8. Launch | Play listing in German and English, privacy policy, support address. | Google Play approved. |
-| 9. iOS port | Apple account, MIDI and audio spike on an iPhone, platform fixes, TestFlight beta, App Store listing. | App Store approved. |
+The beta comes as early as possible (D-37), so the plan is three beta
+milestones instead of a long phase ladder: B1 is the free lesson with the
+self-assessed track and local progress, B2 adds MIDI scoring, B3 adds
+adaptivity, six lessons, the subscription, and booking, and B3 is the launch
+product. The milestone contents, exit tests, and the two-week spike that
+precedes B1 are in architecture.md, section 9. B1 needs no server code at
+all, and the twenty recruited students (D-36) test from B1 onward, which
+satisfies Google's fourteen-day closed-test requirement inside the normal
+beta sequence.
 
 Working rules for the build: the specification and the content schema live
 in the repository and are updated before code changes; every engine change
 comes with a fixture test; a build goes to the phone at least weekly and is
 played on the console; no native module is added without a spike branch
-proving it on both platforms.
+proving it on the target platform.
 
 ## 15. Non-functional requirements
 
@@ -480,7 +476,7 @@ proving it on both platforms.
 | Offline | All learning features after download; sync deferred |
 | Accessibility | Dynamic type, screen-reader labels on all non-score UI, high-contrast score theme |
 | Languages | German and English at launch (D-13); the content model supports adding languages per lesson |
-| Privacy | Attempts stay on device unless sync is on; EU hosting; no third-party trackers |
+| Privacy | Attempts stay on device (no accounts at launch, D-38); the one upload is the consented snapshot at tutor booking; Swiss hosting; no third-party trackers |
 | Minimum OS | Android 10 with USB host at launch; iOS 16 at the port (A-13) |
 
 ## 16. Out of scope for the first release
@@ -531,6 +527,10 @@ proving it on both platforms.
 | D-32 | Build time is 20 hours per week. |
 | D-33 | Android launches first; iOS is ported after launch. |
 | D-34 | Brand exploration runs separately in Claude Design. |
+| D-35 | Test device Pixel 8 Pro, USB-C cable to the console, no OTG adapter. |
+| D-36 | Twenty students are recruitable for the Google closed test. |
+| D-37 | Beta as soon as possible; spec depth goes to design and architecture, not roadmap. |
+| D-38 | Device-local launch; accounts and sync arrive with the iOS port. |
 
 ## 18. Assumptions register
 
@@ -562,12 +562,14 @@ Deferred risks:
 |---|---|---|
 | R-1 | VAT position for tutor sessions and store account setup as a private person, unconfirmed (D-29). | First paid tutor session. |
 
-Questions for round four, the last round before the spec freezes for the
-phase 0 spike:
+The interview is closed; rounds one to four are all folded in. What remains
+open before code:
 
-| ID | Question |
-|---|---|
-| Q-1 | Android test device: which phone model, and is a USB-C OTG adapter for the console at hand? |
-| Q-2 | Beta testers: Google's closed test needs twenty testers for fourteen days. Do you have an organ community to recruit from (students, church musicians' association, online forum), or should the plan include recruiting time? |
-| Q-3 | Target date: when should the Google Play launch land? Working back at 20 hours per week, phases 0 to 8 span roughly 10 to 12 months including the 119 authoring hours. |
-| Q-4 | Progress sync: an Android-only launch could skip accounts entirely and add them at the iOS port. Keep accounts and sync in phase 5 as planned, or defer them too and launch device-local? |
+1. Review of [architecture.md](architecture.md), in particular its four
+   assumptions: backup export as loss protection, the consented snapshot
+   upload at tutor booking, 90-day pruning of raw attempt events, and the
+   USB-C cabling assumption for the console (its USB-B socket, if that is
+   what it has, needs a C-to-B cable).
+2. The brand direction, decided in Claude Design (D-34) and recorded here
+   afterwards.
+3. Risk R-1 above, before the first paid tutor session.
