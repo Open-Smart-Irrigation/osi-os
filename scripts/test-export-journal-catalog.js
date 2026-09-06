@@ -17,7 +17,7 @@ assert.equal(
 
 // Version/hash come from the shipped DB's journal_catalog_state, so the cloud
 // can compare them against what a gateway advertises at bootstrap.
-assert.equal(artifact.catalog_version, 10, 'shipped catalog must be v10');
+assert.equal(artifact.catalog_version, 11, 'shipped catalog must be v11');
 assert.match(artifact.catalog_hash, /^[0-9a-f]{64}$/);
 
 // v10 markers: the full_record@10 template carries the three operation maps.
@@ -40,6 +40,19 @@ const operationSection = (fullRecord10.definition.sections || [])
   .find((section) => section.code === 'operation');
 assert.equal(operationSection && operationSection.scoped_by_activity, true,
   'the operation section must stay scoped_by_activity');
+
+const fullRecord11 = artifact.templates.find(
+  (row) => row.code === 'full_record' && row.version === 11
+);
+assert.ok(fullRecord11, 'full_record@11 must be present');
+assert.equal(Object.keys(fullRecord11.definition.final_requirement_matrix.activities).length, 16,
+  'full_record@11 must vendor the full activity requirement matrix');
+assert.equal(Object.keys(fullRecord11.definition.final_requirement_matrix.leaves).length, 25,
+  'full_record@11 must vendor all Agroscope operation-leaf replacements');
+const farmWide = artifact.layouts.find((row) => row.code === 'farm_wide' && row.version === 1);
+assert.deepEqual(farmWide && farmWide.definition.activity_codes,
+  ['equipment_maintenance', 'general_observation'],
+  'farm_wide@1 must expose only non-plot activities');
 
 // No principal-scoped rows may leak into a shared artifact.
 for (const row of artifact.vocab) {

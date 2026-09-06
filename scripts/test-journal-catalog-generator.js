@@ -99,9 +99,68 @@ assert.deepEqual(
     { version: 8, name: '0030__journal_catalog_v8.sql' },
     { version: 9, name: '0031__journal_catalog_v9.sql' },
     { version: 10, name: '0032__journal_catalog_v10.sql' },
+    { version: 11, name: '0051__journal_catalog_v11.sql' },
   ],
   'compileCatalog must emit exactly the registered catalog migrations, in version order',
 );
+
+assert.ok(generator.FINAL_REQUIREMENT_MATRIX_V11,
+  'v11 must export the normative final-entry requirement matrix');
+assert.deepEqual(
+  Object.keys(generator.FINAL_REQUIREMENT_MATRIX_V11.activities || {}).sort(),
+  [...core.activities.map((activity) => activity.code)].sort(),
+  'v11 matrix must cover every activity exactly once, with no stale activity key',
+);
+assert.deepEqual(
+  Object.keys(generator.FINAL_REQUIREMENT_MATRIX_V11.leaves || {}).sort(),
+  [
+    'agroscope.operation.primary_tillage',
+    'agroscope.operation.seedbed_preparation',
+    'agroscope.operation.stubble_cultivation',
+    'agroscope.operation.weed_mechanical',
+    'agroscope.operation.weed_other',
+    'agroscope.operation.cleaning_cut',
+    'agroscope.operation.sowing_main_crop',
+    'agroscope.operation.sowing_cover_crop',
+    'agroscope.operation.organic_fertilization',
+    'agroscope.operation.mineral_fertilization',
+    'agroscope.operation.other_fertilization',
+    'agroscope.operation.fungicide',
+    'agroscope.operation.insecticide',
+    'agroscope.operation.growth_regulator',
+    'agroscope.operation.weed_herbicide',
+    'agroscope.operation.total_herbicide',
+    'agroscope.operation.biocontrol',
+    'agroscope.operation.pest_control',
+    'agroscope.operation.harvest_main_crop',
+    'agroscope.operation.harvest_cover_crop',
+    'agroscope.operation.hay_removal',
+    'agroscope.operation.straw_removal',
+    'agroscope.operation.watering',
+    'agroscope.operation.sampling',
+    'agroscope.operation.note',
+  ].sort(),
+  'v11 matrix must cover every Agroscope operation leaf exactly once',
+);
+assert.ok(core.layouts.some((layout) => layout.code === 'farm_wide' && layout.version === 1),
+  'v11 must publish a farm_wide@1 layout');
+assert.ok(core.templates.some((template) => template.code === 'full_record' && template.version === 11),
+  'v11 must publish immutable full_record@11 requirements');
+const fullRecordV11 = compiled.rows.find((row) =>
+  row.table === 'journal_templates' && row.key === 'full_record:11'
+);
+assert.deepEqual(
+  JSON.parse(fullRecordV11.values[3]).final_requirement_matrix,
+  generator.FINAL_REQUIREMENT_MATRIX_V11,
+  'the generated v11 template must carry the exact generator-owned matrix',
+);
+for (const layout of compiled.rows.filter((row) => row.table === 'journal_layouts' && row.values[1] >= 11)) {
+  const definition = JSON.parse(layout.values[3]);
+  assert.equal(definition.availability_mode, 'all_compatible',
+    `${layout.key} must declare all-compatible availability explicitly`);
+  assert.equal(Object.hasOwn(definition, 'available_device_codes'), false,
+    `${layout.key} must not also declare an explicit device allow-list`);
+}
 
 assert.equal(
   compiled.migrations[0].content,
@@ -614,92 +673,94 @@ assert.equal(
 const mappingRows = compiled.rows.filter((row) => row.table === 'journal_vocab_mappings');
 assert.equal(mappingRows.length, 7, 'compiled row content must include seven standard mappings');
 
-// --- v-next extensibility: a hypothetical v11 must be a pure delta --------
-// (v10 is now real — operation-level field/requirement/product scoping plan:
-// full_record@10, 0032 — so the extensibility probe moves to a hypothetical
-// v11 on top of it.)
+// --- v-next extensibility: a hypothetical v12 must be a pure delta --------
 
 const v3Definition = core.templates.find(
   (template) => template.code === 'farmer_quick' && template.version === 3,
 ).definition;
-const coreWithV11 = {
+const coreWithV12 = {
   ...core,
   templates: [
     ...core.templates,
     {
       code: 'farmer_quick',
-      version: 11,
+      version: 12,
       label: 'Quick',
       definition: { ...v3Definition, max_primary_fields: 6 },
     },
   ],
 };
-const registryWithV11 = [...generator.CATALOG_MIGRATIONS, { version: 11, name: 'test-only-v11.sql' }];
-const compiledWithV11 = generator.compileCatalog(coreWithV11, source, registryWithV11);
+const registryWithV12 = [...generator.CATALOG_MIGRATIONS, { version: 12, name: 'test-only-v12.sql' }];
+const compiledWithV12 = generator.compileCatalog(coreWithV12, source, registryWithV12);
 assert.equal(
-  compiledWithV11.migrations.length,
-  11,
+  compiledWithV12.migrations.length,
+  12,
   'adding a v-next row must add exactly one new delta migration',
 );
 assert.equal(
-  compiledWithV11.migrations[0].content,
+  compiledWithV12.migrations[0].content,
   compiled.migrations[0].content,
   'adding a v-next row must leave the v1 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[1].content,
+  compiledWithV12.migrations[1].content,
   compiled.migrations[1].content,
   'adding a v-next row must leave the v2 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[2].content,
+  compiledWithV12.migrations[2].content,
   compiled.migrations[2].content,
   'adding a v-next row must leave the v3 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[3].content,
+  compiledWithV12.migrations[3].content,
   compiled.migrations[3].content,
   'adding a v-next row must leave the v4 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[4].content,
+  compiledWithV12.migrations[4].content,
   compiled.migrations[4].content,
   'adding a v-next row must leave the v5 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[5].content,
+  compiledWithV12.migrations[5].content,
   compiled.migrations[5].content,
   'adding a v-next row must leave the v6 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[6].content,
+  compiledWithV12.migrations[6].content,
   compiled.migrations[6].content,
   'adding a v-next row must leave the v7 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[7].content,
+  compiledWithV12.migrations[7].content,
   compiled.migrations[7].content,
   'adding a v-next row must leave the v8 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[8].content,
+  compiledWithV12.migrations[8].content,
   compiled.migrations[8].content,
   'adding a v-next row must leave the v9 migration byte-identical',
 );
 assert.equal(
-  compiledWithV11.migrations[9].content,
+  compiledWithV12.migrations[9].content,
   compiled.migrations[9].content,
   'adding a v-next row must leave the v10 migration byte-identical',
 );
-assert.equal(compiledWithV11.migrations[10].name, 'test-only-v11.sql');
 assert.equal(
-  (compiledWithV11.migrations[10].content.match(/INSERT INTO journal_templates\(/g) || []).length,
+  compiledWithV12.migrations[10].content,
+  compiled.migrations[10].content,
+  'adding a v-next row must leave the published v11 migration byte-identical',
+);
+assert.equal(compiledWithV12.migrations[11].name, 'test-only-v12.sql');
+assert.equal(
+  (compiledWithV12.migrations[11].content.match(/INSERT INTO journal_templates\(/g) || []).length,
   1,
-  'the v11 delta must contain exactly its own new row, nothing carried over from v1..v10',
+  'the v12 delta must contain exactly its own new row, nothing carried over from v1..v11',
 );
 
 assert.throws(
-  () => generator.compileCatalog(coreWithV11, source, generator.CATALOG_MIGRATIONS),
+  () => generator.compileCatalog(core, source, generator.CATALOG_MIGRATIONS.slice(0, -1)),
   /no CATALOG_MIGRATIONS entry|catalog version 11/i,
   'compileCatalog must refuse to silently drop a catalog version with no registered migration file',
 );

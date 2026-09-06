@@ -39,7 +39,83 @@ const CATALOG_MIGRATIONS = [
   { version: 8, name: '0030__journal_catalog_v8.sql' },
   { version: 9, name: '0031__journal_catalog_v9.sql' },
   { version: 10, name: '0032__journal_catalog_v10.sql' },
+  { version: 11, name: '0051__journal_catalog_v11.sql' },
 ];
+
+// Normative final-entry requirements from the Journal parity specification.
+// Leaf rules replace an activity rule; `missing` names only quantity families
+// that may be represented by one status-only not_observed value.
+const PRODUCT_FAMILY = Object.freeze(['attr.product_uuid', 'attr.product']);
+const FERTILIZER_AMOUNT_FAMILY = Object.freeze([
+  'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+]);
+const IRRIGATION_AMOUNT_FAMILY = Object.freeze([
+  'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
+]);
+const PRODUCT_AMOUNT_FAMILY = Object.freeze([
+  'attr.amount_mass_area_product', 'attr.amount_volume_area_product',
+]);
+const BIOCONTROL_AMOUNT_FAMILY = Object.freeze([
+  'attr.amount_biological_count_area', 'attr.amount_mass_area_product', 'attr.amount_volume_area_product',
+]);
+const SEED_AMOUNT_FAMILY = Object.freeze(['attr.amount_mass_area_product', 'attr.amount_count_area']);
+const YIELD_FAMILY = Object.freeze(['attr.harvest_yield_area']);
+const OBSERVATION_FAMILY = Object.freeze(['note', 'attr.observation_text', 'attr.growth_stage_bbch']);
+const NOTE_FAMILY = Object.freeze(['note', 'attr.observation_text']);
+
+function finalRequirement(required = [], requiredAny = [], missing = []) {
+  return Object.freeze({ required: Object.freeze(required), required_any: Object.freeze(requiredAny), missing: Object.freeze(missing) });
+}
+
+function emptyFinalRequirement() {
+  return finalRequirement();
+}
+
+const FINAL_REQUIREMENT_MATRIX_V11 = Object.freeze({
+  activities: Object.freeze({
+    irrigation: finalRequirement([], [IRRIGATION_AMOUNT_FAMILY], [IRRIGATION_AMOUNT_FAMILY]),
+    fertilization: finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    fertigation: finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY, IRRIGATION_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY, IRRIGATION_AMOUNT_FAMILY]),
+    plant_protection_application: finalRequirement([], [PRODUCT_FAMILY, BIOCONTROL_AMOUNT_FAMILY], [BIOCONTROL_AMOUNT_FAMILY]),
+    weed_control_nonchemical: emptyFinalRequirement(),
+    seeding: finalRequirement(['attr.crop'], [SEED_AMOUNT_FAMILY], [SEED_AMOUNT_FAMILY]),
+    planting_transplanting: finalRequirement(['attr.crop'], [['attr.amount_count_area']], [['attr.amount_count_area']]),
+    pruning: emptyFinalRequirement(), crop_care: emptyFinalRequirement(),
+    tillage_soil_work: emptyFinalRequirement(), mowing: emptyFinalRequirement(),
+    harvest: finalRequirement(['attr.crop'], [YIELD_FAMILY], [YIELD_FAMILY]),
+    sampling: emptyFinalRequirement(),
+    general_observation: finalRequirement([], [OBSERVATION_FAMILY]),
+    pest_disease_observation: finalRequirement([], [['note', 'attr.observation_text', 'attr.target']]),
+    equipment_maintenance: finalRequirement([], [['attr.equipment', 'attr.agroscope.device', 'note']]),
+  }),
+  leaves: Object.freeze({
+    'agroscope.operation.primary_tillage': emptyFinalRequirement(),
+    'agroscope.operation.seedbed_preparation': emptyFinalRequirement(),
+    'agroscope.operation.stubble_cultivation': emptyFinalRequirement(),
+    'agroscope.operation.weed_mechanical': emptyFinalRequirement(),
+    'agroscope.operation.weed_other': emptyFinalRequirement(),
+    'agroscope.operation.cleaning_cut': emptyFinalRequirement(),
+    'agroscope.operation.sowing_main_crop': finalRequirement(['attr.crop'], [SEED_AMOUNT_FAMILY], [SEED_AMOUNT_FAMILY]),
+    'agroscope.operation.sowing_cover_crop': finalRequirement(['attr.crop'], [SEED_AMOUNT_FAMILY], [SEED_AMOUNT_FAMILY]),
+    'agroscope.operation.organic_fertilization': finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    'agroscope.operation.mineral_fertilization': finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    'agroscope.operation.other_fertilization': finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    'agroscope.operation.fungicide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.insecticide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.growth_regulator': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.weed_herbicide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.total_herbicide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.biocontrol': finalRequirement([], [PRODUCT_FAMILY, BIOCONTROL_AMOUNT_FAMILY], [BIOCONTROL_AMOUNT_FAMILY]),
+    'agroscope.operation.pest_control': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.harvest_main_crop': finalRequirement(['attr.crop'], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.harvest_cover_crop': finalRequirement(['attr.crop'], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.hay_removal': finalRequirement([], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.straw_removal': finalRequirement([], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.watering': finalRequirement([], [IRRIGATION_AMOUNT_FAMILY], [IRRIGATION_AMOUNT_FAMILY]),
+    'agroscope.operation.sampling': finalRequirement([], [OBSERVATION_FAMILY]),
+    'agroscope.operation.note': finalRequirement([], [NOTE_FAMILY]),
+  }),
+});
 
 const TABLE_ORDER = [
   'journal_vocab',
@@ -226,8 +302,8 @@ function validateCore(coreDef) {
     'core must define exactly three distinct template codes (any number of versions each)'
   );
   assert(
-    new Set(coreDef.layouts.map((row) => row.code)).size === 3,
-    'core must define exactly three distinct generic layout codes (any number of versions each)'
+    new Set(coreDef.layouts.map((row) => row.code)).size === 4,
+    'core must define three plot layouts plus farm_wide (any number of versions each)'
   );
 
   const templateVersionsByCode = new Map();
@@ -828,11 +904,14 @@ function buildRows(coreDef, source) {
   }
 
   for (const template of coreDef.templates) {
+    const definition = template.definition.final_requirement_matrix_version === 11
+      ? { ...template.definition, final_requirement_matrix: FINAL_REQUIREMENT_MATRIX_V11 }
+      : template.definition;
     rows.push({
       table: 'journal_templates',
       key: `${template.code}:${template.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
-      values: [template.code, template.version, JSON.stringify({ en: template.label }), JSON.stringify(template.definition), 1],
+      values: [template.code, template.version, JSON.stringify({ en: template.label }), JSON.stringify(definition), 1],
       since: template.version,
     });
   }
@@ -852,7 +931,7 @@ function buildRows(coreDef, source) {
       key: `${layout.code}:${layout.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
       values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(definition), 1],
-      since: layout.version,
+      since: layout.since_version || layout.version,
     });
   }
   for (const product of coreDef.products) {
@@ -1127,6 +1206,7 @@ module.exports = {
   expectedManifestText,
   writeGeneratedArtifacts,
   CATALOG_MIGRATIONS,
+  FINAL_REQUIREMENT_MATRIX_V11,
 };
 
 if (require.main === module) {
