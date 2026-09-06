@@ -857,22 +857,23 @@ describe('JournalPage', () => {
     expect(screen.queryByRole('button', { name: /void|correct|apply all/i })).not.toBeInTheDocument();
   });
 
-  it('opens a generic capture flow from Log activity', () => {
+  it('opens a generic capture flow from Log activity', async () => {
     renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
 
-    expect(screen.getByTestId('capture-flow')).toBeInTheDocument();
+    expect(await screen.findByTestId('capture-flow')).toBeInTheDocument();
     expect(mocks.captureFlow).toHaveBeenLastCalledWith(expect.objectContaining({
       initialPlot: undefined,
       initialTimezone: undefined,
     }));
   });
 
-  it('reaches New plot and Edit selected plot controls through the route', () => {
+  it('reaches New plot and Edit selected plot controls through the route', async () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
 
+    await waitFor(() => expect(mocks.captureFlow).toHaveBeenCalled());
     const props = mocks.captureFlow.mock.lastCall?.[0];
     expect(props.plotState).toEqual(expect.objectContaining({
       createPlot: expect.any(Function),
@@ -916,6 +917,8 @@ describe('JournalPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
     expect(screen.queryByTestId('capture-flow')).not.toBeInTheDocument();
 
+    await screen.findByRole('button', { name: 'plot.new' });
+
     fireEvent.click(screen.getByRole('button', { name: 'plot.new' }));
     fireEvent.change(screen.getByLabelText('plot.code'), { target: { value: 'NEW-1' } });
     fireEvent.change(screen.getByLabelText('plot.layout'), { target: { value: 'open_field' } });
@@ -936,7 +939,7 @@ describe('JournalPage', () => {
     ));
   });
 
-  it('reaches group create and active-group edit controls through the route', () => {
+  it('reaches group create and active-group edit controls through the route', async () => {
     const group = journalPlotGroup();
     mocks.useJournalPlotGroups.mockReturnValue({
       groups: [group],
@@ -952,6 +955,7 @@ describe('JournalPage', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
 
+    await waitFor(() => expect(mocks.captureFlow).toHaveBeenCalled());
     const props = mocks.captureFlow.mock.lastCall?.[0];
     expect(props.plotGroups).toEqual([group]);
     expect(props.groupState).toEqual(expect.objectContaining({
@@ -1012,6 +1016,7 @@ describe('JournalPage', () => {
 
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    await screen.findByRole('button', { name: 'North pair' });
     fireEvent.click(screen.getByRole('button', { name: 'North pair' }));
     fireEvent.click(screen.getByRole('button', { name: 'where.createGroup' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'where.groupLabel' }), {
@@ -1078,6 +1083,7 @@ describe('JournalPage', () => {
 
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    await screen.findByText('ST-1', { exact: true });
     fireEvent.click(screen.getByText('ST-1', { exact: true }));
     const range = screen.getByRole('textbox', { name: 'where.range' });
     expect(screen.getByRole('button', { name: 'Named bed' })).toBeVisible();

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { Suspense, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { useSearchParams } from 'react-router-dom';
@@ -7,7 +7,6 @@ import { AppHeader } from '../components/AppHeader';
 import { CanWrite } from '../components/CanWrite';
 import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { JournalTimeline } from '../components/journal/JournalTimeline';
-import { JournalCaptureFlow } from '../components/journal/capture/JournalCaptureFlow';
 import { JournalWorkspace } from '../components/journal/desktop/JournalWorkspace';
 import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
@@ -23,6 +22,11 @@ import type { IrrigationZone } from '../types/farming';
 import type { EntryListFilters } from '../types/journal';
 import type { JournalTimelineProps } from '../components/journal/JournalTimeline';
 import type { JournalSavedReceipt } from '../components/journal/capture/JournalCaptureFlow';
+
+const JournalCaptureFlow = React.lazy(async () => {
+  const module = await import('../components/journal/capture/JournalCaptureFlow');
+  return { default: module.JournalCaptureFlow };
+});
 
 type JournalIrrigationZone = IrrigationZone & {
   zone_uuid?: string | null;
@@ -244,21 +248,23 @@ export const JournalPage: React.FC = () => {
         ) : (captureRequested || captureOpen) && captureEnrichmentError ? (
           errorCard(retryCaptureEnrichment)
         ) : showCapture ? (
-          <JournalCaptureFlow
-            catalog={catalogState.catalog!}
-            plots={capturePlots}
-            plotGroups={groupState.groups}
-            initialPlot={initialPlot}
-            recentEntries={entryState.entries}
-            initialTimezone={zoneTimezone(initialZone)}
-            zoneCrops={zoneCrops}
-            zoneTimezones={zoneTimezones}
-            plotState={plotState}
-            groupState={groupState}
-            onClose={closeCapture}
-            onOpenExisting={onOpenExisting}
-            onSaved={onSaved}
-          />
+          <Suspense fallback={<p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>}>
+            <JournalCaptureFlow
+              catalog={catalogState.catalog!}
+              plots={capturePlots}
+              plotGroups={groupState.groups}
+              initialPlot={initialPlot}
+              recentEntries={entryState.entries}
+              initialTimezone={zoneTimezone(initialZone)}
+              zoneCrops={zoneCrops}
+              zoneTimezones={zoneTimezones}
+              plotState={plotState}
+              groupState={groupState}
+              onClose={closeCapture}
+              onOpenExisting={onOpenExisting}
+              onSaved={onSaved}
+            />
+          </Suspense>
         ) : showWorkspace ? (
           <JournalWorkspace
             plots={allPlots}
