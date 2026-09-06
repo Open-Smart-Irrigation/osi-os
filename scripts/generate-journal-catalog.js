@@ -267,6 +267,67 @@ function repairedDevices(operation) {
   return devices;
 }
 
+// The Agroscope source is the sole owner of global operation-to-device
+// compatibility. Layout definitions may only narrow that relation; an empty
+// result is a valid, explicit "no machinery configured" outcome.
+function globalOperationDeviceChoices(source) {
+  const relation = {};
+  for (const category of source.categories) {
+    for (const operation of category.operations) {
+      const operationCode = `agroscope.operation.${operation.code}`;
+      relation[operationCode] = repairedDevices(operation)
+        .map((device) => `agroscope.device.${device.code}`);
+    }
+  }
+  return relation;
+}
+
+function effectiveOperationDeviceChoices(source, layoutDefinition, activeDeviceChoices) {
+  const definition = layoutDefinition || {};
+  const hasAllowList = Object.prototype.hasOwnProperty.call(definition, 'available_device_codes');
+  const hasAllCompatible = Object.prototype.hasOwnProperty.call(definition, 'availability_mode');
+  assert(hasAllowList !== hasAllCompatible,
+    'capture layout must declare exactly one availability declaration');
+  if (hasAllCompatible) {
+    assert(definition.availability_mode === 'all_compatible',
+      'capture layout availability_mode must be all_compatible');
+  } else {
+    assert(Array.isArray(definition.available_device_codes),
+      'capture layout available_device_codes must be an array');
+  }
+
+  const global = globalOperationDeviceChoices(source);
+  const knownDevices = new Set(Object.values(global).flat());
+  const available = hasAllCompatible
+    ? knownDevices
+    : new Set(definition.available_device_codes);
+  if (!hasAllCompatible) {
+    for (const deviceCode of available) {
+      assert(typeof deviceCode === 'string' && knownDevices.has(deviceCode),
+        `capture layout availability references unknown device ${deviceCode}`);
+    }
+  }
+  const active = activeDeviceChoices instanceof Set ? activeDeviceChoices : knownDevices;
+  return Object.fromEntries(Object.entries(global).map(([operationCode, devices]) => [
+    operationCode,
+    devices.filter((deviceCode) => available.has(deviceCode) && active.has(deviceCode)),
+  ]));
+}
+
+function validateCurrentCaptureLayoutAvailability(coreDef, source) {
+  const latestByCode = new Map();
+  for (const layout of coreDef.layouts) {
+    const existing = latestByCode.get(layout.code);
+    if (!existing || layout.version > existing.version) latestByCode.set(layout.code, layout);
+  }
+  for (const layout of latestByCode.values()) {
+    if (!layout.derive_agroscope_dependencies) continue;
+    effectiveOperationDeviceChoices(source, layout.definition, new Set(
+      Object.values(globalOperationDeviceChoices(source)).flat()
+    ));
+  }
+}
+
 function categoryActivityMap(coreDef) {
   const result = new Map();
   for (const activity of coreDef.activities) {
@@ -752,6 +813,9 @@ function buildAgroscope(coreDef, source) {
     // `categoryDependencies`/`operationDependencies` (the spread below always
     // allocates a fresh array).
     operationScopedDependencies: [...categoryDependencies, ...operationDependencies],
+    categoryDependencies,
+    operationDependencies,
+    activeDeviceChoices: new Set([...deviceMetadata.keys()].map((device) => `agroscope.device.${device}`)),
     layout: {
       code: 'agroscope_open_field',
       version: 1,
@@ -837,6 +901,7 @@ function buildRows(coreDef, source) {
   validateCore(coreDef);
   validateSource(coreDef, source);
   validateOperationFieldsByOperation(coreDef, source);
+  validateCurrentCaptureLayoutAvailability(coreDef, source);
   const agroscope = buildAgroscope(coreDef, source);
   const rows = [];
 
@@ -923,9 +988,33 @@ function buildRows(coreDef, source) {
     // open_field@9 today, including the frozen agroscope_open_field itself,
     // which already carries its own full dependency set from buildAgroscope)
     // are emitted completely unchanged.
-    const definition = layout.derive_agroscope_dependencies
-      ? { ...layout.definition, option_dependencies: agroscope.operationScopedDependencies }
-      : layout.definition;
+    let definition = layout.definition;
+    const hasAvailability = Object.prototype.hasOwnProperty.call(layout.definition, 'availability_mode') ||
+      Object.prototype.hasOwnProperty.call(layout.definition, 'available_device_codes');
+    if (layout.derive_agroscope_dependencies) {
+      if (!hasAvailability) {
+        // Published pre-v11 rows remain byte-identical; only the current
+        // revision is required to carry an explicit availability declaration.
+        definition = { ...layout.definition, option_dependencies: agroscope.operationScopedDependencies };
+      } else {
+        const effectiveDevices = effectiveOperationDeviceChoices(
+          source,
+          layout.definition,
+          agroscope.activeDeviceChoices
+        );
+        const operationDependencies = agroscope.operationDependencies.map((dependency) => ({
+          ...dependency,
+          restrict: {
+            ...dependency.restrict,
+            choices: effectiveDevices[dependency.when.equals],
+          },
+        }));
+        definition = {
+          ...layout.definition,
+          option_dependencies: [...agroscope.categoryDependencies, ...operationDependencies],
+        };
+      }
+    }
     rows.push({
       table: 'journal_layouts',
       key: `${layout.code}:${layout.version}`,
@@ -1202,6 +1291,7 @@ module.exports = {
   validateCore,
   validateSource,
   validateOperationFieldsByOperation,
+  effectiveOperationDeviceChoices,
   replaceSeedBlock,
   expectedManifestText,
   writeGeneratedArtifacts,

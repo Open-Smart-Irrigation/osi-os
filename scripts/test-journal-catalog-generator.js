@@ -30,6 +30,7 @@ for (const exportName of [
   'compileCatalog',
   'validateCore',
   'validateSource',
+  'effectiveOperationDeviceChoices',
   'replaceSeedBlock',
   'expectedManifestText',
   'writeGeneratedArtifacts',
@@ -40,6 +41,66 @@ for (const exportName of [
     `generator must export ${exportName} as a testable compiler/validation seam`
   );
 }
+
+// The catalog compiler owns the one global operation/device relation. A
+// capture layout narrows it only through an explicit availability declaration,
+// then active vocabulary narrows it again. This keeps the picker honest when a
+// facility has no compatible machinery configured.
+const activeDeviceChoices = new Set(
+  source.categories.flatMap((category) => category.operations.flatMap((operation) =>
+    operation.devices.map((device) => `agroscope.device.${device.code}`)
+  ))
+);
+const wateringOperation = 'agroscope.operation.watering';
+const allCompatibleDevices = generator.effectiveOperationDeviceChoices(
+  source,
+  { availability_mode: 'all_compatible' },
+  activeDeviceChoices
+);
+assert.ok(allCompatibleDevices[wateringOperation].length > 1,
+  'the generated global relation must expose the operation-compatible devices before layout narrowing');
+const oneAvailableDevice = allCompatibleDevices[wateringOperation][0];
+assert.deepEqual(
+  generator.effectiveOperationDeviceChoices(
+    source,
+    { available_device_codes: [oneAvailableDevice] },
+    activeDeviceChoices
+  )[wateringOperation],
+  [oneAvailableDevice],
+  'an explicit layout allow-list must intersect global operation compatibility'
+);
+assert.deepEqual(
+  generator.effectiveOperationDeviceChoices(
+    source,
+    { available_device_codes: ['agroscope.device.mower'] },
+    activeDeviceChoices
+  )[wateringOperation],
+  [],
+  'a layout may honestly have no compatible machinery for an operation'
+);
+assert.deepEqual(
+  generator.effectiveOperationDeviceChoices(
+    source,
+    { availability_mode: 'all_compatible' },
+    new Set([...activeDeviceChoices].filter((code) => code !== oneAvailableDevice))
+  )[wateringOperation].includes(oneAvailableDevice),
+  false,
+  'inactive choices must not leak into the generated picker relation; historical review is handled separately'
+);
+assert.throws(
+  () => generator.effectiveOperationDeviceChoices(source, {}, activeDeviceChoices),
+  /exactly one availability declaration/,
+  'a capture layout without availability must fail closed rather than broaden the picker'
+);
+assert.throws(
+  () => generator.effectiveOperationDeviceChoices(
+    source,
+    { availability_mode: 'all_compatible', available_device_codes: [oneAvailableDevice] },
+    activeDeviceChoices
+  ),
+  /exactly one availability declaration/,
+  'a capture layout may not combine mutually-exclusive availability declarations'
+);
 assert.ok(
   Array.isArray(generator.CATALOG_MIGRATIONS) && generator.CATALOG_MIGRATIONS.length >= 2,
   'generator must export the CATALOG_MIGRATIONS registry so a v-next migration can be registered without editing frozen files'
@@ -161,6 +222,15 @@ for (const layout of compiled.rows.filter((row) => row.table === 'journal_layout
   assert.equal(Object.hasOwn(definition, 'available_device_codes'), false,
     `${layout.key} must not also declare an explicit device allow-list`);
 }
+const missingAvailabilityCore = structuredClone(core);
+delete missingAvailabilityCore.layouts.find((layout) =>
+  layout.code === 'open_field' && layout.version === 11
+).definition.availability_mode;
+assert.throws(
+  () => generator.compileCatalog(missingAvailabilityCore, source),
+  /exactly one availability declaration/,
+  'the latest machine-capable capture layout must fail generation without an explicit availability declaration'
+);
 
 assert.equal(
   compiled.migrations[0].content,
