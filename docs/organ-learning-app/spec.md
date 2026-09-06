@@ -1,7 +1,8 @@
-# PocketMaestro: product specification (draft 0.2)
+# PocketMaestro: product specification (draft 0.3)
 
-Status: brainstorming draft, second round. Section 15 records the decisions
-taken in the first interview (`D-n`). Statements marked `A-n` are assumptions
+Status: brainstorming draft, third round. Section 17 records the decisions
+taken in the interviews (`D-n`). The launch catalogue is detailed in
+[catalogue.md](catalogue.md). Statements marked `A-n` are assumptions
 still awaiting confirmation; `Q-n` are open questions for the next round.
 This document is unrelated to OSI OS firmware; it lives here because the
 brainstorming session ran in this repository.
@@ -15,9 +16,12 @@ learner's measured or self-reported progress. The audience is adult classical
 music enthusiasts who already play a keyboard instrument and read music. About
 60 % of them can connect their instrument by MIDI (D-1); the other 40 % use
 the same lessons with self-assessment instead of automatic scoring. Content is
-authored in house by a professional organist from public-domain sources, sold
-by subscription, with one-to-one tutor sessions as a premium service. Piano is
-not part of this product (D-14).
+authored in house by a professional organist from public-domain sources. The
+first lesson is free for everyone; the rest need a monthly or annual
+subscription (D-17). Two-hour one-to-one tutor sessions are bookable in the
+app at any time for 100 USD (D-19). The organist builds the product alone
+with AI assistance (D-22), which shapes the stack in section 14. Piano is not
+part of this product (D-14).
 
 ## 2. Target users
 
@@ -69,7 +73,7 @@ teacher-led syllabus.
 | Skill profile | Per-learner vector of capabilities (section 6.1), with a confidence value per dimension that depends on whether evidence is measured or self-reported. |
 | Instrument profile | The learner's instruments: MIDI capable or not, manuals, pedalboard compass, registration mapping. |
 | Curriculum | A difficulty ladder over the catalogue with a recommended next lesson; the learner may pick any lesson. |
-| Tutor session | A booked one-to-one session with a professional tutor, with the tutor's notes and assigned exercises written back into the lesson (section 11). |
+| Tutor session | A booked one-to-one session with a professional tutor, with the tutor's notes and assigned exercises written back into the lesson (section 13). |
 
 ## 5. Lesson structure
 
@@ -78,7 +82,7 @@ teacher-led syllabus.
 - Piece overview: composer, date, liturgical or concert context, form outline
   with a tappable bar map.
 - Reference performance: a commissioned recording by the in-house organist
-  captured as MIDI, with audio where the recording instrument allows (D-9).
+  captured as MIDI and audio at the same time (D-9, D-26).
   The MIDI reference plays through the built-in organ sound or through the
   learner's own instrument (D-10), and it is the reference for tempo and
   articulation in scoring.
@@ -91,15 +95,15 @@ teacher-led syllabus.
 
 | Template | Task | Scoring without MIDI |
 |---|---|---|
-| Part isolation | One part (RH, LH, pedal) of a section; app sounds or mutes the others. | Self-rating |
-| Part pairing | Two of three parts; the organ sequence RH+pedal, LH+pedal, then manuals. | Self-rating |
-| Full texture | All parts at a tempo the profile predicts as achievable. | Self-rating plus metronome tempo |
-| Loop drill | Two to eight bars repeated, tempo ramped between repetitions. | Self-rating per tempo step |
-| Pedal technique | Pedal line alone with heel/toe indications; scored by timing. | Self-rating |
-| Legato and articulation | Note overlap and gap scored against the reference performance; on the organ this is the main expressive parameter. | Listening comparison, self-rating |
-| Manual change | Passages with manual switches; note channel checked against the expected manual. | Self-rating |
-| Sight reading | An unseen section once at a comfortable tempo; scores reading accuracy. | Self-rating |
-| Memory | Score hidden progressively. | Self-rating |
+| Part isolation | One part (RH, LH, pedal) of a section; app sounds or mutes the others. | Rating for that part |
+| Part pairing | Two of three parts; the organ sequence RH+pedal, LH+pedal, then manuals. | Rating per part |
+| Full texture | All parts at a tempo the profile predicts as achievable. | Rating per part plus metronome tempo |
+| Loop drill | Two to eight bars repeated, tempo ramped between repetitions. | Rating per part at each tempo step |
+| Pedal technique | Pedal line alone with heel/toe indications; scored by timing. | Pedal rating |
+| Legato and articulation | Note overlap and gap scored against the reference performance; on the organ this is the main expressive parameter. | Listening comparison, rating per part |
+| Manual change | Passages with manual switches; note channel checked against the expected manual. | Rating per part |
+| Sight reading | An unseen section once at a comfortable tempo; scores reading accuracy. | Rating per part |
+| Memory | Score hidden progressively. | Rating per part |
 | Listening and analysis | Identify subject entries, name the cadence, compare two registrations. | Answer key (identical for both tracks) |
 
 ### 5.3 Pass conditions
@@ -112,11 +116,14 @@ Scored track, placeholder thresholds to tune with data (A-1):
 | Timing | 90 % of onsets within ±60 ms at target tempo | 95 % within ±40 ms |
 | Articulation | 80 % of scored note pairs within tolerance of the reference | 90 % |
 
-Self-assessed track: a three-step rating after each attempt (not yet, mostly,
-secure) plus the metronome tempo the learner used. A rating of "secure" at
-target tempo counts as a pass; three such ratings on separate days count as
-secure (A-2), against two for the scored track, because self-reports carry
-less evidence.
+Self-assessed track: after each attempt the learner rates every part that
+was played (RH, LH, pedal) on a three-step scale (not yet, mostly, secure)
+and records the metronome tempo used (D-18). Per-part ratings let the engine
+see which hand or foot limits a combined exercise, which is the same signal
+the scored track gets from per-part error rates. An exercise passes when all
+its parts are rated "secure" at target tempo; three such passes on separate
+days secure the section (A-2), against two for the scored track, because
+self-reports carry less evidence.
 
 A lesson is complete when every section is secured and the whole piece has
 been played through once at tempo, scored above the pass line or self-rated
@@ -135,7 +142,7 @@ unit tests and no network dependency.
 |---|---|---|
 | Pedal accuracy | Pitch errors on pedal notes | Ratings on pedal-only exercises |
 | Pedal timing | Onset error pedal versus manuals | Ratings on part pairings with pedal |
-| Hand independence | Error rise when parts are combined | Rating drop when parts are combined |
+| Hand independence | Error rise when parts are combined | Per-part rating drop when parts are combined |
 | Voice independence | Inner-voice errors in counterpoint | Ratings on contrapuntal sections |
 | Legato control | Overlap and gap distribution | Not estimated |
 | Manual-change fluency | Timing error around switches | Ratings on manual-change exercises |
@@ -203,8 +210,9 @@ mapping in the instrument profile.
 
 ### 7.2 During the attempt
 
-The screen shows the exercise's bars, one system at a time in landscape or
-two to three bars per line in portrait (A-7), with a cursor. The cursor is
+The screen shows the exercise's bars, one system at a time in landscape
+(the default, D-21) or two to three bars per line in portrait (A-7), with a
+cursor. The cursor is
 driven by the metronome by default. MIDI learners can switch to "follow my
 playing", where the cursor tracks the matched notes; there is no correctness
 colouring in either case (D-5).
@@ -237,15 +245,16 @@ enhancement (A-8). Consequences:
   exercise in one to three systems without scrolling during play.
 - The full score is a separate reading view with pinch zoom and vertical
   scroll, used for orientation and study, not while playing.
-- Landscape shows one wide system; portrait shows narrower systems with
-  larger glyphs. The learner's last choice is remembered per lesson.
+- Landscape is the default while playing and shows one wide system (D-21).
+  Portrait is available for reading and for learners who prop the phone
+  upright; it shows narrower systems with larger glyphs.
 - Three-staff organ notation is compressed by reducing inter-staff spacing
   before reducing glyph size; a minimum glyph size is enforced and the
   renderer breaks systems earlier instead.
 - Foot-switch page turning is only relevant in the reading view; it is a
   later feature.
 
-Scores are stored as MEI and rendered on device with Verovio (section 12);
+Scores are stored as MEI and rendered on device with Verovio (section 14);
 the authoring tool uses the same library in its web build, so the organist's
 preview matches the phone rendering.
 
@@ -268,34 +277,22 @@ Per piece:
 4. Segment into sections; write the difficulty annotations.
 5. Write orientation commentary in German and English (D-13) and the analysis
    questions.
-6. Record the reference performance as MIDI on the organist's console, with
-   audio when available (D-9). The tool aligns the MIDI to the score and
-   flags mismatches.
+6. Record the reference performance as MIDI and audio in one take on the
+   organist's console (D-9, D-26). The tool aligns the MIDI to the score and
+   flags mismatches; the audio is trimmed to the same start point so bar
+   positions map to both.
 7. Validate: schema check, a play-through of every exercise configuration on
    the console to confirm channel mapping and tempo targets, and a
    self-assessed walk-through to confirm the lesson stands without MIDI.
 
-### 9.1 Candidate launch catalogue (A-10, for the organist to revise)
+### 9.1 Launch catalogue
 
-Ten pieces at launch, graded as a ladder, then two per month. All are public
-domain in the EU and Switzerland; the edition is in house.
-
-| Grade | Piece | Why it is here |
-|---|---|---|
-| 1 | J. S. Bach, "Ich ruf zu dir, Herr Jesu Christ" BWV 639 | Slow trio, simple pedal line, first manual change; ideal pedal foundation inside real repertoire. |
-| 1 | Brahms, "Es ist ein Ros entsprungen" op. 122 no. 8 | Chordal legato, quiet pedal; teaches finger substitution. |
-| 2 | J. S. Bach, "Liebster Jesu, wir sind hier" BWV 731 | Ornamented cantus firmus, pedal at walking pace. |
-| 2 | Pachelbel, Ciacona in F minor | Variation form; pedal optional, so it works for manuals-only practice. |
-| 3 | J. S. Bach, "Wachet auf, ruft uns die Stimme" BWV 645 | Cantus in the tenor, ritornello texture; classic independence study. |
-| 3 | Buxtehude, "Nun bitten wir den heiligen Geist" BuxWV 208 | North German chorale prelude, ornamented line over pedal. |
-| 4 | Boëllmann, Toccata from Suite gothique | Popular, repetitive figuration, pedal melody; strong motivator. |
-| 4 | Mendelssohn, Sonata no. 6 op. 65, chorale and variations | Romantic legato, manual changes, moderate pedal. |
-| 5 | J. S. Bach, Toccata and Fugue in D minor BWV 565 | Pedal solo, the piece most enthusiasts want; sections span the ladder. |
-| 6 | Widor, Toccata from Symphony no. 5 | Aspirational; rapid manual figuration over pedal theme. Widor died in 1937, so the work is public domain. |
-
-Candidates for the following months: Bach BWV 553 to 560, Franck Prélude,
-fugue et variation, Vierne Carillon de Westminster, Bach Pastorella BWV 590,
-Buxtehude Praeludium in G minor BuxWV 149.
+The catalogue plan, with grading criteria, per-piece section and technique
+plans, licensing checks, and authoring effort estimates, is in
+[catalogue.md](catalogue.md). Its headline: ten pieces at launch would cost
+about 250 authoring hours, which a solo builder cannot afford alongside the
+app, so the plan proposes launching with six (grades 1 to 4) and reaching ten
+within the first quarter after launch (A-10).
 
 ## 10. Motivation layer (D-15)
 
@@ -303,67 +300,165 @@ Buxtehude Praeludium in G minor BuxWV 149.
 |---|---|
 | Practice calendar | Days practised and minutes, a weekly minute goal set by the learner, no penalty display for gaps. |
 | Lesson milestones | First section secured, first full play-through, lesson complete; each with a dated entry the learner can share as an image. |
-| Achievements | Named in musical terms: "First fugue secured", "Pedal solo at tempo", "Ten hours of pedal work", "Thirty days at the console". Awarded quietly at session end, listed in the profile. |
+| Achievements | Two kinds (D-25). General achievements are defined once in the app: "First fugue secured", "Ten hours of pedal work", "Thirty days at the console". Per-piece achievements are defined by the organist in the authoring tool with a name, a condition (section secured, tempo reached, exercise passed without error), and a sentence of context: "Pedal solo of BWV 565 at 100". Both are awarded quietly at session end and listed in the profile. |
 | Repertoire list | Completed lessons form a repertoire list with the date and the tempo reached, in the layout of a concert programme. |
 
-## 11. Tutor sessions (D-12)
+## 11. Brand and visual identity (D-24)
 
-A premium service, sold separately from the subscription: a one-to-one video
-session with a professional organist, initially the in-house organist.
+PocketMaestro is a new brand with no existing assets. The plan is to explore
+several directions before settling, each as a set of mock screens (lesson
+map, playing view in landscape, post-attempt analysis) rather than a logo
+alone, because the score view dominates the product and the brand must
+survive next to engraved music. Three starting directions to try (A-15):
+
+| Direction | Character |
+|---|---|
+| Concert programme | Serif typography, cream and black, restrained accent colour; progress presented like a printed programme. |
+| Engraver's workshop | Reference to plate engraving: fine rules, stamped numerals, warm greys; the analysis views drawn like proof sheets. |
+| Modern loft | Sans-serif, dark interface for low-light organ lofts, single bright accent for the cursor and the recommendation. |
+
+The score theme (staff line weight, glyph font, cursor colour) is part of
+each direction and is tested on a phone at arm's length on a music desk.
+
+## 12. Pricing and access (D-17)
+
+| Tier | What it includes |
+|---|---|
+| Free | The first lesson of the ladder (BWV 639) with every feature: scoring, both selection modes, reference performance, achievements. No time limit, no account required until the learner wants sync. |
+| Subscription | The whole catalogue, new lessons as they are published, progress sync across devices. Monthly or annual; the annual price equals eight monthly payments. Placeholder prices CHF 12 and CHF 96 (Q-1). |
+| Tutor session | Bought per session, subscription not required (section 13). |
+
+The free lesson is the trial: it shows the full system on a piece a pianist
+can finish in a few weeks, so there is no separate time-limited trial.
+Subscription state is checked from the local RevenueCat cache, so a lapsed
+subscription offline still opens downloaded lessons until the grace period
+ends (A-16). Cancelling keeps the learner's data; the repertoire list and
+achievements stay visible.
+
+## 13. Tutor sessions (D-12, D-19)
+
+An optional service, always available, sold separately from the
+subscription: a two-hour one-to-one video session with a professional
+organist for 100 USD, initially the in-house organist. Booking happens in the
+app.
 
 - Booking: the learner picks a lesson to discuss and a slot from the tutor's
-  calendar; the app confirms and sends a video link (an external service such
-  as Zoom or Jitsi in v1, A-11).
-- Preparation: the tutor sees the learner's lesson map, skill profile, and the
-  last attempts with their heat maps or ratings before the session.
+  published availability; the app confirms, takes payment, and sends the
+  video link. Video runs on an external service (Zoom or Jitsi, A-11).
+- Preparation: the tutor sees the learner's lesson map, skill profile, and
+  the last attempts with their heat maps or per-part ratings before the
+  session.
 - Follow-up: the tutor writes notes and can pin exercises with a tempo into
   the learner's lesson; the engine treats pinned exercises as the next
   recommendation until passed.
-- Payment: live person-to-person services may be sold outside the store's
-  in-app purchase system under Apple's guideline 3.1.3(d); Google Play's rule
-  must be checked before launch (Q-3).
-- A tutor web view is needed for preparation and notes; it shares the
-  authoring tool's codebase.
+- Payment: the session is a live person-to-person service consumed outside
+  the app, so it may be sold outside store billing under Apple's guideline
+  3.1.3(d) and Google Play's exemption for services delivered outside the
+  app; the plan is Stripe Checkout inside the booking flow (A-14). If a
+  store review rejects that, the fallback is a consumable in-app purchase at
+  the nearest price tier, which costs the store commission.
+- Capacity: one tutor at two hours per session caps the service at a few
+  sessions per week; the booking calendar exposes only slots the tutor has
+  opened, so the service degrades to "no slots this week" rather than
+  overbooking.
+- The tutor web view for preparation and notes shares the authoring tool's
+  codebase.
 
-## 12. Technology stack (D-16)
+## 14. Technology stack (D-16, D-22, D-23)
 
-Requirements shaping the choice: one small team, phone-first, iOS and Android
-from one codebase, USB and Bluetooth MIDI on both platforms, high-quality
-custom score rendering, low-latency audio, offline SQLite, store
-subscriptions, and a web authoring tool maintained by the same team.
+Requirements shaping the choice: one person building with AI assistance and
+no professional development background, phone-first, iOS and Android from one
+codebase, USB and Bluetooth MIDI on both platforms, high-quality score
+rendering, offline SQLite, store subscriptions, a web authoring tool, and
+Swiss hosting for the backend.
 
-| Option | Fit |
-|---|---|
-| Flutter (Dart) | Strong custom rendering (Impeller), one codebase, mature MIDI package (`flutter_midi_command`, USB and BLE on both platforms), C++ FFI for Verovio, SQLite via `drift`, RevenueCat SDK. |
-| React Native with Expo (TypeScript) | Largest package library, shares TypeScript with the backend and authoring tool; MIDI and low-latency audio need custom native modules; score rendering via Skia or a web view. |
-| Kotlin Multiplatform with Compose | Native performance; iOS Compose is younger; MIDI needs platform code twice. |
-| Two native apps (Swift, Kotlin) | Best MIDI and audio control; double maintenance, wrong for a small team. |
+### 14.1 Why the recommendation changed from draft 0.2
 
-Recommendation: Flutter for the mobile client. The decisive points are
-rendering control for the score view, one MIDI package that covers both
-transports on both platforms, and a single codebase a small team can hold.
+Draft 0.2 recommended Flutter, mainly for rendering control and MIDI
+latency. Two decisions since then move the balance:
+
+- Feedback is post-attempt only (D-5), so MIDI-to-screen latency no longer
+  matters for scoring. Note timestamps come from the platform MIDI layer and
+  are scored after the attempt; a JavaScript bridge in the path costs
+  nothing.
+- The builder works alone with AI assistance (D-22). One language across
+  mobile, backend, and authoring tool halves what must be learned, and
+  TypeScript with React is the corpus where AI coding assistants are most
+  reliable. Expo's cloud build service removes the local Xcode and Gradle
+  toolchain, which is the part of mobile development a solo non-developer
+  most often gets stuck on.
+
+The remaining risk on the TypeScript path is MIDI: the React Native packages
+are less mature than Flutter's. That risk is bounded by a spike in the first
+week (section 14.4); if the spike fails on either platform, the fallback is
+Flutter with the rest of the stack unchanged.
+
+### 14.2 Chosen stack
 
 | Layer | Choice |
 |---|---|
-| Mobile client | Flutter, Dart. Tablet layout later from the same code. |
-| Score renderer | Verovio compiled to a native library, called through Dart FFI; SVG output drawn with the Flutter canvas. |
-| Scoring engine | Dart library: note alignment of played events to the score, timing and articulation metrics. Pure functions, unit-tested with recorded fixtures. |
-| Adaptivity engine | Dart library, same discipline. |
-| Audio | Native low-latency output (AVAudioEngine, Oboe) behind a small platform channel; sample playback of the built-in organ set. |
-| MIDI | `flutter_midi_command`; RTP MIDI later. |
-| Local store | SQLite via `drift`, one database per learner. |
-| Backend | Supabase (managed Postgres, auth, storage, edge functions) hosted in an EU region (A-12). Holds accounts, catalogue metadata, progress sync, tutor bookings. |
-| Content delivery | Signed lesson packages (MEI, MIDI reference, audio, commentary) on object storage behind a CDN. |
-| Subscriptions | RevenueCat over App Store and Google Play billing. |
-| Authoring and tutor tool | Web app in TypeScript with Verovio's JavaScript build, same MEI, same rendering. |
-| Analytics | PostHog, opt-in, aggregated per exercise template. |
-| CI and release | GitHub Actions with Codemagic or Fastlane for store builds. |
+| Language | TypeScript everywhere, one monorepo (pnpm workspaces). |
+| Mobile client | React Native with Expo (dev client, EAS Build and Submit). Landscape score view, phone first. |
+| Score renderer | Verovio's JavaScript build producing SVG, drawn with `react-native-svg`. The authoring tool uses the same Verovio build, so preview equals device rendering. |
+| MIDI | Web MIDI API shape over CoreMIDI and Android MidiManager (candidate `@motiz88/react-native-midi`); Bluetooth MIDI pairing through the system dialogs. Verified by the spike. |
+| Audio | `react-native-audio-api` (Web Audio API for React Native) for sample playback of the built-in organ set and reference audio. |
+| Scoring engine | Pure TypeScript package: alignment of played events to the score, timing and articulation metrics. Tested against recorded MIDI fixtures. |
+| Adaptivity engine | Pure TypeScript package, same discipline. |
+| Content schema | Zod schemas shared by mobile, API, and authoring tool; lesson packages are validated at authoring time and at load time. |
+| Local store | `expo-sqlite` with Drizzle ORM. |
+| Backend API | Small Hono service on Node, in a container. Accounts, catalogue metadata, progress sync, tutor bookings, achievement definitions. |
+| Auth | Self-hosted library (Better Auth) with Sign in with Apple, Google, and email; sessions stored in Postgres. |
+| Database and storage | Managed PostgreSQL and S3-compatible object storage at a Swiss provider (Exoscale, Zurich or Geneva zones; Infomaniak as alternative), D-23. Lesson packages and reference audio served from object storage through the provider's CDN. |
+| Hosting | One container host at the same provider running the API, the authoring web tool, and nightly backups to object storage. |
+| Subscriptions | RevenueCat over App Store and Google Play billing (`react-native-purchases`). RevenueCat receives store identifiers, not personal data. |
+| Tutor payments | Stripe Checkout (A-14). |
+| Authoring and tutor tool | React web app (Vite) served from the same host. |
+| Push and email | Expo push notifications; transactional email through a provider with EU or Swiss processing. |
+| Analytics | None at launch beyond the app's own attempt data; PostHog self-hosted later if needed. |
+| CI and release | GitHub Actions running tests and schema checks; EAS Build for store binaries; weekly TestFlight and Play internal builds. |
 
-The scoring and adaptivity engines are deliberately kept as plain Dart
-packages without Flutter dependencies, so they can be tested on a laptop
-against recorded MIDI fixtures and, if the stack ever changes, ported.
+### 14.3 Legal and account setup for a private person (D-23)
 
-## 13. Non-functional requirements
+- Apple Developer Program and Google Play developer accounts can be held by
+  an individual. Google requires identity verification and, for individual
+  accounts, a closed test with at least twenty testers over fourteen days
+  before production release; plan the beta accordingly.
+- Apple and Google are the merchant of record for subscriptions and handle
+  consumer VAT. For tutor sessions sold through Stripe, the seller is the
+  private person; Swiss VAT registration starts at CHF 100 000 global
+  turnover, and live online tutoring by a person is not an electronically
+  supplied service under EU VAT rules, so the place of supply stays in
+  Switzerland. Confirm both points with a tax advisor before launch (Q-3).
+- The revised Swiss Data Protection Act applies; the app needs a privacy
+  policy, data export, and account deletion. Swiss hosting keeps attempt
+  data in the country; RevenueCat and Stripe are foreign processors and go
+  in the policy.
+
+### 14.4 Development plan for a solo AI-assisted builder (D-22)
+
+Each phase ends with something testable on a real console. The order puts
+the riskiest unknowns first and the free lesson early, so a store listing
+can exist before scoring or subscriptions are finished.
+
+| Phase | Deliverable | Exit test |
+|---|---|---|
+| 0. Spikes (2 weeks) | Expo app receiving USB and Bluetooth MIDI on one iPhone and one Android phone; Verovio rendering a three-staff system in landscape; sample playback with acceptable latency. | Note events with timestamps logged from a real console on both platforms. |
+| 1. Lesson player | One lesson (BWV 639) hand-built as a package; orientation, exercises, metronome, reference playback, per-part self-rating, local progress. | A learner without MIDI completes the lesson end to end. |
+| 2. Scoring | Note alignment, heat map, timing plot, articulation profile. | Fixture tests pass; a scored attempt on the console produces a believable heat map. |
+| 3. Adaptivity | Skill profile, both selection modes, loop drills, retention probes. | Simulated learners in tests progress through the lesson as designed. |
+| 4. Authoring tool | MusicXML import, sectioning, annotations, per-piece achievements, package export, on-device preview. | Second lesson authored in the tool, not by hand. |
+| 5. Accounts and subscriptions | Auth, sync, RevenueCat, free first lesson, catalogue. | Purchase flow passes in sandbox on both stores. |
+| 6. Beta | Six lessons, Google closed test with twenty testers, TestFlight. | Fourteen days of test data; thresholds in section 5.3 tuned. |
+| 7. Tutor sessions | Availability, booking, Stripe, tutor view, pinned exercises. | One real session booked and delivered. |
+| 8. Launch | Store listings in German and English, privacy policy, support address. | Both stores approved. |
+
+Working rules for the build: the specification and the content schema live
+in the repository and are updated before code changes; every engine change
+comes with a fixture test; a build goes to the phone at least weekly and is
+played on the console; no native module is added without a spike branch
+proving it on both platforms.
+
+## 15. Non-functional requirements
 
 | Requirement | Target |
 |---|---|
@@ -376,7 +471,7 @@ against recorded MIDI fixtures and, if the stack ever changes, ported.
 | Privacy | Attempts stay on device unless sync is on; EU hosting; no third-party trackers |
 | Minimum OS | iOS 16, Android 10 with USB host (A-13) |
 
-## 14. Out of scope for the first release
+## 16. Out of scope for the first release
 
 - Piano or any second instrument (D-14).
 - Console or virtual-organ integration for registration (D-6).
@@ -386,7 +481,7 @@ against recorded MIDI fixtures and, if the stack ever changes, ported.
 - Improvisation, harmonisation, hymn playing, service skills.
 - Group features, community, or any teacher role beyond tutor sessions.
 
-## 15. Decisions from interview round one
+## 17. Decisions from interview rounds one and two
 
 | ID | Decision |
 |---|---|
@@ -406,8 +501,18 @@ against recorded MIDI fixtures and, if the stack ever changes, ported.
 | D-14 | Piano deferred entirely. |
 | D-15 | Practice calendar, milestones, and achievements are in scope. |
 | D-16 | Name PocketMaestro; team is one professional organist; stack to be modern, flexible, maintainable. |
+| D-17 | First lesson always free; monthly and annual subscriptions. |
+| D-18 | Self-assessment is rated per part. |
+| D-19 | Tutor sessions: two hours for 100 USD, always available, optional, booked in the app. |
+| D-20 | Catalogue detailed in catalogue.md. |
+| D-21 | Landscape is the default playing orientation. |
+| D-22 | The organist builds the product alone with AI assistance. |
+| D-23 | Swiss hosting; the legal entity is a private person. |
+| D-24 | New brand, several visual directions to be tried. |
+| D-25 | Achievements both general and per piece. |
+| D-26 | Reference performances captured as MIDI and audio together. |
 
-## 16. Assumptions register
+## 18. Assumptions register
 
 | ID | Assumption |
 |---|---|
@@ -420,22 +525,23 @@ against recorded MIDI fixtures and, if the stack ever changes, ported.
 | A-7 | Portrait shows two to three bars per line; landscape one system. |
 | A-8 | Tablet layout comes after launch. |
 | A-9 | Authoring throughput of one lesson per two weeks. |
-| A-10 | The launch catalogue in section 9.1. |
+| A-10 | Launch with six lessons, ten within the first quarter (catalogue.md). |
 | A-11 | Tutor video runs on an external service in v1. |
 | A-12 | Backend hosted in an EU region. |
 | A-13 | Minimum iOS 16 and Android 10. |
+| A-14 | Tutor payment through Stripe outside store billing passes review. |
+| A-15 | The three brand directions in section 11 are the starting set. |
+| A-16 | Offline grace period of 14 days after a subscription lapses. |
 
-## 17. Open questions for round two
+## 19. Open questions for round three
 
 | ID | Question |
 |---|---|
-| Q-1 | Subscription shape: monthly and annual prices, trial length, and whether one lesson stays free as a permanent sample. |
-| Q-2 | Self-assessed track: is the three-step rating plus metronome tempo acceptable, or do you want a richer self-check (per-part ratings, a short checklist per exercise)? |
-| Q-3 | Tutor sessions: price, session length, who else may tutor later, and whether booking happens in the app or on a web page. |
-| Q-4 | Catalogue: which of the ten candidates stay, what replaces the rest, and how many hours one lesson takes you to author with a good tool. |
-| Q-5 | Score view: is landscape acceptable as the default while playing on a phone? |
-| Q-6 | Who builds it: an outside developer or agency, an AI-assisted solo effort, or a hire; and the target date for a first testable build. |
-| Q-7 | Data location and legal: Swiss or EU hosting, and which entity signs the store accounts. |
-| Q-8 | Visual identity: any existing PocketMaestro branding, or does design start from zero? |
-| Q-9 | Achievements: do you want a fixed list now, or should the authoring tool let you define achievements per piece? |
-| Q-10 | Reference audio: does your recording instrument give you audio alongside MIDI, or is MIDI rendered through the built-in sound the only playback at launch? |
+| Q-1 | Subscription prices: a starting point of CHF 12 monthly and CHF 96 annually is in the plan as a placeholder; what do you want to test? |
+| Q-2 | Launch scope: six lessons at launch and ten within the first quarter, or hold the launch until ten are done? Catalogue.md has the hours behind both. |
+| Q-3 | Tax and legal: do you have an advisor to confirm the VAT position for tutor sessions and the store account setup as a private person? |
+| Q-4 | Your console: which instrument records the references, and does it send pedal, manuals, and stops on separate MIDI channels? This fixes the reference format and the setup guide. |
+| Q-5 | Tutor availability: how many two-hour slots per week do you want to open at launch? |
+| Q-6 | Development time: how many hours per week can you give the build? The phase plan in section 14.4 assumes about 20. |
+| Q-7 | Test devices: which iPhone and which Android phone will you build against, and do you have the USB adapters for both? |
+| Q-8 | Brand exploration: do you want the three directions in section 11 mocked up as screens next, before any code? |
