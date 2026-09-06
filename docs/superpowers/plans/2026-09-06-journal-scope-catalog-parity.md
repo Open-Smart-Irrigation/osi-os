@@ -79,7 +79,7 @@
 - Modify: `scripts/journal-catalog-core.js`
 - Modify: `scripts/test-journal-catalog-generator.js`
 - Modify: `scripts/test-journal-schema.js`
-- Add: `database/migrations/ordered/0050__journal_catalog_v11.sql`; immediately before generation, recheck that `0049__sdi12_recipe_deployments.sql` is still the ordered head and update the plan if another migration has landed.
+- Add: `database/migrations/ordered/0051__journal_catalog_v11.sql`; `0050__journal_v2_plot_group_snapshot.sql` was added by the prerequisite cloud-primary group-projection slice. Immediately before generation, recheck that `0050` is still the ordered head and update the plan if another migration has landed.
 - Modify generated seed/bundled database artifacts only with existing generator/apply scripts.
 - Add/update the generated requirement fixture at the repository's existing catalog fixture location.
 
