@@ -411,7 +411,7 @@ CREATE TABLE journal_edge_mutations (
   workspace_uuid TEXT NOT NULL,
   operation TEXT NOT NULL CHECK (operation IN (
     'ENTRY_CREATE','ENTRY_CORRECT','ENTRY_VOID','PRODUCT_UPSERT',
-    'CUSTOM_VOCAB_UPSERT','PLOT_SNAPSHOT','CUTOVER_BARRIER_RECEIPT'
+    'CUSTOM_VOCAB_UPSERT','PLOT_SNAPSHOT','PLOT_GROUP_SNAPSHOT','CUTOVER_BARRIER_RECEIPT'
   )),
   resource_uuid TEXT NOT NULL,
   base_version INTEGER NOT NULL CHECK (base_version >= 0),
@@ -448,7 +448,7 @@ CREATE TABLE journal_replication_applied (
   workspace_uuid TEXT NOT NULL,
   sequence TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN (
-    'ENTRY_HEAD','ENTRY_CONFLICT','REFERENCE_DATA','PLOT_SNAPSHOT',
+    'ENTRY_HEAD','ENTRY_CONFLICT','REFERENCE_DATA','PLOT_SNAPSHOT','PLOT_GROUP_SNAPSHOT',
     'CROP_CYCLE_PROJECTION','ATTACHMENT_DESCRIPTOR','AUTHORITY_STATE'
   )),
   payload_sha256 TEXT NOT NULL CHECK (
@@ -536,6 +536,16 @@ CREATE TABLE journal_v2_plot_snapshots (
   payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
   recorded_at TEXT NOT NULL,
   PRIMARY KEY(workspace_uuid,plot_uuid)
+);
+CREATE TABLE journal_v2_plot_group_snapshots (
+  workspace_uuid TEXT NOT NULL,
+  group_uuid TEXT NOT NULL,
+  snapshot_uuid TEXT NOT NULL,
+  gateway_device_eui TEXT NOT NULL,
+  projection_version INTEGER NOT NULL CHECK (projection_version >= 1),
+  payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY(workspace_uuid,group_uuid)
 );
 CREATE TABLE journal_v2_crop_cycles (
   workspace_uuid TEXT NOT NULL,

@@ -299,6 +299,34 @@ function assertPlot(plot, resource) {
   if (resource && plot.sync_version !== resource.projection_version) fail('plot projection_version mismatch');
 }
 
+function assertPlotGroup(group, resource) {
+  object(group, 'plot group');
+  assertExactKeys(group, [
+    'contract_version', 'group_uuid', 'owner_user_uuid', 'label', 'gateway_device_eui',
+    'created_by_principal_uuid', 'created_at', 'resolved_at', 'resolved_by_principal_uuid',
+    'sync_version', 'deleted_at', 'members',
+  ], 'plot group');
+  if (group.contract_version !== 2) fail('plot group contract_version must be 2');
+  assertUuid(group.group_uuid, 'plot_group.group_uuid');
+  assertUuid(group.owner_user_uuid, 'plot_group.owner_user_uuid');
+  assertEui(group.gateway_device_eui, 'plot_group.gateway_device_eui');
+  assertUuid(group.created_by_principal_uuid, 'plot_group.created_by_principal_uuid');
+  assertTimestamp(group.created_at, 'plot_group.created_at');
+  assertNullableTimestamp(group.resolved_at, 'plot_group.resolved_at');
+  assertNullableUuid(group.resolved_by_principal_uuid, 'plot_group.resolved_by_principal_uuid');
+  if ((group.resolved_at === null) !== (group.resolved_by_principal_uuid === null)) {
+    fail('plot group resolved audit fields must both be present or null');
+  }
+  assertInteger(group.sync_version, 0, MAX_SAFE_INTEGER, 'plot group sync_version must be nonnegative');
+  assertNullableTimestamp(group.deleted_at, 'plot_group.deleted_at');
+  if (!Array.isArray(group.members)) fail('plot group members must be an array');
+  assertSortedUnique(group.members, (member) => member, 'plot group members');
+  for (const member of group.members) assertUuid(member, 'plot group member');
+  if (resource && group.group_uuid !== resource.group_uuid) fail('plot group resource identity mismatch');
+  if (resource && group.gateway_device_eui !== resource.gateway_device_eui) fail('plot group gateway identity mismatch');
+  if (resource && group.sync_version !== resource.projection_version) fail('plot group projection_version mismatch');
+}
+
 function validateMutationStructure(envelope) {
   object(envelope, 'mutation envelope');
   assertExactKeys(envelope, [
@@ -371,6 +399,17 @@ function validateMutationStructure(envelope) {
       assertInteger(resource.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
       if (envelope.origin !== 'edge-worker') fail('plot snapshot origin must be edge-worker');
       assertPlot(candidate.plot, resource);
+      break;
+    case 'PLOT_GROUP_SNAPSHOT':
+      assertExactKeys(resource, [
+        'gateway_device_eui', 'group_uuid', 'projection_version',
+      ], 'plot group resource');
+      assertExactKeys(candidate, ['plot_group'], 'plot group candidate');
+      assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
+      assertUuid(resource.group_uuid, 'resource.group_uuid');
+      assertInteger(resource.projection_version, 1, MAX_SAFE_INTEGER, 'plot group projection_version must be positive');
+      if (envelope.origin !== 'edge-worker') fail('plot group snapshot origin must be edge-worker');
+      assertPlotGroup(candidate.plot_group, resource);
       break;
     case 'CUTOVER_BARRIER_RECEIPT': {
       assertExactKeys(resource, ['gateway_device_eui', 'barrier_uuid'], 'cutover resource');
@@ -483,6 +522,19 @@ function validateReplicationStructure(envelope) {
       assertInteger(payload.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
       assertPlot(payload.plot, {
         plot_uuid: payload.plot.plot_uuid,
+        gateway_device_eui: payload.gateway_device_eui,
+        projection_version: payload.projection_version,
+      });
+      break;
+    case 'PLOT_GROUP_SNAPSHOT':
+      assertExactKeys(payload, [
+        'snapshot_uuid', 'gateway_device_eui', 'projection_version', 'plot_group',
+      ], 'plot group snapshot payload');
+      assertUuid(payload.snapshot_uuid, 'snapshot_uuid');
+      assertEui(payload.gateway_device_eui, 'gateway_device_eui');
+      assertInteger(payload.projection_version, 1, MAX_SAFE_INTEGER, 'plot group projection_version must be positive');
+      assertPlotGroup(payload.plot_group, {
+        group_uuid: payload.plot_group.group_uuid,
         gateway_device_eui: payload.gateway_device_eui,
         projection_version: payload.projection_version,
       });

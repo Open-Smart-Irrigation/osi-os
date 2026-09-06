@@ -383,6 +383,20 @@
       "payload_sha256": "e340baf30123ed4aa4eaebf6d6fcbc347596c4a6b97191c8ff4455aa32950317"
     },
     {
+      "name": "PLOT_GROUP_SNAPSHOT full envelope",
+      "input": {
+        "mutation_uuid": "10000000-0000-4000-8000-000000000009",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000001",
+        "operation": "PLOT_GROUP_SNAPSHOT",
+        "resource": {"gateway_device_eui": "0016C001F11715E2", "group_uuid": "62000000-0000-4000-8000-000000000001", "projection_version": 1},
+        "candidate": {"plot_group": {"contract_version": 2, "group_uuid": "62000000-0000-4000-8000-000000000001", "owner_user_uuid": "40000000-0000-4000-8000-000000000001", "label": "North trial", "gateway_device_eui": "0016C001F11715E2", "created_by_principal_uuid": "50000000-0000-4000-8000-000000000001", "created_at": "2026-09-06T09:00:00.000Z", "resolved_at": "2026-09-06T10:00:00.000Z", "resolved_by_principal_uuid": "50000000-0000-4000-8000-000000000001", "sync_version": 1, "deleted_at": null, "members": ["60000000-0000-4000-8000-000000000001"]}},
+        "origin": "edge-worker", "recorded_at": "2026-09-06T10:00:00.000Z",
+        "payload_sha256": "b50e99aed9f7a6ffde7a0d39444d0418adb025c99bf5fc00fffd1fff9f1efa7c"
+      },
+      "canonical_hash_input": "{\"candidate\":{\"plot_group\":{\"contract_version\":2,\"created_at\":\"2026-09-06T09:00:00.000Z\",\"created_by_principal_uuid\":\"50000000-0000-4000-8000-000000000001\",\"deleted_at\":null,\"gateway_device_eui\":\"0016C001F11715E2\",\"group_uuid\":\"62000000-0000-4000-8000-000000000001\",\"label\":\"North trial\",\"members\":[\"60000000-0000-4000-8000-000000000001\"],\"owner_user_uuid\":\"40000000-0000-4000-8000-000000000001\",\"resolved_at\":\"2026-09-06T10:00:00.000Z\",\"resolved_by_principal_uuid\":\"50000000-0000-4000-8000-000000000001\",\"sync_version\":1}},\"mutation_uuid\":\"10000000-0000-4000-8000-000000000009\",\"operation\":\"PLOT_GROUP_SNAPSHOT\",\"origin\":\"edge-worker\",\"recorded_at\":\"2026-09-06T10:00:00.000Z\",\"resource\":{\"gateway_device_eui\":\"0016C001F11715E2\",\"group_uuid\":\"62000000-0000-4000-8000-000000000001\",\"projection_version\":1},\"workspace_uuid\":\"20000000-0000-4000-8000-000000000001\"}",
+      "payload_sha256": "b50e99aed9f7a6ffde7a0d39444d0418adb025c99bf5fc00fffd1fff9f1efa7c"
+    },
+    {
       "name": "CUTOVER_BARRIER_RECEIPT full envelope",
       "input": {
         "mutation_uuid": "10000000-0000-4000-8000-000000000007",
@@ -820,6 +834,16 @@
       },
       "canonical_hash_input": "{\"barrier_uuid\":null,\"from_state\":null,\"gateway_device_eui\":\"0016C001F11715E2\",\"reason\":null,\"target_state\":\"PREPARE_REQUESTED\",\"transition_uuid\":\"f0000000-0000-4000-8000-000000000002\"}",
       "payload_sha256": "817446e2313a04cf2c7130190f7a2f552246a6cc2209b5f997e090baf3df2d3d"
+    },
+    {
+      "name": "PLOT_GROUP_SNAPSHOT full envelope",
+      "input": {
+        "sequence": "8", "workspace_uuid": "20000000-0000-4000-8000-000000000001", "kind": "PLOT_GROUP_SNAPSHOT",
+        "payload": {"snapshot_uuid": "d0000000-0000-4000-8000-000000000008", "gateway_device_eui": "0016C001F11715E2", "projection_version": 1, "plot_group": {"contract_version": 2, "group_uuid": "62000000-0000-4000-8000-000000000001", "owner_user_uuid": "40000000-0000-4000-8000-000000000001", "label": "North trial", "gateway_device_eui": "0016C001F11715E2", "created_by_principal_uuid": "50000000-0000-4000-8000-000000000001", "created_at": "2026-09-06T09:00:00.000Z", "resolved_at": "2026-09-06T10:00:00.000Z", "resolved_by_principal_uuid": "50000000-0000-4000-8000-000000000001", "sync_version": 1, "deleted_at": null, "members": ["60000000-0000-4000-8000-000000000001"]}},
+        "recorded_at": "2026-09-06T10:00:00.000Z", "payload_sha256": "0377f01ebfab8a1ae36623ee9167cb66ef7a3373e5885a819568812a26857259"
+      },
+      "canonical_hash_input": "{\"gateway_device_eui\":\"0016C001F11715E2\",\"plot_group\":{\"contract_version\":2,\"created_at\":\"2026-09-06T09:00:00.000Z\",\"created_by_principal_uuid\":\"50000000-0000-4000-8000-000000000001\",\"deleted_at\":null,\"gateway_device_eui\":\"0016C001F11715E2\",\"group_uuid\":\"62000000-0000-4000-8000-000000000001\",\"label\":\"North trial\",\"members\":[\"60000000-0000-4000-8000-000000000001\"],\"owner_user_uuid\":\"40000000-0000-4000-8000-000000000001\",\"resolved_at\":\"2026-09-06T10:00:00.000Z\",\"resolved_by_principal_uuid\":\"50000000-0000-4000-8000-000000000001\",\"sync_version\":1},\"projection_version\":1,\"snapshot_uuid\":\"d0000000-0000-4000-8000-000000000008\"}",
+      "payload_sha256": "0377f01ebfab8a1ae36623ee9167cb66ef7a3373e5885a819568812a26857259"
     }
   ],
   "result_vectors": [
@@ -862,6 +886,15 @@
         "mutation_uuid": "10000000-0000-4000-8000-000000000007",
         "outcome": "applied",
         "barrier_uuid": "90000000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "PlotGroupSnapshotResult",
+      "input": {
+        "kind": "PLOT_GROUP_SNAPSHOT_RESULT",
+        "mutation_uuid": "10000000-0000-4000-8000-000000000009",
+        "outcome": "applied",
+        "projection_version": 1
       }
     }
   ],

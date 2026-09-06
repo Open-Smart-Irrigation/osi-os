@@ -153,6 +153,8 @@ function resourceIdentity(mutation) {
       return resource.custom_field_uuid;
     case 'PLOT_SNAPSHOT':
       return resource.plot_uuid;
+    case 'PLOT_GROUP_SNAPSHOT':
+      return resource.group_uuid;
     case 'CUTOVER_BARRIER_RECEIPT':
       return resource.barrier_uuid;
     default:
@@ -161,7 +163,9 @@ function resourceIdentity(mutation) {
 }
 
 function baseVersion(mutation) {
-  if (mutation.operation === 'PLOT_SNAPSHOT') return mutation.resource.projection_version - 1;
+  if (mutation.operation === 'PLOT_SNAPSHOT' || mutation.operation === 'PLOT_GROUP_SNAPSHOT') {
+    return mutation.resource.projection_version - 1;
+  }
   if (mutation.operation === 'CUTOVER_BARRIER_RECEIPT') return 0;
   return mutation.resource.base_version;
 }
@@ -272,11 +276,14 @@ function validateOutcome(mutation, outcome) {
         outcome.resource_uuid !== resourceIdentity(mutation)) {
       throw error('invalid_outcome', 'Reference mutation result has the wrong resource');
     }
-  } else if (mutation.operation === 'PLOT_SNAPSHOT') {
+  } else if (mutation.operation === 'PLOT_SNAPSHOT' || mutation.operation === 'PLOT_GROUP_SNAPSHOT') {
     assertExactKeys(outcome, [
       'kind', 'mutation_uuid', 'outcome', 'projection_version',
     ], 'Plot mutation result');
-    if (outcome.kind !== 'PLOT_SNAPSHOT_RESULT' ||
+    const expectedKind = mutation.operation === 'PLOT_SNAPSHOT'
+      ? 'PLOT_SNAPSHOT_RESULT'
+      : 'PLOT_GROUP_SNAPSHOT_RESULT';
+    if (outcome.kind !== expectedKind ||
         outcome.projection_version !== mutation.resource.projection_version) {
       throw error('invalid_outcome', 'Plot mutation result has the wrong projection version');
     }
@@ -453,6 +460,24 @@ async function replacePlot(tx, envelope) {
   );
 }
 
+async function replacePlotGroup(tx, envelope) {
+  const payload = envelope.payload;
+  await run(
+    tx,
+    'INSERT INTO journal_v2_plot_group_snapshots(' +
+      'workspace_uuid,group_uuid,snapshot_uuid,gateway_device_eui,projection_version,payload_json,recorded_at' +
+    ') VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace_uuid,group_uuid) DO UPDATE SET ' +
+      'snapshot_uuid=excluded.snapshot_uuid,gateway_device_eui=excluded.gateway_device_eui,' +
+      'projection_version=excluded.projection_version,payload_json=excluded.payload_json,' +
+      'recorded_at=excluded.recorded_at',
+    [
+      envelope.workspace_uuid, payload.plot_group.group_uuid, payload.snapshot_uuid,
+      payload.gateway_device_eui, payload.projection_version, JSON.stringify(payload.plot_group),
+      envelope.recorded_at,
+    ]
+  );
+}
+
 async function replaceCropCycle(tx, envelope) {
   const payload = envelope.payload;
   await run(
@@ -541,6 +566,7 @@ async function project(tx, envelope) {
     case 'ENTRY_CONFLICT': return replaceConflict(tx, envelope);
     case 'REFERENCE_DATA': return replaceReference(tx, envelope);
     case 'PLOT_SNAPSHOT': return replacePlot(tx, envelope);
+    case 'PLOT_GROUP_SNAPSHOT': return replacePlotGroup(tx, envelope);
     case 'CROP_CYCLE_PROJECTION': return replaceCropCycle(tx, envelope);
     case 'ATTACHMENT_DESCRIPTOR': return replaceAttachment(tx, envelope);
     case 'AUTHORITY_STATE': return replaceAuthority(tx, envelope);

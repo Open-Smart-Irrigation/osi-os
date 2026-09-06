@@ -749,6 +749,10 @@ const schemaContract = {
     'workspace_uuid', 'plot_uuid', 'snapshot_uuid', 'gateway_device_eui',
     'projection_version', 'payload_json', 'recorded_at',
   ],
+  journal_v2_plot_group_snapshots: [
+    'workspace_uuid', 'group_uuid', 'snapshot_uuid', 'gateway_device_eui',
+    'projection_version', 'payload_json', 'recorded_at',
+  ],
   journal_v2_crop_cycles: [
     'workspace_uuid', 'cycle_uuid', 'sync_version', 'payload_json', 'recorded_at',
   ],
