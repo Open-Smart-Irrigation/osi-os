@@ -34,6 +34,35 @@ const product = {
 } satisfies JournalProductRow;
 
 describe('NutrientRepeater', () => {
+  it('records a selected nutrient unit when that required value was not observed, and can return to value entry', () => {
+    const onChange = vi.fn();
+    render(
+      <NutrientRepeater
+        attributeCode="attr.amount_nutrient_rate"
+        label="Nutrient rate"
+        locale="en-GB"
+        required
+        units={units}
+        values={[{
+          attribute_code: 'attr.amount_nutrient_rate',
+          group_index: 0,
+          entered_value_num: null,
+          entered_unit_code: 'unit.kg_n_per_ha_nutrient',
+        }]}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.valueStatus.not_observed' }));
+    expect(onChange).toHaveBeenLastCalledWith([{
+      attribute_code: 'attr.amount_nutrient_rate',
+      group_index: 0,
+      value_status: 'not_observed',
+      unit_code: 'unit.kg_n_per_ha_nutrient',
+      entered_unit_code: 'unit.kg_n_per_ha_nutrient',
+    }]);
+  });
+
   it('preserves explicit group indices and uses fixed nutrient-unit chips', () => {
     const onChange = vi.fn();
     render(
