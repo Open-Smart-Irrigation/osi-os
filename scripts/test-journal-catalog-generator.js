@@ -47,7 +47,7 @@ assert.ok(
 
 const migrationsDir = path.join(repoRoot, 'database/migrations/ordered');
 const v1Path = path.join(migrationsDir, '0019__journal_catalog_v1.sql');
-const v2Path = path.join(migrationsDir, '0022__journal_catalog_v2.sql');
+const v2Path = path.join(migrationsDir, '0031__journal_catalog_v2.sql');
 const seedPath = path.join(repoRoot, 'database/seed-blank.sql');
 const manifestPath = path.join(migrationsDir, 'CHECKSUMS.json');
 
@@ -90,15 +90,15 @@ assert.deepEqual(
   compiled.migrations.map((migration) => ({ version: migration.version, name: migration.name })),
   [
     { version: 1, name: '0019__journal_catalog_v1.sql' },
-    { version: 2, name: '0022__journal_catalog_v2.sql' },
-    { version: 3, name: '0023__journal_catalog_v3.sql' },
-    { version: 4, name: '0026__journal_catalog_v4.sql' },
-    { version: 5, name: '0027__journal_catalog_v5.sql' },
-    { version: 6, name: '0028__journal_catalog_v6.sql' },
-    { version: 7, name: '0029__journal_catalog_v7.sql' },
-    { version: 8, name: '0030__journal_catalog_v8.sql' },
-    { version: 9, name: '0031__journal_catalog_v9.sql' },
-    { version: 10, name: '0032__journal_catalog_v10.sql' },
+    { version: 2, name: '0031__journal_catalog_v2.sql' },
+    { version: 3, name: '0032__journal_catalog_v3.sql' },
+    { version: 4, name: '0035__journal_catalog_v4.sql' },
+    { version: 5, name: '0036__journal_catalog_v5.sql' },
+    { version: 6, name: '0037__journal_catalog_v6.sql' },
+    { version: 7, name: '0038__journal_catalog_v7.sql' },
+    { version: 8, name: '0039__journal_catalog_v8.sql' },
+    { version: 9, name: '0040__journal_catalog_v9.sql' },
+    { version: 10, name: '0041__journal_catalog_v10.sql' },
   ],
   'compileCatalog must emit exactly the registered catalog migrations, in version order',
 );
