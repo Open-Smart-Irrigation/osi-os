@@ -216,6 +216,20 @@ describe('ActivityPicker', () => {
     expect(screen.getByRole('region', { name: 'All options' })).toHaveTextContent('Bewässerung');
   });
 
+  it('uses one tab stop for the activity grid and moves it with arrow keys', () => {
+    render(<ActivityPicker {...baseProps} layoutFallback={[leaf('irrigation'), leaf('sampling')]} />);
+
+    const grid = screen.getByRole('region', { name: 'All options' });
+    const buttons = activityButtons(grid);
+    expect(buttons.filter((button) => button.tabIndex === 0)).toHaveLength(1);
+
+    buttons[0].focus();
+    fireEvent.keyDown(buttons[0], { key: 'ArrowRight' });
+    expect(buttons[1]).toHaveFocus();
+    expect(buttons[1].tabIndex).toBe(0);
+    expect(buttons[0].tabIndex).toBe(-1);
+  });
+
   it('filters unsupported recents that are absent from the layout fallback', () => {
     render(
       <ActivityPicker
