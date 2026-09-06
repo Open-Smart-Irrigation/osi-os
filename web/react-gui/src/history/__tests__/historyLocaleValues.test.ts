@@ -140,7 +140,11 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
 describe('history locale value parity', () => {
   it('keeps all six locales translated except reviewed shared technical values', () => {
     const english = localeLeaves('en');
-    expect(Object.keys(english)).toHaveLength(414);
+    // 418, not the AgroLink source arc's 414: main carries four additional
+    // irrigationTimeline.eventLabel keys from the valve-control work
+    // (serviceAction, onValveSchedule, oneTime, unexplained). All four are
+    // already translated in every shipped locale, so only the count moves.
+    expect(Object.keys(english)).toHaveLength(418);
 
     for (const locale of LOCALES) {
       const translated = localeLeaves(locale);

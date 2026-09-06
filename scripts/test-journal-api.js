@@ -2057,7 +2057,7 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
     hash_scope: 'core_catalog_state',
     // Slice F: the seeded catalog is now at v6 (BBCH growth stage + manual
     // weather-at-application attrs + farmer_quick@6/full_record@6).
-    core_version: 6,
+    core_version: 10,
     core_hash: metadata.catalog.core_hash,
     scoped_effective_hash: {
       value: null,
