@@ -1,4 +1,4 @@
-# PocketMaestro: product specification (draft 0.5)
+# PocketMaestro: product specification (draft 0.6)
 
 Status: consolidated after four interview rounds; ready to freeze for the
 phase 0 spike. Section 17 records the decisions (`D-n`). The launch
@@ -138,7 +138,10 @@ secure.
 The engine answers one question after every attempt: what should this learner
 do next in this lesson? It runs on the device, takes attempt history, skill
 profile, and the piece's difficulty annotations, and is a pure library with
-unit tests and no network dependency.
+unit tests and no network dependency. Its governing target is a success rate
+near three attempts in four, the band where practice stretches without
+discouraging; the update rules that hold a learner there are specified in
+[architecture.md](architecture.md), section 6 (D-40).
 
 ### 6.1 Skill profile dimensions (A-3)
 
@@ -180,9 +183,12 @@ new learner is guided (A-4).
 2. Pick the section with the largest gap between predicted and target tempo.
 3. Within it, choose the least combined part configuration not yet passed;
    combine only when isolation is secure.
-4. Set tempo at the last passed tempo plus one step (default 4 % of target,
-   A-5), minus one step after two consecutive failures. Halve the step while
-   the relevant confidence is low.
+4. Raise the tempo one step (default 4 % of target, A-5) after two
+   consecutive passes at the current tempo; drop it one step after a fail.
+   This staircase settles where about 71 % of attempts succeed. (Earlier
+   drafts had the inverse rule, which settles near 38 %; the correction is
+   explained in architecture.md 6.2.) Halve the step while the relevant
+   confidence is low.
 5. After three failures on the same bars, spawn a loop drill on those bars
    and attach the technique card named in the difficulty annotation.
 6. Cap the session from the learner's practice budget (default 30 minutes,
@@ -455,7 +461,7 @@ milestones instead of a long phase ladder: B1 is the free lesson with the
 self-assessed track and local progress, B2 adds MIDI scoring, B3 adds
 adaptivity, six lessons, the subscription, and booking, and B3 is the launch
 product. The milestone contents, exit tests, and the two-week spike that
-precedes B1 are in architecture.md, section 9. B1 needs no server code at
+precedes B1 are in architecture.md, section 10. B1 needs no server code at
 all, and the twenty recruited students (D-36) test from B1 onward, which
 satisfies Google's fourteen-day closed-test requirement inside the normal
 beta sequence.
@@ -463,7 +469,10 @@ beta sequence.
 Working rules for the build: the specification and the content schema live
 in the repository and are updated before code changes; every engine change
 comes with a fixture test; a build goes to the phone at least weekly and is
-played on the console; no native module is added without a spike branch
+played against the emulated console (architecture.md, section 7) until the
+organ is available, and gate G1 there revalidates MIDI capture, the channel
+wizard, and the scoring fixtures on the real instrument before B2 reaches
+MIDI testers (D-39); no native module is added without a spike branch
 proving it on the target platform.
 
 ## 15. Non-functional requirements
@@ -531,6 +540,8 @@ proving it on the target platform.
 | D-36 | Twenty students are recruitable for the Google closed test. |
 | D-37 | Beta as soon as possible; spec depth goes to design and architecture, not roadmap. |
 | D-38 | Device-local launch; accounts and sync arrive with the iOS port. |
+| D-39 | Development runs against an emulated console; gate G1 revalidates on the real instrument before B2. |
+| D-40 | Adaptivity is a design priority: a simple, explainable algorithm adjusting pace and exercise type per learner. |
 
 ## 18. Assumptions register
 
