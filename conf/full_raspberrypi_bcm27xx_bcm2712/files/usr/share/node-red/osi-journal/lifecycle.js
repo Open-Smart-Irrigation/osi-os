@@ -2209,7 +2209,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     definitions.layout,
     definitions.template,
     candidate,
-    { mode: 'correction', originalEntry, referenceValues }
+    { mode: 'correction', originalEntry, referenceValues, enforceScope: true }
   );
   if (!validation.ok) {
     throw entryValidationError('Journal correction validation failed', validation);
@@ -2290,7 +2290,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
     definitions.layout,
     definitions.template,
     candidate,
-    { referenceValues }
+    { referenceValues, enforceScope: true }
   );
   if (!validation.ok) {
     throw entryValidationError('Journal draft finalization validation failed', validation);
@@ -2384,7 +2384,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     definitions.layout,
     definitions.template,
     candidate,
-    { referenceValues }
+    { referenceValues, enforceScope: true }
   );
   if (!validation.ok) {
     throw entryValidationError('Journal entry validation failed', validation);

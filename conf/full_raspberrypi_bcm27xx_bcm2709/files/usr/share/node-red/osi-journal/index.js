@@ -602,6 +602,23 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     });
   }
   if (compatibilityErrors.length) return { ok: false, errors: compatibilityErrors };
+  if (context.enforceScope) {
+    const farmWide = _layoutDef.code === 'farm_wide';
+    if (farmWide && entryInput.plot_uuid != null) {
+      return errorResult(
+        'plot_uuid',
+        'farm_wide_requires_no_plot',
+        'Farm-wide entries cannot be assigned to a plot'
+      );
+    }
+    if (!farmWide && entryInput.plot_uuid == null) {
+      return errorResult(
+        'plot_uuid',
+        'plot_required',
+        'A plot is required for this activity'
+      );
+    }
+  }
   if (!Array.isArray(entryInput.values)) {
     return errorResult('values', 'invalid_type', 'Values must be an array');
   }

@@ -2233,6 +2233,33 @@ test('validateEntry: full_record@11 uses the generated final matrix and permits 
     error.field === 'attr.product_uuid|attr.product' && error.code === 'required'));
 });
 
+test('validateEntry: final v11 scope permits farm-wide only for maintenance and observations', async () => {
+  const { catalog } = await loadedFixture('farm-wide-final-scope-v11');
+  const fullRecordV11 = catalog.templates.get('full_record').get(11);
+  const openFieldV11 = catalog.layouts.get('open_field').get(11);
+  const farmWide = catalog.layouts.get('farm_wide').get(1);
+
+  const plotRequired = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11,
+  }), { enforceScope: true });
+  assert.equal(plotRequired.ok, false);
+  assert.ok(plotRequired.errors.some((error) => error.code === 'plot_required'));
+
+  const farmWideMaintenance = validateEntry(catalog, farmWide, fullRecordV11, validIrrigation({
+    activity_code: 'equipment_maintenance', template_code: 'full_record', template_version: 11,
+    layout_code: 'farm_wide', layout_version: 1, values: [], note: 'Serviced mower',
+  }), { enforceScope: true });
+  assert.equal(farmWideMaintenance.ok, true, JSON.stringify(farmWideMaintenance.errors));
+
+  const farmWideWithPlot = validateEntry(catalog, farmWide, fullRecordV11, validIrrigation({
+    activity_code: 'equipment_maintenance', template_code: 'full_record', template_version: 11,
+    layout_code: 'farm_wide', layout_version: 1,
+    plot_uuid: '11111111-1111-4111-8111-111111111111', values: [], note: 'Serviced mower',
+  }), { enforceScope: true });
+  assert.equal(farmWideWithPlot.ok, false);
+  assert.ok(farmWideWithPlot.errors.some((error) => error.code === 'farm_wide_requires_no_plot'));
+});
+
 // Version-pinned control: an entry pinned to the frozen full_record@9 keeps
 // v9's activity-wide harvest requirement (crop + harvest_area +
 // harvest_yield_area) — only NEW entries created against @10 get
