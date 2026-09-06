@@ -33,6 +33,8 @@ const RESEARCH_IDENTITY_FIELDS = new Set([
 const ENTRY_FILTERS = [
   'entry_uuid',
   'plot_uuid',
+  'station_code',
+  'group_uuid',
   'zone_uuid',
   'activity_code',
   'status',
@@ -445,13 +447,28 @@ function normalizeEntryFilters(rawFilters) {
   for (const field of ENTRY_FILTERS) {
     if (field === 'status') continue;
     let value = normalizedStringFilter(raw[field], field);
-    if (value != null && ['entry_uuid', 'plot_uuid', 'zone_uuid', 'campaign_uuid', 'batch_uuid', 'pass_uuid'].includes(field)) {
+    if (value != null && ['entry_uuid', 'plot_uuid', 'group_uuid', 'zone_uuid', 'campaign_uuid', 'batch_uuid', 'pass_uuid'].includes(field)) {
       value = canonicalUuid(value, field, true);
     }
     if (value != null && ['occurred_from', 'occurred_to'].includes(field) && !Number.isFinite(Date.parse(value))) {
       badRequest('invalid_filter', field + ' must be an ISO timestamp');
     }
     if (value != null) filters[field] = value;
+  }
+  const scopes = ['plot_uuid', 'station_code', 'group_uuid'].filter(function(field) {
+    return filters[field] != null;
+  });
+  if (scopes.length > 1) {
+    badRequest('conflicting_scope_filters', 'Only one entry scope filter may be supplied');
+  }
+  if (filters.station_code != null) {
+    if (typeof filters.station_code !== 'string') {
+      badRequest('invalid_filter', 'station_code filter is invalid');
+    }
+    filters.station_code = filters.station_code.normalize('NFKC').trim();
+    if (!filters.station_code || Buffer.byteLength(filters.station_code, 'utf8') > 240) {
+      badRequest('invalid_filter', 'station_code filter is invalid');
+    }
   }
   filters.status = String(raw.status || 'final').trim().toLowerCase();
   if (!['draft', 'final', 'voided', 'all'].includes(filters.status)) {
@@ -462,6 +479,48 @@ function normalizeEntryFilters(rawFilters) {
   filters.limit = Math.min(limit, 100);
   if (raw.cursor != null && raw.cursor !== '') filters.cursor = String(raw.cursor);
   return filters;
+}
+
+function entryScopeOwnership(readScope) {
+  return readScope ? { clause: '', params: [] } : {
+    clause: ' AND owner_user_uuid=?',
+    params: [],
+  };
+}
+
+async function resolveEntryScope(db, filters, principal, readScope) {
+  const ownership = entryScopeOwnership(readScope);
+  if (!readScope) ownership.params.push(principal.owner_user_uuid);
+  const unavailable = function() {
+    throw apiError(404, 'scope_not_found', 'Journal scope was not found');
+  };
+  if (filters.plot_uuid != null) {
+    const plot = await dbGet(db,
+      'SELECT plot_uuid FROM journal_plots WHERE plot_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL' + ownership.clause + ' LIMIT 1',
+      [filters.plot_uuid, principal.gateway_device_eui].concat(ownership.params));
+    if (!plot) unavailable();
+    return { clause: 'e.plot_uuid=?', params: [plot.plot_uuid] };
+  }
+  if (filters.station_code != null) {
+    const plots = await dbAll(db,
+      'SELECT plot_uuid FROM journal_plots WHERE station_code=? AND gateway_device_eui=? AND deleted_at IS NULL' + ownership.clause + ' ORDER BY plot_uuid',
+      [filters.station_code, principal.gateway_device_eui].concat(ownership.params));
+    if (!plots.length) unavailable();
+    return { clause: 'e.plot_uuid IN (' + plots.map(function() { return '?'; }).join(',') + ')', params: plots.map(function(plot) { return plot.plot_uuid; }) };
+  }
+  if (filters.group_uuid != null) {
+    const group = await dbGet(db,
+      'SELECT group_uuid FROM journal_plot_groups WHERE group_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL' + ownership.clause + ' LIMIT 1',
+      [filters.group_uuid, principal.gateway_device_eui].concat(ownership.params));
+    if (!group) unavailable();
+    const plots = await dbAll(db,
+      'SELECT p.plot_uuid FROM journal_plot_group_members AS m JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+        'WHERE m.group_uuid=? AND p.gateway_device_eui=? AND p.deleted_at IS NULL' + ownership.clause + ' ORDER BY p.plot_uuid',
+      [group.group_uuid, principal.gateway_device_eui].concat(ownership.params));
+    if (!plots.length) unavailable();
+    return { clause: 'e.plot_uuid IN (' + plots.map(function() { return '?'; }).join(',') + ')', params: plots.map(function(plot) { return plot.plot_uuid; }) };
+  }
+  return null;
 }
 
 function canonicalExportSelection(rawFilters) {
@@ -511,6 +570,11 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   const params = readScope
     ? [principal.gateway_device_eui]
     : [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui];
+  const entryScope = await resolveEntryScope(db, filters, principal, readScope);
+  if (entryScope) {
+    clauses.push(entryScope.clause);
+    params.push(...entryScope.params);
+  }
   // Write-only scoping (W2): every enabled account on the gateway reads every
   // journal entry, including plot-less (zone-only) entries. resolvedReadScope
   // is retained for its disabled-account 403 (P1); its plotUuids are not read.
@@ -520,7 +584,6 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   }
   const fieldColumns = {
     entry_uuid: 'e.entry_uuid',
-    plot_uuid: 'e.plot_uuid',
     activity_code: 'e.activity_code',
     campaign_uuid: 'e.campaign_uuid',
     protocol_code: 'e.protocol_code',

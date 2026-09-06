@@ -2215,6 +2215,55 @@ test('entry keyset pagination is stable for equal timestamps and rejects cursor 
   assert.deepEqual(seen, entryUuids);
 });
 
+test('station and group entry scopes are exclusive, normalized, and never fall back to all entries', async () => {
+  const { db, entryUuids } = await createPagedEntries('entry-scopes', null, 3);
+  const firstPlot = '61000000-0000-4000-8000-000000000001';
+  const secondPlot = '61000000-0000-4000-8000-000000000002';
+  const groupUuid = '62000000-0000-4000-8000-000000000001';
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-A', firstPlot);
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-B', secondPlot);
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Scope cohort',
+    resolved: false,
+    members: [firstPlot, secondPlot],
+  }, principal());
+
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', plot_uuid: firstPlot, station_code: 'Station-A' }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'conflicting_scope_filters'
+  );
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', group_uuid: 'not-a-uuid' }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'invalid_uuid'
+  );
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', station_code: 'x'.repeat(241) }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'invalid_filter'
+  );
+  const station = await journal.listEntries(db, { status: 'final', station_code: 'Station-A' }, principal());
+  assert.deepEqual(station.entries.map((entry) => entry.entry_uuid), [entryUuids[0]]);
+  const group = await journal.listEntries(db, { status: 'final', group_uuid: groupUuid }, principal());
+  assert.deepEqual(group.entries.map((entry) => entry.entry_uuid), entryUuids.slice(0, 2));
+  const selection = { status: 'final', group_uuid: groupUuid };
+  const csvRecords = parseCsvRecords(await journal.exportWideCsv(db, selection, principal()));
+  const uuidColumn = csvRecords[0].findIndex((cell) => cell.value === 'entry_uuid');
+  assert.deepEqual(csvRecords.slice(1).map((record) => record[uuidColumn].value), entryUuids.slice(0, 2));
+  const exported = JSON.parse(await journal.exportJson(db, selection, principal()));
+  assert.deepEqual(exported.entries.map((entry) => entry.entry_uuid), entryUuids.slice(0, 2));
+  for (const scope of [{ station_code: 'missing' }, { group_uuid: '62000000-0000-4000-8000-000000000099' }]) {
+    await assert.rejects(
+      journal.listEntries(db, Object.assign({ status: 'final' }, scope), principal()),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found'
+    );
+    await assert.rejects(
+      journal.exportJson(db, Object.assign({ status: 'final' }, scope), principal()),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found'
+    );
+  }
+});
+
 function parseStoredZip(buffer) {
   const endSignature = Buffer.from([0x50, 0x4B, 0x05, 0x06]);
   const endOffset = buffer.lastIndexOf(endSignature);
