@@ -28,5 +28,18 @@
   "0027__add_dragino_sdi12_type.sql": "653362d45eb35744f661c64eb44bf82b4015a464c8422e3979012a17ef4c9831",
   "0028__sdi12_value_count.sql": "c8807ca90e0e83e14018017b1756e9b02417c9e1528f5bb0c06218122e3cc5e9",
   "0029__sentek_vwc_vic_channels.sql": "d93d874711627da7e3cc98332324fd5e36c6bf3b32ba9c8330909ed23d722a21",
-  "0030__sdi12_recipe_deployments.sql": "dc67fa5b3c5b4db76cf8d9d3b7b8e7f24b67793819cef9b4af02c7cb30b4d1a1"
+  "0030__sdi12_recipe_deployments.sql": "dc67fa5b3c5b4db76cf8d9d3b7b8e7f24b67793819cef9b4af02c7cb30b4d1a1",
+  "0031__journal_catalog_v2.sql": "8b002914d7bdae1996917b046d81d76498346ef8aa1c6fb879efd3264033442c",
+  "0032__journal_catalog_v3.sql": "eafa56d1b2e517765e3848c61c3344109c63f5b6e6b2d2b069cc1f9b603707ba",
+  "0033__journal_plot_context.sql": "05e76046785a22b27ebe5c65112b348592b0ccd4cca9e110126a8e0ac93cc972",
+  "0034__journal_crop_cycles.sql": "223a667310b317b5b388bdbc7a780532ef79b55045d081c0792deceae23d90d3",
+  "0035__journal_catalog_v4.sql": "1e23aaf1c02c3121b17cf0eba177311fde5bdf30c0ab8a742b30ce7f6906a204",
+  "0036__journal_catalog_v5.sql": "82baf1a980ff248a9ce972f4c04c09d31f50185d8497773de2e8966c984ca8df",
+  "0037__journal_catalog_v6.sql": "b90da543a9019bdc2fafd1e0618826a3de07eb55adcd703128085b14d3c45eec",
+  "0038__journal_catalog_v7.sql": "0e55d79344833aeb7f27c05b1cf444b86c9dcbd86e7509be26ed0425437e27dd",
+  "0039__journal_catalog_v8.sql": "5ff1b6a9ea8b064b7b59eadb76a6d9703e4221868b306ccc10044a54670f4aac",
+  "0040__journal_catalog_v9.sql": "2be950f69a6973560ad8cda794e2e7ef7067ee4f1999a955eb9dc6fd3226d975",
+  "0041__journal_catalog_v10.sql": "f27d351f23d63b9ae3dcab44cb90541e3144af29c47d98ab60efa7a22af37b86",
+  "0042__journal_v2_replication.sql": "563a4da98b9f1f9dde7c6d36896615f77e20505619cedda6b2d3dfccae678e81",
+  "0043__journal_v2_media.sql": "f54b272e387cc389653425572dca5392a322abbc9a925d8c1bdee47fe98b0d01"
 }

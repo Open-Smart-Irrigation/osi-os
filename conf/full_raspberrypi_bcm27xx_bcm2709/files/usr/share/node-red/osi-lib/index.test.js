@@ -24,28 +24,20 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
     'agroscope-uplink-transform',
     'dendro-analytics',
-    'device-commands',
     'device-writer',
     'history-router',
     'history-sync',
-    'installation',
-    'irrigation-config-commands',
     'journal-replication',
     'lsn50-normalize',
     'osi-command-ledger',
     'osi-db-helper',
     'osi-journal',
-<<<<<<< HEAD
     'osi-system-settings',
     'osi-valve-control',
     'sdi12-commissioning',
     'sdi12-normalize',
     'sdi12-reassemble',
     'sdi12-recipe',
-=======
-    'scope',
-    'scoped-access-commands',
->>>>>>> b53bf44e5 (feat(journal): queue cloud-primary edge mutations)
     'uc512-normalize',
     'zone-commands',
     'zone-env',
@@ -93,13 +85,10 @@ test('command flow helpers load from OSI_LIB_BASE and cache successful modules',
   for (const [name, directory] of [
     ['osi-db-helper', 'osi-db-helper'],
     ['osi-command-ledger', 'osi-command-ledger'],
-<<<<<<< HEAD
     ['zone-commands', 'osi-zone-commands'],
     ['sdi12-recipe', 'osi-sdi12-recipe'],
     ['sdi12-commissioning', 'osi-sdi12-commissioning'],
-=======
     ['journal-replication', 'osi-journal-replication'],
->>>>>>> b53bf44e5 (feat(journal): queue cloud-primary edge mutations)
   ]) {
     const helperDirectory = path.join(FIXTURE_BASE, directory);
     const helperPath = path.join(helperDirectory, 'index.js');
