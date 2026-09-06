@@ -1962,7 +1962,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       return;
     }
     if (step === 'where') {
-      if (!selectedPlot && layoutCode !== 'farm_wide') {
+      if (selectedPlotUuids.length === 0 && layoutCode !== 'farm_wide') {
         setWhereError('capture.validation.invalidDefinition');
         return;
       }
@@ -2640,7 +2640,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               </button>
             </div>
           )}
-          {!selectedPlot && !plotEditor && (
+          {selectedPlotUuids.length === 0 && !plotEditor && (
             <label className="block text-sm font-bold text-[var(--text)]">
               {t('capture.where.layout')}
               <select aria-label={t('capture.where.layout')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
