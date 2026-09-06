@@ -90,7 +90,7 @@ organist's time taken from the app build. The six-piece scope covers the
 grades most learners start in and includes one aspirational piece (the
 Boëllmann). BWV 565 and the Widor are marketing assets and belong in the
 first quarter after launch, announced in the store listing as coming.
-Recommendation: six at launch (A-10 in the spec).
+Decided: six at launch (spec decision D-28).
 
 ## 4. Authoring effort model
 

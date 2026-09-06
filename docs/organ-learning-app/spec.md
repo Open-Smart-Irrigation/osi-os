@@ -1,7 +1,7 @@
-# PocketMaestro: product specification (draft 0.3)
+# PocketMaestro: product specification (draft 0.4)
 
-Status: brainstorming draft, third round. Section 17 records the decisions
-taken in the interviews (`D-n`). The launch catalogue is detailed in
+Status: brainstorming draft after three interview rounds. Section 17 records
+the decisions (`D-n`). The launch catalogue is detailed in
 [catalogue.md](catalogue.md). Statements marked `A-n` are assumptions
 still awaiting confirmation; `Q-n` are open questions for the next round.
 This document is unrelated to OSI OS firmware; it lives here because the
@@ -9,8 +9,9 @@ brainstorming session ran in this repository.
 
 ## 1. Summary
 
-PocketMaestro is a phone-first mobile app (iOS and Android) that teaches
-organ playing through complete classical pieces. One lesson is one piece.
+PocketMaestro is a phone-first mobile app that teaches organ playing through
+complete classical pieces. It launches on Android; the iOS port follows after
+launch from the same codebase (D-33). One lesson is one piece.
 Each lesson contains exercises that the app selects and scales from the
 learner's measured or self-reported progress. The audience is adult classical
 music enthusiasts who already play a keyboard instrument and read music. About
@@ -198,15 +199,18 @@ attempts.
 
 | Channel | Support |
 |---|---|
-| USB MIDI (class compliant) | iOS via USB-C or Lightning adapter, Android via USB host. v1. |
-| Bluetooth LE MIDI | Both platforms. v1. Latency budget ≤ 20 ms measured; the app warns above. |
+| USB MIDI (class compliant) | Android via USB host at launch; iOS via USB-C or Lightning adapter at the port (D-33). |
+| Bluetooth LE MIDI | Same platform order. Latency budget ≤ 20 ms measured; the app warns above. |
 | Network MIDI (RTP) | Later; relevant for Hauptwerk on a computer. |
 | Microphone | Not for scoring. Polyphonic organ sound in a reverberant room is not reliably transcribable on a phone. |
 | No connection (self-assessed track) | Metronome, reference playback, score, self-rating. Full lesson available. |
 
-Pedal and manual notes are told apart by MIDI channel. A guided setup asks
-the learner to press one key on each manual and one pedal and stores the
-mapping in the instrument profile.
+Pedal and manual notes are told apart by MIDI channel; instruments are
+assumed to send each division on its own channel (D-30). The guided setup
+confirms the mapping by asking for one key per manual and one pedal note. An
+instrument that merges divisions onto one channel is detected at this step;
+its learner keeps full scoring on single-part exercises and falls back to
+self-rating where parts must be told apart (A-17).
 
 ### 7.2 During the attempt
 
@@ -291,8 +295,8 @@ The catalogue plan, with grading criteria, per-piece section and technique
 plans, licensing checks, and authoring effort estimates, is in
 [catalogue.md](catalogue.md). Its headline: ten pieces at launch would cost
 about 250 authoring hours, which a solo builder cannot afford alongside the
-app, so the plan proposes launching with six (grades 1 to 4) and reaching ten
-within the first quarter after launch (A-10).
+app; the decision is six at launch (grades 1 to 4) and ten within the first
+quarter after (D-28).
 
 ## 10. Motivation layer (D-15)
 
@@ -319,13 +323,15 @@ survive next to engraved music. Three starting directions to try (A-15):
 
 The score theme (staff line weight, glyph font, cursor colour) is part of
 each direction and is tested on a phone at arm's length on a music desk.
+The exploration runs separately in Claude Design (D-34); this spec only
+records the outcome once a direction is chosen.
 
 ## 12. Pricing and access (D-17)
 
 | Tier | What it includes |
 |---|---|
 | Free | The first lesson of the ladder (BWV 639) with every feature: scoring, both selection modes, reference performance, achievements. No time limit, no account required until the learner wants sync. |
-| Subscription | The whole catalogue, new lessons as they are published, progress sync across devices. Monthly or annual; the annual price equals eight monthly payments. Placeholder prices CHF 12 and CHF 96 (Q-1). |
+| Subscription | The whole catalogue, new lessons as they are published, progress sync across devices. CHF 12 monthly or CHF 96 annually, the annual price equal to eight monthly payments (D-27). |
 | Tutor session | Bought per session, subscription not required (section 13). |
 
 The free lesson is the trial: it shows the full system on a piece a pianist
@@ -357,10 +363,11 @@ app.
   app; the plan is Stripe Checkout inside the booking flow (A-14). If a
   store review rejects that, the fallback is a consumable in-app purchase at
   the nearest price tier, which costs the store commission.
-- Capacity: one tutor at two hours per session caps the service at a few
-  sessions per week; the booking calendar exposes only slots the tutor has
-  opened, so the service degrades to "no slots this week" rather than
-  overbooking.
+- Capacity: ten two-hour slots per week are opened at launch (D-31). Slots
+  are a ceiling, not a commitment; unbooked slots cost nothing. Fully booked,
+  they are 20 hours of tutoring on top of the 20 build hours (D-32) and the
+  authoring load, so if bookings approach the ceiling the slot count comes
+  down or the price goes up before quality does.
 - The tutor web view for preparation and notes shares the authoring tool's
   codebase.
 
@@ -390,8 +397,9 @@ latency. Two decisions since then move the balance:
 
 The remaining risk on the TypeScript path is MIDI: the React Native packages
 are less mature than Flutter's. That risk is bounded by a spike in the first
-week (section 14.4); if the spike fails on either platform, the fallback is
-Flutter with the rest of the stack unchanged.
+week (section 14.4) and shrinks with the Android-first order (D-33), because
+Android's USB host MIDI is the better-trodden path in those packages; if the
+spike fails, the fallback is Flutter with the rest of the stack unchanged.
 
 ### 14.2 Chosen stack
 
@@ -419,16 +427,19 @@ Flutter with the rest of the stack unchanged.
 
 ### 14.3 Legal and account setup for a private person (D-23)
 
-- Apple Developer Program and Google Play developer accounts can be held by
-  an individual. Google requires identity verification and, for individual
-  accounts, a closed test with at least twenty testers over fourteen days
-  before production release; plan the beta accordingly.
+- Google Play developer accounts can be held by an individual. Google
+  requires identity verification and, for individual accounts, a closed test
+  with at least twenty testers over fourteen days before production release,
+  so recruiting those testers is on the launch critical path (Q-2). The
+  Apple Developer Program account is only needed when the iOS port starts.
 - Apple and Google are the merchant of record for subscriptions and handle
   consumer VAT. For tutor sessions sold through Stripe, the seller is the
   private person; Swiss VAT registration starts at CHF 100 000 global
   turnover, and live online tutoring by a person is not an electronically
   supplied service under EU VAT rules, so the place of supply stays in
-  Switzerland. Confirm both points with a tax advisor before launch (Q-3).
+  Switzerland. Confirming both points with a tax advisor is deferred by
+  decision (D-29) and tracked as risk R-1 in section 19; it must close
+  before the first paid tutor session, not before the free beta.
 - The revised Swiss Data Protection Act applies; the app needs a privacy
   policy, data export, and account deletion. Swiss hosting keeps attempt
   data in the country; RevenueCat and Stripe are foreign processors and go
@@ -442,15 +453,16 @@ can exist before scoring or subscriptions are finished.
 
 | Phase | Deliverable | Exit test |
 |---|---|---|
-| 0. Spikes (2 weeks) | Expo app receiving USB and Bluetooth MIDI on one iPhone and one Android phone; Verovio rendering a three-staff system in landscape; sample playback with acceptable latency. | Note events with timestamps logged from a real console on both platforms. |
+| 0. Spikes (2 weeks) | Expo app receiving USB and Bluetooth MIDI on the Android test phone; Verovio rendering a three-staff system in landscape; sample playback with acceptable latency. | Note events with timestamps logged from a real console. |
 | 1. Lesson player | One lesson (BWV 639) hand-built as a package; orientation, exercises, metronome, reference playback, per-part self-rating, local progress. | A learner without MIDI completes the lesson end to end. |
 | 2. Scoring | Note alignment, heat map, timing plot, articulation profile. | Fixture tests pass; a scored attempt on the console produces a believable heat map. |
 | 3. Adaptivity | Skill profile, both selection modes, loop drills, retention probes. | Simulated learners in tests progress through the lesson as designed. |
 | 4. Authoring tool | MusicXML import, sectioning, annotations, per-piece achievements, package export, on-device preview. | Second lesson authored in the tool, not by hand. |
-| 5. Accounts and subscriptions | Auth, sync, RevenueCat, free first lesson, catalogue. | Purchase flow passes in sandbox on both stores. |
-| 6. Beta | Six lessons, Google closed test with twenty testers, TestFlight. | Fourteen days of test data; thresholds in section 5.3 tuned. |
+| 5. Accounts and subscriptions | Auth, sync, RevenueCat, free first lesson, catalogue. | Purchase flow passes in the Play sandbox. |
+| 6. Beta | Six lessons, Google closed test with twenty testers. | Fourteen days of test data; thresholds in section 5.3 tuned. |
 | 7. Tutor sessions | Availability, booking, Stripe, tutor view, pinned exercises. | One real session booked and delivered. |
-| 8. Launch | Store listings in German and English, privacy policy, support address. | Both stores approved. |
+| 8. Launch | Play listing in German and English, privacy policy, support address. | Google Play approved. |
+| 9. iOS port | Apple account, MIDI and audio spike on an iPhone, platform fixes, TestFlight beta, App Store listing. | App Store approved. |
 
 Working rules for the build: the specification and the content schema live
 in the repository and are updated before code changes; every engine change
@@ -469,7 +481,7 @@ proving it on both platforms.
 | Accessibility | Dynamic type, screen-reader labels on all non-score UI, high-contrast score theme |
 | Languages | German and English at launch (D-13); the content model supports adding languages per lesson |
 | Privacy | Attempts stay on device unless sync is on; EU hosting; no third-party trackers |
-| Minimum OS | iOS 16, Android 10 with USB host (A-13) |
+| Minimum OS | Android 10 with USB host at launch; iOS 16 at the port (A-13) |
 
 ## 16. Out of scope for the first release
 
@@ -481,7 +493,7 @@ proving it on both platforms.
 - Improvisation, harmonisation, hymn playing, service skills.
 - Group features, community, or any teacher role beyond tutor sessions.
 
-## 17. Decisions from interview rounds one and two
+## 17. Decisions from the interviews
 
 | ID | Decision |
 |---|---|
@@ -511,6 +523,14 @@ proving it on both platforms.
 | D-24 | New brand, several visual directions to be tried. |
 | D-25 | Achievements both general and per piece. |
 | D-26 | Reference performances captured as MIDI and audio together. |
+| D-27 | Prices CHF 12 monthly, CHF 96 annually. |
+| D-28 | Six lessons at launch, ten within the first quarter after. |
+| D-29 | Tax and legal advice deferred (risk R-1). |
+| D-30 | Divisions are assumed to send on separate MIDI channels. |
+| D-31 | Ten two-hour tutor slots per week at launch. |
+| D-32 | Build time is 20 hours per week. |
+| D-33 | Android launches first; iOS is ported after launch. |
+| D-34 | Brand exploration runs separately in Claude Design. |
 
 ## 18. Assumptions register
 
@@ -525,23 +545,29 @@ proving it on both platforms.
 | A-7 | Portrait shows two to three bars per line; landscape one system. |
 | A-8 | Tablet layout comes after launch. |
 | A-9 | Authoring throughput of one lesson per two weeks. |
-| A-10 | Launch with six lessons, ten within the first quarter (catalogue.md). |
+| A-10 | Resolved by D-28. |
 | A-11 | Tutor video runs on an external service in v1. |
 | A-12 | Backend hosted in an EU region. |
-| A-13 | Minimum iOS 16 and Android 10. |
+| A-13 | Minimum Android 10 at launch, iOS 16 at the port. |
 | A-14 | Tutor payment through Stripe outside store billing passes review. |
 | A-15 | The three brand directions in section 11 are the starting set. |
 | A-16 | Offline grace period of 14 days after a subscription lapses. |
+| A-17 | Merged-channel instruments fall back to self-rating only where parts must be told apart. |
 
-## 19. Open questions for round three
+## 19. Open items
+
+Deferred risks:
+
+| ID | Risk | Must close before |
+|---|---|---|
+| R-1 | VAT position for tutor sessions and store account setup as a private person, unconfirmed (D-29). | First paid tutor session. |
+
+Questions for round four, the last round before the spec freezes for the
+phase 0 spike:
 
 | ID | Question |
 |---|---|
-| Q-1 | Subscription prices: a starting point of CHF 12 monthly and CHF 96 annually is in the plan as a placeholder; what do you want to test? |
-| Q-2 | Launch scope: six lessons at launch and ten within the first quarter, or hold the launch until ten are done? Catalogue.md has the hours behind both. |
-| Q-3 | Tax and legal: do you have an advisor to confirm the VAT position for tutor sessions and the store account setup as a private person? |
-| Q-4 | Your console: which instrument records the references, and does it send pedal, manuals, and stops on separate MIDI channels? This fixes the reference format and the setup guide. |
-| Q-5 | Tutor availability: how many two-hour slots per week do you want to open at launch? |
-| Q-6 | Development time: how many hours per week can you give the build? The phase plan in section 14.4 assumes about 20. |
-| Q-7 | Test devices: which iPhone and which Android phone will you build against, and do you have the USB adapters for both? |
-| Q-8 | Brand exploration: do you want the three directions in section 11 mocked up as screens next, before any code? |
+| Q-1 | Android test device: which phone model, and is a USB-C OTG adapter for the console at hand? |
+| Q-2 | Beta testers: Google's closed test needs twenty testers for fourteen days. Do you have an organ community to recruit from (students, church musicians' association, online forum), or should the plan include recruiting time? |
+| Q-3 | Target date: when should the Google Play launch land? Working back at 20 hours per week, phases 0 to 8 span roughly 10 to 12 months including the 119 authoring hours. |
+| Q-4 | Progress sync: an Android-only launch could skip accounts entirely and add them at the iOS port. Keep accounts and sync in phase 5 as planned, or defer them too and launch device-local? |
