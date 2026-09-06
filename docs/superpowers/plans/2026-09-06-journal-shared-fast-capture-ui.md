@@ -32,9 +32,9 @@
 
 **Interface:** `JournalCaptureAdapter` supplies plot/group listing and revalidation, optional resource creation, draft load/save/discard, single/atomic batch save, duplicate lookup/navigation, crop-cycle lookup/correction, recents/carry-forward, receipt lookup, and explicit capability flags.
 
-- [ ] Write one semantic fixture suite and run it against edge-local, cloud gateway-backed, and cloud-primary fake adapters.
-- [ ] Assert authority boundaries: no edge-owned plot mutation from cloud-primary, no draft/per-keystroke edge command, no attachment capability gateway-backed, and no confirmed receipt for pending commands.
-- [ ] Implement typed result/error unions for partial loading, validation, pending/rejected/unknown receipt, and stale-scope outcomes. Avoid booleans that erase state.
+- [x] Write one semantic fixture suite and run it against edge-local, cloud gateway-backed, and cloud-primary fake adapters.
+- [x] Assert authority boundaries: no edge-owned plot mutation from cloud-primary, no draft/per-keystroke edge command, no attachment capability gateway-backed, and no confirmed receipt for pending commands.
+- [x] Implement typed result/error unions for partial loading, validation, pending/rejected/unknown receipt, and stale-scope outcomes. Avoid booleans that erase state.
 - [ ] Refactor edge capture transport calls behind its local adapter without changing behavior. Run existing edge capture tests.
 - [ ] Implement cloud adapters over normalized service functions and backend contracts from the first two plans.
 - [ ] Commit edge/cloud adapter slices as `refactor: isolate journal capture authority`.
