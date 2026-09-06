@@ -3,10 +3,10 @@
 Four independent reviewers judged spec draft 0.6, catalogue 0.1, and
 architecture 0.2, each from one discipline, without seeing each other's
 reports. Their verbatim reports are in [panel/](panel/). This document is the
-adjudication: what is adopted for draft 0.7, what needs the product owner's
-decision, and what is rejected. Nothing has been applied to the three
-documents yet — several adopted items depend on the owner decisions in
-section 4, so the fold-in happens after that round.
+adjudication: what was adopted for draft 0.7, what needed the product
+owner's decision, and what was rejected. The owner accepted all seven
+recommendations in section 4 on 2026-09-06 (spec decisions D-41 to D-48),
+and the fold-in is complete: spec 0.7, catalogue 0.2, architecture 0.3.
 
 Finding references: P = [organ pedagogue](panel/organ-pedagogue.md),
 L = [learning scientist](panel/learning-scientist.md),
