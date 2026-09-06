@@ -32,12 +32,12 @@
 - Modify: `scripts/test-contract-schemas.js`
 - Modify: `scripts/verify-sync-op-parity.js`
 
-- [ ] Add failing schema fixtures for 0, 1, 84, 100, and 101 members; invalid versions; duplicate entry/plot UUID pairs; noncanonical ordering; oversized serialized payload; invalid cycle action; and missing stable UUID/version fields.
-- [ ] Define `UPSERT_JOURNAL_ENTRY_BATCH` with the exact shared/member shape from spec §4.5. Keep single-entry string/value bounds.
-- [ ] Define effect key `journal_entry_batch:{batch_uuid}:0`, `submitted_intent_hash`, per-member applied receipt, duplicate-candidate result, and capability `journal_entry_batch_v1` in golden metadata.
-- [ ] Add golden AgroLink 84-member and maximum 100-member fixtures and assert each serialized command is below 256 KiB.
-- [ ] Run `node scripts/verify-sync-contract.js`, `node scripts/test-contract-schemas.js`, and `node scripts/verify-sync-op-parity.js`.
-- [ ] Commit as `feat: define journal batch command contract`.
+- [x] Add failing schema fixtures for 0, 1, 84, 100, and 101 members; invalid versions; duplicate entry/plot UUID pairs; noncanonical ordering; oversized serialized payload; invalid cycle action; and missing stable UUID/version fields.
+- [x] Define `UPSERT_JOURNAL_ENTRY_BATCH` with the exact shared/member shape from spec §4.5. Keep single-entry string/value bounds.
+- [x] Define effect key `journal_entry_batch:{batch_uuid}:0`, `submitted_intent_hash`, per-member applied receipt, duplicate-candidate result, and capability `journal_entry_batch_v1` in golden metadata.
+- [x] Add golden AgroLink 84-member and maximum 100-member fixtures and assert each serialized command is below 256 KiB.
+- [x] Run `node scripts/verify-sync-contract.js`, `node scripts/test-contract-schemas.js`, and `node scripts/verify-sync-op-parity.js`.
+- [x] Commit as `feat: define journal batch command contract`.
 
 ### Task 2: Land cloud consumer storage and receipt state machine first
 
