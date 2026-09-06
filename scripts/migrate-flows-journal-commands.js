@@ -575,7 +575,9 @@ function migrate(buffer) {
   if (handler && dedupe && queue && handler.func === journalApplySource &&
       same(handler.libs, osiLibOnly) && dedupe.func === dedupeSource &&
       same(dedupe.libs, osiLibOnly) && queue.func === queueAckSource &&
-      same(queue.libs, osiLibOnly)) {
+      same(queue.libs, osiLibOnly) &&
+      Object.entries(expectedCommandShapeHashes).every(([id, expected]) =>
+        commandShapeDigest(byId.get(id)) === expected)) {
     const registry = byId.get('cmd-type-registry');
     const registryMarker = "    SET_KIWI_INTERVAL:         { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },";
     registry.func = addCommandRows(registry.func, registryMarker, false);
