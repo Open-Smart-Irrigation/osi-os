@@ -109,10 +109,11 @@ test('crash_looping respects a custom threshold override', () => {
 
 // health_state derivation logic, mirrored from gatherWork() in the health
 // helper: 'crash_looping' wins over everything, then 'degraded' if there are
-// flow errors or rejected sync rows, else 'healthy'.
-function deriveHealthState({ crashLooping, errorCount, syncRejected }) {
+// flow errors or rejected sync rows in the last 24h (sync_rejected_recent,
+// not the all-time sync_rejected counter), else 'healthy'.
+function deriveHealthState({ crashLooping, errorCount, syncRejectedRecent }) {
   const hasErrors = Number.isFinite(errorCount) && errorCount > 0;
-  const hasRejected = Number.isFinite(syncRejected) && syncRejected > 0;
+  const hasRejected = Number.isFinite(syncRejectedRecent) && syncRejectedRecent > 0;
   if (crashLooping) return 'crash_looping';
   if (hasErrors || hasRejected) return 'degraded';
   return 'healthy';
@@ -120,28 +121,28 @@ function deriveHealthState({ crashLooping, errorCount, syncRejected }) {
 
 test('health_state derivation: healthy when nothing is wrong', () => {
   assert.strictEqual(
-    deriveHealthState({ crashLooping: false, errorCount: 0, syncRejected: 0 }),
+    deriveHealthState({ crashLooping: false, errorCount: 0, syncRejectedRecent: 0 }),
     'healthy'
   );
 });
 
 test('health_state derivation: degraded when flow error_count is positive', () => {
   assert.strictEqual(
-    deriveHealthState({ crashLooping: false, errorCount: 2, syncRejected: 0 }),
+    deriveHealthState({ crashLooping: false, errorCount: 2, syncRejectedRecent: 0 }),
     'degraded'
   );
 });
 
-test('health_state derivation: degraded when sync_rejected is positive', () => {
+test('health_state derivation: degraded when sync_rejected_recent is positive', () => {
   assert.strictEqual(
-    deriveHealthState({ crashLooping: false, errorCount: 0, syncRejected: 1 }),
+    deriveHealthState({ crashLooping: false, errorCount: 0, syncRejectedRecent: 1 }),
     'degraded'
   );
 });
 
 test('health_state derivation: crash_looping takes priority over degraded signals', () => {
   assert.strictEqual(
-    deriveHealthState({ crashLooping: true, errorCount: 5, syncRejected: 5 }),
+    deriveHealthState({ crashLooping: true, errorCount: 5, syncRejectedRecent: 5 }),
     'crash_looping'
   );
 });

@@ -22,6 +22,7 @@ function allNullHealth() {
     sync_pending: null,
     sync_oldest_age_s: null,
     sync_rejected: null,
+    sync_rejected_recent: null,
     sync_dirty_pending: null,
     disk_free_pct: null,
     crash_count: null,
@@ -318,6 +319,17 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
     ));
   } catch (_) {}
 
+  // sync_rejected is all-time and terminal (nothing ever clears rejected_at),
+  // so on a gateway with real history it never returns to zero on its own and
+  // would permanently fail a canary built on it. sync_rejected_recent is the
+  // windowed counterpart the health_state derivation below actually uses.
+  try {
+    health.sync_rejected_recent = toCount(await queryGet(
+      db,
+      "SELECT COUNT(*) c FROM sync_outbox WHERE rejected_at IS NOT NULL AND rejected_at >= datetime('now','-24 hours')"
+    ));
+  } catch (_) {}
+
   try {
     health.sync_dirty_pending = toCount(await queryGet(
       db,
@@ -360,8 +372,8 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
   try {
     const errorCount = Number(options && options.errorCount);
     const hasErrors = Number.isFinite(errorCount) && errorCount > 0;
-    const syncRejected = Number(health.sync_rejected);
-    const hasRejected = Number.isFinite(syncRejected) && syncRejected > 0;
+    const syncRejectedRecent = Number(health.sync_rejected_recent);
+    const hasRejected = Number.isFinite(syncRejectedRecent) && syncRejectedRecent > 0;
     health.health_state = health.crash_looping
       ? 'crash_looping'
       : (hasErrors || hasRejected ? 'degraded' : 'healthy');

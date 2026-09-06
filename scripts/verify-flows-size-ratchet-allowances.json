@@ -135,7 +135,7 @@
     },
     "062a0f9bf66d9789": {
       "delta": 850,
-      "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)"
+      "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6); wave-3 edge foundation port (cherry-picked e5e6648095f94dfc969f14d1d8d075dc949233a3) adds the windowed sync_rejected_recent field to the heartbeat health whitelist so the cloud can evaluate a 24h rejection window instead of the all-time terminal count. Re-measured on port/wave3-edge-foundation with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4242 -> HEAD 4337 = +95, well within the existing 850 headroom (already absorbed into origin/main's own baseline from prior 1.A5/5.6 growth), so no allowance increase was needed."
     },
     "sys-stats-fn": {
       "delta": 4862,
@@ -270,6 +270,5 @@
     "sdi12-identify-fn": {
       "max_chars": 4101,
       "reason": "SDI-12 port: new function node measured at exactly 4101 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
-    }
-  }
+    }  }
 }
