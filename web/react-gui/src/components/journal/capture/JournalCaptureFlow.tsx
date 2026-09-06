@@ -96,6 +96,7 @@ import { SeedingCropFields } from './SeedingCropFields';
 import { randomUuid } from '../../../utils/uuid';
 import { useDisplayPreferences } from '../../../utils/displayPreferences';
 import { createEdgeLocalJournalCaptureAdapter } from '../../../journal/journalCaptureAdapter';
+import { resolveTemplateCode } from '../../../journal/templatePreference';
 
 export interface JournalCaptureFlowProps {
   catalog: JournalCatalog;
@@ -488,21 +489,6 @@ function tankMixDoseLabel(
   return `${localizedNumber(dose.value_num, locale)}${unit ? ` ${catalogLabel(unit, locale)}` : ''}`;
 }
 
-const DETAIL_LEVEL_ORDER = ['farmer_quick', 'full_record', 'research_observation'];
-
-// Effective capture template = the user's global detail-level preference when
-// the plot's layout supports it, otherwise the layout's lowest supported
-// template (U4: a researcher-only layout like agroscope_open_field floors a
-// Quick user to Research). Slice A: detail level is chosen in Settings, never
-// per entry.
-function effectiveTemplateCode(supportedTemplates: string[], preferred: string): string {
-  if (supportedTemplates.includes(preferred)) return preferred;
-  const ordered = [...supportedTemplates].sort(
-    (a, b) => DETAIL_LEVEL_ORDER.indexOf(a) - DETAIL_LEVEL_ORDER.indexOf(b),
-  );
-  return ordered[0] ?? '';
-}
-
 function activityDependencyInputs(leaf: ActivityLeafSelection | null): CaptureEntryValueInput[] {
   return leaf?.dependent_selections.map(({ attribute_code, value }) => ({
     attribute_code,
@@ -819,7 +805,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [templateCode, setTemplateCode] = useState(() => {
     const initialLayout = model?.layouts.get(usableInitialPlot?.settings.layout_code ?? '');
     return initialLayout
-      ? effectiveTemplateCode(initialLayout.supported_templates, journalDetailLevel)
+      ? resolveTemplateCode(initialLayout.supported_templates, journalDetailLevel)
       : journalDetailLevel;
   });
   const [leaf, setLeaf] = useState<ActivityLeafSelection | null>(null);
@@ -1763,7 +1749,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const nextLayoutCode = nextPlot?.settings.layout_code ?? '';
     const nextLayout = model?.layouts.get(nextLayoutCode);
     const nextTemplate = nextLayout
-      ? effectiveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
+      ? resolveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
       : '';
     const plotContextChanged = requestedSelection.length !== selectedPlotUuids.length ||
       requestedSelection.some((plotUuid, index) => plotUuid !== selectedPlotUuids[index]);
@@ -1864,7 +1850,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setLayoutCode(code);
     const nextLayout = model?.layouts.get(code);
     const nextTemplate = nextLayout
-      ? effectiveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
+      ? resolveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
       : '';
     setTemplateCode(nextTemplate);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));

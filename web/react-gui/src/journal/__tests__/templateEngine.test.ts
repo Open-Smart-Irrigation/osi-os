@@ -466,6 +466,24 @@ describe('template engine', () => {
     expect(values[0]).not.toHaveProperty('value');
   });
 
+  it('retains the selected numeric unit when a quantity is marked not observed', () => {
+    const result = buildCatalogModel(valueCatalog());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(buildEntryValues(result.model, [{
+      attribute_code: 'attr.amount',
+      value_status: 'not_observed',
+      unit_code: 'unit.kg_per_ha',
+      entered_unit_code: 'unit.kg_per_ha',
+    }])).toEqual([{
+      attribute_code: 'attr.amount',
+      value_status: 'not_observed',
+      unit_code: 'unit.kg_per_ha',
+      entered_unit_code: 'unit.kg_per_ha',
+    }]);
+  });
+
   it('accepts a numeric generic value only when it equals the canonical value', () => {
     const result = buildCatalogModel(valueCatalog());
     expect(result.ok).toBe(true);
