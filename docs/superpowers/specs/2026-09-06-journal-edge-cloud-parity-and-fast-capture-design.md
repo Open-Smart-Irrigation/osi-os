@@ -1,7 +1,7 @@
 # Journal Edge/Cloud Parity and Fast Capture
 
 **Date:** 2026-09-06  
-**Status:** Approved in conversation; revision under independent UX/farmer re-review
+**Status:** Approved; independent UX/farmer review GREEN after four passes
 **Scope:** `osi-os` edge Journal, `osi-server` cloud Journal, and the paired gateway-backed API behavior  
 **Supersedes:** cloud capture deviations that deliberately pinned `full_record` and omitted the edge capture workflow  
 **Builds on:** [Field Journal design](2026-07-12-field-journal-design.md) and [Field Journal UX addendum](2026-07-12-field-journal-ux-addendum.md)
