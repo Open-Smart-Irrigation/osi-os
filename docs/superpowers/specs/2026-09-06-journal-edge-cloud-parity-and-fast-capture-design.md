@@ -1,7 +1,7 @@
 # Journal Edge/Cloud Parity and Fast Capture
 
 **Date:** 2026-09-06  
-**Status:** Approved in conversation; pending independent UX/farmer review  
+**Status:** Approved in conversation; revised after independent UX/farmer review
 **Scope:** `osi-os` edge Journal, `osi-server` cloud Journal, and the paired gateway-backed API behavior  
 **Supersedes:** cloud capture deviations that deliberately pinned `full_record` and omitted the edge capture workflow  
 **Builds on:** [Field Journal design](2026-07-12-field-journal-design.md) and [Field Journal UX addendum](2026-07-12-field-journal-ux-addendum.md)
@@ -15,7 +15,8 @@ navigation model, capture sequence, vocabulary, or validation policy.
 The most common task is recording an operation that just happened. On an already
 configured desktop or phone, a normal quick entry must require only:
 
-1. choosing one or more plots;
+1. choosing one or more plots, or explicitly choosing **Farm-wide** for an
+   activity allowed at farm level;
 2. choosing an activity/operation;
 3. accepting the prefilled occurrence time; and
 4. entering only the operation-specific fact without which the record would be
@@ -25,6 +26,13 @@ Cloud-only workspaces, attachments, and conflict resolution remain cloud
 extensions. They must not replace or fork the shared gateway-backed Journal flow.
 The removed Status selector and Export research package control stay absent on
 both surfaces. CSV and JSON export remain available.
+
+This specification supersedes the parent design's UI status-filter requirement in
+§6.4 and the parent UX addendum's implication that every final entry must contain
+all facts immediately. It does not remove the parent design's lossless research
+package endpoint: `/export.package` remains an authenticated API/automation
+surface, but it has no GUI button. CSV and JSON are convenient UI exports, not a
+claim that CSV replaces the lossless package.
 
 ## 2. Verified problems
 
@@ -52,10 +60,10 @@ Operation-to-device restrictions exist in `open_field@9` and
 no such restrictions. A Lysimeter plot therefore offers the complete machinery
 vocabulary even after an operation has been selected.
 
-The operation/device relationship is shared agronomic vocabulary, not a property
-of the physical growing layout. Until the catalog format is normalized, every
-general-purpose layout that exposes Agroscope operation/device choices must carry
-the same canonical restriction fragment, with a verifier preventing drift.
+Operation/device compatibility is shared agronomic vocabulary. Physical
+availability remains a layout or deployment fact. Effective machinery is therefore
+the intersection of global operation compatibility, layout availability, and
+active catalog choices; it is not one copied flat list.
 
 ### 2.4 Station and group scope is visual rather than functional
 
@@ -101,29 +109,49 @@ not change the shared capture sequence.
 
 ### 3.2 Required-field policy
 
-`farmer_quick` is the default on edge and cloud. Its normal final entry requires
-plot scope, activity/operation, and occurrence time. The time defaults to now and
-the plot layout comes from plot settings.
+`farmer_quick` is the default on edge and cloud. Its normal final entry requires an
+allowed scope, activity/operation, and occurrence time. The scope is one or more
+plots, except `equipment_maintenance` and `general_observation`, which also permit
+an explicit **Farm-wide** selection. Plot-dependent activities fail closed when no
+plot is selected. The time defaults to now and the plot layout comes from plot
+settings.
 
 The following operation facts remain blocking because omitting them makes the
 record unusable:
 
-| Operation family | Additional blocking facts |
-|---|---|
-| Sowing/planting | Crop; one applicable seed rate/count when the chosen operation records application quantity |
-| Fertilizer or plant-protection application | Product or explicit product name; one applicable dose/quantity |
-| Irrigation/fertigation | One applicable water amount; fertigation also follows the product rule |
-| Harvest | Crop and yield |
-| Other operations and observations | No additional blocking field |
+| Operation family | Additional facts required for **Final** | Explicit missing status allowed? |
+|---|---|---|
+| Sowing/planting | Crop; one of applicable seed mass/count when the selected operation records an application quantity | Quantity may be `not_observed`; crop may not |
+| Fertilizer or plant-protection application | Product or explicit product name; one applicable dose/quantity | Dose may be `not_observed`; product may not |
+| Irrigation/fertigation | One applicable water amount; fertigation also follows the product rule | Water amount may be `not_observed`; product follows the application rule |
+| Harvest | Crop; one applicable yield value | Yield may be `not_observed`; crop may not |
+| General observation | Note or at least one structured observed value | No: an entirely empty observation is not final |
+| Equipment maintenance | Equipment/device or note describing the work | No: an entirely empty maintenance record is not final |
+| Other operations | No additional blocking fact | Not applicable |
+
+When a required numeric fact is unknown, the user can choose **Not observed** and
+finalize without inventing a value. When a required identity such as crop or
+product is not yet known, **Save draft / Finish later** performs a durable draft
+save and returns the entry to the **Drafts / Needs completion** tray. The interface
+never converts an incomplete record to Final merely to shorten the flow.
 
 Machinery/device, operator, treated area, weather, growth stage, end time, method,
-and note are optional unless a future named compliance profile explicitly requires
-them. A normal `full_record` entry uses the same blocking policy; it reveals more
-fields but does not manufacture stricter compliance rules. Useful missing details
-may be listed as non-blocking review suggestions.
+and note are optional except for the explicit maintenance alternative above or a
+future named compliance profile. A normal `full_record` entry uses the same
+blocking policy; it reveals more fields but does not manufacture stricter
+compliance rules. Useful missing details appear as non-blocking review suggestions.
+
+This table is the authoritative baseline and supersedes the parent design §4.4
+`full_record` requiredness matrix where the two disagree. A generated, code-level
+activity/operation matrix records `required`, `required_any`, accepted missing
+statuses, and denominator rules. Total quantities do not require a denominator;
+area-, plant-, or time-based rates require the denominator implied by their chosen
+unit unless it is already fixed by the typed quantity kind.
 
 Required-any families are presented as one task, such as “Enter a dose,” rather
-than marking every alternative field as independently required.
+than marking every alternative field as independently required. Catalog generation,
+client validation, edge finalization, and cloud-primary validation consume the same
+matrix or byte-identical generated fixtures.
 
 ### 3.3 Progressive disclosure
 
@@ -134,28 +162,54 @@ After operation selection, the open form contains only:
 - blocking operation-specific fields; and
 - fields already populated by a safe carry-forward or plot default.
 
-All remaining fields live under **More details**, grouped by purpose rather than
-as one catalog-ordered list. A user can save without opening it. Required controls
-can never be placed in the collapsed group.
+All remaining fields live under **More details**, grouped in this order: product
+and amount, execution, conditions, crop/research context, then notes. A user can
+save without opening it. Required controls can never be placed in the collapsed
+group. Populated optional groups collapse to a one-line summary rather than
+expanding the Quick form by default.
 
 ### 3.4 Machinery picker
 
-The machinery/device picker shows only choices compatible with the selected
-operation. Within that set it orders choices as:
+The machinery/device picker shows the intersection:
 
-1. most recently used for the selected plot;
-2. most recently used on the gateway/workspace;
-3. remaining compatible choices alphabetically in the active locale.
+`global operation-compatible devices ∩ layout-available devices ∩ active choices`.
+
+The global relation has one generated source. Each layout carries an explicit
+availability set; an absent set means “not curated” and produces the global
+operation-compatible set with a catalog warning, never an empty picker or an
+invented restriction. Because the repository has no authoritative AgroLink
+facility-equipment inventory, the initial Lysimeter availability set is explicitly
+the union of its globally compatible active devices; the operation relation still
+narrows the visible picker. Facility-specific narrowing is deferred until a
+maintained equipment profile exists rather than guessed in seed data. Within the
+effective set the picker orders choices as:
+
+1. choices used on every selected plot, most recent first;
+2. choices used on the greatest number of selected plots, then most recent;
+3. choices most recently used in applied entries on the gateway/workspace;
+4. remaining compatible choices alphabetically in the active locale.
 
 A search field searches only the compatible set. If historic data references a
 choice that is no longer compatible or active, correction/review screens retain
 that value visibly but require an explicit change before substituting another.
-No silent remapping occurs.
+No silent remapping occurs. An empty effective set explains that no machinery is
+configured for that operation/layout and permits saving because machinery is
+optional. Recency uses applied, non-voided entries from the previous 180 days;
+ties resolve by latest occurrence and then stable choice code.
 
 ### 3.5 Desktop and mobile capture
 
-On desktop (`lg` and wider), capture is a near-full-screen workspace bounded by
-the existing application maximum width (`1600px`) and viewport height:
+Capture layout follows available content width through container queries rather
+than a viewport-only `lg` breakpoint:
+
+- below 1100px: sequential Where → Activity → Details → Review;
+- 1100–1399px: two panes, with Where and Activity/details in the main pane and a
+  320px sticky Review pane;
+- 1400px and above: three panes, with Where at 280–340px, Activity/details at a
+  minimum 520px, and Review at 320px.
+
+The near-full-screen workspace is bounded by the existing application maximum width
+(`1600px`) and viewport height:
 
 ```text
 +----------------------+--------------------------------+----------------------+
@@ -174,9 +228,16 @@ On smaller screens the existing sequential flow remains: Where → Activity →
 Details → Review. Touch targets remain at least 44px; primary navigation targets
 remain 56px where already established.
 
-Cloud attachments appear in a collapsible section below shared details and surface
-their upload state in the review column. Conflicts are resolved outside an active
-new-entry flow.
+Attachments are cloud-primary-only until a separate gateway attachment contract
+exists. In cloud-primary capture they appear in a collapsible section below shared
+details and surface upload state in Review. Gateway-backed capture hides the
+section and makes no media-attachment claim. Conflicts are resolved outside an
+active new-entry flow.
+
+Capture uses route semantics on both surfaces, not the generic narrow modal. The
+invoking element and return location are recorded before navigation. Cancel,
+Escape, and successful completion restore focus to the actual invoking control;
+if it no longer exists, focus moves to the Journal heading.
 
 ## 4. Architecture
 
@@ -210,6 +271,17 @@ Unsupported capabilities are explicit. A component hides a creation action only
 when the adapter reports it unavailable and explains the authority boundary when
 that absence could surprise the user.
 
+The shared workspace always exposes two status-specific trays rather than a
+general Status selector:
+
+- **Drafts / Needs completion** contains durable drafts the user can resume or
+  discard;
+- **Waiting for farm** contains gateway-backed commands that are pending, rejected,
+  or unresolved after timeout.
+
+Both trays have keyboard-reachable controls and visible counts. They are not table
+filters and do not imply that pending commands are canonical journal entries.
+
 ### 4.2 Template preference
 
 Both clients use one shared template-resolution function. It chooses the user's
@@ -224,16 +296,18 @@ preference uses the same allowed values and labels. A legacy
 
 ### 4.3 Catalog dependency parity
 
-A new additive catalog revision supplies the canonical operation-to-device choice
-restrictions to every active general-purpose layout that exposes those choices,
-including Lysimeter. Existing catalog rows remain immutable.
+A new additive catalog revision separates global operation/device compatibility
+from per-layout device availability. Existing catalog rows remain immutable.
 
-A generator/helper owns the canonical restriction fragment. New layout definition
-JSON is produced from that fragment rather than manually retyping its choices. A
-static verifier fails when a supporting layout omits an operation, adds an unknown
-choice, or disagrees with the canonical fragment. Edge seed copies and both Pi
-profiles remain byte-identical. Cloud consumes the catalog delivered for the
-gateway/workspace; it does not maintain a second hand-authored compatibility list.
+A generator/helper owns the canonical compatibility relation and builds each
+layout's effective dependency rows from it plus `available_device_codes`. New
+layout definition JSON is produced rather than manually retyping choices. A static
+verifier fails when a supporting layout omits an operation, references an unknown
+choice, or emits a dependency outside the computed intersection. It includes
+positive, negative, empty-set, and retained-historical-choice fixtures. Edge seed
+copies and both Pi profiles remain byte-identical. Cloud consumes the catalog
+delivered for the gateway/workspace; it does not maintain a second hand-authored
+compatibility list.
 
 Server-side entry validation uses the same selected layout dependency rules as the
 clients. A stale client cannot submit an incompatible operation/device pair without
@@ -252,6 +326,18 @@ matches active, non-deleted plots in that station. `group_uuid` matches active
 membership in the selected group; resolved groups remain selectable only from the
 resolved-groups section. Pagination happens after the scope predicate.
 
+`station_code` is Unicode-NFKC normalized, trimmed, case-sensitive after
+normalization, and limited to the existing plot-schema maximum. `group_uuid` must
+be a canonical UUID. Stable errors are `conflicting_scope_filters` (400),
+`scope_not_found` (404), and `scope_forbidden` (404 to avoid existence disclosure).
+
+A group filter always means **entries for the group's current member plots at the
+time of this request**. It does not claim that the entries were authored through
+the group. The UI and export manifest use that exact wording. Resolved groups have
+frozen membership; changing membership requires explicit unresolve, edit, and
+resolve actions. Historical cohort provenance is not inferred because entries do
+not snapshot group membership.
+
 CSV and JSON exports use the identical normalized filter object and therefore
 export exactly the rows represented by the table. Unknown or inaccessible scopes
 return 404, not an unfiltered result. Conflicting scope parameters return 400.
@@ -260,7 +346,32 @@ Cloud-primary workspaces expose an equivalent read endpoint over
 `journal_plot_snapshots`, including station code and layout settings. This supplies
 the shared plot picker without granting cloud mutation authority over plots.
 
-### 4.5 Reference data
+### 4.5 Gateway-backed batch command and capability
+
+Gateway-backed cloud batching is unavailable unless the gateway advertises
+`journal_entry_batch_v1`. The capability is enabled only after the following
+versioned command contract and edge applier ship:
+
+- command type: `UPSERT_JOURNAL_ENTRY_BATCH`;
+- `contract_version: 1`, one canonical `batch_uuid`, and 1–100 members;
+- each member contains a stable client-generated `entry_uuid`,
+  `base_sync_version: 0`, plot UUID, and the same complete canonical fields used by
+  a single final entry;
+- one effect key `JOURNAL_ENTRY_BATCH:<batch_uuid>:<payload_sha256>` and one payload
+  hash over canonical member order by `(plot_uuid, entry_uuid)`;
+- the edge validates every member before writing, then commits all entries, values,
+  outbox aggregates, terminal ledger result, and ACK outbox row in one transaction;
+- replay returns the exact stored receipt, including each member UUID/version and
+  duplicate-candidate result, without writing again;
+- an edge without the capability returns durable
+  `REJECTED_PERMANENT / unsupported_command_type`.
+
+Cloud deploys contract acceptance and pending-state storage first. Edge support and
+capability advertisement deploy second. The cloud UI enables gateway-backed
+multi-plot capture only after observing the capability. Edge-local and
+cloud-primary batch paths retain their native atomic transactions.
+
+### 4.6 Reference data
 
 The cloud reference panel removes the six-resource truncation as a discovery
 mechanism. Its compact summary may show counts and a few examples, but **View all**
@@ -274,30 +385,53 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
 2. The shell renders immediately with skeletons in unresolved regions; catalog or
    plot failure does not blank the entire Journal workspace.
 3. Selecting a station/group chooses a scope. Selecting plots derives their common
-   layout; mixed-layout batch selection is rejected before activity entry.
+   layout; mixed-layout batch selection is rejected before activity entry. For a
+   multi-plot selection, a default or carry-forward value is applied only when its
+   value, source entry/default, catalog semantics, crop-cycle context, and validity
+   are identical for every selected plot. Otherwise the field starts empty and a
+   differences summary offers **Split selection**, **Remove plots**, or **Continue
+   without prefill**.
 4. Activity selection resolves the leaf operation and compatible machinery.
 5. The form derives blocking and optional fields from the active catalog definition.
-6. Autosave persists a draft through the adapter. A volatile-only state is labelled
-   honestly if persistence fails.
+6. Autosave persists a draft through the adapter after a 750ms idle interval and on
+   step transitions. Edge and cloud-primary drafts are durable canonical drafts.
+   Gateway-backed cloud coalesces changes into one cloud-durable working copy and
+   never queues an edge command per keystroke. **Save draft / Finish later** queues
+   at most one edge draft command; edits made while it is in flight remain in the
+   working copy and coalesce into the next explicit save. The UI distinguishes
+   browser working copy, cloud-durable pending draft, edge-applied draft, and
+   volatile-only state.
 7. Review summarizes plot scope, operation, time, and entered facts. Optional
    omissions are suggestions, not errors.
-8. Save creates a final entry or atomic batch. Gateway-backed cloud shows pending
-   edge application where applicable; cloud-primary saves directly.
-9. Success updates table, draft queue, and recent-choice ranking without a full page
-   reload. Focus returns to **Log activity** after closing.
+8. A multi-plot review summarizes compactly, for example
+   **84 plots — ST72: 72, ST12: 12**, with an expandable virtualized plot list.
+   Duplicate review is one table with per-plot **Exclude**, **Open existing**, and
+   **Save separately** choices plus safe apply-to-all actions. It never opens 84
+   sequential dialogs.
+9. Save creates a final entry or atomic batch. Its receipt enters this state machine:
+   - `APPLIED`: update canonical table/export/recents and remove the draft;
+   - `PENDING`: update only **Waiting for farm**;
+   - `REJECTED`: keep the submitted payload in **Waiting for farm** with correct,
+     reselect, retry-when-safe, and discard actions;
+   - `UNKNOWN_AFTER_TIMEOUT`: perform receipt lookup before enabling a retry.
+10. Only `APPLIED` updates recent-choice ranking. After close, focus returns to the
+    actual invoking control, with the Journal heading as fallback.
 
 ## 6. Error handling
 
 - Catalog incompatibility blocks capture but leaves close/retry controls available.
 - Missing or stale plot snapshots show an explicit unavailable state; they never
   fall back to farm-wide or unfiltered data.
-- A scope becoming unauthorized during use returns to All entries and shows why.
+- Authorization loss, plot deactivation/deletion, layout-version change, or catalog
+  refresh during capture preserves the working draft and typed fields, identifies
+  the invalid scope/definition, blocks finalization, and offers **Reselect**,
+  **Copy into a new draft**, or **Discard**. It never silently resets to All entries.
 - Batch creation is all-or-none. A transport timeout triggers an idempotent receipt
   lookup before retry so duplicates are not created.
 - Invalid dependency submissions identify the changed operation/machinery pair and
   preserve the rest of the draft.
-- Pending cloud commands, rejected edge commands, and confirmed saves use distinct
-  states and language.
+- Pending cloud commands, rejected edge commands, confirmed saves, and unknown
+  timeout outcomes use the receipt state machine in §5 and distinct language.
 - Attachment failures do not erase a successfully saved cloud-primary entry;
   retryable files remain in the transfer queue.
 
@@ -310,11 +444,46 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
 - Station sections virtualize or collapse their plot grids where needed; a 72-plot
   station must not create an unwieldy select menu.
 - Search and field derivation remain local pure operations after catalog load.
-- Keyboard order follows Where → Activity/details → Review/save. Every disclosure,
-  token, picker, and error is keyboard accessible with a visible focus state.
-- Desktop columns collapse without horizontal overflow. At 200% zoom, save and
-  close remain reachable.
+- A failed shortlist, recents, draft index, or plot-group request gets its own retry
+  state. Failure is never rendered as an empty list. Core manual activity browsing
+  remains available when recents fail.
+- Plot and activity card grids use one Tab stop per grid and arrow-key/roving-tab
+  navigation. The station range field precedes the plot grid in tab order.
+- Validation produces an error summary linked to controls and focuses the first
+  invalid control. A review token targeting a collapsed optional field opens its
+  group before moving focus.
+- `aria-live` announces autosave state, range-selection counts, pending/applied/
+  rejected receipts, and retry outcomes without repeatedly announcing unchanged
+  content.
+- Escape uses the same guarded cancel path as the visible Close control. Unsaved or
+  volatile changes require confirmation; durable drafts may close directly.
+- WCAG 2.2 AA contrast, focus appearance, target size, and reflow are acceptance
+  requirements. Automated accessibility checks cover the capture route and trays.
+- Geometry fixtures at content widths 1024, 1280, 1440, and 1600px, plus 200% zoom,
+  must show no horizontal overflow, clipped fields, sticky overlap, or unreachable
+  Save/Close. The two- and three-pane minimum widths in §3.5 are enforced.
 - User-facing strings use the Journal i18n namespace in every shipped locale.
+
+### 7.1 Fast-entry benchmarks
+
+Benchmarks start when the user activates **Log activity** and end when the applied
+or pending receipt is visibly announced. Catalog, plot hierarchy, and recents are
+warmed; occurrence time needs no activation. “Primary activation” means tap, click,
+Enter/Space selection, or field confirmation, excluding scrolling.
+
+| Fixture | Input conditions | Desktop ceiling | Phone ceiling | Human target |
+|---|---|---:|---:|---:|
+| Zero-extra-fact operation | last plot and operation offered; no typing | 5 activations | 7 activations | p75 ≤ 10s |
+| Repeat fertilizer/treatment | last plot offered; valid recent product/dose card accepted; no typing | 7 activations | 9 activations | p75 ≤ 10s |
+| Routine station batch | station offered; range/all selection; common operation and identical safe prefill | 8 activations | 10 activations | p75 ≤ 15s |
+
+Component tests pin the activation paths and confirm the prefilled time is not
+focused or changed. A pilot usability pass runs five attempts per fixture with at
+least four representative users (two field workers and two research technicians);
+the p75 target determines whether the under-ten-second product outcome may be
+claimed, but does not block a technically green AgroLink rollout. A valid recent
+product/dose appears as one consequential carry-forward card and requires one
+confirming activation, preserving the parent AGR-7 safety rule.
 
 ## 8. Delivery slices
 
@@ -325,6 +494,8 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
 - port the station/group/plot browser to cloud;
 - remove the six-item discovery cap;
 - prove ST72 and ST12 selection and export behavior.
+- add **Drafts / Needs completion** and **Waiting for farm** tray navigation without
+  reintroducing the general Status selector.
 
 ### Slice B — Shared fast capture
 
@@ -334,13 +505,15 @@ from the GUI, with ST72 and ST12 represented as separate station sections.
 - retain the mobile stepped flow and cloud-only attachment extension;
 - add drafts, multi-plot batch, confirmation, carry-forward, duplicate handling,
   and crop-cycle capability behavior through adapters.
+- add the gateway batch command consumer/storage first, then the edge atomic applier
+  and `journal_entry_batch_v1` capability before enabling cloud batch capture.
 
 ### Slice C — Catalog and validation correction
 
-- publish additive template/layout catalog revisions implementing the balanced
-  required-field policy;
-- add canonical operation/device dependencies to Lysimeter and other supporting
-  layouts;
+- publish additive template/layout catalog revisions implementing the code-level
+  balanced requiredness matrix;
+- generate global operation/device compatibility and explicit per-layout
+  availability, including the permissive initial Lysimeter set defined in §3.4;
 - enforce compatible pairs on edge and cloud-backed validation paths;
 - add catalog generation/parity verification.
 
@@ -363,27 +536,47 @@ deployed consumer-first before a producer depends on it.
 - edge and cloud resolve the same layout/template for every preference combination;
 - Quick is the default in both clients;
 - balanced requiredness for every activity/operation family;
-- machinery choices exactly match the selected operation on open-field,
-  greenhouse, and Lysimeter layouts;
+- farm-wide maintenance and general observations work while plot-dependent
+  activities fail closed;
+- `not_observed` satisfies only the explicitly allowed numeric families;
+- empty observations and maintenance records cannot become Final;
+- machinery choices equal the global/layout/active intersection on open-field,
+  greenhouse, and Lysimeter layouts, including positive, negative, empty-set, and
+  retained-historical-value cases;
 - required controls never appear under a closed optional disclosure;
 - station/group/plot filters constrain page one, later pages, CSV, and JSON equally;
 - ST72 shows 72 plots and ST12 shows 12; both can be selected independently;
-- desktop capture exposes three regions and a sticky save action;
+- desktop fixtures obey the one-/two-/three-pane geometry contract with a sticky
+  save action and no overflow at 200% zoom;
 - mobile retains the ordered four-step flow;
+- the three fast-entry fixture paths stay within their activation ceilings;
+- multi-plot prefills apply only when value and provenance agree across every plot;
+- batch review handles mixed crop cycles, conflicting carry-forward, 0/1/84
+  duplicates, and all-84 selection without sequential dialogs;
 - cloud authority adapters neither mutate edge-owned plots in cloud-primary mode nor
   report a pending gateway command as a confirmed save;
-- cloud attachments remain available and failures remain recoverable.
+- `APPLIED`, `PENDING`, `REJECTED`, and `UNKNOWN_AFTER_TIMEOUT` receipts affect only
+  their specified views and ranking;
+- cloud-primary attachments remain available and recoverable, while gateway-backed
+  capture contains no attachment section;
+- automated accessibility checks cover grid navigation, first-error focus,
+  disclosure opening, live announcements, and invoking-control focus restoration.
 
 ### 9.2 Backend and contract tests
 
 - authorization is applied before scope resolution;
 - inaccessible/unknown station and group filters fail closed;
 - pagination and export share filter normalization;
-- multi-plot finalization remains atomic and idempotent;
+- group filters are explicitly current-membership views and resolved membership is
+  frozen;
+- the versioned gateway batch command is capability-gated, atomic, idempotent, and
+  returns exact replay receipts;
 - catalog dependency and requiredness validation rejects stale incompatible input;
 - catalog seeds, generated fragments, bundled databases, and profile copies pass
   parity checks;
-- cloud plot-snapshot listing is workspace-scoped and read-only.
+- cloud plot-snapshot listing is workspace-scoped and read-only;
+- authorization loss, plot deactivation, layout change, and catalog refresh preserve
+  drafts and block stale finalization.
 
 ### 9.3 Required repository gates
 
@@ -437,10 +630,14 @@ Live acceptance requires:
 - private-window verification shows the new Journal assets;
 - ST72 and ST12 are separately visible and selectable;
 - selecting either station filters entries and CSV/JSON exports consistently;
-- Lysimeter operations show only compatible machinery;
+- Lysimeter operations show only globally compatible, layout-available active
+  machinery;
 - a normal Quick entry can reach review without opening More details;
 - desktop capture uses the available workspace and keeps Save visible;
-- attachments/conflict controls remain available where applicable;
+- cloud-primary attachments and conflict controls remain available; gateway-backed
+  capture shows no attachment section;
+- pending gateway entries appear only in **Waiting for farm** until edge ACK;
+- the three fast-entry fixtures meet their activation and live timing targets;
 - Status and Export research package controls remain absent.
 
 If any acceptance check fails, restore the preserved image to `dev-local`, recreate
@@ -453,4 +650,6 @@ only `agrolink-backend`, verify health, and report the evidence.
 - New compliance certification or legal retention claims.
 - Automatic machinery choice when more than one compatible choice exists.
 - Reintroducing the Status filter or Export research package control.
+- Claiming group membership at query time is historical entry provenance.
+- Gateway-backed attachments before a separate attachment contract exists.
 - Deploying to any host other than `agro-link.ch`.
