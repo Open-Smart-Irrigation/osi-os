@@ -1,4 +1,4 @@
-# PocketMaestro: product specification (draft 0.7)
+# PocketMaestro: product specification (draft 0.8)
 
 Status: consolidated after four interview rounds and the adjudicated expert
 panel of 2026-09-06. Decisions carry `D-n` (section 18); the panel's adopted
@@ -6,7 +6,11 @@ changes are folded into every section below, with the panel record in
 [panel-review-2026-09-06.md](panel-review-2026-09-06.md). Companions:
 [catalogue.md](catalogue.md) (launch ladder, grading, licensing) and
 [architecture.md](architecture.md) (algorithms, data, build order). The spec
-is ready to freeze for the phase 0 spike.
+was revised against the adjudicated external review
+([external-review-consolidation-2026-09-07.md](external-review-consolidation-2026-09-07.md));
+the reviewer's learning-policy transition table and commerce state table
+are normative. Ready for the pre-spike contract work (F01/F02), then the
+32-hour spike.
 
 ## 1. Summary
 
@@ -137,21 +141,36 @@ Scored track, per attempt, thresholds tunable over the air (A-1):
 | Timing | Onset deviation as a fraction of the local inter-onset interval, floored in ms, widened at annotated cadences and phrase ends; three steadiness figures (evenness, tempo accuracy, stability). | Share of onsets in band at the difficulty setting. |
 | Articulation | Membership in the authored touch band; consistency across like figures; releases (repeated notes re-articulated, chord releases synchronous). Reference comparison is feedback, never the gate. | Band and consistency shares. |
 
-Free sections score pitch and order only. Self-assessed track: per-part
-ratings on behavioural anchors ("stopped or corrected at least once" /
-"played through, some unevenness" / "played through twice at this tempo
-with no stop"), a pre-attempt prediction whose gap is shown afterwards, and
-a delayed judgment at probe time. MIDI users give the same ratings before
-seeing their analysis; the measured gap calibrates the self-assessed track
-and any systematic bias is subtracted, not damped. Securing still requires
-separate days: two for scored evidence, three for self-rated.
+Free sections score pitch and order only.
+
+Progress is certified only by a **qualifying performance** (review F02):
+each cell carries an authored qualifying task — its full span, stated
+parts, and an acceptable tempo range. Shorter spans, slower drills, and
+other part configurations guide practice and never pass the cell. A MIDI
+channel is not a hand (review F01): when both hands share a manual the
+scorer reports a combined manuals part, individual-hand cells rest on
+self-ratings and genuine isolation, and ambiguous input yields "not
+measured", never a fabricated score.
+
+Self-assessed track: per-part ratings on single-performance observable
+anchors — stopped or corrected; continued with identified problems;
+continued and met this exercise's stated criterion — plus "not sure"; a
+pre-attempt prediction whose gap is shown afterwards as reflection, and a
+delayed judgment at probe time. MIDI users give the same ratings before
+seeing their analysis, which yields paired data for the calibration study;
+no individual bias is subtracted without independent evidence (review
+F03). Securing requires qualifying passes on separate days: two measured,
+three self-reported, with the evidence kind stored and shown; later MIDI
+never upgrades earlier self-reports.
 
 ## 6. Adaptivity engine
 
-The engine's governing rule is a guardrail, not an optimum: keep realised
-success inside a band of roughly 75 to 90 percent early in a cell, relaxing
-to 65 to 80 for consolidation and probes — high enough to build efficacy,
-low enough to stretch. Learning itself is driven by structure: practice
+The engine has one difficulty controller. Success bands (roughly 75 to 90
+percent early, 65 to 80 in consolidation) are diagnostics during beta:
+persistent difficulty triggers a learner choice, never a second automatic
+correction (review F05). The external reviewer's transition table is the
+normative statement of what each kind of evidence may change; it is
+reproduced in architecture.md section 6. Learning itself is driven by structure: practice
 regimes (blocked on first exposure, interleaved across three to four active
 cells, random among passed cells), a hard cap of three consecutive attempts
 per cell, segmentation before fractionation, retrieval through continuity
@@ -281,12 +300,15 @@ lernen" on the German listing (D-47).
 |---|---|
 | Free | The free lesson complete, the BWV 565 pedal-solo exercise, ear-calibration items. No account, no time limit. |
 | Subscription | The whole catalogue and every new lesson. CHF 15 monthly or CHF 96 annually, annual preselected. The anchor, stated in the store listing: less than one hour with an organ teacher, for a year of structured practice. Piece counts never appear in marketing. |
-| Founding member | First 150 subscribers: lifetime access, CHF 249, closed publicly when the cap is reached. |
-| Institutional seats | CHF 60 per seat per year at ten seats or more, redeemed by offer code — for C-Ausbildung courses, chapters, and church music offices. |
+| Institutional seats | Deferred (D-50): no seat entitlement is advertised until the exact billing route is proven in a sandbox (Play promo codes are trials, not seats — review F08). Institutional recruitment proceeds on ordinary individual subscriptions meanwhile. |
 | Tutoring | Per session, outside the stores (section 13). |
 
-Entitlements are cached with a 14-day offline grace period; cancelling
-keeps all data and the repertoire list.
+Entitlement follows the reviewer's commerce state table (normative, in the
+review record): access honours the known paid-through date, then the
+14-day grace when status cannot refresh — never "lock 14 days after last
+contact". Restore is user-triggered; an imported progress file never
+imports access; cancelling keeps all data and the repertoire list. The
+founding-member lifetime tier is cut (D-49).
 
 ## 13. Tutor sessions (D-41)
 
@@ -335,10 +357,15 @@ Four of the twenty weekly hours belong to distribution, permanently:
 
 ### 15.1 Legal setup
 
-Week 1: Einzelfirma registration and a D-U-N-S number, so the Play account
-is an organization account (keeps the home address off the listing and
-gives tutoring a clean invoicing entity); verify the current closed-test
-tester rule rather than assuming 12 or 20. Apple's account waits for the
+Week 1: Einzelfirma registration and a D-U-N-S number (up to 30 days lead
+time) for an organization Play account — chosen for the invoicing entity,
+not for privacy: organization profiles display their legal address, so a
+publishable business address must be arranged deliberately (review F11).
+Google's current rule (verified): personal accounts created after
+2023-11-13 need 12 testers continuously opted in for 14 days; the
+enrollment category still needs confirming after registration. Google's
+policy explicitly exempts qualifying live one-to-one music lessons from
+Play billing, which confirms the tutoring link's basis. Apple's account waits for the
 port decision. Tax advice (R-1) is needed before the first paid tutor
 session, not before the beta; store subscriptions have Apple and Google as
 merchant of record. The revised Swiss DPA applies: privacy policy, export,
@@ -347,10 +374,16 @@ and anonymous.
 
 ### 15.2 Build order
 
-Spike (2 weeks): MIDI module with the numeric timestamp test, one console
-visit with a capture screen (real fixtures, channel and coupler reality,
-cabling), pre-rendered SVG proof on the Widor, audio scheduling proof, and
-three days verifying the same app on an iPhone (D-42). Then the content
+Pre-spike (6-9 h, outside the spike clock): the F01 input-capability
+contract and the F02 qualifying-task definitions. Spike (2 weeks = 8
+distribution + 32 technical hours, per the reviewer's timeboxes): device
+and provisioning prep (2), Android MIDI capture and the console visit
+including same-manual two-hand playing and cross-manual unisons (9), the
+authoring/rendering slice with both pedaling variants and a dense stress
+excerpt (5), the audio scheduling proof (4), a six-hour iOS feasibility
+box with a real CoreMIDI input path (6), measurements and the decision
+note (4), contingency (2). Timeboxes are not promises; a blocked probe is
+a documented result. Then the content
 pipeline (CLI plus annotation tool) before B1, because B1's lesson package
 depends on it. Betas as in architecture.md section 11: B1 free lesson and
 self-assessed track; gate G1; B2 scoring, RTP, telemetry and the
@@ -399,6 +432,9 @@ panel's 47 adopted changes (panel-review section 3) are part of this draft.
 | D-46 | Institutional seat tier (CHF 60/seat/yr, 10+) and founding-member lifetime tier (CHF 249, first 150) ship with B3. |
 | D-47 | Name stays PocketMaestro with a category suffix in store titles; trademark search precedes design. Amends D-16/D-24 scope. |
 | D-48 | The adjudicated panel changes are adopted as a block; individual items are cited inline as "panel item n". |
+| D-49 | The founding-member lifetime tier is cut (amends D-46). |
+| D-50 | Institutional seats deferred until the billing mechanism is proven in sandbox; recruitment proceeds on ordinary subscriptions (amends D-46). |
+| D-51 | The external review's fifteen findings and supporting tables are adopted as a block per the consolidation; the learning-policy transition table and commerce state table are normative. |
 
 ## 19. Assumptions
 
@@ -415,7 +451,14 @@ panel's 47 adopted changes (panel-review section 3) are part of this draft.
 | A-9 | Skia renders the pipeline's SVG correctly; verified in the spike (outline-path fallback if not). |
 | A-10 | Vetted CC0 community engravings exist for at least part of the launch ladder; licence-checked per piece. |
 | A-11 | The hosted scheduler's EU hosting and Stripe terms fit the Swiss posture; checked before B3. |
-| A-12 | The current Play closed-test tester rule is verified in week 1. |
+| A-12 | The current Play closed-test tester rule is verified in week 1 (12 testers / 14 days confirmed for post-2023 personal accounts; enrollment category pending). |
+| A-13 | Phone notation is readable at a real console distance. |
+| A-14 | Observable MIDI separation on real consoles is adequate for the scoring model. |
+| A-15 | Non-MIDI ratings are valid enough to guide practice (not to certify equivalence). |
+| A-16 | Section practice transfers to independent whole-piece performance. |
+| A-17 | A free-lesson finisher finds a suitable paid next lesson. |
+| A-18 | Content throughput including localisation and operations is demonstrable at the promised cadence. |
+| A-19 | Each advertised commerce tier has a realizable billing mechanism. |
 
 ## 20. Open items
 
@@ -423,4 +466,9 @@ panel's 47 adopted changes (panel-review section 3) are part of this draft.
 |---|---|---|
 | R-1 | VAT position for tutoring and the Einzelfirma's invoicing; advisor consult. | First paid tutor session. |
 | R-2 | Trademark search on PocketMaestro. | Design spend (D-47). |
-| R-3 | The verification list from the panel (assumptions A-8 to A-12). | Their named gates. |
+| R-3a | Auto Backup quota with split stores (A-8, review F12). | B1 architecture. |
+| R-3b | Skia renders the pipeline's SVG (A-9). | The spike's rendering slice. |
+| R-3c | CC0/bought engraving licence chain per piece (A-10). | Each package's release. |
+| R-3d | Scheduler vendor hosting and payment terms (A-11). | Live bookings. |
+| R-3e | Play enrollment category and tester rule (A-12). | Distribution. |
+| R-4 | Exact first-pedal work committed (Franck piece named with editorial bass declared, or a verified replacement) — review F07. | Catalogue 0.3 lock; owner's call. |

@@ -1,4 +1,4 @@
-# PocketMaestro: technical architecture (draft 0.3)
+# PocketMaestro: technical architecture (draft 0.4)
 
 Companion to [spec.md](spec.md), rewritten after the adjudicated panel
 review (panel items cited as "item n"). Fixes what the phase 0 spike builds
@@ -6,7 +6,10 @@ against: module layout, the content pipeline and package format, the local
 database, the scoring pipeline, the adaptivity engine, the console emulator
 and recorded fixtures, rendering, screens, commerce, build order, and
 testing. The launch has no user accounts and no server holding learner
-state (spec D-38, D-41).
+state (spec D-38, D-41). Revised per the adjudicated external review: qualifying
+performances certify progress (F02), hand attribution is honest (F01),
+storage is split for the backup quota (F12), and the reviewer's transition
+and commerce state tables are normative (F05, F09).
 
 ## 1. System overview
 
@@ -102,10 +105,17 @@ journal_mode=WAL` and `foreign_keys=ON` set explicitly (item 42).
 | `settings` | key, value |
 
 States rebuild from `attempt_scores` + `part_ratings` (append-only), never
-across a scoring-version boundary; a section whose package revision hash
-changed resets to in-progress with a note. Android Auto Backup covers the
-database (WAL checkpointed, sidecars excluded); the share-sheet export
-remains as the portable path and future account migration (items 37, 42).
+across a scoring-, calibration-, or adaptivity-version boundary; a section
+whose package revision hash changed resets to in-progress with a note.
+
+Storage is split (review F12: a plausible 90-day event table alone is ~59
+MiB against Auto Backup's 25 MB quota): durable progress lives in a small
+database covered by Auto Backup (WAL checkpointed, sidecars excluded);
+raw `attempt_events`, learner recordings, and downloaded lesson packages
+live in a separately capped store excluded from backup, with byte limits
+and retention per class. Quota and restore-after-kill tests are a B1
+gate. The share-sheet export remains the portable path and future account
+migration, and it documents what it includes.
 
 ## 5. Scoring pipeline
 
@@ -132,6 +142,13 @@ remains as the portable path and future account migration (items 37, 42).
    like figures, repeated-note re-articulation, chord-release synchrony;
    the reference comparison renders as feedback only (items 1, 2, 9).
 6. **Free sections** score pitch and order only (item 3).
+7. **Invariants** (review): pitch recall runs over the required expected
+   content and span coverage is checked independently of semi-global
+   head/tail deletions — a well-aligned fragment is not a completed
+   passage; an absent input stream is technical uncertainty ("not
+   measured"), never missed notes; both hands on one manual score as a
+   combined manuals part, and coupler de-duplication applies only to
+   observed, configured routes (F01).
 
 Fixtures: the golden set is recorded on the real console (week-1 capture
 and every visit after), hand-labelled; the emulator's generated takes test
@@ -139,10 +156,18 @@ the engine's breadth but never stand in for expansion truth (items 25, 43).
 
 ## 6. Adaptivity engine
 
-Governing rule: a guardrail band of realised success — 75-90 % early in a
-cell, 65-80 % for consolidation and probes — measured over a sliding
-window and corrected explicitly when left. Learning is driven by
-structure, not by the band (items 15-21).
+One difficulty controller; success bands are beta diagnostics that
+trigger a learner choice, never a second automatic correction (review
+F05). Progress is certified only by qualifying performances (review F02):
+each cell's authored qualifying task — full span, stated parts, tempo
+range — is the top rung of its ladder; everything easier guides practice
+without passing. The reviewer's transition table (consolidation section 3)
+is the normative evidence-response contract, including: technical
+interruptions are invalid attempts with no musical inference; an
+abandoned take resets the pass streak without a down-step; a restart
+inside a probe or continuity test fails that test; probe overflow defers
+deterministically without lowering the target; fewer than three eligible
+cells rotates or ends the session rather than inventing filler.
 
 - **Mastery** per cell: EMA `m += alpha (o - m)`, alpha 0.35 scored / 0.15
   self-rated; self outcomes pass through the calibration mapping (below)
@@ -238,10 +263,13 @@ sweep at 120 Hz; acceptance runs on the Widor and BWV 565 first (item 13).
 ## 10. Commerce and data paths
 
 - Subscriptions: RevenueCat anonymous IDs over Play Billing; annual
-  preselected; founding-member lifetime as a one-time product; offer codes
-  carry the institutional tier (D-43, D-46). Cross-platform entitlement
-  policy is written down before launch: the email opt-in is the future
-  binding point.
+  preselected (D-43). No lifetime product (D-49); no institutional seat
+  product until its billing route is proven in sandbox (D-50). The
+  reviewer's commerce state table is the implementation contract:
+  entitlement honours the known paid-through date plus the 14-day grace,
+  restore is user-triggered, billing events never touch mastery, and a
+  future iOS binding requires a live store entitlement — a newsletter
+  email is not proof of purchase.
 - Tutoring: an external scheduler link; no learner data leaves the app for
   it (the learner may share their export by hand). D-41.
 - Telemetry: opt-in, beta-oriented; a compact anonymous row per attempt
@@ -257,7 +285,8 @@ sweep at 120 Hz; acceptance runs on the Widor and BWV 565 first (item 13).
 
 | Phase | Contents | Exit |
 |---|---|---|
-| Spike (2 wks) | Kotlin MIDI module; console visit with capture screen; pre-rendered SVG proof on the Widor; audio scheduling proof; three days running the app on an iPhone (D-42). | Timestamp test <= 3 ms RMS over 500 note-ons; rendering budgets met; real fixtures in repo; iOS evidence written up. |
+| Pre-spike (6-9 h) | F01 input-capability contract; F02 qualifying-task definitions per lesson. | Contracts written; organist has ruled on qualifying spans and tempo ranges. |
+| Spike (32 technical h + 8 distribution h) | Prep 2 h; Android MIDI capture + console visit incl. same-manual hands, couplers, unisons, disconnect 9 h; authoring/rendering slice with both pedaling variants + dense stress excerpt 5 h; audio proof 4 h; iOS feasibility box 6 h; measurements + decision note 4 h; contingency 2 h. | The reviewer's evidence list per box; a failed probe is a documented result with its fallback named. |
 | Content pipeline | CLI + annotation tool; free lesson built through them. | BWV 639 package validates, renders, and plays end to end. |
 | B1 | Lesson player, self-assessed track with calibration screens, local progress, Auto Backup, Sentry, EAS Update, emulator dev panel. | A tester without MIDI completes the free lesson. |
 | G1 | Real-console validation at scale. | Fixture suite green on recorded takes; wizard and couplers verified. |
@@ -277,14 +306,14 @@ sweep at 120 Hz; acceptance runs on the Widor and BWV 565 first (item 13).
 | app | Maestro flows: complete an exercise, rate with prediction, download and verify a package, coupler wizard path. |
 | release | Play pre-launch report on each closed-track build. |
 
-## 13. Assumptions
+## 13. Assumptions (architecture-local, prefixed AA to avoid colliding with spec A-n)
 
 | ID | Assumption |
 |---|---|
-| A-1 | Recorded fixtures plus the beta calibration study suffice to tune thresholds; emulator data is never used for tuning. |
-| A-2 | The consented manual export covers tutor preparation until accounts exist. |
-| A-3 | 90-day event pruning with durable scores is acceptable. |
-| A-4 | Console cabling: USB-C to the Pixel 8 Pro; C-to-B cable procured in case. |
-| A-5 | Auto Backup quota fits the pruned database (verify before B1). |
-| A-6 | Skia renders the CLI's SVG (verify in spike; outline-path fallback). |
-| A-7 | The serverless telemetry endpoint and newsletter provider meet the Swiss/EU posture. |
+| AA-1 | Recorded fixtures plus the beta calibration study suffice to tune thresholds; emulator data is never used for tuning. |
+| AA-2 | The consented manual export covers tutor preparation until accounts exist. |
+| AA-3 | 90-day event pruning with durable scores is acceptable. |
+| AA-4 | Console cabling: USB-C to the Pixel 8 Pro; C-to-B cable procured in case. |
+| AA-5 | Auto Backup quota fits the pruned database (verify before B1). |
+| AA-6 | Skia renders the CLI's SVG (verify in spike; outline-path fallback). |
+| AA-7 | The serverless telemetry endpoint and newsletter provider meet the Swiss/EU posture. |

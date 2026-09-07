@@ -1,8 +1,11 @@
-# PocketMaestro: catalogue plan (draft 0.2)
+# PocketMaestro: catalogue plan (draft 0.3)
 
 Companion to [spec.md](spec.md) section 9, regraded after the panel review
 (panel items 29-36). Everything here is the organist's to revise; the
 grading scale and the grade-1 rung are the parts most worth arguing about.
+Revised per the external review: Brahms op. 122 no. 8 is manualiter (the
+reviewer inspected the Simrock first edition — it has no pedal part), so
+the first genuine pedal rung is still uncommitted (open item R-4).
 
 ## 1. Grading scale
 
@@ -64,15 +67,21 @@ Paid lessons at launch, four, deep in grades 1-2:
 
 | Grade | Piece | Why | Hours |
 |---|---|---|---|
-| 1 | Brahms, "Es ist ein Ros entsprungen" op. 122 no. 8 | Chordal legato, finger substitution, quiet slow pedal; a true first rung. | 11 |
-| 1 | Franck, from L'Organiste (organist to pick the piece; e.g. the Andantino) | One manual, pedal ad libitum taught with a simple bass; French legato from day one. | 10 |
+| 1 | Brahms, "Es ist ein Ros entsprungen" op. 122 no. 8 | Manualiter: chordal legato and finger substitution on the manuals — no pedal part (review F07). The manual-technique first rung. | 11 |
+| 1 | Franck, from L'Organiste — exact piece to be committed (R-4) | The first-pedal rung: one manual with a simple pedal bass declared as the app's editorial arrangement where absent from the original; or a verified replacement work. | 10 |
 | 2 | J. S. Bach, "Liebster Jesu, wir sind hier" BWV 731 | Ornamented cantus, walking pedal on the early axis, the held-voice trill with authored fingering. | 12 |
-| 2 | J. S. Bach, Prelude and Fugue in C major BWV 553 | The ladder's first fugue, short and kind; alternate-toe pedal. | 14 |
+| 2 | Prelude and Fugue in C major BWV 553 (formerly ascribed to J. S. Bach) | The ladder's first fugue, short and kind; alternate-toe pedal. Attribution stated per the publisher's own description. | 14 |
 
 Launch authoring total: roughly 65 hours with bought or CC0 engravings and
 grade-scaled recording budgets — against 119 in the old six-piece scope.
 
 ## 4. First quarter after launch
+
+A prioritised queue, not a promise. The external review showed the effort model still contradicts itself
+(F06): the detailed per-lesson model prices five complete lessons plus the
+demo at 111-136 h against the launch table's 65. Until the first lesson is
+timed through the real pipeline, this list is a queue ordered by value,
+drawn down as measured capacity allows.
 
 | Grade | Piece | Note |
 |---|---|---|
