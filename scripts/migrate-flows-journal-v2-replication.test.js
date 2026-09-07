@@ -106,3 +106,20 @@ test('migration rejects collisions instead of overwriting a drifted worker', () 
     /Refusing non-exact Journal V2 replication node collision/,
   );
 });
+
+test('migration upgrades the known prior schema-fingerprint worker, but no other drift', () => {
+  const priorSchemaFingerprint = 'a2a455a7ab2279dd51b66390173bcede6e3460c0785208d9ffbc1b737ce79092';
+  const flows = JSON.parse(serialize(migrator.EXPECTED_NODES));
+  const worker = flows.find((node) => node.id === 'journal-v2-replication-worker');
+  worker.func = worker.func.replace(migrator.SCHEMA_FINGERPRINT, priorSchemaFingerprint);
+
+  assert.equal(
+    migrator.migrate(serialize(flows)).equals(serialize(migrator.EXPECTED_NODES)),
+    true,
+  );
+  worker.func += '\n// untrusted drift';
+  assert.throws(
+    () => migrator.migrate(serialize(flows)),
+    /Refusing non-exact Journal V2 replication node collision/,
+  );
+});

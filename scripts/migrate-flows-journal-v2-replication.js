@@ -19,6 +19,13 @@ const SCHEMA_FINGERPRINT = crypto.createHash('sha256').update(fs.readFileSync(pa
   'docs/contracts/sync-schema/journal-v2.schema.json',
 ))).digest('hex');
 const PRIOR_WORKER_SHA256 = 'cc3f55c7212b2d0a7ea3c5f0d058978f9902a6166d161de8713990ac51042918';
+// Schema fingerprints are embedded in the generated worker source. Keep only
+// exact, reviewed predecessors upgradeable; arbitrary worker edits still fail
+// closed as a collision.
+const COMPATIBLE_PRIOR_WORKER_SHA256S = new Set([
+  PRIOR_WORKER_SHA256,
+  '7998f113a0a3ade1cd569ccc814f013932bc719d3e310a2d29a9d48a7cf77bb1',
+]);
 
 function serialize(flows) {
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
@@ -204,8 +211,9 @@ function migrate(buffer) {
       if (JSON.stringify(node) === JSON.stringify(expected)) continue;
       const upgraded = Object.assign({}, node, { func: expected.func });
       const priorWorker = node.id === 'journal-v2-replication-worker' &&
-        crypto.createHash('sha256').update(String(node.func || '')).digest('hex') ===
-          PRIOR_WORKER_SHA256 &&
+        COMPATIBLE_PRIOR_WORKER_SHA256S.has(
+          crypto.createHash('sha256').update(String(node.func || '')).digest('hex')
+        ) &&
         JSON.stringify(upgraded) === JSON.stringify(expected);
       if (!priorWorker) {
         throw new Error('Refusing non-exact Journal V2 replication node collision: ' + node.id);
@@ -243,6 +251,7 @@ if (require.main === module) main();
 module.exports = {
   EXPECTED_NODES,
   PRIOR_WORKER_SHA256,
+  COMPATIBLE_PRIOR_WORKER_SHA256S,
   SCHEMA_FINGERPRINT,
   WORKER_SOURCE,
   migrate,
