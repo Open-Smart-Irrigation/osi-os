@@ -1488,6 +1488,16 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('initializes the local occurrence in the effective farm timezone', async () => {
+    // North field (zone-1) has no zoneTimezones entry in baseProps, so
+    // selecting it falls the flow's timezone back to the browser's own
+    // resolved zone (see JournalCaptureFlow.tsx's plot-select handler).
+    // Pin that resolved zone to Europe/Zurich explicitly -- same technique
+    // as "adopts the linked plot timezone when generic capture selects a
+    // plot" below -- so this assertion exercises "the effective farm
+    // timezone" deterministically instead of depending on the host
+    // machine's own TZ (which only ever coincidentally was Zurich).
+    const browserTimezone = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: 'Europe/Zurich' } as Intl.ResolvedDateTimeFormatOptions);
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-15T22:30:00.000Z'));
     try {
@@ -1501,6 +1511,7 @@ describe('JournalCaptureFlow', () => {
       cleanup();
     } finally {
       vi.useRealTimers();
+      browserTimezone.mockRestore();
     }
   });
 
@@ -3162,41 +3173,56 @@ describe('JournalCaptureFlow', () => {
     apiMocks.createFinalBatch.mockRejectedValueOnce({
       response: { data: { error: 'duplicate_candidates', details: { duplicateCandidates: candidates } } },
     });
-    render(<JournalCaptureFlow
-      {...baseProps}
-      catalog={localizedCatalog}
-      plots={[plot, homogeneousSecondPlot]}
-    />);
-    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
-    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Bewässerung' }));
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
-    // NIT 10: the batch-duplicate list no longer renders the raw entry_uuid
-    // (a meaningless opaque id to a farmer) -- it shows the occurrence date +
-    // activity as the human disambiguator, plus a short "#<last 8 chars>" tag
-    // for the rare case two candidates in the same group share that date +
-    // activity display. Assert on that shortened tag rather than the full
-    // uuid, which no longer appears anywhere in the DOM.
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(`#${duplicateUuid(14).slice(-8)}`));
+    // Neither North field (zone-1) nor East field has a zoneTimezones entry
+    // in baseProps, so the flow's timezone state falls back to the
+    // browser's own resolved zone (see JournalCaptureFlow.tsx's plot-select
+    // handler), which is what occurrenceLabel() then renders the duplicate
+    // list's dates in. Pin that resolved zone to Europe/Zurich explicitly --
+    // same technique as "adopts the linked plot timezone when generic
+    // capture selects a plot" above -- so the expected dates below (already
+    // computed with an explicit Europe/Zurich timeZone) match the rendered
+    // ones regardless of the host machine's own TZ.
+    const browserTimezone = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: 'Europe/Zurich' } as Intl.ResolvedDateTimeFormatOptions);
+    try {
+      render(<JournalCaptureFlow
+        {...baseProps}
+        catalog={localizedCatalog}
+        plots={[plot, homogeneousSecondPlot]}
+      />);
+      fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+      fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Bewässerung' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+      // NIT 10: the batch-duplicate list no longer renders the raw entry_uuid
+      // (a meaningless opaque id to a farmer) -- it shows the occurrence date +
+      // activity as the human disambiguator, plus a short "#<last 8 chars>" tag
+      // for the rare case two candidates in the same group share that date +
+      // activity display. Assert on that shortened tag rather than the full
+      // uuid, which no longer appears anywhere in the DOM.
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(`#${duplicateUuid(14).slice(-8)}`));
 
-    const firstDate = new Intl.DateTimeFormat('de', {
-      dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Zurich',
-    }).format(new Date(candidates[0].occurredStart));
-    const secondDate = new Intl.DateTimeFormat('de', {
-      dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Zurich',
-    }).format(new Date(candidates[1].occurredStart));
-    const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent(firstDate);
-    expect(alert).toHaveTextContent(secondDate);
-    expect(alert).toHaveTextContent('Bewässerung');
-    expect(alert).toHaveTextContent(`#${duplicateUuid(14).slice(-8)}`);
-    expect(alert).toHaveTextContent(`#${duplicateUuid(15).slice(-8)}`);
-    expect(alert).not.toHaveTextContent(duplicateUuid(14));
-    expect(alert).not.toHaveTextContent(duplicateUuid(15));
+      const firstDate = new Intl.DateTimeFormat('de', {
+        dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Zurich',
+      }).format(new Date(candidates[0].occurredStart));
+      const secondDate = new Intl.DateTimeFormat('de', {
+        dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Zurich',
+      }).format(new Date(candidates[1].occurredStart));
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent(firstDate);
+      expect(alert).toHaveTextContent(secondDate);
+      expect(alert).toHaveTextContent('Bewässerung');
+      expect(alert).toHaveTextContent(`#${duplicateUuid(14).slice(-8)}`);
+      expect(alert).toHaveTextContent(`#${duplicateUuid(15).slice(-8)}`);
+      expect(alert).not.toHaveTextContent(duplicateUuid(14));
+      expect(alert).not.toHaveTextContent(duplicateUuid(15));
+    } finally {
+      browserTimezone.mockRestore();
+    }
   });
 
   it('ignores malformed duplicate candidates and value rows without crashing', async () => {
