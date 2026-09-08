@@ -101,6 +101,8 @@ jobs:
         run: node --test scripts/test-scoped-access-reads.js
       - name: Scoped-access command-path suite
         run: node --test scripts/test-scoped-access-command-path.js
+      - name: Scoped-access command package tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.test.js
       - run: node --test scripts/soak/rig.test.js scripts/soak/scenario-outbox-replay.test.js scripts/soak/scenario-clock-jump.test.js scripts/soak/scenario-kill9-migration.test.js scripts/soak/scenario-sd-full.test.js
       - run: node --test scripts/test-gateway-health-persistence.js
       - run: node --test scripts/deploy-canary-gate.test.js
