@@ -104,6 +104,30 @@ function nullable(value) {
   return value == null ? null : value;
 }
 
+// Slice BC (R1 Part 2): journal_plot_settings.context_json carries the
+// plot's static-context values (block/bed/row, structure/compartment,
+// experimental unit, ... per the active layout's static_context_fields) as a
+// JSON object, serialized by the caller. Mirrors the size/shape guard the
+// entry-level context/context_json fields already use (index.js), scoped
+// down to the one field this table has.
+function validatedContextJson(value) {
+  if (value == null) return null;
+  if (typeof value !== 'string') semanticError('invalid_type', 'context_json must be a JSON string', { field: 'context_json' });
+  if (Buffer.byteLength(value, 'utf8') > 64 * 1024) {
+    semanticError('limit_exceeded', 'context_json exceeds the 64 KiB limit', { field: 'context_json' });
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (_) {
+    semanticError('invalid_json', 'context_json must contain valid JSON', { field: 'context_json' });
+  }
+  if (!isObject(parsed)) {
+    semanticError('invalid_type', 'context_json must be a JSON object', { field: 'context_json' });
+  }
+  return value;
+}
+
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -164,6 +188,58 @@ function canonicalDuplicateAcknowledgements(raw) {
     badRequest('duplicate_duplicate_ack', 'Duplicate acknowledgement UUIDs must be unique');
   }
   return values;
+}
+
+// B1/B2 fix (Slice F, atomic tank-mix pass): `isPassBatch` (true whenever the
+// request carries a top-level pass_uuid) generalizes this HTTP-layer
+// validation the same way lifecycle.js's normalizeBatchMembers does — a
+// pass batch requires every member to share ONE plot (it is one plot's
+// operation split across product lines), the opposite of a cross-plot
+// batch's "every member is a different plot" rule. Members may also carry
+// their own `values` (validated only for array-shape here; per-attribute
+// validation happens later via validateEntry, same as any other entry).
+function canonicalBatchMembers(raw, isPassBatch) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    badRequest('invalid_batch', 'members must be a nonempty array');
+  }
+  if (raw.length > 100) {
+    throw apiError(413, 'batch_too_large', 'A journal batch may contain at most 100 members');
+  }
+  const members = raw.map(function(member, index) {
+    if (!isObject(member)) {
+      badRequest('invalid_batch', 'members[' + index + '] must be an object');
+    }
+    if (typeof member.plot_uuid !== 'string' || !CANONICAL_UUID.test(member.plot_uuid)) {
+      badRequest('invalid_uuid', 'members[' + index + '].plot_uuid must be a canonical UUID');
+    }
+    if (typeof member.entry_uuid !== 'string' || !CANONICAL_UUID.test(member.entry_uuid)) {
+      badRequest('invalid_uuid', 'members[' + index + '].entry_uuid must be a canonical UUID');
+    }
+    const canonical = {
+      plot_uuid: member.plot_uuid,
+      entry_uuid: member.entry_uuid,
+    };
+    if (Object.prototype.hasOwnProperty.call(member, 'values')) {
+      if (!Array.isArray(member.values)) {
+        badRequest('invalid_batch', 'members[' + index + '].values must be an array');
+      }
+      canonical.values = member.values;
+    }
+    return canonical;
+  });
+  const entryUuids = new Set(members.map(function(member) { return member.entry_uuid; }));
+  if (entryUuids.size !== members.length) {
+    badRequest('duplicate_member', 'Batch member entry UUIDs must be unique');
+  }
+  const plotUuids = new Set(members.map(function(member) { return member.plot_uuid; }));
+  if (isPassBatch) {
+    if (plotUuids.size !== 1) {
+      badRequest('invalid_batch', 'A pass batch requires every member to share one plot');
+    }
+  } else if (plotUuids.size !== members.length) {
+    badRequest('duplicate_member', 'Batch member plot UUIDs must be unique');
+  }
+  return members;
 }
 
 function normalizeGatewayIdentity(identity) {
@@ -281,9 +357,17 @@ function parsedJson(raw, fallback) {
   }
 }
 
-function catalogDto(catalog) {
+function catalogDto(catalog, options) {
+  const includeDefs = Boolean(options && options.includeDefinitions);
   const vocab = [...catalog.vocabByCode.values()].map(function(row) {
     const output = Object.assign({}, row);
+    if (includeDefs) {
+      output.labels = parsedJson(output.labels_json, {});
+      output.constraints = parsedJson(output.constraints_json, null);
+    } else {
+      delete output.labels;
+      delete output.constraints;
+    }
     delete output.labels_json;
     delete output.constraints_json;
     return output;
@@ -292,6 +376,13 @@ function catalogDto(catalog) {
     return [...index.values()].flatMap(function(versions) {
       return [...versions.values()].map(function(row) {
         const output = Object.assign({}, row);
+        if (includeDefs) {
+          output.labels = parsedJson(output.labels_json, {});
+          output.definition = parsedJson(output.definition_json, {});
+        } else {
+          delete output.labels;
+          delete output.definition;
+        }
         delete output.labels_json;
         delete output.definition_json;
         return output;
@@ -300,6 +391,11 @@ function catalogDto(catalog) {
   };
   const products = [...catalog.products.values()].map(function(row) {
     const output = Object.assign({}, row);
+    if (includeDefs) {
+      output.composition = parsedJson(output.composition_json, {});
+    } else {
+      delete output.composition;
+    }
     delete output.composition_json;
     return output;
   }).sort(function(left, right) { return left.product_uuid.localeCompare(right.product_uuid); });
@@ -319,8 +415,8 @@ function catalogDto(catalog) {
   };
 }
 
-async function loadScopedCatalog(db, principal) {
-  return catalogDto(await loadCatalog(db, principal));
+async function loadScopedCatalog(db, principal, options) {
+  return catalogDto(await loadCatalog(db, principal), options);
 }
 
 function normalizedStringFilter(raw, field) {
@@ -471,8 +567,25 @@ async function listEntriesInSnapshot(db, rawFilters, principal) {
       valuesByEntry.get(value.entry_uuid).push(value);
     }
   }
+  // D2.2/§6: while a plot's covering cycle is open, the crop is resolved
+  // live rather than trusting the (possibly deferred/stale) stored columns.
+  // Purely additive: entries on a plot with no open journal_crop_cycle_plots
+  // membership -- every entry before this feature, and the overwhelming
+  // majority after -- get back an empty Map and are unaffected.
+  const lifecycle = require('./lifecycle');
+  const queryAll = function(sql, params) { return dbAll(db, sql, params); };
+  const liveCropOverrides = await lifecycle.resolveLiveCropOverrides(queryAll, rows);
+  // P2-b (Slice D hardening): a harvest/manual-close/reseed entry that closed
+  // a crop cycle never carries its own season_crop/season_variety (see
+  // lifecycle.js resolveClosedCropCycleOverrides) -- resolve the crop it
+  // CLOSED, for display only, so the timeline/detail views can show what was
+  // harvested instead of a blank crop.
+  const closedCropOverrides = await lifecycle.resolveClosedCropCycleOverrides(queryAll, rows);
   const entries = rows.map(function(row) {
-    return buildAggregate(Object.assign({ contract_version: 1 }, row), valuesByEntry.get(row.entry_uuid) || []);
+    const liveCrop = liveCropOverrides.get(row.entry_uuid);
+    const closedCrop = closedCropOverrides.get(row.entry_uuid);
+    const projected = Object.assign({}, row, liveCrop || {}, closedCrop || {});
+    return buildAggregate(Object.assign({ contract_version: 1 }, projected), valuesByEntry.get(row.entry_uuid) || []);
   });
   return {
     entries,
@@ -563,7 +676,21 @@ async function activeLayout(tx, code, version) {
   return layout;
 }
 
-function plotAggregate(row, settings) {
+// Slice D hardening (P1-a/P1-b): activeCropCycles is a GUI-only, additive
+// enrichment -- the plot's currently OPEN journal_crop_cycles membership(s),
+// per osi-journal/lifecycle.js activeCropCyclesForPlot. It is deliberately
+// left OFF the base aggregate (defaults to []) for callers that feed this
+// object into the outbox/cloud-sync contract (emitPlot below) -- the cloud
+// mirror has no use for it and this keeps that wire contract unchanged.
+// Callers that build a plot response for the GUI (listPlots, upsertPlot)
+// pass the real, freshly-queried array instead.
+//
+// hasWeatherSource (B3 fix, Slice F) follows the exact same additive
+// convention: whether the plot's linked zone has an actual weather-capable
+// device assigned (see zoneHasWeatherSource below), defaulting to false for
+// the outbox/cloud-sync callers (which have no use for it either) and
+// resolved for real by listPlots/upsertPlot.
+function plotAggregate(row, settings, activeCropCycles, hasWeatherSource) {
   return {
     contract_version: 1,
     plot_uuid: row.plot_uuid,
@@ -580,13 +707,56 @@ function plotAggregate(row, settings) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     deleted_at: nullable(row.deleted_at),
+    active_crop_cycles: activeCropCycles || [],
+    zone_has_weather_source: Boolean(hasWeatherSource),
     settings: {
       layout_code: settings.layout_code,
       updated_at: settings.updated_at,
       updated_by_principal_uuid: settings.updated_by_principal_uuid,
       sync_version: Number(settings.sync_version),
+      context_json: nullable(settings.context_json),
     },
   };
+}
+
+// Wraps api.js's plain db/snapshot handle (which may be callback- or
+// promise-shaped, see dbAll/syncDbCall) as the minimal tx-like `{all}` object
+// osi-journal/lifecycle.js's activeCropCyclesForPlot/openCyclesCoveringPlot
+// expect, so this read-only path can reuse that phase-2 query helper
+// verbatim instead of re-deriving the open-membership SQL.
+function txLike(db) {
+  return { all: function(sql, params) { return dbAll(db, sql, params); } };
+}
+
+async function activeCropCyclesForPlot(db, plotUuid) {
+  return require('./lifecycle').activeCropCyclesForPlot(txLike(db), plotUuid);
+}
+
+// B3 fix (Slice F): the real signal behind plotAggregate's
+// zone_has_weather_source -- whether the zone a plot is linked to has an
+// actual weather-capable device assigned, directly (devices.
+// irrigation_zone_id) or shared via the weather_station_zones junction
+// (the same two attachment paths osi-journal/context.js's loadSourceDevices
+// resolves for building the entry's weather context). SENSECAP_S2120 is the
+// only OSI device type that reports wind speed/direction, air temperature
+// and relative humidity together -- context.js's own rainCapable check
+// hardcodes the analogous device-type list for rain capability. A plot
+// merely having ANY zone_uuid is a different fact: a zone with only a soil-
+// tension probe (e.g. DRAGINO_LSN50) has no weather source at all.
+async function zoneHasWeatherSource(db, zoneUuid, principal) {
+  if (!zoneUuid) return false;
+  const row = await dbGet(
+    db,
+    'SELECT 1 FROM irrigation_zones AS z ' +
+      'JOIN devices AS d ON (d.irrigation_zone_id=z.id OR EXISTS (' +
+        'SELECT 1 FROM weather_station_zones AS wsz WHERE wsz.deveui=d.deveui AND wsz.zone_id=z.id' +
+      ')) ' +
+    'WHERE z.zone_uuid=? AND z.user_id=? AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL) ' +
+      "AND z.deleted_at IS NULL AND d.deleted_at IS NULL AND UPPER(d.type_id)='SENSECAP_S2120' " +
+    'LIMIT 1',
+    [zoneUuid, principal.user_id, principal.gateway_device_eui]
+  );
+  return Boolean(row);
 }
 
 async function emitPlot(tx, row, settings) {
@@ -723,13 +893,16 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
             [byZone.plot_uuid, principal.owner_user_uuid, principal.gateway_device_eui]
           );
           const settings = await dbGet(tx, 'SELECT * FROM journal_plot_settings WHERE plot_uuid=?', [byZone.plot_uuid]);
-          return { plot: plotAggregate(row, settings), created: false };
+          const activeCropCycles = await activeCropCyclesForPlot(tx, byZone.plot_uuid);
+          const hasWeatherSource = await zoneHasWeatherSource(tx, row.zone_uuid, principal);
+          return { plot: plotAggregate(row, settings, activeCropCycles, hasWeatherSource), created: false };
         }
         throw apiError(409, 'zone_plot_conflict', 'This zone already has an active application plot');
       }
     }
     const layoutVersion = input.layout_version == null ? null : Number(input.layout_version);
     const layout = await activeLayout(tx, input.layout_code, layoutVersion);
+    const contextJson = validatedContextJson(input.context_json);
     if (existing && Number(existing.sync_version) !== input.base_sync_version) {
       throw apiError(409, 'stale_version', 'Plot version is stale');
     }
@@ -783,9 +956,9 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
         await dbRun(
           tx,
           'INSERT INTO journal_plot_settings (' +
-            'plot_uuid,layout_code,updated_at,updated_by_principal_uuid,sync_version' +
-          ') VALUES (?,?,?,?,?)',
-          [plotUuid, layout.code, now, principal.author_principal_uuid, nextVersion]
+            'plot_uuid,layout_code,updated_at,updated_by_principal_uuid,sync_version,context_json' +
+          ') VALUES (?,?,?,?,?,?)',
+          [plotUuid, layout.code, now, principal.author_principal_uuid, nextVersion, contextJson]
         );
       } else {
         await dbRun(
@@ -799,8 +972,8 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
         await dbRun(
           tx,
           'UPDATE journal_plot_settings SET layout_code=?,updated_at=?,updated_by_principal_uuid=?,' +
-            'sync_version=? WHERE plot_uuid=?',
-          [layout.code, now, principal.author_principal_uuid, nextVersion, plotUuid]
+            'sync_version=?,context_json=? WHERE plot_uuid=?',
+          [layout.code, now, principal.author_principal_uuid, nextVersion, contextJson, plotUuid]
         );
       }
     } catch (error) {
@@ -826,7 +999,14 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
       gateway_device_eui: principal.gateway_device_eui,
       sync_version: nextVersion,
     });
-    return { plot: plotAggregate(row, settings), outbox_event_uuid: emission.event_uuid, created: creating };
+    const activeCropCycles = await activeCropCyclesForPlot(tx, plotUuid);
+    const hasWeatherSource = await zoneHasWeatherSource(tx, row.zone_uuid, principal);
+    return Object.assign({
+      plot: plotAggregate(row, settings, activeCropCycles, hasWeatherSource),
+      created: creating,
+    }, emission.replication_mode === 'v2'
+      ? { outbox_event_uuid: null, mutation_uuid: emission.mutation_uuid }
+      : { outbox_event_uuid: emission.event_uuid });
   });
 }
 
@@ -893,7 +1073,21 @@ async function saveEntry(db, input, principal, options) {
   options = options || {};
   const mode = options.mode || 'create';
   const body = Object.assign({}, input);
-  const batchRequest = Array.isArray(body.plot_uuids);
+  const hasMembers = Object.prototype.hasOwnProperty.call(body, 'members');
+  const hasLegacyPlotUuids = Object.prototype.hasOwnProperty.call(body, 'plot_uuids');
+  if (hasLegacyPlotUuids) {
+    badRequest('invalid_batch', 'Batches require members with plot_uuid and entry_uuid');
+  }
+  const batchRequest = hasMembers;
+  if (batchRequest && (Object.prototype.hasOwnProperty.call(body, 'plot_uuid') ||
+      Object.prototype.hasOwnProperty.call(body, 'zone_uuid'))) {
+    badRequest('invalid_batch', 'Batch members carry plot UUIDs; top-level plot or zone UUIDs are forbidden');
+  }
+  // B1/B2 fix (Slice F): a top-level pass_uuid marks this as an atomic
+  // single-plot, multi-product pass batch rather than a cross-plot batch —
+  // see canonicalBatchMembers's doc comment.
+  const isPassBatch = typeof body.pass_uuid === 'string' && body.pass_uuid.length > 0;
+  const batchMembers = hasMembers ? canonicalBatchMembers(body.members, isPassBatch) : null;
   if (Object.prototype.hasOwnProperty.call(body, 'duplicate_guard_ack_entry_uuids')) {
     if (!batchRequest) {
       badRequest('invalid_batch_control', 'duplicate_guard_ack_entry_uuids is valid only for batches');
@@ -916,12 +1110,12 @@ async function saveEntry(db, input, principal, options) {
     if (!Number.isInteger(body.base_sync_version) || body.base_sync_version < 0) {
       throw apiError(409, 'stale_version', 'PUT requires base_sync_version');
     }
-    if (Array.isArray(body.plot_uuids)) badRequest('invalid_batch', 'PUT cannot create a multi-plot batch');
+    if (batchRequest) badRequest('invalid_batch', 'PUT cannot create a multi-plot batch');
   } else {
     if (body.status === 'final' && body.base_sync_version !== 0) {
       throw apiError(409, 'stale_version', 'POST final requires base_sync_version 0');
     }
-    if (!body.entry_uuid && !Array.isArray(body.plot_uuids)) body.entry_uuid = crypto.randomUUID();
+    if (!body.entry_uuid && !batchRequest) body.entry_uuid = crypto.randomUUID();
   }
   const zoneUuid = canonicalUuid(body.zone_uuid, 'zone_uuid', false);
   let plotUuid = canonicalUuid(body.plot_uuid, 'plot_uuid', false);
@@ -934,14 +1128,13 @@ async function saveEntry(db, input, principal, options) {
   const catalog = await loadCatalog(db, principal);
   const lifecycle = require('./lifecycle');
   if (body.status === 'draft') {
-    if (Array.isArray(body.plot_uuids)) badRequest('invalid_batch', 'Drafts cannot be multi-plot batches');
+    if (batchRequest) badRequest('invalid_batch', 'Drafts cannot be multi-plot batches');
     return lifecycle.saveDraft(db, catalog, body, principal);
   }
-  if (Array.isArray(body.plot_uuids)) {
+  if (batchRequest) {
     if (mode !== 'create') badRequest('invalid_batch', 'Only POST may create a batch');
-    const plotUuids = body.plot_uuids.map(function(value) { return canonicalUuid(value, 'plot_uuids', true); });
-    delete body.plot_uuids;
-    return lifecycle.finalizeBatch(db, catalog, body, plotUuids, principal);
+    delete body.members;
+    return lifecycle.finalizeBatch(db, catalog, body, batchMembers, principal);
   }
   return mode === 'create'
     ? lifecycle.finalizeCreate(db, catalog, body, principal)
@@ -958,13 +1151,28 @@ async function voidEntry(db, entryUuid, input, principal) {
     throw apiError(409, 'stale_version', 'Void requires the current base_sync_version');
   }
   const reason = boundedText(input.reason || input.void_reason, 'reason', { required: true, maxBytes: 4000 });
-  return require('./lifecycle').void_(db, null, pathUuid, input.base_sync_version, reason, principal);
+  // D13/R7: an explicit, caller-supplied acknowledgement that voiding a
+  // seeding may orphan entries that inherit its (now soft-deleted) crop
+  // cycle. Anything other than a literal true is treated as no ack.
+  const cascadeAck = input.cascade_ack === true;
+  return require('./lifecycle').void_(
+    db, null, pathUuid, input.base_sync_version, reason, principal, { cascade_ack: cascadeAck }
+  );
+}
+
+async function discardEntry(db, entryUuid, input, principal) {
+  assertBodyLimit(input);
+  assertNoRequestIdentity(input);
+  const bodyUuid = canonicalUuid(input.entry_uuid, 'entry_uuid', false);
+  const pathUuid = canonicalUuid(entryUuid, 'entry_uuid', true);
+  if (bodyUuid && bodyUuid !== pathUuid) badRequest('path_body_mismatch', 'Path and body entry UUID differ');
+  return require('./lifecycle').discardDraft(db, pathUuid, principal);
 }
 
 async function listPlots(db, principal) {
   const rows = await dbAll(
     db,
-    'SELECT p.*,s.layout_code,s.updated_at AS settings_updated_at,' +
+    'SELECT p.*,s.layout_code,s.context_json,s.updated_at AS settings_updated_at,' +
       's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
     'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
       'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid AND z.deleted_at IS NULL ' +
@@ -973,16 +1181,18 @@ async function listPlots(db, principal) {
     'ORDER BY p.plot_code,p.plot_uuid',
     [principal.owner_user_uuid, principal.gateway_device_eui, principal.user_id, principal.gateway_device_eui]
   );
-  return {
-    plots: rows.map(function(row) {
-      return plotAggregate(row, {
-        layout_code: row.layout_code,
-        updated_at: row.settings_updated_at,
-        updated_by_principal_uuid: row.updated_by_principal_uuid,
-        sync_version: row.settings_sync_version,
-      });
-    }),
-  };
+  const plots = await Promise.all(rows.map(async function(row) {
+    const activeCropCycles = await activeCropCyclesForPlot(db, row.plot_uuid);
+    const hasWeatherSource = await zoneHasWeatherSource(db, row.zone_uuid, principal);
+    return plotAggregate(row, {
+      layout_code: row.layout_code,
+      context_json: row.context_json,
+      updated_at: row.settings_updated_at,
+      updated_by_principal_uuid: row.updated_by_principal_uuid,
+      sync_version: row.settings_sync_version,
+    }, activeCropCycles, hasWeatherSource);
+  }));
+  return { plots };
 }
 
 function jsonObjectText(value, field, required) {
@@ -1486,7 +1696,12 @@ async function upsertCustomVocab(db, input, principal, pathUuid) {
       gateway_device_eui: principal.gateway_device_eui,
       sync_version: nextVersion,
     });
-    return { custom_vocab: aggregate, outbox_event_uuid: emission.event_uuid, created: creating };
+    return Object.assign({
+      custom_vocab: aggregate,
+      created: creating,
+    }, emission.replication_mode === 'v2'
+      ? { outbox_event_uuid: null, mutation_uuid: emission.mutation_uuid }
+      : { outbox_event_uuid: emission.event_uuid });
   });
 }
 
@@ -1522,7 +1737,20 @@ async function loadCurrentAggregateInSnapshot(db, type, key, principal) {
       'SELECT * FROM journal_entry_values WHERE entry_uuid=? ORDER BY group_index,attribute_code',
       [key]
     );
-    return buildAggregate(Object.assign({ contract_version: 1 }, row), values);
+    // S1 (review fix): apply the same live-crop resolution listEntriesInSnapshot
+    // uses (resolveLiveCropOverrides) so a single-entry fetch also shows a
+    // deferred entry's live crop instead of the stored (possibly still-null)
+    // columns -- see the D2.2/§6 comment on listEntriesInSnapshot above.
+    // P2-b (Slice D hardening) applies the same closed-crop display
+    // resolution for symmetry, for the same reason.
+    const lifecycle = require('./lifecycle');
+    const queryAll = function(sql, params) { return dbAll(db, sql, params); };
+    const liveCropOverrides = await lifecycle.resolveLiveCropOverrides(queryAll, [row]);
+    const closedCropOverrides = await lifecycle.resolveClosedCropCycleOverrides(queryAll, [row]);
+    const liveCrop = liveCropOverrides.get(row.entry_uuid);
+    const closedCrop = closedCropOverrides.get(row.entry_uuid);
+    const projected = Object.assign({}, row, liveCrop || {}, closedCrop || {});
+    return buildAggregate(Object.assign({ contract_version: 1 }, projected), values);
   }
   if (type === 'UPSERT_JOURNAL_CUSTOM_VOCAB') {
     const row = await dbGet(
@@ -1977,35 +2205,73 @@ function writableAborted(writable) {
   return Boolean(writable && (writable.destroyed || writable.writableEnded));
 }
 
+// Root cause (2026-07-21 silent-hang investigation): write() signals
+// backpressure by returning false, and this used to await 'drain' with no
+// upper bound. exportJson/exportResearchPackage can hand write() a single
+// chunk containing many entries at once (see writeBoundedChunk below for why
+// exportWideCsv rarely does), so once a page's serialized JSON crosses the
+// response's highWaterMark, write() returns false -- and if the client/
+// transport never actually drains (a stalled proxy, a client that stopped
+// reading, ...), 'drain' never fires and the request hangs forever with no
+// response, no error, and no server log. EXPORT_WRITE_STALL_MS bounds that
+// wait so a genuinely stuck writable fails loudly instead of hanging.
+const EXPORT_WRITE_STALL_MS = 30000;
+
 async function writeChunk(writable, chunk) {
   if (writableAborted(writable)) throw apiError(499, 'client_aborted', 'Export client disconnected');
   if (!writable.write(chunk)) {
     await new Promise(function(resolve, reject) {
+      let settled = false;
       const cleanup = function() {
         writable.removeListener('drain', onDrain);
         writable.removeListener('close', onClose);
         writable.removeListener('error', onError);
+        clearTimeout(stallTimer);
       };
       const onDrain = function() {
+        if (settled) return;
+        settled = true;
         cleanup();
         resolve();
       };
       const onClose = function() {
+        if (settled) return;
+        settled = true;
         cleanup();
         reject(apiError(499, 'client_aborted', 'Export client disconnected'));
       };
       const onError = function(error) {
+        if (settled) return;
+        settled = true;
         cleanup();
         reject(error);
+      };
+      const onStall = function() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(apiError(
+          504,
+          'export_stream_stalled',
+          'Export stream stalled waiting for the client to accept data'
+        ));
       };
       writable.once('drain', onDrain);
       writable.once('close', onClose);
       writable.once('error', onError);
+      const stallTimer = setTimeout(onStall, EXPORT_WRITE_STALL_MS);
+      if (typeof stallTimer.unref === 'function') stallTimer.unref();
     });
   }
 }
 
-async function writeBoundedWideChunk(writable, chunk) {
+// Bounds every write to at most WIDE_EXPORT_MAX_WRITE_BYTES so a single
+// write() is never handed more than one write-budget's worth of data. This
+// was originally CSV-only (hence the historical "Wide" name); exportJson and
+// exportResearchPackage now route their writes through it too so they can
+// never repeat the multi-entry, single-write pattern that (combined with a
+// stalled writable) reproduces the export.json/export.package hang.
+async function writeBoundedChunk(writable, chunk) {
   const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
   for (let offset = 0; offset < buffer.length; offset += WIDE_EXPORT_MAX_WRITE_BYTES) {
     await writeChunk(writable, buffer.subarray(offset, offset + WIDE_EXPORT_MAX_WRITE_BYTES));
@@ -2055,6 +2321,22 @@ function wideExportTooWide(reason, extraDetails) {
   );
 }
 
+// Slice F (F3, tank-mix): SoilManageR's `combination` integer links rows
+// recorded as one field pass (osi-journal's pass_uuid — parent spec
+// §4.1/P8, "Add another operation to this pass"). Every entry sharing a
+// pass_uuid gets the same combination number; a standalone entry (no
+// pass_uuid) gets none (null), matching SoilManageR's own convention that an
+// uncombined operation carries no combination value. Numbers are assigned in
+// first-seen order within THIS export's result set — a stable, self-
+// consistent numbering scoped to the exported rows, not a globally
+// persisted counter (nothing about "combination 3 means the third pass ever
+// recorded" is meaningful outside one export).
+function passCombinationNumber(assigned, passUuid) {
+  if (!passUuid) return null;
+  if (!assigned.has(passUuid)) assigned.set(passUuid, assigned.size + 1);
+  return assigned.get(passUuid);
+}
+
 async function exportWideCsv(db, rawFilters, principal, writable, writableFactory) {
   let sink = null;
   await inReadSnapshot(db, async function(snapshot) {
@@ -2085,7 +2367,7 @@ async function exportWideCsv(db, rawFilters, principal, writable, writableFactor
       'entry_uuid', 'plot_uuid', 'zone_uuid', 'activity_code', 'template_code', 'template_version',
       'layout_code', 'layout_version', 'occurred_start', 'occurred_end', 'occurred_timezone', 'status',
       'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code', 'pass_uuid',
-      'batch_uuid', 'note', 'sync_version',
+      'combination', 'batch_uuid', 'note', 'sync_version',
     ];
     const columns = fixed.concat(dynamic);
     const header = columns.map(function(column) {
@@ -2097,18 +2379,20 @@ async function exportWideCsv(db, rawFilters, principal, writable, writableFactor
     }
     const target = typeof writableFactory === 'function' ? writableFactory() : writable;
     sink = optionalSink(target);
-    await writeBoundedWideChunk(sink.writable, header);
+    await writeBoundedChunk(sink.writable, header);
+    const passCombinationNumbers = new Map();
     await forEachWidePage(snapshot, selection, principal, async function(entries) {
       for (const entry of entries) {
         const row = {};
         for (const column of fixed) row[column] = entry[column];
+        row.combination = passCombinationNumber(passCombinationNumbers, entry.pass_uuid);
         for (const value of entry.values || []) {
           const prefix = 'value.' + String(value.group_index) + '.' + value.attribute_code;
           row[prefix + '.status'] = value.value_status;
           row[prefix + '.value'] = value.value_num == null ? value.value_text : value.value_num;
           row[prefix + '.unit'] = value.unit_code;
         }
-        await writeBoundedWideChunk(sink.writable, csvLine(columns, row));
+        await writeBoundedChunk(sink.writable, csvLine(columns, row));
       }
     });
     await finishWritable(sink.writable);
@@ -2348,7 +2632,7 @@ async function exportJson(db, rawFilters, principal, writable, environment) {
       research_metadata: metadata,
     };
     const prefixText = JSON.stringify(prefix);
-    await writeChunk(sink.writable, prefixText.slice(0, -1) + ',"entries":[');
+    await writeBoundedChunk(sink.writable, prefixText.slice(0, -1) + ',"entries":[');
     const entriesHash = crypto.createHash('sha256');
     const valuesHash = crypto.createHash('sha256');
     entriesHash.update('[');
@@ -2356,13 +2640,21 @@ async function exportJson(db, rawFilters, principal, writable, environment) {
     let first = true;
     let firstValue = true;
     await forEachEntryPage(snapshot, selection, principal, async function(entries) {
-      let chunk = '';
+      // Write one entry at a time (like exportWideCsv writes one row at a
+      // time) instead of batching an entire up-to-50-entry page into a
+      // single write() call. A single write() call this size is exactly the
+      // reproduced silent-hang mechanism: once a page's combined JSON
+      // crosses the response's highWaterMark, write() returns false, and
+      // writeChunk then depends on 'drain' -- which may be delayed far
+      // longer for one big write than for many small ones. writeBoundedChunk
+      // still caps each individual entry's write at WIDE_EXPORT_MAX_WRITE_BYTES
+      // as a second line of defense.
       for (const entry of entries) {
         const serialized = JSON.stringify(researchEntry(entry));
         const separator = first ? '' : ',';
         first = false;
-        chunk += separator + serialized;
         entriesHash.update(separator + serialized);
+        await writeBoundedChunk(sink.writable, separator + serialized);
         for (const value of valueRows([entry])) {
           const valueSerialized = JSON.stringify(value);
           const valueSeparator = firstValue ? '' : ',';
@@ -2370,11 +2662,10 @@ async function exportJson(db, rawFilters, principal, writable, environment) {
           valuesHash.update(valueSeparator + valueSerialized);
         }
       }
-      if (chunk) await writeChunk(sink.writable, chunk);
     });
     entriesHash.update(']');
     valuesHash.update(']');
-    await writeChunk(sink.writable, '],"record_counts":' + JSON.stringify(metadata.record_counts) +
+    await writeBoundedChunk(sink.writable, '],"record_counts":' + JSON.stringify(metadata.record_counts) +
       ',"checksums":' + JSON.stringify({
       research_metadata_sha256: crypto.createHash('sha256')
         .update(JSON.stringify(metadata), 'utf8')
@@ -2419,7 +2710,11 @@ function zipStream(writable, generatedAt) {
 
   async function output(chunk) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
-    await writeChunk(writable, buffer);
+    // Bounded (not a raw writeChunk) so a single big member write -- e.g.
+    // manifest.json, whose size grows with the research metadata -- can
+    // never itself become an oversized, unbounded write() call the way the
+    // pre-fix exportJson entries chunk did.
+    await writeBoundedChunk(writable, buffer);
     offset += buffer.length;
   }
 
@@ -2779,7 +3074,9 @@ async function handleHttpRequest(options) {
     const query = msg.req && msg.req.query || {};
     const uuid = msg.req && msg.req.params && msg.req.params.uuid;
     if (method === 'GET' && requestPath === '/api/journal/catalog') {
-      return respond(200, await loadScopedCatalog(db, principal));
+      return respond(200, await loadScopedCatalog(db, principal, {
+        includeDefinitions: query.include === 'definitions',
+      }));
     }
     if (method === 'GET' && requestPath === '/api/journal/entries') {
       return respond(200, await listEntries(db, query, principal));
@@ -2788,7 +3085,14 @@ async function handleHttpRequest(options) {
       return respond(201, await saveEntry(db, requestBody(msg), principal, { mode: 'create' }));
     }
     if (method === 'PUT' && /^\/api\/journal\/entries\/[^/]+$/.test(requestPath)) {
-      return respond(200, await saveEntry(db, requestBody(msg), principal, { mode: 'update', entryUuid: uuid }));
+      const body = requestBody(msg);
+      // Draft discard reuses this same PUT transport (no new flows.json route):
+      // a body of { discard: true } is a distinct verb from the draft/final
+      // save shapes handled by saveEntry below.
+      if (isObject(body) && body.discard === true) {
+        return respond(200, await discardEntry(db, uuid, body, principal));
+      }
+      return respond(200, await saveEntry(db, body, principal, { mode: 'update', entryUuid: uuid }));
     }
     if (method === 'POST' && /^\/api\/journal\/entries\/[^/]+\/void$/.test(requestPath)) {
       return respond(200, await voidEntry(db, uuid, requestBody(msg), principal));
@@ -2858,6 +3162,7 @@ async function handleHttpRequest(options) {
 }
 
 module.exports = {
+  discardEntry,
   errorResponse,
   exportJson,
   exportResearchPackage,

@@ -523,7 +523,18 @@ that live without also reading `osi-live-ops-runbook`.
    node scripts/verify-db-schema-consistency.js
    node scripts/verify-no-stray-ddl.js
    node scripts/verify-profile-parity.js
+   node scripts/test-journal-schema.js   # MANDATORY for journal-catalog changes
+   node scripts/verify-agroscope-linkage.js   # MANDATORY for journal-catalog changes: guards the catalog against Agroscope-template drift; CI-gated via .github/workflows/field-journal.yml
    ```
+   `test-journal-schema.js` is the **only** gate that compares the 7 bundled DBs'
+   journal-catalog **row content** (`journal_templates`/`layouts`/`vocab`
+   `definition_json` etc.) against the seed-built reference. The others check
+   schema/DDL and fingerprints, not row bytes — so a bundled DB carrying a stale
+   catalog row (e.g. built from an in-progress draft, then never re-baked against
+   the final migration) passes every other gate silently. If you touched
+   `journal-catalog-core.js`, a catalog migration, or any bundled `farming.db`,
+   this must print `test-journal-schema: OK`. (This gap shipped a real
+   `full_record@6` drift in `be363f89`; see the git history of the 7 seed DBs.)
    If your change also touches `sync-init-fn` or the `devices` CHECK, add:
    ```bash
    node scripts/verify-devices-rebuild-fence.js
@@ -549,6 +560,8 @@ node scripts/verify-runtime-schema-parity.js            # boot node devices CHEC
 node scripts/verify-db-schema-consistency.js            # all 7 bundled DBs match hand-maintained contract
 node scripts/verify-no-stray-ddl.js                     # no ad hoc DDL-marker drift in flows/deploy surfaces
 node scripts/verify-profile-parity.js                   # bcm2712 == bcm2709 byte-for-byte
+node scripts/test-journal-schema.js                     # 7 bundled DBs' journal-catalog ROW CONTENT == seed-built reference (only gate that checks row bytes)
+node scripts/verify-agroscope-linkage.js                # journal catalog's vocab/activity/operation/device/unit linkages still match the Agroscope SoilManageR template (both directions)
 node scripts/verify-devices-rebuild-fence.js            # boot-node rebuild is still fail-closed
 node --test scripts/rehearse-devices-rebuild.test.js    # boot-node rebuild behaves correctly against 4 seeded cases
 node --test lib/osi-migrate/__tests__/*.test.js         # runner unit tests (risk classes, atomicity, drift preflight, partial-batch retry)

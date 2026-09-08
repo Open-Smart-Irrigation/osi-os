@@ -27,6 +27,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'device-writer',
     'history-router',
     'history-sync',
+    'journal-replication',
     'lsn50-normalize',
     'osi-command-ledger',
     'osi-db-helper',
@@ -57,6 +58,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['osi-command-ledger'], 'osi-command-ledger');
   assert.equal(osiLib.NAME_TO_PATH['zone-commands'], 'osi-zone-commands');
   assert.equal(osiLib.NAME_TO_PATH['osi-journal'], 'osi-journal');
+  assert.equal(osiLib.NAME_TO_PATH['journal-replication'], 'osi-journal-replication');
 });
 
 test('unknown name returns a typed failure, never throws', () => {
@@ -86,6 +88,7 @@ test('command flow helpers load from OSI_LIB_BASE and cache successful modules',
     ['zone-commands', 'osi-zone-commands'],
     ['sdi12-recipe', 'osi-sdi12-recipe'],
     ['sdi12-commissioning', 'osi-sdi12-commissioning'],
+    ['journal-replication', 'osi-journal-replication'],
   ]) {
     const helperDirectory = path.join(FIXTURE_BASE, directory);
     const helperPath = path.join(helperDirectory, 'index.js');

@@ -244,6 +244,7 @@ test('journal package exposes the complete Task 10 API surface', () => {
     'listEntries',
     'saveEntry',
     'voidEntry',
+    'discardEntry',
     'upsertCustomVocab',
     'listPlots',
     'upsertPlot',
@@ -361,6 +362,71 @@ test('plot upsert is atomic, zone-owner scoped, versioned, and command-ledger re
     (error) => error && error.statusCode === 404
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM journal_plots WHERE plot_code='foreign'").get().n, 0);
+});
+
+// Slice F (B3 fix): zone_has_weather_source must reflect an actual
+// weather-capable device assignment, not merely "this plot has a zone_uuid"
+// -- a zone with only a soil-tension probe (DRAGINO_LSN50) is not a weather
+// source, and a SENSECAP_S2120 counts whether it is assigned directly
+// (devices.irrigation_zone_id) or shared via weather_station_zones.
+test('listPlots/upsertPlot expose zone_has_weather_source only when the linked zone has an actual weather-capable device', async () => {
+  const db = new TestDb('zone-weather-source');
+  seedIdentity(db);
+  const soilOnlyZoneUuid = '86000000-0000-4000-8000-000000000001';
+  const weatherZoneUuid = '86000000-0000-4000-8000-000000000002';
+  const sharedWeatherZoneUuid = '86000000-0000-4000-8000-000000000003';
+  db.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) VALUES (?,?,?,?,?,?)'
+  ).run(10, 'Soil only', 1, 'Europe/Zurich', soilOnlyZoneUuid, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) VALUES (?,?,?,?,?,?)'
+  ).run(11, 'Direct weather', 1, 'Europe/Zurich', weatherZoneUuid, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) VALUES (?,?,?,?,?,?)'
+  ).run(12, 'Shared weather', 1, 'Europe/Zurich', sharedWeatherZoneUuid, GATEWAY_EUI);
+  const now = '2026-07-20T00:00:00.000Z';
+  db.prepare(
+    'INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui) ' +
+      'VALUES (?,?,?,?,?,?,?,?)'
+  ).run('AAAAAAAAAAAAAAA1', 'Soil probe', 'DRAGINO_LSN50', 1, now, now, 10, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui) ' +
+      'VALUES (?,?,?,?,?,?,?,?)'
+  ).run('AAAAAAAAAAAAAAA2', 'Weather station', 'SENSECAP_S2120', 1, now, now, 11, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,gateway_device_eui) VALUES (?,?,?,?,?,?,?)'
+  ).run('AAAAAAAAAAAAAAA3', 'Shared weather station', 'SENSECAP_S2120', 1, now, now, GATEWAY_EUI);
+  db.prepare('INSERT INTO weather_station_zones(deveui,zone_id) VALUES (?,?)').run('AAAAAAAAAAAAAAA3', 12);
+
+  const soilOnlyPlot = '86100000-0000-4000-8000-000000000001';
+  const weatherPlot = '86100000-0000-4000-8000-000000000002';
+  const sharedWeatherPlot = '86100000-0000-4000-8000-000000000003';
+  const soilOnlyResult = await journal.upsertPlot(
+    db, plotInput(soilOnlyPlot, 'soil-only', { zone_uuid: soilOnlyZoneUuid }), principal()
+  );
+  const weatherResult = await journal.upsertPlot(
+    db, plotInput(weatherPlot, 'direct-weather', { zone_uuid: weatherZoneUuid }), principal()
+  );
+  await journal.upsertPlot(db, plotInput(sharedWeatherPlot, 'shared-weather', { zone_uuid: sharedWeatherZoneUuid }), principal());
+
+  // upsertPlot's own immediate response must already carry the real signal.
+  assert.equal(soilOnlyResult.plot.zone_has_weather_source, false);
+  assert.equal(weatherResult.plot.zone_has_weather_source, true);
+
+  const { plots } = await journal.listPlots(db, principal());
+  const byUuid = new Map(plots.map((plot) => [plot.plot_uuid, plot]));
+  assert.equal(
+    byUuid.get(soilOnlyPlot).zone_has_weather_source, false,
+    'a zone with only a soil probe has no weather source'
+  );
+  assert.equal(
+    byUuid.get(weatherPlot).zone_has_weather_source, true,
+    'a zone with a directly-assigned SENSECAP_S2120 has a weather source'
+  );
+  assert.equal(
+    byUuid.get(sharedWeatherPlot).zone_has_weather_source, true,
+    'a zone sharing a SENSECAP_S2120 via weather_station_zones has a weather source'
+  );
 });
 
 test('plot detach succeeds after the linked zone is soft-deleted', async () => {
@@ -688,6 +754,117 @@ test('entry POST/PUT semantics and duplicate acknowledgement are transactional',
     ),
     (error) => error && error.code === 'identity_field_forbidden'
   );
+});
+
+test('discardEntry rejects a path/body entry UUID mismatch and forbidden identity fields', async () => {
+  const db = new TestDb('discard-validation');
+  seedIdentity(db);
+  const draftUuid = '92000000-0000-4000-8000-000000000001';
+
+  await assert.rejects(
+    journal.discardEntry(
+      db,
+      draftUuid,
+      { entry_uuid: '92000000-0000-4000-8000-000000000099' },
+      principal()
+    ),
+    (error) => error && error.code === 'path_body_mismatch'
+  );
+  await assert.rejects(
+    journal.discardEntry(db, draftUuid, { owner_user_uuid: OTHER_OWNER_UUID }, principal()),
+    (error) => error && error.code === 'identity_field_forbidden'
+  );
+});
+
+test('discardEntry via PUT reuses the existing journal-entry transport without a new route', async () => {
+  const db = new TestDb('discard-put-transport');
+  seedIdentity(db);
+  const plotUuid = '90000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'discard-plot', { zone_uuid: ZONE_UUID }), principal());
+  const secret = 'discard-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  const environment = {
+    authTokenSecret: secret,
+    deviceEui: GATEWAY_EUI,
+    deviceEuiConfidence: 'authoritative',
+  };
+  async function request(method, requestPath, options) {
+    const requestOptions = options || {};
+    return journal.handleHttpRequest({
+      msg: {
+        req: {
+          method,
+          path: requestPath,
+          headers: Object.assign({ authorization }, requestOptions.headers || {}),
+          body: requestOptions.body,
+          query: requestOptions.query || {},
+          params: requestOptions.params || {},
+        },
+      },
+      Database: ExistingDb,
+      environment,
+    });
+  }
+
+  const draftUuid = '91000000-0000-4000-8000-000000000001';
+  const draft = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: Object.assign(entryInput(draftUuid, plotUuid, '2026-07-13T09:00:00'), {
+      status: 'draft',
+      base_sync_version: 0,
+    }),
+  });
+  assert.equal(draft.statusCode, 200);
+  assert.equal(draft.payload.sync_version, 0);
+  assert.equal(
+    db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(draftUuid).status,
+    'draft'
+  );
+
+  const foreignAttempt = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: { discard: true },
+    headers: {
+      authorization: 'Bearer ' + token(secret, {
+        userId: 2,
+        username: 'other-user',
+        exp: Date.now() + 60_000,
+      }),
+    },
+  });
+  assert.equal(foreignAttempt.statusCode, 404);
+  assert.equal(foreignAttempt.payload.error, 'ownership');
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(draftUuid).n,
+    1
+  );
+
+  const discarded = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: { discard: true },
+  });
+  assert.equal(discarded.statusCode, 200);
+  assert.deepEqual(discarded.payload, { entry_uuid: draftUuid, discarded: true });
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(draftUuid).n,
+    0
+  );
+
+  const repeat = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: { discard: true },
+  });
+  assert.equal(repeat.statusCode, 200);
+  assert.deepEqual(repeat.payload, { entry_uuid: draftUuid, discarded: true });
 });
 
 test('zone-only entry provisioning is idempotent, explicit-layout, and commits before entry validation', async () => {
@@ -1878,7 +2055,9 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
   assert.equal(metadata.schema.lossless_member, 'records.ndjson');
   assert.deepEqual(metadata.catalog, {
     hash_scope: 'core_catalog_state',
-    core_version: 1,
+    // Slice F: the seeded catalog is now at v6 (BBCH growth stage + manual
+    // weather-at-application attrs + farmer_quick@6/full_record@6).
+    core_version: 10,
     core_hash: metadata.catalog.core_hash,
     scoped_effective_hash: {
       value: null,
@@ -2269,10 +2448,13 @@ test('batch duplicate preflight returns every candidate and accepts only the exa
   const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
   const batch = entryInput(null, null, '2026-07-13T08:30:00', {
     entry_uuid: null,
-    plot_uuid: null,
-    plot_uuids: plots,
+    members: plots.map((plotUuid, index) => ({
+      plot_uuid: plotUuid,
+      entry_uuid: `83000000-0000-4000-8000-00000000000${index + 1}`,
+    })),
     season_crop: 'barley',
   });
+  delete batch.plot_uuid;
 
   await assert.rejects(
     journal.saveEntry(db, batch, principal(), { mode: 'create' }),
@@ -2349,6 +2531,471 @@ test('batch duplicate preflight returns every candidate and accepts only the exa
     assert.equal('duplicate_guard_ack_entry_uuids' in aggregate, false);
     assert.equal('duplicate_guard_ack_entry_uuid' in aggregate, false);
   }
+});
+
+test('batch finalization requires canonical unique members and rejects the legacy plot list', async () => {
+  const db = new TestDb('batch-member-contract');
+  seedIdentity(db);
+  const plots = [
+    '85100000-0000-4000-8000-000000000001',
+    '85100000-0000-4000-8000-000000000002',
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-member-' + index), principal());
+  }
+  const base = entryInput(null, null, '2026-07-13T16:00:00', {
+    entry_uuid: null,
+    plot_uuid: null,
+    season_crop: 'barley',
+  });
+
+  for (const invalid of [
+    Object.assign({}, base, { plot_uuids: plots }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0], entry_uuid: 'not-a-uuid' }] }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0].replaceAll('-', ''), entry_uuid: '85110000-0000-4000-8000-000000000001' }] }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0], entry_uuid: '85110000-0000-4000-8000-000000000001' }, { plot_uuid: plots[0], entry_uuid: '85110000-0000-4000-8000-000000000002' }] }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0], entry_uuid: '85110000-0000-4000-8000-000000000001' }, { plot_uuid: plots[1], entry_uuid: '85110000-0000-4000-8000-000000000001' }] }),
+  ]) {
+    await assert.rejects(
+      journal.saveEntry(db, invalid, principal(), { mode: 'create' }),
+      (error) => error && ['invalid_batch', 'invalid_uuid', 'duplicate_member'].includes(error.code)
+    );
+  }
+});
+
+// Slice F (B1/B2 fix): a pass batch (top-level pass_uuid set) generalizes
+// the batch member contract the opposite way a cross-plot batch does --
+// every member must share ONE plot rather than each naming a different one.
+test('pass batch (top-level pass_uuid) requires every member to share one plot, unlike a cross-plot batch', async () => {
+  const db = new TestDb('pass-batch-member-contract');
+  seedIdentity(db);
+  const plots = [
+    '85400000-0000-4000-8000-000000000001',
+    '85400000-0000-4000-8000-000000000002',
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'pass-batch-member-' + index), principal());
+  }
+  const passUuid = '85500000-0000-4000-8000-000000000001';
+  const base = entryInput(null, null, '2026-07-13T16:45:00', {
+    entry_uuid: null,
+    plot_uuid: null,
+    season_crop: 'barley',
+    pass_uuid: passUuid,
+    activity_code: 'plant_protection_application',
+    values: [],
+  });
+  delete base.plot_uuid;
+
+  // Different plots under one pass_uuid is invalid -- a pass is one plot's
+  // operation split into product lines, not a cross-plot batch.
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, base, {
+      members: [
+        { plot_uuid: plots[0], entry_uuid: '85600000-0000-4000-8000-000000000001', values: [] },
+        { plot_uuid: plots[1], entry_uuid: '85600000-0000-4000-8000-000000000002', values: [] },
+      ],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'invalid_batch'
+  );
+
+  // The SAME plot repeated across members is exactly what a pass batch
+  // requires and must be accepted (contrast with the cross-plot case in the
+  // previous test, where a repeated plot_uuid is a duplicate_member error).
+  const receipt = await journal.saveEntry(db, Object.assign({}, base, {
+    members: [
+      { plot_uuid: plots[0], entry_uuid: '85600000-0000-4000-8000-000000000003', values: [
+        { attribute_code: 'attr.product', group_index: 0, value: 'Herbicide X', value_status: 'observed' },
+        { attribute_code: 'attr.treated_area', group_index: 0, value: 1000, unit_code: 'unit.m2_area', value_status: 'observed' },
+        { attribute_code: 'attr.amount_volume_area_product', group_index: 0, value: 2, unit_code: 'unit.l_per_ha_product', value_status: 'observed' },
+      ] },
+      { plot_uuid: plots[0], entry_uuid: '85600000-0000-4000-8000-000000000004', values: [
+        { attribute_code: 'attr.product', group_index: 0, value: 'Adjuvant Y', value_status: 'observed' },
+        { attribute_code: 'attr.treated_area', group_index: 0, value: 1000, unit_code: 'unit.m2_area', value_status: 'observed' },
+        { attribute_code: 'attr.amount_volume_area_product', group_index: 0, value: 1, unit_code: 'unit.l_per_ha_product', value_status: 'observed' },
+      ] },
+    ],
+  }), principal(), { mode: 'create' });
+  assert.equal(receipt.entries.length, 2);
+  const rows = db.prepare('SELECT pass_uuid FROM journal_entries WHERE entry_uuid IN (?,?)').all(
+    '85600000-0000-4000-8000-000000000003', '85600000-0000-4000-8000-000000000004'
+  );
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.pass_uuid === passUuid));
+});
+
+test('batch members reject top-level plot or zone scalars before any provisioning or writes', async () => {
+  const db = new TestDb('batch-member-scalar-fields');
+  seedIdentity(db);
+  const plotUuid = '85110000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'batch-scalar-plot', { zone_uuid: ZONE_UUID }), principal());
+  const members = [{
+    plot_uuid: plotUuid,
+    entry_uuid: '85110000-0000-4000-8000-000000000002',
+  }];
+  const snapshot = () => JSON.stringify({
+    plots: db.prepare('SELECT * FROM journal_plots ORDER BY plot_uuid').all(),
+    plotSettings: db.prepare('SELECT * FROM journal_plot_settings ORDER BY plot_uuid').all(),
+    entries: db.prepare('SELECT * FROM journal_entries ORDER BY entry_uuid').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values ORDER BY entry_uuid,group_index,attribute_code').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox ORDER BY rowid').all(),
+    appliedCommands: db.prepare('SELECT * FROM applied_commands ORDER BY command_id').all(),
+    commandAcks: db.prepare('SELECT * FROM command_ack_outbox ORDER BY command_id').all(),
+  });
+  const before = snapshot();
+  const base = entryInput(null, null, '2026-07-13T16:30:00', {
+    entry_uuid: null,
+    plot_uuid: null,
+    members,
+  });
+
+  for (const invalid of [
+    Object.assign({}, base, { plot_uuid: plotUuid }),
+    Object.assign({}, base, { zone_uuid: ZONE_UUID }),
+  ]) {
+    await assert.rejects(
+      journal.saveEntry(db, invalid, principal(), { mode: 'create' }),
+      (error) => error && error.code === 'invalid_batch' && error.statusCode === 400
+    );
+    assert.equal(snapshot(), before);
+  }
+});
+
+test('batch retry with the same member UUIDs returns existing receipts without writes while fresh UUIDs hit the duplicate guard', async () => {
+  const db = new TestDb('batch-member-idempotency');
+  seedIdentity(db);
+  const plots = [
+    '85200000-0000-4000-8000-000000000001',
+    '85200000-0000-4000-8000-000000000002',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '85300000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '85300000-0000-4000-8000-000000000002' },
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-idempotent-' + index), principal());
+  }
+  const batch = entryInput(null, null, '2026-07-13T17:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+
+  const first = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  assert.deepEqual(first.entries.map((entry) => entry.entry_uuid), members.map((member) => member.entry_uuid));
+  const entryCount = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const outboxCount = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  const retried = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  assert.equal(retried.batch_uuid, first.batch_uuid);
+  assert.deepEqual(retried.entries, first.entries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount);
+
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, batch, {
+      values: [Object.assign({}, batch.values[0], { value: 13 })],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount);
+
+  db.prepare('UPDATE journal_plots SET active=1 WHERE plot_uuid IN (?,?)').run(...plots);
+
+  const freshMembers = members.map((member, index) => ({
+    plot_uuid: member.plot_uuid,
+    entry_uuid: `85400000-0000-4000-8000-00000000000${index + 1}`,
+  }));
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, batch, { members: freshMembers }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'duplicate_candidates' && error.statusCode === 409 &&
+      error.details.duplicateCandidates.length === members.length
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount);
+
+  const acknowledged = await journal.saveEntry(db, Object.assign({}, batch, {
+    members: freshMembers,
+    duplicate_guard_ack_entry_uuids: db.prepare(
+      "SELECT entry_uuid FROM journal_entries WHERE entry_uuid IN (?,?) ORDER BY entry_uuid"
+    ).all(...members.map((member) => member.entry_uuid)).map((row) => row.entry_uuid),
+  }), principal(), { mode: 'create' });
+  assert.deepEqual(acknowledged.entries.map((entry) => entry.entry_uuid), freshMembers.map((member) => member.entry_uuid));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount + members.length);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount + members.length);
+
+  for (const plotUuid of plots) {
+    db.prepare('UPDATE journal_plots SET active=0 WHERE plot_uuid=?').run(plotUuid);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE deleted_at IS NULL').get().n, 4);
+  const retryAfterDeactivation = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  assert.deepEqual(retryAfterDeactivation, retried);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount + members.length);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount + members.length);
+});
+
+test('batch retry binds activity, occurrence, and value intent and survives plot lifecycle changes', async () => {
+  const db = new TestDb('batch-member-intent-binding');
+  seedIdentity(db);
+  const members = [{
+    plot_uuid: '87100000-0000-4000-8000-000000000001',
+    entry_uuid: '87200000-0000-4000-8000-000000000001',
+  }];
+  await journal.upsertPlot(db, plotInput(members[0].plot_uuid, 'batch-intent-binding'), principal());
+  const batch = entryInput(null, null, '2026-07-14T08:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+
+  for (const changed of [
+    Object.assign({}, batch, { activity_code: 'fertilization' }),
+    Object.assign({}, batch, { occurred_start_local: '2026-07-14T08:01:00' }),
+    Object.assign({}, batch, { values: [Object.assign({}, batch.values[0], { value: 13 })] }),
+  ]) {
+    await assert.rejects(
+      journal.saveEntry(db, changed, principal(), { mode: 'create' }),
+      (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+    );
+  }
+
+  for (const update of [
+    ['active', "UPDATE journal_plots SET active=0 WHERE plot_uuid=?", [members[0].plot_uuid]],
+    ['deleted', "UPDATE journal_plots SET active=1,deleted_at=? WHERE plot_uuid=?", ['2026-07-14T09:00:00.000Z', members[0].plot_uuid]],
+  ]) {
+    db.prepare(update[1]).run(...update[2]);
+    const retry = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+    assert.equal(retry.entries[0].entry_uuid, members[0].entry_uuid, update[0]);
+    db.prepare(
+      'UPDATE journal_plots SET active=1,deleted_at=NULL WHERE plot_uuid=?'
+    ).run(members[0].plot_uuid);
+  }
+});
+
+test('batch API rejects tombstoned member UUIDs without writes and masks foreign ownership', async () => {
+  const db = new TestDb('batch-member-tombstone');
+  seedIdentity(db);
+  const member = {
+    plot_uuid: '87300000-0000-4000-8000-000000000001',
+    entry_uuid: '87400000-0000-4000-8000-000000000001',
+  };
+  await journal.upsertPlot(db, plotInput(member.plot_uuid, 'batch-tombstone'), principal());
+  const batch = entryInput(null, null, '2026-07-14T09:00:00', {
+    entry_uuid: null,
+    members: [member],
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  db.prepare('UPDATE journal_entries SET deleted_at=? WHERE entry_uuid=?').run(
+    '2026-07-14T10:00:00.000Z', member.entry_uuid
+  );
+  const snapshot = () => JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries ORDER BY entry_uuid').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values ORDER BY entry_uuid,group_index,attribute_code').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox ORDER BY rowid').all(),
+  });
+  const before = snapshot();
+
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal({
+      user_id: 2,
+      owner_user_uuid: OTHER_OWNER_UUID,
+    }), { mode: 'create' }),
+    (error) => {
+      const response = journal.errorResponse(error);
+      return error && error.code === 'ownership' && response.statusCode === 404;
+    }
+  );
+  assert.equal(snapshot(), before);
+});
+
+test('batch rejects mixed existing and new members before duplicate preflight or writes', async () => {
+  const db = new TestDb('batch-member-mixed-idempotency');
+  seedIdentity(db);
+  const plots = [
+    '86100000-0000-4000-8000-000000000001',
+    '86100000-0000-4000-8000-000000000002',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '86200000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '86200000-0000-4000-8000-000000000002' },
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-mixed-' + index), principal());
+  }
+  const batch = entryInput(null, null, '2026-07-13T19:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, batch, {
+      members: [
+        members[0],
+        { plot_uuid: plots[1], entry_uuid: '86300000-0000-4000-8000-000000000001' },
+      ],
+      duplicate_guard_ack_entry_uuids: [members[1].entry_uuid],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('all-existing batch retries require one batch and an exact persisted member set', async () => {
+  const db = new TestDb('batch-member-exact-idempotency');
+  seedIdentity(db);
+  const plots = [
+    '86400000-0000-4000-8000-000000000001',
+    '86400000-0000-4000-8000-000000000002',
+    '86400000-0000-4000-8000-000000000003',
+    '86400000-0000-4000-8000-000000000004',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '86500000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '86500000-0000-4000-8000-000000000002' },
+  ];
+  const otherMember = { plot_uuid: plots[2], entry_uuid: '86500000-0000-4000-8000-000000000003' };
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-exact-' + index), principal());
+  }
+  const firstBatch = entryInput(null, null, '2026-07-13T20:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete firstBatch.plot_uuid;
+  await journal.saveEntry(db, firstBatch, principal(), { mode: 'create' });
+  const secondBatch = entryInput(null, null, '2026-07-13T21:00:00', {
+    entry_uuid: null,
+    members: [otherMember],
+    season_crop: 'barley',
+  });
+  delete secondBatch.plot_uuid;
+  await journal.saveEntry(db, secondBatch, principal(), { mode: 'create' });
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, firstBatch, { members: [members[0]] }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, firstBatch, { members: [...members, {
+      plot_uuid: plots[3],
+      entry_uuid: '86600000-0000-4000-8000-000000000001',
+    }] }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, firstBatch, {
+      members: [members[0], otherMember],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('batch retry fails closed when an existing member lacks its current outbox receipt', async () => {
+  const db = new TestDb('batch-member-missing-receipt');
+  seedIdentity(db);
+  const plots = [
+    '86700000-0000-4000-8000-000000000001',
+    '86700000-0000-4000-8000-000000000002',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '86800000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '86800000-0000-4000-8000-000000000002' },
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-receipt-' + index), principal());
+  }
+  const batch = entryInput(null, null, '2026-07-13T22:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  db.prepare(
+    "DELETE FROM sync_outbox WHERE aggregate_type='JOURNAL_ENTRY' AND aggregate_key=?"
+  ).run(members[0].entry_uuid);
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('batch retry fails closed when the receipt sync version differs from the persisted entry', async () => {
+  const db = new TestDb('batch-member-stale-receipt');
+  seedIdentity(db);
+  const plotUuid = '86900000-0000-4000-8000-000000000001';
+  const entryUuid = '87000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'batch-stale-receipt'), principal());
+  const batch = entryInput(null, null, '2026-07-13T23:00:00', {
+    entry_uuid: null,
+    members: [{ plot_uuid: plotUuid, entry_uuid: entryUuid }],
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  db.prepare(
+    "UPDATE sync_outbox SET sync_version=sync_version+1 WHERE aggregate_type='JOURNAL_ENTRY' AND aggregate_key=?"
+  ).run(entryUuid);
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('batch member finalization remains atomic when a later member cannot resolve', async () => {
+  const db = new TestDb('batch-member-atomicity');
+  seedIdentity(db);
+  const validPlot = '85500000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(validPlot, 'batch-atomic'), principal());
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  const batch = entryInput(null, null, '2026-07-13T18:00:00', {
+      entry_uuid: null,
+      members: [
+        { plot_uuid: validPlot, entry_uuid: '85600000-0000-4000-8000-000000000001' },
+        { plot_uuid: '85700000-0000-4000-8000-000000000001', entry_uuid: '85600000-0000-4000-8000-000000000002' },
+      ],
+      season_crop: 'barley',
+    });
+  delete batch.plot_uuid;
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'plot_not_found'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
 });
 
 test('code-only plot layout binding rolls forward to the latest active version without rewriting history', async () => {
@@ -2440,6 +3087,102 @@ function parseCsvRecords(text) {
   }
   return records;
 }
+
+test('export.csv derives a SoilManageR combination integer from a shared pass_uuid, leaving standalone entries uncombined', async () => {
+  const db = new TestDb('tank-mix-combination');
+  seedIdentity(db);
+  const plotUuid = '63000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'tank-mix-plot'), principal());
+  const passUuid = '64000000-0000-4000-8000-000000000001';
+  const herbicideUuid = '65000000-0000-4000-8000-000000000001';
+  const adjuvantUuid = '65000000-0000-4000-8000-000000000002';
+  const standaloneUuid = '65000000-0000-4000-8000-000000000003';
+
+  function sprayValues(product) {
+    return [
+      { attribute_code: 'attr.product', group_index: 0, value: product, value_status: 'observed' },
+      {
+        attribute_code: 'attr.treated_area', group_index: 0, value: 1000,
+        unit_code: 'unit.m2_area', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.amount_volume_area_product', group_index: 0, value: 2,
+        unit_code: 'unit.l_per_ha_product', value_status: 'observed',
+      },
+    ];
+  }
+
+  // Slice F (F3): a tank-mix pass — two products sharing one pass_uuid,
+  // exactly as JournalCaptureFlow.tsx's "add product to this pass" +
+  // createPassMembers create them (the second entry acknowledges the first
+  // as an intentional non-duplicate, since findDuplicateCandidate keys on
+  // plot+activity+time only).
+  await journal.saveEntry(
+    db,
+    entryInput(herbicideUuid, plotUuid, '2026-07-20T08:00:00', {
+      activity_code: 'plant_protection_application',
+      season_crop: 'barley',
+      pass_uuid: passUuid,
+      values: sprayValues('Herbicide X'),
+      note: null,
+    }),
+    principal(),
+    { mode: 'create' }
+  );
+  await journal.saveEntry(
+    db,
+    entryInput(adjuvantUuid, plotUuid, '2026-07-20T08:00:00', {
+      activity_code: 'plant_protection_application',
+      season_crop: 'barley',
+      pass_uuid: passUuid,
+      duplicate_guard_ack_entry_uuid: herbicideUuid,
+      values: sprayValues('Adjuvant Y'),
+      note: null,
+    }),
+    principal(),
+    { mode: 'create' }
+  );
+  // An unrelated, standalone plant-protection entry (no pass_uuid) on the
+  // same plot a day later must never be swept into the pass's combination.
+  await journal.saveEntry(
+    db,
+    entryInput(standaloneUuid, plotUuid, '2026-07-21T08:00:00', {
+      activity_code: 'plant_protection_application',
+      season_crop: 'barley',
+      values: sprayValues('Fungicide Z'),
+      note: null,
+    }),
+    principal(),
+    { mode: 'create' }
+  );
+
+  const rows = parseCsvRecords(await journal.exportWideCsv(db, { status: 'final' }, principal()));
+  const header = rows[0].map((cell) => cell.value);
+  const entryIndex = header.indexOf('entry_uuid');
+  const passIndex = header.indexOf('pass_uuid');
+  const combinationIndex = header.indexOf('combination');
+  assert.ok(combinationIndex >= 0, 'export.csv must expose a combination column');
+  const byEntry = new Map(rows.slice(1).map((row) => [row[entryIndex].value, row]));
+
+  const herbicideRow = byEntry.get(herbicideUuid);
+  const adjuvantRow = byEntry.get(adjuvantUuid);
+  const standaloneRow = byEntry.get(standaloneUuid);
+  assert.equal(herbicideRow[passIndex].value, passUuid);
+  assert.equal(adjuvantRow[passIndex].value, passUuid);
+  assert.equal(standaloneRow[passIndex].value, '');
+
+  assert.ok(herbicideRow[combinationIndex].value, 'combined entries must carry a combination number');
+  assert.equal(
+    herbicideRow[combinationIndex].value,
+    adjuvantRow[combinationIndex].value,
+    'entries sharing one pass_uuid must share one combination number'
+  );
+  assert.equal(
+    standaloneRow[combinationIndex].value,
+    '',
+    'a standalone entry (no pass_uuid) must carry no combination number'
+  );
+});
 
 test('research package CSV is formula-safe and records.ndjson preserves typed source rows', async () => {
   const dangerous = [
@@ -2873,4 +3616,47 @@ test('export.csv streams through a Node-RED msg.res wrapper (msg.res._res)', asy
   assert.ok(sink.writableEnded);
   const csvText = Buffer.concat(sink.chunks).toString('utf8');
   assert.match(csvText, /"entry_uuid"/);
+});
+
+test('catalog delivers parsed definitions under include=definitions and stays light by default', async () => {
+  const db = new TestDb('catalog-definitions');
+  const light = await journal.loadScopedCatalog(db, principal());
+  assert.ok(light.vocab.length > 0);
+  assert.ok(light.templates.length > 0);
+  for (const row of light.vocab) {
+    assert.ok(!Object.hasOwn(row, 'labels'));
+    assert.ok(!Object.hasOwn(row, 'labels_json'));
+  }
+  for (const row of light.templates) {
+    assert.ok(!Object.hasOwn(row, 'labels'));
+    assert.ok(!Object.hasOwn(row, 'labels_json'));
+    assert.ok(!Object.hasOwn(row, 'definition'));
+    assert.ok(!Object.hasOwn(row, 'definition_json'));
+  }
+
+  const full = await journal.loadScopedCatalog(db, principal(), { includeDefinitions: true });
+  const template = full.templates[0];
+  const layout = full.layouts[0];
+  const vocab = full.vocab[0];
+  assert.ok(template.definition && typeof template.definition === 'object');
+  assert.ok(Object.keys(template.definition).length > 0, 'template definition must not be empty');
+  assert.ok(template.labels && typeof template.labels === 'object');
+  assert.ok(typeof template.labels.en === 'string' && template.labels.en.trim().length > 0,
+    'template must expose a non-empty English label');
+  assert.ok(layout.definition && typeof layout.definition === 'object');
+  assert.ok(vocab.labels && typeof vocab.labels === 'object');
+  assert.ok(Object.hasOwn(vocab, 'constraints'));
+  if (full.products.length > 0) {
+    assert.ok(full.products[0].composition && typeof full.products[0].composition === 'object');
+  }
+
+  function assertNoRawJsonKeys(value) {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, nested] of Object.entries(value)) {
+      assert.ok(!key.endsWith('_json'), 'raw JSON key leaked: ' + key);
+      assertNoRawJsonKeys(nested);
+    }
+  }
+  assertNoRawJsonKeys(light);
+  assertNoRawJsonKeys(full);
 });

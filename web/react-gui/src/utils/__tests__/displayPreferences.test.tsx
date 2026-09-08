@@ -16,6 +16,7 @@ describe('display preferences', () => {
     dashboardDensity: 'comfortable',
     dashboardAutoRefresh: 'on',
     defaultTimezone: null,
+    journalDetailLevel: 'farmer_quick',
     modules: {
       predictionAdvisory: false,
       environment: true,
@@ -70,6 +71,42 @@ describe('display preferences', () => {
   it('treats unknown stored values as kPa', () => {
     window.localStorage.setItem('osi.display.swtUnit', 'bars');
     expect(readDisplayPreferences()).toEqual(defaultPreferences);
+  });
+
+  it('defaults the journal detail level to farmer_quick', () => {
+    expect(readDisplayPreferences().journalDetailLevel).toBe('farmer_quick');
+  });
+
+  it.each(['farmer_quick', 'full_record'] as const)(
+    'persists and reloads the journal detail level %s',
+    (journalDetailLevel) => {
+      writeDisplayPreferences({ journalDetailLevel });
+      expect(window.localStorage.getItem('osi.journal.detailLevel')).toBe(journalDetailLevel);
+      expect(readDisplayPreferences()).toEqual({ ...defaultPreferences, journalDetailLevel });
+    },
+  );
+
+  it('falls back to the default journal detail level for an unknown stored value', () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'expert_mode');
+    expect(readDisplayPreferences()).toEqual(defaultPreferences);
+  });
+
+  // Product change: the "Research" setting option was dropped (owner
+  // decision), but a pre-existing install may still have it in localStorage.
+  // Map it to the closest surviving option (full_record) instead of all the
+  // way down to the default, and never let it crash the read.
+  it('maps a legacy research_observation stored value to full_record', () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'research_observation');
+    expect(readDisplayPreferences()).toEqual({ ...defaultPreferences, journalDetailLevel: 'full_record' });
+  });
+
+  it('dispatches the preferences event when the journal detail level is written', () => {
+    const { result } = renderHook(() => useDisplayPreferences());
+    expect(result.current.journalDetailLevel).toBe('farmer_quick');
+    act(() => {
+      writeDisplayPreferences({ journalDetailLevel: 'full_record' });
+    });
+    expect(result.current.journalDetailLevel).toBe('full_record');
   });
 
   it('applies explicit and system theme preferences to the document element', () => {

@@ -59,6 +59,7 @@ marked otherwise. The live identity daemon notes in section 2 were verified on
 | Gateway identity (`DEVICE_EUI*`) | `usr/libexec/osi-gateway-identity.sh` (resolution logic) + UCI persistence | `node-red.init` → Node-RED process env → flows.json | `/usr/libexec/osi-gateway-identity.sh resolve` |
 | `.chirpstack.env` (legacy fallback) | Written by `chirpstack-bootstrap.js` | Read per-key by `node-red.init` (`load_chirpstack_env_value`) and `settings.js` compat loader | `cat /srv/node-red/.chirpstack.env` (never commit/paste secrets) |
 | `CHIRPSTACK_PROFILE_*` / `CHIRPSTACK_APP_*` | `chirpstack-bootstrap.js` (creates ChirpStack objects, writes UCI + env file) | `node-red.init` exports as process env; flows.json reads via `env.get(...)` | `scripts/diagnose-pi-communication.sh` |
+| Journal V2 media cache | UCI `journal_photo_cache_bytes`, `journal_min_free_bytes`, `journal_media_root` | `node-red.init` validates and exports `JOURNAL_*`; the independent Journal V2 worker reads them | `uci -q get osi-server.cloud.journal_media_root` |
 | `OSI_HEALTH_RAW_RETENTION_DAYS` / `OSI_HEALTH_HOURLY_RETENTION_DAYS` | Inline default in the flows.json rollup function (`14`, `365`) | Same function, via Node-RED `env.get(...)` | no live override mechanism is wired — see below |
 | Node-RED `settings.js` | `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` | Node-RED runtime on boot | `cat /srv/node-red/settings.js` |
 | `deploy.sh` | Repo root | Run manually on-Pi — see `osi-live-ops-runbook` deploy runbook (download-then-run, not `curl \| sh`) | n/a (script itself) |
@@ -87,6 +88,9 @@ key with a default, then commits.
 | `server_host` | Cloud host set during account-link (used to persist/restore MQTT/server host across link/unlink), separate from the hardcoded telemetry broker URL (section 9) | empty | flows.json account-link nodes write it; `node-red.init` exports as `OSI_SERVER_HOST` |
 | `mqtt_password` | **Secret.** Cloud MQTT password used to build `/srv/node-red/flows_cred.json` | empty | Written by flows.json account-link finalize node; read by `node-red.init`. **Never print, log, or commit this value.** |
 | `allow_private_target` | Dev/test escape hatch allowing `http://` or private/loopback hosts for account-link `serverUrl` | `0` | flows.json `allowPrivateTargets()` reads via UCI directly (`uci -q get osi-server.cloud.allow_private_target`), also via `ALLOW_PRIVATE_SERVER_URLS`/`ALLOW_INSECURE_SERVER_URL` env fallback |
+| `journal_photo_cache_bytes` | Maximum retained Journal V2 photo-cache bytes | `4294967296` | `node-red.init` validates a positive safe integer and exports `JOURNAL_PHOTO_CACHE_BYTES`; the Journal V2 worker enforces it |
+| `journal_min_free_bytes` | Filesystem free-space reserve for the Journal V2 media root | `4294967296` | `node-red.init` validates a positive safe integer and exports `JOURNAL_MIN_FREE_BYTES`; the Journal V2 worker enforces it |
+| `journal_media_root` | Exact canonical directory for generated Journal V2 media files | `/data/journal-media` | `node-red.init` rejects non-canonical or symlink roots and exports `JOURNAL_MEDIA_ROOT`; the Journal V2 worker accepts UUID-generated paths only |
 | `openagri_weather_url` | OpenAgri weather integration endpoint | empty | `node-red.init` exports as `OPENAGRI_WEATHER_URL` |
 | `openagri_weather_username` | OpenAgri basic-auth username | empty | exports as `OPENAGRI_WEATHER_USERNAME` |
 | `openagri_weather_password` | **Secret.** OpenAgri basic-auth password | empty | exports as `OPENAGRI_WEATHER_PASSWORD` |

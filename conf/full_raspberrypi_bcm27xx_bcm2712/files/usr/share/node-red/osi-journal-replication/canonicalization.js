@@ -1,0 +1,592 @@
+'use strict';
+
+const crypto = require('node:crypto');
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+const EUI = /^[0-9a-f]{16}$/i;
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const CANONICAL_EUI = /^[0-9A-F]{16}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const MAX_SEQUENCE = 9223372036854775807n;
+const MAX_SAFE_INTEGER = 9007199254740991;
+const USER_ORIGINS = new Set(['cloud-ui', 'edge-ui']);
+const CUTOVER_STATES = new Set([
+  'PREPARE_REQUESTED', 'COMMANDS_FENCED', 'BARRIER_RECORDED', 'LEGACY_DRAINED',
+  'RECONCILED', 'ACTIVATED', 'BLOCKED', 'ABORTED',
+]);
+const ATTACHMENT_STATES = new Set([
+  'local_only', 'uploading', 'verified', 'download_queued', 'downloading',
+  'failed_retryable', 'failed_terminal', 'missing_legacy', 'unreadable', 'evicted_verified',
+]);
+const ENTRY_KEYS = [
+  'contract_version', 'entry_uuid', 'owner_user_uuid', 'author_principal_uuid', 'author_label',
+  'plot_uuid', 'zone_uuid', 'device_eui', 'season_uuid', 'season_crop', 'season_variety',
+  'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code', 'pass_uuid',
+  'batch_uuid', 'activity_code', 'template_code', 'template_version', 'layout_code',
+  'layout_version', 'catalog_version', 'occurred_start', 'occurred_end', 'occurred_timezone',
+  'occurred_utc_offset_minutes', 'recorded_at', 'origin', 'status', 'voided_at',
+  'voided_by_principal_uuid', 'void_reason', 'note', 'context_json', 'sync_version',
+  'gateway_device_eui', 'created_at', 'updated_at', 'deleted_at', 'values',
+];
+const FORBIDDEN_TRANSPORT_FIELDS = new Set([
+  'blob', 'blob_bytes', 'blob_uuid', 'object_key', 'object_store_path', 'object_store_url',
+  'remote_object_key', 'local_path', 'local_relpath', 'credential', 'credentials',
+  'access_key', 'secret_key', 'signed_url', 'download_url', 'upload_url', 'url',
+]);
+
+function normalizeString(value) {
+  if (UUID.test(value)) return value.toLowerCase();
+  if (EUI.test(value)) return value.toUpperCase();
+  if (ISO.test(value)) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.valueOf())) return date.toISOString();
+  }
+  return value;
+}
+
+function fixedNumber(value) {
+  if (!Number.isFinite(value)) throw new TypeError('canonical JSON forbids non-finite numbers');
+  if (Object.is(value, -0) || value === 0) return '0';
+  const text = String(value);
+  if (!/[eE]/.test(text)) return text;
+  const [coefficient, exponentText] = text.toLowerCase().split('e');
+  const negative = coefficient.startsWith('-');
+  const unsigned = negative ? coefficient.slice(1) : coefficient;
+  const digits = unsigned.replace('.', '');
+  const fraction = unsigned.includes('.') ? unsigned.length - unsigned.indexOf('.') - 1 : 0;
+  const power = Number(exponentText) - fraction;
+  let fixed;
+  if (power >= 0) fixed = digits + '0'.repeat(power);
+  else if (digits.length + power > 0) fixed = digits.slice(0, digits.length + power) + '.' + digits.slice(digits.length + power);
+  else fixed = '0.' + '0'.repeat(-(digits.length + power)) + digits;
+  return (negative ? '-' : '') + fixed.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+}
+
+function canonicalize(value) {
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return fixedNumber(value);
+  if (typeof value === 'string') return JSON.stringify(normalizeString(value));
+  if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']';
+  if (!value || typeof value !== 'object') throw new TypeError(`canonical JSON cannot encode ${typeof value}`);
+  return '{' + Object.keys(value).sort().map((key) => {
+    if (value[key] === undefined) throw new TypeError(`canonical JSON forbids undefined at ${key}`);
+    return JSON.stringify(key) + ':' + canonicalize(value[key]);
+  }).join(',') + '}';
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(canonicalize(value), 'utf8').digest('hex');
+}
+
+function fail(message) {
+  throw new TypeError('journal V2 semantic validation: ' + message);
+}
+
+function object(value, field) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(field + ' must be an object');
+  return value;
+}
+
+function assertExactKeys(value, expected, field) {
+  const actual = Object.keys(object(value, field)).sort();
+  const wanted = expected.slice().sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    fail(field + ' has an unexpected shape');
+  }
+}
+
+function assertNoTransportFields(value, path) {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoTransportFields(item, `${path}[${index}]`));
+    return;
+  }
+  for (const [key, member] of Object.entries(value)) {
+    if (FORBIDDEN_TRANSPORT_FIELDS.has(key)) fail(`${path}.${key} is forbidden transport data`);
+    assertNoTransportFields(member, `${path}.${key}`);
+  }
+}
+
+function assertPayloadHash(value) {
+  if (typeof value.payload_sha256 !== 'string' || !SHA256.test(value.payload_sha256)) {
+    fail('payload_sha256 must be 64 lowercase hex characters');
+  }
+}
+
+function assertInteger(value, minimum, maximum, message) {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    fail(message + '; expected a safe integer');
+  }
+}
+
+function assertDeclaredHash(envelope, actual) {
+  if (envelope.payload_sha256 !== actual) fail('payload_sha256 mismatch');
+}
+
+function assertUuid(value, field) {
+  if (typeof value !== 'string' || !CANONICAL_UUID.test(value)) fail(field + ' must be a canonical UUID');
+}
+
+function assertNullableUuid(value, field) {
+  if (value !== null) assertUuid(value, field);
+}
+
+function assertTimestamp(value, field) {
+  if (typeof value !== 'string' || !CANONICAL_TIMESTAMP.test(value) || !Number.isFinite(Date.parse(value))) {
+    fail(field + ' must be a canonical UTC timestamp');
+  }
+}
+
+function assertNullableTimestamp(value, field) {
+  if (value !== null) assertTimestamp(value, field);
+}
+
+function assertEui(value, field) {
+  if (typeof value !== 'string' || !CANONICAL_EUI.test(value)) fail(field + ' must be an uppercase EUI64');
+}
+
+function assertNullableEui(value, field) {
+  if (value !== null) assertEui(value, field);
+}
+
+function assertSha256Value(value, field) {
+  if (typeof value !== 'string' || !SHA256.test(value)) fail(field + ' must be a lowercase SHA-256');
+}
+
+function assertSortedUnique(items, key, field) {
+  let previous = null;
+  for (const item of items) {
+    const current = key(item);
+    if (previous !== null && previous >= current) fail(field + ' must be sorted and unique');
+    previous = current;
+  }
+}
+
+function assertEntryValues(entry) {
+  if (!Array.isArray(entry.values)) fail('entry.values must be an array');
+  assertSortedUnique(
+    entry.values,
+    (value) => String(value.group_index).padStart(20, '0') + '\u0000' + value.attribute_code,
+    'entry.values'
+  );
+  for (const value of entry.values) {
+    assertExactKeys(value, [
+      'attribute_code', 'group_index', 'value_status', 'value_num', 'value_text', 'unit_code',
+      'entered_value_num', 'entered_unit_code',
+    ], 'entry value');
+    assertInteger(value.group_index, 0, MAX_SAFE_INTEGER, 'entry value group_index must be nonnegative');
+    const observed = value.value_status === 'observed';
+    const hasNumber = typeof value.value_num === 'number' && Number.isFinite(value.value_num);
+    const hasText = typeof value.value_text === 'string';
+    if (observed && hasNumber === hasText) fail('observed entry value must contain exactly one numeric or text value');
+    if (!observed && (value.value_num !== null || value.value_text !== null)) {
+      fail('non-observed entry value must contain null values');
+    }
+  }
+}
+
+function assertEntry(entry) {
+  object(entry, 'entry');
+  assertExactKeys(entry, ENTRY_KEYS, 'entry');
+  assertUuid(entry.entry_uuid, 'entry.entry_uuid');
+  assertUuid(entry.owner_user_uuid, 'entry.owner_user_uuid');
+  assertUuid(entry.author_principal_uuid, 'entry.author_principal_uuid');
+  for (const field of [
+    'plot_uuid', 'zone_uuid', 'season_uuid', 'campaign_uuid', 'pass_uuid', 'batch_uuid',
+    'voided_by_principal_uuid',
+  ]) assertNullableUuid(entry[field], 'entry.' + field);
+  assertNullableEui(entry.device_eui, 'entry.device_eui');
+  if (entry.gateway_device_eui !== null) {
+    assertEui(entry.gateway_device_eui, 'entry.gateway_device_eui');
+  } else if (entry.plot_uuid !== null) {
+    fail('a zero-gateway entry must not invent a plot');
+  }
+  assertInteger(entry.template_version, 1, MAX_SAFE_INTEGER, 'entry template_version must be positive');
+  assertInteger(entry.layout_version, 1, MAX_SAFE_INTEGER, 'entry layout_version must be positive');
+  assertInteger(entry.catalog_version, 1, MAX_SAFE_INTEGER, 'entry catalog_version must be positive');
+  assertInteger(entry.occurred_utc_offset_minutes, -840, 840, 'entry occurred_utc_offset_minutes is out of range');
+  assertInteger(entry.sync_version, 0, MAX_SAFE_INTEGER, 'entry sync_version must be nonnegative');
+  assertTimestamp(entry.occurred_start, 'entry.occurred_start');
+  assertNullableTimestamp(entry.occurred_end, 'entry.occurred_end');
+  assertTimestamp(entry.recorded_at, 'entry.recorded_at');
+  assertNullableTimestamp(entry.voided_at, 'entry.voided_at');
+  assertTimestamp(entry.created_at, 'entry.created_at');
+  assertTimestamp(entry.updated_at, 'entry.updated_at');
+  assertNullableTimestamp(entry.deleted_at, 'entry.deleted_at');
+  assertEntryValues(entry);
+}
+
+function assertProduct(product, resource) {
+  object(product, 'product');
+  assertExactKeys(product, [
+    'contract_version', 'product_uuid', 'scope', 'owner_user_uuid', 'gateway_device_eui', 'name',
+    'kind', 'composition_json', 'active', 'sync_version', 'created_at', 'deleted_at',
+  ], 'product');
+  assertUuid(product.product_uuid, 'product.product_uuid');
+  assertUuid(product.owner_user_uuid, 'product.owner_user_uuid');
+  assertEui(product.gateway_device_eui, 'product.gateway_device_eui');
+  assertTimestamp(product.created_at, 'product.created_at');
+  assertNullableTimestamp(product.deleted_at, 'product.deleted_at');
+  assertInteger(product.active, 0, 1, 'product active must be zero or one');
+  assertInteger(product.sync_version, 1, MAX_SAFE_INTEGER, 'product sync_version must be positive');
+  if (resource && product.product_uuid !== resource.product_uuid) fail('product resource identity mismatch');
+  if (resource && product.sync_version !== resource.base_version + 1) fail('product sync_version must equal base_version + 1');
+}
+
+function mappingKey(mapping) {
+  return mapping.scheme_uri + '\u0000' + mapping.mapping_role + '\u0000' + mapping.external_id;
+}
+
+function assertCustomVocabulary(vocab, resource) {
+  object(vocab, 'custom_vocab');
+  assertExactKeys(vocab, [
+    'contract_version', 'code', 'kind', 'parent_code', 'value_type', 'quantity_kind', 'basis',
+    'default_unit_code', 'labels_json', 'icon_key', 'constraints_json', 'agrovoc_uri', 'icasa_code',
+    'adapt_code', 'scope', 'owner_user_uuid', 'gateway_device_eui', 'custom_field_uuid', 'active',
+    'sort_order', 'sync_version', 'created_at', 'deleted_at', 'mappings',
+  ], 'custom_vocab');
+  assertUuid(vocab.custom_field_uuid, 'custom_vocab.custom_field_uuid');
+  assertUuid(vocab.owner_user_uuid, 'custom_vocab.owner_user_uuid');
+  assertEui(vocab.gateway_device_eui, 'custom_vocab.gateway_device_eui');
+  assertTimestamp(vocab.created_at, 'custom_vocab.created_at');
+  assertNullableTimestamp(vocab.deleted_at, 'custom_vocab.deleted_at');
+  assertInteger(vocab.active, 0, 1, 'custom vocabulary active must be zero or one');
+  assertInteger(vocab.sort_order, -MAX_SAFE_INTEGER, MAX_SAFE_INTEGER, 'custom vocabulary sort_order is out of range');
+  assertInteger(vocab.sync_version, 1, MAX_SAFE_INTEGER, 'custom vocabulary sync_version must be positive');
+  if (resource && vocab.custom_field_uuid !== resource.custom_field_uuid) fail('custom vocabulary resource identity mismatch');
+  if (vocab.code !== 'custom.' + vocab.custom_field_uuid) fail('custom vocabulary code must derive from custom_field_uuid');
+  if (resource && vocab.sync_version !== resource.base_version + 1) fail('custom vocabulary sync_version must equal base_version + 1');
+  if (!Array.isArray(vocab.mappings)) fail('custom vocabulary mappings must be an array');
+  assertSortedUnique(vocab.mappings, mappingKey, 'custom vocabulary mappings');
+  for (const mapping of vocab.mappings) {
+    assertExactKeys(mapping, [
+      'term_code', 'scheme_uri', 'scheme_version', 'mapping_role', 'external_id',
+      'external_parent_id', 'mapping_relation', 'source_uri', 'active',
+    ], 'custom vocabulary mapping');
+    assertInteger(mapping.active, 0, 1, 'custom vocabulary mapping active must be zero or one');
+    if (mapping.term_code !== vocab.code) fail('custom vocabulary mapping term_code mismatch');
+  }
+}
+
+function assertPlot(plot, resource) {
+  object(plot, 'plot');
+  assertExactKeys(plot, [
+    'contract_version', 'plot_uuid', 'plot_code', 'name', 'zone_uuid', 'station_code', 'crop_hint',
+    'area_m2', 'active', 'sync_version', 'owner_user_uuid', 'gateway_device_eui', 'created_at',
+    'updated_at', 'deleted_at', 'settings',
+  ], 'plot');
+  assertUuid(plot.plot_uuid, 'plot.plot_uuid');
+  assertEui(plot.gateway_device_eui, 'plot.gateway_device_eui');
+  assertUuid(plot.owner_user_uuid, 'plot.owner_user_uuid');
+  assertNullableUuid(plot.zone_uuid, 'plot.zone_uuid');
+  assertTimestamp(plot.created_at, 'plot.created_at');
+  assertTimestamp(plot.updated_at, 'plot.updated_at');
+  assertNullableTimestamp(plot.deleted_at, 'plot.deleted_at');
+  assertInteger(plot.active, 0, 1, 'plot active must be zero or one');
+  assertInteger(plot.sync_version, 0, MAX_SAFE_INTEGER, 'plot sync_version must be nonnegative');
+  const settings = object(plot.settings, 'plot settings');
+  assertExactKeys(settings, [
+    'layout_code', 'updated_at', 'updated_by_principal_uuid', 'sync_version', 'context_json',
+  ], 'plot settings');
+  assertTimestamp(settings.updated_at, 'plot settings updated_at');
+  assertUuid(settings.updated_by_principal_uuid, 'plot settings updated_by_principal_uuid');
+  assertInteger(settings.sync_version, 0, MAX_SAFE_INTEGER, 'plot settings sync_version must be nonnegative');
+  if (resource && plot.plot_uuid !== resource.plot_uuid) fail('plot resource identity mismatch');
+  if (resource && plot.gateway_device_eui !== resource.gateway_device_eui) fail('plot gateway identity mismatch');
+  if (resource && plot.sync_version !== resource.projection_version) fail('plot projection_version mismatch');
+}
+
+function validateMutationStructure(envelope) {
+  object(envelope, 'mutation envelope');
+  assertExactKeys(envelope, [
+    'mutation_uuid', 'workspace_uuid', 'operation', 'resource', 'candidate', 'payload_sha256',
+    'origin', 'recorded_at',
+  ], 'mutation envelope');
+  assertNoTransportFields(envelope, '$');
+  assertPayloadHash(envelope);
+  assertUuid(envelope.mutation_uuid, 'mutation_uuid');
+  assertUuid(envelope.workspace_uuid, 'workspace_uuid');
+  assertTimestamp(envelope.recorded_at, 'recorded_at');
+  const resource = object(envelope.resource, 'resource');
+  const candidate = object(envelope.candidate, 'candidate');
+  switch (envelope.operation) {
+    case 'ENTRY_CREATE':
+    case 'ENTRY_CORRECT': {
+      assertExactKeys(resource, ['entry_uuid', 'base_version'], 'entry resource');
+      assertExactKeys(candidate, ['entry'], 'entry candidate');
+      assertUuid(resource.entry_uuid, 'resource.entry_uuid');
+      if (envelope.operation === 'ENTRY_CREATE' && resource.base_version !== 0) fail('ENTRY_CREATE base_version must be zero');
+      if (envelope.operation === 'ENTRY_CORRECT') {
+        assertInteger(resource.base_version, 1, MAX_SAFE_INTEGER, 'ENTRY_CORRECT base_version must be positive');
+      }
+      if (!USER_ORIGINS.has(envelope.origin)) fail('entry mutation origin must be cloud-ui or edge-ui');
+      const entry = object(candidate.entry, 'candidate.entry');
+      assertEntry(entry);
+      if (entry.entry_uuid !== resource.entry_uuid) fail('entry resource identity mismatch');
+      if (entry.origin !== envelope.origin) fail('entry origin must match the envelope');
+      if (entry.recorded_at !== envelope.recorded_at) fail('entry recorded_at must match the envelope');
+      if (entry.status !== 'final') fail('create and correction candidates must be final');
+      const expected = envelope.operation === 'ENTRY_CREATE' ? 1 : resource.base_version + 1;
+      if (entry.sync_version !== expected) fail('entry sync_version must be the next version');
+      break;
+    }
+    case 'ENTRY_VOID':
+      assertExactKeys(resource, ['entry_uuid', 'base_version'], 'entry void resource');
+      assertExactKeys(candidate, [
+        'status', 'voided_at', 'voided_by_principal_uuid', 'void_reason',
+      ], 'entry void candidate');
+      assertUuid(resource.entry_uuid, 'resource.entry_uuid');
+      assertInteger(resource.base_version, 1, MAX_SAFE_INTEGER, 'ENTRY_VOID base_version must be positive');
+      if (!USER_ORIGINS.has(envelope.origin)) fail('entry mutation origin must be cloud-ui or edge-ui');
+      if (candidate.status !== 'voided') fail('entry void candidate status must be voided');
+      assertTimestamp(candidate.voided_at, 'entry void candidate voided_at');
+      assertUuid(candidate.voided_by_principal_uuid, 'entry void candidate principal UUID');
+      break;
+    case 'PRODUCT_UPSERT':
+      assertUuid(resource.product_uuid, 'resource.product_uuid');
+      assertExactKeys(resource, ['product_uuid', 'base_version'], 'product resource');
+      assertExactKeys(candidate, ['product'], 'product candidate');
+      assertInteger(resource.base_version, 0, MAX_SAFE_INTEGER, 'product base_version must be nonnegative');
+      if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
+      assertProduct(candidate.product, resource);
+      break;
+    case 'CUSTOM_VOCAB_UPSERT':
+      assertExactKeys(resource, ['custom_field_uuid', 'base_version'], 'custom vocabulary resource');
+      assertExactKeys(candidate, ['custom_vocab'], 'custom vocabulary candidate');
+      assertUuid(resource.custom_field_uuid, 'resource.custom_field_uuid');
+      assertInteger(resource.base_version, 0, MAX_SAFE_INTEGER, 'custom vocabulary base_version must be nonnegative');
+      if (!USER_ORIGINS.has(envelope.origin)) fail('reference mutation origin must be cloud-ui or edge-ui');
+      assertCustomVocabulary(candidate.custom_vocab, resource);
+      break;
+    case 'PLOT_SNAPSHOT':
+      assertExactKeys(resource, [
+        'gateway_device_eui', 'plot_uuid', 'projection_version',
+      ], 'plot resource');
+      assertExactKeys(candidate, ['plot'], 'plot candidate');
+      assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
+      assertUuid(resource.plot_uuid, 'resource.plot_uuid');
+      assertInteger(resource.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
+      if (envelope.origin !== 'edge-worker') fail('plot snapshot origin must be edge-worker');
+      assertPlot(candidate.plot, resource);
+      break;
+    case 'CUTOVER_BARRIER_RECEIPT': {
+      assertExactKeys(resource, ['gateway_device_eui', 'barrier_uuid'], 'cutover resource');
+      assertExactKeys(candidate, [
+        'exact_pending_v1_event_uuids_sorted', 'pending_set_sha256', 'source_head_manifest_sha256',
+      ], 'cutover receipt candidate');
+      assertEui(resource.gateway_device_eui, 'resource.gateway_device_eui');
+      assertUuid(resource.barrier_uuid, 'resource.barrier_uuid');
+      if (envelope.origin !== 'edge-worker') fail('cutover receipt origin must be edge-worker');
+      const pending = candidate.exact_pending_v1_event_uuids_sorted;
+      if (!Array.isArray(pending)) fail('pending V1 UUID set must be an array');
+      assertSortedUnique(pending, (uuid) => uuid, 'pending V1 UUID set');
+      for (const uuid of pending) assertUuid(uuid, 'pending V1 event UUID');
+      if (candidate.pending_set_sha256 !== sha256(pending)) fail('pending_set_sha256 mismatch');
+      assertSha256Value(candidate.source_head_manifest_sha256, 'source_head_manifest_sha256');
+      break;
+    }
+    default:
+      fail('unknown mutation operation');
+  }
+  return true;
+}
+
+function assertSequence(sequence) {
+  if (typeof sequence !== 'string' || !/^[1-9][0-9]*$/.test(sequence)) fail('sequence must be a positive decimal string');
+  if (BigInt(sequence) > MAX_SEQUENCE) fail('sequence exceeds signed BIGINT');
+}
+
+function assertCropCycle(cycle) {
+  object(cycle, 'crop cycle projection');
+  assertExactKeys(cycle, [
+    'cycle_uuid', 'crop_code', 'variety', 'group_uuid', 'opened_by_entry_uuid', 'starts_on',
+    'gateway_device_eui', 'created_by_principal_uuid', 'sync_version', 'created_at', 'updated_at',
+    'deleted_at', 'plots',
+  ], 'crop cycle projection');
+  assertUuid(cycle.cycle_uuid, 'crop cycle cycle_uuid');
+  assertNullableUuid(cycle.group_uuid, 'crop cycle group_uuid');
+  assertUuid(cycle.opened_by_entry_uuid, 'crop cycle opened_by_entry_uuid');
+  assertEui(cycle.gateway_device_eui, 'crop cycle gateway_device_eui');
+  assertUuid(cycle.created_by_principal_uuid, 'crop cycle created_by_principal_uuid');
+  assertTimestamp(cycle.created_at, 'crop cycle created_at');
+  assertTimestamp(cycle.updated_at, 'crop cycle updated_at');
+  assertNullableTimestamp(cycle.deleted_at, 'crop cycle deleted_at');
+  assertInteger(cycle.sync_version, 0, MAX_SAFE_INTEGER, 'crop cycle sync_version must be nonnegative');
+  if (!Array.isArray(cycle.plots)) fail('crop cycle plots must be an array');
+  assertSortedUnique(cycle.plots, (plot) => plot.plot_uuid, 'crop cycle plots');
+  for (const plot of cycle.plots) {
+    assertExactKeys(plot, [
+      'cycle_uuid', 'plot_uuid', 'ends_on', 'closed_by_entry_uuid', 'close_reason',
+    ], 'crop cycle plot');
+    assertUuid(plot.cycle_uuid, 'crop cycle plot cycle_uuid');
+    assertUuid(plot.plot_uuid, 'crop cycle plot plot_uuid');
+    assertNullableUuid(plot.closed_by_entry_uuid, 'crop cycle plot closed_by_entry_uuid');
+    if (plot.cycle_uuid !== cycle.cycle_uuid) fail('crop cycle plot identity mismatch');
+    const open = plot.ends_on === null;
+    const allCloseFieldsNull = plot.closed_by_entry_uuid === null && plot.close_reason === null;
+    const allCloseFieldsPopulated = plot.closed_by_entry_uuid !== null && plot.close_reason !== null;
+    if ((open && !allCloseFieldsNull) || (!open && !allCloseFieldsPopulated)) {
+      fail('crop cycle close fields must be all null or all populated');
+    }
+  }
+}
+
+function validateReplicationStructure(envelope) {
+  object(envelope, 'replication envelope');
+  assertExactKeys(envelope, [
+    'sequence', 'workspace_uuid', 'kind', 'payload', 'payload_sha256', 'recorded_at',
+  ], 'replication envelope');
+  assertNoTransportFields(envelope, '$');
+  assertPayloadHash(envelope);
+  assertSequence(envelope.sequence);
+  assertUuid(envelope.workspace_uuid, 'workspace_uuid');
+  assertTimestamp(envelope.recorded_at, 'recorded_at');
+  const payload = object(envelope.payload, 'payload');
+  switch (envelope.kind) {
+    case 'ENTRY_HEAD':
+      assertExactKeys(payload, ['entry_head_uuid', 'entry_revision_uuid', 'entry'], 'entry head payload');
+      assertUuid(payload.entry_head_uuid, 'entry_head_uuid');
+      assertUuid(payload.entry_revision_uuid, 'entry_revision_uuid');
+      assertEntry(payload.entry);
+      if (payload.entry_head_uuid !== payload.entry.entry_uuid) fail('entry head identity mismatch');
+      break;
+    case 'ENTRY_CONFLICT':
+      assertExactKeys(payload, [
+        'conflict_uuid', 'entry_head_uuid', 'current_revision_uuid', 'candidate_revision_uuid',
+        'base_version', 'current_version', 'reason', 'disposition', 'current_entry', 'candidate_entry',
+      ], 'entry conflict payload');
+      assertUuid(payload.conflict_uuid, 'conflict_uuid');
+      assertUuid(payload.entry_head_uuid, 'entry_head_uuid');
+      assertUuid(payload.current_revision_uuid, 'current_revision_uuid');
+      assertUuid(payload.candidate_revision_uuid, 'candidate_revision_uuid');
+      if (payload.reason !== 'base-version-mismatch') fail('entry conflict reason is invalid');
+      if (!['needs-review', 'dismissed'].includes(payload.disposition)) fail('entry conflict disposition is invalid');
+      assertEntry(payload.current_entry);
+      assertEntry(payload.candidate_entry);
+      assertInteger(payload.base_version, 0, MAX_SAFE_INTEGER, 'conflict base_version must be nonnegative');
+      assertInteger(payload.current_version, 1, MAX_SAFE_INTEGER, 'conflict current_version must be positive');
+      if (payload.current_entry.entry_uuid !== payload.entry_head_uuid ||
+          payload.candidate_entry.entry_uuid !== payload.entry_head_uuid) fail('entry conflict identity mismatch');
+      if (payload.current_entry.sync_version !== payload.current_version) fail('current conflict version mismatch');
+      if (payload.candidate_entry.sync_version !== payload.base_version + 1) fail('candidate conflict version mismatch');
+      if (payload.current_version <= payload.base_version) fail('conflict current_version must exceed base_version');
+      break;
+    case 'PLOT_SNAPSHOT':
+      assertExactKeys(payload, [
+        'snapshot_uuid', 'gateway_device_eui', 'projection_version', 'plot',
+      ], 'plot snapshot payload');
+      assertUuid(payload.snapshot_uuid, 'snapshot_uuid');
+      assertEui(payload.gateway_device_eui, 'gateway_device_eui');
+      assertInteger(payload.projection_version, 1, MAX_SAFE_INTEGER, 'plot projection_version must be positive');
+      assertPlot(payload.plot, {
+        plot_uuid: payload.plot.plot_uuid,
+        gateway_device_eui: payload.gateway_device_eui,
+        projection_version: payload.projection_version,
+      });
+      break;
+    case 'REFERENCE_DATA':
+      if (Object.keys(payload).length !== 1) fail('reference payload must contain exactly one union member');
+      if (Object.prototype.hasOwnProperty.call(payload, 'product')) assertProduct(payload.product);
+      else if (Object.prototype.hasOwnProperty.call(payload, 'custom_vocab')) assertCustomVocabulary(payload.custom_vocab);
+      else fail('reference payload must contain product or custom_vocab');
+      break;
+    case 'CROP_CYCLE_PROJECTION':
+      assertCropCycle(payload);
+      break;
+    case 'ATTACHMENT_DESCRIPTOR':
+      assertExactKeys(payload, [
+        'attachment_uuid', 'entry_uuid', 'entry_revision_uuid', 'content_role', 'parent_disposition',
+        'original_filename', 'mime', 'size_bytes', 'sha256', 'state', 'captured_at', 'sync_version',
+        'created_at', 'deleted_at',
+      ], 'attachment descriptor payload');
+      assertUuid(payload.attachment_uuid, 'attachment_uuid');
+      assertUuid(payload.entry_uuid, 'entry_uuid');
+      assertUuid(payload.entry_revision_uuid, 'entry_revision_uuid');
+      if (payload.content_role !== 'photo') fail('attachment content_role must be photo');
+      if (!['canonical', 'conflict'].includes(payload.parent_disposition)) {
+        fail('attachment parent_disposition is invalid');
+      }
+      assertSha256Value(payload.sha256, 'attachment sha256');
+      if (!ATTACHMENT_STATES.has(payload.state)) fail('attachment state is invalid');
+      assertNullableTimestamp(payload.captured_at, 'attachment captured_at');
+      assertTimestamp(payload.created_at, 'attachment created_at');
+      assertNullableTimestamp(payload.deleted_at, 'attachment deleted_at');
+      assertInteger(payload.size_bytes, 0, MAX_SAFE_INTEGER, 'attachment size_bytes must be nonnegative');
+      assertInteger(payload.sync_version, 0, MAX_SAFE_INTEGER, 'attachment sync_version must be nonnegative');
+      break;
+    case 'AUTHORITY_STATE':
+      assertExactKeys(payload, [
+        'transition_uuid', 'gateway_device_eui', 'from_state', 'target_state', 'barrier_uuid', 'reason',
+      ], 'authority state payload');
+      assertUuid(payload.transition_uuid, 'authority transition_uuid');
+      assertNullableEui(payload.gateway_device_eui, 'authority gateway_device_eui');
+      if (payload.from_state !== null && !CUTOVER_STATES.has(payload.from_state)) {
+        fail('authority from_state is invalid');
+      }
+      if (!CUTOVER_STATES.has(payload.target_state)) fail('authority target_state is invalid');
+      assertNullableUuid(payload.barrier_uuid, 'authority barrier_uuid');
+      break;
+    default:
+      fail('unknown replication kind');
+  }
+  return true;
+}
+
+function validateReplicationBatch(envelopes) {
+  if (!Array.isArray(envelopes)) fail('replication batch must be an array');
+  let previous = null;
+  let workspace = null;
+  for (const envelope of envelopes) {
+    validateReplication(envelope);
+    if (workspace !== null && workspace !== envelope.workspace_uuid) fail('replication batch must contain one workspace');
+    workspace = envelope.workspace_uuid;
+    const sequence = BigInt(envelope.sequence);
+    if (previous !== null && sequence <= previous) fail('replication sequences must be numerically ascending');
+    previous = sequence;
+  }
+  return true;
+}
+
+function mutationHash(envelope) {
+  const { payload_sha256, ...hashInput } = envelope;
+  return sha256(hashInput);
+}
+
+function replicationHash(envelope) {
+  return sha256(envelope.payload);
+}
+
+function validateMutation(envelope) {
+  validateMutationStructure(envelope);
+  assertDeclaredHash(envelope, mutationHash(envelope));
+  return true;
+}
+
+function validateReplication(envelope) {
+  validateReplicationStructure(envelope);
+  assertDeclaredHash(envelope, replicationHash(envelope));
+  return true;
+}
+
+function hashMutation(envelope) {
+  validateMutationStructure(envelope);
+  return mutationHash(envelope);
+}
+
+function hashReplication(envelope) {
+  validateReplicationStructure(envelope);
+  return replicationHash(envelope);
+}
+
+module.exports = {
+  canonicalize,
+  sha256,
+  validateMutation,
+  validateReplication,
+  validateReplicationBatch,
+  hashMutation,
+  hashReplication,
+};

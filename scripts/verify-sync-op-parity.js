@@ -34,6 +34,25 @@ const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
 ];
+// Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
+// order is cloud-before-edge: osi-server lands the landing applier for a journal event op
+// before the edge activates real emission of that op. Before this allowance existed, the
+// server-vs-union check below treated ANY op the server implements that isn't required by
+// the edge as a hard error -- correct for the old edge-ahead default, but wrong once cloud
+// is deliberately let land first. An op listed here is module-emitted on the edge (real,
+// audited emitter call sites -- it stays required in edgeModuleOwned/edgeDeferred) but not
+// yet contractually ACTIVE: nothing in the shipped edge code path invokes the emitter for
+// real farm data on this slice, so the op is safe for the server to already understand.
+// Fail-closed is preserved for everything else: a server op that is neither in the edge's
+// expected union nor listed here still errors. Same closed-set discipline as every other
+// EXACT_ constant above -- not an extensible allow list.
+const EXACT_EDGE_STAGED_OPS = [
+  'JOURNAL_ENTRY_UPSERTED',
+  'JOURNAL_ENTRY_VOIDED',
+  'JOURNAL_VOCAB_UPSERTED',
+  'JOURNAL_PLOT_UPSERTED',
+  'JOURNAL_PLOT_GROUP_UPSERTED',
+];
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',
@@ -107,6 +126,21 @@ const JS_MODULE_OWNED_EVENT_OPS = new Set([
   // osi-valve-control/runtime.test.js and cancel.test.js. cloud full-parity Task P4-E1.
   'VALVE_ACTUATION_ARCHIVED',
 ]);
+const V2_CONTRACT_FILES = [
+  'journal-v2.schema.json',
+  'journal-v2-golden.json',
+  'canonicalization-v2.md',
+];
+
+function verifyV2ContractFiles(root = REPO_ROOT) {
+  const directory = path.join(root, 'docs/contracts/sync-schema');
+  for (const name of V2_CONTRACT_FILES) {
+    const file = path.join(directory, name);
+    if (!fs.existsSync(file) || fs.statSync(file).size === 0) {
+      throw new Error(`missing or empty V2 contract file: ${name}`);
+    }
+  }
+}
 
 function readUtf8(file) {
   return fs.readFileSync(file, 'utf8');
@@ -754,8 +788,8 @@ function validateStagingManifest(manifest) {
   const eventKeys = eventOps && typeof eventOps === 'object' && !Array.isArray(eventOps)
     ? Object.keys(eventOps).sort()
     : [];
-  if (!sameKeys(eventKeys, ['cloudDeferred', 'edgeDeferred', 'edgeModuleOwned'])) {
-    errors.push(`staging eventOps keys must be cloudDeferred,edgeDeferred,edgeModuleOwned; got ${eventKeys.join(',') || '(none)'}`);
+  if (!sameKeys(eventKeys, ['cloudDeferred', 'edgeDeferred', 'edgeModuleOwned', 'edgeStaged'])) {
+    errors.push(`staging eventOps keys must be cloudDeferred,edgeDeferred,edgeModuleOwned,edgeStaged; got ${eventKeys.join(',') || '(none)'}`);
   }
 
   const checks = [
@@ -763,6 +797,7 @@ function validateStagingManifest(manifest) {
     ['commands.cloudDeferred', commands && commands.cloudDeferred, EXACT_STAGED_COMMANDS],
     ['eventOps.edgeModuleOwned', eventOps && eventOps.edgeModuleOwned, EXACT_EDGE_MODULE_OPS],
     ['eventOps.edgeDeferred', eventOps && eventOps.edgeDeferred, EXACT_EDGE_DEFERRED_OPS],
+    ['eventOps.edgeStaged', eventOps && eventOps.edgeStaged, EXACT_EDGE_STAGED_OPS],
     ['eventOps.cloudDeferred', eventOps && eventOps.cloudDeferred, EXACT_JOURNAL_EVENT_OPS],
   ];
   for (const [name, actual, expected] of checks) {
@@ -786,6 +821,15 @@ function validateStagingManifest(manifest) {
     const edgeDiff = diffSets(sortedUnique(EXACT_JOURNAL_EVENT_OPS), edgeUnion);
     if (edgeDiff.missing.length || edgeDiff.extra.length) {
       errors.push('staging edgeModuleOwned union edgeDeferred must equal the exact journal event-op set');
+    }
+    // edgeStaged declares which ops the server may implement ahead of edge activation --
+    // it can only sanction an op that is actually a recognized edge journal op (module-owned
+    // or edge-deferred), never an arbitrary string, so it must stay a subset of that union.
+    if (Array.isArray(eventOps.edgeStaged)) {
+      const staleStaged = eventOps.edgeStaged.filter((op) => !edgeUnion.includes(op));
+      if (staleStaged.length) {
+        errors.push(`staging eventOps.edgeStaged must be a subset of edgeModuleOwned union edgeDeferred: ${staleStaged.join(', ')}`);
+      }
     }
   }
   return errors;
@@ -1331,10 +1375,12 @@ function checkSyncOpParity(options = {}) {
     edgeModuleOwned: EXACT_EDGE_MODULE_OPS,
     edgeDeferred: EXACT_EDGE_DEFERRED_OPS,
     cloudDeferred: EXACT_JOURNAL_EVENT_OPS,
+    edgeStaged: EXACT_EDGE_STAGED_OPS,
   } : {
     edgeModuleOwned: [],
     edgeDeferred: [],
     cloudDeferred: [],
+    edgeStaged: [],
   };
 
   const flowResults = flowSources.map((flow) => ({
@@ -1458,10 +1504,22 @@ function checkSyncOpParity(options = {}) {
   }
 
   const expectedServerOps = expectedSchemaOps.filter((op) => !staging.cloudDeferred.includes(op));
-  const serverDiffLines = formatDiff('server', 'union', diffSets(expectedServerOps, serverResult.ops));
+  const serverDiff = diffSets(expectedServerOps, serverResult.ops);
+  // Cloud-before-edge deploy order: an "extra" server op (implemented ahead of the edge's
+  // own union) is sanctioned, not an error, IFF it is declared in staging.edgeStaged. Every
+  // other extra op, and any missing op, still fails closed exactly as before.
+  const sanctionedServerAhead = serverDiff.extra.filter((op) => staging.edgeStaged.includes(op));
+  const unsanctionedServerDiff = {
+    missing: serverDiff.missing,
+    extra: serverDiff.extra.filter((op) => !staging.edgeStaged.includes(op)),
+  };
+  const serverDiffLines = formatDiff('server', 'union', unsanctionedServerDiff);
   if (serverDiffLines.length) {
     ok = false;
     lines.push(...serverDiffLines);
+  }
+  if (sanctionedServerAhead.length) {
+    lines.push(`  server ahead of edge activation (sanctioned, cloud-before-edge deploy order): ${sanctionedServerAhead.join(', ')}`);
   }
 
   return {
@@ -1473,6 +1531,7 @@ function checkSyncOpParity(options = {}) {
 }
 
 function main() {
+  verifyV2ContractFiles();
   const serverSource = process.argv[2]
     ? (path.isAbsolute(process.argv[2]) ? process.argv[2] : path.resolve(process.cwd(), process.argv[2]))
     : resolveDefaultServerSource(REPO_ROOT);
@@ -1504,4 +1563,5 @@ module.exports = {
   extractSqlOps,
   payloadHasTopLevelContractVersion,
   resolveDefaultServerSource,
+  verifyV2ContractFiles,
 };

@@ -7,6 +7,7 @@ const THEME_KEY = 'osi.display.theme';
 const DASHBOARD_DENSITY_KEY = 'osi.display.dashboardDensity';
 const DASHBOARD_AUTO_REFRESH_KEY = 'osi.display.dashboardAutoRefresh';
 const DEFAULT_TIMEZONE_KEY = 'osi.defaults.timezone';
+const JOURNAL_DETAIL_LEVEL_KEY = 'osi.journal.detailLevel';
 const MODULE_KEYS = {
   predictionAdvisory: 'osi.modules.predictionAdvisory',
   environment: 'osi.modules.environment',
@@ -18,6 +19,31 @@ const PREFERENCES_EVENT = 'osi-display-preferences';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 export type DashboardDensity = 'comfortable' | 'compact';
+// Owner decision (2026-07): the user-selectable setting only ever offers
+// Quick or Full — "Research" is not a choice a farmer/user makes here. The
+// capture flow's `research_observation` template still exists and is still
+// reachable as a per-layout FLOOR (a researcher-only layout forces it
+// regardless of this preference — see JournalCaptureFlow's
+// effectiveTemplateCode, which is untyped against this setting on purpose),
+// so removing it from this type only removes it as a settable preference.
+export type JournalDetailLevel = 'farmer_quick' | 'full_record';
+
+const JOURNAL_DETAIL_LEVELS: readonly JournalDetailLevel[] = ['farmer_quick', 'full_record'];
+const DEFAULT_JOURNAL_DETAIL_LEVEL: JournalDetailLevel = 'farmer_quick';
+// A pre-dropped-Research install may still have this in localStorage; map it
+// to the closest surviving option instead of falling all the way back to the
+// default (Quick), which would silently downgrade a user who had chosen the
+// most detail available.
+const LEGACY_RESEARCH_DETAIL_LEVEL = 'research_observation';
+
+function isJournalDetailLevel(value: string | null): value is JournalDetailLevel {
+  return value != null && (JOURNAL_DETAIL_LEVELS as readonly string[]).includes(value);
+}
+
+function normalizeJournalDetailLevel(value: string | null): JournalDetailLevel {
+  if (value === LEGACY_RESEARCH_DETAIL_LEVEL) return 'full_record';
+  return isJournalDetailLevel(value) ? value : DEFAULT_JOURNAL_DETAIL_LEVEL;
+}
 
 export interface ModulePreferences {
   predictionAdvisory: boolean;
@@ -33,6 +59,7 @@ export interface DisplayPreferences {
   dashboardDensity: DashboardDensity;
   dashboardAutoRefresh: 'on' | 'off';
   defaultTimezone: string | null;
+  journalDetailLevel: JournalDetailLevel;
   modules: ModulePreferences;
 }
 
@@ -97,6 +124,8 @@ export function readDisplayPreferences(): DisplayPreferences {
   const dashboardDensity: DashboardDensity = storedDensity === 'compact' ? 'compact' : 'comfortable';
   const dashboardAutoRefresh = readStorage(DASHBOARD_AUTO_REFRESH_KEY) === 'off' ? 'off' : 'on';
   const storedTimezone = normalizeStoredString(readStorage(DEFAULT_TIMEZONE_KEY));
+  const storedDetailLevel = readStorage(JOURNAL_DETAIL_LEVEL_KEY);
+  const journalDetailLevel: JournalDetailLevel = normalizeJournalDetailLevel(storedDetailLevel);
 
   return {
     swtUnit,
@@ -104,6 +133,7 @@ export function readDisplayPreferences(): DisplayPreferences {
     dashboardDensity,
     dashboardAutoRefresh,
     defaultTimezone: storedTimezone,
+    journalDetailLevel,
     modules: {
       predictionAdvisory: readBooleanPreference(MODULE_KEYS.predictionAdvisory, DEFAULT_MODULES.predictionAdvisory),
       environment: readBooleanPreference(MODULE_KEYS.environment, DEFAULT_MODULES.environment),
@@ -125,6 +155,9 @@ export function writeDisplayPreferences(next: Partial<DisplayPreferences>): void
   }
   if (Object.prototype.hasOwnProperty.call(next, 'defaultTimezone')) {
     writeStorage(DEFAULT_TIMEZONE_KEY, normalizeStoredString(next.defaultTimezone));
+  }
+  if (isJournalDetailLevel(next.journalDetailLevel ?? null)) {
+    writeStorage(JOURNAL_DETAIL_LEVEL_KEY, next.journalDetailLevel as JournalDetailLevel);
   }
   if (next.modules) {
     writeStorage(MODULE_KEYS.predictionAdvisory, String(next.modules.predictionAdvisory));

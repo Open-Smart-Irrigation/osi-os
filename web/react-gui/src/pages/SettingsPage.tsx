@@ -16,6 +16,7 @@ import type {
 import {
   applyThemePreference,
   type DisplayPreferences,
+  type JournalDetailLevel,
   type ModulePreferences,
   type ThemePreference,
   useDisplayPreferences,
@@ -264,6 +265,20 @@ export function SettingsPage() {
     ],
     [t],
   );
+  // Product change (owner decision): the detail-level setting only offers
+  // Quick and Full. "Research" stays reachable as a per-layout floor in the
+  // capture flow (see effectiveTemplateCode), just not as a user-selectable
+  // preference here. journalDetailResearch stays in the locale files
+  // deliberately (see displayPreferences.ts's legacy-mapping comment) so a
+  // pre-existing translation isn't churned for a key that may still be
+  // referenced elsewhere.
+  const journalDetailOptions = useMemo<Array<Option<JournalDetailLevel>>>(
+    () => [
+      { value: 'farmer_quick', label: t('journalDetailQuick') },
+      { value: 'full_record', label: t('journalDetailFull') },
+    ],
+    [t],
+  );
 
   const updateTheme = (theme: ThemePreference) => {
     writeDisplayPreferences({ theme });
@@ -271,6 +286,8 @@ export function SettingsPage() {
   };
 
   const updateSwtUnit = (swtUnit: SwtUnit) => writeDisplayPreferences({ swtUnit });
+  const updateJournalDetailLevel = (journalDetailLevel: JournalDetailLevel) =>
+    writeDisplayPreferences({ journalDetailLevel });
   const updateRefresh = (dashboardAutoRefresh: AutoRefreshPreference) => writeDisplayPreferences({ dashboardAutoRefresh });
   const writeModules = (modules: ModulePreferences) => writeDisplayPreferences({ modules });
   const updateModule = (key: keyof ModulePreferences, enabled: boolean) => {
@@ -560,6 +577,18 @@ export function SettingsPage() {
             options={refreshOptions}
             onChange={updateRefresh}
           />
+        </Section>
+
+        <Section title={t('journalTitle')}>
+          <SegmentedControl
+            label={t('journalDetailLevel')}
+            value={preferences.journalDetailLevel}
+            options={journalDetailOptions}
+            onChange={updateJournalDetailLevel}
+          />
+          <p className="mt-3 max-w-prose text-sm text-[var(--text-secondary)]">
+            {t('journalDetailLevelHelp')}
+          </p>
         </Section>
 
         <Section title={t('userRequestTitle')}>

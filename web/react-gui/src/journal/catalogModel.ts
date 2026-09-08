@@ -1,0 +1,1071 @@
+import type { JournalCatalog, JournalDefinitionRow, JournalVocabRow } from '../types/journal';
+import type {
+  ActivityLeafSelection,
+  CatalogModelResult,
+  JournalCaptureCatalogModel,
+  JournalConditionalGroup,
+  JournalDependencyCondition,
+  JournalFieldInput,
+  JournalFieldState,
+  JournalLayoutDefinition,
+  JournalOptionDependency,
+  JournalRequirement,
+  JournalSelections,
+  JournalTemplateDefinition,
+  JournalTemplateSection,
+  NumericConversionResult,
+} from '../types/journalCapture';
+
+// The choice fields a host renders as a read-only "chip + change" instead of an
+// open <select> once they hold a value: the detailed operation is chosen in the
+// activity picker (capture flow) or carried from the source entry (correction /
+// copy), so re-showing a 9-option select invites an accidental change that also
+// invalidates the operation-scoped device. Shared by the capture flow and the
+// desktop correction/copy forms so all three surfaces behave identically.
+export const OPERATION_CONFIRMED_CHOICE_CODES: readonly string[] = ['attr.agroscope.operation'];
+
+const TOP_LEVEL_FIELDS = new Set([
+  'entry_uuid', 'owner_user_uuid', 'user_id', 'author_principal_uuid', 'author_label',
+  'plot_uuid', 'zone_id', 'zone_uuid', 'device_eui', 'season_uuid', 'season_crop',
+  'season_variety', 'campaign_uuid', 'protocol_code', 'protocol_version',
+  'observation_unit_code', 'pass_uuid', 'batch_uuid', 'activity_code', 'template_code',
+  'template_version', 'layout_code', 'layout_version', 'catalog_version', 'occurred_start',
+  'occurred_start_local', 'occurred_end', 'occurred_end_local', 'occurred_timezone',
+  'occurred_utc_offset_minutes', 'recorded_at', 'origin', 'status', 'note', 'context',
+  'context_json', 'voided_at', 'voided_by_principal_uuid', 'void_reason', 'sync_version',
+  'base_sync_version', 'gateway_device_eui', 'created_at', 'updated_at', 'deleted_at',
+  'values',
+]);
+
+interface UnitFacts {
+  quantityKind: string;
+  basis: string;
+  dimension: string;
+  canonicalUnitCode: string;
+  scale: number;
+  offset: number;
+}
+
+interface DefinitionDomain {
+  vocabByCode: Map<string, JournalVocabRow>;
+  templateCodes: Set<string>;
+  layoutCodes: Set<string>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isActive(row: JournalVocabRow): boolean {
+  return row.active === 1 && row.deleted_at == null;
+}
+
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return null;
+  return [...value];
+}
+
+function fieldCode(field: JournalFieldInput): string | null {
+  if (typeof field === 'string') return field;
+  const code = field.code || field.attribute_code || field.field;
+  return typeof code === 'string' && code.length > 0 ? code : null;
+}
+
+function knownField(vocabByCode: Map<string, JournalVocabRow>, code: string): boolean {
+  if (TOP_LEVEL_FIELDS.has(code)) return true;
+  return vocabByCode.get(code)?.kind === 'attribute';
+}
+
+function isCalendarDate(value: unknown): boolean {
+  const match = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
+}
+
+function predicateValueMatchesDomain(
+  field: string,
+  value: unknown,
+  domain: DefinitionDomain,
+): boolean {
+  if (field === 'activity_code') return typeof value === 'string' &&
+    domain.vocabByCode.get(value)?.kind === 'activity';
+  if (field === 'template_code') return typeof value === 'string' &&
+    domain.templateCodes.has(value);
+  if (field === 'layout_code') return typeof value === 'string' && domain.layoutCodes.has(value);
+  const attribute = domain.vocabByCode.get(field);
+  if (!attribute || attribute.kind !== 'attribute') return true;
+  if (attribute.value_type === 'choice') {
+    if (typeof value !== 'string') return false;
+    const choice = domain.vocabByCode.get(value);
+    return choice?.kind === 'choice' && choice.parent_code === attribute.code;
+  }
+  if (attribute.value_type === 'boolean') return typeof value === 'boolean';
+  if (attribute.value_type === 'number') return typeof value === 'number' && Number.isFinite(value);
+  if (attribute.value_type === 'date') return isCalendarDate(value);
+  if (attribute.value_type === 'text') return typeof value === 'string';
+  return false;
+}
+
+function validPredicate(
+  value: unknown,
+  domain: DefinitionDomain,
+): boolean {
+  if (!isRecord(value) || typeof value.field !== 'string' ||
+      (value.op !== 'eq' && value.op !== 'in') || !('value' in value) ||
+      !knownField(domain.vocabByCode, value.field)) return false;
+  const field = value.field;
+  if (value.op === 'in') {
+    return Array.isArray(value.value) &&
+      value.value.every((entry) => predicateValueMatchesDomain(field, entry, domain));
+  }
+  return predicateValueMatchesDomain(field, value.value, domain);
+}
+
+function validFields(
+  fields: unknown,
+  domain: DefinitionDomain,
+): fields is JournalFieldInput[] {
+  if (!Array.isArray(fields)) return false;
+  return fields.every((field) => {
+    if (typeof field === 'string') return knownField(domain.vocabByCode, field);
+    if (!isRecord(field)) return false;
+    const code = fieldCode(field);
+    if (!code || !knownField(domain.vocabByCode, code)) return false;
+    if (field.required != null && typeof field.required !== 'boolean') return false;
+    if (field.required_if != null && !validPredicate(field.required_if, domain)) return false;
+    if (field.visible_if != null && !validPredicate(field.visible_if, domain)) return false;
+    return true;
+  });
+}
+
+function parseRequirement(
+  value: unknown,
+  vocabByCode: Map<string, JournalVocabRow>,
+): JournalRequirement | null {
+  if (value == null) return { required: [], optional: [], required_any: [] };
+  if (!isRecord(value)) return null;
+  const required = value.required == null ? [] : stringArray(value.required);
+  const optional = value.optional == null ? [] : stringArray(value.optional);
+  if (!required || !optional || required.some((code) => !knownField(vocabByCode, code)) ||
+      optional.some((code) => !knownField(vocabByCode, code))) return null;
+  let requiredAny: string[][] = [];
+  if (value.required_any != null) {
+    if (!Array.isArray(value.required_any)) return null;
+    requiredAny = [];
+    for (const family of value.required_any) {
+      const parsed = stringArray(family);
+      if (!parsed || parsed.length === 0 || parsed.some((code) => !knownField(vocabByCode, code))) {
+        return null;
+      }
+      requiredAny.push(parsed);
+    }
+  }
+  return { required, optional, required_any: requiredAny };
+}
+
+function parseSections(
+  value: unknown,
+  domain: DefinitionDomain,
+): JournalTemplateSection[] | null {
+  if (value == null) return [];
+  if (!Array.isArray(value)) return null;
+  const sections: JournalTemplateSection[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw.code !== 'string') return null;
+    const includeScope = raw.include_scope;
+    if (includeScope != null && includeScope !== 'core' && includeScope !== 'custom') return null;
+    const scopedByActivity = raw.scoped_by_activity;
+    if (scopedByActivity != null && typeof scopedByActivity !== 'boolean') return null;
+    const rawFields = raw.fields == null ? [] : raw.fields;
+    if (!validFields(rawFields, domain)) return null;
+    const fields = [...rawFields];
+    if (includeScope) {
+      const included = [...domain.vocabByCode.values()]
+        .filter((row) => row.kind === 'attribute' && row.scope === includeScope && isActive(row))
+        .sort((left, right) => left.sort_order - right.sort_order || left.code.localeCompare(right.code));
+      for (const row of included) {
+        if (!fields.some((field) => fieldCode(field) === row.code)) fields.push(row.code);
+      }
+    }
+    sections.push({
+      code: raw.code,
+      fields,
+      ...(includeScope ? { include_scope: includeScope } : {}),
+      ...(scopedByActivity ? { scoped_by_activity: true } : {}),
+    });
+  }
+  return sections;
+}
+
+// Slice E (full_record@5, R5): mirrors parseQuickFields' shape (an
+// activity_code -> field-code map validated for completeness against every
+// known activity), but scoped to the one `scoped_by_activity` section this
+// template declares — every referenced field must not just be a *known*
+// field but a member of that section's own declared field superset (the
+// guard generate-journal-catalog.js's validateOperationFieldsByActivity
+// enforces server-side; this is its GUI-side twin so a malformed/foreign
+// catalog payload can never smuggle an out-of-section field into visibility).
+// Returns `undefined` when no section is scoped_by_activity and no map is
+// declared (every template/version before full_record@5); `null` when the
+// two are out of sync or the map itself is malformed — the caller must treat
+// `null` as "reject this definition".
+function parseOperationFieldsByActivity(
+  value: unknown,
+  domain: DefinitionDomain,
+  sections: JournalTemplateSection[],
+): Record<string, string[]> | null | undefined {
+  const scopedSections = sections.filter((section) => section.scoped_by_activity);
+  if (value == null) return scopedSections.length === 0 ? undefined : null;
+  if (scopedSections.length !== 1 || !isRecord(value)) return null;
+  const allowedFields = new Set(
+    scopedSections[0].fields
+      .map((field) => fieldCode(field))
+      .filter((code): code is string => code != null),
+  );
+  const activityCodes = [...domain.vocabByCode.values()].filter((row) => row.kind === 'activity');
+  const result: Record<string, string[]> = {};
+  for (const [activityCode, rawFields] of Object.entries(value)) {
+    if (domain.vocabByCode.get(activityCode)?.kind !== 'activity') return null;
+    const fields = stringArray(rawFields);
+    if (!fields || fields.length === 0 ||
+        fields.some((code) => !knownField(domain.vocabByCode, code) || !allowedFields.has(code))) {
+      return null;
+    }
+    result[activityCode] = fields;
+  }
+  if (activityCodes.some((activity) => !(activity.code in result))) return null;
+  return result;
+}
+
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §0.6): the GUI-side twin of parseOperationFieldsByActivity above, but
+// PARTIAL by design — unlike that map (and quick_fields), this one must NOT
+// require covering every operation choice in vocab. A future OSI-terms
+// operation addition must never retroactively null-reject this pinned
+// template row; the generator (generate-journal-catalog.js's
+// validateOperationFieldsByOperation) is the one place that asserts exact
+// coverage of the 25 CURRENT operations, at generation time. Returns
+// `undefined` when the definition simply doesn't declare it (every
+// template/version before full_record@10); `null` when present but
+// malformed (an unknown key, an out-of-section field, or no
+// scoped_by_activity section to scope at all) — the caller must treat `null`
+// as "reject this definition".
+function parseOperationFieldsByOperation(
+  value: unknown,
+  domain: DefinitionDomain,
+  sections: JournalTemplateSection[],
+): Record<string, string[]> | null | undefined {
+  if (value == null) return undefined;
+  const scopedSections = sections.filter((section) => section.scoped_by_activity);
+  if (scopedSections.length !== 1 || !isRecord(value)) return null;
+  const allowedFields = new Set(
+    scopedSections[0].fields
+      .map((field) => fieldCode(field))
+      .filter((code): code is string => code != null),
+  );
+  const result: Record<string, string[]> = {};
+  for (const [opCode, rawFields] of Object.entries(value)) {
+    const choice = domain.vocabByCode.get(opCode);
+    if (choice?.kind !== 'choice' || choice.parent_code !== 'attr.agroscope.operation') return null;
+    const fields = stringArray(rawFields);
+    if (!fields || fields.length === 0 ||
+        fields.some((code) => !knownField(domain.vocabByCode, code) || !allowedFields.has(code))) {
+      return null;
+    }
+    result[opCode] = fields;
+  }
+  return result;
+}
+
+// Operation-level field/requirement/product scoping plan (full_record@10):
+// the operation-keyed twin of activity_requirements — same partial-by-design
+// rule as parseOperationFieldsByOperation above (no completeness check
+// against vocab). Returns `undefined` when absent, `null` when malformed.
+function parseOperationRequirements(
+  value: unknown,
+  vocabByCode: Map<string, JournalVocabRow>,
+): Record<string, JournalRequirement> | null | undefined {
+  if (value == null) return undefined;
+  if (!isRecord(value)) return null;
+  const result: Record<string, JournalRequirement> = {};
+  for (const [opCode, raw] of Object.entries(value)) {
+    const choice = vocabByCode.get(opCode);
+    if (choice?.kind !== 'choice' || choice.parent_code !== 'attr.agroscope.operation') return null;
+    const parsed = parseRequirement(raw, vocabByCode);
+    if (!parsed) return null;
+    result[opCode] = parsed;
+  }
+  return result;
+}
+
+const JOURNAL_PRODUCT_KINDS = new Set(['mineral', 'organic_amendment', 'plant_protection', 'other']);
+
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §2): operation-CHOICE-CODE -> allowed journal_products.kind[], a
+// GUI-only product-picker filter (the edge never enforces it). Partial by
+// design, same as the two parsers above — most operations carry no product
+// field at all and simply have no key here. Kinds must be one of the four
+// frozen journal_products.kind CHECK values; anything else is malformed.
+function parseOperationProductKinds(
+  value: unknown,
+  vocabByCode: Map<string, JournalVocabRow>,
+): Record<string, string[]> | null | undefined {
+  if (value == null) return undefined;
+  if (!isRecord(value)) return null;
+  const result: Record<string, string[]> = {};
+  for (const [opCode, rawKinds] of Object.entries(value)) {
+    const choice = vocabByCode.get(opCode);
+    if (choice?.kind !== 'choice' || choice.parent_code !== 'attr.agroscope.operation') return null;
+    const kinds = stringArray(rawKinds);
+    if (!kinds || kinds.length === 0 || kinds.some((kind) => !JOURNAL_PRODUCT_KINDS.has(kind))) return null;
+    result[opCode] = kinds;
+  }
+  return result;
+}
+
+// The set of field codes a template actually shows the user: its top-level
+// `fields` plus every (already-expanded) section's `fields`. Used to guard
+// `carry_forward` below — see that call site for why.
+function visibleFieldCodes(
+  fields: JournalFieldInput[],
+  sections: JournalTemplateSection[],
+): Set<string> {
+  const codes = new Set<string>();
+  for (const field of fields) {
+    const code = fieldCode(field);
+    if (code) codes.add(code);
+  }
+  for (const section of sections) {
+    for (const field of section.fields) {
+      const code = fieldCode(field);
+      if (code) codes.add(code);
+    }
+  }
+  return codes;
+}
+
+// Slice BC (farmer_quick@3): `quick_fields` is an activity_code -> field-code
+// map. Returns `undefined` when the definition simply doesn't declare it
+// (every template/version before v3), and `null` when it is present but
+// malformed — the caller must treat `null` as "reject this definition",
+// matching every other parse* helper in this file.
+function parseQuickFields(
+  value: unknown,
+  domain: DefinitionDomain,
+): Record<string, string[]> | null | undefined {
+  if (value == null) return undefined;
+  if (!isRecord(value)) return null;
+  const result: Record<string, string[]> = {};
+  for (const [activityCode, rawFields] of Object.entries(value)) {
+    if (domain.vocabByCode.get(activityCode)?.kind !== 'activity') return null;
+    const fields = stringArray(rawFields);
+    if (!fields || fields.length === 0 || fields.some((code) => !knownField(domain.vocabByCode, code))) {
+      return null;
+    }
+    result[activityCode] = fields;
+  }
+  return result;
+}
+
+function parseTemplate(
+  row: JournalDefinitionRow,
+  domain: DefinitionDomain,
+): JournalTemplateDefinition | null {
+  if (row.catalog_errors.includes('definition_json') || !isRecord(row.definition)) return null;
+  const definition = row.definition;
+  const fields = definition.fields == null ? [] : definition.fields;
+  if (!validFields(fields, domain)) return null;
+  const sections = parseSections(definition.sections, domain);
+  if (!sections) return null;
+  const rootRequirement = parseRequirement(definition, domain.vocabByCode);
+  const requirements = parseRequirement(definition.requirements, domain.vocabByCode);
+  if (!rootRequirement || !requirements) return null;
+  const carryForward = definition.carry_forward == null ? [] : stringArray(definition.carry_forward);
+  if (!carryForward || carryForward.some((code) => !knownField(domain.vocabByCode, code))) return null;
+  // A carry_forward code must be part of this template's own visible field
+  // set (top-level `fields` or a section's `fields`) — otherwise a value is
+  // silently carried into the entry with no field for the user to see or
+  // correct it. This was the P4 bug in farmer_quick@1 (Task 27): shipped
+  // alone, this guard would reject that live definition, which is exactly
+  // why the visibility fix (farmer_quick@2) must ship atomically with it.
+  const visible = visibleFieldCodes(fields, sections);
+  if (carryForward.some((code) => !visible.has(code))) return null;
+  const maxPrimaryFields = definition.max_primary_fields;
+  if (maxPrimaryFields != null &&
+      (!Number.isInteger(maxPrimaryFields) || (maxPrimaryFields as number) <= 0)) return null;
+  const requireExplicitChoices = definition.require_explicit_choices ?? false;
+  const showStandardMappings = definition.show_standard_mappings ?? false;
+  if (typeof requireExplicitChoices !== 'boolean' || typeof showStandardMappings !== 'boolean') {
+    return null;
+  }
+  const combinedRequirements: JournalRequirement = {
+    required: [...rootRequirement.required, ...requirements.required],
+    optional: [...rootRequirement.optional, ...requirements.optional],
+    required_any: [...rootRequirement.required_any, ...requirements.required_any],
+  };
+  const activityRequirements: Record<string, JournalRequirement> = {};
+  if (definition.activity_requirements != null) {
+    if (!isRecord(definition.activity_requirements)) return null;
+    for (const [activityCode, raw] of Object.entries(definition.activity_requirements)) {
+      const activity = domain.vocabByCode.get(activityCode);
+      const parsed = parseRequirement(raw, domain.vocabByCode);
+      if (!activity || activity.kind !== 'activity' || !parsed) return null;
+      activityRequirements[activityCode] = parsed;
+    }
+  }
+  const conditionalGroups: JournalConditionalGroup[] = [];
+  if (definition.conditional_groups != null) {
+    if (!Array.isArray(definition.conditional_groups)) return null;
+    for (const raw of definition.conditional_groups) {
+      if (!isRecord(raw) || typeof raw.code !== 'string') return null;
+      const activities = stringArray(raw.activity_codes);
+      const requirement = parseRequirement(raw, domain.vocabByCode);
+      if (!activities || !requirement ||
+          activities.some((code) => domain.vocabByCode.get(code)?.kind !== 'activity')) {
+        return null;
+      }
+      conditionalGroups.push({ code: raw.code, activity_codes: activities, ...requirement });
+    }
+  }
+  const quickFields = parseQuickFields(definition.quick_fields, domain);
+  if (quickFields === null) return null;
+  const operationFieldsByActivity = parseOperationFieldsByActivity(
+    definition.operation_fields_by_activity,
+    domain,
+    sections,
+  );
+  if (operationFieldsByActivity === null) return null;
+  const operationFieldsByOperation = parseOperationFieldsByOperation(
+    definition.operation_fields_by_operation,
+    domain,
+    sections,
+  );
+  if (operationFieldsByOperation === null) return null;
+  const operationRequirements = parseOperationRequirements(
+    definition.operation_requirements,
+    domain.vocabByCode,
+  );
+  if (operationRequirements === null) return null;
+  const operationProductKinds = parseOperationProductKinds(
+    definition.operation_product_kinds,
+    domain.vocabByCode,
+  );
+  if (operationProductKinds === null) return null;
+  return {
+    code: row.code,
+    version: row.version,
+    fields: [...fields],
+    sections,
+    carry_forward: carryForward,
+    ...(typeof maxPrimaryFields === 'number' ? { max_primary_fields: maxPrimaryFields } : {}),
+    ...(quickFields ? { quick_fields: quickFields } : {}),
+    ...(operationFieldsByActivity ? { operation_fields_by_activity: operationFieldsByActivity } : {}),
+    ...(operationFieldsByOperation ? { operation_fields_by_operation: operationFieldsByOperation } : {}),
+    ...(operationRequirements ? { operation_requirements: operationRequirements } : {}),
+    ...(operationProductKinds ? { operation_product_kinds: operationProductKinds } : {}),
+    require_explicit_choices: requireExplicitChoices,
+    show_standard_mappings: showStandardMappings,
+    activity_requirements: activityRequirements,
+    conditional_groups: conditionalGroups,
+    requirements: combinedRequirements,
+  };
+}
+
+function parseConditionalFields(
+  value: unknown,
+  vocabByCode: Map<string, JournalVocabRow>,
+): Record<string, string[]> | null {
+  if (value == null) return {};
+  if (!isRecord(value)) return null;
+  const result: Record<string, string[]> = {};
+  for (const [condition, rawFields] of Object.entries(value)) {
+    const fields = stringArray(rawFields);
+    if (!fields || fields.some((code) => !knownField(vocabByCode, code))) return null;
+    result[condition] = fields;
+  }
+  return result;
+}
+
+function parseCondition(value: unknown): JournalDependencyCondition | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'attribute_code' && key !== 'equals') ||
+      typeof value.attribute_code !== 'string' || value.attribute_code.length === 0 ||
+      typeof value.equals !== 'string' || value.equals.length === 0) return null;
+  return { attribute_code: value.attribute_code, equals: value.equals };
+}
+
+function parseDependencies(value: unknown): JournalOptionDependency[] | null {
+  if (!Array.isArray(value)) return null;
+  const dependencies: JournalOptionDependency[] = [];
+  const duplicateRules = new Map<string, { kind: 'choices' | 'units'; values: string[] }>();
+  for (const raw of value) {
+    if (!isRecord(raw) || Object.keys(raw).some((key) =>
+      key !== 'when' && key !== 'restrict' && key !== 'source_category')) return null;
+    if (raw.source_category != null &&
+        (typeof raw.source_category !== 'string' || raw.source_category.trim() === '')) return null;
+    const when = parseCondition(raw.when);
+    if (!when || !isRecord(raw.restrict) || typeof raw.restrict.attribute_code !== 'string') {
+      return null;
+    }
+    const restrictKeys = Object.keys(raw.restrict);
+    if (restrictKeys.some((key) => key !== 'attribute_code' && key !== 'choices' && key !== 'units')) {
+      return null;
+    }
+    const choices = stringArray(raw.restrict.choices);
+    const units = stringArray(raw.restrict.units);
+    if ((choices == null) === (units == null)) return null;
+    const values = choices ?? units;
+    if (!values || values.length === 0 || new Set(values).size !== values.length) return null;
+    const kind = choices ? 'choices' : 'units';
+    const duplicateKey = [
+      when.attribute_code,
+      when.equals,
+      raw.restrict.attribute_code,
+    ].join('\u0000');
+    const previous = duplicateRules.get(duplicateKey);
+    if (previous && (previous.kind !== kind || previous.values.length !== values.length ||
+        previous.values.some((entry) => !values.includes(entry)))) return null;
+    duplicateRules.set(duplicateKey, { kind, values });
+    dependencies.push({
+      when,
+      restrict: choices
+        ? { attribute_code: raw.restrict.attribute_code, choices }
+        : { attribute_code: raw.restrict.attribute_code, units: units ?? [] },
+      ...(typeof raw.source_category === 'string' ? { source_category: raw.source_category } : {}),
+    });
+  }
+  return dependencies;
+}
+
+function hasChoiceDependencyCycle(dependencies: JournalOptionDependency[]): boolean {
+  const edges = new Map<string, Set<string>>();
+  for (const dependency of dependencies) {
+    if (!('choices' in dependency.restrict)) continue;
+    const targets = edges.get(dependency.when.attribute_code) ?? new Set<string>();
+    targets.add(dependency.restrict.attribute_code);
+    edges.set(dependency.when.attribute_code, targets);
+  }
+  const state = new Map<string, number>();
+  const visit = (code: string): boolean => {
+    if (state.get(code) === 1) return true;
+    if (state.get(code) === 2) return false;
+    state.set(code, 1);
+    for (const target of edges.get(code) ?? []) if (visit(target)) return true;
+    state.set(code, 2);
+    return false;
+  };
+  return [...edges.keys()].some(visit);
+}
+
+function unitFacts(row: JournalVocabRow): UnitFacts | null {
+  if (row.kind !== 'unit' || !row.quantity_kind || !row.basis || !isRecord(row.constraints) ||
+      row.catalog_errors.includes('constraints_json') ||
+      typeof row.constraints.dimension !== 'string' || !row.constraints.dimension ||
+      !isRecord(row.constraints.to_canonical)) {
+    return null;
+  }
+  const conversion = row.constraints.to_canonical;
+  if (typeof conversion.unit_code !== 'string' || !conversion.unit_code ||
+      typeof conversion.scale !== 'number' ||
+      !Number.isFinite(conversion.scale) || conversion.scale <= 0 ||
+      typeof conversion.offset !== 'number' || !Number.isFinite(conversion.offset)) return null;
+  return {
+    quantityKind: row.quantity_kind,
+    basis: row.basis,
+    dimension: row.constraints.dimension,
+    canonicalUnitCode: conversion.unit_code,
+    scale: conversion.scale,
+    offset: conversion.offset,
+  };
+}
+
+function numericAttributeValid(attribute: JournalVocabRow): boolean {
+  if (attribute.kind !== 'attribute' || attribute.value_type !== 'number' ||
+      !attribute.quantity_kind || !attribute.basis || !isActive(attribute) ||
+      !isRecord(attribute.constraints) || attribute.catalog_errors.includes('constraints_json')) {
+    return false;
+  }
+  for (const key of ['min', 'max'] as const) {
+    if (Object.prototype.hasOwnProperty.call(attribute.constraints, key)) {
+      const value = attribute.constraints[key];
+      if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+    }
+  }
+  if (typeof attribute.constraints.min === 'number' &&
+      typeof attribute.constraints.max === 'number' &&
+      attribute.constraints.min > attribute.constraints.max) return false;
+  if (Object.prototype.hasOwnProperty.call(attribute.constraints, 'step')) {
+    const step = attribute.constraints.step;
+    if (typeof step !== 'number' || !Number.isFinite(step) || step <= 0) return false;
+  }
+  for (const key of ['requires_explicit_unit', 'allow_default_unit'] as const) {
+    if (Object.prototype.hasOwnProperty.call(attribute.constraints, key) &&
+        typeof attribute.constraints[key] !== 'boolean') return false;
+  }
+  if (Object.prototype.hasOwnProperty.call(attribute.constraints, 'semantic_discriminator') &&
+      attribute.constraints.semantic_discriminator !== 'unit_code') return false;
+  if (attribute.default_unit_code == null) {
+    return attribute.constraints.requires_explicit_unit === true &&
+      attribute.constraints.allow_default_unit === false &&
+      attribute.constraints.semantic_discriminator === 'unit_code';
+  }
+  return attribute.default_unit_code.length > 0;
+}
+
+function validUnitForAttribute(
+  model: JournalCaptureCatalogModel,
+  attribute: JournalVocabRow,
+  unitCode: string,
+): { facts: UnitFacts; canonical: JournalVocabRow } | { error: string } {
+  const unit = model.vocabByCode.get(unitCode);
+  if (!unit || unit.kind !== 'unit') return { error: 'unknown_unit' };
+  const facts = unitFacts(unit);
+  if (!facts) return { error: 'invalid_catalog' };
+  if (!isActive(unit)) return { error: 'inactive_unit' };
+  if (facts.basis !== attribute.basis) return { error: 'cross_basis_forbidden' };
+  if (facts.quantityKind !== attribute.quantity_kind) return { error: 'unit_incompatible' };
+  const canonical = model.vocabByCode.get(facts.canonicalUnitCode);
+  const canonicalFacts = canonical && unitFacts(canonical);
+  if (!canonical || !canonicalFacts || !isActive(canonical) || canonicalFacts.scale !== 1 ||
+      canonicalFacts.offset !== 0 || canonicalFacts.canonicalUnitCode !== canonical.code ||
+      canonicalFacts.quantityKind !== facts.quantityKind || canonicalFacts.basis !== facts.basis ||
+      canonicalFacts.dimension !== facts.dimension ||
+      (attribute.default_unit_code != null && attribute.default_unit_code !== canonical.code)) {
+    return { error: 'invalid_catalog' };
+  }
+  return { facts, canonical };
+}
+
+function validDependencyReferences(
+  model: JournalCaptureCatalogModel,
+  layout: JournalLayoutDefinition,
+): boolean {
+  if (hasChoiceDependencyCycle(layout.option_dependencies)) return false;
+  const targetKinds = new Map<string, 'choices' | 'units'>();
+  for (const dependency of layout.option_dependencies) {
+    const source = dependency.when.attribute_code;
+    if (source === 'activity_code') {
+      if (model.vocabByCode.get(dependency.when.equals)?.kind !== 'activity') return false;
+    } else {
+      const sourceAttribute = model.vocabByCode.get(source);
+      const sourceChoice = model.vocabByCode.get(dependency.when.equals);
+      if (!sourceAttribute || sourceAttribute.kind !== 'attribute' || sourceAttribute.value_type !== 'choice' ||
+          !sourceChoice || sourceChoice.kind !== 'choice' || sourceChoice.parent_code !== source) return false;
+    }
+    const target = model.vocabByCode.get(dependency.restrict.attribute_code);
+    if (!target || target.kind !== 'attribute') return false;
+    const kind = 'choices' in dependency.restrict ? 'choices' : 'units';
+    if (targetKinds.has(target.code) && targetKinds.get(target.code) !== kind) return false;
+    targetKinds.set(target.code, kind);
+    if (kind === 'choices') {
+      if (target.value_type !== 'choice') return false;
+      if (!(dependency.restrict as { choices: string[] }).choices.every((code) => {
+        const choice = model.vocabByCode.get(code);
+        return choice?.kind === 'choice' && choice.parent_code === target.code && isActive(choice);
+      })) return false;
+    } else {
+      if (!numericAttributeValid(target)) return false;
+      if (!(dependency.restrict as { units: string[] }).units.every((code) =>
+        !('error' in validUnitForAttribute(model, target, code)))) return false;
+    }
+  }
+  return true;
+}
+
+// Detailed activity vocabulary plan (layout v9, 2026-07-22): `picker_targets`
+// declares which choice-dependency targets the activity picker should stop
+// expanding through (deriveActivityLeaves) — e.g. `['attr.agroscope.operation']`
+// stops at the operation, never descending to the device. `undefined` means
+// "not declared" (every layout before open_field@9) — deriveActivityLeaves
+// treats that as "expand every choice target", today's behaviour, unchanged.
+// `null` means malformed — reject_as_null on a non-string-array value, or on
+// any entry that is not actually a choice-target attribute of this SAME
+// layout's own dependencies (mirrors validDependencyReferences' rigor:
+// picker_targets can only narrow a real target, never invent one).
+function parsePickerTargets(
+  value: unknown,
+  dependencies: JournalOptionDependency[],
+): string[] | null | undefined {
+  if (value == null) return undefined;
+  const targets = stringArray(value);
+  if (!targets) return null;
+  const choiceTargets = new Set(
+    dependencies
+      .filter((dependency) => 'choices' in dependency.restrict)
+      .map((dependency) => dependency.restrict.attribute_code),
+  );
+  if (targets.length === 0 || targets.some((code) => !choiceTargets.has(code))) return null;
+  return targets;
+}
+
+function parseLayout(
+  row: JournalDefinitionRow,
+  domain: DefinitionDomain,
+  templates: Map<string, JournalTemplateDefinition>,
+): JournalLayoutDefinition | null {
+  if (row.catalog_errors.includes('definition_json') || !isRecord(row.definition)) return null;
+  const definition = row.definition;
+  const activityCodes = stringArray(definition.activity_codes);
+  const supportedTemplates = stringArray(definition.supported_templates);
+  const dependencies = parseDependencies(definition.option_dependencies);
+  if (!activityCodes || !supportedTemplates || !dependencies ||
+      activityCodes.some((code) => domain.vocabByCode.get(code)?.kind !== 'activity') ||
+      supportedTemplates.some((code) => !templates.has(code))) return null;
+  const pickerTargets = parsePickerTargets(definition.picker_targets, dependencies);
+  if (pickerTargets === null) return null;
+  const fields = definition.fields == null ? [] : definition.fields;
+  const minimumFields = definition.minimum_fields == null ? [] : stringArray(definition.minimum_fields);
+  const denominatorContract = definition.denominator_contract == null
+    ? []
+    : stringArray(definition.denominator_contract);
+  const conditionalFields = parseConditionalFields(
+    definition.conditional_fields,
+    domain.vocabByCode,
+  );
+  // Slice BC (layout v3): both lists are additive metadata on top of the
+  // unchanged minimum_fields/conditional_fields above — absent on v1/v2
+  // layout rows, so `null` here (not `[]`) means "malformed", matching the
+  // convention already used for minimum_fields.
+  const staticContextFields = definition.static_context_fields == null
+    ? []
+    : stringArray(definition.static_context_fields);
+  const readingFields = definition.reading_fields == null
+    ? []
+    : stringArray(definition.reading_fields);
+  if (!validFields(fields, domain) || !minimumFields || !denominatorContract ||
+      minimumFields.some((code) => !knownField(domain.vocabByCode, code)) ||
+      !conditionalFields || !staticContextFields || !readingFields ||
+      staticContextFields.some((code) => !knownField(domain.vocabByCode, code)) ||
+      readingFields.some((code) => !knownField(domain.vocabByCode, code))) return null;
+  return {
+    code: row.code,
+    version: row.version,
+    activity_codes: activityCodes,
+    supported_templates: supportedTemplates,
+    fields: [...fields],
+    minimum_fields: minimumFields,
+    conditional_fields: conditionalFields,
+    denominator_contract: denominatorContract,
+    static_context_fields: staticContextFields,
+    reading_fields: readingFields,
+    option_dependencies: dependencies,
+    ...(pickerTargets ? { picker_targets: pickerTargets } : {}),
+  };
+}
+
+export function catalogLabel(
+  row: Pick<JournalVocabRow | JournalDefinitionRow, 'code' | 'labels'>,
+  locale: string,
+): string {
+  return row.labels?.[locale] ?? row.labels?.en ?? row.code;
+}
+
+// Looks up any vocab code (activity, attribute, unit, choice — vocabByCode is
+// keyed uniformly across kinds) and returns its catalog label, falling back
+// to the raw code only when the catalog has nothing for it (no model, or no
+// matching row). Single shared home for the `vocabLabelOrCode` helper that
+// DetailPanel.tsx and JournalTimeline.tsx each used to declare locally (see
+// their own history) — both read the exact same catalogByCode/catalogLabel
+// primitives, so duplicating the three-line lookup added no isolation, only
+// drift risk. EntryTable.tsx and JournalEntryRow.tsx reuse this same export
+// rather than the incomplete client-side `journal.json` `activity.*` map,
+// which only ever covered 6 of the 16 shipped activity codes.
+export function vocabLabelOrCode(
+  code: string,
+  model: Pick<JournalCaptureCatalogModel, 'vocabByCode'> | null,
+  locale: string,
+): string {
+  const row = model?.vocabByCode.get(code);
+  return row ? catalogLabel(row, locale) : code;
+}
+
+export function activeDefinition(
+  rows: JournalDefinitionRow[],
+  code: string,
+): JournalDefinitionRow | undefined {
+  return rows
+    .filter((row) => row.code === code && row.active === 1)
+    .sort((left, right) => right.version - left.version)[0];
+}
+
+export function buildCatalogModel(catalog: JournalCatalog): CatalogModelResult {
+  const errors: string[] = [];
+  const vocabByCode = new Map<string, JournalVocabRow>();
+  for (const row of catalog.vocab) {
+    if (vocabByCode.has(row.code)) errors.push(`duplicate vocab code: ${row.code}`);
+    vocabByCode.set(row.code, row);
+  }
+  const templateCodes = new Set(
+    catalog.templates.filter((row) => row.active === 1).map((row) => row.code),
+  );
+  const layoutCodes = new Set(
+    catalog.layouts.filter((row) => row.active === 1).map((row) => row.code),
+  );
+  const domain = { vocabByCode, templateCodes, layoutCodes };
+  const templates = new Map<string, JournalTemplateDefinition>();
+  for (const code of [...new Set(catalog.templates.map((row) => row.code))]) {
+    const row = activeDefinition(catalog.templates, code);
+    const parsed = row && parseTemplate(row, domain);
+    if (!parsed) errors.push(`invalid template definition: ${code}`);
+    else templates.set(code, parsed);
+  }
+  const layouts = new Map<string, JournalLayoutDefinition>();
+  for (const code of [...new Set(catalog.layouts.map((row) => row.code))]) {
+    const row = activeDefinition(catalog.layouts, code);
+    const parsed = row && parseLayout(row, domain, templates);
+    if (!parsed) errors.push(`invalid layout definition: ${code}`);
+    else layouts.set(code, parsed);
+  }
+  const model = { vocabByCode, templates, layouts };
+  for (const layout of layouts.values()) {
+    if (!validDependencyReferences(model, layout)) {
+      errors.push(`invalid option dependencies: ${layout.code}`);
+    }
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, model };
+}
+
+function selectedValues(selections: JournalSelections, code: string): JournalScalarValue[] {
+  const raw = selections[code];
+  if (raw === undefined) return [];
+  return (Array.isArray(raw) ? raw : [raw]).filter(isScalarValue);
+}
+
+type JournalScalarValue = string | number | boolean | null;
+
+function isScalarValue(value: unknown): value is JournalScalarValue {
+  return value == null || typeof value === 'string' || typeof value === 'number' ||
+    typeof value === 'boolean';
+}
+
+function resolveDependencies(
+  layout: JournalLayoutDefinition,
+  selections: JournalSelections,
+): Map<string, { choices: string[]; units: string[] }> {
+  const targets = new Map<string, { choices: string[]; units: string[] }>();
+  for (const dependency of layout.option_dependencies) {
+    if (!targets.has(dependency.restrict.attribute_code)) {
+      targets.set(dependency.restrict.attribute_code, { choices: [], units: [] });
+    }
+  }
+  const targetCodes = new Set(targets.keys());
+  const validated = new Map<string, Set<JournalScalarValue>>();
+  for (const [code] of Object.entries(selections)) {
+    if (!targetCodes.has(code)) validated.set(code, new Set(selectedValues(selections, code)));
+  }
+  for (let attempt = 0; attempt <= layout.option_dependencies.length + 1; attempt += 1) {
+    let changed = false;
+    for (const dependency of layout.option_dependencies) {
+      if (!validated.get(dependency.when.attribute_code)?.has(dependency.when.equals)) continue;
+      const resolved = targets.get(dependency.restrict.attribute_code);
+      if (!resolved) continue;
+      const values = 'choices' in dependency.restrict
+        ? dependency.restrict.choices
+        : dependency.restrict.units;
+      const target = 'choices' in dependency.restrict ? resolved.choices : resolved.units;
+      for (const value of values) {
+        if (!target.includes(value)) {
+          target.push(value);
+          changed = true;
+        }
+      }
+    }
+    for (const [targetCode, resolved] of targets) {
+      const chosen = selectedValues(selections, targetCode);
+      if (chosen.length === 0 || resolved.choices.length === 0) continue;
+      const accepted = validated.get(targetCode) ?? new Set<JournalScalarValue>();
+      for (const value of chosen) {
+        if (typeof value === 'string' && resolved.choices.includes(value) && !accepted.has(value)) {
+          accepted.add(value);
+          changed = true;
+        }
+      }
+      validated.set(targetCode, accepted);
+    }
+    if (!changed) break;
+  }
+  return targets;
+}
+
+export function allowedChoices(
+  model: JournalCaptureCatalogModel,
+  layout: JournalLayoutDefinition,
+  attributeCode: string,
+  selections: JournalSelections,
+): string[] {
+  const attribute = model.vocabByCode.get(attributeCode);
+  if (!attribute || attribute.kind !== 'attribute' || attribute.value_type !== 'choice') return [];
+  const resolved = resolveDependencies(layout, selections);
+  if (resolved.has(attributeCode)) return [...(resolved.get(attributeCode)?.choices ?? [])];
+  return [...model.vocabByCode.values()]
+    .filter((row) => row.kind === 'choice' && row.parent_code === attributeCode && isActive(row))
+    .sort((left, right) => left.sort_order - right.sort_order || left.code.localeCompare(right.code))
+    .map((row) => row.code);
+}
+
+export function allowedUnits(
+  model: JournalCaptureCatalogModel,
+  layout: JournalLayoutDefinition,
+  attributeCode: string,
+  selections: JournalSelections,
+): string[] {
+  const attribute = model.vocabByCode.get(attributeCode);
+  if (!attribute || !numericAttributeValid(attribute)) return [];
+  const compatible = [...model.vocabByCode.values()]
+    .filter((row) => row.kind === 'unit' && isActive(row))
+    .filter((row) => !('error' in validUnitForAttribute(model, attribute, row.code)))
+    .map((row) => row.code)
+    .sort();
+  const resolved = resolveDependencies(layout, selections);
+  if (!resolved.has(attributeCode)) return compatible;
+  const restricted = new Set(resolved.get(attributeCode)?.units ?? []);
+  return compatible.filter((code) => restricted.has(code));
+}
+
+export function convertNumericValue(
+  model: JournalCaptureCatalogModel,
+  attributeCode: string,
+  enteredValue: number,
+  enteredUnitCode: string,
+): NumericConversionResult {
+  if (!Number.isFinite(enteredValue)) return { ok: false, code: 'invalid_number' };
+  const attribute = model.vocabByCode.get(attributeCode);
+  if (!attribute || !numericAttributeValid(attribute)) return { ok: false, code: 'invalid_catalog' };
+  const conversion = validUnitForAttribute(model, attribute, enteredUnitCode);
+  if ('error' in conversion) return { ok: false, code: conversion.error };
+  let canonicalValue = enteredValue * conversion.facts.scale + conversion.facts.offset;
+  if (!Number.isFinite(canonicalValue)) return { ok: false, code: 'invalid_number' };
+  if (canonicalValue === 0) canonicalValue = 0;
+  return {
+    value_num: canonicalValue,
+    unit_code: conversion.canonical.code,
+    entered_value_num: enteredValue,
+    entered_unit_code: enteredUnitCode,
+  };
+}
+
+export function isLayoutTemplateCompatible(
+  layout: JournalLayoutDefinition | undefined,
+  template: JournalTemplateDefinition | undefined,
+): boolean {
+  return Boolean(layout && template && layout.supported_templates.includes(template.code));
+}
+
+function leafKey(leaf: ActivityLeafSelection): string {
+  return JSON.stringify([leaf.activity_code, ...leaf.dependent_selections.map((selection) => [
+    selection.attribute_code,
+    selection.value,
+  ])]);
+}
+
+// The set of choice-dependency targets `deriveActivityLeaves` should expand
+// through, honouring a layout's optional `picker_targets` depth knob (Task 5,
+// detailed activity vocabulary plan). Absent `picker_targets` (every layout
+// before open_field@9) keeps today's behaviour: expand every choice target to
+// its deepest leaf.
+export function pickerChoiceTargets(layout: JournalLayoutDefinition): string[] {
+  const allChoiceTargets = layout.option_dependencies
+    .filter((dependency) => 'choices' in dependency.restrict)
+    .map((dependency) => dependency.restrict.attribute_code)
+    .filter((code, index, all) => all.indexOf(code) === index);
+  if (!layout.picker_targets) return allChoiceTargets;
+  const declared = new Set(layout.picker_targets);
+  return allChoiceTargets.filter((code) => declared.has(code));
+}
+
+export function deriveActivityLeaves(
+  model: JournalCaptureCatalogModel,
+  layout: JournalLayoutDefinition,
+): ActivityLeafSelection[] {
+  const choiceTargets = pickerChoiceTargets(layout);
+  const leaves: ActivityLeafSelection[] = [];
+  const expand = (activityCode: string, dependentSelections: ActivityLeafSelection['dependent_selections']) => {
+    const selections: JournalSelections = { activity_code: activityCode };
+    for (const selection of dependentSelections) selections[selection.attribute_code] = selection.value;
+    const nextTarget = choiceTargets.find((target) => {
+      if (dependentSelections.some((selection) => selection.attribute_code === target)) return false;
+      return allowedChoices(model, layout, target, selections).length > 0;
+    });
+    if (!nextTarget) {
+      leaves.push({ activity_code: activityCode, dependent_selections: dependentSelections });
+      return;
+    }
+    for (const value of allowedChoices(model, layout, nextTarget, selections)) {
+      expand(activityCode, [...dependentSelections, { attribute_code: nextTarget, value }]);
+    }
+  };
+  for (const activityCode of layout.activity_codes) {
+    const activity = model.vocabByCode.get(activityCode);
+    if (activity?.kind === 'activity' && isActive(activity)) expand(activityCode, []);
+  }
+  const seen = new Set<string>();
+  return leaves.filter((leaf) => {
+    const key = leafKey(leaf);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// Slice F (F2): full_record@6's manual weather-at-application fallback
+// fields. Gates purely by field code on the already-resolved states, so it
+// is source-agnostic: in @6-@9 these four codes reach `states` via the
+// activity-keyed weather_at_application conditional_group
+// (plant_protection_application only); in @10 that conditional_group is
+// gone and the same four codes instead reach `states` per-operation via
+// operation_fields_by_operation for the 5 chemical-spray operations (see
+// journal-catalog-core.js). Either way, the catalog's
+// operation_fields_by_activity/operation_fields_by_operation/
+// conditional_groups mechanisms only ever condition on the selected
+// activity/operation — they cannot express "hide this group when the plot
+// already has a linked weather source," because that fact is plot/zone
+// data, not an activity, operation, or another field's value. This is the
+// GUI-side resolution: JournalCaptureFlow.tsx already computes `zoneLinked`
+// (Boolean(selectedPlot?.zone_uuid)) for its crop-hint fallback, and parent
+// spec §4.8 only ever populates context_json's wind/temperature/humidity
+// channels for a zone-linked plot (osi-journal/context.js buildContext
+// returns null otherwise) — so "zone-linked" and "has a weather source" are
+// the same question.
+export const WEATHER_AT_APPLICATION_FIELD_CODES: ReadonlySet<string> = new Set([
+  'attr.wind_speed', 'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+]);
+
+export function withWeatherAtApplicationVisibility(
+  states: readonly JournalFieldState[],
+  hasWeatherSource: boolean,
+): JournalFieldState[] {
+  if (!hasWeatherSource) return [...states];
+  return states.map((state) => (
+    WEATHER_AT_APPLICATION_FIELD_CODES.has(state.code)
+      ? { ...state, visible: false, required: false }
+      : state
+  ));
+}
+
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §2): resolves the EntryForm `allowedProductKinds` prop from a
+// template's operation_product_kinds map + the current
+// attr.agroscope.operation selection. Shared by the three EntryForm call
+// sites (JournalCaptureFlow, DetailPanel's correction form, DraftsQueue's
+// DraftResumePanel) so the resolution rule lives in one place. Returns
+// undefined (no restriction — every active kind shown) when the template
+// declares no operation_product_kinds map, no operation is currently
+// selected, or the selected operation has no entry (15 of the 25 operations
+// carry no product field at all and simply have no key here).
+export function allowedProductKindsForOperation(
+  template: JournalTemplateDefinition | undefined,
+  selections: JournalSelections,
+): readonly string[] | undefined {
+  const productKinds = template?.operation_product_kinds;
+  if (!productKinds) return undefined;
+  const selected = selections['attr.agroscope.operation'];
+  const opCode = typeof selected === 'string'
+    ? selected
+    : Array.isArray(selected) && typeof selected[0] === 'string' ? selected[0] : undefined;
+  return opCode ? productKinds[opCode] : undefined;
+}

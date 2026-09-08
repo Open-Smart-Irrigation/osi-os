@@ -14,6 +14,7 @@ const profileRoot = path.join(
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red'
 );
 const journal = require(path.join(profileRoot, 'osi-journal'));
+const { emitJournalOutbox } = require(path.join(profileRoot, 'osi-journal/lifecycle'));
 const { buildAggregate } = journal;
 
 const USER_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -544,7 +545,7 @@ test.after(() => {
 });
 
 test('exports the complete lifecycle API from osi-journal', () => {
-  for (const name of ['saveDraft', 'finalize', 'finalizeBatch', 'void_']) {
+  for (const name of ['saveDraft', 'finalize', 'finalizeBatch', 'void_', 'discardDraft']) {
     assert.equal(typeof journal[name], 'function', name);
   }
 });
@@ -1191,7 +1192,10 @@ test('a 100-plot same-context batch reuses nine reads and stamps each plot UUID'
     device_eui: OWNED_DEVICE_EUI,
     occurred_start_local: '2026-07-12T09:00',
     occurred_end_local: '2026-07-12T09:30',
-  }), plots, principal());
+  }), plots.map((plotUuidValue, index) => ({
+    plot_uuid: plotUuidValue,
+    entry_uuid: 'a1000000-0000-4000-8000-' + String(index + 1).padStart(12, '0'),
+  })), principal());
 
   assert.ok(observed.reads.length <= 9, 'context reads: ' + observed.reads.length);
   const rows = await db.all(
@@ -1208,6 +1212,78 @@ test('a 100-plot same-context batch reuses nine reads and stamps each plot UUID'
     assert.equal(context.subject_device, OWNED_DEVICE_EUI);
     assert.equal(aggregate.context_json, row.context_json);
   }
+});
+
+test('batch retry binds write intent and looks up existing entries before plot resolution', async () => {
+  const members = [
+    { plot_uuid: plotUuid(2), entry_uuid: 'a5000000-0000-4000-8000-000000000001' },
+    { plot_uuid: plotUuid(5), entry_uuid: 'a5000000-0000-4000-8000-000000000002' },
+  ];
+  const batch = validEntry({
+    entry_uuid: undefined,
+    plot_uuid: undefined,
+    season_crop: 'barley',
+    occurred_start_local: '2026-07-12T10:30',
+    members,
+  });
+  delete batch.plot_uuid;
+  const first = await journal.finalizeBatch(db, catalog, batch, members, principal());
+  for (const changed of [
+    Object.assign({}, batch, { activity_code: 'fertilization' }),
+    Object.assign({}, batch, { occurred_start_local: '2026-07-12T10:31' }),
+    Object.assign({}, batch, { values: [Object.assign({}, batch.values[0], { value: 13 })] }),
+  ]) {
+    await assert.rejects(
+      journal.finalizeBatch(db, catalog, changed, members, principal()),
+      (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+    );
+  }
+  await db.run('UPDATE journal_plots SET active=0 WHERE plot_uuid=?', [members[0].plot_uuid]);
+  assert.deepEqual(
+    await journal.finalizeBatch(db, catalog, batch, members, principal()),
+    first
+  );
+  await db.run('UPDATE journal_plots SET active=1,deleted_at=? WHERE plot_uuid=?', [
+    '2026-07-12T11:00:00.000Z', members[0].plot_uuid,
+  ]);
+  assert.deepEqual(
+    await journal.finalizeBatch(db, catalog, batch, members, principal()),
+    first
+  );
+  await db.run('UPDATE journal_plots SET active=1,deleted_at=NULL WHERE plot_uuid=?', [members[0].plot_uuid]);
+});
+
+test('batch retry rejects a tombstoned member before replay while masking foreign ownership', async () => {
+  const members = [{
+    plot_uuid: plotUuid(2),
+    entry_uuid: 'a5100000-0000-4000-8000-000000000001',
+  }];
+  const batch = validEntry({
+    entry_uuid: undefined,
+    plot_uuid: undefined,
+    season_crop: 'barley',
+    occurred_start_local: '2026-07-12T10:45',
+    members,
+  });
+  delete batch.plot_uuid;
+  await journal.finalizeBatch(db, catalog, batch, members, principal());
+  await db.run('UPDATE journal_entries SET deleted_at=? WHERE entry_uuid=?', [
+    '2026-07-12T11:00:00.000Z', members[0].entry_uuid,
+  ]);
+  const before = await journalMutationState();
+
+  await assert.rejects(
+    journal.finalizeBatch(db, catalog, batch, members, principal()),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  await assert.rejects(
+    journal.finalizeBatch(db, catalog, batch, members, principal({
+      user_id: 2,
+      owner_user_uuid: OTHER_USER_UUID,
+    })),
+    (error) => error && error.code === 'ownership'
+  );
+  assert.deepEqual(await journalMutationState(), before);
 });
 
 test('a 100-zone duration batch keeps context reads bounded per distinct zone', async () => {
@@ -1260,7 +1336,10 @@ test('a 100-zone duration batch keeps context reads bounded per distinct zone', 
     occurred_end_local: '2026-07-12T09:30',
     season_crop: 'barley',
     season_variety: 'Fixture',
-  }), plots, principal());
+  }), plots.map((plotUuidValue, index) => ({
+    plot_uuid: plotUuidValue,
+    entry_uuid: 'a2000000-0000-4000-8000-' + String(index + 1).padStart(12, '0'),
+  })), principal());
 
   assert.equal(observed.reads.length, 600);
   assert.ok(observed.reads.length <= 900);
@@ -1474,7 +1553,10 @@ test('finalizeBatch fans five plots into independent version-one aggregates shar
     season_crop: 'barley',
     season_variety: 'Golden',
   });
-  const result = await journal.finalizeBatch(db, catalog, input, plots, principal());
+  const result = await journal.finalizeBatch(db, catalog, input, plots.map((plotUuidValue, index) => ({
+    plot_uuid: plotUuidValue,
+    entry_uuid: 'a3000000-0000-4000-8000-' + String(index + 1).padStart(12, '0'),
+  })), principal());
 
   assert.match(result.batch_uuid, UUID_PATTERN);
   assert.equal(result.entries.length, plots.length);
@@ -1521,7 +1603,10 @@ test('finalizeBatch rolls back every sibling when entry four fails', async () =>
         season_crop: 'barley',
         season_variety: 'Golden',
       }),
-      plots,
+      plots.map((plotUuidValue, index) => ({
+        plot_uuid: plotUuidValue,
+        entry_uuid: 'a4000000-0000-4000-8000-' + String(index + 1).padStart(12, '0'),
+      })),
       batchPrincipal
     ),
     injected
@@ -1615,6 +1700,27 @@ test('finalize atomically writes derived identity, ordered values, season, and e
   assert.equal(outbox.gateway_device_eui, GATEWAY_EUI);
   const expectedAggregate = buildAggregate(Object.assign({ contract_version: 1 }, entry), values);
   assert.deepEqual(JSON.parse(outbox.payload_json), expectedAggregate);
+});
+
+test('entry descriptor preserves an explicit receipt through the three-argument outbox contract', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  await db.run('DELETE FROM sync_outbox WHERE aggregate_key=?', [ENTRY_UUID]);
+  const eventUuid = 'fedcba98-7654-4321-8fed-cba987654321';
+
+  const emission = await db.transaction(function(tx) {
+    return emitJournalOutbox(tx, {
+      entry_uuid: ENTRY_UUID,
+      event_uuid: eventUuid,
+    }, 'JOURNAL_ENTRY_UPSERTED');
+  });
+
+  assert.equal(emission.event_uuid, eventUuid);
+  assert.equal(emission.entry.entry_uuid, ENTRY_UUID);
+  const receipt = await db.get('SELECT * FROM sync_outbox WHERE event_uuid=?', [eventUuid]);
+  assert.equal(receipt.aggregate_type, 'JOURNAL_ENTRY');
+  assert.equal(receipt.aggregate_key, ENTRY_UUID);
+  assert.equal(receipt.op, 'JOURNAL_ENTRY_UPSERTED');
+  assert.deepEqual(JSON.parse(receipt.payload_json), emission.aggregate);
 });
 
 test('stale correction rejects and writes nothing', async () => {
@@ -1898,6 +2004,117 @@ test('saveDraft updates an owned version-zero draft and fully replaces its value
   assert.equal(await count('sync_outbox'), 0);
 });
 
+test('discardDraft rejects a discard for an entry owned by another user without writes', async () => {
+  await journal.saveDraft(db, catalog, validEntry(), principal());
+  const before = await journalMutationState();
+
+  await rejectCode(
+    journal.discardDraft(db, ENTRY_UUID, principal({
+      user_id: 2,
+      owner_user_uuid: OTHER_USER_UUID,
+    })),
+    'ownership'
+  );
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft rejects a final entry with a clear invalid_state error', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const before = await journalMutationState();
+
+  await rejectCode(journal.discardDraft(db, ENTRY_UUID, principal()), 'invalid_state');
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft rejects a voided entry with a clear invalid_state error', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  await journal.void_(db, catalog, ENTRY_UUID, 1, 'Recorded twice', principal());
+  const before = await journalMutationState();
+
+  await rejectCode(journal.discardDraft(db, ENTRY_UUID, principal()), 'invalid_state');
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft rejects a draft whose sync_version has drifted from zero', async () => {
+  await journal.saveDraft(db, catalog, validEntry(), principal());
+  await db.run('UPDATE journal_entries SET sync_version=1 WHERE entry_uuid=?', [ENTRY_UUID]);
+  const before = await journalMutationState();
+
+  await rejectCode(journal.discardDraft(db, ENTRY_UUID, principal()), 'invalid_state');
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft transactionally hard-deletes the draft entry and its values with no outbox row', async () => {
+  await journal.saveDraft(db, catalog, validEntry({
+    values: [{
+      attribute_code: 'attr.operator',
+      group_index: 0,
+      value: 'Alice',
+      value_status: 'observed',
+    }],
+  }), principal());
+  assert.equal(await count('journal_entries'), 1);
+  assert.equal(await count('journal_entry_values'), 1);
+
+  const result = await journal.discardDraft(db, ENTRY_UUID, principal());
+
+  assert.deepEqual(result, { entry_uuid: ENTRY_UUID, discarded: true });
+  assert.equal(await count('journal_entries'), 0);
+  assert.equal(await count('journal_entry_values'), 0);
+  assert.equal(await count('sync_outbox'), 0);
+  assert.equal(await count('applied_commands'), 0);
+  assert.equal(await count('command_ack_outbox'), 0);
+});
+
+test('discardDraft rolls back the entry alongside its values on a late injected failure', async () => {
+  await journal.saveDraft(db, catalog, validEntry({
+    values: [{
+      attribute_code: 'attr.operator',
+      group_index: 0,
+      value: 'Alice',
+      value_status: 'observed',
+    }],
+  }), principal());
+  const injected = new Error('injected discard failure');
+  let deleteEntryCalls = 0;
+  const crashingDb = {
+    transaction(executor) {
+      return db.transaction((tx) => executor(Object.assign({}, tx, {
+        run(sql, params) {
+          if (String(sql).startsWith('DELETE FROM journal_entries')) {
+            deleteEntryCalls += 1;
+            throw injected;
+          }
+          return tx.run(sql, params);
+        },
+      })));
+    },
+  };
+
+  await assert.rejects(journal.discardDraft(crashingDb, ENTRY_UUID, principal()), injected);
+
+  assert.equal(deleteEntryCalls, 1);
+  assert.equal(await count('journal_entries'), 1);
+  assert.equal(await count('journal_entry_values'), 1);
+});
+
+test('discardDraft is idempotent: an exact repeated discard of an already-gone draft succeeds', async () => {
+  await journal.saveDraft(db, catalog, validEntry(), principal());
+
+  const first = await journal.discardDraft(db, ENTRY_UUID, principal());
+  assert.deepEqual(first, { entry_uuid: ENTRY_UUID, discarded: true });
+
+  const second = await journal.discardDraft(db, ENTRY_UUID, principal());
+  assert.deepEqual(second, { entry_uuid: ENTRY_UUID, discarded: true });
+
+  assert.equal(await count('journal_entries'), 0);
+  assert.equal(await count('journal_entry_values'), 0);
+});
+
 test('finalize promotes an owned draft in place to final version one', async () => {
   await journal.saveDraft(db, catalog, validEntry({
     values: [{
@@ -2073,7 +2290,10 @@ test('correction preserves the batch UUID of a batch-created entry when omitted'
     db,
     catalog,
     validEntry({ entry_uuid: undefined, plot_uuid: undefined }),
-    [plotUuid(2)],
+    [{
+      plot_uuid: plotUuid(2),
+      entry_uuid: 'a5000000-0000-4000-8000-000000000001',
+    }],
     principal()
   );
   const created = batch.entries[0];
@@ -2340,7 +2560,10 @@ test('correction rejects a changed batch UUID and preserves entry and outbox', a
     db,
     catalog,
     validEntry({ entry_uuid: undefined, plot_uuid: undefined }),
-    [plotUuid(2)],
+    [{
+      plot_uuid: plotUuid(2),
+      entry_uuid: 'a6000000-0000-4000-8000-000000000001',
+    }],
     principal()
   );
   const created = batch.entries[0];
@@ -2533,9 +2756,12 @@ test('finalizeBatch rejects duplicate plot UUIDs without writing rows', async ()
     db,
     catalog,
     validEntry({ entry_uuid: undefined, plot_uuid: undefined }),
-    [plotUuid(2), plotUuid(2)],
+    [
+      { plot_uuid: plotUuid(2), entry_uuid: 'a7000000-0000-4000-8000-000000000001' },
+      { plot_uuid: plotUuid(2), entry_uuid: 'a7000000-0000-4000-8000-000000000002' },
+    ],
     principal()
-  ), 'duplicate_plot');
+  ), 'duplicate_member');
 
   await assertNoJournalWrites();
 });

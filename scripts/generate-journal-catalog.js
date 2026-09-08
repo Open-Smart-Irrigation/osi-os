@@ -12,14 +12,42 @@ const SOURCE_PATH = path.join(
   REPO_ROOT,
   'docs/superpowers/specs/agroscope-open-field/catalog.json'
 );
-const MIGRATION_NAME = '0019__journal_catalog_v1.sql';
-const MIGRATION_PATH = path.join(REPO_ROOT, 'database/migrations/ordered', MIGRATION_NAME);
-const MANIFEST_PATH = path.join(REPO_ROOT, 'database/migrations/ordered/CHECKSUMS.json');
+const MIGRATIONS_DIR = path.join(REPO_ROOT, 'database/migrations/ordered');
+const MANIFEST_PATH = path.join(MIGRATIONS_DIR, 'CHECKSUMS.json');
 const SEED_PATH = path.join(REPO_ROOT, 'database/seed-blank.sql');
 const SEED_BEGIN = '-- BEGIN GENERATED JOURNAL CATALOG V1';
 const SEED_END = '-- END GENERATED JOURNAL CATALOG V1';
-const CATALOG_VERSION = 1;
 const FIXED_TIMESTAMP = '2026-07-12T00:00:00.000Z';
+
+// Registry of catalog migrations, one entry per published catalog version, in
+// ascending order. `0019` is the frozen v1 baseline; every later entry is an
+// incremental delta (only the rows whose `since` equals that version). To
+// publish a new catalog version: tag the new/changed core row(s) with a
+// template/layout `version` (or a `since_version` on other row kinds) one
+// higher than today's latest, append one entry here naming the next
+// contiguous ordered-migration slot, and regenerate. Earlier entries are
+// never rewritten — `writeGeneratedArtifacts` refuses to touch an existing
+// migration file whose bytes would change.
+const CATALOG_MIGRATIONS = [
+  { version: 1, name: '0019__journal_catalog_v1.sql' },
+  { version: 2, name: '0031__journal_catalog_v2.sql' },
+  { version: 3, name: '0032__journal_catalog_v3.sql' },
+  { version: 4, name: '0035__journal_catalog_v4.sql' },
+  { version: 5, name: '0036__journal_catalog_v5.sql' },
+  { version: 6, name: '0037__journal_catalog_v6.sql' },
+  { version: 7, name: '0038__journal_catalog_v7.sql' },
+  { version: 8, name: '0039__journal_catalog_v8.sql' },
+  { version: 9, name: '0040__journal_catalog_v9.sql' },
+  { version: 10, name: '0041__journal_catalog_v10.sql' },
+];
+
+const TABLE_ORDER = [
+  'journal_vocab',
+  'journal_vocab_mappings',
+  'journal_templates',
+  'journal_layouts',
+  'journal_products',
+];
 
 function fail(message) {
   throw new Error(message);
@@ -55,8 +83,15 @@ function sqlValue(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-const CATALOG_V1_ACTIVE =
-  'COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1';
+// A row introduced at catalog version N must only (re-)insert itself while
+// the installed catalog hasn't moved past N yet — this is a defense-in-depth
+// guard on top of the NOT EXISTS idempotency check below, not the primary
+// idempotency mechanism. Reproduces the historical v1 predicate
+// (`<= 1`) exactly for since=1 rows, so 0019 stays byte-identical.
+function catalogActiveGuard(sinceVersion) {
+  assert(Number.isInteger(sinceVersion) && sinceVersion >= 1, `invalid since version ${sinceVersion}`);
+  return `COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= ${sinceVersion}`;
+}
 
 const ROW_IDENTITY_COLUMNS = {
   journal_vocab: ['code'],
@@ -77,7 +112,7 @@ function insertIfCatalogNotNewer(row) {
   return [
     `INSERT INTO ${row.table}(${row.columns.join(',')})`,
     `SELECT ${row.values.map(sqlValue).join(',')}`,
-    `WHERE ${CATALOG_V1_ACTIVE}`,
+    `WHERE ${catalogActiveGuard(row.since)}`,
     `  AND NOT EXISTS (SELECT 1 FROM ${row.table} WHERE ${identityPredicate});`,
   ].join('\n');
 }
@@ -94,10 +129,24 @@ function postconditionGuard(row) {
   ).join(' AND ');
   return [
     'INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)',
-    `SELECT 0,0,'catalog-v1-postcondition-failed',${sqlValue(FIXED_TIMESTAMP)}`,
-    `WHERE ${CATALOG_V1_ACTIVE}`,
+    `SELECT 0,0,${sqlValue(`catalog-v${row.since}-postcondition-failed`)},${sqlValue(FIXED_TIMESTAMP)}`,
+    `WHERE ${catalogActiveGuard(row.since)}`,
     `  AND NOT EXISTS (SELECT 1 FROM ${row.table} WHERE ${exact});`,
   ].join('\n');
+}
+
+// Rows outside `journal_templates`/`journal_layouts` don't carry their own
+// `version`; they default to catalog version 1 (matching every row that
+// existed when v1 was generated) unless the core object explicitly opts a
+// future row into a later version via `since_version`.
+function rowSince(sourceObject) {
+  const since = sourceObject && sourceObject.since_version;
+  if (since == null) return 1;
+  assert(
+    Number.isInteger(since) && since >= 1,
+    `invalid since_version on ${(sourceObject && sourceObject.code) || '(unknown)'}`
+  );
+  return since;
 }
 
 function humanize(code) {
@@ -172,8 +221,35 @@ function validateCore(coreDef) {
   assert(Object.keys(coreDef).join(',') === 'activities,attributes,units,choices,templates,layouts,products',
     'core export must contain exactly the seven catalog collections in contract order');
   assert(coreDef.activities.length === 16, 'core must define exactly 16 activities');
-  assert(coreDef.templates.length === 3, 'core must define exactly three templates');
-  assert(coreDef.layouts.length === 3, 'core must define exactly three generic layouts');
+  assert(
+    new Set(coreDef.templates.map((row) => row.code)).size === 3,
+    'core must define exactly three distinct template codes (any number of versions each)'
+  );
+  assert(
+    new Set(coreDef.layouts.map((row) => row.code)).size === 3,
+    'core must define exactly three distinct generic layout codes (any number of versions each)'
+  );
+
+  const templateVersionsByCode = new Map();
+  for (const template of coreDef.templates) {
+    assert(Number.isInteger(template.version) && template.version >= 1,
+      `${template.code} has an invalid version`);
+    const seenVersions = templateVersionsByCode.get(template.code) || new Set();
+    assert(!seenVersions.has(template.version),
+      `duplicate template version ${template.code}@${template.version}`);
+    seenVersions.add(template.version);
+    templateVersionsByCode.set(template.code, seenVersions);
+  }
+  const layoutVersionsByCode = new Map();
+  for (const layout of coreDef.layouts) {
+    assert(Number.isInteger(layout.version) && layout.version >= 1,
+      `${layout.code} has an invalid version`);
+    const seenVersions = layoutVersionsByCode.get(layout.code) || new Set();
+    assert(!seenVersions.has(layout.version),
+      `duplicate layout version ${layout.code}@${layout.version}`);
+    seenVersions.add(layout.version);
+    layoutVersionsByCode.set(layout.code, seenVersions);
+  }
 
   const unitByCode = new Map(coreDef.units.map((row) => [row.code, row]));
   const attributeByCode = new Map(coreDef.attributes.map((row) => [row.code, row]));
@@ -244,6 +320,205 @@ function validateCore(coreDef) {
         `${activity.code} has an incomplete standard mapping`);
       assert(mapping.external_id && mapping.mapping_relation && mapping.source_uri,
         `${activity.code} has an incomplete standard mapping target`);
+    }
+  }
+  validateQuickFieldsAndReadings(coreDef);
+  validateOperationFieldsByActivity(coreDef);
+}
+
+// Slice BC (journal-catalog v3): a template's `quick_fields` is an
+// activity_code -> field-code map consumed by templateEngine.deriveFieldStates
+// to scope the Quick capture form per activity (R1). Every core activity must
+// be covered so the model never silently falls through to a bare default at
+// render time, and every referenced field code must be a real attribute (or
+// the top-level `note` field) — a typo here would otherwise only surface as a
+// runtime GUI bug. Layout `reading_fields`/`static_context_fields` get the
+// analogous check: every referenced field must be a real attribute, no
+// `reading_fields` entry may remain in that same layout's `minimum_fields`
+// (BC3's whole point — readings move to the `sampling` Quick set instead of
+// being forced onto every entry), and `static_context_fields` must be a
+// subset of `minimum_fields` (it is the same forced set full_record/research
+// still see, just also exposed for read-only plot-context rendering).
+function validateQuickFieldsAndReadings(coreDef) {
+  const attributeCodes = new Set(coreDef.attributes.map((row) => row.code));
+  const activityCodes = new Set(coreDef.activities.map((row) => row.code));
+  const knownQuickField = (code) => code === 'note' || attributeCodes.has(code);
+
+  for (const template of coreDef.templates) {
+    const quickFields = template.definition && template.definition.quick_fields;
+    if (quickFields == null) continue;
+    assert(template.code === 'farmer_quick',
+      `only farmer_quick may declare quick_fields (found on ${template.code}@${template.version})`);
+    const declared = Object.keys(quickFields);
+    assert(
+      declared.length === activityCodes.size && declared.every((code) => activityCodes.has(code)),
+      `${template.code}@${template.version} quick_fields must cover exactly every core activity`
+    );
+    for (const [activityCode, fields] of Object.entries(quickFields)) {
+      assert(Array.isArray(fields) && fields.length > 0,
+        `${template.code}@${template.version} quick_fields.${activityCode} must be a nonempty array`);
+      for (const field of fields) {
+        assert(knownQuickField(field),
+          `${template.code}@${template.version} quick_fields.${activityCode} references unknown field ${field}`);
+      }
+    }
+  }
+
+  for (const layout of coreDef.layouts) {
+    const definition = layout.definition || {};
+    const readingFields = definition.reading_fields || [];
+    const staticFields = definition.static_context_fields || [];
+    const minimumFields = definition.minimum_fields || [];
+    for (const field of [...readingFields, ...staticFields]) {
+      assert(attributeCodes.has(field),
+        `${layout.code}@${layout.version} references unknown field ${field}`);
+    }
+    const readingsStillMinimum = readingFields.filter((field) => minimumFields.includes(field));
+    assert(readingsStillMinimum.length === 0,
+      `${layout.code}@${layout.version} minimum_fields must not retain reading field(s) ${readingsStillMinimum.join(', ')}`);
+    const staticNotMinimum = staticFields.filter((field) => !minimumFields.includes(field));
+    assert(staticNotMinimum.length === 0,
+      `${layout.code}@${layout.version} static_context_fields must be a subset of minimum_fields (missing ${staticNotMinimum.join(', ')})`);
+  }
+}
+
+// Slice E (full_record@5, R5): a template's `operation_fields_by_activity` is
+// an activity_code -> field-code map consumed by templateEngine.deriveFieldStates
+// to narrow visibility of a `scoped_by_activity` section per activity (the
+// mechanism farmer_quick@3's `quick_fields` established for Quick — see
+// validateQuickFieldsAndReadings above). Every core activity must be covered
+// (same completeness guarantee as quick_fields), every referenced field must
+// be a real attribute, and — the guard specific to this mechanism — every
+// referenced field must actually be a member of the one section it scopes,
+// so the map can only ever narrow what that section already declares, never
+// smuggle in an undeclared field.
+function validateOperationFieldsByActivity(coreDef) {
+  const attributeCodes = new Set(coreDef.attributes.map((row) => row.code));
+  const activityCodes = new Set(coreDef.activities.map((row) => row.code));
+
+  for (const template of coreDef.templates) {
+    const sections = (template.definition && template.definition.sections) || [];
+    const scopedSections = sections.filter((section) => section.scoped_by_activity);
+    const map = template.definition && template.definition.operation_fields_by_activity;
+
+    if (map == null) {
+      assert(scopedSections.length === 0,
+        `${template.code}@${template.version} has a scoped_by_activity section but declares no operation_fields_by_activity map`);
+      continue;
+    }
+    assert(scopedSections.length === 1,
+      `${template.code}@${template.version} declares operation_fields_by_activity but must have exactly one scoped_by_activity section (found ${scopedSections.length})`);
+    const allowedFields = new Set(scopedSections[0].fields);
+    const declared = Object.keys(map);
+    assert(
+      declared.length === activityCodes.size && declared.every((code) => activityCodes.has(code)),
+      `${template.code}@${template.version} operation_fields_by_activity must cover exactly every core activity`
+    );
+    for (const [activityCode, fields] of Object.entries(map)) {
+      assert(Array.isArray(fields) && fields.length > 0,
+        `${template.code}@${template.version} operation_fields_by_activity.${activityCode} must be a nonempty array`);
+      for (const field of fields) {
+        assert(attributeCodes.has(field),
+          `${template.code}@${template.version} operation_fields_by_activity.${activityCode} references unknown field ${field}`);
+        assert(allowedFields.has(field),
+          `${template.code}@${template.version} operation_fields_by_activity.${activityCode} references ${field}, ` +
+          'which is not declared on its scoped_by_activity section');
+      }
+    }
+  }
+}
+
+// v10 (operation-level field/requirement/product scoping plan, 2026-07-23):
+// the operation-keyed twin of validateOperationFieldsByActivity above, plus
+// the analogous checks for operation_requirements/operation_product_kinds.
+// Unlike operation_fields_by_activity/activity_requirements (which must cover
+// every core activity), these three maps are declared PARTIAL by design
+// (spec §0.6): the GUI parser must accept a template row that only covers
+// some operations (so a future OSI-terms operation addition never
+// retroactively invalidates a pinned template row). This generator-side
+// validator is the one place that DOES assert exact coverage of the 25
+// operations for operation_fields_by_operation/operation_requirements — at
+// generation time, against the current Agroscope source, not at GUI runtime
+// against whatever vocab a stored row happened to ship with.
+function validateOperationFieldsByOperation(coreDef, source) {
+  const attributeCodes = new Set(coreDef.attributes.map((row) => row.code));
+  const operationCodes = new Set(
+    source.categories.flatMap((category) =>
+      category.operations.map((operation) => `agroscope.operation.${operation.code}`))
+  );
+  const validProductKinds = new Set(['mineral', 'organic_amendment', 'plant_protection', 'other']);
+
+  for (const template of coreDef.templates) {
+    const definition = template.definition || {};
+    const fieldsMap = definition.operation_fields_by_operation;
+    const requirementsMap = definition.operation_requirements;
+    const productKindsMap = definition.operation_product_kinds;
+    if (fieldsMap == null && requirementsMap == null && productKindsMap == null) continue;
+
+    const sections = definition.sections || [];
+    const scopedSections = sections.filter((section) => section.scoped_by_activity);
+    assert(scopedSections.length === 1,
+      `${template.code}@${template.version} declares an operation-level map but must have exactly one scoped_by_activity section (found ${scopedSections.length})`);
+    const allowedFields = new Set(scopedSections[0].fields);
+
+    if (fieldsMap != null) {
+      const declared = Object.keys(fieldsMap);
+      assert(
+        declared.length === operationCodes.size && declared.every((code) => operationCodes.has(code)),
+        `${template.code}@${template.version} operation_fields_by_operation must cover exactly the ${operationCodes.size} Agroscope operations`
+      );
+      for (const [opCode, fields] of Object.entries(fieldsMap)) {
+        assert(Array.isArray(fields) && fields.length > 0,
+          `${template.code}@${template.version} operation_fields_by_operation.${opCode} must be a nonempty array`);
+        assert(fields[0] === 'attr.agroscope.operation' && fields[1] === 'attr.agroscope.device',
+          `${template.code}@${template.version} operation_fields_by_operation.${opCode} must lead with attr.agroscope.operation, attr.agroscope.device`);
+        for (const field of fields) {
+          assert(attributeCodes.has(field),
+            `${template.code}@${template.version} operation_fields_by_operation.${opCode} references unknown field ${field}`);
+          assert(allowedFields.has(field),
+            `${template.code}@${template.version} operation_fields_by_operation.${opCode} references ${field}, ` +
+            'which is not declared on its scoped_by_activity section');
+        }
+      }
+    }
+
+    if (requirementsMap != null) {
+      const declared = Object.keys(requirementsMap);
+      assert(
+        declared.length === operationCodes.size && declared.every((code) => operationCodes.has(code)),
+        `${template.code}@${template.version} operation_requirements must cover exactly the ${operationCodes.size} Agroscope operations`
+      );
+      for (const [opCode, requirement] of Object.entries(requirementsMap)) {
+        assert(requirement && Array.isArray(requirement.required) && Array.isArray(requirement.required_any),
+          `${template.code}@${template.version} operation_requirements.${opCode} must declare required[] and required_any[]`);
+        for (const field of requirement.required) {
+          assert(attributeCodes.has(field) && allowedFields.has(field),
+            `${template.code}@${template.version} operation_requirements.${opCode}.required references ${field}, ` +
+            'which is not a known field of its scoped_by_activity section');
+        }
+        for (const family of requirement.required_any) {
+          assert(Array.isArray(family) && family.length > 0,
+            `${template.code}@${template.version} operation_requirements.${opCode}.required_any entries must be nonempty arrays`);
+          for (const field of family) {
+            assert(attributeCodes.has(field) && allowedFields.has(field),
+              `${template.code}@${template.version} operation_requirements.${opCode}.required_any references ${field}, ` +
+              'which is not a known field of its scoped_by_activity section');
+          }
+        }
+      }
+    }
+
+    if (productKindsMap != null) {
+      for (const [opCode, kinds] of Object.entries(productKindsMap)) {
+        assert(operationCodes.has(opCode),
+          `${template.code}@${template.version} operation_product_kinds references unknown operation ${opCode}`);
+        assert(Array.isArray(kinds) && kinds.length > 0,
+          `${template.code}@${template.version} operation_product_kinds.${opCode} must be a nonempty array`);
+        for (const kind of kinds) {
+          assert(validProductKinds.has(kind),
+            `${template.code}@${template.version} operation_product_kinds.${opCode} references unknown product kind ${kind}`);
+        }
+      }
     }
   }
 }
@@ -391,6 +666,16 @@ function buildAgroscope(coreDef, source) {
 
   return {
     choices,
+    // v9 (detailed activity vocabulary plan): the same activity->operation and
+    // operation->device rules the research layout uses, WITHOUT the
+    // device->unit rules (Fable P2 hard rule — see journal-catalog-core.js's
+    // open_field@9 comment). Exposed here, generator-side, so `buildRows` can
+    // attach it to any core layout row that opts in via
+    // `derive_agroscope_dependencies`, without buildAgroscope itself knowing
+    // which (if any) second layout consumes it, and without mutating
+    // `categoryDependencies`/`operationDependencies` (the spread below always
+    // allocates a fresh array).
+    operationScopedDependencies: [...categoryDependencies, ...operationDependencies],
     layout: {
       code: 'agroscope_open_field',
       version: 1,
@@ -468,12 +753,14 @@ function vocabRow(row) {
       0,
       FIXED_TIMESTAMP,
     ],
+    since: rowSince(row),
   };
 }
 
 function buildRows(coreDef, source) {
   validateCore(coreDef);
   validateSource(coreDef, source);
+  validateOperationFieldsByOperation(coreDef, source);
   const agroscope = buildAgroscope(coreDef, source);
   const rows = [];
 
@@ -535,6 +822,7 @@ function buildRows(coreDef, source) {
           mapping.source_uri,
           mapping.active,
         ],
+        since: rowSince(activity),
       });
     }
   }
@@ -545,14 +833,26 @@ function buildRows(coreDef, source) {
       key: `${template.code}:${template.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
       values: [template.code, template.version, JSON.stringify({ en: template.label }), JSON.stringify(template.definition), 1],
+      since: template.version,
     });
   }
   for (const layout of [...coreDef.layouts, agroscope.layout]) {
+    // Injection seam (Task 1): attach the shared dependency build purely —
+    // derive a new definition object rather than mutating `layout` or any
+    // core module state (compileCatalog may run multiple times per process,
+    // e.g. in tests). Layouts that don't opt in (every row except
+    // open_field@9 today, including the frozen agroscope_open_field itself,
+    // which already carries its own full dependency set from buildAgroscope)
+    // are emitted completely unchanged.
+    const definition = layout.derive_agroscope_dependencies
+      ? { ...layout.definition, option_dependencies: agroscope.operationScopedDependencies }
+      : layout.definition;
     rows.push({
       table: 'journal_layouts',
       key: `${layout.code}:${layout.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
-      values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(layout.definition), 1],
+      values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(definition), 1],
+      since: layout.version,
     });
   }
   for (const product of coreDef.products) {
@@ -573,6 +873,7 @@ function buildRows(coreDef, source) {
         0,
         FIXED_TIMESTAMP,
       ],
+      since: rowSince(product),
     });
   }
 
@@ -593,52 +894,99 @@ function buildRows(coreDef, source) {
   return rows;
 }
 
-function compileCatalog(coreDef, source) {
-  const rows = buildRows(coreDef, source);
-  const hashInput = rows.map((row) => ({
+function catalogRowsHash(rowsSubset) {
+  const hashInput = rowsSubset.map((row) => ({
     table: row.table,
     key: row.key,
     columns: row.columns,
     values: row.values,
   }));
-  const catalogHash = sha256(stableStringify(hashInput));
+  return sha256(stableStringify(hashInput));
+}
+
+// Renders INSERT statements (grouped by table, tables with no rows in this
+// slice are omitted) plus postcondition guards for exactly `rowsSubset`, and
+// optionally a `journal_catalog_state` stamp to `stampVersion`/`stampHash`.
+// Used both for a single version's delta migration (rowsSubset = only that
+// version's new rows) and for the full cumulative seed block (rowsSubset =
+// every row, stamped to the latest version).
+function buildRowSql(rowsSubset, { commentVersion, includeStateStamp, stampVersion, stampHash }) {
   const sections = [];
-  for (const table of [
-    'journal_vocab',
-    'journal_vocab_mappings',
-    'journal_templates',
-    'journal_layouts',
-    'journal_products',
-  ]) {
+  for (const table of TABLE_ORDER) {
+    const tableRows = rowsSubset.filter((row) => row.table === table);
+    if (tableRows.length === 0) continue;
     sections.push(`-- ${table}`);
-    for (const row of rows.filter((candidate) => candidate.table === table)) {
-      sections.push(insertIfCatalogNotNewer(row));
-    }
+    for (const row of tableRows) sections.push(insertIfCatalogNotNewer(row));
     sections.push('');
   }
-  sections.push('-- Immutable v1 postconditions. Each mismatch deliberately attempts id=0,');
-  sections.push('-- tripping journal_catalog_state CHECK(id=1) before state can be stamped.');
-  for (const row of rows) sections.push(postconditionGuard(row));
-  sections.push('');
-  sections.push('-- journal_catalog_state');
-  sections.push(
-    `INSERT OR IGNORE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,${CATALOG_VERSION},${sqlValue(catalogHash)},${sqlValue(FIXED_TIMESTAMP)});`
-  );
-  sections.push(
-    `UPDATE journal_catalog_state SET catalog_version=${CATALOG_VERSION},catalog_hash=${sqlValue(catalogHash)},updated_at=${sqlValue(FIXED_TIMESTAMP)} WHERE id=1 AND catalog_version <= ${CATALOG_VERSION};`
-  );
-  const rowSql = sections.join('\n').trimEnd() + '\n';
-  const migration = [
-    '-- risk: data',
-    '-- GENERATED by scripts/generate-journal-catalog.js; do not edit by hand.',
-    '-- Source: SoilManageR management-data template v2.6 + scripts/journal-catalog-core.js.',
-    `-- catalog-row-content-sha256: ${catalogHash}`,
-    '',
-    rowSql.trimEnd(),
-    '',
-  ].join('\n');
-  const seedBlock = `${SEED_BEGIN}\n${rowSql}${SEED_END}\n`;
-  return { rows, catalogHash, migration, seedBlock };
+  if (rowsSubset.length > 0) {
+    sections.push(`-- Immutable v${commentVersion} postconditions. Each mismatch deliberately attempts id=0,`);
+    sections.push('-- tripping journal_catalog_state CHECK(id=1) before state can be stamped.');
+    for (const row of rowsSubset) sections.push(postconditionGuard(row));
+    sections.push('');
+  }
+  if (includeStateStamp) {
+    sections.push('-- journal_catalog_state');
+    sections.push(
+      `INSERT OR IGNORE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,${stampVersion},${sqlValue(stampHash)},${sqlValue(FIXED_TIMESTAMP)});`
+    );
+    sections.push(
+      `UPDATE journal_catalog_state SET catalog_version=${stampVersion},catalog_hash=${sqlValue(stampHash)},updated_at=${sqlValue(FIXED_TIMESTAMP)} WHERE id=1 AND catalog_version <= ${stampVersion};`
+    );
+  }
+  return sections.join('\n').trimEnd() + '\n';
+}
+
+// Compiles the full current catalog into: every generated row (each carrying
+// the catalog version it was introduced `since`), one migration per
+// registered catalog version (a pure delta: only that version's new rows),
+// and the seed block (the full cumulative state, for bootstrapping a fresh
+// database in one shot). `migrationsRegistry` defaults to the real
+// CATALOG_MIGRATIONS list; tests may pass an extended copy to prove a
+// hypothetical next version stays a pure delta without touching this file.
+function compileCatalog(coreDef, source, migrationsRegistry = CATALOG_MIGRATIONS) {
+  const rows = buildRows(coreDef, source);
+  const versions = [...new Set(rows.map((row) => row.since))].sort((left, right) => left - right);
+  versions.forEach((version, index) => {
+    assert(version === index + 1,
+      `catalog row versions must be contiguous starting at 1 (found gap before version ${version})`);
+  });
+  const registryByVersion = new Map(migrationsRegistry.map((entry) => [entry.version, entry]));
+
+  const migrations = versions.map((version) => {
+    const entry = registryByVersion.get(version);
+    assert(entry,
+      `no CATALOG_MIGRATIONS entry declared for catalog version ${version}; add one before publishing new core content`);
+    const deltaRows = rows.filter((row) => row.since === version);
+    const cumulativeRows = rows.filter((row) => row.since <= version);
+    const stampHash = catalogRowsHash(cumulativeRows);
+    const rowSql = buildRowSql(deltaRows, {
+      commentVersion: version,
+      includeStateStamp: true,
+      stampVersion: version,
+      stampHash,
+    });
+    const content = [
+      '-- risk: data',
+      '-- GENERATED by scripts/generate-journal-catalog.js; do not edit by hand.',
+      '-- Source: SoilManageR management-data template v2.6 + scripts/journal-catalog-core.js.',
+      `-- catalog-row-content-sha256: ${catalogRowsHash(deltaRows)}`,
+      '',
+      rowSql.trimEnd(),
+      '',
+    ].join('\n');
+    return { version, name: entry.name, content, stampHash };
+  });
+
+  const latest = migrations[migrations.length - 1];
+  const seedRowSql = buildRowSql(rows, {
+    commentVersion: latest.version,
+    includeStateStamp: true,
+    stampVersion: latest.version,
+    stampHash: latest.stampHash,
+  });
+  const seedBlock = `${SEED_BEGIN}\n${seedRowSql}${SEED_END}\n`;
+  return { rows, catalogHash: latest.stampHash, migrations, seedBlock };
 }
 
 function replaceSeedBlock(seed, seedBlock) {
@@ -661,8 +1009,9 @@ function replaceSeedBlock(seed, seedBlock) {
   return seed.slice(0, start) + seedBlock.trimEnd() + seed.slice(after);
 }
 
-function expectedManifestText(manifest, migration) {
-  const next = { ...manifest, [MIGRATION_NAME]: sha256(migration) };
+function expectedManifestText(manifest, migrations) {
+  const next = { ...manifest };
+  for (const migration of migrations) next[migration.name] = sha256(migration.content);
   const ordered = Object.fromEntries(Object.entries(next).sort(([left], [right]) => left.localeCompare(right)));
   return JSON.stringify(ordered, null, 2) + '\n';
 }
@@ -675,7 +1024,7 @@ function checkEqual(actual, expected, label) {
 
 function artifactPaths(overrides = {}) {
   return {
-    migrationPath: overrides.migrationPath || MIGRATION_PATH,
+    migrationsDir: overrides.migrationsDir || MIGRATIONS_DIR,
     seedPath: overrides.seedPath || SEED_PATH,
     manifestPath: overrides.manifestPath || MANIFEST_PATH,
   };
@@ -686,23 +1035,30 @@ function expectedArtifacts(compiled, overrides = {}) {
   const currentSeed = fs.readFileSync(paths.seedPath, 'utf8');
   const expectedSeed = replaceSeedBlock(currentSeed, compiled.seedBlock);
   const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
-  const generatedChecksum = sha256(compiled.migration);
+  const migrationChecks = compiled.migrations.map((migration) => ({
+    name: migration.name,
+    path: path.join(paths.migrationsDir, migration.name),
+    content: migration.content,
+    checksum: sha256(migration.content),
+  }));
   return {
     paths,
     manifest,
-    generatedChecksum,
+    migrationChecks,
     expectedSeed,
-    expectedManifest: expectedManifestText(manifest, compiled.migration),
+    expectedManifest: expectedManifestText(manifest, compiled.migrations),
   };
 }
 
 function checkGeneratedArtifacts(compiled, overrides = {}) {
-  const { paths, expectedSeed, expectedManifest } = expectedArtifacts(compiled, overrides);
-  checkEqual(
-    fs.existsSync(paths.migrationPath) ? fs.readFileSync(paths.migrationPath, 'utf8') : '',
-    compiled.migration,
-    path.basename(paths.migrationPath)
-  );
+  const { paths, migrationChecks, expectedSeed, expectedManifest } = expectedArtifacts(compiled, overrides);
+  for (const migration of migrationChecks) {
+    checkEqual(
+      fs.existsSync(migration.path) ? fs.readFileSync(migration.path, 'utf8') : '',
+      migration.content,
+      migration.name
+    );
+  }
   checkEqual(fs.readFileSync(paths.seedPath, 'utf8'), expectedSeed,
     path.basename(paths.seedPath) + ' generated catalog block');
   checkEqual(fs.readFileSync(paths.manifestPath, 'utf8'), expectedManifest,
@@ -713,24 +1069,29 @@ function writeGeneratedArtifacts(compiled, overrides = {}) {
   const {
     paths,
     manifest,
-    generatedChecksum,
+    migrationChecks,
     expectedSeed,
     expectedManifest,
   } = expectedArtifacts(compiled, overrides);
-  const migrationExists = fs.existsSync(paths.migrationPath);
-  if (migrationExists) {
-    const installed = fs.readFileSync(paths.migrationPath, 'utf8');
-    if (installed !== compiled.migration) {
-      fail(`${path.basename(paths.migrationPath)} exists and differs; refuse to rewrite an immutable migration — create a new migration`);
-    }
-  } else {
-    const recordedChecksum = manifest[MIGRATION_NAME];
-    if (recordedChecksum && recordedChecksum !== generatedChecksum) {
-      fail(`${MIGRATION_NAME} has a different recorded checksum; restore it or create a new migration`);
+
+  // Validate every migration before writing any of them, so a refusal on one
+  // migration never leaves a partial write behind on another.
+  for (const migration of migrationChecks) {
+    const exists = fs.existsSync(migration.path);
+    if (exists) {
+      const installed = fs.readFileSync(migration.path, 'utf8');
+      if (installed !== migration.content) {
+        fail(`${migration.name} exists and differs; refuse to rewrite an immutable migration — create a new migration`);
+      }
+    } else {
+      const recordedChecksum = manifest[migration.name];
+      if (recordedChecksum && recordedChecksum !== migration.checksum) {
+        fail(`${migration.name} has a different recorded checksum; restore it or create a new migration`);
+      }
     }
   }
-  if (!migrationExists) {
-    fs.writeFileSync(paths.migrationPath, compiled.migration);
+  for (const migration of migrationChecks) {
+    if (!fs.existsSync(migration.path)) fs.writeFileSync(migration.path, migration.content);
   }
   if (fs.readFileSync(paths.seedPath, 'utf8') !== expectedSeed) {
     fs.writeFileSync(paths.seedPath, expectedSeed);
@@ -761,9 +1122,11 @@ module.exports = {
   compileCatalog,
   validateCore,
   validateSource,
+  validateOperationFieldsByOperation,
   replaceSeedBlock,
   expectedManifestText,
   writeGeneratedArtifacts,
+  CATALOG_MIGRATIONS,
 };
 
 if (require.main === module) {

@@ -73,9 +73,17 @@ function copyFixtureTree() {
       fs.copyFileSync(entryPath, path.join(serverDir, entry));
     }
   }
-  fs.copyFileSync(
-    path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json'),
-    path.join(stagingDir, 'sync-contract-staging.json')
+  // Declare the staged set explicitly instead of copying the repo's live
+  // scripts/fixtures/sync-contract-staging.json: this fixture tree is also given the real,
+  // current osi-server checkout (see SERVER_SOURCE above), and inheriting the repo's own
+  // staging file coupled this tree's "is the journal contract self-consistent" tests to
+  // whatever osi-server's real state happens to be *today* -- exactly the drift that broke
+  // "parity check accepts seed SQL trigger ops as a canonical subset" once osi-server's
+  // cloud-before-edge journal appliers landed ahead of this branch's edge activation.
+  // exactJournalStaging() is this file's single declared source of truth for the shape.
+  fs.writeFileSync(
+    path.join(stagingDir, 'sync-contract-staging.json'),
+    JSON.stringify(exactJournalStaging(), null, 2)
   );
   fs.copyFileSync(
     path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js'),
@@ -125,6 +133,9 @@ function exactJournalStaging() {
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
       edgeDeferred: [],
+      // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
+      // applier for each of these ops before the edge activates real emission of it.
+      edgeStaged: JOURNAL_EVENT_OPS.slice(),
       cloudDeferred: JOURNAL_EVENT_OPS.slice(),
     },
   };
@@ -774,7 +785,11 @@ async function publishBroken(tx, entryUuid) {
   assert.match(result.message, /unparseable outbox call|missing closing parenthesis/i);
 });
 
-test('parity rejects cloud-deferred journal ops implemented by the server early', () => {
+test('parity accepts a cloud-deferred journal op the server implements early when it is declared edge-staged', () => {
+  // Mandated deploy order (cloud full-parity program): osi-server lands its landing
+  // applier for a journal op before the edge activates real emission of it. The default
+  // fixture staging (exactJournalStaging()) declares all 5 journal ops edgeStaged, so the
+  // server implementing one of them ahead of edge activation is sanctioned, not an error.
   const fixture = createStagedParityFixture();
   fs.writeFileSync(fixture.serverSource, `
 class EdgeSyncService {
@@ -789,8 +804,31 @@ class EdgeSyncService {
 
   const result = checkSyncOpParity(fixture);
 
+  assert.equal(result.ok, true, result.message);
+  assert.match(result.message, /server ahead of edge activation \(sanctioned.*JOURNAL_ENTRY_UPSERTED/);
+});
+
+test('parity rejects a server op that is neither in the edge-active union nor declared edge-staged', () => {
+  // Fail-closed must survive the edgeStaged allowance: an op the server implements that is
+  // not required by the edge AND not declared edge-staged is still an error, regardless of
+  // it living in the same switch as legitimately staged journal ops.
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.serverSource, `
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED", "JOURNAL_ZZZ_NEVER_STAGED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
   assert.equal(result.ok, false);
-  assert.match(result.message, /server.*JOURNAL_ENTRY_UPSERTED/);
+  assert.match(result.message, /server.*JOURNAL_ZZZ_NEVER_STAGED/);
+  assert.doesNotMatch(result.message, /sanctioned.*JOURNAL_ZZZ_NEVER_STAGED/);
 });
 
 test('parity check reports runtime dispatch switch missing an op even if an allow list includes it', () => {

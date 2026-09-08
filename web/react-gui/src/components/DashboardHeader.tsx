@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
@@ -18,6 +18,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onLogout,
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
+  const navigate = useNavigate();
   const showDesktopData = isDesktopBrowser();
 
   return (
@@ -40,6 +41,11 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               items={[
                 { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
                 { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
+                {
+                  key: 'activity',
+                  label: t('addMenu.activity'),
+                  onSelect: () => navigate('/journal?capture=1'),
+                },
               ]}
             />
 
