@@ -133,7 +133,7 @@ function exactJournalStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: SCOPED_ACCESS_COMMANDS.slice(),
+      edgeDeferred: [],
       cloudDeferred: [
         'UPSERT_JOURNAL_ENTRY',
         'VOID_JOURNAL_ENTRY',

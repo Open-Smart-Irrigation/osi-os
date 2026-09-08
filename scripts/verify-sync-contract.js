@@ -42,7 +42,12 @@ const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
     ...EXACT_STAGED_JOURNAL_COMMANDS,
     ...EXACT_SCOPED_ACCESS_COMMANDS,
 ];
-const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [...EXACT_SCOPED_ACCESS_COMMANDS];
+// Edge implementation landed (real appliers wired into cmd-type-registry / the new
+// osi-scoped-access-commands module -- port commit "apply scoped access commands"), so
+// these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS
+// below: osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of
+// this port, so the cloud side is not required to issue them yet.
+const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },

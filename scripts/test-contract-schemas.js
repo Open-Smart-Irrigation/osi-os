@@ -961,7 +961,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([...SCOPED_ACCESS_COMMANDS].sort()) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
@@ -1906,6 +1906,10 @@ for (const format of [
     'journal_vocab:{custom_field_uuid}:{base_sync_version}',
     'journal_plot:{plot_uuid}:{base_sync_version}',
     'journal_plot_group:{group_uuid}:{base_sync_version}',
+    'scoped_user:{user_uuid}:{base_sync_version}',
+    'scoped_user_password:{user_uuid}:{base_sync_version}',
+    'scoped_zone_assignment:{assignment_uuid}:{base_sync_version}',
+    'scoped_plot_assignment:{assignment_uuid}:{base_sync_version}',
 ]) {
     reportCheck(
         effectKeyDoc.includes(format),

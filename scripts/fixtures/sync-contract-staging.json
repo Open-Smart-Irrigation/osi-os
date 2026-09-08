@@ -1,14 +1,7 @@
 {
   "version": 1,
   "commands": {
-    "edgeDeferred": [
-      "DELETE_USER_PLOT_ASSIGNMENT",
-      "DELETE_USER_ZONE_ASSIGNMENT",
-      "RESET_SCOPED_USER_PASSWORD",
-      "UPSERT_SCOPED_USER",
-      "UPSERT_USER_PLOT_ASSIGNMENT",
-      "UPSERT_USER_ZONE_ASSIGNMENT"
-    ],
+    "edgeDeferred": [],
     "cloudDeferred": [
       "UPSERT_JOURNAL_ENTRY",
       "VOID_JOURNAL_ENTRY",
