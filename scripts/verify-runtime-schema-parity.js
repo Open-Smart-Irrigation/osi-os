@@ -38,6 +38,15 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   'trg_journal_attachment_edge_parent_bi',
   'trg_journal_attachment_edge_parent_bu',
   'trg_journal_attachment_edge_binding_immutable_bu',
+  // 0044__scoped_access_schema.sql (scoped multi-gateway access, renumbered from
+  // AgroLink 0033) is migration-owned and emit-gated.
+  'trg_dp_user_zone_assign_outbox_ai',
+  'trg_dp_user_zone_assign_outbox_au',
+  'trg_dp_user_plot_assign_outbox_ai',
+  'trg_dp_user_plot_assign_outbox_au',
+  'trg_dp_users_outbox_uuid_au',
+  'trg_dp_users_outbox_ai',
+  'trg_dp_users_outbox_role_au',
 ]);
 
 function q(db, sql) {
