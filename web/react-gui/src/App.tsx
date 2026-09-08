@@ -15,6 +15,7 @@ import { GatewayRestartBanner } from './components/GatewayRestartBanner';
 import { AdminOnly } from './components/AdminOnly';
 import { UsersPage } from './pages/admin/UsersPage';
 import { GrantsPage } from './pages/admin/GrantsPage';
+import { ScopeStatusBanner } from './components/ScopeStatusBanner';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -24,6 +25,7 @@ function App() {
   return (
     <AuthProvider>
       <ScopeProvider>
+        <ScopeStatusBanner />
         <GatewayRestartBanner />
         <HashRouter>
           <Routes>
