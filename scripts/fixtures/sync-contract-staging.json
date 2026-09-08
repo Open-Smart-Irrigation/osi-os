@@ -19,6 +19,13 @@
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
     "edgeDeferred": [],
+    "edgeStaged": [
+      "JOURNAL_ENTRY_UPSERTED",
+      "JOURNAL_ENTRY_VOIDED",
+      "JOURNAL_VOCAB_UPSERTED",
+      "JOURNAL_PLOT_UPSERTED",
+      "JOURNAL_PLOT_GROUP_UPSERTED"
+    ],
     "cloudDeferred": [
       "JOURNAL_ENTRY_UPSERTED",
       "JOURNAL_ENTRY_VOIDED",
