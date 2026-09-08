@@ -20,7 +20,7 @@ const FLOW_PATHS = [
 ].map((rel) => path.join(REPO, rel));
 
 const TELEMETRY = ['DEVICE_DATA', 'CHAMELEON_READING', 'DENDRO_READING', 'DENDRO_DAILY', 'ZONE_ENVIRONMENT', 'ZONE_RECOMMENDATION'];
-const PROTECTED = ['IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION', 'VALVE_SCHEDULE', 'VALVE_SETTINGS', 'USER', 'USER_ZONE_ASSIGNMENT', 'USER_PLOT_ASSIGNMENT'];
+const PROTECTED = ['IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION', 'VALVE_SCHEDULE', 'VALVE_SETTINGS', 'USER', 'USER_ZONE_ASSIGNMENT', 'USER_PLOT_ASSIGNMENT', 'IRRIGATION_CALIBRATION', 'WEATHER_STATION_ZONES'];
 
 function nodeById(flowPath, id) {
   return JSON.parse(fs.readFileSync(flowPath, 'utf8')).find((n) => n.id === id);
@@ -88,21 +88,26 @@ function triggerAggregateTypes(seed) {
     //   AND appearing before the `op` position). To stay robust we collect ALL caps string
     //   literals in the INSERT column/VALUES region and let the assertion below flag any not
     //   in the declared union — a genuinely new, unclassified type WILL surface.
-    const region = b.slice(0, b.indexOf('json_object') === -1 ? b.length : b.indexOf('json_object'));
+    // Scoped to start at the INSERT statement itself (not the trigger's WHEN clause):
+    // a device-type gate such as `type_id = 'SENSECAP_S2120'` upstream of the INSERT is
+    // not an aggregate_type candidate and must not be swept into this heuristic.
+    const insertAt = b.indexOf('INSERT INTO sync_outbox');
+    const jsonAt = b.indexOf('json_object');
+    const region = b.slice(insertAt === -1 ? 0 : insertAt, jsonAt === -1 ? b.length : jsonAt);
     for (const m of region.matchAll(/'([A-Z][A-Z0-9_]+)'/g)) {
       const lit = m[1];
       // aggregate_type literals are the short subjects (DEVICE_DATA), not the op verbs
       // (DEVICE_DATA_APPENDED). Heuristic: an aggregate_type has no trailing op suffix.
-      if (!/_(APPENDED|UPSERTED|DELETED|UNCLAIMED|UNASSIGNED|ASSIGNED|UPDATED)$/.test(lit)) types.add(lit);
+      if (!/_(APPENDED|UPSERTED|DELETED|UNCLAIMED|UNASSIGNED|ASSIGNED|UPDATED|REPLACED)$/.test(lit)) types.add(lit);
     }
   }
   return types;
 }
 
-test('declared sets partition exactly the trigger set aggregate_types (28 triggers)', () => {
+test('declared sets partition exactly the trigger set aggregate_types (31 triggers)', () => {
   const seed = fs.readFileSync(SEED, 'utf8');
   const blocks = seed.split(/CREATE TRIGGER/).filter((b) => b.includes('INSERT INTO sync_outbox'));
-  assert.equal(blocks.length, 28, `expected 28 outbox triggers, found ${blocks.length}`);
+  assert.equal(blocks.length, 31, `expected 31 outbox triggers, found ${blocks.length}`);
   const declared = new Set([...TELEMETRY, ...PROTECTED]);
   const types = triggerAggregateTypes(seed);
   // Every aggregate_type a trigger writes MUST be classified (this is what forces a

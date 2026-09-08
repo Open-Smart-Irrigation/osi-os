@@ -43,5 +43,10 @@
   "0042__journal_v2_replication.sql": "563a4da98b9f1f9dde7c6d36896615f77e20505619cedda6b2d3dfccae678e81",
   "0043__journal_v2_media.sql": "f54b272e387cc389653425572dca5392a322abbc9a925d8c1bdee47fe98b0d01",
   "0044__scoped_access_schema.sql": "3d2333a8ce6b0043d6cff4ed7648686d9d8c833b3efd27af3f5a781846b0901b",
-  "0045__scoped_access_backfill.sql": "2f9c6b59da9cef67fcca8be68d31c7e08b5783b37832d8a895567285bfea07e7"
+  "0045__scoped_access_backfill.sql": "2f9c6b59da9cef67fcca8be68d31c7e08b5783b37832d8a895567285bfea07e7",
+  "0046__zone_insert_outbox.sql": "b8274cf8de72ae903c4df7b241caa9c4c301a713a4fca0948c4962194414fdbd",
+  "0047__zone_irrigation_calibration_sync.sql": "091e56275b8a84e1dd0ea0b846c5139e3f042d6dd200d4181ff71516253ca165",
+  "0048__zone_irrigation_calibration_backfill.sql": "f455faafe52d230997161c151581c5248aa3583d8c6da1e91de3161232da7e8c",
+  "0049__weather_station_zone_sync.sql": "7c851979a3a022b51447eaf011fc4053d5cd6b121dc9311f58f879804c35d27f",
+  "0050__weather_station_zone_backfill.sql": "77dfa221bc87b171a0e11518a720d16a117f22ae022896bdcd1dc0fb0e6a26e5"
 }

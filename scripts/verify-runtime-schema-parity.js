@@ -11,42 +11,67 @@ const FLOWS = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((p) => path.join(repo, p));
-const MIGRATION_OWNED_TRIGGERS = new Set([
+const MIGRATION_OWNED_TRIGGERS = new Map([
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
   // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
-  'trg_improvement_requests_outbox_ai',
+  ['trg_improvement_requests_outbox_ai', '0005__field_work_requests.sql'],
   // 0024__valve_schedule_sync_triggers.sql — same story: seed DB + deploy-time
   // migration runner delivery, not the frozen sync-init-fn boot DDL.
-  'trg_sync_valve_schedules_outbox_ai',
-  'trg_sync_valve_schedules_outbox_au',
+  ['trg_sync_valve_schedules_outbox_ai', '0024__valve_schedule_sync_triggers.sql'],
+  ['trg_sync_valve_schedules_outbox_au', '0024__valve_schedule_sync_triggers.sql'],
   // 0025__valve_settings_sync_triggers.sql (cloud full-parity Task P2-E1) —
   // same story again: seed DB + deploy-time migration runner delivery.
-  'trg_sync_valve_settings_outbox_ai',
-  'trg_sync_valve_settings_outbox_au',
+  ['trg_sync_valve_settings_outbox_ai', '0025__valve_settings_sync_triggers.sql'],
+  ['trg_sync_valve_settings_outbox_au', '0025__valve_settings_sync_triggers.sql'],
   // 0029__sentek_vwc_vic_channels.sql decorates existing outbox rows with additive
   // Sentek fields. Migration-owned so the frozen sync-init-fn boot DDL does not
   // duplicate the new schema behavior.
-  'trg_sentek_device_outbox_payload_ai',
-  'trg_sentek_data_outbox_payload_ai',
+  ['trg_sentek_device_outbox_payload_ai', '0029__sentek_vwc_vic_channels.sql'],
+  ['trg_sentek_data_outbox_payload_ai', '0029__sentek_vwc_vic_channels.sql'],
   // 0043__journal_v2_media.sql (journal v2 replication, renumbered from AgroLink
   // 0044) guards journal attachment provenance. These are NOT sync_outbox emitters
   // -- they are integrity guards -- but this verifier compares the whole seed trigger
   // set against sync-init-fn, so migration-delivered triggers must be listed here or
   // the boot node would be required to grow them. Seed DB + deploy-time migration
   // runner delivery, not the frozen sync-init-fn boot DDL.
-  'trg_journal_attachment_source_immutable_bu',
-  'trg_journal_attachment_edge_parent_bi',
-  'trg_journal_attachment_edge_parent_bu',
-  'trg_journal_attachment_edge_binding_immutable_bu',
+  ['trg_journal_attachment_source_immutable_bu', '0043__journal_v2_media.sql'],
+  ['trg_journal_attachment_edge_parent_bi', '0043__journal_v2_media.sql'],
+  ['trg_journal_attachment_edge_parent_bu', '0043__journal_v2_media.sql'],
+  ['trg_journal_attachment_edge_binding_immutable_bu', '0043__journal_v2_media.sql'],
   // 0044__scoped_access_schema.sql (scoped multi-gateway access, renumbered from
   // AgroLink 0033) is migration-owned and emit-gated.
-  'trg_dp_user_zone_assign_outbox_ai',
-  'trg_dp_user_zone_assign_outbox_au',
-  'trg_dp_user_plot_assign_outbox_ai',
-  'trg_dp_user_plot_assign_outbox_au',
-  'trg_dp_users_outbox_uuid_au',
-  'trg_dp_users_outbox_ai',
-  'trg_dp_users_outbox_role_au',
+  ['trg_dp_user_zone_assign_outbox_ai', '0044__scoped_access_schema.sql'],
+  ['trg_dp_user_zone_assign_outbox_au', '0044__scoped_access_schema.sql'],
+  ['trg_dp_user_plot_assign_outbox_ai', '0044__scoped_access_schema.sql'],
+  ['trg_dp_user_plot_assign_outbox_au', '0044__scoped_access_schema.sql'],
+  ['trg_dp_users_outbox_uuid_au', '0044__scoped_access_schema.sql'],
+  ['trg_dp_users_outbox_ai', '0044__scoped_access_schema.sql'],
+  ['trg_dp_users_outbox_role_au', '0044__scoped_access_schema.sql'],
+  // 0046__zone_insert_outbox.sql (renumbered from AgroLink 0035) repairs
+  // local-create sync through the deploy-time migration runner. The frozen
+  // boot DDL must not duplicate it.
+  ['trg_sync_zones_outbox_ai', '0046__zone_insert_outbox.sql'],
+  // 0047__zone_irrigation_calibration_sync.sql (renumbered from AgroLink
+  // 0036) versions and mirrors the calibration aggregate. These triggers
+  // stay out of the frozen boot DDL.
+  [
+    'trg_sync_zone_irrigation_calibration_defaults_ai',
+    '0047__zone_irrigation_calibration_sync.sql',
+  ],
+  [
+    'trg_sync_zone_irrigation_calibration_outbox_au',
+    '0047__zone_irrigation_calibration_sync.sql',
+  ],
+  // 0049__weather_station_zone_sync.sql (renumbered from AgroLink 0038)
+  // versions and mirrors complete S2120 weather-station assignment sets.
+  [
+    'trg_sync_weather_station_zone_state_defaults_ai',
+    '0049__weather_station_zone_sync.sql',
+  ],
+  [
+    'trg_sync_weather_station_zones_outbox_au',
+    '0049__weather_station_zone_sync.sql',
+  ],
 ]);
 
 function q(db, sql) {
@@ -72,9 +97,19 @@ const setEq = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const diff = (a, b) => [...a].filter((x) => !b.has(x));
 
 const problems = [];
-for (const triggerName of MIGRATION_OWNED_TRIGGERS) {
+for (const [triggerName, migrationName] of MIGRATION_OWNED_TRIGGERS) {
   if (!canonTriggers.has(triggerName)) {
     problems.push(`migration-owned trigger ${triggerName} is not present in the canonical seed`);
+  }
+  const migrationPath = path.join(
+    repo,
+    'database/migrations/ordered',
+    migrationName
+  );
+  if (!fs.existsSync(migrationPath)) {
+    problems.push(`migration-owned trigger ${triggerName} has no migration ${migrationName}`);
+  } else if (!triggerNames(fs.readFileSync(migrationPath, 'utf8')).has(triggerName)) {
+    problems.push(`migration ${migrationName} does not create ${triggerName}`);
   }
 }
 for (const flowPath of FLOWS) {

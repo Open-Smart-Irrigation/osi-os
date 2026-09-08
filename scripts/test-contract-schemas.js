@@ -34,6 +34,13 @@ const SCOPED_ACCESS_EVENT_OPS = [
     'USER_ZONE_ASSIGNMENT_DELETED',
     'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
+// Wave 3 zone/weather/calibration sync port: SQL-owned outbox events, cloud-deferred
+// pending a paired osi-server applier PR (see the long-form rationale in
+// scripts/verify-sync-op-parity.js next to EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS).
+const ZONE_CALIBRATION_WEATHER_EVENT_OPS = [
+    'WEATHER_STATION_ZONES_REPLACED',
+    'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
     JOURNAL_ENTRY_VOIDED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -83,6 +90,10 @@ const SCOPED_ACCESS_EVENT_KEY_FIELDS = {
     USER_PLOT_ASSIGNMENT_UPSERTED: 'assignment_uuid',
     USER_PLOT_ASSIGNMENT_DELETED: 'assignment_uuid',
 };
+const ZONE_CALIBRATION_WEATHER_EVENT_KEY_FIELDS = {
+    ZONE_IRRIGATION_CALIBRATION_UPSERTED: 'zone_uuid',
+    WEATHER_STATION_ZONES_REPLACED: 'device_eui',
+};
 const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     ...Object.fromEntries(
         Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
@@ -92,6 +103,12 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     ),
     ...Object.fromEntries(
         Object.entries(SCOPED_ACCESS_EVENT_KEY_FIELDS).map(([op, keyField]) => [op, {
+            aggregate_key_path: `payload.${keyField}`,
+            sync_version_path: 'payload.sync_version',
+        }])
+    ),
+    ...Object.fromEntries(
+        Object.entries(ZONE_CALIBRATION_WEATHER_EVENT_KEY_FIELDS).map(([op, keyField]) => [op, {
             aggregate_key_path: `payload.${keyField}`,
             sync_version_path: 'payload.sync_version',
         }])
@@ -971,7 +988,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS, ZONE_CALIBRATION_WEATHER_EVENT_OPS));
     reportCheck(exactStaging, 'staging manifest pins the exact journal sets', 'staging manifest drifted from the exact journal sets');
 }
 

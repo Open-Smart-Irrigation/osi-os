@@ -75,9 +75,23 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
   'USER_ZONE_ASSIGNMENT_DELETED',
   'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
+// Wave 3 zone/weather/calibration sync port (AgroLink 64d72f90 + ae9741880 +
+// 33eb12b94, renumbered migrations 0047/0049): SQL-owned outbox events
+// emitted by trg_sync_zone_irrigation_calibration_outbox_au and
+// trg_sync_weather_station_zones_outbox_au. Stage 4a on osi-server only
+// implemented the USER trio's appliers; osi-server has no applier for
+// either of these two ops yet, so both stay cloudDeferred until the paired
+// cloud applier PR merges and this repo's server-source snapshot is
+// updated to match -- flip by moving this list out of
+// EXACT_CLOUD_DEFERRED_EVENT_OPS in that same commit, never silently.
+const EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS = [
+  'WEATHER_STATION_ZONES_REPLACED',
+  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+];
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
   ...EXACT_JOURNAL_EVENT_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
+  ...EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS,
 ];
 // Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
 // order is cloud-before-edge: osi-server lands the landing applier for a journal event op
@@ -162,6 +176,14 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_user_plot_assign_outbox_* triggers.
   'USER_PLOT_ASSIGNMENT_UPSERTED',
   'USER_PLOT_ASSIGNMENT_DELETED',
+  // Emitted by 0047__zone_irrigation_calibration_sync.sql's
+  // trg_sync_zone_irrigation_calibration_outbox_au trigger, not by flows.json.
+  // Cloud handling is staged (see EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS)
+  // pending a paired osi-server applier PR.
+  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+  // Emitted by 0049__weather_station_zone_sync.sql's
+  // trg_sync_weather_station_zones_outbox_au trigger, not by flows.json.
+  'WEATHER_STATION_ZONES_REPLACED',
 ]);
 // Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
 // "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living

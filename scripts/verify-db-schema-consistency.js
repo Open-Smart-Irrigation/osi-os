@@ -447,6 +447,24 @@ const schemaContract = {
     'valve_channel',
     'created_at',
   ],
+  zone_irrigation_calibration: [
+    'zone_id',
+    'valve_device_eui',
+    'measured_flow_rate_lpm',
+    'measurement_method',
+    'measured_at',
+    'created_at',
+    'updated_at',
+    'sync_version',
+    'deleted_at',
+    'last_applied_at',
+  ],
+  weather_station_zone_state: [
+    'deveui',
+    'sync_version',
+    'last_applied_at',
+    'updated_at',
+  ],
   valve_actuation_expectations: [
     'expectation_id',
     'device_eui',
@@ -1204,6 +1222,15 @@ const requiredIndexSqlFragments = {
 };
 
 const requiredTriggerSqlFragments = {
+  trg_sync_zones_outbox_ai: [
+    "where peer_node = 'cloud' and linked = 1",
+    "new.zone_uuid is not null",
+    "new.gateway_device_eui is not null",
+    "'zone_upserted'",
+    "'soil_type', new.soil_type",
+    "'sync_version', new.sync_version",
+    "'user', json_object(",
+  ],
   trg_sentek_device_outbox_payload_ai: [
     "new.aggregate_type = 'device'",
     "'$.sdi12_channel_layout_json'",
