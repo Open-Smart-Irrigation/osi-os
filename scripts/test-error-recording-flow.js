@@ -19,6 +19,17 @@ const directCatchNodes = {
   'record-error-catch-cloud-sync': recordErrorTab,
 };
 
+// record-error-catch-auth additionally wires to auth-catch-http500 (Wave 3
+// scoped-access port, shared-resolver commit): auth-tab's uncaught-error catch
+// now fans out to both the shared error-recording link-out AND a same-tab
+// responder that turns an unhandled auth-tab exception into a real HTTP 500
+// instead of leaving the request hanging. Same-tab, so it doesn't violate the
+// cross-tab-wire ban checked further below -- just an extra wire this specific
+// catch node carries that its siblings don't.
+const extraSameTabTargets = {
+  'record-error-catch-auth': 'auth-catch-http500',
+};
+
 // Catch nodes on a different tab than record-error-fn: must route through a
 // same-tab `link out` -> shared `link in` -> record-error-fn, never a direct
 // cross-tab wire (Node-RED's editor silently drops cross-tab drawn wires).
@@ -90,8 +101,16 @@ for (const relativePath of flowProfiles) {
       const catchNode = byId.get(catchId);
       assert.strictEqual(catchNode.wires.length, 1, `${catchId} should have exactly one wire group`);
       const targets = catchNode.wires[0];
-      assert.strictEqual(targets.length, 1, `${catchId} should wire to exactly one node`);
-      const [targetId] = targets;
+      const extraTargetId = extraSameTabTargets[catchId];
+      const expectedTargetCount = extraTargetId ? 2 : 1;
+      assert.strictEqual(targets.length, expectedTargetCount, `${catchId} should wire to exactly ${expectedTargetCount} node(s)`);
+      if (extraTargetId) {
+        assert(targets.includes(extraTargetId), `${catchId} should wire to ${extraTargetId}`);
+        const extraNode = byId.get(extraTargetId);
+        assert(extraNode, `${catchId} target ${extraTargetId} missing`);
+        assert.strictEqual(extraNode.z, tabId, `${catchId}'s extra target ${extraTargetId} must be on the same tab (${tabId})`);
+      }
+      const [targetId] = targets.filter((id) => id !== extraTargetId);
       assert.notStrictEqual(targetId, 'record-error-fn', `${catchId} must not wire directly to record-error-fn (cross-tab)`);
 
       const linkOutNode = byId.get(targetId);
