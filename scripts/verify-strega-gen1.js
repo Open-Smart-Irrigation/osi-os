@@ -33,6 +33,32 @@ const flowPath = path.resolve(
   'share',
   'flows.json',
 );
+const scopeHelperPath = path.resolve(
+  __dirname,
+  '..',
+  'conf',
+  'full_raspberrypi_bcm27xx_bcm2712',
+  'files',
+  'usr',
+  'share',
+  'node-red',
+  'osi-scope-helper',
+  'index.js',
+);
+
+// Auth + Parse STREGA * nodes resolve their bearer secret via
+// osiLib.require('scope').value.resolveAuthSecret(...) (Wave 3 scoped-access
+// port, shared-resolver refactor) instead of duplicating the file-read/env
+// logic inline. This test's sandbox executes those nodes' real func bodies in
+// a vm context, so it needs the same osiLib.require('scope') seam every other
+// harness in this repo already stubs (see scripts/test-auth-credential-isolation.js).
+const scopeHelper = require(scopeHelperPath);
+const osiLib = {
+  require(name) {
+    if (name === 'scope') return { ok: true, value: scopeHelper };
+    return { ok: false, error: `unexpected helper ${name}` };
+  },
+};
 
 function loadJson(jsonPath) {
   return JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
@@ -72,7 +98,7 @@ function getFunctionNode(flows, name) {
   return node;
 }
 
-function runFunctionNode(node, payload, secret, deviceEui) {
+async function runFunctionNode(node, payload, secret, deviceEui) {
   const msg = {
     req: {
       headers: {
@@ -93,6 +119,7 @@ function runFunctionNode(node, payload, secret, deviceEui) {
     console,
     crypto,
     msg,
+    osiLib,
     env: {
       get(name) {
         if (name === 'AUTH_TOKEN_SECRET' || name === 'JWT_SECRET') return secret;
@@ -105,8 +132,34 @@ function runFunctionNode(node, payload, secret, deviceEui) {
         return undefined;
       },
     },
+    // Some Auth + Parse STREGA * nodes became async (X2 review: fresh scope check on
+    // physical commands when OSI_SCOPED_ACCESS=1) and now open their own osiDb.Database
+    // handle on that branch. This fixture always runs with OSI_SCOPED_ACCESS unset, so
+    // that branch never executes, but the stub is here so a node this test starts
+    // exercising in scoped mode later fails on a real assertion instead of a ReferenceError.
+    osiDb: {
+      Database: class {
+        get(_sql, _params, callback) {
+          callback(null, undefined);
+        }
+
+        close(callback) {
+          callback();
+        }
+      },
+    },
+    node: {
+      status() {},
+      error() {},
+      warn() {},
+    },
   };
-  const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.vm.js`);
+  // Auth + Parse STREGA * nodes are a mix of plain functions and `return (async () =>
+  // {...})();` — the latter's func body makes runScript return a Promise synchronously
+  // rather than the resolved output array. Await only when the result is thenable so a
+  // plain synchronous node's real array return isn't itself mistaken for a promise.
+  const raw = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.vm.js`);
+  const result = raw && typeof raw.then === 'function' ? await raw : raw;
   assert.ok(Array.isArray(result), `${node.name} must return a Node-RED output array`);
   assert.ok(result[0], `${node.name} should emit the parsed command on output 1`);
   return result[0];
@@ -206,7 +259,7 @@ async function verifyStregaNormalizationContract(flows, fixture, object, label, 
   console.log(`OK ${label} STREGA normalization fixture`);
 }
 
-function verifyCommandMatrix(flows, fixture) {
+async function verifyCommandMatrix(flows, fixture) {
   const secret = 'strega-gen1-test-secret';
   const cases = [
     {
@@ -243,7 +296,7 @@ function verifyCommandMatrix(flows, fixture) {
 
   for (const testCase of cases) {
     const node = getFunctionNode(flows, testCase.name);
-    const parsed = runFunctionNode(node, testCase.payload, secret, fixture.deviceEui);
+    const parsed = await runFunctionNode(node, testCase.payload, secret, fixture.deviceEui);
     assert.equal(parsed._strega_payload_hex, testCase.expectedHex, `${testCase.name} should build ${testCase.expectedHex}`);
     assert.equal(parsed._strega_fport, testCase.expectedPort, `${testCase.name} should target fPort ${testCase.expectedPort}`);
     console.log(`OK ${testCase.name} builds ${testCase.expectedHex} on fPort ${testCase.expectedPort}`);
@@ -288,7 +341,7 @@ async function main() {
       currentState: 'OPEN',
     },
   );
-  verifyCommandMatrix(flows, fixture);
+  await verifyCommandMatrix(flows, fixture);
 
   const schedulerAckFixture = loadJson(schedulerAckFixturePath);
   const clockSyncAckFixture = loadJson(clockSyncAckFixturePath);
