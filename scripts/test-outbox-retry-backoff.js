@@ -100,9 +100,26 @@ test('retry-bump UPDATE is present verbatim in sync-outbox-mark and sync-force-b
 
 test('sync-outbox-mark: the statusCode transport-failure guard returns before retryableIds is ever touched', () => {
   const f = nodeById(FLOW_PATHS[0], 'sync-outbox-mark').func;
-  const guardIdx = f.indexOf('if (!isHttpSuccess(msg.statusCode)) {');
+  // These two markers previously searched for an `isHttpSuccess(...)` helper
+  // and a `const retryableIds` declaration -- the shape from f5d02c00b
+  // ("fix(sync): fail-closed statusCode + success gating in outbox/bootstrap
+  // mark"). That commit lives only on the unrelated, self-described
+  // "non-deployable scratch proposal" branch sdd/sync-stoploss-harness (task
+  // 2 of a since-untracked docs/superpowers/plans/2026-07-15-sync-delivery-
+  // stop-loss.md) and is NOT an ancestor of this branch -- it never shipped
+  // to main or to this journal port. The markers were updated in anticipation
+  // of that rewrite landing (95624198c and its duplicates), but it never did,
+  // leaving the assertions pointed at source text that does not exist here.
+  // What main (and this port) actually ships is the truthy
+  // `msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300))`
+  // check with `let retryableIds` -- already fail-closed: the guard's
+  // `return null;` sits textually before both the retryableIds declaration
+  // and the retry-bump UPDATE, which is exactly the invariant this test
+  // exists to pin. Point the markers at what is really shipped instead of
+  // reverting the invariant itself.
+  const guardIdx = f.indexOf('if (msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300)) {');
   const guardReturnIdx = f.indexOf('return null;', guardIdx);
-  const retryDeclIdx = f.indexOf('const retryableIds');
+  const retryDeclIdx = f.indexOf('let retryableIds');
   const retryUpdateIdx = f.indexOf('retry_count = retry_count + 1');
   assert.ok(guardIdx !== -1 && guardReturnIdx !== -1 && retryDeclIdx !== -1 && retryUpdateIdx !== -1, 'expected markers not found');
   assert.ok(guardReturnIdx < retryDeclIdx, 'transport-failure guard must return before retryableIds is declared');
