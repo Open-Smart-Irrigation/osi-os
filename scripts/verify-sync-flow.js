@@ -18,6 +18,8 @@ const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js
 const commandLedgerSource = fs.readFileSync(commandLedgerPath, 'utf8');
 const zoneCommandsPath = path.join(nodeRedRoot, 'osi-zone-commands', 'index.js');
 const zoneCommandsSource = fs.readFileSync(zoneCommandsPath, 'utf8');
+const scopedAccessCommandsPath = path.join(nodeRedRoot, 'osi-scoped-access-commands', 'index.js');
+const scopedAccessCommandsSource = fs.readFileSync(scopedAccessCommandsPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -107,6 +109,8 @@ execFileSync(process.execPath, [path.resolve(__dirname, 'test-sync-history-worke
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-hash-fixtures.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-api-contract.js'), '--allow-missing-history'], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'test-terra-selection-edge-acceptance.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'verify-history-api-contract.test.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'verify-scoped-access.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
 const chirpstackInitScript = fs.readFileSync(chirpstackInitPath, 'utf8');
@@ -1402,7 +1406,8 @@ expectIncludes('Clear linked account state', "flow.set('account_linked', false)"
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
-expectIncludes('Process Result', 'osi_auth_token_secret', 'uses a persisted local auth secret');
+expectIncludes('Process Result', "osiLib.require('scope')", 'loads the shared authentication secret helper');
+expectIncludes('Process Result', 'resolveAuthSecret', 'uses the shared persisted local auth secret implementation');
 expectIncludes('Process Result', "env.get('LINK_GATEWAY_DEVICE_EUI')", 'uses the linked gateway identity captured at account-link time');
 expectIncludes('Process Result', 'decodeGatewayDeviceEuiFromSyncToken', 'falls back to the gateway encoded into the sync token');
 expectIncludes('Process Result', "env.get('DEVICE_EUI')", 'uses canonical runtime gateway identity only as a last resort');
@@ -1650,6 +1655,16 @@ expectIncludesById(
   '.close(',
   'closes the Terra zone-config command database handle'
 );
+expectOrderedIncludesById('scoped-access-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const accessLoad = osiLib.require('scoped-access-commands');",
+  "const scopeLoad = osiLib.require('scope');",
+  'applyScopedAccessCommand(db, envelope, {',
+], 'passes protected scoped-access commands through the transactional helper');
+expectIncludesById('scoped-access-command-apply-fn', 'Scoped access command helpers unavailable:', 'fails closed when scoped-access helpers are unavailable');
+expectIncludesById('scoped-access-command-apply-fn', '.close(', 'closes the scoped-access command database handle');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'db.transaction(async function(tx) {', 'atomically applies Terra zone config and terminal command state');
@@ -1659,6 +1674,10 @@ expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'owner_user
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'UPDATE irrigation_zones SET ', 'writes canonical Terra selection state');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO applied_commands', 'persists the Terra terminal result');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO command_ack_outbox', 'persists the Terra ACK in the same transaction');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async function(tx) {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'base_version_conflict', 'rejects stale scoped-access commands with a terminal conflict');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'Cannot disable or demote the last enabled admin', 'protects the final enabled gateway admin');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'scope.invalidateScope()', 'invalidates cached scope after an applied mutation');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
@@ -1788,9 +1807,11 @@ expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guar
 expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
 expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
 expectWireById('journal-command-apply-fn', 'terra-zone-config-command-apply-fn', 'routes recognized non-journal commands through the protected Terra zone-config applier');
-expectWireById('journal-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted journal ACKs');
+expectWireById('journal-command-apply-fn', 'scoped-access-command-apply-fn', 'publishes atomically persisted journal ACKs onward through scoped-access handling');
 expectWireById('terra-zone-config-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-Terra commands to the existing router');
 expectWireById('terra-zone-config-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted Terra zone-config ACKs');
+expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
+expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');
@@ -2260,7 +2281,7 @@ expectLibById('put-soil-depth-fn', 'crypto', 'crypto', 'imports crypto for soil-
 expectLibById('put-soil-depth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for soil-depth persistence');
 expectIncludesById('sensor-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy sensor history through the history helper rollup path');
 expectIncludesById('sensor-history-fn', 'field: field', 'passes the requested legacy field to the helper');
-expectIncludesById('sensor-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy sensor history');
+expectIncludesById('sensor-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy sensor history and delegates scoped access separately');
 expectLibById('sensor-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy sensor history');
 expectLibById('sensor-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy sensor history');
 expectLibById('sensor-history-fn', 'crypto', 'crypto', 'imports crypto for legacy sensor history auth verification');
@@ -2299,7 +2320,7 @@ expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESC
 expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
 expectIncludesById('dendro-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy dendro history through the history helper rollup path');
 expectIncludesById('dendro-history-fn', "mode: 'dendro'", 'preserves dendrometer history response shape through helper dendro mode');
-expectIncludesById('dendro-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy dendro history');
+expectIncludesById('dendro-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy dendro history and delegates scoped access separately');
 expectLibById('dendro-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy dendro history');
 expectLibById('dendro-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy dendro history');
 expectLibById('dendro-history-fn', 'crypto', 'crypto', 'imports crypto for legacy dendro history auth verification');
@@ -2333,8 +2354,16 @@ if (deviceApiCatch) {
   expectEqual(deviceApiCatch.scope, null, 'device-api catch node catches the whole tab');
 }
 expectWireById('device-api-catch', 'device-api-http500', 'routes uncaught device-api errors into the HTTP 500 formatter');
-expectIncludesById('device-api-http500', 'msg.statusCode = (msg.error && msg.error.statusCode) || 500;', 'adopts a thrown error statusCode (e.g. verifyBearer 401) for device-api failures, defaulting to 500 (issue #9)');
-expectIncludesById('device-api-http500', "error: 'device-api failed'", 'formats uncaught device-api failures with the generic error code');
+// Wave 3 scoped-access port (AgroLink c034b2893): device-api-http500 gained an
+// _osiAuthFailure exact-shape-tag + closed-allowlist classifier so a genuine 401
+// from an allowlisted auth node reports its real Unauthorized/Invalid
+// token/Token expired message, while an unclassified or spoofed tag still falls
+// through to the original issue #9 contract below -- adopt the thrown error's own
+// statusCode (400/403/404/etc, or an unclassified 401), defaulting to 500. The
+// literal assignment is split across two statements now (const statusCode = ...
+// ; msg.statusCode = statusCode;) rather than one, so the pin is updated to match.
+expectIncludesById('device-api-http500', 'const statusCode = authMessage ? 401 : (msg.error && msg.error.statusCode) || 500;', 'adopts a thrown error statusCode (e.g. verifyBearer 401) for device-api failures, defaulting to 500 (issue #9), unless overridden by a classified 401');
+expectIncludesById('device-api-http500', "error: authMessage ? 'Unauthorized' : 'device-api failed'", 'formats uncaught device-api failures with the generic error code, or Unauthorized for a classified 401');
 expectWireById('device-api-http500', 'device-response', 'returns uncaught device-api failures through the shared response node');
 expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');
 expectIncludes('Format Dendro Config Response', 'dendro_invert_direction: row.dendro_invert_direction ?? null', 'keeps legacy dendrometer inversion config for compatibility');
@@ -3451,6 +3480,33 @@ if (!helperPath) {
     }
   }
 }
+
+// cs-reg-cloud-fn (cloud-command registration) — W5/P9: resolves the
+// cloud-sent zoneUuid to an edge-local zone id and assigns it through a
+// row-wise precondition-guarded UPDATE so trg_sync_devices_outbox_au fires
+// and a replayed command can never pull a device out of a zone someone has
+// already assigned it to (P11/W4).
+expectIncludesById('cs-reg-cloud-fn', "SELECT id FROM irrigation_zones WHERE zone_uuid = ? AND deleted_at IS NULL LIMIT 1", 'resolves the cloud-sent zoneUuid to an edge-local zone id (W5/P9)');
+expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns through the row-wise precondition-guarded UPDATE (P11/W4)');
+// Spec section 10: the whole P9 zone seam is scoped-mode only, so a flag-off
+// gateway ignores a cloud-supplied zoneUuid and emits the pre-seam ACK shape.
+expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
+expectIncludesById('cs-reg-cloud-fn', 'SELECT user_id, type_id, irrigation_zone_id, deleted_at, gateway_device_eui, sync_version FROM devices WHERE deveui = ? LIMIT 1', 'loads deleted, unclaimed, assigned, and owned device state before the scoped claim fence');
+expectIncludesById('cs-reg-cloud-fn', "code: 'ALREADY_CLAIMED'", 'refuses an EUI another account already claimed before touching ChirpStack');
+expectIncludesById('cs-reg-cloud-fn', "var successState = scopedOn && existing && existingOwnerId !== null ? 'ALREADY_REGISTERED' : 'APPLIED';", 'scopes the already-registered ACK state while retaining the legacy APPLIED state when the flag is off');
+expectIncludesById('cs-reg-cloud-fn', ', deleted_at = NULL', 'revives a deleted existing device during an allowed scoped claim');
+expectIncludesById('cs-reg-cloud-fn', 'if (scopedOn && error.verificationRequired === true)', 'gates verification-required failure detail on scoped mode');
+expectIncludesById('cs-reg-cloud-fn', 'successExtras.zoneAssignedId = zoneId;', 'reports the P9 zone-resolution outcome only in scoped mode');
+expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', successExtras), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
+
+// cs-reg-cloud-ack-fn (Build Special Command ACK) — forwards the P9 zone
+// resolution outcome on every REGISTER_DEVICE ack, scoped mode only: the
+// applier omits both keys on a flag-off gateway, and this ACK payload omits
+// them in turn so a cloud that predates the seam sees the shape it expects.
+expectIncludesById('cs-reg-cloud-ack-fn', "Object.prototype.hasOwnProperty.call(ack, 'zoneAssignedId')", 'forwards the P9 zone assignment outcome only when the applier set it');
+expectIncludesById('cs-reg-cloud-ack-fn', "Object.prototype.hasOwnProperty.call(ack, 'zoneWarning')", 'forwards the P9 zone resolution warning only when the applier set it');
+expectIncludesById('cs-reg-cloud-ack-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'resolves scoped mode before forwarding scoped-only ACK detail');
+expectIncludesById('cs-reg-cloud-ack-fn', 'if (scopedOn && ack.verificationRequired === true) payload.verificationRequired = true;', 'omits verification-required detail from flag-off ACK bytes');
 
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function decodeUplink(input)', 'ships the STREGA ChirpStack decoder entry point');
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function Decode(fPort, bytes)', 'ships the vendor Gen1 STREGA decoder implementation');

@@ -8,6 +8,11 @@
     "activity": "Log activity"
   },
   "data": "Data",
+  "admin": "Admin",
+  "adminMenu": {
+    "users": "Users",
+    "grants": "Grants"
+  },
   "account": "Account",
   "accountMenu": {
     "osiServer": "OSI Server"

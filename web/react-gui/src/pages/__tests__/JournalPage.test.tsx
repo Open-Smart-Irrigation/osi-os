@@ -26,16 +26,29 @@ const mocks = vi.hoisted(() => ({
   retryZones: vi.fn(),
   isDesktopBrowser: vi.fn(() => false),
   workspace: vi.fn(),
+  scopeState: {
+    loading: false,
+    isScoped: false,
+    role: 'admin',
+    canWrite: true,
+    zoneWritable: vi.fn<(zoneUuid: string) => boolean>(() => true),
+  },
 }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key === 'capture.save.finalSavedGateway' ? 'Saved on farm gateway' : key,
+    t: (key: string) => ({
+      'capture.save.finalSavedGateway': 'Saved on farm gateway',
+      'readOnly.farm': 'You have read-only access to this farm.',
+    }[key] ?? key),
     i18n: { language: 'en', resolvedLanguage: 'en' },
   }),
 }));
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ username: 'farmer', logout: vi.fn() }),
+}));
+vi.mock('../../contexts/ScopeContext', () => ({
+  useScope: () => mocks.scopeState,
 }));
 vi.mock('../../components/AppHeader', () => ({ AppHeader: () => <header /> }));
 vi.mock('../../journal/useJournalCatalog', () => ({
@@ -522,6 +535,11 @@ describe('JournalPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.useRealCaptureFlow = false;
+    mocks.scopeState.loading = false;
+    mocks.scopeState.isScoped = false;
+    mocks.scopeState.role = 'admin';
+    mocks.scopeState.canWrite = true;
+    mocks.scopeState.zoneWritable.mockReturnValue(true);
     mocks.getZones.mockResolvedValue(zones);
     mocks.useSWR.mockReturnValue({
       data: zones,
@@ -599,6 +617,98 @@ describe('JournalPage', () => {
     expect(screen.getByTestId('timeline')).toBeInTheDocument();
     expect(screen.queryByTestId('journal-workspace')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'logActivity' })).toBeInTheDocument();
+  });
+
+  it('keeps journal data visible but removes capture controls for viewers', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.role = 'viewer';
+    mocks.scopeState.canWrite = false;
+
+    renderPage();
+
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'logActivity' })).not.toBeInTheDocument();
+  });
+
+  // Maintainer decision 3(c) (S6): the <CanWrite> wrapper around "Log activity"
+  // and the write controls beneath JournalWorkspace/DetailPanel hide silently;
+  // this notice is the ONE explanation for all of them on this page, mounted
+  // once beneath the header, not duplicated per hidden control.
+  it('explains read-only access exactly once for a viewer, not once per hidden control', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.role = 'viewer';
+    mocks.scopeState.canWrite = false;
+
+    renderPage();
+
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByText('You have read-only access to this farm.')).toBeInTheDocument();
+  });
+
+  it('shows no read-only notice for a writer', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.canWrite = true;
+
+    renderPage();
+
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+  });
+
+  // Regression for the false banner: loading=true + canWrite=false previously
+  // rendered "you have read-only access" before scope was even known. The
+  // banner is a factual claim, not a control, so it must wait for the truth.
+  it('shows no read-only notice while scope is still loading, even for a non-writer', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.loading = true;
+    mocks.scopeState.canWrite = false;
+
+    renderPage();
+
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+  });
+
+  it('renders the journal timeline even when the scope profile never resolves', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.loading = true;
+
+    renderPage();
+
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.queryByText('timeline.loading')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['researcher', true],
+    ['viewer', true],
+    ['admin', false],
+  ])('offers every plot to a %s when scoped=%s', (role, isScoped) => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.role = role;
+    mocks.scopeState.isScoped = isScoped;
+    mocks.useJournalPlots.mockReturnValue({
+      plots: [
+        plots[0],
+        {
+          ...plots[0],
+          plot_uuid: ROUTE_FIXTURE_IDS.secondaryPlot,
+          plot_code: 'S-2',
+          name: 'Colleague field',
+        },
+      ],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
+      createPlot: vi.fn(),
+      updatePlot: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByRole('option', { name: plots[0].name ?? plots[0].plot_code }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Colleague field' })).toBeInTheDocument();
   });
 
   it('keeps reads disabled while the catalog probe is loading', () => {

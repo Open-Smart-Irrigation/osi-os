@@ -4,10 +4,13 @@ import useSWR from 'swr';
 import { useSearchParams } from 'react-router-dom';
 
 import { AppHeader } from '../components/AppHeader';
+import { CanWrite } from '../components/CanWrite';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { JournalTimeline } from '../components/journal/JournalTimeline';
 import { JournalCaptureFlow } from '../components/journal/capture/JournalCaptureFlow';
 import { JournalWorkspace } from '../components/journal/desktop/JournalWorkspace';
 import { useAuth } from '../contexts/AuthContext';
+import { useScope } from '../contexts/ScopeContext';
 import { catalogLabel } from '../journal/catalogModel';
 import { useJournalCatalog } from '../journal/useJournalCatalog';
 import { useJournalEntries } from '../journal/useJournalEntries';
@@ -44,6 +47,11 @@ export const JournalPage: React.FC = () => {
   const { t, i18n } = useTranslation('journal');
   const locale = i18n.resolvedLanguage || i18n.language;
   const { username, logout } = useAuth();
+  const {
+    loading: scopeLoading,
+    canWrite,
+    isAdmin,
+  } = useScope();
   const isDesktop = isDesktopBrowser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -79,40 +87,46 @@ export const JournalPage: React.FC = () => {
 
   const requestedZoneUuid = searchParams.get('zone_uuid')?.trim() || null;
   const captureRequested = searchParams.get('capture') === '1';
+  // Write-only scoping (W1/W2): journal reads are account-wide. Every enabled
+  // account sees every plot, zone and entry on the gateway; canWrite still gates
+  // capture and edit affordances below.
+  const allZones = useMemo(() => zonesState.data ?? [], [zonesState.data]);
+  const allPlots = plotState.plots;
   const zonesByUuid = useMemo(() => new Map(
-    (zonesState.data ?? [])
+    allZones
       .map((zone) => [zoneUuid(zone), zone] as const)
       .filter(([uuid]) => uuid != null),
-  ), [zonesState.data]);
-  const capturePlots = useMemo(() => plotState.plots.map((plot) => {
+  ), [allZones]);
+  const capturePlots = useMemo(() => allPlots.map((plot) => {
     const cropHint = zoneCropHint(
       plot.zone_uuid ? zonesByUuid.get(plot.zone_uuid) : undefined,
     ) || plot.crop_hint?.trim() || null;
     return { ...plot, crop_hint: cropHint };
-  }), [plotState.plots, zonesByUuid]);
+  }), [allPlots, zonesByUuid]);
   const zoneCrops = useMemo(() => Object.fromEntries(
-    (zonesState.data ?? []).flatMap((zone) => {
+    allZones.flatMap((zone) => {
       const uuid = zoneUuid(zone);
       const crop = zoneCropHint(zone);
       return uuid && crop ? [[uuid, crop] as const] : [];
     }),
-  ), [zonesState.data]);
+  ), [allZones]);
   const zoneTimezones = useMemo(() => Object.fromEntries(
-    (zonesState.data ?? []).flatMap((zone) => {
+    allZones.flatMap((zone) => {
       const uuid = zoneUuid(zone);
       const timezone = zoneTimezone(zone);
       return uuid && timezone ? [[uuid, timezone] as const] : [];
     }),
-  ), [zonesState.data]);
+  ), [allZones]);
   const initialPlot = useMemo(() => requestedZoneUuid
     ? capturePlots.find((plot) => plot.zone_uuid === requestedZoneUuid)
     : undefined, [capturePlots, requestedZoneUuid]);
   const initialZone = useMemo(() => {
     if (!initialPlot?.zone_uuid) return undefined;
-    return (zonesState.data ?? []).find((zone) => zoneUuid(zone) === initialPlot.zone_uuid);
-  }, [initialPlot, zonesState.data]);
+    return allZones.find((zone) => zoneUuid(zone) === initialPlot.zone_uuid);
+  }, [allZones, initialPlot]);
   const captureReady = catalogState.available && !catalogState.error && !timelineReadError && !captureEnrichmentError &&
-    !plotState.loading && !groupState.loading && Array.isArray(zonesState.data) && !zonesState.isLoading && !zonesState.error;
+    !plotState.loading && !groupState.loading &&
+    Array.isArray(zonesState.data) && !zonesState.isLoading && !zonesState.error;
 
   React.useEffect(() => {
     if (!captureRequested) {
@@ -208,7 +222,10 @@ export const JournalPage: React.FC = () => {
         activeTab="journal"
         username={username}
         onLogout={logout}
+        showAdmin={isAdmin && !scopeLoading}
       />
+
+      {!scopeLoading && !canWrite && <ReadOnlyNotice scope="farm" />}
 
       <main className={showWorkspace ? 'mx-auto max-w-[1600px]' : 'mx-auto max-w-3xl px-4 py-8'}>
         {catalogState.loading ? (
@@ -244,9 +261,9 @@ export const JournalPage: React.FC = () => {
           />
         ) : showWorkspace ? (
           <JournalWorkspace
-            plots={plotState.plots}
+            plots={allPlots}
             activeGroups={groupState.activeGroups}
-            zones={zonesState.data ?? []}
+            zones={allZones}
             activities={activities}
             catalog={catalogState.catalog!}
             plotGroups={groupState.groups}
@@ -256,6 +273,7 @@ export const JournalPage: React.FC = () => {
             zoneTimezones={zoneTimezones}
             plotState={plotState}
             groupState={groupState}
+            canWrite={canWrite}
           />
         ) : (
           <>
@@ -272,7 +290,7 @@ export const JournalPage: React.FC = () => {
                   }}
                 >
                   <option value="">{t('filters.allPlots')}</option>
-                  {plotState.plots.map((plot) => (
+                  {allPlots.map((plot) => (
                     <option key={plot.plot_uuid} value={plot.plot_uuid}>
                       {plot.name?.trim() || plot.plot_code}
                     </option>
@@ -300,20 +318,22 @@ export const JournalPage: React.FC = () => {
                 </select>
               </label>
 
-              <button
-                ref={logActivityRef}
-                type="button"
-                className="btn-liquid rounded-lg px-5 py-2.5 font-bold"
-                onClick={() => openCapture()}
-              >
-                {t('logActivity')}
-              </button>
+              <CanWrite>
+                <button
+                  ref={logActivityRef}
+                  type="button"
+                  className="btn-liquid rounded-lg px-5 py-2.5 font-bold"
+                  onClick={() => openCapture()}
+                >
+                  {t('logActivity')}
+                </button>
+              </CanWrite>
             </div>
 
             {timelineReadError ? errorCard(retryTimelineReads) : (
               <JournalTimeline
                 entries={entryState.entries}
-                plots={plotState.plots}
+                plots={allPlots}
                 loading={entryState.loading || plotState.loading}
                 catalog={catalogState.catalog}
                 listBatchEntries={listBatchEntries}

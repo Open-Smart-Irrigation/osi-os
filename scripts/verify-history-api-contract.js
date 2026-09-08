@@ -198,6 +198,7 @@ function verifyHistoryRouterImplementation(flows, failures, extractedModuleSourc
   assertContains(failures, adapterSource, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, adapterSource, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
   assertContains(failures, adapterSource, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
+  assertContains(failures, adapterSource, "assertRole(db, user.user_uuid, 'admin', { scopedMode: true })", 'gateway history stays admin-only (P2)');
   assertContains(failures, adapterSource, 'channels', 'zone CSV export forwards channels query param');
   assertContains(failures, adapterSource, 'site:', 'zone CSV export forwards gateway site id');
   assertContains(failures, adapterSource, 'respondCsv(200, filename, osiHistory.toCsv(result.columns, result.rows))', 'CSV download response');
@@ -260,11 +261,20 @@ function verifyAnalysisRouterImplementation(flows, failures) {
 
   const source = String(router.func || '');
   assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
+  assertContains(failures, source, "osiLib.require('scope')", 'analysis reads load the shared scope module');
+  assertContains(failures, source, 'assertEnabledAccount(db, ownerUuid, { scopedMode: true })', 'analysis reads gate on an enabled account (P1)');
+  assertContains(failures, source, 'null is the legacy owner-only path in osi-history-helper', 'analysis null sentinel stays legacy owner-only');
+  assertContains(failures, source, 'SELECT zone_uuid FROM irrigation_zones WHERE deleted_at IS NULL AND zone_uuid IS NOT NULL ORDER BY id ASC', 'scoped analysis reads load an explicit account-wide zone array');
+  assertContains(failures, source, 'scopeZoneUuids = accountZoneRows', 'scoped analysis reads pass the explicit zone array');
   assertContains(failures, source, 'osiHistory.buildAnalysisCatalog', 'analysis /channels calls buildAnalysisCatalog');
-  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId })', 'analysis /channels scopes catalog to authenticated user');
+  // Wave 3 scoped-access port (AgroLink d49e1cd28): buildAnalysisCatalog also
+  // threads zoneUuids through when OSI_SCOPED_ACCESS=1 (osi-scope-helper's
+  // listScopeZoneUuids); the literal call site gained a trailing property.
+  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids })', 'analysis /channels scopes catalog to authenticated user and owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');
-  assertContains(failures, source, 'userId: auth.userId', 'analysis /series scopes resolver to authenticated user');
+  assertContains(failures, source, 'zoneUuids: scopeZoneUuids', 'analysis /series scopes resolver to owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');
+  assertContains(failures, source, 'deviceEui: deviceEui, zoneUuids: scopeZoneUuids', 'analysis /views filters saved selectors to owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.saveAnalysisView', 'analysis /views POST calls saveAnalysisView');
   assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured analysis suggestions');
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only analysis views');
@@ -360,9 +370,13 @@ function verify(options) {
   }
 }
 
-try {
-  verify(parseArgs(process.argv.slice(2)));
-} catch (error) {
-  console.error(`FAIL verify-history-api-contract: ${error.message}`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try {
+    verify(parseArgs(process.argv.slice(2)));
+  } catch (error) {
+    console.error(`FAIL verify-history-api-contract: ${error.message}`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { verifyAnalysisRouterImplementation };

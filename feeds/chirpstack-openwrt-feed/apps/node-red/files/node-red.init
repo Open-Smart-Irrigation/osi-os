@@ -200,6 +200,7 @@ start_service() {
         journal_replication_disable="1"
         journal_media_root=""
     fi
+    local scoped_access_enabled=$(uci -q get osi-server.cloud.scoped_access_enabled 2>/dev/null || echo "0")
     local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.7.0")
     local openagri_weather_url=$(uci -q get osi-server.cloud.openagri_weather_url 2>/dev/null || echo "")
     local openagri_weather_username=$(uci -q get osi-server.cloud.openagri_weather_username 2>/dev/null || echo "")
@@ -351,6 +352,7 @@ NODE
         JOURNAL_MIN_FREE_BYTES="$journal_min_free_bytes" \
         JOURNAL_MEDIA_ROOT="$journal_media_root" \
         JOURNAL_REPLICATION_DISABLE="$journal_replication_disable" \
+        OSI_SCOPED_ACCESS="$scoped_access_enabled" \
         FIRMWARE_VERSION="$fw_version" \
         OPENAGRI_WEATHER_URL="$openagri_weather_url" \
         OPENAGRI_WEATHER_USERNAME="$openagri_weather_username" \

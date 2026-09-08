@@ -12,12 +12,22 @@ const bindings = {
   journal: { variable: 'osiJournal', module: 'osi-journal' },
   ledger: { variable: 'osiCommandLedger', module: 'osi-command-ledger' },
   zoneCommands: { variable: 'osiZoneCommands', module: 'zone-commands' },
+  scope: { variable: 'scope', module: 'scope' },
+  scopedAccessCommands: {
+    variable: 'osiScopedAccessCommands',
+    module: 'scoped-access-commands',
+  },
 };
 const expectedById = {
-  'journal-api-router-fn': [bindings.db, bindings.journal],
+  'journal-api-router-fn': [bindings.db, bindings.journal, bindings.scope],
   'command-dedupe-dispatch': [bindings.db, bindings.journal, bindings.ledger],
   'journal-command-apply-fn': [bindings.db, bindings.journal],
   'terra-zone-config-command-apply-fn': [bindings.db, bindings.zoneCommands],
+  'scoped-access-command-apply-fn': [
+    bindings.db,
+    bindings.scopedAccessCommands,
+    bindings.scope,
+  ],
   'command-ack-queue-rest': [bindings.db, bindings.ledger],
 };
 const exactLibs = [{ var: 'osiLib', module: 'osi-lib' }];
@@ -60,7 +70,7 @@ test('exports one pinned policy for each approved Task 9 node', () => {
   );
 });
 
-test('accepts the five complete approved function-node surfaces', () => {
+test('accepts the complete approved function-node surfaces', () => {
   for (const [id, node] of Object.entries(approvedNodes)) {
     assert.ok(node, `missing approved node ${id}`);
     assert.deepEqual(audit(node), { ok: true, errors: [] }, id);

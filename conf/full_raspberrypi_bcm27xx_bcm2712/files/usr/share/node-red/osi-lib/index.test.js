@@ -34,6 +34,8 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'osi-journal',
     'osi-system-settings',
     'osi-valve-control',
+    'scope',
+    'scoped-access-commands',
     'sdi12-commissioning',
     'sdi12-normalize',
     'sdi12-reassemble',
@@ -48,6 +50,8 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['device-writer'], 'osi-device-writer');
   assert.equal(osiLib.NAME_TO_PATH['uc512-normalize'], 'osi-uc512-normalize');
   assert.equal(osiLib.NAME_TO_PATH['osi-valve-control'], 'osi-valve-control');
+  assert.equal(osiLib.NAME_TO_PATH['scope'], 'osi-scope-helper');
+  assert.equal(osiLib.NAME_TO_PATH['scoped-access-commands'], 'osi-scoped-access-commands');
   assert.equal(osiLib.NAME_TO_PATH['osi-system-settings'], 'osi-system-settings');
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
   assert.equal(osiLib.NAME_TO_PATH['sdi12-recipe'], 'osi-sdi12-recipe');

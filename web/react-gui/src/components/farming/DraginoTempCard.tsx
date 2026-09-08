@@ -65,9 +65,15 @@ interface DraginoTempCardProps {
   device: Device;
   onRemove?: () => void;
   onUpdate?: () => void;
+  readOnly?: boolean;
 }
 
-export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemove, onUpdate }) => {
+export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
+  device,
+  onRemove,
+  onUpdate,
+  readOnly = false,
+}) => {
   const data = device.latest_data;
   const lastSeenStr = device.last_seen ?? null;
   const { swtUnit } = useDisplayPreferences();
@@ -163,7 +169,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             LSN50
           </span>
-          <button
+          {!readOnly && <button
             type="button"
             onClick={() => setShowConfig((value) => !value)}
             aria-label={showConfig ? 'Close device settings' : 'Device settings'}
@@ -175,9 +181,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             } ${FOCUS_VISIBLE_RING}`}
           >
             ⚙
-          </button>
-          {showConfig && <DraginoSettingsModal device={device} dendroNeedsCalibration={dendroNeedsCalibration} onUpdate={() => { onUpdate?.(); }} onClose={() => setShowConfig(false)} />}
-          <button
+          </button>}
+          {!readOnly && showConfig && <DraginoSettingsModal device={device} dendroNeedsCalibration={dendroNeedsCalibration} onUpdate={() => { onUpdate?.(); }} onClose={() => setShowConfig(false)} />}
+          {!readOnly && <button
             type="button"
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
@@ -186,7 +192,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             className={`p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed ${FOCUS_VISIBLE_RING}`}
           >
             ✕
-          </button>
+          </button>}
         </div>
       </div>
       <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
@@ -197,7 +203,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         </div>
       )}
 
-      {showConfirm && (
+      {!readOnly && showConfirm && (
         <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
           <p className="mb-2 font-bold">Remove this device?</p>
           <p className="mb-3 text-sm">This will unlink the device from your account.</p>
@@ -428,13 +434,13 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                 <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                   Ratio mode is active, but this device still needs ratio calibration values.
                 </p>
-                <button
+                {!readOnly && <button
                   type="button"
                   onClick={() => setShowConfig(true)}
                   className={`mt-3 rounded-lg border border-[var(--warn-border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold text-[var(--warn-text)] transition-colors hover:bg-[var(--warn-bg)] ${FOCUS_VISIBLE_RING}`}
                 >
                   Open calibration
-                </button>
+                </button>}
               </>
             )}
           </div>

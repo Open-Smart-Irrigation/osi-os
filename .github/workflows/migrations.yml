@@ -52,7 +52,7 @@ jobs:
       - name: Fetch migration base ref
         run: git fetch --no-tags origin main:refs/remotes/origin/main
       - run: node --test lib/osi-migrate/__tests__/*.test.js
-      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-migrations.test.js scripts/verify-no-stray-ddl.test.js scripts/verify-no-new-silent-catch.test.js scripts/test-error-recording-flow.js scripts/flows-bare-require-scan.test.js scripts/test-outbox-retention.js scripts/test-outbox-retry-backoff.js scripts/verify-helper-registration.test.js scripts/semantic-schema-compare.test.js scripts/repair-sync-outbox-v2.test.js scripts/baseline-existing-db.test.js scripts/flows-size-scan.test.js scripts/verify-flows-size-ratchet.test.js scripts/migrate-cli.test.js scripts/test-deploy-migration-wiring.js scripts/deploy-payload-swap.test.js scripts/test-deploy-atomic-payload-wiring.js
+      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-migrations.test.js scripts/verify-no-stray-ddl.test.js scripts/verify-no-new-silent-catch.test.js scripts/test-error-recording-flow.js scripts/test-auth-credential-isolation.js scripts/flows-bare-require-scan.test.js scripts/test-outbox-retention.js scripts/test-outbox-retry-backoff.js scripts/verify-helper-registration.test.js scripts/semantic-schema-compare.test.js scripts/repair-sync-outbox-v2.test.js scripts/baseline-existing-db.test.js scripts/flows-size-scan.test.js scripts/verify-flows-size-ratchet.test.js scripts/migrate-cli.test.js scripts/test-deploy-migration-wiring.js scripts/deploy-payload-swap.test.js scripts/test-deploy-atomic-payload-wiring.js
       - run: node scripts/test-history-helper.js
       - run: node --test scripts/test-health-helper.js
       - run: node --test scripts/test-timestamp-clamp.js
@@ -93,14 +93,38 @@ jobs:
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/*.test.js
       - run: node scripts/capture-zone-env-vectors.js --verify
       - run: node --test scripts/rehearse-devices-rebuild.test.js
+      - run: node --test scripts/rehearse-scoped-access-migration.test.js
+      - run: node --test scripts/rehearse-scoped-trigger-boot-survival.test.js
+      - name: Scoped-access write suite (registration fences, zone guards)
+        run: node --test scripts/test-scoped-access-writes.js
+      - name: Scoped-access read suite (account-wide reads, preserved gates)
+        run: node --test scripts/test-scoped-access-reads.js
+      - name: Scoped-access command-path suite
+        run: node --test scripts/test-scoped-access-command-path.js
+      - name: Scoped-access command package tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.test.js
       - run: node --test scripts/soak/rig.test.js scripts/soak/scenario-outbox-replay.test.js scripts/soak/scenario-clock-jump.test.js scripts/soak/scenario-kill9-migration.test.js scripts/soak/scenario-sd-full.test.js
       - run: node --test scripts/test-gateway-health-persistence.js
       - run: node --test scripts/deploy-canary-gate.test.js
       - run: node scripts/test-contract-schemas.js
-      - run: node --test scripts/verify-sync-op-parity.test.js
+      - name: Verify edge/cloud sync operation parity against the checked-out server revision
+        run: |
+          set -euo pipefail
+          node --test scripts/verify-sync-op-parity.test.js 2>&1 | tee /tmp/verify-sync-op-parity.test.out
+          if grep -q 'not a trustworthy branch pairing' /tmp/verify-sync-op-parity.test.out; then
+            echo '::error::sync parity test used an untrusted osi-server fallback'
+            exit 1
+          fi
         env:
           OSI_SERVER_EDGE_SYNC_SERVICE: osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
-      - run: node scripts/verify-sync-op-parity.js osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
+      - name: Verify sync operation parity against the checked-out server revision
+        run: |
+          set -euo pipefail
+          node scripts/verify-sync-op-parity.js osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java 2>&1 | tee /tmp/verify-sync-op-parity.out
+          if grep -q 'not a trustworthy branch pairing' /tmp/verify-sync-op-parity.out; then
+            echo '::error::sync parity verifier used an untrusted osi-server fallback'
+            exit 1
+          fi
       - run: node scripts/verify-dendro-contract-mirror.js osi-server
       - run: node scripts/verify-channel-manifest-parity.js
       - name: Cross-repo channels.json byte-identity (DD5)

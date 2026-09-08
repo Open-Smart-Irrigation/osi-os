@@ -26,6 +26,27 @@ const EXACT_STAGED_JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_PLOT',
     'UPSERT_JOURNAL_PLOT_GROUP',
 ];
+// Scoped-access admin commands (port/wave3-edge-scope). Declared staged (cloud- and
+// edge-deferred) from the commit that governs the command schema; edgeDeferred drops out
+// once real edge appliers land in the same port slice. See the matching constants and
+// long-form rationale in scripts/verify-sync-op-parity.js.
+const EXACT_SCOPED_ACCESS_COMMANDS = [
+    'DELETE_USER_PLOT_ASSIGNMENT',
+    'DELETE_USER_ZONE_ASSIGNMENT',
+    'RESET_SCOPED_USER_PASSWORD',
+    'UPSERT_SCOPED_USER',
+    'UPSERT_USER_PLOT_ASSIGNMENT',
+    'UPSERT_USER_ZONE_ASSIGNMENT',
+];
+const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
+    ...EXACT_STAGED_JOURNAL_COMMANDS,
+    ...EXACT_SCOPED_ACCESS_COMMANDS,
+];
+// Edge implementation landed (real appliers wired into cmd-type-registry / the new
+// osi-scoped-access-commands module -- port commit "apply scoped access commands"), so
+// these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS
+// below: osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of
+// this port, so the cloud side is not required to issue them yet.
 const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
@@ -43,6 +64,24 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_PLOT_GROUP: {
         effect_key: { prefix: 'journal_plot_group', uuid_path: 'plot_group.group_uuid', version_path: 'plot_group.base_sync_version' },
     },
+    UPSERT_SCOPED_USER: {
+        effect_key: { prefix: 'scoped_user', uuid_path: 'user.user_uuid', version_path: 'user.base_sync_version' },
+    },
+    RESET_SCOPED_USER_PASSWORD: {
+        effect_key: { prefix: 'scoped_user_password', uuid_path: 'user_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_USER_ZONE_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_zone_assignment', uuid_path: 'zone_assignment.assignment_uuid', version_path: 'zone_assignment.base_sync_version' },
+    },
+    DELETE_USER_ZONE_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_zone_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_USER_PLOT_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'plot_assignment.assignment_uuid', version_path: 'plot_assignment.base_sync_version' },
+    },
+    DELETE_USER_PLOT_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
+    },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
@@ -50,6 +89,11 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_VOCAB_UPSERTED: { aggregate_key_path: 'payload.custom_field_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_UPSERTED: { aggregate_key_path: 'payload.plot_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_GROUP_UPSERTED: { aggregate_key_path: 'payload.group_uuid', sync_version_path: 'payload.sync_version' },
+    USER_UPSERTED: { aggregate_key_path: 'payload.user_uuid', sync_version_path: 'payload.sync_version' },
+    USER_ZONE_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    USER_ZONE_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    USER_PLOT_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    USER_PLOT_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
 };
 
 function loadSchema(name) {
@@ -140,7 +184,7 @@ function loadStagedCommands() {
         throw new Error(`sync-contract staging command axes must be cloudDeferred,edgeDeferred; got ${commandKeys.join(',') || '(none)'}`);
     }
     assertExactList('staging commands.edgeDeferred', staging.commands.edgeDeferred, EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS);
-    assertExactList('staging commands.cloudDeferred', staging.commands.cloudDeferred, EXACT_STAGED_JOURNAL_COMMANDS);
+    assertExactList('staging commands.cloudDeferred', staging.commands.cloudDeferred, EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS);
     return staging.commands.edgeDeferred;
 }
 

@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "History",
+      "admin": "Admin",
       "legacyDashboard": "Legacy dashboard",
       "logout": "Logout"
     },

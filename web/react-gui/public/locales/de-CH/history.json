@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Verlauf",
+      "admin": "Admin",
       "legacyDashboard": "Bestehendes Dashboard",
       "logout": "Abmelden"
     },

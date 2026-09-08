@@ -10,6 +10,7 @@
     "osi-chirpstack-helper": "file:osi-chirpstack-helper",
     "osi-cloud-http": "file:osi-cloud-http",
     "osi-command-ledger": "file:osi-command-ledger",
+    "osi-scoped-access-commands": "file:osi-scoped-access-commands",
     "osi-zone-commands": "file:osi-zone-commands",
     "osi-dendro-helper": "file:osi-dendro-helper",
     "osi-db-helper": "file:osi-db-helper",
@@ -31,6 +32,7 @@
     "osi-sdi12-commissioning": "file:osi-sdi12-commissioning",
     "osi-sdi12-reassemble": "file:osi-sdi12-reassemble",
     "osi-valve-control": "file:osi-valve-control",
-    "osi-system-settings": "file:osi-system-settings"
+    "osi-system-settings": "file:osi-system-settings",
+    "osi-scope-helper": "file:osi-scope-helper"
   }
 }

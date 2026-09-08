@@ -53,6 +53,27 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
     setError('');
   };
 
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, currentTab: DeviceTab) => {
+    const tabOrder: DeviceTab[] = ['assign', 'register'];
+    const currentIndex = tabOrder.indexOf(currentTab);
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % tabOrder.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
+    } else if (event.key !== 'Home' && event.key !== 'End') {
+      return;
+    }
+    event.preventDefault();
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = tabOrder.length - 1;
+    const nextTab = tabOrder[nextIndex];
+    changeTab(nextTab);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`zone-device-tab-${nextTab}`)?.focus();
+    });
+  };
+
   const handleAssign = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -69,9 +90,12 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
       onClose();
     } catch (err: any) {
       if (err?.response?.status === 409) {
-        setError(t('zoneDeviceModal.assignConflict', {
-          zoneName: err.response.data?.current_zone_name ?? '',
-        }));
+        const conflict = err.response.data || {};
+        setError(
+          conflict.current_zone_deleted || !conflict.current_zone_name
+            ? t('zoneDeviceModal.assignConflictDeleted')
+            : t('zoneDeviceModal.assignConflict', { zoneName: conflict.current_zone_name }),
+        );
         // The device moved under us; refresh the caller's lists so the picker
         // stops offering it.
         onChanged();
@@ -138,9 +162,13 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
             <Button
               key={value}
               role="tab"
+              id={`zone-device-tab-${value}`}
+              aria-controls={`zone-device-panel-${value}`}
               aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
               variant={isActive ? 'primary' : 'secondary'}
               onClick={() => changeTab(value)}
+              onKeyDown={(event) => handleTabKeyDown(event, value)}
             >
               {t(value === 'assign' ? 'zoneDeviceModal.tabAssign' : 'zoneDeviceModal.tabRegister')}
             </Button>
@@ -154,6 +182,12 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
         </div>
       )}
 
+      <div
+        id={`zone-device-panel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`zone-device-tab-${tab}`}
+        tabIndex={0}
+      >
       {tab === 'assign' ? (
         availableDevices.length === 0 ? (
           <div className="bg-[var(--warn-bg)] border border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg">
@@ -257,6 +291,7 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
           </div>
         </form>
       )}
+      </div>
     </Modal>
   );
 };

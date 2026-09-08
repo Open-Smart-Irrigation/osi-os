@@ -10,7 +10,7 @@ import { ThematicCardCarousel } from '../ThematicCardCarousel';
 import { systemAPI, historyAPI, irrigationZonesAPI } from '../../../services/api';
 import type { HistoryCardSummary, HistoryWorkspace, HistoryWorkspaceRecord } from '../../../history/types';
 
-const { translateForTest } = vi.hoisted(() => {
+const { translateForTest, scopeState } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'history.nav.legacyDashboard': 'Legacy dashboard',
     'history.nav.logout': 'Logout',
@@ -99,6 +99,12 @@ const { translateForTest } = vi.hoisted(() => {
       const template = translations[key] ?? key;
       return template.replace(/\{\{(\w+)\}\}/g, (_, name) => String(options?.[name] ?? ''));
     },
+    scopeState: {
+      loading: false,
+      isScoped: false,
+      role: 'admin',
+      zoneWritable: vi.fn<(zoneUuid: string) => boolean>(() => true),
+    },
   };
 });
 
@@ -107,6 +113,10 @@ vi.mock('../../../contexts/AuthContext', () => ({
     username: 'operator',
     logout: vi.fn(),
   }),
+}));
+
+vi.mock('../../../contexts/ScopeContext', () => ({
+  useScope: () => scopeState,
 }));
 
 vi.mock('../../../components/LanguageSwitcher', () => ({
@@ -204,6 +214,10 @@ function workspace(overrides: Partial<HistoryWorkspace> = {}): HistoryWorkspace 
 describe('History shell', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    scopeState.loading = false;
+    scopeState.isScoped = false;
+    scopeState.role = 'admin';
+    scopeState.zoneWritable.mockReturnValue(true);
     vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
       {
         id: 1,
@@ -318,6 +332,73 @@ describe('History shell', () => {
         updatedAt: '2026-05-31T10:02:00Z',
       } as unknown as HistoryWorkspaceRecord;
     });
+  });
+
+  it.each([
+    ['researcher', true],
+    ['viewer', true],
+    ['admin', false],
+  ])('offers every history zone to a %s when scoped=%s', async (role, isScoped) => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: false,
+      historyWorkspacesEnabled: false,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    scopeState.role = role;
+    scopeState.isScoped = isScoped;
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
+      {
+        id: 1,
+        name: 'North Block',
+        zone_uuid: 'zone-north',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+      {
+        id: 2,
+        name: 'South Block',
+        zone_uuid: 'zone-south',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+    ]);
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    await waitFor(() => expect(screen.getByText('North Block')).toBeInTheDocument());
+    expect(screen.getByText('South Block')).toBeInTheDocument();
+  });
+
+  it('renders the zone list even when the scope profile never resolves', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: false,
+      historyWorkspacesEnabled: false,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    scopeState.loading = true;
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
+      {
+        id: 1,
+        name: 'North Block',
+        zone_uuid: 'zone-north',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+    ]);
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    await waitFor(() => expect(screen.getByText('North Block')).toBeInTheDocument());
   });
 
   it('keeps history unavailable and retryable when runtime feature flags fail', async () => {

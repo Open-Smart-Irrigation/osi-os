@@ -5,9 +5,13 @@ import { LanguageSwitcher } from '../../LanguageSwitcher';
 
 interface HistoryMobileHeaderProps {
   onLogout: () => void;
+  showAdmin?: boolean;
 }
 
-export const HistoryMobileHeader: React.FC<HistoryMobileHeaderProps> = ({ onLogout }) => {
+export const HistoryMobileHeader: React.FC<HistoryMobileHeaderProps> = ({
+  onLogout,
+  showAdmin = false,
+}) => {
   const { t } = useTranslation('history');
   const [open, setOpen] = useState(false);
 
@@ -38,9 +42,17 @@ export const HistoryMobileHeader: React.FC<HistoryMobileHeaderProps> = ({ onLogo
               <div className="mb-3 flex justify-center">
                 <LanguageSwitcher />
               </div>
+              {showAdmin && (
+                <Link
+                  to="/admin/users"
+                  className="block rounded-md border border-[var(--border)] px-3 py-2 text-center text-sm font-bold text-[var(--text)]"
+                >
+                  {t('history.nav.admin')}
+                </Link>
+              )}
               <Link
                 to="/dashboard"
-                className="block rounded-md border border-[var(--border)] px-3 py-2 text-center text-sm font-bold text-[var(--text)]"
+                className={`block rounded-md border border-[var(--border)] px-3 py-2 text-center text-sm font-bold text-[var(--text)]${showAdmin ? ' mt-2' : ''}`}
               >
                 {t('history.nav.legacyDashboard')}
               </Link>

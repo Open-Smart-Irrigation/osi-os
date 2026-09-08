@@ -1,0 +1,151 @@
+#!/usr/bin/env node
+'use strict';
+
+// Scoped-access ratchet (spec §5.4): every HTTP-handler function chain in the
+// maintained profiles must reference the scope module (osiLib.require('scope'))
+// or be explicitly allowlisted. Necessary-not-sufficient: the behavioral
+// matrix (test-scoped-access-*.js) is the correctness gate; this stops
+// newly-added endpoints shipping with no scope call at all.
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.resolve(__dirname, '..');
+const PROFILES = [
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
+  'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
+];
+
+// Endpoints with no scoped data or Phase-A/public semantics (exact http-in ids).
+const PUBLIC_ALLOWLIST = new Set([
+  'auth-register-http',
+  'auth-login-http',
+  'api-me-http',
+  'history-system-features-http',
+]);
+
+// Phase B lands before write enforcement by design. These exact pre-existing
+// mutation/effect routes are tracked debt, not general exemptions. Phase C
+// removes each id as its scope guard lands; any newly-added route still fails.
+const PHASE_C_PENDING = new Set([
+  'sys-reboot-in',
+  'sys-fan-in',
+  'al-link-in',
+  'al-unlink-in',
+  'sync-force-http',
+  'history-rollups-run-http',
+  // Wave 3 scoped-access port: these routes don't exist anywhere in AgroLink's
+  // scope arc (valve-control and SDI-12 landed on main after AgroLink's fork;
+  // AgroLink itself never scoped them). Tracked debt, same discipline as the
+  // rest of this list -- not a blanket exemption for the two features.
+  // sdi12-config-http and sdi12-identify-http are guard reconciliation done:
+  // both now route through scoped-device-config-guard (routeTable extended
+  // with POST /sdi12/identify -> sdi12-identify-action-fn and PUT /sdi12/config
+  // -> sdi12-config-auth-fn), matching AgroLink's own guard scope exactly.
+  // sdi12-recipe-apply-http/sdi12-recipe-rollback-http stay pending: AgroLink's
+  // own guard-extension commit (853c1b3584) never added routeTable entries for
+  // the recipe apply/rollback routes either -- this is upstream's own scope,
+  // not a gap introduced by this port.
+  'sdi12-recipe-apply-http',
+  'sdi12-recipe-rollback-http',
+  'valve-list-get-http',
+  'valve-schedules-get-http',
+  'valve-schedules-post-http',
+  'valve-schedule-put-http',
+  'valve-schedule-delete-http',
+  'valve-plan-resend-post-http',
+  'valve-scheduler-status-post-http',
+  'valve-settings-put-http',
+  'sys-settings-get-in',
+  'sys-settings-put-in',
+]);
+const ALLOWLIST = new Set([...PUBLIC_ALLOWLIST, ...PHASE_C_PENDING]);
+
+// Write-only scoping (W1): the read-filter API is retired. A route that
+// reintroduces one of these calls is reintroducing read scoping, which the
+// behavioral matrix would catch only if someone wrote the matching test.
+const RETIRED_READ_FILTERS = [
+  'assertZoneAccess',
+  'assertPlotAccess',
+  'assertDeviceAccess',
+  'listScopeZoneUuids',
+  'filterZoneUuids',
+];
+
+function findReadFilterRegressions(flows, profileLabel) {
+  const failures = [];
+  for (const node of flows) {
+    const text = String(node.func || '');
+    for (const name of RETIRED_READ_FILTERS) {
+      if (text.includes(name + '(')) {
+        failures.push(
+          `${profileLabel}: node ${node.id} (${node.name || 'unnamed'}) calls retired read filter ${name}()`
+        );
+      }
+    }
+  }
+  return failures;
+}
+
+function findFailures(flows, profileLabel, allowlist = ALLOWLIST) {
+  const failures = [];
+  const byId = new Map(flows.map((node) => [node.id, node]));
+
+  for (const node of flows) {
+    if (node.type !== 'http in' || node.method === 'options') continue;
+    if (allowlist.has(node.id)) continue;
+
+    const seen = new Set();
+    let text = '';
+    const walk = (id) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      const downstream = byId.get(id);
+      if (!downstream) return;
+      text += String(downstream.func || '') + '\n' + JSON.stringify(downstream.libs || []);
+      for (const output of downstream.wires || []) {
+        for (const target of output) walk(target);
+      }
+    };
+
+    for (const output of node.wires || []) {
+      for (const target of output) walk(target);
+    }
+
+    if (!text.includes("require('scope')")) {
+      failures.push(
+        `${profileLabel}: ${node.method.toUpperCase()} ${node.url} (${node.id}) has no scope call`
+      );
+    }
+  }
+  return failures;
+}
+
+function verifyProfiles(profiles = PROFILES) {
+  const failures = [];
+  for (const relativePath of profiles) {
+    const flows = JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), 'utf8'));
+    failures.push(...findFailures(flows, relativePath));
+    failures.push(...findReadFilterRegressions(flows, relativePath));
+  }
+  return failures;
+}
+
+if (require.main === module) {
+  const failures = verifyProfiles();
+  if (failures.length) {
+    console.error('FAIL: scoped-access ratchet:\n  ' + failures.join('\n  '));
+    process.exit(1);
+  }
+  console.log('verify-scoped-access: OK (ratchet only; behavioral matrix is the correctness gate)');
+}
+
+module.exports = {
+  ALLOWLIST,
+  PHASE_C_PENDING,
+  PROFILES,
+  PUBLIC_ALLOWLIST,
+  RETIRED_READ_FILTERS,
+  findFailures,
+  findReadFilterRegressions,
+  verifyProfiles,
+};

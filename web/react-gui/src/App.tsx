@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { ScopeProvider } from './contexts/ScopeContext';
 import { PrivateRoute } from './components/PrivateRoute';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
@@ -11,6 +12,10 @@ import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
 import { SettingsPage } from './pages/SettingsPage';
 import { GatewayRestartBanner } from './components/GatewayRestartBanner';
+import { AdminOnly } from './components/AdminOnly';
+import { UsersPage } from './pages/admin/UsersPage';
+import { GrantsPage } from './pages/admin/GrantsPage';
+import { ScopeStatusBanner } from './components/ScopeStatusBanner';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -19,9 +24,11 @@ const AnalysisRoute = lazy(() =>
 function App() {
   return (
     <AuthProvider>
-      <GatewayRestartBanner />
-      <HashRouter>
-        <Routes>
+      <ScopeProvider>
+        <ScopeStatusBanner />
+        <GatewayRestartBanner />
+        <HashRouter>
+          <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -62,6 +69,9 @@ function App() {
               </PrivateRoute>
             }
           />
+
+          <Route path="/admin/users" element={<PrivateRoute><AdminOnly><UsersPage /></AdminOnly></PrivateRoute>} />
+          <Route path="/admin/grants" element={<PrivateRoute><AdminOnly><GrantsPage /></AdminOnly></PrivateRoute>} />
 
           <Route
             path="/history"
@@ -123,8 +133,9 @@ function App() {
 
           {/* Unknown routes fall back to the dashboard instead of a blank screen */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </HashRouter>
+          </Routes>
+        </HashRouter>
+      </ScopeProvider>
     </AuthProvider>
   );
 }

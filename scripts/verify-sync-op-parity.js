@@ -21,7 +21,29 @@ const EXACT_STAGED_COMMANDS = [
   'UPSERT_JOURNAL_PLOT',
   'UPSERT_JOURNAL_PLOT_GROUP',
 ];
+// Scoped-access admin commands (port/wave3-edge-scope): cloud-issued commands to manage
+// scoped users/zone-plot assignments on the edge. Declared staged from the moment the
+// contract exists (this port's commit that governs the command schema) through the
+// commit that wires real edge appliers -- see EXACT_EDGE_DEFERRED_COMMANDS below, which
+// tracks the same set until appliers land.
+const EXACT_SCOPED_ACCESS_COMMANDS = [
+  'DELETE_USER_PLOT_ASSIGNMENT',
+  'DELETE_USER_ZONE_ASSIGNMENT',
+  'RESET_SCOPED_USER_PASSWORD',
+  'UPSERT_SCOPED_USER',
+  'UPSERT_USER_PLOT_ASSIGNMENT',
+  'UPSERT_USER_ZONE_ASSIGNMENT',
+];
+// Edge implementation landed (real appliers wired into cmd-type-registry / the new
+// osi-scoped-access-commands module -- port commit "apply scoped access commands"), so
+// these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_COMMANDS below:
+// osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of this
+// port, so the cloud side is not required to issue them yet.
 const EXACT_EDGE_DEFERRED_COMMANDS = [];
+const EXACT_CLOUD_DEFERRED_COMMANDS = [
+  ...EXACT_STAGED_COMMANDS,
+  ...EXACT_SCOPED_ACCESS_COMMANDS,
+];
 const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_ENTRY_UPSERTED',
   'JOURNAL_ENTRY_VOIDED',
@@ -33,6 +55,29 @@ const EXACT_EDGE_DEFERRED_OPS = [];
 const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
+];
+// Scoped-access outbox events (port/wave3-edge-scope): USER_UPSERTED and the zone/plot
+// assignment upsert/delete events emitted by the migration-owned triggers in
+// 0044__scoped_access_schema.sql (trg_dp_users_outbox_*, trg_dp_user_zone_assign_outbox_*,
+// trg_dp_user_plot_assign_outbox_*). These are SQL-owned (see SQL_OWNED_EVENT_OPS below),
+// not edgeModuleOwned/edgeDeferred -- the triggers are structurally present in schema
+// unconditionally, gated at the data layer by the scoped_access_emit.enabled row (default
+// 0) rather than by absence from a source. osi-server PR #83 (EdgeSyncService appliers for
+// these ops) is open, not merged, as of this port -- so these stay cloudDeferred until #83
+// merges and this repo's server-source snapshot is updated to match. Flip by moving this
+// list (or the relevant entries) out of EXACT_CLOUD_DEFERRED_EVENT_OPS in the same commit
+// that updates SERVER_RELATIVE_SOURCE handling, per this file's own staged/deferred
+// contract -- never silently.
+const EXACT_SCOPED_ACCESS_EVENT_OPS = [
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+];
+const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
+  ...EXACT_JOURNAL_EVENT_OPS,
+  ...EXACT_SCOPED_ACCESS_EVENT_OPS,
 ];
 // Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
 // order is cloud-before-edge: osi-server lands the landing applier for a journal event op
@@ -107,6 +152,16 @@ const SQL_OWNED_EVENT_OPS = new Set([
   'VALVE_SCHEDULE_UPSERTED',
   // Emitted by 0025__valve_settings_sync_triggers.sql, not by flows.json.
   'VALVE_SETTINGS_UPSERTED',
+  // Emitted by 0044__scoped_access_schema.sql's trg_dp_users_outbox_* triggers, not by
+  // flows.json. Cloud handling is staged (see EXACT_SCOPED_ACCESS_EVENT_OPS) pending
+  // osi-server PR #83.
+  'USER_UPSERTED',
+  // Emitted by 0044__scoped_access_schema.sql's trg_dp_user_zone_assign_outbox_* triggers.
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  // Emitted by 0044__scoped_access_schema.sql's trg_dp_user_plot_assign_outbox_* triggers.
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_PLOT_ASSIGNMENT_DELETED',
 ]);
 // Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
 // "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living
@@ -794,11 +849,11 @@ function validateStagingManifest(manifest) {
 
   const checks = [
     ['commands.edgeDeferred', commands && commands.edgeDeferred, EXACT_EDGE_DEFERRED_COMMANDS],
-    ['commands.cloudDeferred', commands && commands.cloudDeferred, EXACT_STAGED_COMMANDS],
+    ['commands.cloudDeferred', commands && commands.cloudDeferred, EXACT_CLOUD_DEFERRED_COMMANDS],
     ['eventOps.edgeModuleOwned', eventOps && eventOps.edgeModuleOwned, EXACT_EDGE_MODULE_OPS],
     ['eventOps.edgeDeferred', eventOps && eventOps.edgeDeferred, EXACT_EDGE_DEFERRED_OPS],
     ['eventOps.edgeStaged', eventOps && eventOps.edgeStaged, EXACT_EDGE_STAGED_OPS],
-    ['eventOps.cloudDeferred', eventOps && eventOps.cloudDeferred, EXACT_JOURNAL_EVENT_OPS],
+    ['eventOps.cloudDeferred', eventOps && eventOps.cloudDeferred, EXACT_CLOUD_DEFERRED_EVENT_OPS],
   ];
   for (const [name, actual, expected] of checks) {
     if (!Array.isArray(actual)) {
@@ -1374,7 +1429,7 @@ function checkSyncOpParity(options = {}) {
   const staging = stagingEnabled ? {
     edgeModuleOwned: EXACT_EDGE_MODULE_OPS,
     edgeDeferred: EXACT_EDGE_DEFERRED_OPS,
-    cloudDeferred: EXACT_JOURNAL_EVENT_OPS,
+    cloudDeferred: EXACT_CLOUD_DEFERRED_EVENT_OPS,
     edgeStaged: EXACT_EDGE_STAGED_OPS,
   } : {
     edgeModuleOwned: [],

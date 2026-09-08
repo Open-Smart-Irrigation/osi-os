@@ -2,6 +2,7 @@
   "addModal": {
     "title": "Yongera Ekyuma",
     "deviceType": "Ekika ky'ekyuma",
+    "deviceTypeRequired": "Londako ekika ky'ekyuma",
     "deviceName": "Erinnya ly'ekyuma",
     "deviceNamePlaceholder": "eg. Olusozi olw'omugga, Zzimu enkulu",
     "deveui": "DevEUI",
@@ -11,6 +12,10 @@
     "generation": "Valve generation",
     "generationGen1": "Gen-1",
     "generationGen2": "Gen-2",
+    "appkeyInvalid": "AppKey erina okubaamu ebyagiro 32 eby'hexadecimal",
+    "appkey": "AppKey",
+    "appkeyHint": "Ebyagiro 32 eby'hexadecimal ebiri ku kabonero k'ekyuma",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Tikuyongera...",
     "submit": "Yongera Ekyuma",
     "failed": "Okuyongera ekyuma kugaanye"
@@ -31,6 +36,7 @@
     "tabAssign": "Gabira ekiriwo",
     "tabRegister": "Ekyuma ekipya",
     "assignConflict": "Ekyuma kino kati kiri mu kitundu \"{{zoneName}}\". Sooka okiggyemu eyo.",
+    "assignConflictDeleted": "Ekyuma kino kikyalagiddwa mu kitundu ekyasaziddwamu. Komyawo olukalala lw'ebyuma ogezeeko nate.",
     "registerZoneNotice": "Ekyuma kino kijja kuwandiikibwa butereevu mu {{zoneName}}.",
     "registerSubmit": "Wandiika mu kitundu",
     "registering": "Kiwandiikibwa..."

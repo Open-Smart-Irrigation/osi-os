@@ -74,6 +74,7 @@ import type {
   ValveScheduleInput,
   ValveSchedulerStatus,
   ValvePlanError,
+  AdminUser,
 } from '../types/farming';
 
 type ApiErrorPayload = {
@@ -159,6 +160,39 @@ export const authAPI = {
     return response.data;
   },
 };
+
+export const listUsers = () =>
+  api.get<{ users: AdminUser[] }>('/api/users').then((response) => response.data.users);
+
+export const createUser = (body: { username: string; password: string; role: AdminUser['role'] }) =>
+  api.post<AdminUser>('/api/users', body).then((response) => response.data);
+
+export const resetPassword = (uuid: string, password: string) =>
+  api.post(`/api/users/${encodeURIComponent(uuid)}/password-reset`, { password });
+
+export const setUserRole = (uuid: string, role: AdminUser['role']) =>
+  api.put(`/api/users/${encodeURIComponent(uuid)}/role`, { role });
+
+export const setUserDisabled = (uuid: string, disabled: boolean) =>
+  api.put(`/api/users/${encodeURIComponent(uuid)}/disabled`, { disabled });
+
+export interface GrantAssignment {
+  assignment_uuid: string;
+  user_uuid: string;
+  zone_uuid?: string;
+  plot_uuid?: string;
+}
+
+export const grantZone = (user_uuid: string, zone_uuid: string) =>
+  api.post<GrantAssignment>('/api/grants/zone', { user_uuid, zone_uuid })
+    .then((response) => response.data);
+
+export const grantPlot = (user_uuid: string, plot_uuid: string) =>
+  api.post<GrantAssignment>('/api/grants/plot', { user_uuid, plot_uuid })
+    .then((response) => response.data);
+
+export const revokeGrant = (kind: 'zone' | 'plot', assignmentUuid: string) =>
+  api.delete(`/api/grants/${kind}/${encodeURIComponent(assignmentUuid)}`);
 
 type RawIrrigationSchedule = Partial<IrrigationSchedule> & {
   irrigationZoneId?: number | null;
@@ -1159,6 +1193,20 @@ export const systemSettingsAPI = {
     return res.data;
   },
 };
+
+export interface ScopeProfile {
+  username: string;
+  user_uuid: string;
+  role: 'admin' | 'researcher' | 'viewer';
+  zone_uuids: string[] | null;
+  plot_uuids: string[] | null;
+  features: { scoped_access: boolean };
+}
+
+export async function fetchScopeProfile(): Promise<ScopeProfile> {
+  const response = await api.get<ScopeProfile>('/api/me');
+  return response.data;
+}
 
 export interface AccountLinkRequest {
   serverUrl: string;

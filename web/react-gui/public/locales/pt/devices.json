@@ -2,6 +2,7 @@
   "addModal": {
     "title": "Adicionar dispositivo",
     "deviceType": "Tipo de dispositivo",
+    "deviceTypeRequired": "Selecione um tipo de dispositivo",
     "deviceName": "Nome do dispositivo",
     "deviceNamePlaceholder": "ex. Campo Norte, Válvula principal",
     "deveui": "DevEUI",
@@ -11,6 +12,10 @@
     "generation": "Valve generation",
     "generationGen1": "Gen-1",
     "generationGen2": "Gen-2",
+    "appkeyInvalid": "A AppKey deve ter exatamente 32 caracteres hexadecimais",
+    "appkey": "AppKey",
+    "appkeyHint": "32 caracteres hexadecimais impressos na etiqueta do dispositivo",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "A adicionar...",
     "submit": "Adicionar dispositivo",
     "failed": "Falha ao adicionar dispositivo"
@@ -31,6 +36,7 @@
     "tabAssign": "Atribuir existente",
     "tabRegister": "Novo dispositivo",
     "assignConflict": "Esse dispositivo está agora na zona \"{{zoneName}}\". Primeiro remova-o dessa zona.",
+    "assignConflictDeleted": "Esse dispositivo ainda está atribuído a uma zona eliminada. Atualize a lista de dispositivos e tente novamente.",
     "registerZoneNotice": "Este dispositivo será registado diretamente em {{zoneName}}.",
     "registerSubmit": "Registar na zona",
     "registering": "A registar..."

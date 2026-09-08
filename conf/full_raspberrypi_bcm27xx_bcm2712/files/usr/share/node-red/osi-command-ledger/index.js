@@ -134,6 +134,28 @@ function validNonJournalEffectBinding(envelope, runtime) {
       .trim().toUpperCase();
     return deviceEui === match[1];
   }
+  const scopedBindings = {
+    UPSERT_SCOPED_USER: ['scoped_user', payload.user, 'user_uuid'],
+    RESET_SCOPED_USER_PASSWORD: ['scoped_user_password', payload, 'user_uuid'],
+    UPSERT_USER_ZONE_ASSIGNMENT: [
+      'scoped_zone_assignment', payload.zone_assignment, 'assignment_uuid'
+    ],
+    DELETE_USER_ZONE_ASSIGNMENT: ['scoped_zone_assignment', payload, 'assignment_uuid'],
+    UPSERT_USER_PLOT_ASSIGNMENT: [
+      'scoped_plot_assignment', payload.plot_assignment, 'assignment_uuid'
+    ],
+    DELETE_USER_PLOT_ASSIGNMENT: ['scoped_plot_assignment', payload, 'assignment_uuid'],
+  };
+  const scoped = scopedBindings[commandType(envelope)];
+  if (scoped) {
+    const resource = scoped[1];
+    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) return false;
+    const resourceUuid = String(resource[scoped[2]] || '').trim().toLowerCase();
+    const base = resource.base_sync_version;
+    return /^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(resourceUuid) &&
+      Number.isSafeInteger(base) && base >= 0 &&
+      effectKey === scoped[0] + ':' + resourceUuid + ':' + base;
+  }
   return false;
 }
 

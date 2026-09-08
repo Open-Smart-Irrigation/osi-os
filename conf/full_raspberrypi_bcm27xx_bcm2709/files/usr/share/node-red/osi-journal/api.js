@@ -419,6 +419,18 @@ async function loadScopedCatalog(db, principal, options) {
   return catalogDto(await loadCatalog(db, principal), options);
 }
 
+async function resolveCatalogPrincipal(db, principal, query) {
+  if (!principal || !principal.scoped) return principal;
+  const filters = query || {};
+  if (filters.plot_uuid != null && filters.plot_uuid !== '') {
+    return assertPlotWrite(db, principal, canonicalUuid(filters.plot_uuid, 'plot_uuid', true));
+  }
+  if (filters.zone_uuid != null && filters.zone_uuid !== '') {
+    return assertZoneWrite(db, principal, canonicalUuid(filters.zone_uuid, 'zone_uuid', true));
+  }
+  return principal;
+}
+
 function normalizedStringFilter(raw, field) {
   if (raw == null || raw === '') return null;
   if (typeof raw !== 'string' || Buffer.byteLength(raw, 'utf8') > 4096) {
@@ -492,13 +504,16 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   const filters = normalizeEntryFilters(rawFilters);
   const hash = filterHash(filters);
   const cursor = includeCursor === false ? null : decodeCursor(filters.cursor, hash);
-  const clauses = [
-    'e.owner_user_uuid=?',
-    'e.user_id=?',
-    'e.gateway_device_eui=?',
-    'e.deleted_at IS NULL',
-  ];
-  const params = [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui];
+  const readScope = await resolvedReadScope(db, principal);
+  const clauses = readScope
+    ? ['e.gateway_device_eui=?', 'e.deleted_at IS NULL']
+    : ['e.owner_user_uuid=?', 'e.user_id=?', 'e.gateway_device_eui=?', 'e.deleted_at IS NULL'];
+  const params = readScope
+    ? [principal.gateway_device_eui]
+    : [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui];
+  // Write-only scoping (W2): every enabled account on the gateway reads every
+  // journal entry, including plot-less (zone-only) entries. resolvedReadScope
+  // is retained for its disabled-account 403 (P1); its plotUuids are not read.
   if (filters.status !== 'all') {
     clauses.push('e.status=?');
     params.push(filters.status);
@@ -515,7 +530,15 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
     pass_uuid: 'e.pass_uuid',
   };
   if (filters.zone_uuid != null) {
-    const zone = await ownedZone(db, filters.zone_uuid, principal);
+    const zone = readScope
+      ? await dbGet(
+        db,
+        'SELECT id FROM irrigation_zones WHERE zone_uuid=? AND deleted_at IS NULL ' +
+          'AND (gateway_device_eui=? OR gateway_device_eui IS NULL) LIMIT 1',
+        [filters.zone_uuid, principal.gateway_device_eui]
+      )
+      : await ownedZone(db, filters.zone_uuid, principal);
+    if (!zone) throw apiError(404, 'not_found', 'Zone was not found');
     clauses.push('e.zone_id=?');
     params.push(Number(zone.id));
   }
@@ -599,6 +622,126 @@ async function listEntries(db, rawFilters, principal) {
   });
 }
 
+async function resolvedReadScope(db, principal) {
+  if (!principal || !principal.scoped) return null;
+  if (!principal.scope || typeof principal.scope.resolveScope !== 'function') {
+    throw apiError(503, 'scope_unavailable', 'Scoped journal access is unavailable');
+  }
+  const scope = await principal.scope.resolveScope(
+    db,
+    principal.owner_user_uuid,
+    { scopedMode: true }
+  );
+  if (scope.disabled) throw apiError(403, 'forbidden', 'Account is disabled');
+  return scope;
+}
+
+function scopedWriteHelper(principal, method) {
+  if (!principal || !principal.scoped) return null;
+  if (!principal.scope || typeof principal.scope[method] !== 'function') {
+    throw apiError(503, 'scope_unavailable', 'Scoped journal access is unavailable');
+  }
+  return principal.scope;
+}
+
+async function assertJournalWriteRole(db, principal) {
+  const scopeHelper = scopedWriteHelper(principal, 'assertFreshRole');
+  if (!scopeHelper) return principal;
+  const actor = await dbGet(
+    db,
+    'SELECT role FROM users WHERE user_uuid=? LIMIT 1',
+    [principal.author_principal_uuid]
+  );
+  if (!actor) throw apiError(401, 'unauthorized', 'Authentication is required');
+  const fresh = await scopeHelper.assertFreshRole(
+    db,
+    principal.author_principal_uuid,
+    actor.role,
+    { scopedMode: true }
+  );
+  if (!scopeHelper.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
+  return principal;
+}
+
+async function assertZoneWrite(db, principal, zoneUuid) {
+  const scopeHelper = scopedWriteHelper(principal, 'assertFreshZoneAccess');
+  if (!scopeHelper) return principal;
+  await scopeHelper.assertFreshZoneAccess(
+    db,
+    principal.author_principal_uuid,
+    zoneUuid,
+    { scopedMode: true }
+  );
+  const owner = await dbGet(
+    db,
+    'SELECT z.user_id AS owner_user_id,u.user_uuid AS owner_user_uuid ' +
+      'FROM irrigation_zones AS z JOIN users AS u ON u.id=z.user_id ' +
+      'WHERE z.zone_uuid=? AND z.deleted_at IS NULL LIMIT 1',
+    [zoneUuid]
+  );
+  if (!owner) throw apiError(404, 'not_found', 'Zone was not found');
+  return Object.assign({}, principal, {
+    user_id: Number(owner.owner_user_id),
+    owner_user_uuid: owner.owner_user_uuid,
+  });
+}
+
+async function assertPlotWrite(db, principal, plotUuid) {
+  const scopeHelper = scopedWriteHelper(principal, 'assertFreshPlotAccess');
+  if (!scopeHelper) return principal;
+  await scopeHelper.assertFreshPlotAccess(
+    db,
+    principal.author_principal_uuid,
+    plotUuid,
+    { scopedMode: true }
+  );
+  const owner = await dbGet(
+    db,
+    'SELECT p.owner_user_uuid,u.id AS owner_user_id ' +
+      'FROM journal_plots AS p JOIN users AS u ON u.user_uuid=p.owner_user_uuid ' +
+      'WHERE p.plot_uuid=? AND p.gateway_device_eui=? AND p.deleted_at IS NULL LIMIT 1',
+    [plotUuid, principal.gateway_device_eui]
+  );
+  if (!owner) throw apiError(404, 'not_found', 'Plot was not found');
+  return Object.assign({}, principal, {
+    user_id: Number(owner.owner_user_id),
+    owner_user_uuid: owner.owner_user_uuid,
+  });
+}
+
+async function assertPlotSetWrite(db, principal, plotUuids) {
+  let effective = principal;
+  let ownerUuid = null;
+  for (const plotUuid of [...new Set(plotUuids)]) {
+    const candidate = await assertPlotWrite(db, principal, plotUuid);
+    if (ownerUuid && candidate.owner_user_uuid !== ownerUuid) {
+      throw apiError(422, 'mixed_plot_owners', 'A journal write cannot span plots with different owners');
+    }
+    ownerUuid = candidate.owner_user_uuid;
+    effective = candidate;
+  }
+  return effective;
+}
+
+async function assertEntryWrite(db, principal, entryUuid) {
+  if (!principal || !principal.scoped) return principal;
+  const entry = await dbGet(
+    db,
+    'SELECT plot_uuid,owner_user_uuid,user_id FROM journal_entries WHERE entry_uuid=? AND gateway_device_eui=? ' +
+      'AND deleted_at IS NULL LIMIT 1',
+    [entryUuid, principal.gateway_device_eui]
+  );
+  if (!entry) throw apiError(404, 'not_found', 'Journal entry was not found');
+  if (!entry.plot_uuid) {
+    await assertJournalWriteRole(db, principal);
+    return Object.assign({}, principal, {
+      owner_user_uuid: entry.owner_user_uuid,
+      user_id: Number(entry.user_id),
+    });
+  }
+  return assertPlotWrite(db, principal, entry.plot_uuid);
+}
+
 async function writeTransaction(db, executor) {
   if (db && typeof db.transaction === 'function') return db.transaction(executor);
   if (!db || typeof db.exec !== 'function') throw new TypeError('Database must provide transaction()');
@@ -643,6 +786,19 @@ function exactBaseVersion(value, creating) {
 }
 
 async function ownedZone(tx, zoneUuid, principal) {
+  if (principal && principal.scoped) {
+    principal = await assertZoneWrite(tx, principal, zoneUuid);
+    const scopedZone = await dbGet(
+      tx,
+      'SELECT z.id,z.name,z.zone_uuid,z.gateway_device_eui,z.user_id,u.user_uuid ' +
+        'FROM irrigation_zones AS z JOIN users AS u ON u.id=z.user_id ' +
+        'WHERE z.zone_uuid=? AND z.deleted_at IS NULL ' +
+          'AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL) LIMIT 1',
+      [zoneUuid, principal.gateway_device_eui]
+    );
+    if (!scopedZone) throw apiError(404, 'not_found', 'Zone was not found');
+    return scopedZone;
+  }
   const zone = await dbGet(
     tx,
     'SELECT z.id,z.name,z.zone_uuid,z.gateway_device_eui,z.user_id,u.user_uuid ' +
@@ -745,16 +901,23 @@ async function activeCropCyclesForPlot(db, plotUuid) {
 // tension probe (e.g. DRAGINO_LSN50) has no weather source at all.
 async function zoneHasWeatherSource(db, zoneUuid, principal) {
   if (!zoneUuid) return false;
+  const scopedClause = principal && principal.scoped
+    ? ''
+    : 'AND z.user_id=? ';
+  const params = principal && principal.scoped
+    ? [zoneUuid, principal.gateway_device_eui]
+    : [zoneUuid, principal.user_id, principal.gateway_device_eui];
   const row = await dbGet(
     db,
     'SELECT 1 FROM irrigation_zones AS z ' +
       'JOIN devices AS d ON (d.irrigation_zone_id=z.id OR EXISTS (' +
         'SELECT 1 FROM weather_station_zones AS wsz WHERE wsz.deveui=d.deveui AND wsz.zone_id=z.id' +
       ')) ' +
-    'WHERE z.zone_uuid=? AND z.user_id=? AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL) ' +
+    'WHERE z.zone_uuid=? ' + scopedClause +
+      'AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL) ' +
       "AND z.deleted_at IS NULL AND d.deleted_at IS NULL AND UPPER(d.type_id)='SENSECAP_S2120' " +
     'LIMIT 1',
-    [zoneUuid, principal.user_id, principal.gateway_device_eui]
+    params
   );
   return Boolean(row);
 }
@@ -863,6 +1026,11 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
   const inputUuid = canonicalUuid(input.plot_uuid, 'plot_uuid', !pathUuid);
   const plotUuid = canonicalUuid(pathUuid || inputUuid, 'plot_uuid', true);
   if (inputUuid && inputUuid !== plotUuid) badRequest('path_body_mismatch', 'Path and body plot UUID differ');
+  if (pathUuid) principal = await assertPlotWrite(db, principal, plotUuid);
+  const requestedZoneUuid = canonicalUuid(input.zone_uuid, 'zone_uuid', false);
+  if (!pathUuid && requestedZoneUuid) {
+    principal = await assertZoneWrite(db, principal, requestedZoneUuid);
+  }
   return writeTransaction(db, async function(tx) {
     const existing = await dbGet(
       tx,
@@ -1119,6 +1287,27 @@ async function saveEntry(db, input, principal, options) {
   }
   const zoneUuid = canonicalUuid(body.zone_uuid, 'zone_uuid', false);
   let plotUuid = canonicalUuid(body.plot_uuid, 'plot_uuid', false);
+  if (batchMembers) {
+    principal = await assertPlotSetWrite(
+      db,
+      principal,
+      batchMembers.map(function(member) { return member.plot_uuid; })
+    );
+  } else if (mode === 'update') {
+    // The entry's OWN plot is the authority on an update. Checking only the
+    // body-supplied plot let a revoked grantee overwrite an entry, and
+    // re-parent it, by naming a plot they still hold.
+    principal = await assertEntryWrite(db, principal, body.entry_uuid);
+    if (plotUuid) {
+      // A re-parent needs write scope on the destination too, and the
+      // destination owner is the principal the write is attributed to.
+      principal = await assertPlotWrite(db, principal, plotUuid);
+    }
+  } else if (plotUuid) {
+    principal = await assertPlotWrite(db, principal, plotUuid);
+  } else if (zoneUuid) {
+    principal = await assertZoneWrite(db, principal, zoneUuid);
+  }
   if (!plotUuid && zoneUuid) {
     plotUuid = await ensureZonePlot(db, zoneUuid, body, principal);
   }
@@ -1147,6 +1336,7 @@ async function voidEntry(db, entryUuid, input, principal) {
   const bodyUuid = canonicalUuid(input.entry_uuid, 'entry_uuid', false);
   const pathUuid = canonicalUuid(entryUuid, 'entry_uuid', true);
   if (bodyUuid && bodyUuid !== pathUuid) badRequest('path_body_mismatch', 'Path and body entry UUID differ');
+  principal = await assertEntryWrite(db, principal, pathUuid);
   if (!Number.isInteger(input.base_sync_version) || input.base_sync_version < 1) {
     throw apiError(409, 'stale_version', 'Void requires the current base_sync_version');
   }
@@ -1166,21 +1356,11 @@ async function discardEntry(db, entryUuid, input, principal) {
   const bodyUuid = canonicalUuid(input.entry_uuid, 'entry_uuid', false);
   const pathUuid = canonicalUuid(entryUuid, 'entry_uuid', true);
   if (bodyUuid && bodyUuid !== pathUuid) badRequest('path_body_mismatch', 'Path and body entry UUID differ');
+  principal = await assertEntryWrite(db, principal, pathUuid);
   return require('./lifecycle').discardDraft(db, pathUuid, principal);
 }
 
-async function listPlots(db, principal) {
-  const rows = await dbAll(
-    db,
-    'SELECT p.*,s.layout_code,s.context_json,s.updated_at AS settings_updated_at,' +
-      's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
-    'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
-      'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid AND z.deleted_at IS NULL ' +
-    'WHERE p.owner_user_uuid=? AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
-      'AND (p.zone_uuid IS NULL OR (z.user_id=? AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL))) ' +
-    'ORDER BY p.plot_code,p.plot_uuid',
-    [principal.owner_user_uuid, principal.gateway_device_eui, principal.user_id, principal.gateway_device_eui]
-  );
+async function aggregatePlotRows(db, rows, principal) {
   const plots = await Promise.all(rows.map(async function(row) {
     const activeCropCycles = await activeCropCyclesForPlot(db, row.plot_uuid);
     const hasWeatherSource = await zoneHasWeatherSource(db, row.zone_uuid, principal);
@@ -1193,6 +1373,37 @@ async function listPlots(db, principal) {
     }, activeCropCycles, hasWeatherSource);
   }));
   return { plots };
+}
+
+async function listPlotsLegacy(db, principal) {
+  const rows = await dbAll(
+    db,
+    'SELECT p.*,s.layout_code,s.context_json,s.updated_at AS settings_updated_at,' +
+      's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
+    'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
+      'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid AND z.deleted_at IS NULL ' +
+    'WHERE p.owner_user_uuid=? AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
+      'AND (p.zone_uuid IS NULL OR (z.user_id=? AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL))) ' +
+    'ORDER BY p.plot_code,p.plot_uuid',
+    [principal.owner_user_uuid, principal.gateway_device_eui, principal.user_id, principal.gateway_device_eui]
+  );
+  return aggregatePlotRows(db, rows, principal);
+}
+
+async function listPlots(db, principal) {
+  const scope = await resolvedReadScope(db, principal);
+  if (!scope) return listPlotsLegacy(db, principal);
+  // Write-only scoping (W2): account-wide plot list.
+  const rows = await dbAll(
+    db,
+    'SELECT p.*,s.layout_code,s.context_json,s.updated_at AS settings_updated_at,' +
+      's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
+    'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
+    'WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
+    'ORDER BY p.plot_code,p.plot_uuid',
+    [principal.gateway_device_eui]
+  );
+  return aggregatePlotRows(db, rows, principal);
 }
 
 function jsonObjectText(value, field, required) {
@@ -1835,6 +2046,13 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
   const inputUuid = canonicalUuid(input.group_uuid, 'group_uuid', !pathUuid);
   const groupUuid = canonicalUuid(pathUuid || inputUuid, 'group_uuid', true);
   if (inputUuid && inputUuid !== groupUuid) badRequest('path_body_mismatch', 'Path and body group UUID differ');
+  if (Array.isArray(input.members) && input.members.length) {
+    principal = await assertPlotSetWrite(
+      db,
+      principal,
+      input.members.map(function(value) { return canonicalUuid(value, 'members', true); })
+    );
+  }
   return writeTransaction(db, async function(tx) {
     const existing = await dbGet(
       tx,
@@ -1960,26 +2178,46 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
 }
 
 async function listPlotGroupsInSnapshot(db, principal) {
-  const rows = await dbAll(
-    db,
-    'SELECT * FROM journal_plot_groups WHERE owner_user_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL ' +
-      'ORDER BY resolved_at IS NOT NULL,label,group_uuid',
-    [principal.owner_user_uuid, principal.gateway_device_eui]
-  );
+  const scope = await resolvedReadScope(db, principal);
+  const rows = scope
+    ? await dbAll(
+      db,
+      'SELECT * FROM journal_plot_groups WHERE gateway_device_eui=? AND deleted_at IS NULL ' +
+        'ORDER BY resolved_at IS NOT NULL,label,group_uuid',
+      [principal.gateway_device_eui]
+    )
+    : await dbAll(
+      db,
+      'SELECT * FROM journal_plot_groups WHERE owner_user_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL ' +
+        'ORDER BY resolved_at IS NOT NULL,label,group_uuid',
+      [principal.owner_user_uuid, principal.gateway_device_eui]
+    );
   if (!rows.length) return { plot_groups: [] };
   const ids = rows.map(function(row) { return row.group_uuid; });
-  const memberships = await dbAll(
-    db,
+  const memberships = scope
+    ? await dbAll(
+      db,
       'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
-      'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
-      'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
-      'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
-      'AND g.owner_user_uuid=? AND g.gateway_device_eui=? ' +
-      'AND p.owner_user_uuid=? AND p.gateway_device_eui=? ' +
-      'ORDER BY m.group_uuid,m.plot_uuid',
-    ids.concat([principal.owner_user_uuid, principal.gateway_device_eui,
-      principal.owner_user_uuid, principal.gateway_device_eui])
-  );
+        'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
+        'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+        'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
+        'AND g.gateway_device_eui=? AND g.deleted_at IS NULL ' +
+        'AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
+        'ORDER BY m.group_uuid,m.plot_uuid',
+      ids.concat([principal.gateway_device_eui, principal.gateway_device_eui])
+    )
+    : await dbAll(
+      db,
+        'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
+        'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
+        'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+        'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
+        'AND g.owner_user_uuid=? AND g.gateway_device_eui=? ' +
+        'AND p.owner_user_uuid=? AND p.gateway_device_eui=? ' +
+        'ORDER BY m.group_uuid,m.plot_uuid',
+      ids.concat([principal.owner_user_uuid, principal.gateway_device_eui,
+        principal.owner_user_uuid, principal.gateway_device_eui])
+    );
   const byGroup = new Map();
   for (const member of memberships) {
     if (!byGroup.has(member.group_uuid)) byGroup.set(member.group_uuid, []);
@@ -3071,10 +3309,16 @@ async function handleHttpRequest(options) {
       confidence: environment.deviceEuiConfidence,
       source: environment.deviceEuiSource,
     });
+    principal.scope = options.scope || null;
+    principal.scoped = options.scopedMode === true;
     const query = msg.req && msg.req.query || {};
     const uuid = msg.req && msg.req.params && msg.req.params.uuid;
+    if (method === 'POST' || method === 'PUT') {
+      await assertJournalWriteRole(db, principal);
+    }
     if (method === 'GET' && requestPath === '/api/journal/catalog') {
-      return respond(200, await loadScopedCatalog(db, principal, {
+      const catalogPrincipal = await resolveCatalogPrincipal(db, principal, query);
+      return respond(200, await loadScopedCatalog(db, catalogPrincipal, {
         includeDefinitions: query.include === 'definitions',
       }));
     }

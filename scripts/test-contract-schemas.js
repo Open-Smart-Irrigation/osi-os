@@ -16,6 +16,24 @@ const JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_PLOT',
     'UPSERT_JOURNAL_PLOT_GROUP',
 ];
+const SCOPED_ACCESS_COMMANDS = [
+    'UPSERT_SCOPED_USER',
+    'RESET_SCOPED_USER_PASSWORD',
+    'UPSERT_USER_ZONE_ASSIGNMENT',
+    'DELETE_USER_ZONE_ASSIGNMENT',
+    'UPSERT_USER_PLOT_ASSIGNMENT',
+    'DELETE_USER_PLOT_ASSIGNMENT',
+];
+const DEVICE_EUI_EXEMPT_COMMANDS = [...JOURNAL_COMMANDS, ...SCOPED_ACCESS_COMMANDS];
+// Scoped-access outbox events, cloud-deferred pending osi-server PR #83 (see the long-form
+// rationale in scripts/verify-sync-op-parity.js next to EXACT_SCOPED_ACCESS_EVENT_OPS).
+const SCOPED_ACCESS_EVENT_OPS = [
+    'USER_PLOT_ASSIGNMENT_DELETED',
+    'USER_PLOT_ASSIGNMENT_UPSERTED',
+    'USER_UPSERTED',
+    'USER_ZONE_ASSIGNMENT_DELETED',
+    'USER_ZONE_ASSIGNMENT_UPSERTED',
+];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
     JOURNAL_ENTRY_VOIDED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -39,13 +57,46 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_PLOT_GROUP: {
         effect_key: { prefix: 'journal_plot_group', uuid_path: 'plot_group.group_uuid', version_path: 'plot_group.base_sync_version' },
     },
+    UPSERT_SCOPED_USER: {
+        effect_key: { prefix: 'scoped_user', uuid_path: 'user.user_uuid', version_path: 'user.base_sync_version' },
+    },
+    RESET_SCOPED_USER_PASSWORD: {
+        effect_key: { prefix: 'scoped_user_password', uuid_path: 'user_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_USER_ZONE_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_zone_assignment', uuid_path: 'zone_assignment.assignment_uuid', version_path: 'zone_assignment.base_sync_version' },
+    },
+    DELETE_USER_ZONE_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_zone_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_USER_PLOT_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'plot_assignment.assignment_uuid', version_path: 'plot_assignment.base_sync_version' },
+    },
+    DELETE_USER_PLOT_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
+    },
 };
-const EXPECTED_EVENT_SEMANTIC_BINDINGS = Object.fromEntries(
-    Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
-        aggregate_key_path: `payload.${binding[2]}`,
-        sync_version_path: 'payload.sync_version',
-    }])
-);
+const SCOPED_ACCESS_EVENT_KEY_FIELDS = {
+    USER_UPSERTED: 'user_uuid',
+    USER_ZONE_ASSIGNMENT_UPSERTED: 'assignment_uuid',
+    USER_ZONE_ASSIGNMENT_DELETED: 'assignment_uuid',
+    USER_PLOT_ASSIGNMENT_UPSERTED: 'assignment_uuid',
+    USER_PLOT_ASSIGNMENT_DELETED: 'assignment_uuid',
+};
+const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
+    ...Object.fromEntries(
+        Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
+            aggregate_key_path: `payload.${binding[2]}`,
+            sync_version_path: 'payload.sync_version',
+        }])
+    ),
+    ...Object.fromEntries(
+        Object.entries(SCOPED_ACCESS_EVENT_KEY_FIELDS).map(([op, keyField]) => [op, {
+            aggregate_key_path: `payload.${keyField}`,
+            sync_version_path: 'payload.sync_version',
+        }])
+    ),
+};
 
 function loadSchema(name) {
     return JSON.parse(fs.readFileSync(path.join(SCHEMA_DIR, name), 'utf8'));
@@ -911,7 +962,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
         JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -920,9 +971,82 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS));
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
     reportCheck(exactStaging, 'staging manifest pins the exact journal sets', 'staging manifest drifted from the exact journal sets');
 }
+
+const scopedUserCommand = {
+    command_id: UUID,
+    command_type: 'UPSERT_SCOPED_USER',
+    effect_key: `scoped_user:${UUID}:0`,
+    user: {
+        user_uuid: UUID,
+        username: 'researcher-one',
+        role: 'researcher',
+        disabled_at: null,
+        sync_version: 1,
+        base_sync_version: 0,
+        gateway_device_eui: '0123456789ABCDEF',
+    },
+};
+expectValid('UPSERT_SCOPED_USER canonical command', cmdSchema, scopedUserCommand, cmdSchema);
+expectInvalid(
+    'UPSERT_SCOPED_USER rejects plaintext password',
+    cmdSchema,
+    { ...scopedUserCommand, user: { ...scopedUserCommand.user, password: 'secret' } },
+    /password.*enum|property/
+);
+expectInvalid(
+    'UPSERT_SCOPED_USER rejects mismatched effect identity',
+    cmdSchema,
+    { ...scopedUserCommand, effect_key: `scoped_user:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:0` },
+    /effect_key.*(?:equal|match)/
+);
+const bcryptHash = '$2b$10$' + 'a'.repeat(53);
+expectValid(
+    'RESET_SCOPED_USER_PASSWORD accepts bcrypt hash without plaintext',
+    cmdSchema,
+    {
+        command_id: UUID,
+        command_type: 'RESET_SCOPED_USER_PASSWORD',
+        effect_key: `scoped_user_password:${UUID}:1`,
+        user_uuid: UUID,
+        base_sync_version: 1,
+        password_hash: bcryptHash,
+    },
+    cmdSchema
+);
+expectInvalid(
+    'DELETE_USER_ZONE_ASSIGNMENT requires a base version',
+    cmdSchema,
+    {
+        command_id: UUID,
+        command_type: 'DELETE_USER_ZONE_ASSIGNMENT',
+        effect_key: `scoped_zone_assignment:${UUID}:0`,
+        assignment_uuid: UUID,
+    },
+    /base_sync_version.*required/
+);
+expectValid(
+    'UPSERT_USER_PLOT_ASSIGNMENT canonical command',
+    cmdSchema,
+    {
+        command_id: UUID,
+        command_type: 'UPSERT_USER_PLOT_ASSIGNMENT',
+        effect_key: `scoped_plot_assignment:${UUID}:0`,
+        plot_assignment: {
+            assignment_uuid: UUID,
+            user_uuid: UUID,
+            plot_uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            assigned_by_user_uuid: null,
+            sync_version: 1,
+            base_sync_version: 0,
+            deleted_at: null,
+            gateway_device_eui: '0123456789ABCDEF',
+        },
+    },
+    cmdSchema
+);
 
 const journalEntry = {
     contract_version: 1,
@@ -1338,9 +1462,9 @@ const journalScopeRule = allOf.find((rule) =>
     rule.else && Array.isArray(rule.else.required) && rule.else.required.includes('device_eui')
 );
 reportCheck(
-    journalScopeRule && JSON.stringify(journalScopeRule.if.properties.command_type.enum) === JSON.stringify(JOURNAL_COMMANDS),
-    'journal commands are the exact device_eui exemptions',
-    'device_eui exemption is missing or is not limited to the exact five journal commands'
+    journalScopeRule && JSON.stringify(journalScopeRule.if.properties.command_type.enum) === JSON.stringify(DEVICE_EUI_EXEMPT_COMMANDS),
+    'gateway-resource commands are the exact device_eui exemptions',
+    'device_eui exemption is missing or does not match gateway-resource commands'
 );
 
 const trustedCommandIdentity = {
@@ -1605,7 +1729,7 @@ const existingCommandEnvelope = {
     request_id: 'request-1',
     status: 'APPLIED',
 };
-for (const commandType of cmdSchema.properties.command_type.enum.filter((type) => !JOURNAL_COMMANDS.includes(type))) {
+for (const commandType of cmdSchema.properties.command_type.enum.filter((type) => !DEVICE_EUI_EXEMPT_COMMANDS.includes(type))) {
     expectInvalid(
         `${commandType} without device_eui`,
         cmdSchema,
@@ -1776,12 +1900,50 @@ expectInvalid(
     /op.*enum/
 );
 
+// AgroLink review E3: scoped gateways embed actor_user_uuid on physical device
+// commands so the edge can enforce scope on cloud-originated actuation, not just
+// GUI-originated actuation. Must validate with it present, and remain valid without
+// it (unscoped gateways / other command types never set it).
+const openForDurationWithActor = {
+    command_id: UUID,
+    command_type: 'OPEN_FOR_DURATION',
+    device_eui: '0123456789ABCDEF',
+    duration_seconds: 600,
+    actor_user_uuid: '44444444-4444-4444-8444-444444444444',
+};
+expectValid(
+    'OPEN_FOR_DURATION with an embedded actor_user_uuid for scoped-gateway enforcement',
+    cmdSchema,
+    openForDurationWithActor,
+    cmdSchema
+);
+expectValid(
+    'OPEN_FOR_DURATION remains valid without actor_user_uuid (unscoped gateways)',
+    cmdSchema,
+    (() => {
+        const { actor_user_uuid, ...withoutActor } = openForDurationWithActor;
+        return withoutActor;
+    })(),
+    cmdSchema
+);
+expectInvalid(
+    'OPEN_FOR_DURATION rejects a malformed actor_user_uuid',
+    cmdSchema,
+    { ...openForDurationWithActor, actor_user_uuid: 'not-a-uuid' },
+    /actor_user_uuid/,
+    cmdSchema
+);
+
 const effectKeyDoc = fs.readFileSync(path.join(SCHEMA_DIR, 'effect-keys.md'), 'utf8');
 for (const format of [
     'journal_entry:{entry_uuid}:{base_sync_version}',
     'journal_vocab:{custom_field_uuid}:{base_sync_version}',
     'journal_plot:{plot_uuid}:{base_sync_version}',
     'journal_plot_group:{group_uuid}:{base_sync_version}',
+    'scoped_user:{user_uuid}:{base_sync_version}',
+    'scoped_user_password:{user_uuid}:{base_sync_version}',
+    'scoped_zone_assignment:{assignment_uuid}:{base_sync_version}',
+    'scoped_plot_assignment:{assignment_uuid}:{base_sync_version}',
 ]) {
     reportCheck(
         effectKeyDoc.includes(format),

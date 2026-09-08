@@ -9,6 +9,8 @@ interface DashboardHeaderProps {
   onAddZone: () => void;
   onAddDevice: () => void;
   onLogout: () => void;
+  canWrite?: boolean;
+  showAdmin?: boolean;
 }
 
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
@@ -16,6 +18,8 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddZone,
   onAddDevice,
   onLogout,
+  canWrite = true,
+  showAdmin = false,
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const navigate = useNavigate();
@@ -33,21 +37,23 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            <HeaderMenu
-              label={t('add')}
-              className="w-[calc(50%-4px)] sm:w-auto"
-              triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-lg px-6 py-3"
-              align="left"
-              items={[
-                { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
-                { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-                {
-                  key: 'activity',
-                  label: t('addMenu.activity'),
-                  onSelect: () => navigate('/journal?capture=1'),
-                },
-              ]}
-            />
+            {canWrite && (
+              <HeaderMenu
+                label={t('add')}
+                className="w-[calc(50%-4px)] sm:w-auto"
+                triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-lg px-6 py-3"
+                align="left"
+                items={[
+                  { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
+                  { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
+                  {
+                    key: 'activity',
+                    label: t('addMenu.activity'),
+                    onSelect: () => navigate('/journal?capture=1'),
+                  },
+                ]}
+              />
+            )}
 
             {showDesktopData && (
               <Link
@@ -56,6 +62,18 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               >
                 {t('data')}
               </Link>
+            )}
+
+            {showAdmin && (
+              <HeaderMenu
+                label={t('admin')}
+                className="w-[calc(50%-4px)] sm:w-auto"
+                triggerClassName="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] text-lg px-6 py-3"
+                items={[
+                  { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
+                  { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
+                ]}
+              />
             )}
 
             <span className="hidden sm:block w-px self-stretch bg-[var(--border)]" aria-hidden="true" />

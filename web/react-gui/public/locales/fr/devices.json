@@ -2,6 +2,7 @@
   "addModal": {
     "title": "Ajouter un appareil",
     "deviceType": "Type d'appareil",
+    "deviceTypeRequired": "Sélectionnez un type d'appareil",
     "deviceName": "Nom de l'appareil",
     "deviceNamePlaceholder": "ex. Champ Nord, Vanne principale",
     "deveui": "DevEUI",
@@ -11,6 +12,10 @@
     "generation": "Génération de la vanne",
     "generationGen1": "Gen-1",
     "generationGen2": "Gen-2",
+    "appkeyInvalid": "L’AppKey doit contenir exactement 32 caractères hexadécimaux",
+    "appkey": "AppKey",
+    "appkeyHint": "32 caractères hexadécimaux imprimés sur l’étiquette de l’appareil",
+    "appkeyPlaceholder": "AABBCCDDEEFF00112233445566778899",
     "adding": "Ajout en cours...",
     "submit": "Ajouter l'appareil",
     "failed": "Impossible d'ajouter l'appareil"
@@ -31,6 +36,7 @@
     "tabAssign": "Affecter un appareil existant",
     "tabRegister": "Nouvel appareil",
     "assignConflict": "Cet appareil se trouve maintenant dans la zone « {{zoneName}} ». Désaffectez-le d’abord de cette zone.",
+    "assignConflictDeleted": "Cet appareil est encore affecté à une zone supprimée. Actualisez la liste des appareils et réessayez.",
     "registerZoneNotice": "Cet appareil sera enregistré directement dans {{zoneName}}.",
     "registerSubmit": "Enregistrer dans la zone",
     "registering": "Enregistrement..."

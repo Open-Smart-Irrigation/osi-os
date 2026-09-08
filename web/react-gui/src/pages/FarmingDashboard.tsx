@@ -2,8 +2,10 @@ import React, { useState, useMemo } from 'react';
 import useSWR from 'swr';
 import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI, valvesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useScope } from '../contexts/ScopeContext';
 import { useTranslation } from 'react-i18next';
 import { DashboardHeader } from '../components/DashboardHeader';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { KiwiSensorCard } from '../components/farming/KiwiSensorCard';
 import { StregaValveCard } from '../components/farming/StregaValveCard';
 import { DraginoTempCard } from '../components/farming/DraginoTempCard';
@@ -31,6 +33,7 @@ const valvesFetcher = () => valvesAPI.list();
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
+  const { canWrite, isAdmin, loading: scopeLoading } = useScope();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const { modules } = useDisplayPreferences();
@@ -98,6 +101,10 @@ export const FarmingDashboard: React.FC = () => {
     }
   );
 
+  // Write-only scoping (W1): enabled accounts read every zone and device.
+  // canWrite still gates mutation affordances below.
+  const allZones = useMemo(() => zones ?? [], [zones]);
+
   const handleUpdate = () => {
     mutateDevices();
     mutateZones();
@@ -118,11 +125,18 @@ export const FarmingDashboard: React.FC = () => {
       return { devicesByZone: new Map(), unassignedDevices: [] };
     }
 
+    const zoneIds = new Set(zones.map((zone) => zone.id));
     const byZone = new Map<number, Device[]>();
     const unassigned: Device[] = [];
 
     devices.forEach((device) => {
-      if (device.irrigation_zone_id) {
+      // Write-only scoping (W1) removed the visible-zone term from this branch.
+      // The weather-station term went with it: it existed only to sweep weather
+      // stations out of zones the caller could not see. A zone-assigned weather
+      // station belongs on its zone card, where IrrigationZoneCard renders its
+      // own weather section; unassignedS2120/unassignedLoRain still cover the
+      // genuinely unassigned ones.
+      if (device.irrigation_zone_id && zoneIds.has(device.irrigation_zone_id)) {
         const zoneDevices = byZone.get(device.irrigation_zone_id) || [];
         zoneDevices.push(device);
         byZone.set(device.irrigation_zone_id, zoneDevices);
@@ -142,8 +156,8 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedSdi12 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_SDI12');
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
-    () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
-    [zones],
+    () => new Map(allZones.map((zone) => [zone.id, zone.timezone])),
+    [allZones],
   );
   // deviceEui is always uppercased by normaliseValveSummary; Device.deveui is always
   // uppercased by normaliseDevice — so a plain-string key match is safe.
@@ -161,7 +175,7 @@ export const FarmingDashboard: React.FC = () => {
     [devices],
   );
   const irrigationOutcomeZoneContexts = useMemo(
-    () => new Map<number, IrrigationOutcomeZoneContext>((zones ?? []).map((zone) => [
+    () => new Map<number, IrrigationOutcomeZoneContext>(allZones.map((zone) => [
       zone.id,
       {
         timeZone: zone.timezone ?? null,
@@ -169,7 +183,7 @@ export const FarmingDashboard: React.FC = () => {
         irrigationEfficiencyPct: zone.irrigationEfficiencyPct ?? zone.irrigation_efficiency_pct ?? null,
       },
     ])),
-    [zones],
+    [allZones],
   );
 
   const isLoading = !devices && !devicesError && !zones && !zonesError;
@@ -182,7 +196,15 @@ export const FarmingDashboard: React.FC = () => {
         onAddZone={() => setIsCreateZoneModalOpen(true)}
         onAddDevice={() => setIsAddDeviceModalOpen(true)}
         onLogout={logout}
+        canWrite={canWrite && !scopeLoading}
+        showAdmin={isAdmin && !scopeLoading}
       />
+
+      {/* Maintainer decision 3(c) (S6): one explanation per surface, not per
+          hidden control. The header's Add-menu gating above, the 8 inline
+          IrrigationZoneCard sites and its 10 readOnly disables all stay
+          untouched — this is the single notice that explains all of them. */}
+      {!scopeLoading && !canWrite && <ReadOnlyNotice scope="farm" />}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8">
@@ -212,45 +234,48 @@ export const FarmingDashboard: React.FC = () => {
         {devices && zones && (
           <>
             {/* Empty State */}
-            {devices.length === 0 && zones.length === 0 && (
+            {devices.length === 0 && allZones.length === 0 && (
               <div className="text-center py-12 bg-[var(--surface)] rounded-xl border-2 border-[var(--border)]">
                 <p className="text-[var(--text)] text-2xl font-bold mb-4">{t('emptyState.title')}</p>
                 <p className="text-[var(--text-tertiary)] text-lg mb-6">
                   {t('emptyState.subtitle')}
                 </p>
-                <div className="flex gap-4 justify-center">
-                  <button
-                    onClick={() => setIsCreateZoneModalOpen(true)}
-                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
-                  >
-                    {t('emptyState.createZone')}
-                  </button>
-                  <button
-                    onClick={() => setIsAddDeviceModalOpen(true)}
-                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
-                  >
-                    {t('emptyState.addDevice')}
-                  </button>
-                </div>
+                {canWrite && (
+                  <div className="flex gap-4 justify-center">
+                    <button
+                      onClick={() => setIsCreateZoneModalOpen(true)}
+                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
+                    >
+                      {t('emptyState.createZone')}
+                    </button>
+                    <button
+                      onClick={() => setIsAddDeviceModalOpen(true)}
+                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
+                    >
+                      {t('emptyState.addDevice')}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Irrigation Zones Section */}
-            {zones.length > 0 && (
+            {allZones.length > 0 && (
               <div className="mb-8">
                 <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">
                   {t('irrigationZones')}
                 </h2>
-                {zones.map((zone) => (
+                {allZones.map((zone) => (
                   <IrrigationZoneCard
                     key={zone.id}
                     zone={zone}
                     devices={devicesByZone.get(zone.id) || []}
                     unassignedDevices={unassignedDevices}
                     onUpdate={handleUpdate}
-                    allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
+                    allZones={allZones.map((z) => ({ id: z.id, name: z.name }))}
                     irrigationActuations={irrigationActuations}
                     valvesByEui={valvesByEui}
+                    canWrite={canWrite}
                   />
                 ))}
               </div>
@@ -290,6 +315,7 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onRemove={handleUpdate}
                             onUpdate={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -310,6 +336,7 @@ export const FarmingDashboard: React.FC = () => {
                             irrigationActuations={irrigationActuations}
                             timeZone={device.irrigation_zone_id ? zoneTimezones.get(device.irrigation_zone_id) : undefined}
                             valve={valvesByEui.get(device.deveui)}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -327,6 +354,7 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onRemove={handleUpdate}
                             onUpdate={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -359,8 +387,9 @@ export const FarmingDashboard: React.FC = () => {
                           <SenseCapWeatherCard
                             key={device.deveui}
                             device={device}
-                            allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
+                            allZones={allZones.map((z) => ({ id: z.id, name: z.name }))}
                             onUpdate={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -377,6 +406,7 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             onRemove={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -411,13 +441,13 @@ export const FarmingDashboard: React.FC = () => {
 
       {/* Modals */}
       <AddDeviceModal
-        isOpen={isAddDeviceModalOpen}
+        isOpen={canWrite && isAddDeviceModalOpen}
         onClose={() => setIsAddDeviceModalOpen(false)}
         onDeviceAdded={handleDeviceAdded}
       />
 
       <CreateZoneModal
-        isOpen={isCreateZoneModalOpen}
+        isOpen={canWrite && isCreateZoneModalOpen}
         onClose={() => setIsCreateZoneModalOpen(false)}
         onZoneCreated={handleZoneCreated}
       />
