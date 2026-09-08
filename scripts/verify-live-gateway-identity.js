@@ -350,12 +350,16 @@ const localRestartReader = [
   '}',
 ].join('\n');
 const protectedNodeHashes = {
-  // Re-pinned (pick-list commit 65, AgroLink d2e81bd6a, "close auth and scoped-access
-  // review gaps"): al-link-validate's getAuthSecret/verifyBearer boilerplate now delegates
-  // to osi-scope-helper's shared resolveAuthSecret with the merged _osiAuthFailure tagging;
-  // ours matched AgroLink's own pre-commit-65 parent exactly for this node, so this hash is
-  // AgroLink's own post-commit value, taken wholesale. Hash re-derived fresh on this branch.
-  'al-link-validate': 'a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc',
+  // Re-pinned #2 (port/wave3-auth-flaggate, fix(auth): flag-gate the shared scope resolver
+  // across all auth nodes + hermetic flag-off verifier, follow-up to PR #200 / commit
+  // 2c4fa9a5f): al-link-validate's getAuthSecret() called osiLib.require('scope')
+  // unconditionally, violating the default-off contract (with OSI_SCOPED_ACCESS unset, no
+  // code path may touch osiLib/the scope helper). Fixed per the history-api-router-fn/
+  // zone-env-fn reference pattern: a freshly-recomputed flag check now gates osiLib
+  // resolution, and the flag-off branch inlines the pre-refactor secret-resolution logic
+  // byte-equivalent to the pre-port route. Hash re-derived fresh on this branch.
+  // Previous pin (pick-list commit 65, AgroLink d2e81bd6a): a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc
+  'al-link-validate': '586ed5912d0dfb36171c299a3b8b9e24b0588fec91fd47a5fa4549d2f873b842',
   // Re-pinned #3 (port adaptation, migration 0029): the guarded devices rebuild's
   // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_channel_layout_json.
   // The source branch's own history never closed this gap -- a live rebuild would have created
@@ -1038,7 +1042,12 @@ if (sizeAllowances) {
     'sync-pending-build': 1344,
     'sync-force-build': 5786,
     'command-ack-build-batch': 975,
-    'sync-state-build': 1072,
+    // sync-state-build superseded 1072 -> 1951 on port/wave3-auth-flaggate: the old 1072
+    // was unconsumed Task-4 slack (never tied to actual content growth on origin/main), so
+    // this auth flag-gate fix's own measured content delta (origin/main 9368 -> HEAD 11319)
+    // simply replaces it; the reason text still retains the "live identity restart sentinel
+    // (Option C Slice 1)" phrase below as carried-forward provenance.
+    'sync-state-build': 1951,
     'al-link-build-req': 969,
     'al-link-restart-node-red': 1761,
     'al-unlink-restart-node-red': 1773,
