@@ -103,6 +103,10 @@ jobs:
         run: node --test scripts/test-scoped-access-command-path.js
       - name: Scoped-access command package tests
         run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.test.js
+      - name: Auth flag-off hermetic ratchet (osiLib.require('scope') unreachable with OSI_SCOPED_ACCESS unset)
+        run: node scripts/verify-auth-flag-off-hermetic.js
+      - name: Auth flag-off hermetic ratchet unit tests
+        run: node --test scripts/verify-auth-flag-off-hermetic.test.js
       - run: node --test scripts/soak/rig.test.js scripts/soak/scenario-outbox-replay.test.js scripts/soak/scenario-clock-jump.test.js scripts/soak/scenario-kill9-migration.test.js scripts/soak/scenario-sd-full.test.js
       - run: node --test scripts/test-gateway-health-persistence.js
       - run: node --test scripts/deploy-canary-gate.test.js
