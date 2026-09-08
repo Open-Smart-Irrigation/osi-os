@@ -37,13 +37,14 @@ const PHASE_C_PENDING = new Set([
   // scope arc (valve-control and SDI-12 landed on main after AgroLink's fork;
   // AgroLink itself never scoped them). Tracked debt, same discipline as the
   // rest of this list -- not a blanket exemption for the two features.
-  // sdi12-config-http/sdi12-identify-http/sdi12-recipe-apply-http/
-  // sdi12-recipe-rollback-http are removed from this set later in this same
-  // port slice, once scoped-device-config-guard is inserted ahead of
-  // sdi12-config-auth-fn and its routeTable is extended to cover the recipe
-  // apply/rollback routes (guard reconciliation).
-  'sdi12-config-http',
-  'sdi12-identify-http',
+  // sdi12-config-http and sdi12-identify-http are guard reconciliation done:
+  // both now route through scoped-device-config-guard (routeTable extended
+  // with POST /sdi12/identify -> sdi12-identify-action-fn and PUT /sdi12/config
+  // -> sdi12-config-auth-fn), matching AgroLink's own guard scope exactly.
+  // sdi12-recipe-apply-http/sdi12-recipe-rollback-http stay pending: AgroLink's
+  // own guard-extension commit (853c1b3584) never added routeTable entries for
+  // the recipe apply/rollback routes either -- this is upstream's own scope,
+  // not a gap introduced by this port.
   'sdi12-recipe-apply-http',
   'sdi12-recipe-rollback-http',
   'valve-list-get-http',

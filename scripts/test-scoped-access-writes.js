@@ -1469,6 +1469,8 @@ const DEVICE_CONFIG_ROUTES = [
   ['POST', '/dendro-baseline/reset'],
   ['POST', '/chameleon/refresh-calibration'],
   ['PUT', '/chameleon/depth'],
+  ['POST', '/sdi12/identify'],
+  ['PUT', '/sdi12/config'],
 ];
 
 test('W5: every device-config route fresh-checks write scope', async () => {
@@ -1527,6 +1529,87 @@ test('W5: every device-config route fresh-checks write scope', async () => {
       });
       assert.equal(viewer.result.at(-1).statusCode, 403, `${method} ${suffix} rejects viewers`);
     }
+  } finally {
+    db.close();
+  }
+});
+
+test('IB1: denied SDI-12 config cannot write, authorized config does write', async () => {
+  const db = seedScopedDb();
+  const deveui = 'AABBCCDDEEFF0001';
+  try {
+    db.prepare(
+      `INSERT INTO devices (
+         deveui, name, type_id, user_id, irrigation_zone_id,
+         created_at, updated_at, sdi12_probe_profile
+       ) VALUES (?, ?, 'DRAGINO_SDI12', ?, ?, ?, ?, ?)`
+    ).run(deveui, 'Scoped SDI-12 test', 2, 1, '2026-01-01', '2026-01-01', 'GENERIC_VWC');
+    const guard = loadNode('scoped-device-config-guard');
+    const configAuth = loadNode('sdi12-config-auth-fn');
+    const configAction = loadNode('sdi12-config-action-fn');
+
+    scopeHelper._resetForTests();
+    const denied = await executeFunction(guard, {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'PUT',
+        `/api/devices/${deveui}/sdi12/config`,
+        { deveui },
+        { probe_profile: 'TENSIOMARK' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(denied.result.at(-1).statusCode, 403);
+    // Guards against a routeTable/wires misalignment reintroducing the exact
+    // bug fixed alongside this guard extension (AgroLink 853c1b3584): a stray
+    // duplicate output branch that let a denied request's msg still reach
+    // sdi12-config-auth-fn on some other output index.
+    const denialWireTarget = guard.wires[25] && guard.wires[25][0];
+    if (denialWireTarget === 'sdi12-config-auth-fn') {
+      const bypass = await executeFunction(configAuth, {
+        msg: denied.result[25],
+        env: ENV,
+        db,
+      });
+      await executeFunction(configAction, { msg: bypass.result[0], env: ENV, db });
+    }
+    assert.equal(
+      db.prepare('SELECT sdi12_probe_profile FROM devices WHERE deveui = ?').get(deveui).sdi12_probe_profile,
+      'GENERIC_VWC',
+      'scope denial must leave the SDI-12 profile unchanged'
+    );
+
+    scopeHelper._resetForTests();
+    const allowed = await executeFunction(guard, {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        `/api/devices/${deveui}/sdi12/config`,
+        { deveui },
+        { probe_profile: 'TENSIOMARK' }
+      ),
+      env: ENV,
+      db,
+    });
+    const authorized = await executeFunction(configAuth, {
+      msg: allowed.result[24],
+      env: ENV,
+      db,
+    });
+    const saved = await executeFunction(configAction, {
+      msg: authorized.result[0],
+      env: ENV,
+      db,
+    });
+    assert.equal(saved.result.payload.probe_profile, 'TENSIOMARK');
+    assert.equal(
+      db.prepare('SELECT sdi12_probe_profile FROM devices WHERE deveui = ?').get(deveui).sdi12_probe_profile,
+      'TENSIOMARK',
+      'authorized SDI-12 config must persist the selected profile'
+    );
   } finally {
     db.close();
   }
