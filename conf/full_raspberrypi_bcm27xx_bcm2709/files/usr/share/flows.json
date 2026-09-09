@@ -3742,7 +3742,6 @@
     "y": 300,
     "wires": [
       [
-        "write-strega-expectation",
         "745b6db588017e56"
       ],
       [

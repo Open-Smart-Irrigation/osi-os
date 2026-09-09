@@ -944,6 +944,78 @@ assertWires('write-strega-expectation',
     [['cdbaa3891d40d7a1']],
     'C5: write-strega-expectation → Build STREGA downlink');
 
+// C5b (wave3 tail fix, adapted from AgroLink 6d63c15fc): Route Command output 0
+// (cloud-dispatched STREGA/valve commands) must reach write-strega-expectation
+// exactly once, via the "to Actuator_STREGA" link-out (745b6db588017e56) only —
+// not also via a direct wire. A direct wire in addition to the link
+// double-invokes write-strega-expectation for every cloud-dispatched command:
+// an expectation_id PRIMARY KEY collision on the second pass for timed
+// actuations, and two identical published downlinks for command types that
+// early-return before writing (e.g. SET_STREGA_PARTIAL_OPENING,
+// SET_STREGA_FLUSHING). This must stay in lockstep with the scheduler
+// ('To Actuator' → b64b9e8c1a0e2c77) and manual
+// ('To Actuator (same as scheduler)' → 1ef83e7d26a33d6c) paths, which enter
+// the same link-in solely through their own link-out and are never wired
+// directly to write-strega-expectation.
+assertWires('934bf2bc19a8ce22',
+    [
+        ['745b6db588017e56'],
+        ['4f4a765f36cee6f3'],
+        ['9d5e3035c3d069c4', 'command-ack-queue-rest'],
+        ['cs-reg-cloud-fn'],
+        ['lsn50-mode-link-out-sync'],
+        ['b1bc51c1d156de8b'],
+        ['d4b7fd0b0422426f'],
+    ],
+    'C5b: Route Command output 0 reaches write-strega-expectation only via link-out (no double-invoke)');
+
+// C5c: behavioral single-invocation guard. Counts how many times a single
+// message dispatched from Route Command output 0 actually arrives at
+// write-strega-expectation, by walking `wires` edges and following
+// `link out` → `link in` edges through link nodes (Node-RED's real fan-out:
+// each entry in a wires[] output array is an independent send of the same
+// message). This catches the double-invoke defect class even if a future
+// edit reintroduces a second path through some other node instead of a
+// literal direct wire, which C5b's exact-match assertion alone would not.
+function countPathsToTarget(nodeId, targetId, visited) {
+    if (visited.has(nodeId)) return 0; // wiring-cycle guard; none expected here
+    const node = byId[nodeId];
+    if (!node) return 0;
+    const nextVisited = new Set(visited);
+    nextVisited.add(nodeId);
+    if (node.type === 'link out') {
+        let total = 0;
+        for (const linkInId of (node.links || [])) {
+            total += countPathsToTarget(linkInId, targetId, nextVisited);
+        }
+        return total;
+    }
+    const outputs = Array.isArray(node.wires) ? node.wires : [];
+    let total = 0;
+    for (const output of outputs) {
+        for (const nextId of (output || [])) {
+            if (nextId === targetId) total += 1;
+            else total += countPathsToTarget(nextId, targetId, nextVisited);
+        }
+    }
+    return total;
+}
+const routeCommandNode = byId['934bf2bc19a8ce22'];
+const routeCommandOutput0 = (routeCommandNode && Array.isArray(routeCommandNode.wires) && routeCommandNode.wires[0]) || [];
+let cloudStregaDispatchCount = 0;
+for (const firstHopId of routeCommandOutput0) {
+    if (firstHopId === 'write-strega-expectation') {
+        cloudStregaDispatchCount += 1;
+    } else {
+        cloudStregaDispatchCount += countPathsToTarget(firstHopId, 'write-strega-expectation', new Set(['934bf2bc19a8ce22']));
+    }
+}
+if (cloudStregaDispatchCount !== 1) {
+    failures.push('C5c: Route Command output 0 reaches write-strega-expectation ' + cloudStregaDispatchCount + ' time(s) per cloud-dispatched command, expected exactly 1 (double-invoke regression)');
+} else {
+    console.log('OK  C5c: Route Command output 0 reaches write-strega-expectation exactly once per cloud-dispatched command (no double-invoke)');
+}
+
 // H2: reconciliation monitor must handle OBSERVED_RUNNING stale timeout
 const reconcNode = byId['strega-reconciliation-monitor'];
 if (!reconcNode) {
