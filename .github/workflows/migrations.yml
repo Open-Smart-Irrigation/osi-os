@@ -94,9 +94,12 @@ jobs:
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state/protocol-verbs.test.js
         env:
           # Shared runners miss the workstation-calibrated wall-clock budgets
-          # (append p99 measured 111 ms vs the 50 ms NVMe budget); 5x keeps a
-          # hard bound that still fails on any O(n) enumeration regression.
-          OSI_PERF_BUDGET_SCALE: "5"
+          # by a wide, unstable margin (append p99 observed at 111 ms and
+          # 373 ms on two different runners vs the 50 ms NVMe budget). 20x
+          # (1 s p99) clears the worst observed runner with ~2.7x headroom
+          # while still failing hard on any O(n) enumeration regression,
+          # which costs seconds-to-minutes at million-generation scale.
+          OSI_PERF_BUDGET_SCALE: "20"
       - run: node --test scripts/sync-protocol-capability-cli.test.js scripts/installation-recovery-adapter.test.js
       - run: node scripts/capture-zone-env-vectors.js --verify
       - run: node --test scripts/rehearse-devices-rebuild.test.js
