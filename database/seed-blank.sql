@@ -1120,8 +1120,57 @@ CREATE TABLE sync_link_state (
   server_url TEXT,
   cloud_user_id TEXT,
   gateway_device_eui TEXT,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  installation_uuid TEXT
 );
+
+CREATE TABLE installation_identity (
+  singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  installation_uuid TEXT NOT NULL UNIQUE
+    CHECK (
+      length(installation_uuid) = 36
+      AND installation_uuid = lower(installation_uuid)
+      AND substr(installation_uuid, 9, 1) = '-'
+      AND substr(installation_uuid, 14, 1) = '-'
+      AND substr(installation_uuid, 15, 1) = '4'
+      AND substr(installation_uuid, 19, 1) = '-'
+      AND substr(installation_uuid, 20, 1) IN ('8', '9', 'a', 'b')
+      AND substr(installation_uuid, 24, 1) = '-'
+      AND replace(installation_uuid, '-', '') NOT GLOB '*[^0-9a-f]*'
+    ),
+  current_gateway_device_eui TEXT,
+  previous_gateway_device_euis_json TEXT NOT NULL DEFAULT '[]'
+    CHECK (
+      json_valid(previous_gateway_device_euis_json)
+      AND json_type(previous_gateway_device_euis_json) = 'array'
+    ),
+  recovery_state TEXT NOT NULL DEFAULT 'ACTIVE'
+    CHECK (recovery_state IN ('ACTIVE', 'RESTORING', 'RECONCILING', 'BLOCKED')),
+  recovery_operation_uuid TEXT,
+  restore_started_at TEXT,
+  reconciled_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (
+    (recovery_state = 'ACTIVE' AND recovery_operation_uuid IS NULL)
+    OR (recovery_state <> 'ACTIVE' AND recovery_operation_uuid IS NOT NULL)
+  )
+);
+
+CREATE TABLE installation_recovery_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  operation_uuid TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  installation_uuid TEXT NOT NULL,
+  gateway_device_eui TEXT,
+  bundle_sha256 TEXT,
+  detail_json TEXT
+    CHECK (detail_json IS NULL OR json_valid(detail_json)),
+  occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_installation_recovery_audit_operation
+  ON installation_recovery_audit(operation_uuid, occurred_at, id);
 
 INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at)
 SELECT
@@ -1165,6 +1214,9 @@ CREATE TABLE sync_history_cursors (
   retry_count INTEGER NOT NULL DEFAULT 0,
   next_attempt_at TEXT,
   last_error TEXT,
+  snapshot_high_key TEXT,
+  shadow_completed_at TEXT,
+  durable_enabled_at TEXT,
   PRIMARY KEY (peer_node, table_name)
 );
 
@@ -1193,6 +1245,7 @@ CREATE TABLE sync_history_segments (
   quarantined_count INTEGER NOT NULL DEFAULT 0,
   covered_max_id INTEGER,
   computed_at TEXT NOT NULL,
+  tombstone_count INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (peer_node, table_name, segment_key, hash_version)
 );
 
@@ -1478,6 +1531,127 @@ CREATE INDEX idx_valve_act_exp_active
   ON valve_actuation_expectations(reconciliation_state)
   WHERE reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING');
 CREATE INDEX idx_valve_act_exp_effect_key ON valve_actuation_expectations(effect_key);
+
+-- Durable history corrections for irrigation and actuation rows.
+CREATE TRIGGER trg_sync_irrigation_events_dirty_ai
+AFTER INSERT ON irrigation_events
+FOR EACH ROW
+WHEN NEW.event_uuid IS NOT NULL
+  AND trim(NEW.event_uuid) <> ''
+  AND EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, source_row_id, changed_at
+  ) VALUES (
+    'cloud',
+    'irrigation_events',
+    'IRRIGATION_EVENT|' || NEW.event_uuid || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_irrigation_events_dirty_au
+AFTER UPDATE ON irrigation_events
+FOR EACH ROW
+WHEN NEW.event_uuid IS NOT NULL
+  AND trim(NEW.event_uuid) <> ''
+  AND EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, source_row_id, changed_at
+  ) VALUES (
+    'cloud',
+    'irrigation_events',
+    'IRRIGATION_EVENT|' || NEW.event_uuid || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_valve_actuation_dirty_ai
+AFTER INSERT ON valve_actuation_expectations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, changed_at
+  ) VALUES (
+    'cloud',
+    'valve_actuation_expectations',
+    'VALVE_ACTUATION|' ||
+      COALESCE(
+        NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), ''),
+        'UNKNOWN'
+      ) || '|' || NEW.expectation_id,
+    'correction',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_valve_actuation_dirty_au
+AFTER UPDATE ON valve_actuation_expectations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, changed_at
+  ) VALUES (
+    'cloud',
+    'valve_actuation_expectations',
+    'VALVE_ACTUATION|' ||
+      COALESCE(
+        NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), ''),
+        'UNKNOWN'
+      ) || '|' || NEW.expectation_id,
+    'correction',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
 
 -- ---------------------------------------------------------------------------
 -- valve_schedules / valve_settings / valve_schedule_pushes  (valve control module,

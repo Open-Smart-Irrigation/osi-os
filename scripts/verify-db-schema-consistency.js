@@ -350,6 +350,29 @@ const schemaContract = {
     'cloud_user_id',
     'gateway_device_eui',
     'updated_at',
+    'installation_uuid',
+  ],
+  installation_identity: [
+    'singleton_id',
+    'installation_uuid',
+    'current_gateway_device_eui',
+    'previous_gateway_device_euis_json',
+    'recovery_state',
+    'recovery_operation_uuid',
+    'restore_started_at',
+    'reconciled_at',
+    'created_at',
+    'updated_at',
+  ],
+  installation_recovery_audit: [
+    'id',
+    'operation_uuid',
+    'event_type',
+    'installation_uuid',
+    'gateway_device_eui',
+    'bundle_sha256',
+    'detail_json',
+    'occurred_at',
   ],
   sync_history_cursors: [
     'peer_node',
@@ -368,6 +391,9 @@ const schemaContract = {
     'retry_count',
     'next_attempt_at',
     'last_error',
+    'snapshot_high_key',
+    'shadow_completed_at',
+    'durable_enabled_at',
   ],
   sync_history_dirty_keys: [
     'peer_node',
@@ -392,6 +418,7 @@ const schemaContract = {
     'quarantined_count',
     'covered_max_id',
     'computed_at',
+    'tombstone_count',
   ],
   sync_history_quarantine: [
     'peer_node',
@@ -967,6 +994,7 @@ const schemaContract = {
 };
 
 const requiredIndexes = {
+  installation_recovery_audit: ['idx_installation_recovery_audit_operation'],
   device_data: ['idx_device_data_deveui_recorded_at'],
   dendrometer_readings: ['idx_dendro_readings_deveui_time'],
   chameleon_readings: ['idx_chameleon_readings_deveui_time', 'idx_chameleon_readings_array_id'],

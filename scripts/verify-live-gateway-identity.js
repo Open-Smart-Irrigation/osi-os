@@ -315,17 +315,22 @@ const restartOwnerContracts = [
   ['al-unlink-restart-node-red', 'account_unlink', 2],
 ];
 const expectedNodeLibs = {
-  'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
+  // sync-bootstrap-build gained osiLib in the wave 3 durable-history-batch +
+  // installation-identity port (AgroLink 77d3c52a, renumbered 0052-0053): it
+  // now calls osiLib.require('installation') to mint/merge the local
+  // installation_identity singleton before advertising it in the bootstrap
+  // payload's gatewayIdentity.installationUuid/recoveryState fields.
+  'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }, { var: 'osiLib', module: 'osi-lib' }],
   'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
-  // al-link-build-req: unlike AgroLink's own tree, this node's func never calls
-  // osiLib.require(...) on this branch (its getAuthSecret boilerplate wasn't part of
-  // pick-list commit 65's real delta for this specific node -- verified fresh against the
-  // rebuilt flows.json), so its libs stay osiDb-only.
-  'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  // al-link-build-req: same wave 3 port. It now reads/creates/merges the local
+  // installation_identity singleton and advertises installationUuid plus the
+  // installation_recovery_v1 capability in the /auth/local-sync request body,
+  // so it gained osiLib the same way sync-bootstrap-build did.
+  'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'al-link-restart-node-red': [],
   'al-unlink-restart-node-red': [],
 };
@@ -1023,9 +1028,13 @@ if (silentCatchBaseline) {
   // nodes, replacing each node's own two silent file-read/file-write catch(_){} pairs
   // with delegated, warn-visible handling inside osi-scope-helper's resolveAuthSecret:
   // 185 -> 97, re-measured fresh with this file's own regex over both maintained profiles.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 97 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 97,
-    'silent-catch baseline records 97 for both maintained profiles',
-    'silent-catch baseline must be 97 for both maintained profiles');
+  // 95: wave 3 durable-history-batch + installation-identity port (AgroLink
+  // 7e30e6a4/77d3c52a/45e2a57e) converts auth-db-query's and al-link-finalize's
+  // DB-close catch(_){} to visible node.warn while wiring installation_uuid
+  // through the touched auth/account-link/bootstrap/sync-state nodes: 97 -> 95.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 95 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 95,
+    'silent-catch baseline records 95 for both maintained profiles',
+    'silent-catch baseline must be 95 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
@@ -1034,21 +1043,18 @@ if (sizeAllowances) {
     // sync-bootstrap-build / sync-force-build were 0 at merge 48c8ab47 (byte-identical to
     // origin/main). The port-back's valve snapshot work grew each by exactly +5786; the
     // allowance reasons still declare the live-identity provenance this guard checks for.
-    // sync-bootstrap-build is 5859, not 5786: the SDI-12 port added a measured +73 when
-    // the bootstrap devices snapshot gained sdi12_probe_profile, sdi12_value_count and
-    // sdi12_channel_layout_json. The other pins are unchanged by that port.
-    'sync-bootstrap-build': 5859,
+    // sync-bootstrap-build / sync-state-build / al-link-build-req were re-pinned on
+    // port/wave3-edge-durable (AgroLink 77d3c52a, installation identity, renumbered
+    // migrations 0052-0053): each prior pin (5859 / 1951 / 969) was already fully baked
+    // into origin/main's own measured size for that node once its port merged, so this
+    // slice's own measured content delta simply replaces it rather than stacking on top.
+    'sync-bootstrap-build': 2483,
     'sync-outbox-build': 0,
     'sync-pending-build': 1344,
     'sync-force-build': 5786,
     'command-ack-build-batch': 975,
-    // sync-state-build superseded 1072 -> 1951 on port/wave3-auth-flaggate: the old 1072
-    // was unconsumed Task-4 slack (never tied to actual content growth on origin/main), so
-    // this auth flag-gate fix's own measured content delta (origin/main 9368 -> HEAD 11319)
-    // simply replaces it; the reason text still retains the "live identity restart sentinel
-    // (Option C Slice 1)" phrase below as carried-forward provenance.
-    'sync-state-build': 1951,
-    'al-link-build-req': 969,
+    'sync-state-build': 1089,
+    'al-link-build-req': 2511,
     'al-link-restart-node-red': 1761,
     'al-unlink-restart-node-red': 1773,
   };
@@ -1082,10 +1088,17 @@ if (sizeAllowances) {
   // here). Re-measured directly in this port worktree against current origin/main:
   // 1421800 -> HEAD 1430228 = +8428. This pin is updated as a single unit for this
   // slice, not "in progress" the way the scoped-access port's pin was.
-  expectCondition(sizeAllowances.total_allowance?.delta === 8428,
-    'size total allowance: exact cumulative delta 8428',
-    'size total allowance: expected exact cumulative delta 8428');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-zonesync', 'declares this port branch\'s provenance within the re-measured total');
+  // Wave 3 durable-history-batch + installation-identity port (port/wave3-edge-durable):
+  // a clean slice off merged origin/main d8a6d9cc, which already carries the full
+  // wave3-edge-zonesync program (the 8428 figure above is now baked into origin/main's
+  // own measured total, superseded the same way). Re-measured directly in this port
+  // worktree against current origin/main: 1430228 -> HEAD 1451345 = +21117. Includes
+  // sync-force-build's deliberate symmetry expansion (+2493, inside its existing 5786
+  // node_allowances ceiling, so that per-node pin is unchanged).
+  expectCondition(sizeAllowances.total_allowance?.delta === 21117,
+    'size total allowance: exact cumulative delta 21117',
+    'size total allowance: expected exact cumulative delta 21117');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',
