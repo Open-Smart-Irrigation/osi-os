@@ -1596,7 +1596,12 @@ expectIncludes('Build Cloud Bootstrap', "'  dd.rain_mm_per_10min,'", 'includes n
 expectIncludes('Build Cloud Bootstrap', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'gatewayLocations,', 'includes gateway GPS state in bootstrap payloads');
-expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
+// Wave 3 installation-identity port (AgroLink 77d3c52a, renumbered 0052-0053):
+// this field now carries the installation_identity-merged superset (raw
+// gateway-migration-preflight candidates unioned with the locally-remembered
+// EUI history), not the bare migration-preflight list, so the cloud sees the
+// same previousGatewayDeviceEuis set sync-state-build's local mirror does.
+expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: mergedInstallation.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
 expectIncludes('Build Cloud Bootstrap', 'edgeBuildVersion,', 'includes the edge build version in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'syncCapabilities', 'includes sync capabilities in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'runGatewayMigrationPreflight', 'runs local gateway migration preflight before bootstrap sync');
@@ -4406,6 +4411,7 @@ function assertCommandRegistry(flows) {
         'SET_CHAMELEON_CONFIG',
         'REGISTER_DEVICE',
         'REBOOT_DEVICE',
+        'SET_SDI12_IDENTIFY',
     ];
     for (const cmd of required) {
         if (!registry.func.includes(cmd)) {
@@ -4435,6 +4441,18 @@ expectIncludesById('934bf2bc19a8ce22', '/sys/class/hwmon', 'SET_FAN tries hwmon 
 expectIncludesById('934bf2bc19a8ce22', 'pwm1_enable', 'SET_FAN sets hwmon fan control mode when driver is loaded');
 expectIncludesById('934bf2bc19a8ce22', "pwm1_enable', '2'", 'SET_FAN speed=0 switches to thermal auto mode via hwmon');
 expectIncludesById('934bf2bc19a8ce22', '/sys/class/pwm/pwmchip2', 'SET_FAN falls back to raw PWM sysfs when hwmon absent');
+
+// --- Route Command SET_SDI12_IDENTIFY: dispatches into the existing
+// sdi12-identify-trigger-fn machinery (wave 3, osi-server main issues this as
+// a cloud pending command; the edge dispatcher had no case for it before,
+// so it queued and aged out). Deep functional round-trip coverage (downlink
+// bytes + SUCCESS/FAILED ack) lives in test-sdi12-recipe-flow.js.
+expectWireById('934bf2bc19a8ce22', 'd4b7fd0b0422426f', 'SET_SDI12_IDENTIFY routes to its link-out into the sdi12-identify machinery');
+expectIncludesById('934bf2bc19a8ce22', "commandType === 'SET_SDI12_IDENTIFY'", 'Route Command has a SET_SDI12_IDENTIFY case');
+expectIncludesById('4f4a765f36cee6f3', "commandType === 'SET_SDI12_IDENTIFY'", 'Build UPDATE SQL acks SET_SDI12_IDENTIFY');
+// Structural link-out -> link-in wiring (link nodes use `links`, not `wires`,
+// so the direct target isn't checkable via expectWireById) is covered by
+// test-sdi12-recipe-flow.js's "Route Command wires SET_SDI12_IDENTIFY..." test.
 
 Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {

@@ -993,3 +993,124 @@ test('Apply and Rollback action nodes return 202 projections and map non-contrac
     }
   }
 });
+
+// --- Command dispatcher: osi-server main issues SET_SDI12_IDENTIFY as a cloud
+// pending command (POST /devices/{eui}/sdi12/identify), but the edge's Route
+// Command dispatcher (934bf2bc19a8ce22) had no case for it, so the command
+// queued and aged out on the cloud side. Route Command now dispatches it into
+// this same sdi12-identify-trigger-fn machinery (over a new link-out into
+// sdi12-identify-trigger-link-in, the exact fan-in sdi12-identify-action-fn's
+// HTTP path already uses) and separately acks it through Build UPDATE SQL,
+// mirroring every other non-actuator "config" command type Route Command
+// dispatches (SET_LSN50_MODE, SET_STREGA_MAGNET_MODE, ...).
+
+function routeCommandNode() {
+  return nodeById('934bf2bc19a8ce22', 'function');
+}
+
+function buildUpdateSqlNode() {
+  return nodeById('4f4a765f36cee6f3', 'function');
+}
+
+test('Route Command wires SET_SDI12_IDENTIFY into the sdi12-identify link-in and Build UPDATE SQL', () => {
+  const routeCommand = routeCommandNode();
+  assert.equal(routeCommand.outputs, 7);
+  assert.match(routeCommand.func, /commandType === 'SET_SDI12_IDENTIFY'/);
+
+  const linkOutIds = routeCommand.wires[6];
+  assert.equal(linkOutIds.length, 1);
+  const linkOut = nodeById(linkOutIds[0], 'link out');
+  assert.deepEqual(linkOut.links, ['sdi12-identify-trigger-link-in']);
+
+  const linkIn = nodeById('sdi12-identify-trigger-link-in', 'link in');
+  assert.equal(linkIn.links.includes(linkOutIds[0]), true);
+  assert.deepEqual(linkIn.wires, [['sdi12-identify-trigger-fn']]);
+
+  const buildUpdateSql = buildUpdateSqlNode();
+  assert.match(buildUpdateSql.func, /commandType === 'SET_SDI12_IDENTIFY'/);
+
+  const registry = nodeById('cmd-type-registry', 'function');
+  assert.match(
+    registry.func,
+    /SET_SDI12_IDENTIFY:\s*\{\s*dispatch:\s*'sdi12_identify',\s*actuator:\s*false/
+  );
+});
+
+test('Route Command dispatches SET_SDI12_IDENTIFY through to a real discovery downlink and a SUCCESS ack', async () => {
+  const db = seedTestDb();
+  const deveui = 'A840410000000140';
+  try {
+    insertDevice(db, { deveui, layout: null, status: null });
+    const cloudCommand = {
+      commandId: 501,
+      commandType: 'SET_SDI12_IDENTIFY',
+      deviceEui: deveui,
+      eventUuid: '3fae2f2e-1111-4a11-8111-000000000501',
+      aggregateType: 'DEVICE',
+      aggregateKey: deveui,
+      appliedSyncVersion: 6,
+    };
+
+    const routed = await executeFunction(loadNode('934bf2bc19a8ce22'), {
+      msg: { payload: cloudCommand },
+      env: {},
+    });
+    assert.equal(routed.result.length, 7);
+    for (const idx of [0, 2, 3, 4, 5]) assert.equal(routed.result[idx], null);
+    const ackMsg = routed.result[1];
+    const triggerMsg = routed.result[6];
+    assert.equal(ackMsg.payload.deviceEui, deveui);
+    assert.equal(ackMsg.payload.commandId, cloudCommand.commandId);
+    assert.deepEqual(triggerMsg, { deviceRow: { deveui } });
+    // The cloud-dispatched path never sets the HTTP-only flag, so the local
+    // HTTP response formatters downstream of sdi12-identify-trigger-fn must
+    // no-op on it rather than reach for a nonexistent msg.res.
+    assert.equal(Object.prototype.hasOwnProperty.call(triggerMsg, '_sdi12_identify_http'), false);
+
+    const discoveryDownlink = await executeFunction(loadNode('sdi12-identify-trigger-fn'), {
+      msg: triggerMsg,
+      env: {},
+      db,
+    });
+    assert.equal(discoveryDownlink.result[1], null);
+    assert.equal(discoveryDownlink.result[0].sdi12Identify.stage, 'discovering');
+    assert.equal(
+      Buffer.from(discoveryDownlink.result[0].downlink.payload.data, 'base64').toString('hex').toUpperCase(),
+      'A8023F21010100'
+    );
+    assert.deepEqual(
+      { ...db.prepare('SELECT stage, discovered_address FROM sdi12_identify_attempts WHERE deveui = ?').get(deveui) },
+      { stage: 'discovering', discovered_address: null }
+    );
+
+    const ackResult = await executeFunction(loadNode('4f4a765f36cee6f3'), {
+      msg: ackMsg,
+      env: {},
+    });
+    assert.equal(ackResult.result.syncAck.result, 'SUCCESS');
+    assert.equal(ackResult.result.syncAck.commandId, cloudCommand.commandId);
+    assert.equal(ackResult.result.syncAck.eventUuid, cloudCommand.eventUuid);
+    assert.equal(ackResult.result.syncAck.aggregateType, cloudCommand.aggregateType);
+    assert.equal(ackResult.result.syncAck.aggregateKey, cloudCommand.aggregateKey);
+    assert.equal(ackResult.result.syncAck.appliedSyncVersion, cloudCommand.appliedSyncVersion);
+    assert.equal(ackResult.result.topic, 'SELECT 1');
+  } finally {
+    db.close();
+  }
+});
+
+test('Build UPDATE SQL rejects a malformed SET_SDI12_IDENTIFY device identity with a FAILED ack', async () => {
+  const result = await executeFunction(loadNode('4f4a765f36cee6f3'), {
+    msg: {
+      payload: {
+        commandType: 'SET_SDI12_IDENTIFY',
+        deviceEui: 'not-an-eui',
+        commandId: 502,
+      },
+    },
+    env: {},
+  });
+  assert.equal(result.result.syncAck.result, 'FAILED');
+  assert.match(result.result.syncAck.error, /Invalid SDI-12 Identify device identity/);
+  assert.equal(result.result.topic, 'SELECT 1');
+});

@@ -1092,12 +1092,14 @@ if (sizeAllowances) {
   // a clean slice off merged origin/main d8a6d9cc, which already carries the full
   // wave3-edge-zonesync program (the 8428 figure above is now baked into origin/main's
   // own measured total, superseded the same way). Re-measured directly in this port
-  // worktree against current origin/main: 1430228 -> HEAD 1451345 = +21117. Includes
+  // worktree against current origin/main: 1430228 -> HEAD 1452121 = +21893. Includes
   // sync-force-build's deliberate symmetry expansion (+2493, inside its existing 5786
-  // node_allowances ceiling, so that per-node pin is unchanged).
-  expectCondition(sizeAllowances.total_allowance?.delta === 21117,
-    'size total allowance: exact cumulative delta 21117',
-    'size total allowance: expected exact cumulative delta 21117');
+  // node_allowances ceiling, so that per-node pin is unchanged) and the SDI-12 identify
+  // dispatch case (Build UPDATE SQL +284, Route Command +492 inside its existing 706
+  // ceiling).
+  expectCondition(sizeAllowances.total_allowance?.delta === 21893,
+    'size total allowance: exact cumulative delta 21893',
+    'size total allowance: expected exact cumulative delta 21893');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
