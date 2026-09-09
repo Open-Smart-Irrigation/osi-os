@@ -174,7 +174,7 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
             <h2 className="high-contrast-text text-2xl font-bold text-[var(--header-text)]">Rainfall</h2>
             <p className="mt-0.5 text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
           </div>
-          <button onClick={onClose} className="px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-white">×</button>
+          <button onClick={onClose} className="px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-[var(--text-secondary)]">×</button>
         </div>
 
         <div className="flex flex-wrap gap-2 px-6 pt-4">
@@ -184,7 +184,7 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
               onClick={() => setWindowIndex(index)}
               className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
                 windowIndex === index
-                  ? 'bg-[var(--primary)] text-white'
+                  ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >

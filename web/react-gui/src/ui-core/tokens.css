@@ -1,0 +1,210 @@
+/* ui-core design tokens — canonical in osi-os (web/react-gui/src/ui-core),
+   byte-mirrored to osi-server (frontend/src/ui-core). Edit ONLY on the
+   osi-os AgroLink branch, then re-vendor; verify-ui-core-vendor gates CI. */
+
+/* Light, high-contrast theme for field readability */
+:root {
+  /* Tell the UA which theme its own widgets should render in. Without this,
+     every native date/time picker paints its glyphs dark-on-dark over a token
+     surface in the dark theme — 23 inputs across the two GUIs (edge 7, cloud
+     16). This is a UA-widget hint, not a colour: it changes no token value and
+     no rendered class, so the edge's own light rendering is untouched. */
+  color-scheme: light;
+  --bg: #F4F6F8;
+  --surface: #E8EDF2;
+  --card: #FFFFFF;
+  --text: #0F172A;
+  --text-secondary: #334155;
+  --text-tertiary: #576474;
+  --text-disabled: #94A3B8;
+  --border: #CBD5E1;
+  --field-border: #78899F;
+  --focus: #2563EB;
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --on-primary: #FFFFFF;
+  --secondary-bg: #E2E8F0;
+  --header-bg: #FFFFFF;
+  --header-text: #040404;
+  --header-subtext: #475569;
+  --brand-red: #E30613;
+  /* liquid-glass material (AgroLink iOS-26-style chrome) */
+  --glass-hi: rgba(255, 255, 255, 0.60);
+  --glass-lo: rgba(255, 255, 255, 0.20);
+  --glass-mid: rgba(255, 255, 255, 0.40);
+  --glass-edge: rgba(255, 255, 255, 0.80);
+  --glass-edge-dim: rgba(4, 4, 4, 0.10);
+  --glass-spec: rgba(255, 255, 255, 0.90);
+  --glass-sweep: rgba(255, 255, 255, 0.75);
+  --chrome-hi: rgba(255, 255, 255, 0.66);
+  --chrome-lo: rgba(255, 255, 255, 0.46);
+  --success-bg: #DCFCE7;
+  --success-text: #14532D;
+  --success-border: #16A34A;
+  --warn-bg: #FEF3C7;
+  --warn-text: #92400E;
+  --warn-border: #F59E0B;
+  --info-bg: #DBEAFE;
+  --info-text: #1E3A8A;
+  --info-border: #3B82F6;
+  /* error pair follows the success/warn convention (wash bg + dark text) so
+     bare text-[var(--error-text)] reads on light surfaces; the old
+     #DC2626/#FFFFFF pair rendered white-on-white in ~30 files. */
+  --error-bg: #FEE2E2;
+  --error-text: #7F1D1D;
+  --danger-fg: #DC2626;
+  --soil-wet: #3B82F6;
+  --soil-wet-bg: #DBEAFE;
+  --soil-moist: #15803D;
+  --soil-moist-bg: #DCFCE7;
+  --soil-dry: #EF4444;
+  --soil-dry-bg: #FEE2E2;
+  /* Categorical history-state palette (S4 T1, maintainer ruling M11).
+     LIGHT values are the edge's own installed Tailwind v4 palette, copied
+     VERBATIM from node_modules/tailwindcss/theme.css: -50 -> bg, -950 -> text,
+     -300 -> border, -500 -> solid. Verbatim, not converted to sRGB hex: these
+     oklch() colours render outside sRGB, so a hex conversion would shift every
+     one of them on a P3 display. The edge is therefore pixel-unchanged; the
+     cloud (Tailwind 3.4, v3 hex palette) converges onto these values, which is
+     the intended convergence and is measured in reading 6.
+     DARK values are new hex — nothing shipped a readable dark calendar.
+     bg = wash fill, text = foreground, border = border and NEVER text,
+     solid = saturated dot/swatch/ring fill and NEVER text. */
+  --cal-warn-bg: oklch(98.7% 0.022 95.277);
+  --cal-warn-text: oklch(27.9% 0.077 45.635);
+  --cal-warn-border: oklch(87.9% 0.169 91.605);
+  --cal-warn-solid: oklch(76.9% 0.188 70.08);
+  --cal-good-bg: oklch(97.9% 0.021 166.113);
+  --cal-good-text: oklch(26.2% 0.051 172.552);
+  --cal-good-border: oklch(84.5% 0.143 164.978);
+  --cal-good-solid: oklch(69.6% 0.17 162.48);
+  --cal-cool-bg: oklch(97.7% 0.013 236.62);
+  --cal-cool-text: oklch(29.3% 0.066 243.157);
+  --cal-cool-border: oklch(82.8% 0.111 230.318);
+  --cal-cool-solid: oklch(68.5% 0.169 237.323);
+  --cal-bad-bg: oklch(97.1% 0.013 17.38);
+  --cal-bad-text: oklch(25.8% 0.092 26.042);
+  --cal-bad-border: oklch(80.8% 0.114 19.571);
+  --cal-bad-solid: oklch(63.7% 0.237 25.331);
+  --cal-alert-bg: oklch(98% 0.016 73.684);
+  --cal-alert-text: oklch(26.6% 0.079 36.259);
+  --cal-alert-border: oklch(83.7% 0.128 66.29);
+  --cal-alert-solid: oklch(70.5% 0.213 47.604);
+  --cal-humid-bg: oklch(98.4% 0.019 200.873);
+  --cal-humid-text: oklch(30.2% 0.056 229.695);
+  --cal-humid-border: oklch(86.5% 0.127 207.078);
+  --cal-humid-solid: oklch(71.5% 0.143 215.221);
+  --cal-water-bg: oklch(97% 0.014 254.604);
+  --cal-water-text: oklch(28.2% 0.091 267.935);
+  --cal-water-border: oklch(80.9% 0.105 251.813);
+  --cal-water-solid: oklch(62.3% 0.214 259.815);
+  --cal-mixed-bg: oklch(97.7% 0.014 308.299);
+  --cal-mixed-text: oklch(29.1% 0.149 302.717);
+  --cal-mixed-border: oklch(82.7% 0.119 306.383);
+  --cal-mixed-solid: oklch(62.7% 0.265 303.9);
+  --cal-violet-bg: oklch(96.9% 0.016 293.756);
+  --cal-violet-text: oklch(28.3% 0.141 291.089);
+  --cal-violet-border: oklch(81.1% 0.111 293.571);
+  --cal-violet-solid: oklch(60.6% 0.25 292.717);
+  --toggle-on: #16A34A;
+  --toggle-off: #CBD5E1;
+  --overlay: #334155;
+}
+
+html[data-theme='dark'] {
+  /* Tell the UA which theme its own widgets should render in. Without this,
+     every native date/time picker paints its glyphs dark-on-dark over a token
+     surface in the dark theme — 23 inputs across the two GUIs (edge 7, cloud
+     16). This is a UA-widget hint, not a colour: it changes no token value and
+     no rendered class, so the edge's own light rendering is untouched. */
+  color-scheme: dark;
+  --bg: #101413;
+  --surface: #171D1B;
+  --card: #202623;
+  --text: #F4F7F5;
+  --text-secondary: #C3CCC7;
+  --text-tertiary: #91A09A;
+  --text-disabled: #65736D;
+  --border: #3A4540;
+  --field-border: #66766F;
+  --focus: #2DD4BF;
+  --primary: #2DD4BF;
+  --primary-hover: #14B8A6;
+  --on-primary: #04100E;
+  --secondary-bg: #26322E;
+  --header-bg: #171D1B;
+  --header-text: #F4F7F5;
+  --header-subtext: #C3CCC7;
+  --brand-red: #E30613;
+  --glass-hi: rgba(70, 82, 77, 0.55);
+  --glass-lo: rgba(38, 46, 43, 0.25);
+  --glass-mid: rgba(52, 62, 58, 0.40);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-edge-dim: rgba(0, 0, 0, 0.35);
+  --glass-spec: rgba(255, 255, 255, 0.22);
+  --glass-sweep: rgba(255, 255, 255, 0.20);
+  --chrome-hi: rgba(23, 29, 27, 0.72);
+  --chrome-lo: rgba(23, 29, 27, 0.52);
+  --success-bg: #123326;
+  --success-text: #BBF7D0;
+  --success-border: #22C55E;
+  --warn-bg: #3A2B0B;
+  --warn-text: #FDE68A;
+  --warn-border: #F59E0B;
+  --info-bg: #172B48;
+  --info-text: #DBEAFE;
+  --info-border: #60A5FA;
+  --error-bg: #7F1D1D;
+  --error-text: #FEE2E2;
+  --danger-fg: #F87171;
+  --soil-wet: #60A5FA;
+  --soil-wet-bg: #172B48;
+  --soil-moist: #4ADE80;
+  --soil-moist-bg: #173827;
+  --soil-dry: #F87171;
+  --soil-dry-bg: #3B1717;
+  /* Dark: new values, no stability constraint. -solid repeats -border on
+     purpose — in dark theme the tone wash and --card are close enough in
+     luminance that one saturated shade serves both roles (5.57-8.53 against
+     --card, reading 6). The two tokens stay separate because their LIGHT
+     values differ (-300 vs -500) and consumers pick by role, not by value. */
+  --cal-warn-bg: #3A2B0B;
+  --cal-warn-text: #FDE68A;
+  --cal-warn-border: #F59E0B;
+  --cal-warn-solid: #F59E0B;
+  --cal-good-bg: #123326;
+  --cal-good-text: #BBF7D0;
+  --cal-good-border: #22C55E;
+  --cal-good-solid: #22C55E;
+  --cal-cool-bg: #0C2A3A;
+  --cal-cool-text: #BAE6FD;
+  --cal-cool-border: #38BDF8;
+  --cal-cool-solid: #38BDF8;
+  --cal-bad-bg: #3B1717;
+  --cal-bad-text: #FECACA;
+  --cal-bad-border: #F87171;
+  --cal-bad-solid: #F87171;
+  --cal-alert-bg: #3A1F07;
+  --cal-alert-text: #FED7AA;
+  --cal-alert-border: #FB923C;
+  --cal-alert-solid: #FB923C;
+  --cal-humid-bg: #0B2E33;
+  --cal-humid-text: #A5F3FC;
+  --cal-humid-border: #22D3EE;
+  --cal-humid-solid: #22D3EE;
+  --cal-water-bg: #172B48;
+  --cal-water-text: #BFDBFE;
+  --cal-water-border: #60A5FA;
+  --cal-water-solid: #60A5FA;
+  --cal-mixed-bg: #2E1B47;
+  --cal-mixed-text: #E9D5FF;
+  --cal-mixed-border: #C084FC;
+  --cal-mixed-solid: #C084FC;
+  --cal-violet-bg: #251C46;
+  --cal-violet-text: #DDD6FE;
+  --cal-violet-border: #A78BFA;
+  --cal-violet-solid: #A78BFA;
+  --toggle-on: #22C55E;
+  --toggle-off: #4B5A54;
+  --overlay: #050807;
+}

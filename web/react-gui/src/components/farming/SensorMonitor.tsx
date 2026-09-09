@@ -138,7 +138,7 @@ export const SensorMonitor: React.FC<Props> = ({
               onClick={() => setHours(window.hours)}
               className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
                 hours === window.hours
-                  ? 'bg-[var(--primary)] text-white'
+                  ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >
@@ -155,7 +155,7 @@ export const SensorMonitor: React.FC<Props> = ({
                 onClick={() => setSelectedField(option.field)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
                   selectedField === option.field
-                    ? 'bg-[var(--primary)] text-white'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                     : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
                 }`}
               >

@@ -171,7 +171,10 @@
       "applyFlush": "Programmer la purge anti-sédiments",
       "flushPending": "Purge demandée à {{percentage}} %, retour à {{state}}.",
       "failedFlush": "Impossible de programmer la purge anti-sédiments",
-      "invalidOpenDuration": "Indiquez une durée d'ouverture entre 1 et 255 minutes."
+      "invalidOpenDuration": "Indiquez une durée d'ouverture entre 1 et 255 minutes.",
+      "intervalLabel": "Intervalle boîtier fermé (minutes)",
+      "intervalPlaceholder": "ex. 10",
+      "intervalNote": "OSI définit l'intervalle normal en boîtier fermé sur le FPort 11. L'intervalle en boîtier ouvert reste fixé à 2 minutes et la détection d'intrusion reste activée."
     },
   "zone": {
     "deviceCount_one": "{{count}} appareil",

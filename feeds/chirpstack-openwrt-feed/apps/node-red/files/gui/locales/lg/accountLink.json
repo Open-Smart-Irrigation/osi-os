@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Kigambiddwa",
-    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
+    "message": "Oluvannyuma lw'okuyunga, oteekwa okukozesa ebintu by'okuyingira ebya OSI Server okuyingira. OSI OS etereka ekikakasa ekitali kuyintaneeti ekya Gateway eno, olw'okuyingira okuyungiddwa.",
     "proceed": "Komezagana"
   },
   "success": {
@@ -40,30 +40,30 @@
     "networkError": "Teyinziddwa kutuuka ku OSI Server. Kebera endabirwamu n'okuteekateeka kwo kw'omukutu.",
     "authFailed": "Ebintu by'okuyingira by'OSI Server si bya mazima.",
     "generic": "Waliwo ensobi. Gezaako nate.",
-    "forceSyncFailed": "Manual sync failed. Please try again."
+    "forceSyncFailed": "Okusinkroniza ku mukono kugaanye. Gezaako nate."
   },
   "sync": {
-    "title": "Manual sync",
-    "description": "Run an immediate recovery sync with OSI Server.",
-    "button": "Force sync now",
-    "running": "Syncing...",
-    "successTitle": "Manual sync completed",
-    "partialTitle": "Manual sync finished with issues",
-    "refreshed": "Sync token refreshed before sync.",
-    "usedCurrentToken": "Using current sync token.",
-    "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
-    "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
-    "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
-    "pendingAfterResponse": "Local apply continues after this response returns.",
-    "lastError": "Last error from {{source}}: {{message}}"
+    "title": "Okusinkroniza ku mukono",
+    "description": "Kola okusinkroniza kw'okuddaabiriza kaakano ne OSI Server.",
+    "button": "Sinkroniza Kaakano",
+    "running": "Tikusinkroniza...",
+    "successTitle": "Okusinkroniza ku mukono kuwedde",
+    "partialTitle": "Okusinkroniza ku mukono kuwedde n'ebizibu",
+    "refreshed": "Token y'okusinkroniza ezze obuggya nga tonnasinkroniza.",
+    "usedCurrentToken": "Kikozesa token y'okusinkroniza ekiriwo kaakano.",
+    "bootstrap": "Bootstrap ekozesebbwa: {{applied}}, eyasaziddwaawo: {{skipped}}",
+    "outbox": "Outbox etuusiddwa: {{delivered}} ({{before}} -> {{after}} birindiridde)",
+    "pending": "Ebiragiro ebirindiridde ebifunibbwa: {{fetched}}, ebiterekeddwa okukozesebwa mu kitundu: {{queued}}",
+    "pendingAfterResponse": "Okukozesa mu kitundu kugenda mu maaso oluvannyuma lw'okuddamu kuno.",
+    "lastError": "Ensobi esembayo okuva ku {{source}}: {{message}}"
   },
   "reauth": {
-    "title": "Sync token expired",
-    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
-    "button": "Re-authenticate",
-    "username": "Server Username",
-    "password": "OSI Server Password",
-    "submit": "Refresh connection",
-    "running": "Refreshing..."
+    "title": "Token y'okusinkroniza ewedde ekiseera",
+    "description": "Yingira nate ku OSI Server okufuna token empya ey'okusinkroniza eya Gateway eno.",
+    "button": "Yingira Nate",
+    "username": "Erinnya ery'omukozesa ku server",
+    "password": "Ekigambo ky'okulinda ekya OSI Server",
+    "submit": "Zzaawo Okuyunga",
+    "running": "Tikuzzaawo..."
   }
 }

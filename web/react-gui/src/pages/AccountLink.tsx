@@ -231,7 +231,7 @@ export const AccountLink: React.FC = () => {
                   <button
                     onClick={handleForceSync}
                     disabled={forcingSync}
-                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-5 py-3 rounded-lg transition-colors disabled:opacity-50"
+                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold px-5 py-3 rounded-lg transition-colors disabled:opacity-50"
                   >
                     {forcingSync ? t('sync.running') : t('sync.button')}
                   </button>
@@ -319,7 +319,7 @@ export const AccountLink: React.FC = () => {
                           type="text"
                           value={status.serverUsername || ''}
                           disabled
-                          className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text-secondary)]"
+                          className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text-secondary)]"
                         />
                       </div>
                       <div>
@@ -331,14 +331,14 @@ export const AccountLink: React.FC = () => {
                           value={reauthPassword}
                           onChange={e => setReauthPassword(e.target.value)}
                           required
-                          className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                          className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                         />
                       </div>
                       <div className="flex gap-3">
                         <button
                           type="submit"
                           disabled={reauthSubmitting}
-                          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-4 py-3 rounded-lg transition-colors disabled:opacity-50"
+                          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold px-4 py-3 rounded-lg transition-colors disabled:opacity-50"
                         >
                           {reauthSubmitting ? t('reauth.running') : t('reauth.submit')}
                         </button>
@@ -400,7 +400,7 @@ export const AccountLink: React.FC = () => {
                     <button
                       onClick={handleProceed}
                       disabled={submitting}
-                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
+                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
                     >
                       {submitting ? t('form.submitting') : t('warning.proceed')}
                     </button>
@@ -423,7 +423,7 @@ export const AccountLink: React.FC = () => {
                       value={serverUrl}
                       onChange={e => setServerUrl(e.target.value)}
                       required
-                      className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                      className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                     />
                   </div>
 
@@ -462,7 +462,7 @@ export const AccountLink: React.FC = () => {
                       value={username}
                       onChange={e => setUsername(e.target.value)}
                       required
-                      className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                      className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                     />
                   </div>
 
@@ -476,7 +476,7 @@ export const AccountLink: React.FC = () => {
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                         required
-                        className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                        className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                       />
                     </div>
                   )}
@@ -490,13 +490,13 @@ export const AccountLink: React.FC = () => {
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       required
-                      className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                      className="w-full px-4 py-3 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
                     />
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-xl py-4 rounded-lg transition-colors shadow-lg"
+                    className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold text-xl py-4 rounded-lg transition-colors shadow-lg"
                   >
                     {t('form.submit')}
                   </button>

@@ -320,7 +320,7 @@ export const JournalMarkerLane: React.FC<JournalMarkerLaneProps> = ({
                 onClick={() => toggleActivityFilter(code)}
                 className={`rounded-full border px-2 py-0.5 text-xs font-semibold transition-colors ${
                   active
-                    ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                    ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                     : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text-tertiary)]'
                 }`}
               >
@@ -366,7 +366,7 @@ export const JournalMarkerLane: React.FC<JournalMarkerLaneProps> = ({
                 aria-haspopup="dialog"
                 onClick={() => setOpenClusterId(cluster.id)}
                 onKeyDown={(event) => handleMarkerKeyDown(event, cluster)}
-                className={`absolute rounded-full ${style.colorClass} text-white shadow focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary)]`}
+                className={`absolute rounded-full ${style.colorClass} text-[var(--on-primary)] shadow focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary)]`}
                 style={{
                   width: HIT_TARGET_PX,
                   height: HIT_TARGET_PX,

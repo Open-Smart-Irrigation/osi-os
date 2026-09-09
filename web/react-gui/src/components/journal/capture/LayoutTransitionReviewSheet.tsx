@@ -154,7 +154,7 @@ export function LayoutTransitionReviewSheet({
                     <button
                       type="button"
                       onClick={() => onResolve(item, 'removed')}
-                      className={`min-h-11 rounded-lg bg-[var(--primary)] px-3 text-sm font-semibold text-white ${FOCUS_RING}`}
+                      className={`min-h-11 rounded-lg bg-[var(--primary)] px-3 text-sm font-semibold text-[var(--on-primary)] ${FOCUS_RING}`}
                     >
                       {`${t('capture.transition.remove', { defaultValue: 'Remove' })} ${label}`}
                     </button>

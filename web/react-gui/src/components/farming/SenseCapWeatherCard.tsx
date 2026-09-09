@@ -144,7 +144,7 @@ const ZonePickerPanel: React.FC<{
       <button
         onClick={save}
         disabled={busy}
-        className="w-full rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+        className="w-full rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-semibold text-[var(--on-primary)] disabled:opacity-60"
       >
         {busy ? 'Saving...' : 'Save'}
       </button>
@@ -208,7 +208,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
             onClick={() => setShowConfig((visible) => !visible)}
             className={`rounded-md p-1.5 transition-colors ${
               showConfig
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             }`}
             title="Manage zone assignments"

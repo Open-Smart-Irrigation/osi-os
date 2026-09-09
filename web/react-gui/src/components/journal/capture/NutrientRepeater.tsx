@@ -169,7 +169,7 @@ export const NutrientRepeater: React.FC<NutrientRepeaterProps> = ({
                           : value))}
                       className={`min-h-11 rounded-full border px-3 py-2 text-sm font-bold transition-colors ${
                         selected
-                          ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                          ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                           : 'border-[var(--border)] bg-[var(--card)] text-[var(--text)] hover:border-[var(--focus)]'
                       } ${FOCUS_RING}`}
                     >

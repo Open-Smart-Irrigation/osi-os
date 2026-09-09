@@ -189,7 +189,7 @@ export const SystemPanel: React.FC = () => {
                       disabled={fanBusy}
                       className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
                         fanSpeed === p.speed
-                          ? 'bg-[var(--primary)] text-white'
+                          ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                           : 'bg-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
                       }`}
                     >
@@ -218,7 +218,7 @@ export const SystemPanel: React.FC = () => {
             <button
               onClick={handleReboot}
               disabled={rebooting}
-              className="bg-[var(--error-bg)] hover:bg-red-700 text-[var(--error-text)] font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
+              className="bg-[var(--error-bg)] hover:opacity-90 text-[var(--error-text)] font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
             >
               {rebooting && <span className="animate-spin h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full" />}
               Yes, Reboot
@@ -233,7 +233,7 @@ export const SystemPanel: React.FC = () => {
         ) : (
           <button
             onClick={() => setShowRebootConfirm(true)}
-            className="bg-[var(--card)] hover:bg-[var(--border)] text-[var(--danger-fg)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
+            className="bg-[var(--card)] hover:bg-[var(--error-bg)] text-[var(--danger-fg)] hover:text-[var(--error-text)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
           >
             ⟳ Reboot Gateway
           </button>

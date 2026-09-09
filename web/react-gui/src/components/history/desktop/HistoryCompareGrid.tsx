@@ -167,7 +167,7 @@ export const HistoryCompareGrid: React.FC<HistoryCompareGridProps> = ({
                 onClick={() => setSelectedCompareView(view)}
                 className={`px-2 py-1 text-xs font-semibold transition-colors ${
                   resolvedCompareView === view
-                    ? 'bg-[var(--primary)] text-white'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                     : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                 }`}
               >

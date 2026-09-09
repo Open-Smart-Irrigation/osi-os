@@ -61,7 +61,10 @@ describe('ScopeStatusBanner', () => {
       </ScopeProvider>,
     );
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Permissions could not be loaded.');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Permissions could not be loaded.');
+    expect(alert.className).toContain('bg-[var(--error-bg)]');
+    expect(alert.getAttribute('aria-live')).toBe('assertive');
     expect(screen.getByTestId('authority')).toHaveTextContent('false:false:false');
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

@@ -222,14 +222,14 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               </button>
               <button
                 onClick={() => setShowAssignModal(true)}
-                className="touch-target bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+                className="touch-target bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
               >
                 {t('zone.assignDevice')}
               </button>
               <Link
                 to={buildJournalHref(zone)}
                 style={{ minHeight: '56px' }}
-                className="touch-target min-h-14 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
+                className="touch-target min-h-14 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
               >
                 {tDashboard('addMenu.activity')}
               </Link>
@@ -246,7 +246,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           {canWrite && <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}
-            className="touch-target bg-[var(--error-bg)] hover:bg-red-700 disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            className="touch-target bg-[var(--error-bg)] hover:opacity-90 disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
           >
             {t('zone.deleteZone')}
           </button>}
@@ -600,7 +600,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               <p className="text-[var(--text-tertiary)] text-lg mb-3">{t('zone.noDevices')}</p>
               {canWrite && <button
                 onClick={() => setShowAssignModal(true)}
-                className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors"
+                className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-bold px-6 py-3 rounded-lg transition-colors"
               >
                 {t('zone.assignFirst')}
               </button>}
