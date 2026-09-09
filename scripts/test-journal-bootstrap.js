@@ -12,9 +12,14 @@ const ROOT = path.resolve(__dirname, '..');
 const scopeHelper = require(path.join(
   ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js'
 ));
+const installationHelper = require(path.join(
+  ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'
+));
+const FIXTURE_INSTALLATION_UUID = '11111111-1111-4111-8111-111111111111';
 const osiLib = {
   require(name) {
     if (name === 'scope') return { ok: true, value: scopeHelper };
+    if (name === 'installation') return { ok: true, value: installationHelper };
     return { ok: false, error: `unexpected helper ${name}` };
   },
 };
@@ -25,6 +30,7 @@ const HISTORY_AUTH_SECRET = 'fixture-history-auth-secret';
 const EXPECTED_CAPABILITIES = [
   'linked_auth_sync_v1',
   'force_edge_sync_v1',
+  'installation_recovery_v1',
   'field_journal_v1',
 ];
 const JOURNAL_FIELDS = [
@@ -226,6 +232,19 @@ class JournalFixtureDb {
           server_url: 'https://cloud.invalid',
           server_sync_token: 'fixture-sync-token',
         }];
+      } else if (/FROM installation_identity WHERE singleton_id=1/.test(sql)) {
+        // Fixture always presents an already-provisioned installation identity so
+        // sync-bootstrap-build's read/create-if-missing/merge sequence takes the
+        // steady-state branch, matching every other canned "already linked" row
+        // this mock returns (users, etc.) rather than exercising the one-time
+        // mint path (covered by scripts/test-installation-recovery-flow.js instead).
+        rows = [{
+          installation_uuid: FIXTURE_INSTALLATION_UUID,
+          current_gateway_device_eui: GATEWAY_EUI,
+          previous_gateway_device_euis_json: '[]',
+          recovery_state: 'ACTIVE',
+          recovery_operation_uuid: null,
+        }];
       } else if (/journal_catalog_state/.test(sql) && !/sqlite_master/.test(sql) && this.catalogQueryError) {
         throw this.catalogQueryError;
       } else if (/sqlite_master|journal_/.test(sql)) {
@@ -321,8 +340,8 @@ async function runNormalBootstrap(node, options) {
   const db = new JournalFixtureDb(options);
   const context = runtime(db, options);
   try {
-    const execute = new Function('msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', node.func);
-    const result = await execute({}, context.flow, identityGlobal(options), context.env, context.node, crypto, context.osiDb);
+    const execute = new Function('msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', 'osiLib', node.func);
+    const result = await execute({}, context.flow, identityGlobal(options), context.env, context.node, crypto, context.osiDb, osiLib);
     return { payload: result && result.payload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
@@ -350,7 +369,7 @@ async function runForcedBootstrap(node, options) {
   };
   try {
     const execute = new Function(
-      'msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', 'osiCloudHttp',
+      'msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', 'osiCloudHttp', 'osiLib',
       node.func
     );
     await execute({
@@ -358,7 +377,7 @@ async function runForcedBootstrap(node, options) {
       _forceSyncUserId: 1,
       _forceSyncUsername: 'fixture-user',
     }, context.flow, identityGlobal(options), context.env, context.node,
-    crypto, context.osiDb, osiCloudHttp);
+    crypto, context.osiDb, osiCloudHttp, osiLib);
     return { payload: bootstrapPayload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
@@ -443,7 +462,7 @@ function assertReadyAdvertisement(payload) {
 
 function assertSuppressedAdvertisement(payload) {
   assert.ok(payload, 'ordinary core bootstrap must continue');
-  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 2));
+  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 3));
   for (const field of JOURNAL_FIELDS) {
     assert.equal(Object.prototype.hasOwnProperty.call(payload.gatewayIdentity, field), false, field);
   }

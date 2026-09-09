@@ -113,6 +113,7 @@ execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-api-cont
 execFileSync(process.execPath, [path.resolve(__dirname, 'test-terra-selection-edge-acceptance.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'verify-history-api-contract.test.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-scoped-access.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'installation-recovery-adapter.test.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
 const chirpstackInitScript = fs.readFileSync(chirpstackInitPath, 'utf8');
@@ -1535,25 +1536,31 @@ expectIncludes('Build History Batch', "osiLib.require('history-sync')", 'loads h
 expectIncludes('Mark History Batch ACK', "osiLib.require('history-sync')", 'marks history batches via the osi-lib-loaded helper');
 expectIncludes('Build History Batch', "source: 'history-build', message: 'helper unavailable: '", 'records helper-load failure into sync_state');
 expectIncludes('Mark History Batch ACK', "source: 'history-mark', message: 'helper unavailable: '", 'records helper-load failure into sync_state');
-expectIncludes('Build History Batch', "phase: 'shadow'", 'runs history sync in shadow mode first');
+expectIncludes('Build History Batch', "state === 'shadow'", 'runs each history table in shadow mode first');
+expectIncludes('Build History Batch', 'helper.tableNames()', 'uses the complete durable history table registry');
+expectIncludes('Build History Batch', 'helper.nextTable(', 'rotates history tables fairly');
 expectIncludes('Build History Batch', 'hashVersion: 1', 'uses history hash v1');
 expectIncludes('Build History Batch', '/api/v1/sync/edge/history/batches', 'posts history batches to the v1 history endpoint');
-expectIncludes('Build History Batch', 'if (!syncToken)', 'history batch fails closed without sync token');
+expectIncludes('Build History Batch', 'if (!target.syncToken)', 'history batch fails closed without sync token');
 expectIncludes('Build History Batch', 'return null', 'history batch stops before unauthenticated post');
 expectExcludes('Build History Batch', 'replace(//$/', 'malformed trailing slash normalizer in history sync builder');
-expectIncludes('Build History Batch', 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', 'uses id cursor for device_data history');
+expectIncludes('Build History Batch', 'helper.batchQuery(', 'uses registry-owned bounded history queries');
 expectIncludes('Build History Batch', 'next_attempt_at', 'honors history cursor retry backoff before building a batch');
-expectIncludes('Build History Batch', 'lastShadowAckedId', 'uses shadow ACK progress while shadowing');
-expectIncludes('Build History Batch', 'helper.hashHistoryRow', 'hashes raw rows through shared helper');
+expectIncludes('Build History Batch', 'last_shadow_acked_id', 'uses shadow ACK progress while shadowing');
+expectIncludes('Build History Batch', 'helper.prepareRow', 'hashes and validates rows through the shared helper');
 expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
+expectIncludes('Build History Batch', 'snapshot_high_key', 'captures natural-key backfill high-water marks');
+expectIncludes('Build History Batch', 'sync_history_dirty_keys', 'drains correction and repair dirty keys');
 expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
-expectIncludes('Mark History Batch ACK', '!durableHistoryAck', 'keeps raw cursor non-durable while shadowing');
+expectIncludes('Mark History Batch ACK', "batch.phase === 'shadow'", 'keeps shadow cursor progress separate from durable progress');
 expectIncludes('Mark History Batch ACK', 'helper.shouldApplyDurableAck', 'uses helper gate before applying durable history ACKs');
 expectIncludes('Mark History Batch ACK', 'history_mirror_write_v1_confirmed', 'durable ACK requires confirmed server mirror writes');
 expectIncludes('Mark History Batch ACK', 'ackedThroughId', 'history batch marker handles explicit ACK before raw trigger removal');
 expectIncludes('Mark History Batch ACK', 'last_shadow_acked_id', 'stores shadow ACK id separately from durable ACKs');
 expectIncludes('Mark History Batch ACK', 'last_shadow_acked_key', 'stores shadow ACK key separately from durable ACKs');
 expectIncludes('Mark History Batch ACK', 'history-shadow-ack', 'reports shadow ACK errors without confirming durable mirror writes');
+expectIncludes('Mark History Batch ACK', 'helper.buildSegment', 'recomputes bounded parity segments after durable ACKs');
+expectIncludes('Mark History Batch ACK', 'tombstone_count', 'persists the zero-tombstone history contract');
 expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_version, canonical_row_count,', 'builds history manifests from cached segments');
 expectIncludes('Build History Manifest', "].join('\\n')", 'uses a real newline separator for history manifest SQL');
 expectExcludes('Build History Manifest', "].join('\\\\n')", 'does not use a literal backslash-n separator for history manifest SQL');
@@ -1561,6 +1568,9 @@ expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
 expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
 expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
+expectIncludes('Mark History Manifest ACK', 'repairRequested', 'turns manifest mismatches into repair work');
+expectIncludes('Mark History Manifest ACK', "change_kind='repair'", 'persists requested history repairs');
+expectExcludes('Mark History Manifest ACK', 'DELETE FROM', 'never treats manifests as deletion instructions');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
 expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');
@@ -1586,7 +1596,12 @@ expectIncludes('Build Cloud Bootstrap', "'  dd.rain_mm_per_10min,'", 'includes n
 expectIncludes('Build Cloud Bootstrap', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'gatewayLocations,', 'includes gateway GPS state in bootstrap payloads');
-expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
+// Wave 3 installation-identity port (AgroLink 77d3c52a, renumbered 0052-0053):
+// this field now carries the installation_identity-merged superset (raw
+// gateway-migration-preflight candidates unioned with the locally-remembered
+// EUI history), not the bare migration-preflight list, so the cloud sees the
+// same previousGatewayDeviceEuis set sync-state-build's local mirror does.
+expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: mergedInstallation.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
 expectIncludes('Build Cloud Bootstrap', 'edgeBuildVersion,', 'includes the edge build version in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'syncCapabilities', 'includes sync capabilities in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'runGatewayMigrationPreflight', 'runs local gateway migration preflight before bootstrap sync');
@@ -4396,6 +4411,7 @@ function assertCommandRegistry(flows) {
         'SET_CHAMELEON_CONFIG',
         'REGISTER_DEVICE',
         'REBOOT_DEVICE',
+        'SET_SDI12_IDENTIFY',
     ];
     for (const cmd of required) {
         if (!registry.func.includes(cmd)) {
@@ -4425,6 +4441,18 @@ expectIncludesById('934bf2bc19a8ce22', '/sys/class/hwmon', 'SET_FAN tries hwmon 
 expectIncludesById('934bf2bc19a8ce22', 'pwm1_enable', 'SET_FAN sets hwmon fan control mode when driver is loaded');
 expectIncludesById('934bf2bc19a8ce22', "pwm1_enable', '2'", 'SET_FAN speed=0 switches to thermal auto mode via hwmon');
 expectIncludesById('934bf2bc19a8ce22', '/sys/class/pwm/pwmchip2', 'SET_FAN falls back to raw PWM sysfs when hwmon absent');
+
+// --- Route Command SET_SDI12_IDENTIFY: dispatches into the existing
+// sdi12-identify-trigger-fn machinery (wave 3, osi-server main issues this as
+// a cloud pending command; the edge dispatcher had no case for it before,
+// so it queued and aged out). Deep functional round-trip coverage (downlink
+// bytes + SUCCESS/FAILED ack) lives in test-sdi12-recipe-flow.js.
+expectWireById('934bf2bc19a8ce22', 'd4b7fd0b0422426f', 'SET_SDI12_IDENTIFY routes to its link-out into the sdi12-identify machinery');
+expectIncludesById('934bf2bc19a8ce22', "commandType === 'SET_SDI12_IDENTIFY'", 'Route Command has a SET_SDI12_IDENTIFY case');
+expectIncludesById('4f4a765f36cee6f3', "commandType === 'SET_SDI12_IDENTIFY'", 'Build UPDATE SQL acks SET_SDI12_IDENTIFY');
+// Structural link-out -> link-in wiring (link nodes use `links`, not `wires`,
+// so the direct target isn't checkable via expectWireById) is covered by
+// test-sdi12-recipe-flow.js's "Route Command wires SET_SDI12_IDENTIFY..." test.
 
 Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {

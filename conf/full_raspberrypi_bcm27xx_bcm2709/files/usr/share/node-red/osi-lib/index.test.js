@@ -28,6 +28,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'device-writer',
     'history-router',
     'history-sync',
+    'installation',
     'journal-replication',
     'lsn50-normalize',
     'osi-command-ledger',

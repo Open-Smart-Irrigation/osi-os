@@ -72,6 +72,17 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
     'trg_sync_weather_station_zones_outbox_au',
     '0049__weather_station_zone_sync.sql',
   ],
+  // 0051__durable_history_batch.sql (renumbered from AgroLink 0040) writes
+  // correction dirty-keys into sync_history_dirty_keys, NOT sync_outbox --
+  // these are durable-history-batch coverage triggers, not outbox emitters,
+  // but this verifier compares the whole seed trigger set against
+  // sync-init-fn, so migration-delivered triggers must be listed here.
+  // Seed DB + deploy-time migration runner delivery, not the frozen
+  // sync-init-fn boot DDL.
+  ['trg_sync_irrigation_events_dirty_ai', '0051__durable_history_batch.sql'],
+  ['trg_sync_irrigation_events_dirty_au', '0051__durable_history_batch.sql'],
+  ['trg_sync_valve_actuation_dirty_ai', '0051__durable_history_batch.sql'],
+  ['trg_sync_valve_actuation_dirty_au', '0051__durable_history_batch.sql'],
 ]);
 
 function q(db, sql) {
