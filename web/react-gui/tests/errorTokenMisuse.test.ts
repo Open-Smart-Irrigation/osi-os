@@ -52,7 +52,6 @@ test('no source file uses a *-bg token as a foreground utility color', () => {
 // sweep called out in that batch's report).
 const PRE_EXISTING_INVISIBLE_BORDER_FILES = new Set<string>([
   'components/farming/AddDeviceModal.tsx',
-  'components/farming/AssignDeviceModal.tsx',
   'components/farming/CreateZoneModal.tsx',
   'components/farming/DraginoTempCard.tsx',
   'components/farming/IrrigationZoneCard.tsx',
