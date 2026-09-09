@@ -128,14 +128,6 @@ const SCOPED_ACCESS_EVENT_OPS = [
   'USER_ZONE_ASSIGNMENT_DELETED',
   'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
-// Wave 3 zone/weather/calibration sync port: SQL-owned outbox events staged
-// pending a paired osi-server applier PR -- see the long-form rationale next
-// to EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS in verify-sync-op-parity.js.
-const ZONE_CALIBRATION_WEATHER_EVENT_OPS = [
-  'WEATHER_STATION_ZONES_REPLACED',
-  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
-];
-
 function exactJournalStaging() {
   return {
     version: 1,
@@ -162,7 +154,7 @@ function exactJournalStaging() {
       // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
       // applier for each of these ops before the edge activates real emission of it.
       edgeStaged: JOURNAL_EVENT_OPS.slice(),
-      cloudDeferred: [...JOURNAL_EVENT_OPS, ...SCOPED_ACCESS_EVENT_OPS, ...ZONE_CALIBRATION_WEATHER_EVENT_OPS],
+      cloudDeferred: [...JOURNAL_EVENT_OPS, ...SCOPED_ACCESS_EVENT_OPS],
     },
   };
 }

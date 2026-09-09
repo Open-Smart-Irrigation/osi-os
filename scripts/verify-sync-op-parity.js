@@ -78,20 +78,18 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
 // Wave 3 zone/weather/calibration sync port (AgroLink 64d72f90 + ae9741880 +
 // 33eb12b94, renumbered migrations 0047/0049): SQL-owned outbox events
 // emitted by trg_sync_zone_irrigation_calibration_outbox_au and
-// trg_sync_weather_station_zones_outbox_au. Stage 4a on osi-server only
-// implemented the USER trio's appliers; osi-server has no applier for
-// either of these two ops yet, so both stay cloudDeferred until the paired
-// cloud applier PR merges and this repo's server-source snapshot is
-// updated to match -- flip by moving this list out of
-// EXACT_CLOUD_DEFERRED_EVENT_OPS in that same commit, never silently.
-const EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS = [
-  'WEATHER_STATION_ZONES_REPLACED',
-  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
-];
+// trg_sync_weather_station_zones_outbox_au. ACTIVATED: osi-server PR #86
+// (Open-Smart-Irrigation/osi-server commit c0d23e06, "feat(sync):
+// zone-calibration + weather-station-zones appliers (pairs osi-os #202)")
+// merged ZoneIrrigationCalibrationApplier and WeatherStationZonesApplier,
+// both implementing SyncEventApplier with a payload field contract
+// (zone_uuid/sync_version/measured_flow_rate_lpm/measurement_method/
+// measured_at/deleted_at/last_applied_at for calibration; device_eui/
+// sync_version/last_applied_at for weather zones) verified against the
+// exact field names this repo's triggers emit. No longer cloudDeferred.
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
   ...EXACT_JOURNAL_EVENT_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
-  ...EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS,
 ];
 // Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
 // order is cloud-before-edge: osi-server lands the landing applier for a journal event op
@@ -178,8 +176,7 @@ const SQL_OWNED_EVENT_OPS = new Set([
   'USER_PLOT_ASSIGNMENT_DELETED',
   // Emitted by 0047__zone_irrigation_calibration_sync.sql's
   // trg_sync_zone_irrigation_calibration_outbox_au trigger, not by flows.json.
-  // Cloud handling is staged (see EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS)
-  // pending a paired osi-server applier PR.
+  // Cloud handling activated: osi-server PR #86 (commit c0d23e06).
   'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
   // Emitted by 0049__weather_station_zone_sync.sql's
   // trg_sync_weather_station_zones_outbox_au trigger, not by flows.json.

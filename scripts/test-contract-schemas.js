@@ -34,13 +34,6 @@ const SCOPED_ACCESS_EVENT_OPS = [
     'USER_ZONE_ASSIGNMENT_DELETED',
     'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
-// Wave 3 zone/weather/calibration sync port: SQL-owned outbox events, cloud-deferred
-// pending a paired osi-server applier PR (see the long-form rationale in
-// scripts/verify-sync-op-parity.js next to EXACT_ZONE_CALIBRATION_WEATHER_EVENT_OPS).
-const ZONE_CALIBRATION_WEATHER_EVENT_OPS = [
-    'WEATHER_STATION_ZONES_REPLACED',
-    'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
-];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
     JOURNAL_ENTRY_VOIDED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -988,7 +981,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS, ZONE_CALIBRATION_WEATHER_EVENT_OPS));
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
     reportCheck(exactStaging, 'staging manifest pins the exact journal sets', 'staging manifest drifted from the exact journal sets');
 }
 
