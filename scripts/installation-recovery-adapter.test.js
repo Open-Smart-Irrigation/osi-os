@@ -123,6 +123,15 @@ function protocolInputs(directory) {
       values[flag] = OPERATION_UUID;
     } else if (flag === '--expected-recovery-phase') {
       values[flag] = 'database-restore-preparing';
+    } else if (flag === '--current-snapshot') {
+      // Real VERB_FLAGS types these as a path-or-sentinel-literal function
+      // (FLAG_TYPES.pathOrLiteral), not a plain 'path' string kind — supply
+      // the plan sentinel literal directly rather than matching on `kind`.
+      values[flag] = 'snapshot-unavailable-json';
+    } else if (flag === '--current-command-audit-report' || flag === '--current-farming-audit-report') {
+      values[flag] = 'current-database-unreadable-json';
+    } else if (flag === '--database-lineage-invalidation-receipt') {
+      values[flag] = 'not-applicable';
     } else if (kind === 'generation') {
       values[flag] = '0';
     } else if (kind === 'sha256') {

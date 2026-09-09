@@ -41,6 +41,7 @@ const CANONICAL_PAYLOAD = [
   'files/etc/uci-defaults/99_tailscale_init',
   'files/usr/libexec/osi-gateway-identity.sh',
   'files/usr/libexec/osi-identityd.sh',
+  'files/usr/libexec/osi-sync-protocol-capability-cli.js',
   'files/usr/share/db',
   'files/usr/share/flows.json',
   'files/usr/share/node-red',
