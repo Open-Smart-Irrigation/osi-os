@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
-const { bootstrapFresh } = require('../lib/osi-migrate');
+const { bootstrapFresh, applyPending } = require('../lib/osi-migrate');
 const { syncFingerprints } = require('../lib/osi-migrate/runner');
 const { ensureLedger, successInsertSql } = require('../lib/osi-migrate/ledger');
 const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
@@ -21,6 +21,89 @@ const { snapshotSchema, compareSchemas, FAILING_CLASSES } = require('./semantic-
 const REPO = path.resolve(__dirname, '..');
 const DEFAULT_MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 const APP_VERSION = 'baseline-existing-db';
+
+// --- Reference chain cache -------------------------------------------------
+// The candidate scan below needs reference(N) - "a fresh DB with exactly
+// migrations 1..N applied" - for potentially every N from 1..head in one
+// runBaseline() call (worst case: nothing matches, or --report walks every
+// N). The naive approach rebuilds reference(N) from scratch per candidate,
+// which independently replays migrations 1..N through bootstrapFresh() every
+// time - O(head) rebuilds, each itself O(N) migrations with the runner's own
+// per-migration fingerprint recompute, i.e. an O(head^3)-ish blowup as head
+// grows (measured: a single N=45 bootstrap already costs ~107s; a top-down
+// scan that reaches low N redoes that cost dozens of times).
+//
+// Fix: build ONE reference chain per migrationsDir, incrementally - apply
+// migration 1, snapshot; apply migration 2, snapshot; ... up to head - reusing
+// the SAME growing database and letting applyPending's own "already applied,
+// skip" ledger logic do the incremental work. This issues the exact same
+// bootstrapFresh()/applyPending() calls (same fingerprint stamping, same
+// postflight, same everything) the runner would make for a real bootstrap -
+// it just makes each one ONCE instead of redundantly once per candidate.
+// Memoized at module scope (keyed by resolved migrationsDir) because the
+// chain is a pure function of the migration files on disk: safe to reuse
+// across multiple runBaseline()/buildReference() calls within one process
+// run (e.g. the whole test file), and a no-op difference for the normal
+// CLI path, which only ever calls runBaseline() once per process.
+const referenceChains = new Map();
+
+function getChainState(migrationsDir, scratchRoot) {
+  const key = path.resolve(migrationsDir);
+  let state = referenceChains.get(key);
+  if (!state) {
+    const dir = fs.mkdtempSync(path.join(scratchRoot, 'ref-chain-'));
+    const subset = path.join(dir, 'migrations');
+    fs.mkdirSync(subset);
+    state = {
+      dir,
+      subset,
+      workingDb: path.join(dir, 'working.db'),
+      files: fs.readdirSync(migrationsDir)
+        .filter((f) => /^\d{4}__[a-z0-9_]+\.sql$/.test(f))
+        .sort(),
+      bootstrapped: false,
+      nextIdx: 0,
+      byVersion: new Map(), // version -> { dbPath, snap }
+      chain: Promise.resolve(),
+    };
+    referenceChains.set(key, state);
+  }
+  return state;
+}
+
+// Extends the shared chain to cover every migration <= n that isn't already
+// built, applying only the newly-reached ones. Serialized on state.chain so
+// concurrent callers for the same migrationsDir can't race the one working DB.
+function ensureReferenceUpTo(migrationsDir, n, scratchRoot) {
+  const state = getChainState(migrationsDir, scratchRoot);
+  state.chain = state.chain.then(async () => {
+    const runner = cliRunner(state.workingDb);
+    while (state.nextIdx < state.files.length) {
+      const f = state.files[state.nextIdx];
+      const version = Number(f.slice(0, 4));
+      if (version > n) break;
+      fs.copyFileSync(path.join(migrationsDir, f), path.join(state.subset, f));
+      if (!state.bootstrapped) {
+        await bootstrapFresh(runner, { migrationsDir: state.subset, appVersion: 'stage0-reference' });
+        state.bootstrapped = true;
+      } else {
+        await applyPending(runner, { migrationsDir: state.subset, appVersion: 'stage0-reference', writersStopped: true });
+      }
+      const snap = await snapshotSchema(runner);
+      const savedPath = path.join(state.dir, `ref-${f.slice(0, 4)}.db`);
+      fs.copyFileSync(state.workingDb, savedPath);
+      state.byVersion.set(version, { dbPath: savedPath, snap });
+      state.nextIdx += 1;
+    }
+  });
+  return state.chain;
+}
+
+// Reference(N) snapshot, built (or reused) via the shared incremental chain.
+async function referenceSnapshot(migrationsDir, n, scratchRoot) {
+  await ensureReferenceUpTo(migrationsDir, n, scratchRoot);
+  return getChainState(migrationsDir, scratchRoot).byVersion.get(n).snap;
+}
 
 function loadManifest(migrationsDir) {
   const p = path.join(migrationsDir, 'CHECKSUMS.json');
@@ -42,17 +125,15 @@ function assertManifestMatchesDisk(migrations, manifest) {
   }
 }
 
+// reference(N): a DB with exactly migrations 1..n applied (same runner calls,
+// same fingerprint stamping as a real bootstrap - see the chain cache above).
+// Backed by the shared incremental chain, so repeat calls for a version
+// already reached (by this call or an earlier one, e.g. while computing
+// head) are a cache hit, not a rebuild. External contract unchanged: still
+// takes (migrationsDir, n, scratchRoot) and returns a dbPath.
 async function buildReference(migrationsDir, n, scratchRoot) {
-  const dir = fs.mkdtempSync(path.join(scratchRoot, `ref-${String(n).padStart(4, '0')}-`));
-  const subset = path.join(dir, 'migrations');
-  fs.mkdirSync(subset);
-  for (const f of fs.readdirSync(migrationsDir)) {
-    if (!/^\d{4}__[a-z0-9_]+\.sql$/.test(f)) continue;
-    if (Number(f.slice(0, 4)) <= n) fs.copyFileSync(path.join(migrationsDir, f), path.join(subset, f));
-  }
-  const dbPath = path.join(dir, 'reference.db');
-  await bootstrapFresh(cliRunner(dbPath), { migrationsDir: subset, appVersion: 'stage0-reference' });
-  return dbPath;
+  await ensureReferenceUpTo(migrationsDir, n, scratchRoot);
+  return getChainState(migrationsDir, scratchRoot).byVersion.get(n).dbPath;
 }
 
 function summarize(diffs) {
@@ -96,7 +177,7 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
 
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-baseline-'));
   const liveSnap = await snapshotSchema(cliRunner(dbPath));
-  const headSnap = await snapshotSchema(cliRunner(await buildReference(migrationsDir, head, scratchRoot)));
+  const headSnap = await referenceSnapshot(migrationsDir, head, scratchRoot);
 
   const candidates = version !== null ? [version] : Array.from({ length: head }, (_, i) => head - i);
   const tried = [];
@@ -104,7 +185,7 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
   for (const n of candidates) {
     const refSnap = n === head
       ? headSnap
-      : await snapshotSchema(cliRunner(await buildReference(migrationsDir, n, scratchRoot)));
+      : await referenceSnapshot(migrationsDir, n, scratchRoot);
     const res = compareSchemas(liveSnap, refSnap, headSnap);
     tried.push({ n, res });
     const failing = res.diffs.filter((d) => FAILING_CLASSES.has(d.class));
