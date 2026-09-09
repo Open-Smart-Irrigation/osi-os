@@ -49,6 +49,12 @@ const DEFAULT_FLOWS = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((p) => path.join(repoRoot, p));
 const DEFAULT_SEED = path.join(repoRoot, 'database/seed-blank.sql');
+const MIGRATION_OWNED_TRIGGER_NAMES = new Set([
+  'trg_sync_zone_irrigation_calibration_defaults_ai',
+  'trg_sync_zone_irrigation_calibration_outbox_au',
+  'trg_sync_weather_station_zone_state_defaults_ai',
+  'trg_sync_weather_station_zones_outbox_au',
+]);
 
 // Rule 1: the interpolated test EUI and the seed's hardcoded fallback EUI.
 const GATEWAY_EUI_LITERALS = [TEST_GATEWAY_SQL, "'0016C001F11715E2'"];
@@ -75,7 +81,17 @@ function snapshotTriggers(db) {
   );
 }
 
-function verifyFlows(flowsPath, seedPath) {
+function verifyFlows(flowsPath, seedPath, options = {}) {
+  // migrationOwnedTriggerNames is an opt-in extra completeness check (does this
+  // *specific* seed carry every migration-owned trigger, and does the frozen
+  // boot DDL never duplicate one?) layered on top of the generic seed<->boot
+  // body-parity diffing below. It defaults to empty so verifyFlows stays a
+  // pure, reusable seed/flows-pair checker -- callers driving it against
+  // synthetic fixtures (this file's own test suite) must not be forced to
+  // also satisfy a hardcoded list of real production trigger names that have
+  // nothing to do with what they're testing. Only run() (the CLI entry point,
+  // always targeting the real database/seed-blank.sql by default) opts in.
+  const migrationOwnedTriggerNames = options.migrationOwnedTriggerNames || new Set();
   const stmts = extractTriggerStatements(flowsPath);
   const bootManaged = new Set();
   for (const stmt of stmts) {
@@ -88,6 +104,14 @@ function verifyFlows(flowsPath, seedPath) {
   try {
     db.exec(fs.readFileSync(seedPath, 'utf8'));
     const seedTriggers = snapshotTriggers(db);
+    for (const name of migrationOwnedTriggerNames) {
+      if (!seedTriggers.has(name)) {
+        failures.push(`${name}: migration-owned trigger absent from seed-blank.sql`);
+      }
+      if (bootManaged.has(name)) {
+        failures.push(`${name}: migration-owned trigger duplicated in frozen boot DDL`);
+      }
+    }
     for (const sql of stmts) {
       try { db.exec(sql); } catch (_) { /* execution failures are verify-boot-ddl-interpolation's job */ }
     }
@@ -131,7 +155,9 @@ function run() {
   let failed = false;
   for (const flowsPath of o.flows) {
     const rel = path.isAbsolute(flowsPath) ? flowsPath : path.relative(repoRoot, path.resolve(flowsPath));
-    const failures = verifyFlows(path.resolve(flowsPath), path.resolve(o.seed));
+    const failures = verifyFlows(path.resolve(flowsPath), path.resolve(o.seed), {
+      migrationOwnedTriggerNames: MIGRATION_OWNED_TRIGGER_NAMES,
+    });
     if (failures.length) {
       failed = true;
       console.error(`FAIL ${rel}:`);

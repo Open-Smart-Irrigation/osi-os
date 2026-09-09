@@ -63,6 +63,7 @@ const OSI_DB_BINDING = { variable: 'osiDb', module: 'osi-db-helper' };
 const OSI_JOURNAL_BINDING = { variable: 'osiJournal', module: 'osi-journal' };
 const OSI_COMMAND_LEDGER_BINDING = { variable: 'osiCommandLedger', module: 'osi-command-ledger' };
 const OSI_ZONE_COMMAND_BINDING = { variable: 'osiZoneCommands', module: 'zone-commands' };
+const OSI_DEVICE_COMMAND_BINDING = { variable: 'osiDeviceCommands', module: 'device-commands' };
 const OSI_SCOPE_BINDING = { variable: 'scope', module: 'scope' };
 const OSI_SCOPED_ACCESS_COMMANDS_BINDING = {
     variable: 'osiScopedAccessCommands',
@@ -286,6 +287,7 @@ const dedupe = byId['command-dedupe-dispatch'];
 const journalApply = byId['journal-command-apply-fn'];
 const terraZoneConfigApply = byId['terra-zone-config-command-apply-fn'];
 const scopedAccessApply = byId['scoped-access-command-apply-fn'];
+const zoneCommandApply = byId['zone-command-apply-fn'];
 const ackQueue = byId['command-ack-queue-rest'];
 for (const commandType of journalCommandTypes) {
     if (!commandRegistry || !new RegExp('\\b' + commandType + '\\s*:').test(commandRegistry.func || '')) {
@@ -361,12 +363,37 @@ if (!terraZoneConfigApply || !requireOsiLibContract(
     'Terra zone config: applier',
     'Terra zone-config command helpers unavailable:'
 ) || JSON.stringify(terraZoneConfigApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
+    ['zone-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyZoneCommand/.test(terraZoneConfigApply.func || '') ||
     !/command_type_recognized:\s*msg\._commandTypeRecognized === true/.test(terraZoneConfigApply.func || '') ||
     !/\.close\s*\(/.test(terraZoneConfigApply.func || '')) {
     failures.push('Terra zone config: applier must delegate with registry proof, close DB, and separate fallback from durable ACK');
+}
+if (!zoneCommandApply || !requireOsiLibContract(
+    zoneCommandApply,
+    [OSI_DB_BINDING, OSI_ZONE_COMMAND_BINDING, OSI_SCOPE_BINDING],
+    'versioned zone commands: applier',
+    'Zone command helpers unavailable:'
+) || JSON.stringify(zoneCommandApply.wires) !== JSON.stringify([
+    ['weather-zones-command-apply-fn'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyZoneCommand/.test(zoneCommandApply.func || '') ||
+    !/\.close\s*\(/.test(zoneCommandApply.func || '')) {
+    failures.push('versioned zone commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
+}
+const weatherZonesCommandApply = byId['weather-zones-command-apply-fn'];
+if (!weatherZonesCommandApply || !requireOsiLibContract(
+    weatherZonesCommandApply,
+    [OSI_DB_BINDING, OSI_DEVICE_COMMAND_BINDING, OSI_SCOPE_BINDING],
+    'weather station zones commands: applier',
+    'Weather station zones command helpers unavailable:'
+) || JSON.stringify(weatherZonesCommandApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyWeatherStationZonesCommand/.test(weatherZonesCommandApply.func || '') ||
+    !/\.close\s*\(/.test(weatherZonesCommandApply.func || '')) {
+    failures.push('weather station zones commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
 }
 if (!ackQueue || !requireOsiLibContract(
     ackQueue,

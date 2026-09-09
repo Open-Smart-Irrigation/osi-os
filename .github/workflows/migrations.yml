@@ -95,6 +95,10 @@ jobs:
       - run: node --test scripts/rehearse-devices-rebuild.test.js
       - run: node --test scripts/rehearse-scoped-access-migration.test.js
       - run: node --test scripts/rehearse-scoped-trigger-boot-survival.test.js
+      - run: node --test scripts/rehearse-irrigation-calibration-sync.test.js
+      - run: node --test scripts/rehearse-weather-station-zone-sync.test.js
+      - run: node --test scripts/test-zone-command-path.js
+      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/weather.test.js
       - name: Scoped-access write suite (registration fences, zone guards)
         run: node --test scripts/test-scoped-access-writes.js
       - name: Scoped-access read suite (account-wide reads, preserved gates)

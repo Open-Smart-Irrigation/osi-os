@@ -816,6 +816,89 @@ CREATE TABLE weather_station_zones (
 CREATE INDEX idx_wsz_zone_id ON weather_station_zones(zone_id);
 
 -- ---------------------------------------------------------------------------
+-- weather_station_zone_state (versioned mirror of a station's complete
+-- weather_station_zones assignment set; weather_station_zones itself has no
+-- sync_version column, so this side table is what the outbox trigger below
+-- actually versions and watches)
+-- ---------------------------------------------------------------------------
+CREATE TABLE weather_station_zone_state (
+  deveui         TEXT PRIMARY KEY,
+  sync_version   INTEGER NOT NULL DEFAULT 0,
+  last_applied_at DATETIME,
+  updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
+);
+
+CREATE TRIGGER trg_sync_weather_station_zone_state_defaults_ai
+AFTER INSERT ON weather_station_zone_state
+FOR EACH ROW
+WHEN COALESCE(NEW.sync_version, 0) = 0
+BEGIN
+  UPDATE weather_station_zone_state
+     SET sync_version = 1
+   WHERE deveui = NEW.deveui;
+END;
+
+CREATE TRIGGER trg_sync_weather_station_zones_outbox_au
+AFTER UPDATE ON weather_station_zone_state
+FOR EACH ROW
+WHEN
+  NEW.sync_version IS NOT OLD.sync_version
+  AND EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND EXISTS (
+    SELECT 1
+      FROM devices
+     WHERE deveui = NEW.deveui
+       AND type_id = 'SENSECAP_S2120'
+       AND deleted_at IS NULL
+       AND gateway_device_eui IS NOT NULL
+       AND trim(gateway_device_eui) <> ''
+  )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'WEATHER_STATION_ZONES',
+    NEW.deveui,
+    'WEATHER_STATION_ZONES_REPLACED',
+    json_object(
+      'contract_version',   1,
+      'device_eui',         NEW.deveui,
+      'gateway_device_eui', (
+        SELECT gateway_device_eui
+          FROM devices
+         WHERE deveui = NEW.deveui
+      ),
+      'zone_uuids',         json(COALESCE((
+        SELECT json_group_array(zone_uuid)
+          FROM (
+            SELECT iz.zone_uuid AS zone_uuid
+              FROM weather_station_zones wsz
+              JOIN irrigation_zones iz ON iz.id = wsz.zone_id
+             WHERE wsz.deveui = NEW.deveui
+               AND iz.deleted_at IS NULL
+             ORDER BY iz.zone_uuid
+          )
+      ), '[]')),
+      'sync_version',       NEW.sync_version,
+      'last_applied_at',    NEW.last_applied_at
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    (
+      SELECT gateway_device_eui
+        FROM devices
+       WHERE deveui = NEW.deveui
+    )
+  );
+END;
+
+-- ---------------------------------------------------------------------------
 -- zone_daily_recommendations
 -- ---------------------------------------------------------------------------
 CREATE TABLE zone_daily_recommendations (
@@ -1675,8 +1758,93 @@ CREATE TABLE zone_irrigation_calibration (
   measurement_method     TEXT NOT NULL,
   measured_at            TEXT NOT NULL,
   created_at             TEXT NOT NULL,
-  updated_at             TEXT NOT NULL
+  updated_at             TEXT NOT NULL,
+  sync_version           INTEGER NOT NULL DEFAULT 0,
+  deleted_at             DATETIME,
+  last_applied_at        DATETIME
 );
+
+CREATE TRIGGER trg_sync_zone_irrigation_calibration_defaults_ai
+AFTER INSERT ON zone_irrigation_calibration
+FOR EACH ROW
+WHEN COALESCE(NEW.sync_version, 0) = 0
+BEGIN
+  UPDATE zone_irrigation_calibration
+     SET sync_version = 1
+   WHERE zone_id = NEW.zone_id;
+END;
+
+CREATE TRIGGER trg_sync_zone_irrigation_calibration_outbox_au
+AFTER UPDATE ON zone_irrigation_calibration
+FOR EACH ROW
+WHEN
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND EXISTS (
+    SELECT 1
+      FROM irrigation_zones
+     WHERE id = NEW.zone_id
+       AND zone_uuid IS NOT NULL
+       AND trim(zone_uuid) <> ''
+       AND gateway_device_eui IS NOT NULL
+       AND trim(gateway_device_eui) <> ''
+       AND deleted_at IS NULL
+  )
+  AND (
+    NEW.measured_flow_rate_lpm IS NOT OLD.measured_flow_rate_lpm OR
+    NEW.measurement_method IS NOT OLD.measurement_method OR
+    NEW.measured_at IS NOT OLD.measured_at OR
+    NEW.sync_version IS NOT OLD.sync_version OR
+    NEW.deleted_at IS NOT OLD.deleted_at OR
+    NEW.last_applied_at IS NOT OLD.last_applied_at
+  )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'IRRIGATION_CALIBRATION',
+    (
+      SELECT zone_uuid
+        FROM irrigation_zones
+       WHERE id = NEW.zone_id
+         AND deleted_at IS NULL
+    ),
+    'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+    json_object(
+      'contract_version',        1,
+      'zone_uuid',               (
+        SELECT zone_uuid
+          FROM irrigation_zones
+         WHERE id = NEW.zone_id
+           AND deleted_at IS NULL
+      ),
+      'gateway_device_eui',      (
+        SELECT gateway_device_eui
+          FROM irrigation_zones
+         WHERE id = NEW.zone_id
+           AND deleted_at IS NULL
+      ),
+      'measured_flow_rate_lpm',  NEW.measured_flow_rate_lpm,
+      'measurement_method',      NEW.measurement_method,
+      'measured_at',             NEW.measured_at,
+      'sync_version',            NEW.sync_version,
+      'deleted_at',              NEW.deleted_at,
+      'last_applied_at',         NEW.last_applied_at
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    (
+      SELECT gateway_device_eui
+        FROM irrigation_zones
+       WHERE id = NEW.zone_id
+         AND deleted_at IS NULL
+    )
+  );
+END;
 
 -- ---------------------------------------------------------------------------
 -- gateway_locations
@@ -1894,6 +2062,63 @@ BEGIN
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE(NEW.gateway_device_eui,'0016C001F11715E2')
+  );
+END;
+
+-- Zone outbox on insert (emits the initial ZONE_UPSERTED mirror event for a
+-- fully identified row -- trg_sync_zones_outbox_au above only fires on UPDATE)
+CREATE TRIGGER trg_sync_zones_outbox_ai
+AFTER INSERT ON irrigation_zones
+FOR EACH ROW
+WHEN
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND NEW.zone_uuid IS NOT NULL
+  AND trim(NEW.zone_uuid) <> ''
+  AND NEW.gateway_device_eui IS NOT NULL
+  AND trim(NEW.gateway_device_eui) <> ''
+  AND COALESCE(NEW.sync_version, 0) > 0
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'ZONE',
+    NEW.zone_uuid,
+    'ZONE_UPSERTED',
+    json_object(
+      'contract_version', 1,
+      'zone_uuid',                 NEW.zone_uuid,
+      'name',                      NEW.name,
+      'gateway_device_eui',        NEW.gateway_device_eui,
+      'timezone',                  NEW.timezone,
+      'latitude',                  NEW.latitude,
+      'longitude',                 NEW.longitude,
+      'phenological_stage',        NEW.phenological_stage,
+      'calibration_key',           NEW.calibration_key,
+      'crop_type',                 NEW.crop_type,
+      'variety',                   NEW.variety,
+      'soil_type',                 NEW.soil_type,
+      'irrigation_method',         NEW.irrigation_method,
+      'area_m2',                   NEW.area_m2,
+      'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct,
+      'scheduling_mode',           COALESCE(NEW.scheduling_mode, 'local'),
+      'prediction_card_enabled',   COALESCE(NEW.prediction_card_enabled, 0),
+      'notes',                     NEW.notes,
+      'sync_version',              NEW.sync_version,
+      'deleted_at',                NEW.deleted_at,
+      'user', json_object(
+        'user_uuid',   (SELECT user_uuid FROM users WHERE id = NEW.user_id),
+        'username',    (SELECT username FROM users WHERE id = NEW.user_id),
+        'cloudUserId', (SELECT cloud_user_id FROM users WHERE id = NEW.user_id)
+      )
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    NEW.gateway_device_eui
   );
 END;
 

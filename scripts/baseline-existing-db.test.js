@@ -37,8 +37,24 @@ const LIVE_ANALYSIS_VIEWS = `CREATE TABLE IF NOT EXISTS analysis_views (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );`;
 
+// Several test cases below need a pre-ledger device "at N" for the SAME N
+// (most need N=3; one needs N=head). buildReference() bootstraps a fresh DB
+// by replaying migrations 1..N through the real runner (same fingerprint
+// stamping a live bootstrap would do), which is the expensive part at N=head
+// - so build each distinct N once per test-process run and snapshot-copy the
+// resulting file per test case, rather than re-bootstrapping from scratch
+// for every test that happens to want the same N. (baseline-existing-db.js
+// also memoizes buildReference() internally, so this is defense-in-depth,
+// not the only thing making this fast - but it keeps the test's own
+// performance legible without depending on that internal detail.)
+const referenceDbCache = new Map(); // n -> Promise<string dbPath>
+function referenceDbAt(n) {
+  if (!referenceDbCache.has(n)) referenceDbCache.set(n, buildReference(MIGRATIONS_DIR, n, scratch()));
+  return referenceDbCache.get(n);
+}
+
 async function makePreLedgerDeviceAt(n, extraSql = '') {
-  const refDb = await buildReference(MIGRATIONS_DIR, n, scratch());
+  const refDb = await referenceDbAt(n);
   const db = path.join(scratch(), 'device.db');
   fs.copyFileSync(refDb, db);
   const r = cliRunner(db);

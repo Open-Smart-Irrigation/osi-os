@@ -83,6 +83,10 @@ const SCOPED_ACCESS_EVENT_KEY_FIELDS = {
     USER_PLOT_ASSIGNMENT_UPSERTED: 'assignment_uuid',
     USER_PLOT_ASSIGNMENT_DELETED: 'assignment_uuid',
 };
+const ZONE_CALIBRATION_WEATHER_EVENT_KEY_FIELDS = {
+    ZONE_IRRIGATION_CALIBRATION_UPSERTED: 'zone_uuid',
+    WEATHER_STATION_ZONES_REPLACED: 'device_eui',
+};
 const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     ...Object.fromEntries(
         Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
@@ -92,6 +96,12 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     ),
     ...Object.fromEntries(
         Object.entries(SCOPED_ACCESS_EVENT_KEY_FIELDS).map(([op, keyField]) => [op, {
+            aggregate_key_path: `payload.${keyField}`,
+            sync_version_path: 'payload.sync_version',
+        }])
+    ),
+    ...Object.fromEntries(
+        Object.entries(ZONE_CALIBRATION_WEATHER_EVENT_KEY_FIELDS).map(([op, keyField]) => [op, {
             aggregate_key_path: `payload.${keyField}`,
             sync_version_path: 'payload.sync_version',
         }])

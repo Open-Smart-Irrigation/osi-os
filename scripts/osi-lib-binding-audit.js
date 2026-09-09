@@ -6,6 +6,7 @@ const DB_BINDING = Object.freeze({ variable: 'osiDb', module: 'osi-db-helper' })
 const JOURNAL_BINDING = Object.freeze({ variable: 'osiJournal', module: 'osi-journal' });
 const LEDGER_BINDING = Object.freeze({ variable: 'osiCommandLedger', module: 'osi-command-ledger' });
 const ZONE_COMMAND_BINDING = Object.freeze({ variable: 'osiZoneCommands', module: 'zone-commands' });
+const DEVICE_COMMAND_BINDING = Object.freeze({ variable: 'osiDeviceCommands', module: 'device-commands' });
 const SCOPE_BINDING = Object.freeze({ variable: 'scope', module: 'scope' });
 const SCOPED_ACCESS_COMMANDS_BINDING = Object.freeze({
   variable: 'osiScopedAccessCommands',
@@ -37,6 +38,24 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
   'scoped-access-command-apply-fn': Object.freeze({
     funcSha256: '98e5bf7a989bf60ba6d9803bc696a1464b75229a9c91757e2d8767a423dc37e9',
     bindings: Object.freeze([DB_BINDING, SCOPED_ACCESS_COMMANDS_BINDING, SCOPE_BINDING]),
+  }),
+  'zone-command-apply-fn': Object.freeze({
+    // Wave 3 zone/weather/calibration sync port (AgroLink 9016d220):
+    // applies UPSERT_ZONE/DELETE_ZONE/UPSERT_ZONE_LOCATION only -- gated on
+    // commandType, not payload shape, so a legacy Terra UPSERT_ZONE_CONFIG
+    // payload (handled upstream by terra-zone-config-command-apply-fn) is
+    // never re-processed here.
+    funcSha256: 'e83cc198efe384ed14ff0be9ea4e6f3395d3f6f5e74450ca37068db4f5a37772',
+    bindings: Object.freeze([DB_BINDING, ZONE_COMMAND_BINDING, SCOPE_BINDING]),
+  }),
+  'weather-zones-command-apply-fn': Object.freeze({
+    // Wave 3 zone/weather/calibration sync port (AgroLink 33eb12b94):
+    // applies REPLACE_WEATHER_STATION_ZONES only. osi-device-commands on
+    // this port is a thin weather-only module -- it never grew AgroLink's
+    // sibling UPSERT_DEVICE/UNCLAIM_DEVICE "protected device aggregate"
+    // applier, which is out of scope here.
+    funcSha256: 'f5984b17ac00a6535be5777b2fd85c5540959c64ca6e3c3c42f93f8b451f3531',
+    bindings: Object.freeze([DB_BINDING, DEVICE_COMMAND_BINDING, SCOPE_BINDING]),
   }),
   'command-ack-queue-rest': Object.freeze({
     funcSha256: '473a5272dfb0c6dbea00143258d91b464fa532e5c96f706ce5aab5381f9dbeff',

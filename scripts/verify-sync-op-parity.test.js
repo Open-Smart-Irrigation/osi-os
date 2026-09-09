@@ -128,7 +128,6 @@ const SCOPED_ACCESS_EVENT_OPS = [
   'USER_ZONE_ASSIGNMENT_DELETED',
   'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
-
 function exactJournalStaging() {
   return {
     version: 1,

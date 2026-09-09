@@ -1075,15 +1075,17 @@ if (sizeAllowances) {
   // chars of slack against origin/main's real total of 1177499; this slice adds a
   // measured +3049 for the six journal-v2-replication nodes, and re-pinning to the
   // measured HEAD total absorbs that slack instead of carrying it forward.
-  // This pin is updated in progress, mid-slice, as the wave-3 scoped-access port lands
-  // commits that touch flows.json (unlike the other node/task pins above, which cover
-  // work that landed as a single unit) -- see the allowance file's own "in progress"
-  // caveat. Re-verify against the branch's current total_allowance.delta rather than
-  // treating any one intermediate value as final.
-  expectCondition(sizeAllowances.total_allowance?.delta === 232389,
-    'size total allowance: exact cumulative delta 232389',
-    'size total allowance: expected exact cumulative delta 232389');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Field Journal port allowance', 'declares the inherited Field Journal provenance within the re-measured total');
+  // Wave 3 zone/weather/calibration sync port (port/wave3-edge-zonesync): a clean slice
+  // off merged origin/main 7448ac0d, which already carries the full scoped-access +
+  // auth-flaggate program (the 232389 figure above described an in-progress sibling
+  // branch stacked on an older, smaller origin/main -- that framing does not apply
+  // here). Re-measured directly in this port worktree against current origin/main:
+  // 1421800 -> HEAD 1430228 = +8428. This pin is updated as a single unit for this
+  // slice, not "in progress" the way the scoped-access port's pin was.
+  expectCondition(sizeAllowances.total_allowance?.delta === 8428,
+    'size total allowance: exact cumulative delta 8428',
+    'size total allowance: expected exact cumulative delta 8428');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-zonesync', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',

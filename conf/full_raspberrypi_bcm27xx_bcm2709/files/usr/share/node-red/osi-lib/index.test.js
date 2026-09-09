@@ -24,6 +24,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
     'agroscope-uplink-transform',
     'dendro-analytics',
+    'device-commands',
     'device-writer',
     'history-router',
     'history-sync',

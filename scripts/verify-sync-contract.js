@@ -94,6 +94,8 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     USER_ZONE_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     USER_PLOT_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     USER_PLOT_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    ZONE_IRRIGATION_CALIBRATION_UPSERTED: { aggregate_key_path: 'payload.zone_uuid', sync_version_path: 'payload.sync_version' },
+    WEATHER_STATION_ZONES_REPLACED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version' },
 };
 
 function loadSchema(name) {

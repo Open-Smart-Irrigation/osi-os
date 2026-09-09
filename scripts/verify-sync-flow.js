@@ -18,6 +18,8 @@ const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js
 const commandLedgerSource = fs.readFileSync(commandLedgerPath, 'utf8');
 const zoneCommandsPath = path.join(nodeRedRoot, 'osi-zone-commands', 'index.js');
 const zoneCommandsSource = fs.readFileSync(zoneCommandsPath, 'utf8');
+const deviceCommandsWeatherPath = path.join(nodeRedRoot, 'osi-device-commands', 'weather.js');
+const deviceCommandsWeatherSource = fs.readFileSync(deviceCommandsWeatherPath, 'utf8');
 const scopedAccessCommandsPath = path.join(nodeRedRoot, 'osi-scoped-access-commands', 'index.js');
 const scopedAccessCommandsSource = fs.readFileSync(scopedAccessCommandsPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
@@ -1655,6 +1657,48 @@ expectIncludesById(
   '.close(',
   'closes the Terra zone-config command database handle'
 );
+expectOrderedIncludesById('zone-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const zoneLoad = osiLib.require('zone-commands');",
+  "const scopeLoad = osiLib.require('scope');",
+  'applyZoneCommand(db, envelope, {',
+], 'passes protected versioned zone commands through the transactional helper');
+expectIncludesById('zone-command-apply-fn', 'Zone command helpers unavailable:', 'fails closed when zone helpers are unavailable');
+expectIncludesById('zone-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied zone mutation');
+expectIncludesById('zone-command-apply-fn', '.close(', 'closes the zone command database handle');
+expectOrderedIncludesById('weather-zones-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const deviceLoad = osiLib.require('device-commands');",
+  "const scopeLoad = osiLib.require('scope');",
+  'applyWeatherStationZonesCommand(db, envelope, {',
+], 'passes protected weather station zones commands through the transactional helper');
+expectIncludesById('weather-zones-command-apply-fn', 'Weather station zones command helpers unavailable:', 'fails closed when weather station zones helpers are unavailable');
+expectIncludesById('weather-zones-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied weather station zones mutation');
+expectIncludesById('weather-zones-command-apply-fn', '.close(', 'closes the weather station zones command database handle');
+expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'db.transaction(async (tx) => {', 'applies weather station zone replacements and terminal ACK persistence in one transaction');
+expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'base_version_conflict', 'rejects a stale weather station zones command with a terminal conflict');
+expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'INSERT INTO weather_station_zone_state', 'versions the first-ever weather station zones assignment set');
+// AgroLink fix-wave E2 (2026-08): a genuinely missing calibration row (NULL) must be told
+// apart from an existing row already at version 0 -- the first-ever insert stores
+// sync_version=0 and lets the AFTER INSERT defaults trigger's own UPDATE bump it to 1
+// (which the UPDATE-only outbox trigger listens for), instead of inserting version 1
+// directly and publishing no event at all.
+expectIncludesById('zone-calibration-fn', 'zic.sync_version AS calibration_sync_version', 'loads the calibration aggregate version for local writes');
+expectIncludesById('zone-calibration-fn', 'hasExistingCalibrationRow', 'distinguishes a missing calibration row from one already at version 0');
+expectIncludesById('zone-calibration-fn', 'nextCalibrationSyncVersion', 'increments the independent calibration aggregate version');
+expectIncludesById('zone-calibration-fn', 'sync_version=excluded.sync_version, deleted_at=NULL, last_applied_at=NULL', 'persists local calibration desired state without marking it cloud-applied');
+expectIncludesById('zone-calibration-fn', '[zoneId, measuredFlowRateLpm, measurementMethod, now, now, now, nextCalibrationSyncVersion, null]', 'binds local calibration write parameters');
+// AgroLink fix-wave E1 (2026-08): a scoped GUI weather-zone edit must mirror
+// weather_station_zone_state in the same transaction as weather_station_zones, or
+// WEATHER_STATION_ZONES_REPLACED never publishes and a later cloud replace at the
+// un-bumped base version silently discards the local edit.
+expectIncludesById('scoped-weather-zone-assign-router', 'priorZoneState', 'reads the prior weather_station_zone_state row before mutating assignments');
+expectIncludesById('scoped-weather-zone-assign-router', "INSERT INTO weather_station_zone_state(deveui, sync_version, last_applied_at, updated_at)", 'versions a first-ever scoped weather-zone assignment set');
+expectIncludesById('scoped-weather-zone-assign-router', 'sync_version = sync_version + 1', 'increments an existing scoped weather-zone assignment-set version');
 expectOrderedIncludesById('scoped-access-command-apply-fn', [
   'const envelope = cmd._pendingCommandEnvelope;',
   "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
@@ -1674,6 +1718,9 @@ expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'owner_user
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'UPDATE irrigation_zones SET ', 'writes canonical Terra selection state');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO applied_commands', 'persists the Terra terminal result');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO command_ack_outbox', 'persists the Terra ACK in the same transaction');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'base_version_conflict', 'rejects stale versioned zone commands with a terminal conflict');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'UPDATE devices SET irrigation_zone_id=NULL', 'detaches devices before tombstoning a zone');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'target_sync_version must equal base_sync_version + 1', 'binds versioned zone command effect keys to the monotonic target version');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async function(tx) {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'base_version_conflict', 'rejects stale scoped-access commands with a terminal conflict');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'Cannot disable or demote the last enabled admin', 'protects the final enabled gateway admin');
@@ -1808,8 +1855,12 @@ expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes no
 expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
 expectWireById('journal-command-apply-fn', 'terra-zone-config-command-apply-fn', 'routes recognized non-journal commands through the protected Terra zone-config applier');
 expectWireById('journal-command-apply-fn', 'scoped-access-command-apply-fn', 'publishes atomically persisted journal ACKs onward through scoped-access handling');
-expectWireById('terra-zone-config-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-Terra commands to the existing router');
+expectWireById('terra-zone-config-command-apply-fn', 'zone-command-apply-fn', 'routes recognized non-Terra commands through the versioned zone applier');
 expectWireById('terra-zone-config-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted Terra zone-config ACKs');
+expectWireById('zone-command-apply-fn', 'weather-zones-command-apply-fn', 'routes recognized non-zone commands through the weather station zones applier');
+expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted versioned zone ACKs');
+expectWireById('weather-zones-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-weather commands to the existing router');
+expectWireById('weather-zones-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted weather station zones ACKs');
 expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
@@ -2277,6 +2328,8 @@ expectLibById('s2120-zones-get-fn', 'crypto', 'crypto', 'imports crypto for auth
 expectLibById('s2120-zones-get-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('s2120-zones-put-auth-fn', 'crypto', 'crypto', 'imports crypto for auth verification');
 expectLibById('s2120-zones-put-auth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectIncludesById('s2120-zones-put-auth-fn', "osiLib.require('device-commands')", 'loads the device-commands helper for weather station zone replacement');
+expectIncludesById('s2120-zones-put-auth-fn', 'replaceLocalWeatherStationZones', 'mirrors weather_station_zone_state instead of writing weather_station_zones directly');
 expectLibById('put-soil-depth-fn', 'crypto', 'crypto', 'imports crypto for soil-depth auth verification');
 expectLibById('put-soil-depth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for soil-depth persistence');
 expectIncludesById('sensor-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy sensor history through the history helper rollup path');

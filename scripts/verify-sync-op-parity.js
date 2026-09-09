@@ -75,6 +75,18 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
   'USER_ZONE_ASSIGNMENT_DELETED',
   'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
+// Wave 3 zone/weather/calibration sync port (AgroLink 64d72f90 + ae9741880 +
+// 33eb12b94, renumbered migrations 0047/0049): SQL-owned outbox events
+// emitted by trg_sync_zone_irrigation_calibration_outbox_au and
+// trg_sync_weather_station_zones_outbox_au. ACTIVATED: osi-server PR #86
+// (Open-Smart-Irrigation/osi-server commit c0d23e06, "feat(sync):
+// zone-calibration + weather-station-zones appliers (pairs osi-os #202)")
+// merged ZoneIrrigationCalibrationApplier and WeatherStationZonesApplier,
+// both implementing SyncEventApplier with a payload field contract
+// (zone_uuid/sync_version/measured_flow_rate_lpm/measurement_method/
+// measured_at/deleted_at/last_applied_at for calibration; device_eui/
+// sync_version/last_applied_at for weather zones) verified against the
+// exact field names this repo's triggers emit. No longer cloudDeferred.
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
   ...EXACT_JOURNAL_EVENT_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
@@ -162,6 +174,13 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_user_plot_assign_outbox_* triggers.
   'USER_PLOT_ASSIGNMENT_UPSERTED',
   'USER_PLOT_ASSIGNMENT_DELETED',
+  // Emitted by 0047__zone_irrigation_calibration_sync.sql's
+  // trg_sync_zone_irrigation_calibration_outbox_au trigger, not by flows.json.
+  // Cloud handling activated: osi-server PR #86 (commit c0d23e06).
+  'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+  // Emitted by 0049__weather_station_zone_sync.sql's
+  // trg_sync_weather_station_zones_outbox_au trigger, not by flows.json.
+  'WEATHER_STATION_ZONES_REPLACED',
 ]);
 // Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
 // "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living

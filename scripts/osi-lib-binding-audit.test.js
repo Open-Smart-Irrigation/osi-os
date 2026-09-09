@@ -12,6 +12,7 @@ const bindings = {
   journal: { variable: 'osiJournal', module: 'osi-journal' },
   ledger: { variable: 'osiCommandLedger', module: 'osi-command-ledger' },
   zoneCommands: { variable: 'osiZoneCommands', module: 'zone-commands' },
+  deviceCommands: { variable: 'osiDeviceCommands', module: 'device-commands' },
   scope: { variable: 'scope', module: 'scope' },
   scopedAccessCommands: {
     variable: 'osiScopedAccessCommands',
@@ -28,6 +29,8 @@ const expectedById = {
     bindings.scopedAccessCommands,
     bindings.scope,
   ],
+  'zone-command-apply-fn': [bindings.db, bindings.zoneCommands, bindings.scope],
+  'weather-zones-command-apply-fn': [bindings.db, bindings.deviceCommands, bindings.scope],
   'command-ack-queue-rest': [bindings.db, bindings.ledger],
 };
 const exactLibs = [{ var: 'osiLib', module: 'osi-lib' }];
