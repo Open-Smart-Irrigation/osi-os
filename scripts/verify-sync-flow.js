@@ -1792,6 +1792,12 @@ expectLibById('work-request-status-apply', 'osiDb', 'osi-db-helper', 'declares o
 expectIncludesById('work-request-status-apply', 'UPDATE improvement_requests SET cloud_status', 'updates improvement request cloud status fields');
 expectIncludesById('work-request-status-apply', 'last_status_at', 'records the cloud status timestamp');
 expectWireById('work-request-status-apply', 'command-ack-queue-rest', 'queues WORK_REQUEST_STATUS ACKs through the durable ACK queue');
+// wave3-tail-fixes (adapted from AgroLink ccb39eb2b): idempotent replay guard,
+// so a replayed WORK_REQUEST_STATUS command (same commandId delivered again
+// after a terminal ACK) does not re-apply a stale/conflicting status.
+expectIncludesById('work-request-status-apply', "SELECT * FROM applied_commands WHERE command_id = ?", 'guards a replay of the same commandId against the shipped applied_commands ledger before re-UPDATE-ing improvement_requests');
+expectIncludesById('work-request-status-apply', "return ack('APPLIED', 'work_request_status_applied', existingRows[0].applied_at);", 'rebuilds and returns the original terminal ACK verbatim on replay, using the stored applied_at instead of call-time now, without mutating the request again');
+expectIncludesById('work-request-status-apply', "'INSERT INTO applied_commands (command_id, device_eui, command_type, effect_key, applied_at, result, originator, result_detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(command_id) DO NOTHING'", 'writes the applied_commands dedup marker in the same shape osi-command-ledger.queueCommandAck writes, so a replayed ack downstream is byte-for-byte unchanged');
 for (const actuatorNodeId of ['reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
   expectExcludesById(actuatorNodeId, 'WORK_REQUEST_STATUS', 'WORK_REQUEST_STATUS actuator/downlink handling');
 }
