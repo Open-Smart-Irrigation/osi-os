@@ -1612,6 +1612,12 @@ expectIncludes('Build Cloud Bootstrap', 'UPDATE sync_outbox SET gateway_device_e
 expectIncludes('Build Cloud Bootstrap', 'rejectedCandidates', 'surfaces rejected migration candidates in bootstrap migration state');
 expectIncludes('Mark Bootstrap Synced', "gatewayMigration.migrated", 'recognizes successful cloud-side gateway migration responses');
 expectIncludes('Mark Bootstrap Synced', 'gatewayMigrationPendingBootstrap = false', 'resumes normal sync after repair bootstrap succeeds');
+// wave3-tail-fixes (adapted from AgroLink 62f8d2dce): fail-closed statusCode +
+// success gating, so a 2xx with {success:false} (or a non-object payload) no
+// longer advances sync_cursor/sync-token/gateway-migration state.
+expectIncludes('Mark Bootstrap Synced', 'function isHttpSuccess(statusCode) {\n  return Number.isInteger(statusCode) && statusCode >= 200 && statusCode < 300;\n}', 'gates on an explicit integer 2xx predicate, never a truthy/0/string statusCode');
+expectIncludes('Mark Bootstrap Synced', "!isHttpSuccess(msg.statusCode) || !payload || payload.success !== true", 'requires both an HTTP 2xx statusCode and an explicit payload.success === true before any durable bootstrap write');
+expectExcludes('Mark Bootstrap Synced', 'if (msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300))', 'the truthy statusCode check that let statusCode=0 fall through as "not a failure"');
 expectIncludes('Build Edge Event Batch', 'gatewayMigrationPaused', 'suppresses event delivery while gateway migration is paused');
 expectIncludes('Build Edge Event Batch', "'X-OSI-Sync-Protocol': '2'", 'opts edge event delivery into sync protocol v2');
 expectIncludes('Build Edge Event Batch', 'delivered_at IS NULL AND rejected_at IS NULL', 'excludes terminal rejected outbox events from normal delivery batches');
@@ -1620,6 +1626,17 @@ expectIncludes('Mark Synced Events Delivered', "result.status || '').trim().toUp
 expectIncludes('Mark Synced Events Delivered', 'rejectedIds', 'tracks rejected protocol-v2 event results separately from delivered results');
 expectIncludes('Mark Synced Events Delivered', 'rejection_reason', 'stores rejected protocol-v2 event reasons in sync_outbox');
 expectIncludes('Mark Synced Events Delivered', 'UPDATE sync_outbox SET rejected_at', 'marks rejected protocol-v2 event results without setting delivered_at');
+// wave3-tail-fixes (adapted from AgroLink 62f8d2dce): fail-closed statusCode
+// gating and unique-result-per-eventUuid classification, so a non-2xx
+// response or a missing/duplicate/malformed/unrequested result never marks
+// an event delivered.
+expectIncludes('Mark Synced Events Delivered', 'function isHttpSuccess(statusCode) {\n  return Number.isInteger(statusCode) && statusCode >= 200 && statusCode < 300;\n}', 'gates on an explicit integer 2xx predicate, never a truthy/0/string statusCode');
+expectExcludes('Mark Synced Events Delivered', 'if (msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300))', 'the truthy statusCode check that let statusCode=0 fall through as "not a failure"');
+expectExcludes('Mark Synced Events Delivered', 'let deliveredIds = msg._syncEventIds;', 'the whole-batch deliveredIds=msg._syncEventIds fallback that marked an absent/empty results array delivered');
+expectIncludes('Mark Synced Events Delivered', "issues.push('protocol_response_missing_results')", 'classifies every requested event retryable when the protocol response has no results array at all');
+expectIncludes('Mark Synced Events Delivered', "issues.push('protocol_response_duplicate_result:' + id)", 'classifies a requested event retryable when the response carries more than one result for it');
+expectIncludes('Mark Synced Events Delivered', "issues.push('protocol_response_unrequested_result:' + id)", 'reports a result identity the request never asked about without updating any row for it');
+expectIncludes('Mark Synced Events Delivered', "classified into more than one disposition group", 'asserts each requested event lands in exactly one of delivered/rejected/retryable before writing SQL');
 expectIncludes('Run Force Sync', 'rejectedIds', 'tracks rejected force-sync event results separately from delivered results');
 expectIncludes('Run Force Sync', 'rejection_reason', 'stores rejected force-sync event reasons in sync_outbox');
 expectIncludes('Run Force Sync', 'UPDATE sync_outbox SET rejected_at', 'marks rejected force-sync event results without setting delivered_at');
@@ -1775,6 +1792,12 @@ expectLibById('work-request-status-apply', 'osiDb', 'osi-db-helper', 'declares o
 expectIncludesById('work-request-status-apply', 'UPDATE improvement_requests SET cloud_status', 'updates improvement request cloud status fields');
 expectIncludesById('work-request-status-apply', 'last_status_at', 'records the cloud status timestamp');
 expectWireById('work-request-status-apply', 'command-ack-queue-rest', 'queues WORK_REQUEST_STATUS ACKs through the durable ACK queue');
+// wave3-tail-fixes (adapted from AgroLink ccb39eb2b): idempotent replay guard,
+// so a replayed WORK_REQUEST_STATUS command (same commandId delivered again
+// after a terminal ACK) does not re-apply a stale/conflicting status.
+expectIncludesById('work-request-status-apply', "SELECT * FROM applied_commands WHERE command_id = ?", 'guards a replay of the same commandId against the shipped applied_commands ledger before re-UPDATE-ing improvement_requests');
+expectIncludesById('work-request-status-apply', "return ack('APPLIED', 'work_request_status_applied', existingRows[0].applied_at);", 'rebuilds and returns the original terminal ACK verbatim on replay, using the stored applied_at instead of call-time now, without mutating the request again');
+expectIncludesById('work-request-status-apply', "'INSERT INTO applied_commands (command_id, device_eui, command_type, effect_key, applied_at, result, originator, result_detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(command_id) DO NOTHING'", 'writes the applied_commands dedup marker in the same shape osi-command-ledger.queueCommandAck writes, so a replayed ack downstream is byte-for-byte unchanged');
 for (const actuatorNodeId of ['reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
   expectExcludesById(actuatorNodeId, 'WORK_REQUEST_STATUS', 'WORK_REQUEST_STATUS actuator/downlink handling');
 }
@@ -1914,7 +1937,7 @@ expectIncludes('Build Cloud Bootstrap', 'schedules: schedules.map(sanitizeSyncRo
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap sensor history');
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dr.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap dendro history');
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL', 'ignores deleted zones when exporting bootstrap history');
-expectIncludes('Mark Bootstrap Synced', "(msg.payload || {}).detail || 'Bootstrap sync failed'", 'preserves server ProblemDetail details for bootstrap errors');
+expectIncludes('Mark Bootstrap Synced', "(payload || {}).detail || 'Bootstrap sync failed'", 'preserves server ProblemDetail details for bootstrap errors');
 expectWireById('al-link-handle-auth', 'al-link-store-mqtt', 'persists MQTT credentials after successful account linking');
 expectWireById('al-link-store-mqtt', 'al-link-finalize', 'finalizes linked-account state only after MQTT config persistence');
 expectWireById('al-link-finalize', 'al-link-success', 'formats a success response only after linked-account finalization');
