@@ -4,7 +4,7 @@
    and data surfaces stay solid. */
 
 /* ── Liquid-glass material ─────────────────────────────────────────────────
-   AgroLink chrome layer (iOS-26-style): translucent, blurs what scrolls
+   Chrome layer: translucent, blurs what scrolls
    beneath, specular top edge, light sweep on hover, press morph. Glass is
    chrome-only — primary/danger semantics and data surfaces stay solid. */
 .btn-liquid,

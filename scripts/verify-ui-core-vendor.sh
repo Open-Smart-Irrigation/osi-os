@@ -2,7 +2,7 @@
 set -eu
 
 if [ -z "${OSI_SERVER_ROOT:-}" ]; then
-  echo "OSI_SERVER_ROOT is required (path to an osi-server checkout on the AgroLink branch)" >&2
+  echo "OSI_SERVER_ROOT is required (path to an osi-server checkout on main)" >&2
   exit 2
 fi
 
@@ -18,7 +18,12 @@ for dir in "$canonical_root" "$vendor_root"; do
   fi
 done
 
-if ! diff -ru "$canonical_root" "$vendor_root"; then
+# tokens.css and tailwind-preset.js are each side's own palette/preset, not
+# part of the shared contract: osi-os and osi-server each keep their own
+# brand tokens (osi-os wave-3 port, 2026-09-09) and neither vendors the
+# other's file under these names. Every actual primitive (.tsx, index.ts,
+# primitives.css) still has to match byte-for-byte.
+if ! diff -ru -x 'tokens.css' -x 'tailwind-preset.js' "$canonical_root" "$vendor_root"; then
   echo "vendored ui-core (osi-server frontend/src/ui-core) differs from canonical web/react-gui/src/ui-core" >&2
   exit 1
 fi
