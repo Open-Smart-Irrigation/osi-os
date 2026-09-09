@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
 
 const REPO = path.resolve(__dirname, '..');
@@ -100,30 +101,44 @@ test('retry-bump UPDATE is present verbatim in sync-outbox-mark and sync-force-b
 
 test('sync-outbox-mark: the statusCode transport-failure guard returns before retryableIds is ever touched', () => {
   const f = nodeById(FLOW_PATHS[0], 'sync-outbox-mark').func;
-  // These two markers previously searched for an `isHttpSuccess(...)` helper
-  // and a `const retryableIds` declaration -- the shape from f5d02c00b
-  // ("fix(sync): fail-closed statusCode + success gating in outbox/bootstrap
-  // mark"). That commit lives only on the unrelated, self-described
-  // "non-deployable scratch proposal" branch sdd/sync-stoploss-harness (task
-  // 2 of a since-untracked docs/superpowers/plans/2026-07-15-sync-delivery-
-  // stop-loss.md) and is NOT an ancestor of this branch -- it never shipped
-  // to main or to this journal port. The markers were updated in anticipation
-  // of that rewrite landing (95624198c and its duplicates), but it never did,
-  // leaving the assertions pointed at source text that does not exist here.
-  // What main (and this port) actually ships is the truthy
-  // `msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300))`
-  // check with `let retryableIds` -- already fail-closed: the guard's
-  // `return null;` sits textually before both the retryableIds declaration
-  // and the retry-bump UPDATE, which is exactly the invariant this test
-  // exists to pin. Point the markers at what is really shipped instead of
-  // reverting the invariant itself.
-  const guardIdx = f.indexOf('if (msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300)) {');
+  // wave3-tail-fixes (adapted from AgroLink 62f8d2dce, "fix(sync): fail-closed
+  // statusCode + success gating in outbox/bootstrap mark") ported this fix
+  // onto main: the old truthy `msg.statusCode && (msg.statusCode < 200 ||
+  // msg.statusCode >= 300))` guard let statusCode=0 (the sync-outbox-http
+  // transport-failure sentinel) fall through as "not a failure" -- `0 && ...`
+  // short-circuits false, so the branch never ran and a transport failure
+  // could reach the normal per-event classification path. The new
+  // `isHttpSuccess(statusCode)` predicate requires an explicit integer 2xx,
+  // so statusCode=0 (and any non-2xx) now correctly returns before
+  // retryableIds is ever declared. `retryableIds` is also now a `const`
+  // (unique-result-per-eventUuid classification replaced the old whole-batch
+  // `let deliveredIds = msg._syncEventIds` fallback), so this test's marker
+  // is updated accordingly.
+  const guardIdx = f.indexOf('if (!isHttpSuccess(msg.statusCode)) {');
   const guardReturnIdx = f.indexOf('return null;', guardIdx);
-  const retryDeclIdx = f.indexOf('let retryableIds');
+  const retryDeclIdx = f.indexOf('const retryableIds');
   const retryUpdateIdx = f.indexOf('retry_count = retry_count + 1');
   assert.ok(guardIdx !== -1 && guardReturnIdx !== -1 && retryDeclIdx !== -1 && retryUpdateIdx !== -1, 'expected markers not found');
   assert.ok(guardReturnIdx < retryDeclIdx, 'transport-failure guard must return before retryableIds is declared');
   assert.ok(guardReturnIdx < retryUpdateIdx, 'transport-failure guard must return before the retry-bump UPDATE');
+});
+
+test('sync-outbox-mark: statusCode=0 (transport-failure sentinel) is treated as a failure, not silently passed through', () => {
+  // This is the actual defect AgroLink 62f8d2dce fixed: the truthy
+  // `msg.statusCode && (...)` check evaluated `0 && anything` to `false`,
+  // so a transport failure reported as statusCode=0 skipped the failure
+  // branch entirely instead of being caught by it.
+  const f = nodeById(FLOW_PATHS[0], 'sync-outbox-mark').func;
+  assert.ok(
+    !f.includes('if (msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300)) {'),
+    'the truthy statusCode check that missed statusCode=0 must be gone'
+  );
+  assert.match(
+    f,
+    /function isHttpSuccess\(statusCode\) \{\s*return Number\.isInteger\(statusCode\) && statusCode >= 200 && statusCode < 300;\s*\}/,
+    'isHttpSuccess must require an explicit integer 2xx, so statusCode=0 is not "not a failure"'
+  );
+  assert.ok(f.includes('if (!isHttpSuccess(msg.statusCode)) {'), 'the failure branch must gate on !isHttpSuccess(msg.statusCode)');
 });
 
 test('sync-force-build: the retry-bump UPDATE lives strictly inside the outbox 2xx branch, not the failure branch', () => {
@@ -258,6 +273,105 @@ test('transport failure (batch-level, msg.statusCode simulated) never bumps retr
   const row = db.prepare('SELECT retry_count, last_retryable_failure_at FROM sync_outbox WHERE event_uuid = ?').get('evt-transport-fail');
   assert.equal(row.retry_count, 0);
   assert.equal(row.last_retryable_failure_at, null);
+  db.close();
+});
+
+// =====================================================================
+// wave3-tail-fixes (adapted from AgroLink 62f8d2dce): behavioral proof that
+// the REAL shipped sync-outbox-mark func, executed as real JS against a
+// real seeded DB, never marks an event delivered on a non-2xx statusCode or
+// on a missing per-event results array, and does mark it delivered on a
+// genuine 2xx APPLIED result (positive control, so the harness itself is
+// proven not to be permanently green).
+// =====================================================================
+
+function makeOsiDbShim(db) {
+  class ShimDatabase {
+    constructor(_filename) {}
+    run(sql, callback) {
+      try {
+        db.exec(sql);
+        if (typeof callback === 'function') callback.call({ changes: 1 }, null);
+      } catch (error) {
+        if (typeof callback === 'function') callback(error);
+        else throw error;
+      }
+    }
+    close(callback) {
+      if (typeof callback === 'function') callback();
+    }
+  }
+  return { Database: ShimDatabase };
+}
+
+async function runOutboxMarkFunc(func, msg, db) {
+  const flowState = new Map();
+  const sandbox = {
+    Buffer, console, require, process, setTimeout, clearTimeout,
+    osiDb: makeOsiDbShim(db),
+  };
+  const script = new vm.Script(`(async function(msg,node,flow,env){${func}\n})`);
+  const fn = script.runInNewContext(sandbox);
+  const flowApi = {
+    get(key) { return flowState.get(key); },
+    set(key, value) { flowState.set(key, value); },
+  };
+  const nodeApi = { error() {}, warn() {}, status() {} };
+  const envApi = { get() { return undefined; } };
+  await fn(msg, nodeApi, flowApi, envApi);
+  return flowState.get('sync_state');
+}
+
+function seedOutboxRow(db, uuid) {
+  db.exec(`INSERT INTO sync_outbox
+      (event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at)
+      VALUES ('${uuid}', 'WORK_REQUEST', '${uuid}', 'WORK_REQUEST_SUBMITTED', '{}', 0, '2026-01-01T00:00:00Z')`);
+}
+
+function readOutboxRow(db, uuid) {
+  return db.prepare('SELECT delivered_at, rejected_at, retry_count FROM sync_outbox WHERE event_uuid = ?').get(uuid);
+}
+
+test('sync-outbox-mark (real shipped func): statusCode=0 (transport-failure sentinel) never marks the event delivered', async () => {
+  const db = seedDb();
+  seedOutboxRow(db, 'evt-status0');
+  const func = nodeById(FLOW_PATHS[0], 'sync-outbox-mark').func;
+  await runOutboxMarkFunc(func, {
+    statusCode: 0,
+    _syncEventIds: ['evt-status0'],
+    payload: { results: [{ eventUuid: 'evt-status0', status: 'APPLIED' }] },
+  }, db);
+  const row = readOutboxRow(db, 'evt-status0');
+  assert.equal(row.delivered_at, null, 'statusCode=0 must not mark the event delivered, even with an APPLIED result present');
+  db.close();
+});
+
+test('sync-outbox-mark (real shipped func): a missing results array never marks the event delivered (classified retryable instead)', async () => {
+  const db = seedDb();
+  seedOutboxRow(db, 'evt-noresults');
+  const func = nodeById(FLOW_PATHS[0], 'sync-outbox-mark').func;
+  await runOutboxMarkFunc(func, {
+    statusCode: 200,
+    _syncEventIds: ['evt-noresults'],
+    payload: {},
+  }, db);
+  const row = readOutboxRow(db, 'evt-noresults');
+  assert.equal(row.delivered_at, null, 'a missing results array must not mark the event delivered');
+  assert.equal(row.retry_count, 1, 'a missing results array must classify the event retryable');
+  db.close();
+});
+
+test('sync-outbox-mark (real shipped func): a genuine 2xx APPLIED result does mark the event delivered (positive control)', async () => {
+  const db = seedDb();
+  seedOutboxRow(db, 'evt-applied');
+  const func = nodeById(FLOW_PATHS[0], 'sync-outbox-mark').func;
+  await runOutboxMarkFunc(func, {
+    statusCode: 200,
+    _syncEventIds: ['evt-applied'],
+    payload: { results: [{ eventUuid: 'evt-applied', status: 'APPLIED' }] },
+  }, db);
+  const row = readOutboxRow(db, 'evt-applied');
+  assert.ok(row.delivered_at, 'a genuine 2xx APPLIED result must mark the event delivered');
   db.close();
 });
 

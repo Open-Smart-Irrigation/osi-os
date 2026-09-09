@@ -210,8 +210,12 @@
       "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors"
     },
     "sync-outbox-mark": {
-      "delta": 294,
-      "reason": "retryable backoff: RETRYABLE_ERROR results now collect event uuids and persist retry_count/last_retryable_failure_at instead of only counting them (Task J)"
+      "delta": 1845,
+      "reason": "wave3-tail-fixes fail-closed outbox mark (adapted from AgroLink 62f8d2dce): isHttpSuccess(statusCode) = Number.isInteger(statusCode) && 200-299 replaces the truthy statusCode check that let statusCode=0 (the sync-outbox-http transport-failure sentinel) fall through as \"not a failure\"; removed the whole-batch deliveredIds=msg._syncEventIds fallback so an absent/empty results array now classifies every requested event retryable instead of marking the batch delivered; added unique-result-per-eventUuid classification (missing/duplicate/malformed/unrequested) with a disjointness assertion before SQL construction. Re-measured with verify-flows-size-ratchet nodeSizes (func.length) against actual origin/main: 3902 -> 5747 = +1845 (supersedes the prior +294 Task J entry, already reflected in origin/main's current 3902)."
+    },
+    "sync-bootstrap-mark": {
+      "delta": 244,
+      "reason": "wave3-tail-fixes fail-closed bootstrap mark (adapted from AgroLink 62f8d2dce): same isHttpSuccess predicate, plus payload.success === true is now required before the sync_cursor write, sync-token rotation, lastBootstrapSuccessAt, or gateway-migration pause-flag clearing -- all gated behind one guard clause, so a 2xx with {success:false} (or a non-object payload) no longer advances state. Re-measured with verify-flows-size-ratchet nodeSizes (func.length) against actual origin/main: 3784 -> 4028 = +244 (new entry; node had no prior node_allowances pin)."
     },
     "command-ack-build-batch": {
       "delta": 975,
