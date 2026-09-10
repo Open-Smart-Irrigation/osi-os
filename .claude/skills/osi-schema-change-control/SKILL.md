@@ -487,11 +487,22 @@ takes (reused from there, under `--backup-dir`), rewrites
 `version`/`name`/`checksum`/`status` for every remapped row inside one
 `BEGIN IMMEDIATE`/`COMMIT` (DELETE-then-INSERT, never UPDATE, so two rows
 trading version slots can never collide on the `INTEGER PRIMARY KEY`
-mid-transaction), then `syncFingerprints`, then `node scripts/verify-head-cli.js`'s
-underlying `verifyHead` self-check MUST return `ok` — otherwise the byte
-image is restored from the backup just taken and the process exits non-zero.
-It never runs migration DDL against the live/target database itself
-(structural proof runs only against disposable scratch copies).
+mid-transaction), then `syncFingerprints`, then an internal
+`verifyReconciliationConsistency` self-check MUST return `ok` — otherwise
+the byte image is restored from the backup just taken and the process exits
+non-zero. This is deliberately narrower than `verifyHead` (used by `node
+scripts/verify-head-cli.js`): `verifyHead` requires the applied set to equal
+*every* migration main has ever shipped ("head reached"), which a
+foreign-numbered device will not satisfy immediately after reconciliation
+whenever it is genuinely missing whole features the other lineage never
+had (an AgroLink-only device has never run main's valve-control migrations
+at all) — that is real pending work for the `applyPending` carry-forward
+that follows, not a reconciliation failure. `verifyReconciliationConsistency`
+checks only what reconciliation can actually guarantee: no row left
+`repair_required`, every `applied` row's checksum matches main at that
+version, and fingerprints are synced to the live schema. It never runs
+migration DDL against the live/target database itself (structural proof
+runs only against disposable scratch copies).
 
 `--clear-repair-required` is a narrower, separate recovery path for a row
 already stuck `repair_required` whose checksum, at its OWN current version
