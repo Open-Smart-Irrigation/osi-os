@@ -191,4 +191,16 @@ if (require.main === module) {
   })();
 }
 
-module.exports = { runMigrateCli, parseArgs };
+module.exports = {
+  runMigrateCli,
+  parseArgs,
+  // Exported for reuse by scripts/reconcile-ledger-numbering.js, which needs
+  // the SAME persistent, fsync'd, retention-pruned off-device backup contract
+  // (not lib/osi-migrate/backup.js's `backupDb`, which is the runner's own
+  // per-migration `.bak-` sibling-file backup used inside applyPending).
+  offDeviceBackup,
+  restoreByteImage,
+  resolveKeep,
+  pruneOldPremigrateBackups,
+  pendingRisksAfterApplied,
+};
