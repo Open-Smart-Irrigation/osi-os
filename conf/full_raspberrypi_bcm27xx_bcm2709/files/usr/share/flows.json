@@ -12666,7 +12666,7 @@
     "y": 1120,
     "wires": [
       [
-        "934bf2bc19a8ce22"
+        "installation-revision-command-apply-fn"
       ],
       [
         "9d5e3035c3d069c4"
