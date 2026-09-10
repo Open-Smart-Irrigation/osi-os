@@ -112,6 +112,14 @@ if (require.main === module) {
   server.listen(port, '127.0.0.1', () => {
     // deploy-offline.sh polls for this exact token to know the server is up.
     console.log(`READY http://127.0.0.1:${port} root=${rootDir}`);
+    const pidfile = process.env.DEPLOY_LOCAL_SERVER_PIDFILE;
+    if (pidfile) {
+      try {
+        fs.writeFileSync(pidfile, String(process.pid));
+      } catch (err) {
+        console.error(`WARN: could not write pidfile ${pidfile}: ${err.message}`);
+      }
+    }
   });
 
   const shutdown = () => server.close(() => process.exit(0));
