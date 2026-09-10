@@ -53,6 +53,14 @@
     "env": []
   },
   {
+    "id": "d5f9a4c7e8126b30",
+    "type": "tab",
+    "label": "Radio observations",
+    "disabled": false,
+    "info": "Always-loaded passive radio observation capture",
+    "env": []
+  },
+  {
     "id": "7d4f3e45f4b0d111",
     "type": "tab",
     "label": "Download Sensor Data",
@@ -3163,7 +3171,27 @@
     "wires": [
       [
         "95ced3f73fa8a692",
-        "e96440ceae67e133",
+        "e96440ceae67e133"
+      ]
+    ]
+  },
+  {
+    "id": "c6e0b5d8f9237a41",
+    "type": "mqtt in",
+    "z": "d5f9a4c7e8126b30",
+    "name": "MQTT IN (Radio Observations)",
+    "topic": "application/+/device/+/event/up",
+    "qos": "2",
+    "datatype": "json",
+    "broker": "b0b19352dac3fb34",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 100,
+    "y": 180,
+    "wires": [
+      [
         "radio-capture-fn"
       ]
     ]
@@ -14100,7 +14128,7 @@
   {
     "id": "radio-capture-fn",
     "type": "function",
-    "z": "a3f03829ad106e10",
+    "z": "d5f9a4c7e8126b30",
     "name": "Capture Radio Observations",
     "func": "return (async()=>{\nif (!['1','true'].includes(String(env.get('OSI_RADIO_CAPTURE_ENABLED') || '').toLowerCase())) return null;\nconst loaded = osiLib.require('radio');\nif (!loaded.ok) { node.warn('Radio capture helper unavailable: ' + loaded.error); return null; }\nconst db = new osiDb.Database('/data/db/farming.db');\ntry {\n  const identity = await db.get(\"SELECT installation_uuid,recovery_state FROM installation_identity WHERE singleton_id=1\");\n  if (!identity || identity.recovery_state !== 'ACTIVE') throw new Error('installation recovery prevents radio capture');\n  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const positions = await db.all('SELECT * FROM gateway_locations');\n  const gatewayPositions = Object.fromEntries(positions.map(row=>[row.gateway_device_eui,row]));\n  const radio = loaded.value;\n  const row = radio.fromChirpStack(msg.payload,{gatewayPositions, testerProfileId:env.get('CHIRPSTACK_PROFILE_FIELD_TESTER'),testerProfileName:'Field Tester'});\n  const location = osiLib.require('installation-location');\n  if (location.ok && row.recorded_at) row.metadata.device_location = await location.value.resolveLocation(db,row.deveui,row.recorded_at);\n  const store = await radio.getSharedStore({farmingDb:db,installationUuid:identity.installation_uuid,gatewayEui,enabled:true});\n  const normalized = radio.normalizeUplink(row,{installationUuid:identity.installation_uuid,ingestedAt:new Date().toISOString(),timestampSource:row.recorded_at?'network':'ingest',deduplicationUncertain:!row.deduplication_id});\n  await store.capture(normalized);\n  global.set('radio_capture_status',{state:'active',at:new Date().toISOString()});\n} catch(error) {\n  global.set('radio_capture_status',{state:'paused',at:new Date().toISOString(),reason:String(error.message || error)});\n  node.warn('Radio capture: ' + String(error.message || error));\n} finally { db.close(); }\nreturn null;\n})();",
     "outputs": 0,
