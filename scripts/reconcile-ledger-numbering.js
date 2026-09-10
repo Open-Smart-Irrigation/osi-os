@@ -61,9 +61,12 @@
 // there), rewrites version/name/checksum/status for every 'remap' row inside
 // one BEGIN IMMEDIATE/COMMIT (DELETE-then-INSERT so mid-transaction primary
 // key collisions between rows trading version slots are impossible), then
-// syncFingerprints, then verifyHead MUST return ok — otherwise the byte
-// image is restored from the just-taken backup and the process exits
-// non-zero. It never runs migration DDL itself (structural proof runs
+// syncFingerprints, then a post-apply consistency self-check MUST pass
+// (deliberately narrower than lib/osi-migrate's verifyHead — see
+// verifyReconciliationConsistency below for why verifyHead's own
+// "every migration ever shipped is applied" bar is the wrong gate here) —
+// otherwise the byte image is restored from the just-taken backup and the
+// process exits non-zero. It never runs migration DDL itself (structural proof runs
 // against disposable scratch copies only, never the live/target DB) and
 // never edits a row it did not prove.
 const fs = require('node:fs');
@@ -74,8 +77,8 @@ const crypto = require('node:crypto');
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
 const { ensureLedger, sqlQuote } = require('../lib/osi-migrate/ledger');
-const { syncFingerprints } = require('../lib/osi-migrate/runner');
-const { verifyHead } = require('../lib/osi-migrate');
+const { syncFingerprints, readStoredFingerprints, sortFps } = require('../lib/osi-migrate/runner');
+const { computeFingerprints } = require('../lib/osi-migrate/fingerprints');
 const { snapshotSchema, compareSchemas } = require('./semantic-schema-compare');
 const { buildReference } = require('./baseline-existing-db');
 const { offDeviceBackup, restoreByteImage } = require('./migrate-cli');
@@ -369,6 +372,47 @@ async function classifyLedger(ledgerRows, { mainIndex, lineageRegistry, migratio
   return { rows, refused: refused.length > 0, summary };
 }
 
+// --- post-apply self-check ---------------------------------------------
+
+// Deliberately narrower than lib/osi-migrate's verifyHead: verifyHead
+// requires the applied SET to exactly equal EVERY migration main has ever
+// shipped (i.e. "have we reached head"), which a reconciled-but-not-yet-
+// caught-up device will never satisfy on its own — reconciliation fixes the
+// NUMBERING of rows that already exist, it does not apply migrations the
+// device never had (a foreign lineage can be missing whole features, e.g.
+// an AgroLink-only device has never run main's valve-control migrations at
+// all — that is real, legitimate pending work for the applyPending call
+// that follows reconciliation, not a reconciliation failure). Using
+// verifyHead itself as this tool's own self-check would therefore refuse
+// and roll back a CORRECT reconciliation any time real pending work
+// remains, which is true for essentially every real foreign-numbered
+// device. The self-check reconciliation actually owes is narrower and
+// achievable: every row this tool touched (or left alone) must now be
+// internally consistent with main — no row left `repair_required`, no
+// `applied` row whose checksum still disagrees with main's checksum at
+// that version — plus the same live-vs-stamped fingerprint comparison
+// verifyHead performs (proving syncFingerprints actually took).
+async function verifyReconciliationConsistency(runner, { migrationsDir }) {
+  const rows = await runner.all('SELECT version, checksum, status FROM schema_migrations ORDER BY version');
+  const mainByVersion = buildMainIndex(migrationsDir).byVersion;
+  for (const r of rows) {
+    if (r.status === 'repair_required') {
+      return { ok: false, reason: `version ${r.version} is still repair_required after reconciliation` };
+    }
+    if (r.status !== 'applied') continue;
+    const main = mainByVersion.get(r.version);
+    if (!main || main.checksum !== r.checksum) {
+      return { ok: false, reason: `version ${r.version} checksum does not match main after reconciliation` };
+    }
+  }
+  const stored = await readStoredFingerprints(runner);
+  const live = sortFps(await computeFingerprints(runner));
+  if (JSON.stringify(stored) !== JSON.stringify(live)) {
+    return { ok: false, reason: 'fingerprint drift detected after reconciliation (stored fingerprints do not match the live schema)' };
+  }
+  return { ok: true };
+}
+
 // --- apply -----------------------------------------------------------------
 
 function remapSql({ oldVersion, newVersion, name, checksum }) {
@@ -402,8 +446,9 @@ async function applyRemap(runner, rows) {
 
 // Orchestrates one full reconcile run against a real DB path: read ledger,
 // classify, and — only in apply mode, and only if nothing refused — back up,
-// remap, re-stamp fingerprints, and self-check with verifyHead, rolling back
-// the byte image if that self-check fails.
+// remap, re-stamp fingerprints, and self-check with
+// verifyReconciliationConsistency, rolling back the byte image if that
+// self-check fails.
 async function runReconcile({
   dbPath,
   migrationsDir = DEFAULT_MIGRATIONS_DIR,
@@ -456,18 +501,18 @@ async function runReconcile({
     log(`[reconcile] remapped ${remapped} ledger row(s)`);
     await syncFingerprints(runner);
 
-    const check = await verifyHead(runner, { migrationsDir });
+    const check = await verifyReconciliationConsistency(runner, { migrationsDir });
     if (!check.ok) {
-      log(`[reconcile] verifyHead self-check FAILED after apply: ${check.reason}`);
+      log(`[reconcile] post-apply consistency self-check FAILED: ${check.reason}`);
       const restored = restoreByteImage(dbPath, backupPath);
       if (!restored) {
-        throw new Error(`reconciliation apply failed verifyHead AND restore integrity_check failed; backup at ${backupPath}`);
+        throw new Error(`reconciliation apply failed the consistency self-check AND restore integrity_check failed; backup at ${backupPath}`);
       }
-      const e = new Error(`reconciliation applied but verifyHead self-check failed; DB restored from ${backupPath}: ${check.reason}`);
+      const e = new Error(`reconciliation applied but the post-apply consistency self-check failed; DB restored from ${backupPath}: ${check.reason}`);
       e.restored = true;
       throw e;
     }
-    log('[reconcile] verifyHead self-check: ok');
+    log('[reconcile] post-apply consistency self-check: ok');
     return { applied: true, refused: false, rows, summary, backupPath };
   } finally {
     fs.rmSync(scratchRoot, { recursive: true, force: true });
@@ -532,15 +577,15 @@ async function clearRepairRequired({
   const updates = clearable.map((r) => `UPDATE schema_migrations SET status='applied', error=NULL, finished_at=${sqlQuote(now)} WHERE version=${r.version};`).join('\n');
   await runner.exec(`BEGIN IMMEDIATE;\n${updates}\nCOMMIT;`);
   await syncFingerprints(runner);
-  const check = await verifyHead(runner, { migrationsDir });
+  const check = await verifyReconciliationConsistency(runner, { migrationsDir });
   if (!check.ok) {
     const restored = restoreByteImage(dbPath, backupPath);
     if (!restored) {
-      throw new Error(`clear-repair-required failed verifyHead AND restore integrity_check failed; backup at ${backupPath}`);
+      throw new Error(`clear-repair-required failed the consistency self-check AND restore integrity_check failed; backup at ${backupPath}`);
     }
-    throw new Error(`clear-repair-required applied but verifyHead self-check failed; DB restored from ${backupPath}: ${check.reason}`);
+    throw new Error(`clear-repair-required applied but the post-apply consistency self-check failed; DB restored from ${backupPath}: ${check.reason}`);
   }
-  log(`[reconcile] cleared repair_required on ${clearable.length} row(s); verifyHead self-check: ok`);
+  log(`[reconcile] cleared repair_required on ${clearable.length} row(s); post-apply consistency self-check: ok`);
   return { cleared: clearable.length, stillWedged };
 }
 
@@ -602,6 +647,7 @@ module.exports = {
   resolveStructuralProofs,
   classifyLedger,
   applyRemap,
+  verifyReconciliationConsistency,
   runReconcile,
   clearRepairRequired,
   parseArgs,

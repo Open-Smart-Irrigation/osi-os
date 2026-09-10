@@ -18,6 +18,7 @@ const {
   refuseVersionSlotCollisions,
   classifyLedger,
   applyRemap,
+  verifyReconciliationConsistency,
   runReconcile,
   clearRepairRequired,
   parseArgs,
@@ -520,8 +521,18 @@ test('AgroLink-lineage fixture: reconcile classifies all 28 foreign rows, applie
   assert.equal(applyRes.applied, true, JSON.stringify(applyRes.summary));
   assert.ok(fs.existsSync(applyRes.backupPath));
 
-  const check = await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR });
-  assert.deepEqual(check, { ok: true });
+  // NOT verifyHead here: verifyHead requires the applied SET to equal EVERY
+  // migration main has ever shipped ("have we reached head"), which this
+  // device provably has not — it never ran main's valve-control migrations
+  // (0022-0025) at all, so real pending work remains after a fully correct
+  // reconciliation. runReconcile's OWN internal self-check already asserted
+  // the narrower, achievable bar (verifyReconciliationConsistency: no row
+  // repair_required, every applied row's checksum matches main, fingerprints
+  // synced) before returning `applied: true` above — assert it again here
+  // directly, then prove verifyHead only AFTER the carry-forward
+  // applyPending call below actually reaches head.
+  const consistency = await verifyReconciliationConsistency(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR });
+  assert.deepEqual(consistency, { ok: true });
 
   // Pending set after reconciliation: main versions NOT covered by the
   // now-remapped ledger. AgroLink's device never shipped valve control
@@ -571,8 +582,11 @@ test('Bovey-lineage fixture: reconcile classifies all 4 foreign rows, applies cl
   assert.equal(remapped.target.version, 25);
   assert.equal(applyRes.applied, true, JSON.stringify(applyRes.summary));
 
-  const check = await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR });
-  assert.deepEqual(check, { ok: true });
+  // See the AgroLink test above for why verifyHead is not the right check
+  // immediately after reconciliation (Bovey also has real pending work —
+  // it never ran any AgroLink-derived migration).
+  const consistency = await verifyReconciliationConsistency(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR });
+  assert.deepEqual(consistency, { ok: true });
 
   // Bovey never ran ANY AgroLink-derived content — pending is exactly
   // main's 0026-0053 tail, matching the stabilization plan's estimate
