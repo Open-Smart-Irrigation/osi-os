@@ -6796,3 +6796,138 @@ BEGIN
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
 END;
+
+-- Immutable device installation and radio configuration revisions.
+CREATE TABLE device_installation_location_revisions (
+  revision_uuid TEXT PRIMARY KEY,
+  device_eui TEXT NOT NULL,
+  installation_uuid TEXT NOT NULL,
+  source_gateway_device_eui TEXT,
+  base_revision_uuid TEXT,
+  revision_no INTEGER NOT NULL CHECK (revision_no >= 1),
+  latitude REAL NOT NULL CHECK (latitude >= -90 AND latitude <= 90),
+  longitude REAL NOT NULL CHECK (longitude >= -180 AND longitude <= 180),
+  altitude_m REAL,
+  vertical_reference TEXT,
+  accuracy_m REAL CHECK (accuracy_m IS NULL OR accuracy_m >= 0),
+  antenna_height_agl_m REAL CHECK (antenna_height_agl_m IS NULL OR antenna_height_agl_m >= 0),
+  coordinate_source TEXT NOT NULL,
+  effective_from TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  actor_user_uuid TEXT,
+  supersedes_revision_uuid TEXT,
+  sync_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  UNIQUE (device_eui, revision_no)
+);
+CREATE INDEX idx_device_location_revisions_device_time ON device_installation_location_revisions(device_eui, effective_from, revision_no);
+CREATE INDEX idx_device_location_revisions_installation_device ON device_installation_location_revisions(installation_uuid, device_eui, effective_from);
+CREATE INDEX idx_device_location_revisions_supersedes ON device_installation_location_revisions(supersedes_revision_uuid);
+
+CREATE TABLE device_radio_configuration_revisions (
+  revision_uuid TEXT PRIMARY KEY,
+  device_eui TEXT NOT NULL,
+  installation_uuid TEXT NOT NULL,
+  source_gateway_device_eui TEXT,
+  base_revision_uuid TEXT,
+  revision_no INTEGER NOT NULL CHECK (revision_no >= 1),
+  tx_power_dbm REAL,
+  antenna_gain_dbi REAL,
+  feeder_loss_db REAL,
+  configuration_source TEXT NOT NULL,
+  effective_from TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  actor_user_uuid TEXT,
+  supersedes_revision_uuid TEXT,
+  sync_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  UNIQUE (device_eui, revision_no)
+);
+CREATE INDEX idx_device_radio_revisions_device_time ON device_radio_configuration_revisions(device_eui, effective_from, revision_no);
+CREATE INDEX idx_device_radio_revisions_installation_device ON device_radio_configuration_revisions(installation_uuid, device_eui, effective_from);
+CREATE INDEX idx_device_radio_revisions_supersedes ON device_radio_configuration_revisions(supersedes_revision_uuid);
+
+-- risk: additive
+-- Durable marker binding the dedicated radio store to this edge installation.
+CREATE TABLE radio_store_identity (
+  singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  radio_store_uuid TEXT NOT NULL UNIQUE,
+  installation_uuid TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'ACTIVE'
+    CHECK (state IN ('CREATING', 'ACTIVE', 'RESTORING', 'RECONCILING', 'BLOCKED')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE radio_history_bridge (
+  history_key TEXT PRIMARY KEY,
+  generation INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'transferred', 'blocked')),
+  claimed_at TEXT,
+  transferred_at TEXT,
+  last_error TEXT
+);
+
+CREATE INDEX idx_radio_history_bridge_status
+  ON radio_history_bridge(status, claimed_at, history_key);
+
+-- risk: additive
+-- Queue immutable installation assertions, including writes made while unlinked.
+
+CREATE TRIGGER trg_device_installation_location_revisions_outbox_ai
+AFTER INSERT ON device_installation_location_revisions
+FOR EACH ROW
+BEGIN
+  INSERT INTO sync_outbox(event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui)
+  VALUES(lower(hex(randomblob(16))),'DEVICE_INSTALLATION_LOCATION',NEW.revision_uuid,'DEVICE_INSTALLATION_LOCATION_REVISED',
+    json_object(
+      'contract_version', 1,
+      'revision_uuid', NEW.revision_uuid,
+      'device_eui', NEW.device_eui,
+      'installation_uuid', NEW.installation_uuid,
+      'source_gateway_device_eui', NEW.source_gateway_device_eui,
+      'base_revision_uuid', NEW.base_revision_uuid,
+      'revision_no', NEW.revision_no,
+      'effective_from', NEW.effective_from,
+      'recorded_at', NEW.recorded_at,
+      'actor_user_uuid', NEW.actor_user_uuid,
+      'supersedes_revision_uuid', NEW.supersedes_revision_uuid,
+      'sync_version', NEW.sync_version,
+      'created_at', NEW.created_at,
+      'latitude', NEW.latitude,
+      'longitude', NEW.longitude,
+      'altitude_m', NEW.altitude_m,
+      'vertical_reference', NEW.vertical_reference,
+      'accuracy_m', NEW.accuracy_m,
+      'antenna_height_agl_m', NEW.antenna_height_agl_m,
+      'coordinate_source', NEW.coordinate_source
+    ),NEW.sync_version,NEW.created_at,NEW.source_gateway_device_eui);
+END;
+
+CREATE TRIGGER trg_device_radio_configuration_revisions_outbox_ai
+AFTER INSERT ON device_radio_configuration_revisions
+FOR EACH ROW
+BEGIN
+  INSERT INTO sync_outbox(event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui)
+  VALUES(lower(hex(randomblob(16))),'DEVICE_RADIO_CONFIGURATION',NEW.revision_uuid,'DEVICE_RADIO_CONFIGURATION_REVISED',
+    json_object(
+      'contract_version', 1,
+      'revision_uuid', NEW.revision_uuid,
+      'device_eui', NEW.device_eui,
+      'installation_uuid', NEW.installation_uuid,
+      'source_gateway_device_eui', NEW.source_gateway_device_eui,
+      'base_revision_uuid', NEW.base_revision_uuid,
+      'revision_no', NEW.revision_no,
+      'effective_from', NEW.effective_from,
+      'recorded_at', NEW.recorded_at,
+      'actor_user_uuid', NEW.actor_user_uuid,
+      'supersedes_revision_uuid', NEW.supersedes_revision_uuid,
+      'sync_version', NEW.sync_version,
+      'created_at', NEW.created_at,
+      'tx_power_dbm', NEW.tx_power_dbm,
+      'antenna_gain_dbi', NEW.antenna_gain_dbi,
+      'feeder_loss_db', NEW.feeder_loss_db,
+      'configuration_source', NEW.configuration_source
+    ),NEW.sync_version,NEW.created_at,NEW.source_gateway_device_eui);
+END;

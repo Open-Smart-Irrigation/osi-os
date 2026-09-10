@@ -1,0 +1,30 @@
+{
+  "network": {
+    "title": "Observações de rede",
+    "device": "Dispositivo",
+    "location": "Localização instalada",
+    "radio": "Configuração de rádio",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "txPower": "Potência TX (dBm)",
+    "gain": "Ganho da antena (dBi)",
+    "loss": "Perda do cabo (dB)",
+    "save": "Guardar",
+    "unknown": "Desconhecido",
+    "observations": "Observações",
+    "observationCount": "{{count}} observações",
+    "noObservations": "Sem observações",
+    "paused": "As observações de rede estão pausadas.",
+    "loadError": "Não foi possível carregar os dados de rede.",
+    "unavailable": "Os dados de rede estão temporariamente indisponíveis.",
+    "saveError": "Não foi possível guardar a configuração de rede.",
+    "conflict": "O dispositivo mudou. Recarregue e tente novamente.",
+    "dashboard": "Painel",
+    "map": "Mapa da rede",
+    "noKnownLocations": "Nenhuma posição conhecida",
+    "mapEvidence": "Apenas posições e ligações registadas; a cobertura da área não é inferida.",
+    "unknownDevices": "Posições desconhecidas",
+    "loadingMore": "A carregar…",
+    "loadMore": "Carregar mais"
+  }
+}

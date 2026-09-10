@@ -34,7 +34,7 @@ function excludes(source, fragment, label) {
 
 const build = node('sync-history-build').func;
 for (const fragment of [
-  'helper.tableNames()',
+  'helper.tableNames({includeRadio:',
   'helper.nextTable(',
   'helper.snapshotHighQuery(',
   'helper.batchQuery(',

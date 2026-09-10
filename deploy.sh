@@ -737,6 +737,54 @@ fetch_required "osi-device-commands weather.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/weather.js" \
     "/srv/node-red/osi-device-commands/weather.js"
 
+fetch_required "osi-radio-helper chirpstack.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/chirpstack.js" \
+    "/srv/node-red/osi-radio-helper/chirpstack.js"
+
+fetch_required "osi-radio-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.js" \
+    "/srv/node-red/osi-radio-helper/index.js"
+
+fetch_required "osi-radio-helper migrations/0001__radio_store.sql" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/migrations/0001__radio_store.sql" \
+    "/srv/node-red/osi-radio-helper/migrations/0001__radio_store.sql"
+
+fetch_required "osi-radio-helper migrations/0002__radio_store_ledger.sql" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/migrations/0002__radio_store_ledger.sql" \
+    "/srv/node-red/osi-radio-helper/migrations/0002__radio_store_ledger.sql"
+
+fetch_required "osi-radio-helper normalize.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/normalize.js" \
+    "/srv/node-red/osi-radio-helper/normalize.js"
+
+fetch_required "osi-network-api package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/package.json" \
+    "/srv/node-red/osi-network-api/package.json"
+
+fetch_required "osi-network-api index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.js" \
+    "/srv/node-red/osi-network-api/index.js"
+
+fetch_required "osi-radio-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/package.json" \
+    "/srv/node-red/osi-radio-helper/package.json"
+
+fetch_required "osi-radio-helper store.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/store.js" \
+    "/srv/node-red/osi-radio-helper/store.js"
+
+fetch_required "osi-installation-location-helper commands.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/commands.js" \
+    "/srv/node-red/osi-installation-location-helper/commands.js"
+
+fetch_required "osi-installation-location-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/package.json" \
+    "/srv/node-red/osi-installation-location-helper/package.json"
+
+fetch_required "osi-installation-location-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/index.js" \
+    "/srv/node-red/osi-installation-location-helper/index.js"
+
 fetch_required "osi-history-sync-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/package.json" \
     "/srv/node-red/osi-history-sync-helper/package.json"

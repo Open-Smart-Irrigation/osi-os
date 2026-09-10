@@ -20,7 +20,7 @@ const FLOW_PATHS = [
 ].map((rel) => path.join(REPO, rel));
 
 const TELEMETRY = ['DEVICE_DATA', 'CHAMELEON_READING', 'DENDRO_READING', 'DENDRO_DAILY', 'ZONE_ENVIRONMENT', 'ZONE_RECOMMENDATION'];
-const PROTECTED = ['IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION', 'VALVE_SCHEDULE', 'VALVE_SETTINGS', 'USER', 'USER_ZONE_ASSIGNMENT', 'USER_PLOT_ASSIGNMENT', 'IRRIGATION_CALIBRATION', 'WEATHER_STATION_ZONES'];
+const PROTECTED = ['DEVICE_INSTALLATION_LOCATION', 'DEVICE_RADIO_CONFIGURATION', 'IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION', 'VALVE_SCHEDULE', 'VALVE_SETTINGS', 'USER', 'USER_ZONE_ASSIGNMENT', 'USER_PLOT_ASSIGNMENT', 'IRRIGATION_CALIBRATION', 'WEATHER_STATION_ZONES'];
 
 function nodeById(flowPath, id) {
   return JSON.parse(fs.readFileSync(flowPath, 'utf8')).find((n) => n.id === id);
@@ -98,16 +98,16 @@ function triggerAggregateTypes(seed) {
       const lit = m[1];
       // aggregate_type literals are the short subjects (DEVICE_DATA), not the op verbs
       // (DEVICE_DATA_APPENDED). Heuristic: an aggregate_type has no trailing op suffix.
-      if (!/_(APPENDED|UPSERTED|DELETED|UNCLAIMED|UNASSIGNED|ASSIGNED|UPDATED|REPLACED)$/.test(lit)) types.add(lit);
+      if (!/_(APPENDED|UPSERTED|DELETED|UNCLAIMED|UNASSIGNED|ASSIGNED|UPDATED|REPLACED|REVISED)$/.test(lit)) types.add(lit);
     }
   }
   return types;
 }
 
-test('declared sets partition exactly the trigger set aggregate_types (31 triggers)', () => {
+test('declared sets partition exactly the trigger set aggregate_types (33 triggers)', () => {
   const seed = fs.readFileSync(SEED, 'utf8');
   const blocks = seed.split(/CREATE TRIGGER/).filter((b) => b.includes('INSERT INTO sync_outbox'));
-  assert.equal(blocks.length, 31, `expected 31 outbox triggers, found ${blocks.length}`);
+  assert.equal(blocks.length, 33, `expected 33 outbox triggers, found ${blocks.length}`);
   const declared = new Set([...TELEMETRY, ...PROTECTED]);
   const types = triggerAggregateTypes(seed);
   // Every aggregate_type a trigger writes MUST be classified (this is what forces a

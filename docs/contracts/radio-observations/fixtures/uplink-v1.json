@@ -1,0 +1,131 @@
+{
+  "gatewayDeviceEui": "0011223344556677",
+  "tableName": "radio_uplinks",
+  "row": {
+    "id": 1,
+    "installation_uuid": "00000000-0000-4000-8000-000000000001",
+    "deveui": "AABBCCDDEEFF0011",
+    "recorded_at": "2026-09-10T10:00:00.000Z",
+    "deduplication_id": "native-1",
+    "metadata_json": {
+      "version": 1,
+      "ingested_at": "2026-09-10T10:00:01.000Z",
+      "timestamp_source": "network",
+      "deduplication_uncertain": false,
+      "radio": {
+        "frequency_hz": 868100000,
+        "spreading_factor": 7,
+        "bandwidth_hz": 125000,
+        "coding_rate": "CR_4_5",
+        "f_cnt": 12,
+        "adr": true,
+        "f_port": 1
+      },
+      "reported_position": {
+        "latitude": 46.95,
+        "longitude": 7.44,
+        "altitude_m": 550,
+        "accuracy_m": 4,
+        "hdop": 1.2,
+        "satellites": 8,
+        "fix_time": "2026-09-10T10:00:00.000Z",
+        "source": "field_tester"
+      },
+      "device_location": null,
+      "receivers": [
+        {
+          "gateway_id": "0011223344556677",
+          "uplink_id_num": null,
+          "rssi_dbm": -109,
+          "snr_db": -3.5,
+          "channel": 0,
+          "crc_status": "CRC_OK",
+          "position": null
+        }
+      ]
+    }
+  },
+  "expected": {
+    "historyKey": "RADIO_UPLINK|0011223344556677|1",
+    "naturalKey": "00000000-0000-4000-8000-000000000001|native-1",
+    "payloadHash": "1ff70514c6d37baafff444ab765778c121d06964770ea3974ba8a020214cedac",
+    "payload": {
+      "id": 1,
+      "installation_uuid": "00000000-0000-4000-8000-000000000001",
+      "deveui": "AABBCCDDEEFF0011",
+      "recorded_at": "2026-09-10T10:00:00.000Z",
+      "deduplication_id": "native-1",
+      "metadata_json": {
+        "version": 1,
+        "ingested_at": "2026-09-10T10:00:01.000Z",
+        "timestamp_source": "network",
+        "deduplication_uncertain": false,
+        "radio": {
+          "frequency_hz": 868100000,
+          "spreading_factor": 7,
+          "bandwidth_hz": 125000,
+          "coding_rate": "CR_4_5",
+          "f_cnt": 12,
+          "adr": true,
+          "f_port": 1
+        },
+        "reported_position": {
+          "latitude": 46.95,
+          "longitude": 7.44,
+          "altitude_m": 550,
+          "accuracy_m": 4,
+          "hdop": 1.2,
+          "satellites": 8,
+          "fix_time": "2026-09-10T10:00:00.000Z",
+          "source": "field_tester"
+        },
+        "device_location": null,
+        "receivers": [
+          {
+            "gateway_id": "0011223344556677",
+            "uplink_id_num": null,
+            "rssi_dbm": -109,
+            "snr_db": -3.5,
+            "channel": 0,
+            "crc_status": "CRC_OK",
+            "position": null
+          }
+        ]
+      }
+    },
+    "quarantineReason": null
+  },
+  "canonicalColumns": [
+    [
+      "id",
+      "INTEGER",
+      "1"
+    ],
+    [
+      "installation_uuid",
+      "TEXT",
+      "00000000-0000-4000-8000-000000000001"
+    ],
+    [
+      "deveui",
+      "TEXT",
+      "AABBCCDDEEFF0011"
+    ],
+    [
+      "recorded_at",
+      "TIMESTAMP",
+      "2026-09-10T10:00:00.000Z"
+    ],
+    [
+      "deduplication_id",
+      "TEXT",
+      "native-1"
+    ],
+    [
+      "metadata_json",
+      "JSON",
+      "{\"deduplication_uncertain\":false,\"device_location\":null,\"ingested_at\":\"2026-09-10T10:00:01.000Z\",\"radio\":{\"adr\":true,\"bandwidth_hz\":125000,\"coding_rate\":\"CR_4_5\",\"f_cnt\":12,\"f_port\":1,\"frequency_hz\":868100000,\"spreading_factor\":7},\"receivers\":[{\"channel\":0,\"crc_status\":\"CRC_OK\",\"gateway_id\":\"0011223344556677\",\"position\":null,\"rssi_dbm\":-109,\"snr_db\":-3.5,\"uplink_id_num\":null}],\"reported_position\":{\"accuracy_m\":4,\"altitude_m\":550,\"fix_time\":\"2026-09-10T10:00:00.000Z\",\"hdop\":1.2,\"latitude\":46.95,\"longitude\":7.44,\"satellites\":8,\"source\":\"field_tester\"},\"timestamp_source\":\"network\",\"version\":1}"
+    ]
+  ],
+  "segmentKey": "AABBCCDDEEFF0011|2026-09-10"
+}
