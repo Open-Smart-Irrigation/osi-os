@@ -5,7 +5,8 @@ network maps in both account GUIs. Account projects, offline browser projects,
 planner extraction and simulation comparison remain later specification phases.
 
 Work is isolated on paired `feat/network-observations-v1` branches. Edge base is
-`492935d3e`; cloud was advanced from `122a1470` to `869fc173` during integration.
+`492935d3e`; cloud was advanced to `a84582c6` during integration. Cloud implementation
+commit `92e94906` is deployed on the test server; edge implementation is `4b7ec8ceb`.
 The user authorized Luna workers, orchestrator review, fixes and test deployment.
 Workers do not deploy. The original dirty edge checkout remains separate.
 
@@ -32,7 +33,7 @@ Workers do not deploy. The original dirty edge checkout remains separate.
 | 2: capture/history integration | Parent, after 1A/1B interfaces agreed | Implemented; correction generation/ACK tests and full edge verifier pass |
 | 3: installation revisions | Edge/cloud workers; parent owns shared flows/contracts | Implemented; transactional command/event/ACK and current-installation tests pass |
 | 4: account network views | Edge/cloud GUI workers in parallel | Implemented; tests and production builds pass; browser check remains open |
-| 5: integration and test pilot | Parent review, independent Luna access review | Database upgrade, packaged startup and rollback rehearsed; remote pilot pending |
+| 5: integration and test pilot | Parent review, independent Luna access review | Cloud acceptance deployed; database upgrade and rollback rehearsed; edge pilot pending |
 
 Parent review corrected generation races, malformed metadata handling, cloud
 ownership predicates, device transfer/history isolation, admin mutation scope,
@@ -46,33 +47,33 @@ Detailed evidence and limitations are in
 
 - Edge integration suite: 40 tests, zero skipped. Full sync verifier, helper
   registration, profile parity and communication contract pass.
-- Cloud selected backend suite: 40 tests, zero skipped. Separate Flyway lineage
-  test passed after updating the baseline.
-- Cloud frontend: 81 script tests and 686 component tests pass. Edge network
+- Cloud selected backend checks after rebase: 41 tests, zero skipped, including
+  Flyway lineage and revision applier tests.
+- Cloud frontend: 81 script tests and 803 component tests pass. Edge network
   page: 5 tests pass. Both production builds pass.
 - Complete boot JAR passes the Terra release-token and packaged-asset checks.
-- Restored test-server database: twelve foundation migrations applied, twelve
+- Restored test-server database: thirteen foundation migrations applied, twelve
   Terra version labels reconciled, then three network migrations applied.
-  Flyway validates all 100 migrations; no row-count loss across the 77 original
+  Flyway validates all 101 migrations; no row-count loss across the 77 original
   tables. Previous backend startup and subsequent roll-forward also pass.
 
-## Remaining execution
+## Deployment and remaining execution
+
+The cloud acceptance layer is deployed at
+`https://server.opensmartirrigation.org/network` with image
+`network-92e94906`. Health, page assets, seven locales, login, authenticated
+metrics and WebSocket origin checks passed. The smoke account owns no gateway;
+its observations request correctly returns 403. No gateway advertises the new
+installation capability yet. The edge was not deployed.
 
 1. Complete browser checks when the browser runtime is available. Its native
-   connection failed before initialization in this session, including after
-   the IDE restart; no browser pass is claimed.
-2. Obtain the designated edge test gateway’s alias or EUI. Run its provisioned
-   migration/restart pilot with backups; never choose an arbitrary gateway.
-3. Take the complete test-server backup required by the server runbook. The
-   local database dump used for rehearsal does not replace it.
-4. Execute the rehearsed staged migration on the test server. Apply intervening
-   foundation migrations under the old Terra lineage before renaming the
-   Terra labels. Validate against the actual target between stages. Do not
-   enable out-of-order migration or stamp unapplied DDL as applied.
-5. Deploy the reviewed package and run health, auth, static-route and edge/cloud
-   radio roundtrip checks. Record source commits, image tag, backup and rollback
-   evidence. Keep capture off outside the designated pilot.
+   connection failed before initialization, including after the IDE restart.
+2. Obtain the designated edge gateway alias/EUI and its linked pilot account.
+   Run the provisioned migration/restart pilot with backups.
+3. Verify authorized network reads and an edge/cloud radio roundtrip. Then
+   enable capture only on that gateway and inspect device revision ACKs.
 
-No remote deployment or database mutation has occurred at this checkpoint.
-A new migration must still sort after main’s newest version at merge time;
-the current network versions are `2026.09.16.001` through `.003`.
+The complete test-server backup, migration evidence, image hash and rollback
+procedure are recorded in the execution report and the cloud deployment record.
+The network migration versions are `2026.09.17.001` through `.003`; they must
+still sort after main at merge time.
