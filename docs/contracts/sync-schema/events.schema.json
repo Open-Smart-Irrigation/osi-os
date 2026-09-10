@@ -3,6 +3,8 @@
     "$id": "https://contracts.opensmartirrigation.org/sync-schema/events.schema.json",
     "title": "Sync Event",
     "x-semantic-bindings": {
+        "DEVICE_RADIO_CONFIGURATION_REVISED": {"aggregate_key_path": "payload.revision_uuid", "sync_version_path": "payload.sync_version"},
+        "DEVICE_INSTALLATION_LOCATION_REVISED": {"aggregate_key_path": "payload.revision_uuid", "sync_version_path": "payload.sync_version"},
         "JOURNAL_ENTRY_UPSERTED": {"aggregate_key_path": "payload.entry_uuid", "sync_version_path": "payload.sync_version"},
         "JOURNAL_ENTRY_VOIDED": {"aggregate_key_path": "payload.entry_uuid", "sync_version_path": "payload.sync_version"},
         "JOURNAL_VOCAB_UPSERTED": {"aggregate_key_path": "payload.custom_field_uuid", "sync_version_path": "payload.sync_version"},
@@ -37,6 +39,8 @@
                 "DEVICE_ASSIGNED",
                 "DEVICE_DATA_APPENDED",
                 "DEVICE_FLAGS_UPDATED",
+                "DEVICE_RADIO_CONFIGURATION_REVISED",
+                "DEVICE_INSTALLATION_LOCATION_REVISED",
                 "DEVICE_UNASSIGNED",
                 "DEVICE_UNCLAIMED",
                 "GATEWAY_LOCATION_UPSERTED",
@@ -83,6 +87,50 @@
         }
     },
     "allOf": [
+        {
+            "if": {
+                "properties": {
+                    "op": {
+                        "const": "DEVICE_RADIO_CONFIGURATION_REVISED"
+                    }
+                },
+                "required": [
+                    "op"
+                ]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {
+                        "const": "DEVICE_RADIO_CONFIGURATION"
+                    },
+                    "payload": {
+                        "$ref": "resources.schema.json#/definitions/DeviceRadioConfigurationRevision"
+                    }
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {
+                    "op": {
+                        "const": "DEVICE_INSTALLATION_LOCATION_REVISED"
+                    }
+                },
+                "required": [
+                    "op"
+                ]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {
+                        "const": "DEVICE_INSTALLATION_LOCATION"
+                    },
+                    "payload": {
+                        "$ref": "resources.schema.json#/definitions/DeviceInstallationLocationRevision"
+                    }
+                }
+            }
+        },
         {
             "if": {
                 "properties": {

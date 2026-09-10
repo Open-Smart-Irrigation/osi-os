@@ -16,6 +16,7 @@ import { AdminOnly } from './components/AdminOnly';
 import { UsersPage } from './pages/admin/UsersPage';
 import { GrantsPage } from './pages/admin/GrantsPage';
 import { ScopeStatusBanner } from './components/ScopeStatusBanner';
+import { NetworkPage } from './pages/NetworkPage';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -92,6 +93,8 @@ function App() {
               </PrivateRoute>
             }
           />
+
+          <Route path="/network" element={<PrivateRoute><NetworkPage /></PrivateRoute>} />
 
           <Route
             path="/history/zones/:zoneId"

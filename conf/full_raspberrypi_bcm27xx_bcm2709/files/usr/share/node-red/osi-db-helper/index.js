@@ -320,6 +320,57 @@ class DatabaseFacade {
   }
 }
 
+// Dedicated stores (for example radio.db) must not share farming.db's
+// singleton connection or queue. Keep this small path-owned facade separate so
+// the legacy Database constructor remains byte-compatible for existing flows.
+const APPROVED_PATHS = new Set(['/data/db/radio.db']);
+const independentStates = new Map();
+
+function approvedPath(filename) {
+  const value = String(filename || '').trim();
+  if (!APPROVED_PATHS.has(value)) throw new Error(`database path is not approved: ${value}`);
+  return value;
+}
+
+class IndependentDatabaseFacade {
+  constructor(filename, options = {}) {
+    this.filename = options.dbFactory ? String(filename) : approvedPath(filename);
+    this._state = independentStates.get(this.filename);
+    if (!this._state) {
+      this._state = { database: null, init: null, queue: Promise.resolve(), opener: options.dbFactory || openDatabase };
+      independentStates.set(this.filename, this._state);
+    }
+    this._state.init = this._state.init || this._state.opener(this.filename).then(async (database) => {
+      for (const pragma of PRAGMAS) await runRaw(database, 'all', pragma);
+      this._state.database = database;
+      return database;
+    });
+  }
+  _enqueue(executor) {
+    const scheduled = this._state.queue.catch(() => undefined).then(async () => executor(await this._state.init));
+    this._state.queue = scheduled.then(() => undefined, () => undefined);
+    return scheduled;
+  }
+  all(...args) { const { sql, params, callback } = normalizeArgs(args); return this._queued('all', sql, params, callback, rows => rows || []); }
+  get(...args) { const { sql, params, callback } = normalizeArgs(args); return this._queued('all', sql, params, callback, rows => (rows && rows[0]) || undefined); }
+  run(...args) { const { sql, params, callback } = normalizeArgs(args); return this._queued('run', sql, params, callback, () => undefined); }
+  _queued(method, sql, params, callback, mapper) {
+    return this._enqueue(db => runRaw(db, method, sql, params)).then(({ rows, statement }) => {
+      const mapped = mapper(rows); invokeCallback(callback, statement, null, mapped); return mapped;
+    }, error => { invokeCallback(callback, null, error); if (typeof callback === 'function') return undefined; throw error; });
+  }
+  exec(sql, callback) { return this._enqueue(db => runRaw(db, 'exec', sql)).then(({ statement }) => { invokeCallback(callback, statement, null); return undefined; }, error => { invokeCallback(callback, null, error); throw error; }); }
+  transaction(executor) {
+    if (typeof executor !== 'function') throw new TypeError('Database.transaction requires an executor function');
+    return this._enqueue(async db => { await runRaw(db, 'exec', 'BEGIN IMMEDIATE;'); try { const result = await executor(createTransactionScope(db)); await runRaw(db, 'exec', 'COMMIT;'); return result; } catch (error) { try { await runRaw(db, 'exec', 'ROLLBACK;'); } catch (rollbackError) { error.rollbackError = rollbackError; } throw error; } });
+  }
+  readSnapshot(executor) {
+    if (typeof executor !== 'function') return Promise.reject(new TypeError('Database.readSnapshot requires an executor function'));
+    return this._enqueue(async db => { await runRaw(db, 'exec', 'BEGIN;'); try { const result = await executor(createTransactionScope(db)); await runRaw(db, 'exec', 'COMMIT;'); return result; } catch (error) { try { await runRaw(db, 'exec', 'ROLLBACK;'); } catch (rollbackError) { error.rollbackError = rollbackError; } throw error; } });
+  }
+  close(callback) { const done = this._enqueue(async db => { await closeDatabase(db); this._state.database = null; this._state.init = null; independentStates.delete(this.filename); }); done.then(() => invokeCallback(callback, this, null), error => invokeCallback(callback, this, error)); return done; }
+}
+
 function getHealth() {
   return Object.assign({}, health);
 }
@@ -331,6 +382,8 @@ async function quickCheck() {
 
 module.exports = {
   Database: DatabaseFacade,
+  open: (filename, options) => new IndependentDatabaseFacade(filename, options),
+  approvedPath,
   OPEN_READONLY: sqlite3.OPEN_READONLY,
   OPEN_READWRITE: sqlite3.OPEN_READWRITE,
   OPEN_CREATE: sqlite3.OPEN_CREATE,

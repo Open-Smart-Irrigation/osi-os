@@ -12,6 +12,8 @@ const FLOWS = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((p) => path.join(repo, p));
 const MIGRATION_OWNED_TRIGGERS = new Map([
+  ['trg_device_installation_location_revisions_outbox_ai', '0056__installation_revision_outbox.sql'],
+  ['trg_device_radio_configuration_revisions_outbox_ai', '0056__installation_revision_outbox.sql'],
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
   // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
   ['trg_improvement_requests_outbox_ai', '0005__field_work_requests.sql'],

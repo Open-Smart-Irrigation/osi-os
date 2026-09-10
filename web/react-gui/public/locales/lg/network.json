@@ -1,0 +1,30 @@
+{
+  "network": {
+    "title": "Okulaba omukutu",
+    "device": "Ekikozesebwa",
+    "location": "Ekifo ekitegekeddwa",
+    "radio": "Enteekateeka ya leediyo",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "txPower": "Amaanyi ga TX (dBm)",
+    "gain": "Gain ya antenna (dBi)",
+    "loss": "Okufiirwa kwa waya (dB)",
+    "save": "Tereka",
+    "unknown": "Tekimanyiddwa",
+    "observations": "Okulaba",
+    "observationCount": "Okulaba {{count}}",
+    "noObservations": "Tewali kulaba",
+    "paused": "Okulaba omukutu kuyimiriziddwa.",
+    "loadError": "Tekisoboka kutikka data y’omukutu.",
+    "unavailable": "Data y’omukutu tefunikika kati.",
+    "saveError": "Tekisoboka kutereka nteekateeka y’omukutu.",
+    "conflict": "Ekikozesebwa kikyuse. Ddamu otikke ogezeeko.",
+    "dashboard": "Ekipande",
+    "map": "Maapu y’omukutu",
+    "noKnownLocations": "Tewali bifo bimanyiddwa",
+    "mapEvidence": "Ebifo n’enkolagana ebiwandiikiddwa byokka; tebikakasa okubikka ekitundu kyonna.",
+    "unknownDevices": "Ebifo ebitamanyiddwa",
+    "loadingMore": "Kigenda mu maaso…",
+    "loadMore": "Laga ebirala"
+  }
+}

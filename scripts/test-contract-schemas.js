@@ -88,6 +88,8 @@ const ZONE_CALIBRATION_WEATHER_EVENT_KEY_FIELDS = {
     WEATHER_STATION_ZONES_REPLACED: 'device_eui',
 };
 const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
+    DEVICE_RADIO_CONFIGURATION_REVISED: {aggregate_key_path: 'payload.revision_uuid', sync_version_path: 'payload.sync_version'},
+    DEVICE_INSTALLATION_LOCATION_REVISED: {aggregate_key_path: 'payload.revision_uuid', sync_version_path: 'payload.sync_version'},
     ...Object.fromEntries(
         Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
             aggregate_key_path: `payload.${binding[2]}`,

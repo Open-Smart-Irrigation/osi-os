@@ -1,0 +1,30 @@
+{
+  "network": {
+    "title": "Observations réseau",
+    "device": "Appareil",
+    "location": "Emplacement installé",
+    "radio": "Configuration radio",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "txPower": "Puissance TX (dBm)",
+    "gain": "Gain d’antenne (dBi)",
+    "loss": "Perte du câble (dB)",
+    "save": "Enregistrer",
+    "unknown": "Inconnu",
+    "observations": "Observations",
+    "observationCount": "{{count}} observations",
+    "noObservations": "Aucune observation",
+    "paused": "Les observations réseau sont suspendues.",
+    "loadError": "Impossible de charger les données réseau.",
+    "unavailable": "Données réseau temporairement indisponibles.",
+    "saveError": "Impossible d’enregistrer la configuration réseau.",
+    "conflict": "Cet appareil a changé. Rechargez et réessayez.",
+    "dashboard": "Tableau de bord",
+    "map": "Carte du réseau",
+    "noKnownLocations": "Aucune position connue",
+    "mapEvidence": "Positions et liaisons enregistrées uniquement ; la couverture de la zone n’est pas déduite.",
+    "unknownDevices": "Positions inconnues",
+    "loadingMore": "Chargement…",
+    "loadMore": "Charger plus"
+  }
+}

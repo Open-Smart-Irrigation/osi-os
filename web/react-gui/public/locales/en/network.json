@@ -1,0 +1,30 @@
+{
+  "network": {
+    "title": "Network observations",
+    "device": "Device",
+    "location": "Installed location",
+    "radio": "Radio configuration",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "txPower": "TX power (dBm)",
+    "gain": "Antenna gain (dBi)",
+    "loss": "Feeder loss (dB)",
+    "save": "Save",
+    "unknown": "Unknown",
+    "observations": "Observations",
+    "observationCount": "{{count}} observations",
+    "noObservations": "No observations",
+    "paused": "Network observations are paused.",
+    "loadError": "Unable to load network data.",
+    "unavailable": "Network data is temporarily unavailable.",
+    "saveError": "Unable to save network settings.",
+    "conflict": "This device changed elsewhere. Reload and try again.",
+    "dashboard": "Dashboard",
+    "map": "Network map",
+    "noKnownLocations": "No known positions",
+    "mapEvidence": "Recorded positions and links only; area coverage is not inferred.",
+    "unknownDevices": "Unknown positions",
+    "loadingMore": "Loading…",
+    "loadMore": "Load more"
+  }
+}
