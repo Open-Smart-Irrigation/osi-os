@@ -173,3 +173,4 @@ jobs:
             exit 1
           fi
       - run: node scripts/verify-command-safety.js
+      - run: node scripts/verify-command-ack-postconditions.js
