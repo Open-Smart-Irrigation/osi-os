@@ -148,6 +148,56 @@ test('deploy migration wiring uses persistent backup path and lifecycle-aware cl
   assert.doesNotMatch(rc3Block, /identityd_service start/);
 });
 
+test('deploy migration wiring probes for a foreign-numbered ledger only after SKIP, before the second checkpoint', () => {
+  const skipIdx = indexOf('SKIP: schema_migrations ledger already has rows');
+  const probeIdx = indexOf('recon_probe_version="$(sqlite3 "$DB_PATH" "SELECT MIN(version) FROM schema_migrations WHERE version > 21;")"');
+  const ledgerChecksumIdx = indexOf('recon_ledger_checksum="$(sqlite3 "$DB_PATH" "SELECT checksum FROM schema_migrations WHERE version=$recon_probe_version;")"');
+  const mainChecksumIdx = indexOf('recon_main_checksum="$(node -e');
+  const mismatchIdx = indexOf('if [ -n "$recon_main_checksum" ] && [ "$recon_ledger_checksum" != "$recon_main_checksum" ]; then');
+  const fetchAssetsCallIdx = deploy.indexOf('fetch_reconciliation_assets', mismatchIdx);
+  const reconcileCallIdx = indexOf('node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH"');
+  const reconcileRefuseIdx = indexOf('ERROR: ledger numbering reconciliation refused or failed; aborting schema migration');
+  const secondCheckpointIdx = deploy.indexOf('if ! checkpoint_live_db; then', skipIdx);
+  const migrateIdx = indexOf('node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"');
+
+  assert.ok(skipIdx < probeIdx, 'the foreign-ledger probe runs inside the ledger-already-has-rows branch, after the SKIP message');
+  assert.ok(probeIdx < ledgerChecksumIdx && ledgerChecksumIdx < mainChecksumIdx, 'lowest post-0021 version must be found before either checksum is read');
+  assert.ok(mainChecksumIdx < mismatchIdx, 'both checksums must be read before they are compared');
+  assert.ok(mismatchIdx < fetchAssetsCallIdx, 'reconciliation assets are fetched only inside the mismatch branch (lazy fetch)');
+  assert.ok(fetchAssetsCallIdx < reconcileCallIdx, 'assets must be fetched before the reconciliation CLI is invoked');
+  assert.ok(reconcileCallIdx < reconcileRefuseIdx, 'a refusing/failing reconcile run must abort the deploy');
+  assert.ok(reconcileRefuseIdx < secondCheckpointIdx, 'reconciliation (or its absence) resolves before the pre-migrate-cli checkpoint');
+  assert.ok(secondCheckpointIdx < migrateIdx, 'second checkpoint still precedes migrate-cli');
+  assert.match(deploy, /--apply\s*$/m, 'the deploy hook must invoke reconciliation in --apply mode, never --report');
+});
+
+test('deploy migration wiring: a main-numbered gateway (checksums already match) takes the untouched fast path', () => {
+  // Static proof that nothing beyond two read-only sqlite3 queries and a
+  // string compare runs when the ledger is already main-numbered: the ONLY
+  // way to reach fetch_reconciliation_assets or the reconcile CLI call is
+  // through the checksum-mismatch conditional — there is no other call site.
+  const fetchAssetsDefIdx = indexOf('fetch_reconciliation_assets() {');
+  const fetchAssetsCallSites = [...deploy.matchAll(/\bfetch_reconciliation_assets\b/g)].map((m) => m.index);
+  assert.equal(fetchAssetsCallSites.length, 2, 'fetch_reconciliation_assets must have exactly one definition and one call site');
+  assert.ok(fetchAssetsDefIdx === fetchAssetsCallSites[0]);
+  const callSiteIdx = fetchAssetsCallSites[1];
+  const mismatchIdx = indexOf('if [ -n "$recon_main_checksum" ] && [ "$recon_ledger_checksum" != "$recon_main_checksum" ]; then');
+  const mismatchFiIdx = deploy.indexOf('\n            fi\n', mismatchIdx);
+  assert.ok(mismatchFiIdx > mismatchIdx, 'must find the mismatch conditional\'s own closing fi');
+  assert.ok(mismatchIdx < callSiteIdx && callSiteIdx < mismatchFiIdx,
+    'the only call to fetch_reconciliation_assets must be inside the checksum-mismatch branch');
+
+  const reconcileMentions = [...deploy.matchAll(/scripts\/reconcile-ledger-numbering\.js/g)].map((m) => m.index);
+  // Two live OUTSIDE the mismatch branch entirely: fetch_reconciliation_assets's
+  // own (source, dest) path literals, defined once, up near fetch_migration_runner
+  // — a function DEFINITION is not itself an execution, so those two are exempt.
+  // Only the actual `node .../reconcile-ledger-numbering.js` invocation runs at
+  // deploy time, and THAT one must be gated.
+  const invocationMentions = reconcileMentions.filter((idx) => idx > mismatchIdx && idx < mismatchFiIdx);
+  assert.equal(reconcileMentions.length, 3, 'reconcile-ledger-numbering.js must be referenced exactly 3 times: fetch source, fetch dest, invocation');
+  assert.equal(invocationMentions.length, 1, 'exactly one (the invocation) must fall inside the checksum-mismatch branch');
+});
+
 test('deploy.sh has a single migration call site and no inline schema DDL helpers', () => {
   assert.match(deploy, /run_schema_migration\(\)/);
   assert.match(deploy, /run_schema_migration \|\| exit 1/);
