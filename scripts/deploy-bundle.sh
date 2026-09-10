@@ -74,6 +74,14 @@ done < "$fetch_list_file"
 # deploy-offline.sh needs it on disk to run locally.
 cp "$REPO_ROOT/deploy.sh" "$stage_dir/deploy.sh"
 
+# deploy-local-server.js: also not part of computeFetchList's output (it is
+# offline-deploy tooling, not something deploy.sh itself fetches), but
+# deploy-offline.sh execs it from inside the extracted bundle
+# ($EXTRACT_DIR/scripts/deploy-local-server.js), so it must travel with the
+# bundle too.
+mkdir -p "$stage_dir/scripts"
+cp "$REPO_ROOT/scripts/deploy-local-server.js" "$stage_dir/scripts/deploy-local-server.js"
+
 # The built GUI bundle, served at the bundle root to match deploy.sh's
 # `fetch "react_gui.tar.gz" ...` request.
 cp "$REACT_GUI_TARBALL" "$stage_dir/react_gui.tar.gz"

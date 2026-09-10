@@ -70,6 +70,10 @@ grep -qx './react_gui.tar.gz' "$listing" || grep -qx 'react_gui.tar.gz' "$listin
   echo "bundle missing react_gui.tar.gz" >&2
   exit 1
 }
+grep -qx './scripts/deploy-local-server.js' "$listing" || grep -qx 'scripts/deploy-local-server.js' "$listing" || {
+  echo "bundle missing scripts/deploy-local-server.js (deploy-offline.sh execs it from inside the bundle)" >&2
+  exit 1
+}
 
 echo "verify bundle is drift-proof against deploy-fetch-list.js..."
 fetch_list="$work/fetch-list.txt"
