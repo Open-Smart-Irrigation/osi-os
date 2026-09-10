@@ -235,6 +235,15 @@ cd web/react-gui && npm run build             # frontend build
 
 ## Live-deploy safety rules
 
+- **Flaky link (Uganda-class Tailscale/cellular):** `deploy.sh`'s default flow
+  ties the fetch loop to the SSH reverse tunnel that carries it; a dropped
+  session kills both mid-deploy. `scripts/deploy-bundle.sh` +
+  `scripts/deploy-push-bundle.sh` + `scripts/deploy-offline.sh` build a
+  self-contained bundle, push it once (resumable), and run `deploy.sh`
+  against a local `127.0.0.1` server under `setsid` so the deploy survives
+  the session ending. See
+  [docs/operations/deploying-over-a-flaky-link.md](docs/operations/deploying-over-a-flaky-link.md).
+  The tunnel flow below is still the default on a stable LAN.
 - **Never** overwrite `/data/db/farming.db` on a running or previously provisioned Pi. `deploy.sh` only seeds on a fresh device (target file absent and no orphaned WAL/SHM/journal sidecars).
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
