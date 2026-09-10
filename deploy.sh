@@ -373,6 +373,31 @@ fetch_migration_runner() {
     done
 }
 
+# Fetched lazily — only when run_schema_migration's own cheap checksum probe
+# (below) finds a foreign-numbered ledger — so a normal main-numbered deploy
+# never pulls this extra payload. Depends on scripts/migrate-cli.js,
+# scripts/baseline-existing-db.js, scripts/semantic-schema-compare.js, and
+# lib/osi-migrate/*, all already fetched by fetch_migration_runner above.
+fetch_reconciliation_assets() {
+    fetch_required "Ledger numbering reconciliation tool" \
+        "scripts/reconcile-ledger-numbering.js" \
+        "$TMP_DIR/scripts/reconcile-ledger-numbering.js"
+
+    lineage_fixtures_dir="$TMP_DIR/scripts/fixtures/lineages"
+    mkdir -p "$lineage_fixtures_dir"
+    for lineage in agrolink bovey; do
+        mkdir -p "$lineage_fixtures_dir/$lineage"
+        fetch_required "Lineage fixture manifest ($lineage)" \
+            "scripts/fixtures/lineages/$lineage/CHECKSUMS.json" \
+            "$lineage_fixtures_dir/$lineage/CHECKSUMS.json"
+        for fixture in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$lineage_fixtures_dir/$lineage/CHECKSUMS.json"); do
+            fetch_required "Lineage fixture $lineage/$fixture" \
+                "scripts/fixtures/lineages/$lineage/$fixture" \
+                "$lineage_fixtures_dir/$lineage/$fixture"
+        done
+    done
+}
+
 run_schema_migration() {
     echo "--- Edge schema migration runner ---"
     if [ ! -e "$DB_PATH" ]; then
@@ -463,6 +488,37 @@ run_schema_migration() {
     fi
     if [ "$ledger_rows" != "0" ]; then
         echo "SKIP: schema_migrations ledger already has rows"
+
+        # Foreign-numbered ledger detection (osi-os stabilization plan §3.5c):
+        # a device that ran the AgroLink or Bovey/Valve-focused line has
+        # schema_migrations rows whose version numbers collide with main's
+        # own (e.g. v22 is journal_catalog_v2 there, valve_control on main).
+        # A cheap, read-only probe — compare the ledger's stored checksum for
+        # the lowest applied version above the shared 0001-0021 prefix
+        # against main's own checksum for that SAME version number — decides
+        # whether reconciliation is even needed. A main-numbered gateway's
+        # checksums already agree here, so it falls straight through this
+        # block untouched (the fast path): no extra fetch, no extra node
+        # invocation beyond the two read-only sqlite3 queries below.
+        recon_probe_version="$(sqlite3 "$DB_PATH" "SELECT MIN(version) FROM schema_migrations WHERE version > 21;")"
+        if [ -n "$recon_probe_version" ]; then
+            recon_ledger_checksum="$(sqlite3 "$DB_PATH" "SELECT checksum FROM schema_migrations WHERE version=$recon_probe_version;")"
+            recon_main_checksum="$(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const v=String(process.argv[2]).padStart(4,'0'); const name=Object.keys(manifest).find((n) => n.startsWith(v + '__')); process.stdout.write(name ? manifest[name] : '');" "$migrations_dir/CHECKSUMS.json" "$recon_probe_version")"
+            if [ -n "$recon_main_checksum" ] && [ "$recon_ledger_checksum" != "$recon_main_checksum" ]; then
+                echo "--- Foreign-numbered schema_migrations ledger detected (v$recon_probe_version checksum mismatch vs main); running ledger numbering reconciliation ---"
+                fetch_reconciliation_assets
+                if ! node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH" \
+                    --migrations-dir "$migrations_dir" \
+                    --fixtures-dir "$TMP_DIR/scripts/fixtures/lineages" \
+                    --backup-dir "$backup_dir" \
+                    --apply
+                then
+                    echo "ERROR: ledger numbering reconciliation refused or failed; aborting schema migration" >&2
+                    return 1
+                fi
+                echo "OK: ledger numbering reconciliation applied"
+            fi
+        fi
     else
         if ! node "$TMP_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH"; then
             return 1
