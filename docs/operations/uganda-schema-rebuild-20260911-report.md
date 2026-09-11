@@ -279,15 +279,98 @@ every schema-parity/CI gate above runs unchanged from `main`.
   +1 row observed in §6 is from an ordinary trigger firing during `migrate-cli`'s replay
   of already-existing migrations, not from anything this PR adds.
 
-## 10. Summary / next steps
+## 11. Adversarial review (PR #211) — fixes applied
+
+Verdict: **APPROVE-WITH-FIXES**. Four items, all addressed in one commit each, TDD,
+foreground only:
+
+1. **HIGH — irrigation_events idempotency bug.** `tableAlreadyCanonical()` compared
+   normalized `sqlite_master.sql` text. For `irrigation_events` (the one ALTER-class
+   table) this was structurally wrong: `ALTER TABLE ... ADD COLUMN` appends the new
+   column at the END of the live DDL text, while reference(1) declares `event_uuid`
+   earlier in the column list, so the table was never recognized as canonical - a second
+   `--apply` re-ran the `ALTER TABLE ... ADD COLUMN` and crashed with "duplicate column
+   name: event_uuid" (exit 2; DB unchanged, protected by SQLite's own transaction
+   rollback - as the reviewer verified). **Fix:** the canonical check is now semantic
+   (reuses the same `scopedFailingDiffs()` mechanism `verify()` already uses - a table is
+   canonical iff it has zero failing diffs against reference(1) - not DDL-text
+   comparison), plus an independent `PRAGMA table_info` guard specific to the ALTER path
+   that strips the `ADD COLUMN` statement if the column already exists, regardless of what
+   the semantic check found. New regression test
+   (`apply() is idempotent for irrigation_events across two real apply() calls`) drives a
+   genuinely-drifted `irrigation_events` fixture (matching the real Uganda shape: no
+   `event_uuid`, its 3 triggers dropped and recreated verbatim, same "capture-then-replay"
+   pattern used elsewhere) through two real `apply()` calls and asserts the second is a
+   no-op. Also verified directly against the real Uganda copy in §12 below. The window
+   script's failure message is now split by exit code: `apply()`'s preflight refusals
+   (drift-signature mismatch, per-table orphan/NULL/drift guards) now set
+   `err.refuseAndHold = true` and exit 1 ("REBUILD-REFUSED..."); anything else exits 2
+   ("REBUILD-CRASHED..." naming the on-device backup path to restore before retrying).
+2. **LOW — disk-space preflight.** Added to `uganda-catchup-window.sh`, ash-compatible
+   (`df -Pk`, shell parameter expansion instead of `dirname`, POSIX arithmetic instead of
+   `bc`), before Node-RED is stopped: requires free space >= 3x the DB's current size +
+   64 MB, fails closed with the exact computed numbers in the message. No existing test
+   file covers this script's shell logic, so verified manually (documented, not automated):
+   a normal-size DB passed with the computed numbers logged; a 20 GB sparse file correctly
+   failed closed with the right message, confirmed to happen BEFORE Node-RED would have
+   been stopped (the exit trap's `NODE_RED_RESTART_NEEDED` flag was never set).
+3. **MEDIUM — accepted deviation, documented.** `PRAGMA foreign_key_check` runs after
+   `COMMIT`, not inside the transaction as the literal 12-step procedure describes,
+   because `lib/osi-migrate`'s `cliRunner` spawns a fresh `sqlite3` CLI process per
+   `exec()`/`all()` call - there is no persistent session to run a pre-commit check
+   against. The per-table orphan preflights (run with writers/Node-RED stopped,
+   immediately before each table's DDL) are the effective equivalent guard; the
+   post-commit check is the last-resort catch for a generator mapping bug. Documented in
+   the design doc's new "Accepted deviations from SQLite's literal 12-step procedure"
+   section.
+4. **LOW — accepted deviation, documented.** The post-apply `PRAGMA foreign_keys = ON` /
+   `legacy_alter_table = OFF` "restore" is, for the identical reason, a no-op (a brand-new
+   process with its own default session state) - kept only for readability/provenance.
+   Documented in the same design-doc section and in the generator's code comments at both
+   call sites.
+
+## 12. Re-run after fixes — timings and results
+
+Full pipeline re-run in foreground (chunked where a single step would exceed ~9 minutes),
+against a **freshly decompressed copy of the real Uganda backup** (sha256 of the `.gz`
+re-verified unchanged: `0f131395...`; decompressed copy sha256
+`04b75d9688c093ebf3bbab52765d72a1ad21938bc94c06f763b0cf14ecb2136d`, matching every prior
+run):
+
+| Step | Timing (this re-run) | Timing (reviewer's measurement) | Notes |
+|---|---|---|---|
+| Additive catch-up artifact | 0.23 s | - | unchanged |
+| `repair-sync-outbox-v2` | 0.07 s | - | unchanged |
+| **Rebuild artifact `--apply`** | **5.9 s** | 10.2 s (69,686 `device_data` rows) | faster here partly because the fix also removed a redundant second `buildReference1()` call the old `tableAlreadyCanonical()` path made |
+| **Rebuild artifact `--apply` AGAIN (idempotency proof)** | **5.3 s** | - | **the exact regression class**: `irrigation_events` now logs `already canonical, skipping` instead of crashing - verified directly against the real 69,686-row copy, not just the synthetic test fixture |
+| `baseline-existing-db.js` (full N=53..1 scan, stamps N=1) | 6m25s | 9m22s | workstation load variance; both runs matched N=1 |
+| `migrate-cli.js` (reaches head, applies [2..53]) | 2m28s | 4m01s | |
+| Full on-device window script (stubbed Node-RED, includes the new disk preflight) | **9m2s total, exit 0** | - | first full run since the fixes; disk preflight logged `3078204KB free ... need >= 224092KB` and passed |
+
+Postflight (identical to §6): `PRAGMA integrity_check` = `ok`; `PRAGMA foreign_key_check`
+= 0 rows; `verify-head-cli.js` = `{"ok":true}`; every row count identical to §6's table
+(`device_data` 69,686, `devices` 4, `irrigation_events` 75, `valve_actuation_expectations`
+34, `zone_irrigation_calibration` 1, `zone_weather_cache` 0, `users` 1, `irrigation_zones`
+3, `sync_outbox` 15,733).
+
+**On-device budget** (per the reviewer's framing, workstation SSD numbers extrapolated to
+Raspberry Pi 5 storage): the baseline scan and migrate-to-head steps dominate wall clock
+(this re-run: ~9 minutes combined on an SSD-backed workstation with no other significant
+disk contention); on Pi 5 storage (microSD or USB-attached SSD, materially slower random
+I/O than a workstation NVMe/SATA SSD, and the same O(head) migration-chain replay cost
+scales with I/O latency, not row count for the schema-only steps) the reviewer's own
+framing of "an hour-plus for the window" stands as the operational planning number - this
+local rehearsal's wall-clock numbers are a lower bound, not a Pi-equivalent estimate.
+
+## 13. Summary / next steps
 
 - **Deliverables (this branch, stacked on PR #209):** data audit script + tests, design
   doc, generated table-rebuild artifact + generator + tests, updated window script, this
-  report. All committed; PR opened, **not merged**.
-- **G4 is now GREEN** on a local byte-copy of the real Uganda backup — the direct
-  resolution of the original rehearsal's open finding.
-- **Before running this on the real device:** this PR needs the senior adversarial review
-  the design doc was explicitly written for. Every irreversible step (the two table
-  rebuilds under `PRAGMA foreign_keys=OFF` + `legacy_alter_table=ON`) is documented with
-  its guard, its data preflight, and its evidence above.
+  report, plus the 4 adversarial-review fixes above. All committed; PR opened, **not
+  merged**.
+- **G4 is GREEN** on a local byte-copy of the real Uganda backup, re-confirmed after the
+  fixes with fresh timings.
+- **Before running this on the real device:** the adversarial review's fixes are in; a
+  final sign-off pass on this report's §11-12 addendum is the remaining gate before any
+  on-device use.
 - G1-G3 and G5 remain untouched by this local-only work (unchanged from PR #209's scope).
