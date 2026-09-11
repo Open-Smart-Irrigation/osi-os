@@ -181,6 +181,13 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0049__weather_station_zone_sync.sql's
   // trg_sync_weather_station_zones_outbox_au trigger, not by flows.json.
   'WEATHER_STATION_ZONES_REPLACED',
+  // Emitted by 0056__installation_revision_outbox.sql's
+  // trg_device_installation_location_revisions_outbox_ai and
+  // trg_device_radio_configuration_revisions_outbox_ai triggers, not by
+  // flows.json. Cloud handling activated: osi-server PR #95 (merged,
+  // land/network-observations-v1), DeviceRevisionMirrorApplier.
+  'DEVICE_INSTALLATION_LOCATION_REVISED',
+  'DEVICE_RADIO_CONFIGURATION_REVISED',
 ]);
 // Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
 // "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living
