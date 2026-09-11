@@ -11,9 +11,15 @@
 #   disown 2>/dev/null || true
 #
 # PAYLOAD_DIR must contain (fetched ahead of time, matching deploy.sh's
-# fetch_migration_runner() list, plus this window's two Uganda-specific
+# fetch_migration_runner() list, plus this window's Uganda-specific
 # additions):
-#   scripts/uganda-catchup-20260911.sql       (the catch-up artifact)
+#   scripts/uganda-catchup-20260911.sql                   (the additive catch-up artifact - static, piped directly to sqlite3)
+#   scripts/ops/uganda-schema-rebuild-20260911.sql         (the table-rebuild artifact - read by the orchestrator below via __dirname, never piped directly)
+#   scripts/ops/generate-uganda-schema-rebuild-20260911.js (guarded orchestrator for the above; kept under scripts/ops/
+#                                                            - NOT flattened to scripts/ - because its own
+#                                                            require('../../lib/...') and
+#                                                            require('../semantic-schema-compare') depend on the
+#                                                            same two-level relative depth it has in this repo)
 #   scripts/repair-sync-outbox-v2.js
 #   scripts/baseline-existing-db.js
 #   scripts/verify-head-cli.js
@@ -21,6 +27,16 @@
 #   scripts/migrate-cli.js
 #   lib/osi-migrate/{backup,fingerprints,index,ledger,migrations-loader,runner-iface,runner,sql-normalize}.js
 #   database/migrations/ordered/  (CHECKSUMS.json + every 00NN__*.sql)
+#
+# Order (runbook Phase 2 rehearsal finding, then Phase-3 design
+# docs/superpowers/specs/2026-09-11-uganda-schema-reconciliation-design.md):
+# additive catch-up artifact -> table-rebuild artifact (the 17 residual,
+# non-additive diffs the catch-up artifact deliberately does not touch) ->
+# repair-sync-outbox-v2 -> baseline-existing-db -> migrate-cli. The
+# table-rebuild artifact runs its OWN guarded preflight (exact drift-signature
+# match, per-table already-canonical skip, orphan/NULL/drift data guards) via
+# generate-uganda-schema-rebuild-20260911.js --apply - see that file's header
+# and the design doc for what each guard protects against.
 #
 # Env overrides (all optional):
 #   UGANDA_DB_PATH          default /data/db/farming.db
@@ -48,7 +64,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 # Row-count invariant tables (runbook Phase 2 postflight list, plus the
 # bookkeeping tables this window itself touches).
-INVARIANT_TABLES="device_data chameleon_readings dendrometer_readings dendrometer_daily irrigation_events zone_daily_environment zone_daily_recommendations analysis_views irrigation_schedules devices users irrigation_zones"
+INVARIANT_TABLES="device_data chameleon_readings dendrometer_readings dendrometer_daily irrigation_events zone_daily_environment zone_daily_recommendations analysis_views irrigation_schedules devices users irrigation_zones valve_actuation_expectations zone_irrigation_calibration zone_weather_cache"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 
@@ -135,6 +151,32 @@ command -v node >/dev/null 2>&1 || fail "node not present"
 
 mkdir -p "$BACKUP_DIR"
 
+# --- disk-space preflight: fail closed BEFORE Node-RED is stopped ----------
+# Worst case this window transiently holds an on-device .backup, a
+# migrate-cli persistent backup, AND (during a table rebuild) both the old
+# and new copy of whichever table is being rebuilt at once - conservatively
+# budgeted as 3x the DB's current size (see the design doc's "disk headroom"
+# section for the 2x-per-rebuild-pass rationale; the 3rd multiple covers the
+# two backups landing in the same window). +64 MB covers fixed overhead
+# (WAL/SHM sidecars, the payload itself, logs) that doesn't scale with DB
+# size. Uses `df -Pk` (POSIX output format - one header line, one data line,
+# no long-devicename line wrapping) and shell parameter expansion instead of
+# `dirname`/`bc`, so it needs nothing beyond what deploy.sh already assumes
+# is present on a BusyBox ash gateway.
+db_dir="${DB_PATH%/*}"
+[ "$db_dir" = "$DB_PATH" ] && db_dir="."
+db_bytes="$(wc -c < "$DB_PATH")" || fail "could not stat $DB_PATH for the disk-space preflight"
+db_kb=$((db_bytes / 1024))
+required_kb=$((db_kb * 3 + 65536))
+avail_kb="$(df -Pk "$db_dir" | awk 'NR==2{print $4}')"
+if [ -z "$avail_kb" ]; then
+    fail "disk-space preflight: could not parse \`df -Pk $db_dir\` output - refusing to proceed without a headroom check"
+fi
+if [ "$avail_kb" -lt "$required_kb" ]; then
+    fail "disk-space preflight: only ${avail_kb}KB free on $db_dir, need >= ${required_kb}KB (3x DB size ${db_kb}KB + 64MB headroom) - free up space before retrying this window"
+fi
+log "disk-space preflight ok: ${avail_kb}KB free on $db_dir, need >= ${required_kb}KB"
+
 log "--- pre-window row-count snapshot -> $COUNTS_FILE ---"
 record_counts "$COUNTS_FILE"
 cat "$COUNTS_FILE"
@@ -155,6 +197,35 @@ log "--- apply catch-up artifact ---"
 sqlite3 "$DB_PATH" < "$PAYLOAD_DIR/scripts/uganda-catchup-20260911.sql" || fail "catch-up artifact apply failed"
 integ="$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;')"
 [ "$integ" = "ok" ] || fail "post-catchup integrity_check failed: $integ"
+
+log "--- apply table-rebuild artifact (the 17 residual non-additive diffs) ---"
+# `set -e` does not fire on a command used as an if-condition, so this is
+# the ash-safe way to capture a non-zero exit status without aborting the
+# script before the rc-specific handling below can distinguish the two
+# failure classes.
+if node "$PAYLOAD_DIR/scripts/ops/generate-uganda-schema-rebuild-20260911.js" --apply "$DB_PATH"; then
+    rebuild_rc=0
+else
+    rebuild_rc=$?
+fi
+if [ "$rebuild_rc" = "1" ]; then
+    # REFUSE-AND-HOLD: a known precondition failed (drift signature mismatch,
+    # or an orphan/NULL/drift data guard) BEFORE any DDL ran - the DB is
+    # untouched. Re-run the audit off-device, fix or triage the data, and
+    # retry this window; do NOT restore a backup, there is nothing to undo.
+    fail "REBUILD-REFUSED: table-rebuild artifact refused before making any change (preflight guard - see its own log lines above for which one) - re-run scripts/ops/uganda-schema-audit.js off-device to diagnose before retrying this window"
+elif [ "$rebuild_rc" != "0" ]; then
+    # Anything else (rc=2, a genuine crash mid-DDL) - SQLite's own
+    # transaction rollback means the DB is very likely intact, but this is
+    # NOT one of the tool's own examined preflight refusals, so treat it as
+    # a structural surprise: stop and have an operator restore the
+    # pre-rebuild on-device backup taken above before retrying.
+    fail "REBUILD-CRASHED (rc=$rebuild_rc): table-rebuild artifact failed unexpectedly during apply - restore the pre-rebuild backup ($ONDEVICE_BACKUP) before retrying; do not assume the transaction rollback alone is sufficient without operator review"
+fi
+integ="$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;')"
+[ "$integ" = "ok" ] || fail "post-rebuild integrity_check failed: $integ"
+fk_rows="$(sqlite3 "$DB_PATH" 'PRAGMA foreign_key_check;' | wc -l)"
+[ "$fk_rows" -eq 0 ] || fail "post-rebuild foreign_key_check found $fk_rows violation(s)"
 
 log "--- repair-sync-outbox-v2 ---"
 node "$PAYLOAD_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH" || fail "repair-sync-outbox-v2 failed"
