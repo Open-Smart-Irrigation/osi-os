@@ -11,9 +11,15 @@
 #   disown 2>/dev/null || true
 #
 # PAYLOAD_DIR must contain (fetched ahead of time, matching deploy.sh's
-# fetch_migration_runner() list, plus this window's two Uganda-specific
+# fetch_migration_runner() list, plus this window's Uganda-specific
 # additions):
-#   scripts/uganda-catchup-20260911.sql       (the catch-up artifact)
+#   scripts/uganda-catchup-20260911.sql                   (the additive catch-up artifact - static, piped directly to sqlite3)
+#   scripts/ops/uganda-schema-rebuild-20260911.sql         (the table-rebuild artifact - read by the orchestrator below via __dirname, never piped directly)
+#   scripts/ops/generate-uganda-schema-rebuild-20260911.js (guarded orchestrator for the above; kept under scripts/ops/
+#                                                            - NOT flattened to scripts/ - because its own
+#                                                            require('../../lib/...') and
+#                                                            require('../semantic-schema-compare') depend on the
+#                                                            same two-level relative depth it has in this repo)
 #   scripts/repair-sync-outbox-v2.js
 #   scripts/baseline-existing-db.js
 #   scripts/verify-head-cli.js
@@ -21,6 +27,16 @@
 #   scripts/migrate-cli.js
 #   lib/osi-migrate/{backup,fingerprints,index,ledger,migrations-loader,runner-iface,runner,sql-normalize}.js
 #   database/migrations/ordered/  (CHECKSUMS.json + every 00NN__*.sql)
+#
+# Order (runbook Phase 2 rehearsal finding, then Phase-3 design
+# docs/superpowers/specs/2026-09-11-uganda-schema-reconciliation-design.md):
+# additive catch-up artifact -> table-rebuild artifact (the 17 residual,
+# non-additive diffs the catch-up artifact deliberately does not touch) ->
+# repair-sync-outbox-v2 -> baseline-existing-db -> migrate-cli. The
+# table-rebuild artifact runs its OWN guarded preflight (exact drift-signature
+# match, per-table already-canonical skip, orphan/NULL/drift data guards) via
+# generate-uganda-schema-rebuild-20260911.js --apply - see that file's header
+# and the design doc for what each guard protects against.
 #
 # Env overrides (all optional):
 #   UGANDA_DB_PATH          default /data/db/farming.db
@@ -48,7 +64,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 # Row-count invariant tables (runbook Phase 2 postflight list, plus the
 # bookkeeping tables this window itself touches).
-INVARIANT_TABLES="device_data chameleon_readings dendrometer_readings dendrometer_daily irrigation_events zone_daily_environment zone_daily_recommendations analysis_views irrigation_schedules devices users irrigation_zones"
+INVARIANT_TABLES="device_data chameleon_readings dendrometer_readings dendrometer_daily irrigation_events zone_daily_environment zone_daily_recommendations analysis_views irrigation_schedules devices users irrigation_zones valve_actuation_expectations zone_irrigation_calibration zone_weather_cache"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 
@@ -155,6 +171,15 @@ log "--- apply catch-up artifact ---"
 sqlite3 "$DB_PATH" < "$PAYLOAD_DIR/scripts/uganda-catchup-20260911.sql" || fail "catch-up artifact apply failed"
 integ="$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;')"
 [ "$integ" = "ok" ] || fail "post-catchup integrity_check failed: $integ"
+
+log "--- apply table-rebuild artifact (the 17 residual non-additive diffs) ---"
+if ! node "$PAYLOAD_DIR/scripts/ops/generate-uganda-schema-rebuild-20260911.js" --apply "$DB_PATH"; then
+    fail "table-rebuild artifact refused or failed - re-run scripts/ops/uganda-schema-audit.js off-device to diagnose before retrying this window (see the design doc's orphan-handling policy - this is a REFUSE-AND-HOLD guard, not a partial-apply)"
+fi
+integ="$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;')"
+[ "$integ" = "ok" ] || fail "post-rebuild integrity_check failed: $integ"
+fk_rows="$(sqlite3 "$DB_PATH" 'PRAGMA foreign_key_check;' | wc -l)"
+[ "$fk_rows" -eq 0 ] || fail "post-rebuild foreign_key_check found $fk_rows violation(s)"
 
 log "--- repair-sync-outbox-v2 ---"
 node "$PAYLOAD_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH" || fail "repair-sync-outbox-v2 failed"
