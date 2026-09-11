@@ -220,6 +220,8 @@ The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
+**Flaky link?** The reverse tunnel above ties the whole fetch loop to one SSH session; a dropped connection (a Tailscale link over rural cellular, for example) kills the deploy along with it, potentially mid-migration. `scripts/deploy-bundle.sh` + `scripts/deploy-push-bundle.sh` build and push a self-contained bundle instead, then run `deploy.sh` on the gateway under `setsid` so it survives the session ending. See [docs/operations/deploying-over-a-flaky-link.md](docs/operations/deploying-over-a-flaky-link.md).
+
 On first boot after a Path B deploy, OSI OS attempts a one-shot in-place resize of the Raspberry Pi writable partition when the SD layout is the expected two-partition `mmcblk0` layout. The helper uses `parted resizepart` without deleting or recreating the root partition, reboots, then runs `resize2fs` on the next boot. It is idempotent: power loss between the reboot and `resize2fs` is recovered on the next boot. It never touches `/data/db/farming.db`.
 
 <details>
