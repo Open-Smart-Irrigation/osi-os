@@ -173,8 +173,28 @@ integ="$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;')"
 [ "$integ" = "ok" ] || fail "post-catchup integrity_check failed: $integ"
 
 log "--- apply table-rebuild artifact (the 17 residual non-additive diffs) ---"
-if ! node "$PAYLOAD_DIR/scripts/ops/generate-uganda-schema-rebuild-20260911.js" --apply "$DB_PATH"; then
-    fail "table-rebuild artifact refused or failed - re-run scripts/ops/uganda-schema-audit.js off-device to diagnose before retrying this window (see the design doc's orphan-handling policy - this is a REFUSE-AND-HOLD guard, not a partial-apply)"
+# `set -e` does not fire on a command used as an if-condition, so this is
+# the ash-safe way to capture a non-zero exit status without aborting the
+# script before the rc-specific handling below can distinguish the two
+# failure classes.
+if node "$PAYLOAD_DIR/scripts/ops/generate-uganda-schema-rebuild-20260911.js" --apply "$DB_PATH"; then
+    rebuild_rc=0
+else
+    rebuild_rc=$?
+fi
+if [ "$rebuild_rc" = "1" ]; then
+    # REFUSE-AND-HOLD: a known precondition failed (drift signature mismatch,
+    # or an orphan/NULL/drift data guard) BEFORE any DDL ran - the DB is
+    # untouched. Re-run the audit off-device, fix or triage the data, and
+    # retry this window; do NOT restore a backup, there is nothing to undo.
+    fail "REBUILD-REFUSED: table-rebuild artifact refused before making any change (preflight guard - see its own log lines above for which one) - re-run scripts/ops/uganda-schema-audit.js off-device to diagnose before retrying this window"
+elif [ "$rebuild_rc" != "0" ]; then
+    # Anything else (rc=2, a genuine crash mid-DDL) - SQLite's own
+    # transaction rollback means the DB is very likely intact, but this is
+    # NOT one of the tool's own examined preflight refusals, so treat it as
+    # a structural surprise: stop and have an operator restore the
+    # pre-rebuild on-device backup taken above before retrying.
+    fail "REBUILD-CRASHED (rc=$rebuild_rc): table-rebuild artifact failed unexpectedly during apply - restore the pre-rebuild backup ($ONDEVICE_BACKUP) before retrying; do not assume the transaction rollback alone is sufficient without operator review"
 fi
 integ="$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;')"
 [ "$integ" = "ok" ] || fail "post-rebuild integrity_check failed: $integ"

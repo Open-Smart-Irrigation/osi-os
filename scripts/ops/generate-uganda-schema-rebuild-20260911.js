@@ -416,21 +416,46 @@ async function preflightDriftSignature(dbPath, log) {
   if (outOfScope.length) {
     log('[uganda-rebuild] REFUSING: drift signature does not match this artifact\'s design:');
     for (const d of outOfScope) log(`  UNEXPECTED [${d.class}] ${d.kind} ${d.name} - ${d.detail}`);
-    throw new Error(`${outOfScope.length} diff(s) outside the audited 17-diff set - re-run the audit (scripts/ops/uganda-schema-audit.js) and update the design before rebuilding`);
+    const err = new Error(`${outOfScope.length} diff(s) outside the audited 17-diff set - re-run the audit (scripts/ops/uganda-schema-audit.js) and update the design before rebuilding`);
+    err.refuseAndHold = true; // distinguishes a known, examined, no-DDL-ran refusal from a genuine crash - see main()'s exit-code split
+    throw err;
   }
-  return cmp;
+  return { cmp, relatedNames, scoped };
 }
 
-async function tableAlreadyCanonical(runner, table, ref1Runner) {
-  const [live] = await runner.all(`SELECT sql FROM sqlite_master WHERE type='table' AND name='${table}'`);
-  const [ref] = await ref1Runner.all(`SELECT sql FROM sqlite_master WHERE type='table' AND name='${table}'`);
-  if (!live || !ref) return false;
-  const norm = (s) => String(s).replace(/\s+/g, ' ').replace(/`|"/g, '').trim().toLowerCase();
-  // Cheap pre-check (catches the common case fast); the real authority is the
-  // per-table semantic diff filter below, since normalized-text equality is
-  // too strict (column order, whitespace-insensitive-but-not-fully-normalized).
-  if (norm(live.sql) === norm(ref.sql)) return true;
-  return false;
+// Per-table canonical check, SEMANTIC (not DDL-text comparison) - reuses the
+// exact same scopedFailingDiffs() mechanism verify() uses: a table is
+// canonical iff it has zero failing diffs against reference(1). This
+// replaced a normalized-sqlite_master.sql-text comparison that was wrong for
+// irrigation_events (the one ALTER-class table, see design doc §3.3):
+// `ALTER TABLE ... ADD COLUMN event_uuid` appends the new column at the END
+// of the live DDL text, while reference(1) declares it earlier in the
+// column list, so the text comparison never matched even after a
+// successful, fully-correct first apply() - a second apply() then tried
+// `ALTER TABLE irrigation_events ADD COLUMN event_uuid TEXT` again and
+// crashed with "duplicate column name: event_uuid" (found by the PR
+// reviewer 2026-09-11; regression test:
+// 'apply() is idempotent for irrigation_events across two real apply() calls').
+function tableIsCanonical(scoped, table) {
+  return !scoped.some((d) => (d.name.includes('.') ? d.name.split('.')[0] : d.name) === table
+    || (table === 'irrigation_events' && d.name === 'idx_irrigation_events_event_uuid'));
+}
+
+// Defense-in-depth for the ALTER-class table specifically, independent of
+// the semantic canonical check above: never emit `ALTER TABLE
+// irrigation_events ADD COLUMN event_uuid` if the column already exists,
+// full stop. This is a second, cheap, orthogonal guard (PRAGMA table_info,
+// not a schema diff) - the reviewer asked for it explicitly so a future bug
+// in the semantic check alone cannot reintroduce the duplicate-column crash.
+async function irrigationEventsAlterBlock(runner, rawBlock) {
+  const cols = await runner.all("PRAGMA table_info(irrigation_events)");
+  const hasEventUuid = cols.some((c) => c.name === 'event_uuid');
+  if (!hasEventUuid) return rawBlock;
+  const stripped = rawBlock.replace(/^ALTER TABLE irrigation_events ADD COLUMN event_uuid TEXT;\n/m, '');
+  if (stripped === rawBlock) {
+    throw new Error('internal error: expected to find the irrigation_events ADD COLUMN statement in its artifact block');
+  }
+  return stripped;
 }
 
 // Per-table data guards. Returns null (ok to proceed) or a refusal message.
@@ -467,52 +492,54 @@ function parseArtifactBlocks(sql) {
 async function dryRun(dbPath, log = console.error) {
   if (!fs.existsSync(dbPath)) throw new Error(`refusing: database file does not exist: ${dbPath}`);
   if (!fs.existsSync(ARTIFACT_PATH)) throw new Error(`artifact not generated yet: ${ARTIFACT_PATH}`);
-  await preflightDriftSignature(dbPath, log);
+  const { scoped } = await preflightDriftSignature(dbPath, log);
   const runner = cliRunner(dbPath);
-  const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-rebuild-dryrun-'));
-  const ref1Path = await buildReference1(scratchRoot);
-  const ref1Runner = cliRunner(ref1Path);
   const sql = fs.readFileSync(ARTIFACT_PATH, 'utf8');
   const blocks = parseArtifactBlocks(sql);
   for (const table of EXPECTED_TABLES) {
-    const canonical = await tableAlreadyCanonical(runner, table, ref1Runner);
-    if (canonical) { log(`[uganda-rebuild] DRY-RUN: ${table} already canonical - would SKIP`); continue; }
+    if (tableIsCanonical(scoped, table)) { log(`[uganda-rebuild] DRY-RUN: ${table} already canonical - would SKIP`); continue; }
     const refusal = await preflightTableData(runner, table);
     if (refusal) { log(`[uganda-rebuild] DRY-RUN: ${table} would REFUSE: ${refusal}`); continue; }
     log(`[uganda-rebuild] DRY-RUN: ${table} would REBUILD (${blocks.has(table) ? blocks.get(table).split('\n').length : '?'} lines)`);
   }
-  fs.rmSync(scratchRoot, { recursive: true, force: true });
 }
 
 async function apply(dbPath, log = console.error) {
   if (!fs.existsSync(dbPath)) throw new Error(`refusing: database file does not exist: ${dbPath}`);
   if (!fs.existsSync(ARTIFACT_PATH)) throw new Error(`artifact not generated yet: ${ARTIFACT_PATH}`);
-  await preflightDriftSignature(dbPath, log);
+  const { scoped } = await preflightDriftSignature(dbPath, log);
 
   const runner = cliRunner(dbPath);
-  const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-rebuild-apply-'));
-  const ref1Path = await buildReference1(scratchRoot);
-  const ref1Runner = cliRunner(ref1Path);
   const sql = fs.readFileSync(ARTIFACT_PATH, 'utf8');
   const blocks = parseArtifactBlocks(sql);
 
   const toRun = [];
   for (const table of EXPECTED_TABLES) {
-    const canonical = await tableAlreadyCanonical(runner, table, ref1Runner);
-    if (canonical) { log(`[uganda-rebuild] ${table}: already canonical, skipping (idempotent re-run)`); continue; }
+    if (tableIsCanonical(scoped, table)) { log(`[uganda-rebuild] ${table}: already canonical, skipping (idempotent re-run)`); continue; }
     const refusal = await preflightTableData(runner, table);
-    if (refusal) throw new Error(`${table}: refusing to rebuild - ${refusal}`);
+    if (refusal) {
+      const err = new Error(`${table}: refusing to rebuild - ${refusal}`);
+      err.refuseAndHold = true;
+      throw err;
+    }
     if (!blocks.has(table)) throw new Error(`internal error: no artifact block found for ${table}`);
     toRun.push(table);
   }
-  fs.rmSync(scratchRoot, { recursive: true, force: true });
 
   if (toRun.length === 0) {
     log('[uganda-rebuild] all 6 tables already canonical; nothing to do.');
     return { ran: [] };
   }
 
-  const body = toRun.map((t) => blocks.get(t)).join('\n\n');
+  const blockTexts = [];
+  for (const t of toRun) {
+    if (t === 'irrigation_events') {
+      blockTexts.push(await irrigationEventsAlterBlock(runner, blocks.get(t)));
+    } else {
+      blockTexts.push(blocks.get(t));
+    }
+  }
+  const body = blockTexts.join('\n\n');
   // Both PRAGMAs are no-ops inside an open transaction, so both the OFF/ON and
   // legacy_alter_table toggles bracket BEGIN/COMMIT rather than sitting inside
   // it (see the artifact header comment for why legacy_alter_table=ON is
@@ -562,12 +589,27 @@ async function main() {
   }
 }
 
+// Exit codes for --apply (and --dry-run, which never mutates but shares the
+// same preflight): 0 = success (including "nothing to do, already
+// canonical"). 1 = REFUSE-AND-HOLD - a known precondition failed (drift
+// signature mismatch, or a per-table orphan/NULL/drift data guard) BEFORE
+// any DDL ran; the DB is untouched and the fix is to repair the data or
+// re-run the audit, not to restore a backup. 2 = an unexpected failure
+// (e.g. a crash mid-DDL, caught by SQLite's own transaction rollback rather
+// than one of this tool's own preflight guards) - the window script treats
+// this as a signal to stop and have an operator restore the pre-rebuild
+// on-device backup before retrying, even though the transaction itself
+// rolled back cleanly, because it means something this design did not
+// anticipate happened.
 if (require.main === module) {
-  main().catch((e) => { console.error(`[uganda-rebuild] FAILED: ${e.message}`); process.exit(2); });
+  main().catch((e) => {
+    console.error(`[uganda-rebuild] FAILED: ${e.message}`);
+    process.exit(e.refuseAndHold ? 1 : 2);
+  });
 }
 
 module.exports = {
   generate, dryRun, apply, verify,
-  preflightDriftSignature, preflightTableData, tableAlreadyCanonical, parseArtifactBlocks,
+  preflightDriftSignature, preflightTableData, tableIsCanonical, irrigationEventsAlterBlock, parseArtifactBlocks,
   EXPECTED_TABLES, EXPECTED_DIFF_KEYS, ARTIFACT_PATH, STAGING_SUFFIX,
 };

@@ -277,6 +277,71 @@ test('apply() rebuilds the drifted fixture to a clean reference(1) match, is ide
   assert.equal(okAfterDamage, false, 'verify() must detect a manually-dropped index on an in-scope table');
 });
 
+// Regression (found by the reviewer, 2026-09-11): irrigation_events is the
+// one ALTER-class table (plain ADD COLUMN, no rebuild - see design doc
+// §3.3). tableAlreadyCanonical()'s original normalized-DDL-text comparison
+// never matched it as canonical, because ALTER TABLE ... ADD COLUMN appends
+// the new column at the END of sqlite_master.sql, while reference(1)
+// declares event_uuid earlier in the column list - so a second --apply
+// tried to run `ALTER TABLE irrigation_events ADD COLUMN event_uuid TEXT;`
+// again and crashed with "duplicate column name: event_uuid" (exit 2, DB
+// unchanged - the whole batched transaction rolls back). Fixed by deriving
+// per-table canonical status SEMANTICALLY (reusing the same
+// scopedFailingDiffs used by verify(), not a DDL-text comparison), plus an
+// independent PRAGMA table_info guard specific to the ALTER path.
+test('apply() is idempotent for irrigation_events across two real apply() calls (duplicate-column regression)', async () => {
+  const db = tmpDb();
+  await bootstrapFresh(cliRunner(db), { migrationsDir: ref1MigrationsDir(), appVersion: 'test' });
+  const runner = cliRunner(db);
+  // Drift ONLY irrigation_events: drop event_uuid (it doesn't exist on a
+  // fresh reference(1) DB by construction... reference(1) DOES declare it,
+  // so build the "Uganda-shaped" gap explicitly: rebuild the table without
+  // the column and without the index, matching the real live shape.
+  const irrigationSql = (await runner.all(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='irrigation_events'"))[0].sql;
+  // Capture the real indexes/triggers BEFORE dropping (same "capture then
+  // replay verbatim" pattern used elsewhere in this file) so the drifted
+  // fixture matches the real Uganda shape: the additive catch-up artifact
+  // already restores trg_sync_irrigation_events_uuid_ai and the two
+  // trg_dp_irrigation_events_outbox_* triggers independent of whether
+  // event_uuid exists yet (they were sourced from 0001__baseline.sql, which
+  // does not validate a trigger body's column references at CREATE time).
+  const irrigationIndexes = (await runner.all(
+    "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='irrigation_events' AND sql IS NOT NULL AND name != 'idx_irrigation_events_event_uuid'")).map((r) => r.sql);
+  const irrigationTriggers = (await runner.all(
+    "SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='irrigation_events'")).map((r) => r.sql);
+  const drifted = irrigationSql
+    .replace(/^CREATE TABLE irrigation_events\b/, 'CREATE TABLE irrigation_events_drift')
+    .replace(/[ \t]*event_uuid\s+TEXT,\n/, '');
+  if (drifted === irrigationSql) throw new Error('irrigation_events drift replacement had no effect');
+  await runner.exec([
+    'BEGIN IMMEDIATE;',
+    drifted + ';',
+    'INSERT INTO irrigation_events_drift (id, user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json, created_at) SELECT id, user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json, created_at FROM irrigation_events;',
+    'DROP TABLE irrigation_events;',
+    'ALTER TABLE irrigation_events_drift RENAME TO irrigation_events;',
+    ...irrigationIndexes.map((s) => `${s};`),
+    ...irrigationTriggers.map((s) => `${s};`),
+    'COMMIT;',
+  ].join('\n'));
+
+  const before = (await runner.all('PRAGMA table_info(irrigation_events)')).map((r) => r.name);
+  assert.ok(!before.includes('event_uuid'), 'fixture setup sanity: event_uuid must be absent before apply()');
+
+  const res1 = await apply(db);
+  assert.ok(res1.ran.includes('irrigation_events'), 'first apply() must run irrigation_events (event_uuid missing)');
+  const after1 = (await runner.all('PRAGMA table_info(irrigation_events)')).map((r) => r.name);
+  assert.ok(after1.includes('event_uuid'), 'event_uuid must exist after the first apply()');
+
+  // THE regression: a second real apply() call must be a no-op for
+  // irrigation_events, not attempt ADD COLUMN again.
+  const res2 = await apply(db);
+  assert.ok(!res2.ran.includes('irrigation_events'), 'second apply() must treat irrigation_events as already canonical');
+
+  const ok = await verify(db);
+  assert.equal(ok, true);
+});
+
 test('apply() end-to-end: catch-up artifact -> rebuild artifact -> repair-sync-outbox-v2 -> baseline-existing-db stamps N=1 -> migrate-cli reaches head -> verify-head ok', async () => {
   const { runBaseline } = require('../baseline-existing-db');
   const { runMigrateCli } = require('../migrate-cli');
