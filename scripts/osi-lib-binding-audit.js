@@ -12,6 +12,10 @@ const SCOPED_ACCESS_COMMANDS_BINDING = Object.freeze({
   variable: 'osiScopedAccessCommands',
   module: 'scoped-access-commands',
 });
+const INSTALLATION_LOCATION_BINDING = Object.freeze({
+  variable: 'installationLocation',
+  module: 'installation-location',
+});
 
 // Fail closed on complete reviewed sources. Any function change must be reviewed
 // and explicitly re-pinned here before either executable flow audit accepts it.
@@ -60,6 +64,17 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
   'command-ack-queue-rest': Object.freeze({
     funcSha256: '473a5272dfb0c6dbea00143258d91b464fa532e5c96f706ce5aab5381f9dbeff',
     bindings: Object.freeze([DB_BINDING, LEDGER_BINDING]),
+  }),
+  'installation-revision-command-apply-fn': Object.freeze({
+    // Network coverage v1 (feat/network-observations-v1, already live on the
+    // OSI Cloud + Silvan): applies UPSERT_DEVICE_INSTALLATION_LOCATION and
+    // UPSERT_DEVICE_RADIO_CONFIGURATION only, delegating to
+    // osi-installation-location-helper. End of the command-apply delegation
+    // chain (after weather-zones-command-apply-fn) -- an unrecognized command
+    // loops back to Route Command (legacy fallback), a recognized one is
+    // queued on the durable ACK path.
+    funcSha256: '48be4fcf2f22f89ee330f0661142cd69f5e4078b035eafe8644fd363ca053aa6',
+    bindings: Object.freeze([DB_BINDING, INSTALLATION_LOCATION_BINDING, SCOPE_BINDING]),
   }),
 });
 
