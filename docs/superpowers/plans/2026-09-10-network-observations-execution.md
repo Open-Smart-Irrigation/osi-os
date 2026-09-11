@@ -39,7 +39,8 @@ retry completed and the deployed migration set validated.
 The first five real radio uplinks had equal parsed JSON metadata and normalized
 timestamps on edge and cloud. The first two were quarantined for an unknown
 installation and then retried unchanged from the existing dirty queue; no rows
-remain quarantined. The new weather version 27 was accepted.
+remain quarantined. New weather versions 27 and 28 were accepted without
+increasing the retained rejection tally.
 
 ## Deployment state
 
@@ -52,7 +53,9 @@ were changed.
 
 The retained legacy rejection tally is 17,959. The current rolling health result
 reports `sync_rejected`; the schema fingerprint is correct and MQTT is
-connected. One canary run exited with a transport/authentication error during
+connected. Run the operator canary with `TZ=UTC`: the current cloud response
+formats its UTC heartbeat timestamp without an offset, and a local-time parse
+can falsely report `heartbeat_before_deploy`. One canary run exited with a transport/authentication error during
 backend restart, and an earlier run failed its heartbeat/schema gate. The
 evidence must remain available for diagnosis rather than being deleted,
 acknowledged artificially, or hidden by a canary change.
