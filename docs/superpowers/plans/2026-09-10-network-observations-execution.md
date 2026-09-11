@@ -2,14 +2,14 @@
 
 The network observation implementation is deployed to the cloud test service and
 to the designated pilot gateway. Functional checks pass for the deployed radio
-path. The rolling sync health gate remains pending because retained rejection
-evidence and the authenticated UI checks are still open.
+path. Retained rejection history still prevents a healthy canary verdict.
+Authenticated UI checks are separately pending.
 
 ## Implemented and reviewed
 
 The edge implementation is based on `855aee17f` and ends at commit
-`9f010325e`. It includes the disabled Field testing TAB fix and the numeric,
-deterministic radio result correction. Cloud commit `93c7380e` includes bootstrap
+`9f010325e`. Capture now runs independently of the disabled Field Testing tab,
+and radio corrections follow deterministic protocol ordering. Cloud commit `93c7380e` includes bootstrap
 installation identity repair for legacy links, multi-user ownership handling,
 the MQTT binary alignment fix, and the dedicated per-zone-per-day
 `ZONE_ENVIRONMENT` watermark with a stateful regression.
@@ -27,7 +27,7 @@ The three unshipped network migrations were renumbered to
 - Rehearsal against a restored copy of the target database applied the staged
   migrations and validated 101 migrations. Counts for all 77 original tables
   were preserved.
-- Device-data reading rows increased from 44212 to 44224 during the pilot. The
+- Device-data reading rows increased from 44,212 to 44,224 during the pilot. The
   target snapshot and rehearsal retained the original rows.
 
 The first deployment runner stopped before connecting to the database because
@@ -50,8 +50,8 @@ The pilot runtime payload is `20260911T002237Z-radio`. Capture remains disabled
 outside the designated pilot. No production host was accessed, and no passwords
 were changed.
 
-The retained legacy rejection tally is 17959. The current rolling health result
-reports `sync_rejected_24h`; the schema fingerprint is correct and MQTT is
+The retained legacy rejection tally is 17,959. The current rolling health result
+reports `sync_rejected`; the schema fingerprint is correct and MQTT is
 connected. One canary run exited with a transport/authentication error during
 backend restart, and an earlier run failed its heartbeat/schema gate. The
 evidence must remain available for diagnosis rather than being deleted,

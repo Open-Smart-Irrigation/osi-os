@@ -5,8 +5,8 @@ network maps in both account GUIs. Account projects, offline browser projects,
 planner extraction and simulation comparison remain later specification phases.
 
 Work is isolated on paired `feat/network-observations-v1` branches. Edge base is
-`492935d3e`; cloud was advanced to `a84582c6` during integration. Cloud implementation
-commit `92e94906` is deployed on the test server; edge implementation is `4b7ec8ceb`.
+`855aee17f`; cloud was advanced to `a84582c6` during integration. Cloud implementation
+`93c7380e` and edge implementation `9f010325e` are deployed to the test pilot.
 The user authorized Luna workers, orchestrator review, fixes and test deployment.
 Workers do not deploy. The original dirty edge checkout remains separate.
 
@@ -33,7 +33,7 @@ Workers do not deploy. The original dirty edge checkout remains separate.
 | 2: capture/history integration | Parent, after 1A/1B interfaces agreed | Implemented; correction generation/ACK tests and full edge verifier pass |
 | 3: installation revisions | Edge/cloud workers; parent owns shared flows/contracts | Implemented; transactional command/event/ACK and current-installation tests pass |
 | 4: account network views | Edge/cloud GUI workers in parallel | Implemented; tests and production builds pass; browser check remains open |
-| 5: integration and test pilot | Parent review, independent Luna access review | Cloud acceptance deployed; database upgrade and rollback rehearsed; edge pilot pending |
+| 5: integration and test pilot | Parent review, independent Luna access review | Edge/cloud deployed; radio roundtrip verified; rolling health gate and authenticated UI acceptance pending |
 
 Parent review corrected generation races, malformed metadata handling, cloud
 ownership predicates, device transfer/history isolation, admin mutation scope,
@@ -45,10 +45,10 @@ The independent access review’s four findings were fixed and rechecked.
 Detailed evidence and limitations are in
 `2026-09-10-network-observations-execution.md`.
 
-- Edge integration suite: 40 tests, zero skipped. Full sync verifier, helper
+- Edge integration suite: 42 tests, zero skipped. Full sync verifier, helper
   registration, profile parity and communication contract pass.
-- Cloud selected backend checks after rebase: 41 tests, zero skipped, including
-  Flyway lineage and revision applier tests.
+- Cloud final focused backend checks: 118 tests, zero skipped. Earlier Flyway
+  lineage and revision applier checks also passed.
 - Cloud frontend: 81 script tests and 803 component tests pass. Edge network
   page: 5 tests pass. Both production builds pass.
 - Complete boot JAR passes the Terra release-token and packaged-asset checks.
@@ -59,19 +59,17 @@ Detailed evidence and limitations are in
 
 ## Deployment and remaining execution
 
-The cloud acceptance layer is deployed at
-`https://server.opensmartirrigation.org/network` with image
-`network-92e94906`. Health, page assets, seven locales, login, authenticated
-metrics and WebSocket origin checks passed. The smoke account owns no gateway;
-its observations request correctly returns 403. No gateway advertises the new
-installation capability yet. The edge was not deployed.
+The cloud runs `network-93c7380e` at
+`https://server.opensmartirrigation.org/network`. The designated edge pilot runs
+`9f010325e`, with capture enabled only there. Installation registration and
+MQTT work. Five retained uplinks match the cloud by payload and timestamp;
+the radio quarantine is empty.
 
-1. Complete browser checks when the browser runtime is available. Its native
-   connection failed before initialization, including after the IDE restart.
-2. Obtain the designated edge gateway alias/EUI and its linked pilot account.
-   Run the provisioned migration/restart pilot with backups.
-3. Verify authorized network reads and an edge/cloud radio roundtrip. Then
-   enable capture only on that gateway and inspect device revision ACKs.
+1. Confirm continued acceptance of new weather updates and rerun the normal
+   canary when retained rejection history ages out of its 24-hour window.
+   No canary pass is claimed; audit rows remain intact.
+2. Verify signed-in pilot network reads and device revision command/ACK behavior.
+3. Complete browser checks when its native runtime can initialize.
 
 The complete test-server backup, migration evidence, image hash and rollback
 procedure are recorded in the execution report and the cloud deployment record.
