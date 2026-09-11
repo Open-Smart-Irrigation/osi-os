@@ -1,90 +1,68 @@
 # Network observations execution checkpoint
 
-The cloud acceptance layer is deployed on the test server at
-`https://server.opensmartirrigation.org/network`. Edge deployment and the
-radio roundtrip remain pending a designated gateway and linked pilot account.
-No production host was accessed.
+The network observation implementation is deployed to the cloud test service and
+to the designated Silvan pilot gateway. Functional checks pass for the deployed
+radio path. The rolling sync health gate remains red because the canary still
+contains retained legacy rejections and new rejection evidence is still being
+monitored.
 
 ## Implemented and reviewed
 
-Edge commit `4b7ec8ceb` provides bounded radio storage, history v1 transport,
-installation revisions and the account network view. Cloud commit `92e94906`
-provides the mirror, capability-gated revision commands and account network view.
-Both interfaces use worldwide topographic tiles and all seven host locales.
-Antenna gain accepts 0 through 13 dBi.
+Edge commit `9f010325e` includes the capture-disabled table fix and the numeric,
+deterministic radio result correction. Cloud commit `93c7380e` includes bootstrap
+installation identity repair for legacy links, multi-user ownership handling,
+the MQTT binary alignment fix, and the dedicated per-zone-per-day
+`ZONE_ENVIRONMENT` watermark with a stateful regression.
 
-Parent and Luna reviews corrected receiver-generation races, gateway ownership
-checks, transferred-device history exposure, admin mutation scope, legacy owner
-reads, location precedence and pagination windows. The final integration review
-also found that revision command records lacked the effect key sent in their
-payload. The issuer now persists that same key, matching the edge ACK contract;
-a regression test verifies the binding.
-
-Cloud main advanced during rollout preparation. The branch was rebased onto
-`a84582c6`, and its three unshipped migrations moved to `2026.09.17.001–003`
-after main's new pending-projections migration. The ordering gate passes.
+The cloud branch was rebased after main added its pending-projections migration.
+The three unshipped network migrations were renumbered to
+`2026.09.17.001–003`; the ordering gate passes.
 
 ## Verification
 
-- Edge radio/revision/API suite: 40 passed, zero skipped. Full sync verifier,
-  seed replay, bundled schema consistency, profile parity and contract checks
-  passed during implementation.
-- Edge network page: 5 tests passed; production build passed.
-- Cloud selected backend checks after rebase: 37 passed, including Flyway
-  lineage, plus 4 revision mirror applier tests. No failures or skips.
-- Cloud frontend: 81 script tests and 803 component tests passed.
-- Complete boot JAR passed frontend/Terra build and packaged-asset checks.
-- Fresh target-dump rehearsal: 13 foundation migrations applied under the old
-  Terra lineage, 12 byte-identical Terra labels reconciled, then 3 network
-  migrations applied. Flyway validates 101 migrations. No row-count loss across
-  the 77 original tables.
-- The exact previous backend started after the rehearsed label reversal.
-  Roll-forward applied no further DDL and preserved counts across 109 tables.
+- Edge network, revision, API and four normalization checks: 42 passed, zero
+  skipped. The parent also ran the 38-test network/revision/API suite.
+- Cloud focused backend checks: 7 classes, 118 passed, zero skipped.
+- Frontend checks: 81 script tests and 803 component tests passed.
+- Fresh-database rehearsal applied the staged migrations and validated 101
+  migrations. Counts for all 77 original tables were preserved.
+- The live database increased from 44212 to 44224 rows in the checked history
+  tables. The target snapshot and rehearsal retained the original rows.
 
-The browser runtime still fails before initialization. No browser smoke pass
-is claimed; component and HTTP checks do not replace that evidence.
+The first deployment runner stopped before connecting to the database because
+the extracted libraries did not have permissions for the container user. The old
+backend restarted with the original 85-row migration history. After permissions
+were corrected and checked with a read-only probe under the deployment user, the
+retry completed and the deployed migration set validated.
 
-## Test deployment
+The first five real radio uplinks matched the edge and cloud byte-for-byte,
+including receiver metadata and timestamps. No radio rows entered quarantine.
+The new weather version 27 was accepted. The latest rejection at 00:19 predates
+the final cloud fix at 00:22.
 
-The backend now uses `network-92e94906`. Only the backend was recreated. Compose
-retains that image pin and supplies the test HTTPS origin explicitly, as required
-by the new WebSocket configuration. Other services were not recreated.
+## Deployment state
 
-The full backup is
-`/home/rocky/backups/osi-server-network-20260910T213627Z`. It includes the repo,
-configuration, PostgreSQL dump/globals, MongoDB logical dump, persisted service
-files and exact previous JAR. Archive checks and SHA-256 verification passed.
-A second PostgreSQL dump was taken with the backend stopped and no other
-application database clients connected.
+The pilot runtime payload is `20260911T002237Z-radio`. Capture remains disabled
+outside the designated pilot. No production host was accessed, and no passwords
+were changed.
 
-The first runner attempt stopped before a database connection because extracted
-libraries were unreadable by the container's unprivileged user. The old backend
-was restarted; Flyway still had 85 rows. Library permissions were corrected and
-a read-only probe under the actual deployment user passed before the retry.
-The retry applied the rehearsed stages, validated 101 migrations and preserved
-all original table counts. The final target verifier also passed against the
-actual deployed database.
+The retained legacy rejection tally is 17959. The rolling 24-hour canary still
+reports `sync_rejected`, although the schema fingerprint is correct and MQTT is
+connected. This is a pending health gate; the evidence must remain available for
+diagnosis rather than being deleted, acknowledged artificially, or hidden by a
+canary change.
 
-Post-deploy checks passed: health, `/network`, its script asset, all seven locale
-files, login and authenticated metrics. Unauthenticated observations/metrics
-return 403. The smoke account has no gateway and scoped access is off; its
-observations request correctly returns 403. Positive gateway-scoped reads remain
-pending the pilot account. The configured WebSocket origin returns 200 at the
-SockJS info route; a foreign origin returns 403. Zero linked gateways advertise
-installation revision support, so the cloud cannot issue those commands yet.
-
-The cloud record is `docs/operations/network-observations-test-deploy-2026-09-11.md`
-in the paired server worktree. It records the artifact hash and rollback path.
-Private dumps and rehearsal files remain outside both repositories under
-`/home/phil/.cache/osi-network-rehearsal/`.
+The browser runtime was unavailable, so no signed-in UI smoke pass is claimed.
+HTTP health, login, metrics, locale assets and the unauthenticated access
+checks were verified during the cloud deployment. Positive pilot gateway reads
+remain the next authenticated API check.
 
 ## Remaining scope
 
-The edge migration/restart pilot, browser checks, authorized gateway reads and
-radio roundtrip are still open. Capture stays off outside the designated pilot.
-Account projects, offline browser projects and simulation comparison remain later
-specification phases.
+Resolve the rolling sync rejection condition and rerun the canary with the
+retained evidence intact. Then perform the authenticated pilot reads and browser
+checks when the runtime is available.
 
-The original dirty edge checkout was not changed. Paired implementation worktrees
-and recovery refs preserve the work across the IDE crash. The cloud recovery
-stash `network-observations-before-main-869fc173` remains as an earlier copy.
+Account projects, offline browser projects and simulation comparison remain
+later phases. The paired implementation worktrees and recovery references retain
+the reviewed changes.
