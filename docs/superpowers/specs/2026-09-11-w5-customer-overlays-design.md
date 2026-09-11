@@ -1,7 +1,8 @@
 # W5 — customer branches as overlays on main
 
 Status: design, not executed. No branch was cut, no host was touched.
-Baselines: osi-os `main` = `2c9ef4c34`, osi-server `main` = `3b0bad45`.
+Baselines: osi-os `main` = `2c9ef4c34` (the inventory's baseline; `main` reached
+`97e1b1de6` while this was written), osi-server `main` = `3b0bad45`.
 Predecessor: `.superpowers/sdd/stabilization-plan-2026-09-10.md` (wave 3.5).
 Companion inventory: `docs/superpowers/reviews/2026-09-11-w5-edge-overlay-inventory.md`.
 
@@ -178,10 +179,23 @@ Two new branches per repo, cut from `main`, never from a customer branch.
 
 ```sh
 git switch -c customer/bovey origin/main
-git cherry-pick 7ee2c8c16955 3c27cf453d8a f8ecff490430 e59558f6ff47 b3485e8b7aee
-# edge: expect a conflict only in en/devices.json (the one file the branding
-# commits share with later main work)
+git cherry-pick -x 7ee2c8c16955 3c27cf453d8a f8ecff490430 e59558f6ff47 b3485e8b7aee
 ```
+
+Dry-run 2026-09-11 against `97e1b1de6`: three of the five apply clean, two
+conflict, six files total.
+
+| pick | conflicts |
+|---|---|
+| `7ee2c8c16955` | `web/react-gui/src/index.css` |
+| `f8ecff490430` | `public/locales/en/devices.json`, `components/farming/DendrometerMonitor.tsx`, `RainMonitor.tsx`, `WindMonitor.tsx`, `pages/CrossZoneAnalysisPage.tsx` |
+
+All six are palette-application conflicts: `main` restyled the same lines
+after the branding commits were written. Resolve toward the Bovey side for the
+colour values and toward `main` for everything else in the hunk, then let
+`tests/boveyBranding.test.ts` confirm the palette survived. (An earlier note
+said the only overlap was `en/devices.json`; that was true against
+`feat/valve-control` in August, not against `main` today.)
 
 Cloud `customer/bovey` is cut the same way from `origin/main`, then takes
 `origin/feat/bovey-branding`'s five commits, then merges
