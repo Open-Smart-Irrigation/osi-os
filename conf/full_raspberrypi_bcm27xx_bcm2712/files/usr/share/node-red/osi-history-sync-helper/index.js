@@ -519,6 +519,15 @@ function rowByHistoryKeyQuery(tableName, key) {
   throw new Error(`unsupported dirty-key table ${tableName}`);
 }
 
+function compareHistoryKeys(tableName, left, right) {
+  if (cursorKind(tableName) === 'id') {
+    const leftId = BigInt(String(left || '').split('|').at(-1));
+    const rightId = BigInt(String(right || '').split('|').at(-1));
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  }
+  return String(left || '').localeCompare(String(right || ''));
+}
+
 module.exports = {
   tableNames,
   nextTable,
@@ -543,5 +552,6 @@ module.exports = {
   prepareRow,
   buildSegment,
   segmentQuery,
-  rowByHistoryKeyQuery
+  rowByHistoryKeyQuery,
+  compareHistoryKeys
 };

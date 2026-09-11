@@ -70,3 +70,29 @@ test('radio HTTP rejection backs off only that stream and next tick selects anot
   assert.notEqual(f.memory.get('history_sync_last_table'),'radio_uplinks');
   assert.equal(f.reads(),0);
 });
+test('radio correction rows are emitted in numeric history-key order across requeue timestamps',async t=>{
+  const f=fixture(t);
+  for (const id of [2,3,4,10]) {
+    const minute=String(id).padStart(2,'0');
+    f.radio.prepare('INSERT INTO radio_uplinks VALUES(?,?,?,?,?,?,?)').run(id,installation,'AABBCCDDEEFF0011',`2026-09-10T10:${minute}:00.000Z`,`native-${id}`,JSON.stringify({version:1,receivers:[]}),1);
+  }
+  const dirty = [
+    [3,'2026-09-10T10:00:00.000Z'],
+    [4,'2026-09-10T10:01:00.000Z'],
+    [1,'2026-09-10T10:02:00.000Z'],
+    [10,'2026-09-10T10:03:00.000Z'],
+    [2,'2026-09-10T10:04:00.000Z']
+  ];
+  for (const [id,changedAt] of dirty) {
+    const rowKey=`RADIO_UPLINK|${gateway}|${id}`;
+    if (id === 1) {
+      f.farming.prepare("UPDATE sync_history_dirty_keys SET changed_at=?,status='pending' WHERE peer_node='cloud' AND table_name='radio_uplinks' AND row_key=?").run(changedAt,rowKey);
+    } else {
+      f.farming.prepare("INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,source_row_id,changed_at,status) VALUES('cloud','radio_uplinks',?,'correction',?,?, 'pending')").run(rowKey,id,changedAt);
+    }
+  }
+  const tables=helper.tableNames({includeRadio:true});
+  f.memory.set('history_sync_last_table',tables[(tables.indexOf('radio_uplinks')+tables.length-1)%tables.length]);
+  const batch=await f.invoke('sync-history-build',{});
+  assert.deepEqual(Array.from(batch.payload.rows, row=>row.payload.id),[1,2,3,4,10]);
+});
