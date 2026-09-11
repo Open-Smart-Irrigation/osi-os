@@ -183,11 +183,23 @@ test('preflightDriftSignature accepts the expected 17-diff fixture and refuses u
   await buildDriftedFixture(db);
   await preflightDriftSignature(db, () => {}); // must not throw
 
-  const clean = tmpDb();
-  await bootstrapFresh(cliRunner(clean), { migrationsDir: ref1MigrationsDir(), appVersion: 'test' });
-  const cRunner = cliRunner(clean);
-  await cRunner.exec('BEGIN IMMEDIATE;\nALTER TABLE users ADD COLUMN surprise_unrelated_column TEXT;\nCOMMIT;');
-  await assert.rejects(() => preflightDriftSignature(clean, () => {}), /outside the audited 17-diff set/);
+  // Drift on a table OUTSIDE this artifact's 6-table scope (e.g. users) must
+  // NOT cause a refusal - it is none of this tool's business, and the real
+  // window script legitimately runs this artifact while sync_outbox still
+  // has 3 missing v2 columns (repair-sync-outbox-v2.js runs AFTER it) that
+  // would otherwise trip a naive whole-database drift check (caught
+  // 2026-09-11 running the window script dry run against a real copy).
+  const outOfScopeDrift = tmpDb();
+  await bootstrapFresh(cliRunner(outOfScopeDrift), { migrationsDir: ref1MigrationsDir(), appVersion: 'test' });
+  await cliRunner(outOfScopeDrift).exec('BEGIN IMMEDIATE;\nALTER TABLE users ADD COLUMN surprise_unrelated_column TEXT;\nCOMMIT;');
+  await preflightDriftSignature(outOfScopeDrift, () => {}); // must NOT throw
+
+  // Drift ON one of the 6 in-scope tables that is NOT one of the 17 audited
+  // diffs must still refuse.
+  const inScopeSurprise = tmpDb();
+  await bootstrapFresh(cliRunner(inScopeSurprise), { migrationsDir: ref1MigrationsDir(), appVersion: 'test' });
+  await cliRunner(inScopeSurprise).exec("BEGIN IMMEDIATE;\nALTER TABLE devices ADD COLUMN surprise_in_scope_column TEXT;\nCOMMIT;");
+  await assert.rejects(() => preflightDriftSignature(inScopeSurprise, () => {}), /outside the audited 17-diff set/);
 });
 
 test('preflightTableData refuses on orphans/NULLs and passes on clean data', async () => {

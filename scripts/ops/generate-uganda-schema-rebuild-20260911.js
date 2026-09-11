@@ -385,10 +385,31 @@ async function objectNamesForTables(dbPath, tableNames) {
 // never an unexpected diff outside the known set). A live DB may legitimately
 // have FEWER of the 17 (idempotent partial re-run scenario); it must never
 // have diffs this artifact doesn't know about.
+// Scopes a compareSchemas() result's failing diffs to ONLY the 6 rebuild
+// tables (by column-diff table prefix, or by object name for index/trigger
+// diffs via `relatedNames`, dynamically derived from reference(1) -
+// see objectNamesForTables()). Diffs on any OTHER table (e.g. sync_outbox's
+// 3 missing v2 columns, which repair-sync-outbox-v2.js - not this artifact -
+// is responsible for, and which the window script deliberately runs AFTER
+// this artifact per the design doc's ordering) are none of this tool's
+// business and must never cause a refusal or count toward "clean."
+function scopedFailingDiffs(cmp, relatedNames) {
+  return cmp.diffs.filter((d) => {
+    if (!FAILING_CLASSES.has(d.class)) return false;
+    const table = d.name.includes('.') ? d.name.split('.')[0] : d.name;
+    return EXPECTED_TABLES.includes(table) || relatedNames.has(d.name);
+  });
+}
+
 async function preflightDriftSignature(dbPath, log) {
+  const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-rebuild-preflight-'));
+  const ref1Path = await buildReference1(scratchRoot);
+  const relatedNames = await objectNamesForTables(ref1Path, EXPECTED_TABLES);
+  fs.rmSync(scratchRoot, { recursive: true, force: true });
+
   const cmp = await referenceCompare(dbPath);
-  const failing = cmp.diffs.filter((d) => FAILING_CLASSES.has(d.class));
-  const outOfScope = failing.filter((d) => {
+  const scoped = scopedFailingDiffs(cmp, relatedNames);
+  const outOfScope = scoped.filter((d) => {
     const key = `${d.class}:${d.kind}:${d.name}`;
     return !EXPECTED_DIFF_KEYS.includes(key);
   });
@@ -516,11 +537,7 @@ async function verify(dbPath, log = console.error) {
   const relatedNames = await objectNamesForTables(ref1Path, EXPECTED_TABLES);
   fs.rmSync(scratchRoot, { recursive: true, force: true });
   const cmp = await referenceCompare(dbPath);
-  const failing = cmp.diffs.filter((d) => {
-    if (!FAILING_CLASSES.has(d.class)) return false;
-    const table = d.name.includes('.') ? d.name.split('.')[0] : d.name;
-    return EXPECTED_TABLES.includes(table) || relatedNames.has(d.name);
-  });
+  const failing = scopedFailingDiffs(cmp, relatedNames);
   if (failing.length) {
     log(`[uganda-rebuild] --verify FAILED: ${failing.length} diff(s) remain on the 6 rebuild tables:`);
     for (const d of failing) log(`  [${d.class}] ${d.kind} ${d.name} - ${d.detail}`);
