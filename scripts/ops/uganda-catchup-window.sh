@@ -151,6 +151,32 @@ command -v node >/dev/null 2>&1 || fail "node not present"
 
 mkdir -p "$BACKUP_DIR"
 
+# --- disk-space preflight: fail closed BEFORE Node-RED is stopped ----------
+# Worst case this window transiently holds an on-device .backup, a
+# migrate-cli persistent backup, AND (during a table rebuild) both the old
+# and new copy of whichever table is being rebuilt at once - conservatively
+# budgeted as 3x the DB's current size (see the design doc's "disk headroom"
+# section for the 2x-per-rebuild-pass rationale; the 3rd multiple covers the
+# two backups landing in the same window). +64 MB covers fixed overhead
+# (WAL/SHM sidecars, the payload itself, logs) that doesn't scale with DB
+# size. Uses `df -Pk` (POSIX output format - one header line, one data line,
+# no long-devicename line wrapping) and shell parameter expansion instead of
+# `dirname`/`bc`, so it needs nothing beyond what deploy.sh already assumes
+# is present on a BusyBox ash gateway.
+db_dir="${DB_PATH%/*}"
+[ "$db_dir" = "$DB_PATH" ] && db_dir="."
+db_bytes="$(wc -c < "$DB_PATH")" || fail "could not stat $DB_PATH for the disk-space preflight"
+db_kb=$((db_bytes / 1024))
+required_kb=$((db_kb * 3 + 65536))
+avail_kb="$(df -Pk "$db_dir" | awk 'NR==2{print $4}')"
+if [ -z "$avail_kb" ]; then
+    fail "disk-space preflight: could not parse \`df -Pk $db_dir\` output - refusing to proceed without a headroom check"
+fi
+if [ "$avail_kb" -lt "$required_kb" ]; then
+    fail "disk-space preflight: only ${avail_kb}KB free on $db_dir, need >= ${required_kb}KB (3x DB size ${db_kb}KB + 64MB headroom) - free up space before retrying this window"
+fi
+log "disk-space preflight ok: ${avail_kb}KB free on $db_dir, need >= ${required_kb}KB"
+
 log "--- pre-window row-count snapshot -> $COUNTS_FILE ---"
 record_counts "$COUNTS_FILE"
 cat "$COUNTS_FILE"
