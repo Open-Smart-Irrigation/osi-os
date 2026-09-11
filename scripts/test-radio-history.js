@@ -28,3 +28,7 @@ test('radio golden vector matches canonical columns and history hash',()=>{
  assert.deepEqual(helper.prepareRow(fixture.tableName,fixture.gatewayDeviceEui,fixture.row),fixture.expected);
  assert.deepEqual(helper.buildCanonicalColumns(fixture.tableName,fixture.row),fixture.canonicalColumns);
 });
+test('key-cursor history ordering is deterministic across composite UUID/date keys',()=>{
+ assert.equal(helper.compareHistoryKeys('dendrometer_daily','A0000000-0000-4000-8000-000000000001|2026-09-10','A0000000-0000-4000-8000-000000000001|2026-09-11'),-1);
+ assert.equal(helper.compareHistoryKeys('dendrometer_daily','A0000000-0000-4000-8000-000000000001|2026-09-11','a0000000-0000-4000-8000-000000000001|2026-09-10'),-1);
+});

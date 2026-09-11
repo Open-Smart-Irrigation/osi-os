@@ -525,7 +525,8 @@ function compareHistoryKeys(tableName, left, right) {
     const rightId = BigInt(String(right || '').split('|').at(-1));
     return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
   }
-  return String(left || '').localeCompare(String(right || ''));
+  const leftKey = String(left || ''), rightKey = String(right || '');
+  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
 }
 
 module.exports = {
