@@ -109,3 +109,80 @@ test('buildAnalysisCatalog preserves the legacy owner filter without a scope lis
   assert.match(calls[0].sql, /user_id = \?/);
   assert.deepEqual(calls[0].params, [7]);
 });
+
+test('buildAnalysisCatalog exposes only configured Sentek soil channels', async () => {
+  const sentek = {
+    deveui: '0011223344556677',
+    type_id: 'DRAGINO_SDI12',
+    sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+    soil_moisture_probe_depths_json: JSON.stringify({ vwc_1: 0, vwc_8: 80 }),
+  };
+  const analysis = analysisModule.createAnalysis({
+    aggregateRows: () => ({ series: {}, buckets: [] }),
+    dbAll: async (_db, sql) => sql.includes('FROM irrigation_zones')
+      ? [{ id: 2, zone_uuid: 'zone-2', name: 'Sentek block' }]
+      : [sentek],
+    deriveCardsForZone: () => [{ cardType: 'soil' }],
+    displayDeviceName: () => 'Sentek-01',
+    normalizeDeveui: (value) => value,
+    resolveAggregation: () => ({ requested: 'raw', level: 'raw', bucketSizeSeconds: null }),
+    soilDepthCm: () => null,
+    sourceDevicesForCard: () => [sentek],
+    sourceKeyForCsv: () => 'sentek-01',
+  });
+
+  const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
+
+  assert.deepEqual(catalog.channels.map((entry) => entry.channelKey), [
+    'vwc_1',
+    'vwc_8',
+  ]);
+  assert.ok(catalog.channels.every((entry) => !entry.channelKey.startsWith('swt_')));
+});
+
+test('buildAnalysisCatalog keeps explicit Chameleon SWT capability ahead of other configuration', async () => {
+  const chameleon = {
+    deveui: '8899AABBCCDDEEFF',
+    type_id: 'KIWI_SENSOR',
+    chameleon_enabled: 1,
+    soil_moisture_probe_depths_json: JSON.stringify({ vwc_1: 12.5 }),
+  };
+  const analysis = analysisModule.createAnalysis({
+    aggregateRows: () => ({ series: {}, buckets: [] }),
+    dbAll: async (_db, sql) => sql.includes('FROM irrigation_zones')
+      ? [{ id: 3, zone_uuid: 'zone-3', name: 'Chameleon block' }]
+      : [chameleon],
+    deriveCardsForZone: () => [{ cardType: 'soil' }],
+    displayDeviceName: () => 'Chameleon',
+    normalizeDeveui: (value) => value,
+    resolveAggregation: () => ({ requested: 'raw', level: 'raw', bucketSizeSeconds: null }),
+    soilDepthCm: () => null,
+    sourceDevicesForCard: () => [chameleon],
+    sourceKeyForCsv: () => 'chameleon',
+  });
+
+  const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
+
+  assert.deepEqual(catalog.channels.map((entry) => entry.channelKey), ['swt_1', 'swt_2', 'swt_3']);
+});
+
+test('buildAnalysisCatalog uses the two canonical Kiwi SWT channels without state', async () => {
+  const kiwi = { deveui: '1020304050607080', type_id: 'KIWI_SENSOR' };
+  const analysis = analysisModule.createAnalysis({
+    aggregateRows: () => ({ series: {}, buckets: [] }),
+    dbAll: async (_db, sql) => sql.includes('FROM irrigation_zones')
+      ? [{ id: 4, zone_uuid: 'zone-4', name: 'Kiwi block' }]
+      : [kiwi],
+    deriveCardsForZone: () => [{ cardType: 'soil' }],
+    displayDeviceName: () => 'Kiwi',
+    normalizeDeveui: (value) => value,
+    resolveAggregation: () => ({ requested: 'raw', level: 'raw', bucketSizeSeconds: null }),
+    soilDepthCm: () => null,
+    sourceDevicesForCard: () => [kiwi],
+    sourceKeyForCsv: () => 'kiwi',
+  });
+
+  const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
+
+  assert.deepEqual(catalog.channels.map((entry) => entry.channelKey), ['swt_1', 'swt_2']);
+});

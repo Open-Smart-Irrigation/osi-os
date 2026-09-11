@@ -8,11 +8,15 @@ const setOption = vi.fn();
 const resize = vi.fn();
 const dispose = vi.fn();
 const getDataURL = vi.fn(() => 'data:image/png;base64,AAAA');
-vi.mock('echarts', () => ({
+vi.mock('echarts/core', () => ({
   init: vi.fn(() => ({ setOption, resize, dispose, getDataURL, on: vi.fn() })),
+  use: vi.fn(),
 }));
+vi.mock('echarts/charts', () => ({ LineChart: {}, ScatterChart: {} }));
+vi.mock('echarts/components', () => ({ GridComponent: {}, LegendComponent: {}, TooltipComponent: {} }));
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }));
 
-import * as echarts from 'echarts';
+import * as echarts from 'echarts/core';
 import { EChart, type EChartHandle } from '../EChart';
 
 class ResizeObserverStub {

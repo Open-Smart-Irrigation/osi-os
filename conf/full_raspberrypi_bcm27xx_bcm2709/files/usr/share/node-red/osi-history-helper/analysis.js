@@ -114,12 +114,24 @@ function filterAvailable(cardType, defaults) {
   return defaults.filter((key) => allowed.has(key));
 }
 
+function configuredChannels(cardType, source) {
+  const configured = new Set(Array.isArray(source && source.configuredChannels) ? source.configuredChannels : []);
+  return cardChannels(cardType).filter((key) => configured.has(key));
+}
+
 function cardChannelsForSource(cardType, source = null) {
   const normalized = normalizeCardType(cardType);
   if (!source) return cardChannels(normalized);
 
   if (normalized === 'soil' && boolFlag(source.chameleonEnabled ?? source.chameleon_enabled)) {
     return filterAvailable(normalized, ['swt_1', 'swt_2', 'swt_3']);
+  }
+
+  if (normalized === 'soil') {
+    const deviceType = String(source.deviceType || source.typeId || source.type_id || '').trim().toUpperCase();
+    if (deviceType === 'DRAGINO_SDI12') return configuredChannels(normalized, source);
+    if (deviceType === 'KIWI_SENSOR') return filterAvailable(normalized, ['swt_1', 'swt_2']);
+    if (deviceType === 'TEKTELIC_CLOVER') return [];
   }
 
   if (normalized === 'environment') {
@@ -288,11 +300,34 @@ function parseViewRow(row) {
 }
 
 function displaySafeDeviceContext(device) {
+  function parseObject(value) {
+    if (value && typeof value === 'object') return value;
+    if (typeof value !== 'string' || !value.trim()) return null;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  const depths = parseObject(device && (device.soil_moisture_probe_depths_json || device.soilMoistureProbeDepthsJson));
+  const layout = parseObject(device && (device.sdi12_channel_layout_json || device.sdi12ChannelLayoutJson));
+  const configuredChannels = depths ? Object.keys(depths) : [];
+  if (!configuredChannels.length && layout && Array.isArray(layout.sensors)) {
+    for (const sensor of layout.sensors) {
+      const channel = Number(sensor && sensor.channel);
+      if (!Number.isInteger(channel) || channel < 1 || channel > 10) continue;
+      configuredChannels.push(`vwc_${channel}`);
+      if (String(sensor.type || '').toUpperCase() === 'TRISCAN') configuredChannels.push(`soil_vic_${channel}`);
+    }
+  }
   return {
     deviceType: device && (device.type_id || device.typeId),
     typeId: device && (device.type_id || device.typeId),
     chameleonEnabled: device && (device.chameleon_enabled || device.chameleonEnabled),
     tempEnabled: device && (device.temp_enabled || device.tempEnabled),
+    configuredChannels,
   };
 }
 
