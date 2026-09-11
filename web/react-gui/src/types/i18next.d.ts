@@ -9,6 +9,7 @@ import type en_support from '../../public/locales/en/support.json';
 import type en_settings from '../../public/locales/en/settings.json';
 import type en_valves from '../../public/locales/en/valves.json';
 import type en_journal from '../../public/locales/en/journal.json';
+import type en_network from '../../public/locales/en/network.json';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
@@ -24,6 +25,7 @@ declare module 'i18next' {
       settings: typeof en_settings;
       valves: typeof en_valves;
       journal: typeof en_journal;
+      network: typeof en_network;
     };
   }
 }

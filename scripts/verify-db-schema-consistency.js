@@ -17,6 +17,11 @@ const seedDatabasePaths = [
 ].map((relativePath) => path.join(repoRoot, relativePath));
 
 const schemaContract = {
+  radio_store_identity: ["singleton_id", "radio_store_uuid", "installation_uuid", "state", "created_at", "updated_at"],
+  radio_history_bridge: ["history_key", "generation", "status", "claimed_at", "transferred_at", "last_error"],
+  device_installation_location_revisions: ["revision_uuid", "device_eui", "installation_uuid", "source_gateway_device_eui", "base_revision_uuid", "revision_no", "latitude", "longitude", "altitude_m", "vertical_reference", "accuracy_m", "antenna_height_agl_m", "coordinate_source", "effective_from", "recorded_at", "actor_user_uuid", "supersedes_revision_uuid", "sync_version", "created_at"],
+  device_radio_configuration_revisions: ["revision_uuid", "device_eui", "installation_uuid", "source_gateway_device_eui", "base_revision_uuid", "revision_no", "tx_power_dbm", "antenna_gain_dbi", "feeder_loss_db", "configuration_source", "effective_from", "recorded_at", "actor_user_uuid", "supersedes_revision_uuid", "sync_version", "created_at"],
+
   devices: [
     'id',
     'deveui',

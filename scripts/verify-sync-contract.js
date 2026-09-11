@@ -84,6 +84,8 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
+    DEVICE_INSTALLATION_LOCATION_REVISED: {aggregate_key_path: 'payload.revision_uuid', sync_version_path: 'payload.sync_version'},
+    DEVICE_RADIO_CONFIGURATION_REVISED: {aggregate_key_path: 'payload.revision_uuid', sync_version_path: 'payload.sync_version'},
     JOURNAL_ENTRY_UPSERTED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_ENTRY_VOIDED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_VOCAB_UPSERTED: { aggregate_key_path: 'payload.custom_field_uuid', sync_version_path: 'payload.sync_version' },

@@ -69,6 +69,10 @@ const OSI_SCOPED_ACCESS_COMMANDS_BINDING = {
     variable: 'osiScopedAccessCommands',
     module: 'scoped-access-commands',
 };
+const OSI_INSTALLATION_LOCATION_BINDING = {
+    variable: 'installationLocation',
+    module: 'installation-location',
+};
 
 function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
@@ -288,6 +292,7 @@ const journalApply = byId['journal-command-apply-fn'];
 const terraZoneConfigApply = byId['terra-zone-config-command-apply-fn'];
 const scopedAccessApply = byId['scoped-access-command-apply-fn'];
 const zoneCommandApply = byId['zone-command-apply-fn'];
+const installationRevisionApply = byId['installation-revision-command-apply-fn'];
 const ackQueue = byId['command-ack-queue-rest'];
 const commandUpdate = byId['4f4a765f36cee6f3'];
 const commandApply = byId['78d3d38be30a8741'];
@@ -416,11 +421,23 @@ if (!weatherZonesCommandApply || !requireOsiLibContract(
     'weather station zones commands: applier',
     'Weather station zones command helpers unavailable:'
 ) || JSON.stringify(weatherZonesCommandApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
+    ['installation-revision-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyWeatherStationZonesCommand/.test(weatherZonesCommandApply.func || '') ||
     !/\.close\s*\(/.test(weatherZonesCommandApply.func || '')) {
     failures.push('weather station zones commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
+}
+if (!installationRevisionApply || !requireOsiLibContract(
+    installationRevisionApply,
+    [OSI_DB_BINDING, OSI_INSTALLATION_LOCATION_BINDING, OSI_SCOPE_BINDING],
+    'installation revision commands: applier',
+    'Installation revision command helpers unavailable:'
+) || JSON.stringify(installationRevisionApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyCommand/.test(installationRevisionApply.func || '') ||
+    !/\.close\s*\(/.test(installationRevisionApply.func || '')) {
+    failures.push('installation revision commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
 }
 if (!ackQueue || !requireOsiLibContract(
     ackQueue,

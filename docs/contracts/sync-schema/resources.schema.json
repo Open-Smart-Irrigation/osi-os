@@ -658,6 +658,211 @@
                     "description": "Last-write-wins snapshot field -- this table has no sync_version bookkeeping column of its own (unlike ValveSettings). Deterministic from the row's own terminal timestamps (COALESCE(observed_close_at, expected_close_at, commanded_at)), never wall-clock 'now': the row never changes again once terminal, so a repeated emission (bootstrap replay, a later trigger-backfill touching the same row) resolves to the SAME archived_at rather than drifting forward on every re-run. Precisely BECAUSE a correction re-emit ties on archived_at rather than advancing it, the cloud applier MUST resolve ties with >= (a later-ARRIVING event with an equal archived_at wins), not a strict >, or a correction that fixes trigger/estimated_gross_liters/volume_source on an already-applied row would lose the tie and be silently dropped. This deliberately diverges from ValveRuntime.as_of's own strict-last-write-wins ruling (P3-E1) -- as_of is a fresh wall-clock read on every emission and effectively never ties, while archived_at is deliberately reused verbatim across corrections. See canonicalization.md."
                 }
             }
+        },
+        "DeviceInstallationLocationRevision": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version",
+                "revision_uuid",
+                "device_eui",
+                "installation_uuid",
+                "source_gateway_device_eui",
+                "base_revision_uuid",
+                "revision_no",
+                "effective_from",
+                "recorded_at",
+                "actor_user_uuid",
+                "supersedes_revision_uuid",
+                "sync_version",
+                "created_at",
+                "latitude",
+                "longitude",
+                "altitude_m",
+                "vertical_reference",
+                "accuracy_m",
+                "antenna_height_agl_m",
+                "coordinate_source"
+            ],
+            "properties": {
+                "contract_version": {
+                    "type": "integer",
+                    "const": 1
+                },
+                "revision_uuid": {
+                    "$ref": "#/definitions/CanonicalUuid"
+                },
+                "device_eui": {
+                    "$ref": "#/definitions/Eui64"
+                },
+                "installation_uuid": {
+                    "$ref": "#/definitions/CanonicalUuid"
+                },
+                "source_gateway_device_eui": {
+                    "$ref": "#/definitions/Eui64"
+                },
+                "base_revision_uuid": {
+                    "$ref": "#/definitions/NullableCanonicalUuid"
+                },
+                "revision_no": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "effective_from": {
+                    "$ref": "#/definitions/CanonicalUtcTimestamp"
+                },
+                "recorded_at": {
+                    "$ref": "#/definitions/CanonicalUtcTimestamp"
+                },
+                "actor_user_uuid": {
+                    "$ref": "#/definitions/NullableCanonicalUuid"
+                },
+                "supersedes_revision_uuid": {
+                    "$ref": "#/definitions/NullableCanonicalUuid"
+                },
+                "sync_version": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "created_at": {
+                    "$ref": "#/definitions/CanonicalUtcTimestamp"
+                },
+                "latitude": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                },
+                "longitude": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                },
+                "altitude_m": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "vertical_reference": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 80
+                },
+                "accuracy_m": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "antenna_height_agl_m": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "coordinate_source": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                }
+            }
+        },
+        "DeviceRadioConfigurationRevision": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version",
+                "revision_uuid",
+                "device_eui",
+                "installation_uuid",
+                "source_gateway_device_eui",
+                "base_revision_uuid",
+                "revision_no",
+                "effective_from",
+                "recorded_at",
+                "actor_user_uuid",
+                "supersedes_revision_uuid",
+                "sync_version",
+                "created_at",
+                "tx_power_dbm",
+                "antenna_gain_dbi",
+                "feeder_loss_db",
+                "configuration_source"
+            ],
+            "properties": {
+                "contract_version": {
+                    "type": "integer",
+                    "const": 1
+                },
+                "revision_uuid": {
+                    "$ref": "#/definitions/CanonicalUuid"
+                },
+                "device_eui": {
+                    "$ref": "#/definitions/Eui64"
+                },
+                "installation_uuid": {
+                    "$ref": "#/definitions/CanonicalUuid"
+                },
+                "source_gateway_device_eui": {
+                    "$ref": "#/definitions/Eui64"
+                },
+                "base_revision_uuid": {
+                    "$ref": "#/definitions/NullableCanonicalUuid"
+                },
+                "revision_no": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "effective_from": {
+                    "$ref": "#/definitions/CanonicalUtcTimestamp"
+                },
+                "recorded_at": {
+                    "$ref": "#/definitions/CanonicalUtcTimestamp"
+                },
+                "actor_user_uuid": {
+                    "$ref": "#/definitions/NullableCanonicalUuid"
+                },
+                "supersedes_revision_uuid": {
+                    "$ref": "#/definitions/NullableCanonicalUuid"
+                },
+                "sync_version": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "created_at": {
+                    "$ref": "#/definitions/CanonicalUtcTimestamp"
+                },
+                "tx_power_dbm": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "antenna_gain_dbi": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 13
+                },
+                "feeder_loss_db": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "minimum": 0
+                },
+                "configuration_source": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                }
+            }
         }
     }
 }

@@ -1537,7 +1537,7 @@ expectIncludes('Mark History Batch ACK', "osiLib.require('history-sync')", 'mark
 expectIncludes('Build History Batch', "source: 'history-build', message: 'helper unavailable: '", 'records helper-load failure into sync_state');
 expectIncludes('Mark History Batch ACK', "source: 'history-mark', message: 'helper unavailable: '", 'records helper-load failure into sync_state');
 expectIncludes('Build History Batch', "state === 'shadow'", 'runs each history table in shadow mode first');
-expectIncludes('Build History Batch', 'helper.tableNames()', 'uses the complete durable history table registry');
+expectIncludes('Build History Batch', 'helper.tableNames({includeRadio:', 'uses the durable history registry with opt-in radio capture');
 expectIncludes('Build History Batch', 'helper.nextTable(', 'rotates history tables fairly');
 expectIncludes('Build History Batch', 'hashVersion: 1', 'uses history hash v1');
 expectIncludes('Build History Batch', '/api/v1/sync/edge/history/batches', 'posts history batches to the v1 history endpoint');
@@ -1897,7 +1897,8 @@ expectWireById('terra-zone-config-command-apply-fn', 'zone-command-apply-fn', 'r
 expectWireById('terra-zone-config-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted Terra zone-config ACKs');
 expectWireById('zone-command-apply-fn', 'weather-zones-command-apply-fn', 'routes recognized non-zone commands through the weather station zones applier');
 expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted versioned zone ACKs');
-expectWireById('weather-zones-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-weather commands to the existing router');
+expectWireById('weather-zones-command-apply-fn', 'installation-revision-command-apply-fn', 'routes non-weather commands through installation revisions');
+expectWireById('installation-revision-command-apply-fn', '934bf2bc19a8ce22', 'falls through other commands to the existing router');
 expectWireById('weather-zones-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted weather station zones ACKs');
 expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');

@@ -51,5 +51,8 @@
   "0050__weather_station_zone_backfill.sql": "77dfa221bc87b171a0e11518a720d16a117f22ae022896bdcd1dc0fb0e6a26e5",
   "0051__durable_history_batch.sql": "020c37d9ad563d970bd43c40f7dc760590e28c320a03f8a502381b88d8b18cad",
   "0052__installation_identity.sql": "3cb46273464d3057163f60d5709ae39bcc33bd4ca12f91681a535fad0e631a98",
-  "0053__installation_identity_backfill.sql": "0714d087204d6ea6e779ca65f615612814191c706ccfa5e1ef01d57472e27822"
+  "0053__installation_identity_backfill.sql": "0714d087204d6ea6e779ca65f615612814191c706ccfa5e1ef01d57472e27822",
+  "0054__installation_location_revisions.sql": "f42c7ccf9b89010e89cf33a268e2bd9b1ec824095d6375f295ac5b5a8adce206",
+  "0055__radio_store_identity.sql": "21d21038f5b95610089fe279603abffef8286471ca92018f6c3dea3f04fdffa9",
+  "0056__installation_revision_outbox.sql": "35af4279d08229ab29819c7596e49f65cb526ee9017ea5f6e942895d486a24f0"
 }

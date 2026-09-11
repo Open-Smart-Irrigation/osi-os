@@ -15,6 +15,7 @@ import { AdminOnly } from './components/AdminOnly';
 import { UsersPage } from './pages/admin/UsersPage';
 import { GrantsPage } from './pages/admin/GrantsPage';
 import { ScopeStatusBanner } from './components/ScopeStatusBanner';
+import { NetworkPage } from './pages/NetworkPage';
 import { AnalysisRoute } from './pages/AnalysisRoute';
 
 function App() {
@@ -86,6 +87,8 @@ function App() {
               </PrivateRoute>
             }
           />
+
+          <Route path="/network" element={<PrivateRoute><NetworkPage /></PrivateRoute>} />
 
           <Route
             path="/history/zones/:zoneId"

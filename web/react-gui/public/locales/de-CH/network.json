@@ -1,0 +1,30 @@
+{
+  "network": {
+    "title": "Netzwerkbeobachtungen",
+    "device": "Gerät",
+    "location": "Installierter Standort",
+    "radio": "Funkkonfiguration",
+    "latitude": "Breitengrad",
+    "longitude": "Längengrad",
+    "txPower": "Sendeleistung (dBm)",
+    "gain": "Antennengewinn (dBi)",
+    "loss": "Kabelverlust (dB)",
+    "save": "Speichern",
+    "unknown": "Unbekannt",
+    "observations": "Beobachtungen",
+    "observationCount": "{{count}} Beobachtungen",
+    "noObservations": "Keine Beobachtungen",
+    "paused": "Netzwerkbeobachtungen sind pausiert.",
+    "loadError": "Netzwerkdaten konnten nicht geladen werden.",
+    "unavailable": "Netzwerkdaten sind vorübergehend nicht verfügbar.",
+    "saveError": "Netzwerkeinstellungen konnten nicht gespeichert werden.",
+    "conflict": "Dieses Gerät wurde inzwischen geändert. Neu laden und erneut versuchen.",
+    "dashboard": "Übersicht",
+    "map": "Netzwerkkarte",
+    "noKnownLocations": "Keine bekannten Positionen",
+    "mapEvidence": "Nur erfasste Positionen und Verbindungen; keine abgeleitete Flächenabdeckung.",
+    "unknownDevices": "Unbekannte Positionen",
+    "loadingMore": "Wird geladen…",
+    "loadMore": "Mehr laden"
+  }
+}

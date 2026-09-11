@@ -18,6 +18,10 @@ const bindings = {
     variable: 'osiScopedAccessCommands',
     module: 'scoped-access-commands',
   },
+  installationLocation: {
+    variable: 'installationLocation',
+    module: 'installation-location',
+  },
 };
 const expectedById = {
   'journal-api-router-fn': [bindings.db, bindings.journal, bindings.scope],
@@ -31,6 +35,11 @@ const expectedById = {
   ],
   'zone-command-apply-fn': [bindings.db, bindings.zoneCommands, bindings.scope],
   'weather-zones-command-apply-fn': [bindings.db, bindings.deviceCommands, bindings.scope],
+  'installation-revision-command-apply-fn': [
+    bindings.db,
+    bindings.installationLocation,
+    bindings.scope,
+  ],
   'command-ack-queue-rest': [bindings.db, bindings.ledger],
 };
 const exactLibs = [{ var: 'osiLib', module: 'osi-lib' }];

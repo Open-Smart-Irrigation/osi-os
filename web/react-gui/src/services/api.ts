@@ -383,6 +383,31 @@ export const devicesAPI = {
   },
 };
 
+export interface InstallationLocationRevision {
+  revisionUuid: string; revisionNo: number; latitude: number; longitude: number;
+  effectiveFrom: string; coordinateSource: string; accuracyM?: number | null;
+  sourceGatewayDeviceEui?: string | null;
+}
+export interface RadioConfigurationRevision {
+  revisionUuid: string; revisionNo: number; txPowerDbm?: number | null;
+  antennaGainDbi?: number | null; feederLossDb?: number | null;
+  effectiveFrom: string; configurationSource: string;
+}
+export interface NetworkObservation { id?: number; deveui: string; recorded_at: string; rssi?: number | null; metadata_json?: string | null; [key: string]: unknown; }
+export interface NetworkObservationPage { rows: NetworkObservation[]; truncated: boolean; nextOffset: number | null; from: string; to: string; }
+const normaliseLocation = (value: unknown): InstallationLocationRevision | null => {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as InstallationLocationRevision;
+  return Number.isFinite(row.latitude) && Number.isFinite(row.longitude) ? row : null;
+};
+export const networkAPI = {
+  location: async (deveui: string): Promise<InstallationLocationRevision | null> => normaliseLocation((await api.get(`/api/devices/${encodeURIComponent(deveui)}/installation-location`)).data),
+  radio: async (deveui: string): Promise<RadioConfigurationRevision | null> => (await api.get(`/api/devices/${encodeURIComponent(deveui)}/radio-configuration`)).data,
+  observations: async (limit = 500, offset = 0, window?: { from: string; to: string }): Promise<NetworkObservationPage> => (await api.get<NetworkObservationPage>('/api/network/observations', { params: { limit: Math.min(500, Math.max(1, limit)), offset: Math.max(0, Math.floor(offset)), ...window } })).data,
+  saveLocation: async (deveui: string, body: { revision_uuid: string; base_revision_uuid?: string | null; values: Record<string, unknown> }): Promise<InstallationLocationRevision> => (await api.put(`/api/devices/${encodeURIComponent(deveui)}/installation-location`, body)).data,
+  saveRadio: async (deveui: string, body: { revision_uuid: string; base_revision_uuid?: string | null; values: Record<string, unknown> }): Promise<RadioConfigurationRevision> => (await api.put(`/api/devices/${encodeURIComponent(deveui)}/radio-configuration`, body)).data,
+};
+
 export interface Sdi12ConfigRequest {
   probe_profile: string;
   depths?: Record<string, number>;

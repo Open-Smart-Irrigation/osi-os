@@ -1,0 +1,7 @@
+'use strict';
+const test=require('node:test');const assert=require('node:assert/strict');
+const {fromChirpStack}=require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/chirpstack');
+const event={deviceInfo:{devEui:'a84041cafecafe01'},deduplicationId:'abc',time:'2026-09-10T10:00:00Z',data:'AAAAAAAAAAAAAA==',fPort:1,txInfo:{frequency:868100000,modulation:{lora:{spreadingFactor:12,bandwidth:125000}}},rxInfo:[{gatewayId:'0016c001f11715e2',rssi:-91,snr:4}]};
+test('extracts common rxInfo without decoding arbitrary sensor payload as GPS',()=>{const row=fromChirpStack(event);assert.equal(row.deveui,'A84041CAFECAFE01');assert.equal(row.metadata.reported_position,null);assert.equal(row.metadata.receivers[0].rssi_dbm,-91);assert.equal(row.metadata.radio.bandwidth_hz,125000);assert.equal(JSON.stringify(row).includes(event.data),false);});
+test('known tester uses existing GPS codec only at supported port',()=>{const row=fromChirpStack({...event,deviceInfo:{...event.deviceInfo,deviceProfileName:'Field Tester'}},{testerProfileName:'Field Tester'});assert.ok(row.metadata.reported_position);assert.equal(fromChirpStack({...event,fPort:2},{testerProfileName:'other'}).metadata.reported_position,null);});
+test('gateway snapshot cannot attach a future/current fix to delayed uplink',()=>{const gateway={latitude:46,longitude:6,last_good_fix_at:'2026-09-10T12:00:00Z',status:'fixed',sync_version:2};assert.equal(fromChirpStack(event,{gatewayPositions:{'0016C001F11715E2':gateway}}).metadata.receivers[0].position,null);});
