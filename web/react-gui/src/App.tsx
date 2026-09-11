@@ -1,4 +1,3 @@
-import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ScopeProvider } from './contexts/ScopeContext';
@@ -16,10 +15,7 @@ import { AdminOnly } from './components/AdminOnly';
 import { UsersPage } from './pages/admin/UsersPage';
 import { GrantsPage } from './pages/admin/GrantsPage';
 import { ScopeStatusBanner } from './components/ScopeStatusBanner';
-
-const AnalysisRoute = lazy(() =>
-  import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
-);
+import { AnalysisRoute } from './pages/AnalysisRoute';
 
 function App() {
   return (
@@ -86,9 +82,7 @@ function App() {
             path="/analysis"
             element={
               <PrivateRoute>
-                <Suspense fallback={<div className="p-6 text-sm text-[var(--text-secondary)]">Loading analysis...</div>}>
-                  <AnalysisRoute />
-                </Suspense>
+                <AnalysisRoute />
               </PrivateRoute>
             }
           />
