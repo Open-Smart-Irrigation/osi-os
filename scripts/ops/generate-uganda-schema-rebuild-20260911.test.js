@@ -138,11 +138,19 @@ async function buildDriftedFixture(db) {
     'ALTER TABLE zic_drift RENAME TO zone_irrigation_calibration;',
     "INSERT INTO zone_irrigation_calibration (zone_id, valve_device_eui, measured_flow_rate_lpm, measurement_method, measured_at, created_at, updated_at) VALUES (7777, 'X', 3.5, 'bucket_test', datetime('now'), datetime('now'), datetime('now'));",
 
+    // A real irrigation_zones row is required: zone_weather_cache gains an FK
+    // to it during the rebuild, and preflightTableData's orphan guard would
+    // (correctly) refuse a zone_id with no matching row. A fresh
+    // reference(1) DB seeds neither users nor irrigation_zones, so both are
+    // inserted here (FK enforcement is off for this whole block anyway).
+    "INSERT INTO users (username, password_hash, created_at) VALUES ('testuser', 'x', datetime('now'));",
+    "INSERT INTO irrigation_zones (name, user_id) VALUES ('Test Zone', (SELECT id FROM users WHERE username='testuser'));",
+
     zwcDrift + ';',
     'INSERT INTO zwc_drift (zone_id, cache_key, source, payload_json, observed_at, expires_at) SELECT zone_id, cache_key, source, payload_json, observed_at, expires_at FROM zone_weather_cache;',
     'DROP TABLE zone_weather_cache;',
     'ALTER TABLE zwc_drift RENAME TO zone_weather_cache;',
-    "INSERT INTO zone_weather_cache (zone_id, cache_key, payload_json, expires_at, created_at, updated_at) SELECT id, 'et0', '{}', '2026-01-01', datetime('now'), datetime('now') FROM irrigation_zones LIMIT 1;",
+    "INSERT INTO zone_weather_cache (zone_id, cache_key, payload_json, expires_at, created_at, updated_at) SELECT id, 'et0', '{}', '2026-01-01', datetime('now'), datetime('now') FROM irrigation_zones WHERE name='Test Zone';",
 
     'COMMIT;',
     'PRAGMA foreign_keys=ON;',
@@ -163,7 +171,10 @@ test('generate() emits verbatim, per-table REBUILD/ALTER blocks with no ad hoc D
   assert.match(sql, /-- === REBUILD: valve_actuation_expectations ===/);
   assert.match(sql, /-- === REBUILD: zone_irrigation_calibration ===/);
   assert.match(sql, /-- === REBUILD: zone_weather_cache ===/);
-  assert.match(sql, /created_at\s*\n\s*\)\s*\n\s*FROM zone_weather_cache;/); // fetched_at <- created_at mapping present
+  // fetched_at <- created_at mapping: destination column list names fetched_at,
+  // the corresponding SELECT source expression is created_at.
+  assert.match(sql, /fetched_at,\s*\n\s*expires_at\s*\n\s*\)/);
+  assert.match(sql, /observed_at,\s*\n\s*created_at,\s*\n\s*expires_at\s*\n\s*FROM zone_weather_cache;/);
   assert.match(sql, /PRAGMA foreign_keys = OFF;\nPRAGMA legacy_alter_table = ON;\nBEGIN IMMEDIATE;/);
 });
 
@@ -216,8 +227,12 @@ test('apply() rebuilds the drifted fixture to a clean reference(1) match, is ide
   // failure check - so verify() reported PASS even with 3 real indexes
   // missing. Assert the indexes explicitly, independent of verify()'s own
   // (now-fixed) scoping.
+  // Excludes sqlite_autoindex_* (SQLite's own hidden index backing the
+  // non-integer TEXT PRIMARY KEY on expectation_id - present regardless of
+  // this rebuild, not one of the 3 indexes the rebuild block is responsible
+  // for recreating).
   const vaeIndexNames = (await runner.all(
-    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='valve_actuation_expectations'"))
+    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='valve_actuation_expectations' AND name NOT LIKE 'sqlite_autoindex_%'"))
     .map((r) => r.name);
   assert.deepEqual(vaeIndexNames.sort(), ['idx_valve_act_exp_active', 'idx_valve_act_exp_device_eui', 'idx_valve_act_exp_effect_key'].sort());
 
