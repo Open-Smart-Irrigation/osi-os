@@ -277,6 +277,60 @@ integrity_check` and `PRAGMA foreign_key_check` and refuses to report success
 if either fails (the latter would catch, among other things, a mapping bug
 that let an orphan slip past the preflight guards).
 
+### Accepted deviations from SQLite's literal 12-step procedure (adversarial review, 2026-09-11)
+
+The upstream 12-step procedure (sqlite.org/lang_altertable.html §7) describes
+running `PRAGMA foreign_key_check` **inside** the same transaction, immediately
+before `COMMIT`, so a violation can be caught and rolled back atomically
+without ever having committed a bad state. This artifact's `apply()` instead
+runs it **after** `COMMIT` (see above) - a deliberate, reviewed deviation, not
+an oversight:
+
+- `lib/osi-migrate/runner-iface.js`'s `cliRunner` spawns a **fresh `sqlite3`
+  CLI process per `exec()`/`all()` call**. `PRAGMA foreign_key_check` is a
+  session-scoped connection setting/query in SQLite - it has no meaning
+  "inside a transaction" across a process boundary, and this runner has no
+  persistent connection to run it against mid-transaction even if the SQL
+  text asked it to. This is a property of the runner abstraction this
+  artifact deliberately reuses (the same one `lib/osi-migrate/runner.js`'s
+  own `destructive`-class migrations use), not something unique to this
+  artifact.
+- **The effective substitute guard is the per-table orphan preflights**
+  (§3.2 `device_data`, §3.6 `zone_weather_cache`) run immediately before each
+  table's DDL, plus Node-RED being stopped for the whole window (no
+  concurrent writer can introduce a fresh orphan between the preflight read
+  and the DDL that declares the FK). This is weaker than an atomic in-
+  transaction check in one narrow sense - a preflight-then-DDL sequence is
+  two separate steps, not one atomic operation - but with writers stopped
+  there is no actor that could change `device_data`/`zone_weather_cache` between
+  them, so the practical gap is null on a correctly-operated window.
+  The post-`COMMIT` `foreign_key_check` is still real and still useful: it is
+  the last-resort catch for a mapping bug in the generator itself (as opposed
+  to a data-shape problem the preflights are designed for), and `apply()`
+  still refuses to report success if it finds a violation - the DB is left in
+  the (now-detected-bad) committed state for the operator to see the
+  `foreign_key_check` output and restore the pre-rebuild backup, rather than
+  a silent no-op rollback of a state no one gets to inspect.
+
+**The post-transaction `PRAGMA foreign_keys = ON` restore is, for the same
+reason, a no-op.** `PRAGMA foreign_keys` is a per-connection session setting;
+by the time `runner.exec('PRAGMA foreign_keys = ON;\n...')` runs, it is a
+brand-new `sqlite3` CLI process with its own default-`ON` session state - it
+was never "off" for that process to begin with, and the toggle has no
+lingering effect on any FUTURE connection to the same database file either
+(the pragma is not persisted in the database itself). It is kept in the
+generated SQL and in `apply()`'s script assembly purely for **readability and
+provenance**: a human reviewing the artifact (or the `PRAGMA foreign_keys =
+OFF` / `= ON` bracket in isolation, e.g. copy-pasted into an interactive
+`sqlite3` session for manual inspection) sees the conventional
+disable/re-enable pairing and does not have to separately learn "this
+particular runner makes the restore a no-op" to trust that the artifact isn't
+silently leaving FK enforcement off. `PRAGMA legacy_alter_table` is genuinely
+different: it is *also* session-scoped and *also* a no-op as a "restore" in
+this runner, for the identical reason - stated here explicitly rather than
+implied, since the artifact's own header comment could otherwise read as
+claiming a durable effect it does not have.
+
 The other 4 tables (`irrigation_events`, `valve_actuation_expectations`,
 `zone_irrigation_calibration`, `zone_weather_cache`) have no FK relationship
 to `devices`/`device_data` or to each other, so their relative order inside

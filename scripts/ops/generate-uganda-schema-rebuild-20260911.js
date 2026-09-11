@@ -546,8 +546,23 @@ async function apply(dbPath, log = console.error) {
   // required, not just foreign_keys=OFF).
   const script = `PRAGMA foreign_keys = OFF;\nPRAGMA legacy_alter_table = ON;\nBEGIN IMMEDIATE;\n\n${body}\n\nCOMMIT;\n`;
   await runner.exec(script);
+  // This "restore" is a no-op: cliRunner spawns a fresh sqlite3 CLI process
+  // per exec() call, so the process that ran the OFF/ON toggle above has
+  // already exited - there is no lingering session for `= ON` to restore
+  // anything on, and neither PRAGMA persists in the database file itself.
+  // Kept for readability/provenance (a human - or a copy-paste into an
+  // interactive sqlite3 session - sees the conventional disable/re-enable
+  // pairing), not because it has a durable effect. See the design doc's
+  // "Accepted deviations from SQLite's literal 12-step procedure" section.
   await runner.exec('PRAGMA foreign_keys = ON;\nPRAGMA legacy_alter_table = OFF;');
 
+  // Also a deliberate deviation from the literal 12-step procedure (which
+  // runs this INSIDE the transaction, before COMMIT): the same fresh-
+  // process-per-exec() property means there is no way to run it pre-commit
+  // through this runner. The per-table orphan preflights (preflightTableData,
+  // run above with writers stopped) are the effective equivalent guard; this
+  // post-commit check is the last-resort catch for a mapping bug in the
+  // generator itself. See the design doc for the full rationale.
   const integrity = execFileSync('sqlite3', [dbPath, 'PRAGMA integrity_check'], { encoding: 'utf8' }).trim();
   if (integrity !== 'ok') throw new Error(`post-apply integrity_check failed: ${integrity}`);
   const fkViolations = execFileSync('sqlite3', [dbPath, 'PRAGMA foreign_key_check'], { encoding: 'utf8' }).trim();
