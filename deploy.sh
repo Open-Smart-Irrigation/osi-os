@@ -354,7 +354,10 @@ fetch_migration_runner() {
         baseline-existing-db.js \
         repair-sync-outbox-v2.js \
         migrate-cli.js \
-        semantic-schema-compare.js
+        semantic-schema-compare.js \
+        restamp-fingerprints.js \
+        verify-head-cli.js \
+        verify-runtime-schema-parity.js
     do
         fetch_required "Migration script $script" "scripts/$script" "$TMP_DIR/scripts/$script"
     done

@@ -38,6 +38,9 @@ test('deploy migration wiring fetches the runner, Stage 0 helpers, and semantic 
     'repair-sync-outbox-v2.js',
     'migrate-cli.js',
     'semantic-schema-compare.js',
+    'restamp-fingerprints.js',
+    'verify-head-cli.js',
+    'verify-runtime-schema-parity.js',
   ]) {
     assert.match(deploy, new RegExp(`\\b${escapeRegExp(script)}\\b`), script);
   }

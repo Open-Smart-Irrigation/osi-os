@@ -97,56 +97,69 @@ function triggerNames(text) {
   return new Set([...text.matchAll(/CREATE TRIGGER (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)/gi)].map((m) => m[1]));
 }
 
-// Canonical schema from the seed: the devices CHECK type-set and the full trigger set.
-const canonDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'parity-')), 'canon.db');
-execFileSync('sqlite3', ['-bail', canonDb], { input: fs.readFileSync(SEED, 'utf8'), encoding: 'utf8' });
-const canonDevices = checkTypes((q(canonDb, "SELECT sql FROM sqlite_master WHERE name='devices'")[0] || {}).sql);
-const canonTriggers = new Set(q(canonDb, "SELECT name FROM sqlite_master WHERE type='trigger'").map((r) => r.name));
-const runtimeCanonTriggers = new Set([...canonTriggers].filter((name) => !MIGRATION_OWNED_TRIGGERS.has(name)));
-
 const setEq = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const diff = (a, b) => [...a].filter((x) => !b.has(x));
 
-const problems = [];
-for (const [triggerName, migrationName] of MIGRATION_OWNED_TRIGGERS) {
-  if (!canonTriggers.has(triggerName)) {
-    problems.push(`migration-owned trigger ${triggerName} is not present in the canonical seed`);
-  }
-  const migrationPath = path.join(
-    repo,
-    'database/migrations/ordered',
-    migrationName
-  );
-  if (!fs.existsSync(migrationPath)) {
-    problems.push(`migration-owned trigger ${triggerName} has no migration ${migrationName}`);
-  } else if (!triggerNames(fs.readFileSync(migrationPath, 'utf8')).has(triggerName)) {
-    problems.push(`migration ${migrationName} does not create ${triggerName}`);
-  }
-}
-for (const flowPath of FLOWS) {
-  const rel = path.relative(repo, flowPath);
-  const raw = fs.readFileSync(flowPath, 'utf8');
-  const node = JSON.parse(raw).find((n) => n.id === 'sync-init-fn');
-  if (!node) throw new Error(`${rel}: sync-init-fn node not found`);
+// Everything below has real side effects (spawns the sqlite3 CLI against a temp
+// DB) and is only appropriate for the CLI entry point — a module consumer
+// (runner.js's osi-os#212 boot-trigger grace path) needs only the
+// MIGRATION_OWNED_TRIGGERS map above, not a re-run of this whole verifier on
+// every require(). Guarded behind run() / require.main below.
+function run() {
+  // Canonical schema from the seed: the devices CHECK type-set and the full trigger set.
+  const canonDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'parity-')), 'canon.db');
+  execFileSync('sqlite3', ['-bail', canonDb], { input: fs.readFileSync(SEED, 'utf8'), encoding: 'utf8' });
+  const canonDevices = checkTypes((q(canonDb, "SELECT sql FROM sqlite_master WHERE name='devices'")[0] || {}).sql);
+  const canonTriggers = new Set(q(canonDb, "SELECT name FROM sqlite_master WHERE type='trigger'").map((r) => r.name));
+  const runtimeCanonTriggers = new Set([...canonTriggers].filter((name) => !MIGRATION_OWNED_TRIGGERS.has(name)));
 
-  // (a) devices_new CHECK — the regression site (specific to sync-init-fn's rebuild).
-  const dm = /devices_new\s*\(id[\s\S]*?CHECK\s*\(\s*type_id\s+IN\s*\(([\s\S]*?)\)/i.exec(node.func || '');
-  const devTypes = new Set(((dm && dm[1].match(/'[^']*'/g)) || []).map((s) => s.slice(1, -1)));
-  if (!setEq(devTypes, canonDevices)) {
-    problems.push(`${rel}: sync-init-fn devices_new CHECK != canonical seed. missing=[${diff(canonDevices, devTypes)}] extra=[${diff(devTypes, canonDevices)}]`);
+  const problems = [];
+  for (const [triggerName, migrationName] of MIGRATION_OWNED_TRIGGERS) {
+    if (!canonTriggers.has(triggerName)) {
+      problems.push(`migration-owned trigger ${triggerName} is not present in the canonical seed`);
+    }
+    const migrationPath = path.join(
+      repo,
+      'database/migrations/ordered',
+      migrationName
+    );
+    if (!fs.existsSync(migrationPath)) {
+      problems.push(`migration-owned trigger ${triggerName} has no migration ${migrationName}`);
+    } else if (!triggerNames(fs.readFileSync(migrationPath, 'utf8')).has(triggerName)) {
+      problems.push(`migration ${migrationName} does not create ${triggerName}`);
+    }
+  }
+  for (const flowPath of FLOWS) {
+    const rel = path.relative(repo, flowPath);
+    const raw = fs.readFileSync(flowPath, 'utf8');
+    const node = JSON.parse(raw).find((n) => n.id === 'sync-init-fn');
+    if (!node) throw new Error(`${rel}: sync-init-fn node not found`);
+
+    // (a) devices_new CHECK — the regression site (specific to sync-init-fn's rebuild).
+    const dm = /devices_new\s*\(id[\s\S]*?CHECK\s*\(\s*type_id\s+IN\s*\(([\s\S]*?)\)/i.exec(node.func || '');
+    const devTypes = new Set(((dm && dm[1].match(/'[^']*'/g)) || []).map((s) => s.slice(1, -1)));
+    if (!setEq(devTypes, canonDevices)) {
+      problems.push(`${rel}: sync-init-fn devices_new CHECK != canonical seed. missing=[${diff(canonDevices, devTypes)}] extra=[${diff(devTypes, canonDevices)}]`);
+    }
+
+    // (b) triggers — created across MULTIPLE flow nodes, so compare the WHOLE flow text.
+    const flowTriggers = triggerNames(raw);
+    if (!setEq(flowTriggers, runtimeCanonTriggers)) {
+      problems.push(`${rel}: runtime flow trigger set != canonical runtime trigger set. missing=[${diff(runtimeCanonTriggers, flowTriggers)}] extra=[${diff(flowTriggers, runtimeCanonTriggers)}]`);
+    }
   }
 
-  // (b) triggers — created across MULTIPLE flow nodes, so compare the WHOLE flow text.
-  const flowTriggers = triggerNames(raw);
-  if (!setEq(flowTriggers, runtimeCanonTriggers)) {
-    problems.push(`${rel}: runtime flow trigger set != canonical runtime trigger set. missing=[${diff(runtimeCanonTriggers, flowTriggers)}] extra=[${diff(flowTriggers, runtimeCanonTriggers)}]`);
+  if (problems.length) {
+    console.error('verify-runtime-schema-parity: FAIL');
+    for (const p of problems) console.error(`  - ${p}`);
+    process.exit(1);
   }
+  console.log(`verify-runtime-schema-parity: OK (${FLOWS.length} flows: devices CHECK + runtime trigger parity)`);
+  process.exit(0);
 }
 
-if (problems.length) {
-  console.error('verify-runtime-schema-parity: FAIL');
-  for (const p of problems) console.error(`  - ${p}`);
-  process.exit(1);
+if (require.main === module) {
+  run();
 }
-console.log(`verify-runtime-schema-parity: OK (${FLOWS.length} flows: devices CHECK + runtime trigger parity)`);
-process.exit(0);
+
+module.exports = { MIGRATION_OWNED_TRIGGERS, run };
