@@ -75,7 +75,45 @@ All classes run a postflight (`PRAGMA integrity_check` = `ok`,
 failed batch leaves migrations 1..k-1 consistently stamped and retryable. A
 preflight compares live fingerprints against the stored baseline and refuses
 on drift, pointing at `scripts/restamp-fingerprints.js` as the sanctioned
-recovery for a verified-good schema.
+recovery for a verified-good schema (`--report` prints the stored-vs-live
+diff without writing; the default/`--apply` form restamps).
+
+**Two provably-safe grace paths sit ahead of that refusal, both in
+`runner.js`, both self-healing with zero operator action:**
+
+1. **Normalizer-scheme upgrade (osi-os#153).** `fingerprints.js` tags every
+   hash with its normalizer version, so bumping `NORMALIZER_VERSION` alone
+   makes every stored hash mismatch the live recompute even when nothing
+   about the schema changed. The preflight recomputes live fingerprints under
+   `PREVIOUS_NORMALIZER_VERSION` too; if that matches the stored stamp
+   exactly, only the scheme advanced — restamp and proceed.
+2. **Boot-node-owned trigger body drift (osi-os#212).** The legacy
+   `sync-init-fn` boot node (see "Boot-DDL freeze" above) re-creates ~20
+   trigger names it shares with the ordered migrations on every Node-RED
+   start, substituting this gateway's real `gateway_device_eui` for the
+   migration-baked fallback literal and reformatting the SQL as a compact
+   single-line template literal. When `deploy.sh` stamps fingerprints right
+   after the migration runner commits (Node-RED stopped) and Node-RED then
+   restarts before the *next* stamp, the live schema no longer matches the
+   stamp under *either* normalizer scheme, because the mismatch is a real
+   content difference, not a hash-scheme artifact. Root-cause investigation
+   (2026-09-11, live kaba100 evidence) found **no parity gap at `main` HEAD**
+   between `sync-init-fn`'s literal and the migrations —
+   `scripts/verify-trigger-body-parity.js` already canonicalizes both the
+   gateway-EUI literal and formatting spacing and passes — the gap was
+   purely in the runner's drift check, which only had the normalizer-scheme
+   comparison to fall back on. The fix: build `reference(appliedHead)` (the
+   schema `scripts/baseline-existing-db.js`'s migrations-only bootstrap chain
+   would produce for exactly the migrations already applied on this device)
+   and compare it against the live schema with
+   `scripts/semantic-schema-compare.js`. Every diff must be a `changed`
+   trigger body, and that trigger's name must be in the boot-node-owned set —
+   everything the reference migrations create that is **not** in
+   `scripts/verify-runtime-schema-parity.js`'s `MIGRATION_OWNED_TRIGGERS` map
+   (existence is still required for those triggers; only body content is
+   exempted) — or the preflight refuses exactly as before. A real
+   table/column/index/view diff, a missing trigger, or a non-boot-owned
+   trigger body diff is never tolerated.
 
 Execution happens at deploy time, not boot. `deploy.sh run_schema_migration()`
 fetches the migration corpus, `scripts/migrate-cli.js`, and the runner onto
