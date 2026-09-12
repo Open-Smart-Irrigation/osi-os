@@ -8,6 +8,7 @@
     "activity": "Log activity"
   },
   "data": "Data",
+  "network": "Network",
   "admin": "Admin",
   "adminMenu": {
     "users": "Users",

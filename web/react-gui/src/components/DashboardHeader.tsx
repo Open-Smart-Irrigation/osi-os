@@ -69,7 +69,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 to="/network"
                 className="w-[calc(50%-4px)] sm:w-auto bg-sky-700 hover:bg-sky-800 text-white font-bold text-lg px-6 py-3 rounded-lg transition-colors shadow-lg text-center"
               >
-                {t('network', { defaultValue: 'Network' })}
+                {t('dashboard:network', { defaultValue: 'Network' })}
               </Link>
             )}
 
