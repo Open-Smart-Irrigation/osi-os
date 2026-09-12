@@ -201,6 +201,48 @@ test('deploy migration wiring: a main-numbered gateway (checksums already match)
   assert.equal(invocationMentions.length, 1, 'exactly one (the invocation) must fall inside the checksum-mismatch branch');
 });
 
+test('deploy migration wiring flips the payload BEFORE restarting Node-RED on migrate-cli success (issue #222 / F4)', () => {
+  // The Uganda 2026-09-12 incident's fleet-wide root cause: run_schema_migration
+  // used to call restart_node_red() immediately after a successful migrate-cli,
+  // while the deploy's new flows.json payload was still only staged (the flip
+  // happens much later, in the "Flip payload + local health self-check" block).
+  // That restart started Node-RED on the OLD flows against the NEWLY migrated
+  // schema. The fix: flip the staged payload first, so any restart from this
+  // point on is always on the migration-target flows.
+  const migrateSuccessIdx = indexOf(
+    'if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then'
+  );
+  const migrateFailureIdx = indexOf('migration_rc=$?');
+  assert.ok(migrateFailureIdx > migrateSuccessIdx, 'must find the failure branch of the migrate-cli conditional');
+  const successBlock = deploy.slice(migrateSuccessIdx, migrateFailureIdx);
+
+  const flipCallIdx = successBlock.indexOf('swap_call flipTo "$DEPLOY_STAMP"');
+  const payloadFlippedSetIdx = successBlock.indexOf('PAYLOAD_FLIPPED=1');
+  const restartCallIdx = successBlock.indexOf('if ! restart_node_red; then');
+
+  assert.ok(flipCallIdx >= 0, 'migrate-cli success branch must flip the staged payload');
+  assert.ok(payloadFlippedSetIdx >= 0, 'migrate-cli success branch must record that the payload was already flipped');
+  assert.ok(restartCallIdx >= 0, 'migrate-cli success branch must still restart Node-RED');
+  assert.ok(flipCallIdx < restartCallIdx, 'payload must be flipped BEFORE Node-RED is restarted after a schema migration');
+  assert.ok(payloadFlippedSetIdx < restartCallIdx, 'PAYLOAD_FLIPPED must be recorded before the restart');
+
+  // The later "Flip payload + local health self-check" block must not
+  // unconditionally re-flip (which would be harmless but misleading); it
+  // must skip the flip when run_schema_migration already did it, and only
+  // flip there for the no-live-DB / no-migration-needed path.
+  const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
+  const nodeRedRestartAfterFlipIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
+  const healthCheckBlock = deploy.slice(healthCheckHeaderIdx, nodeRedRestartAfterFlipIdx);
+  assert.match(healthCheckBlock, /PAYLOAD_FLIPPED/, 'the post-migration flip block must consult PAYLOAD_FLIPPED before re-flipping');
+
+  // PAYLOAD_FLIPPED must exist as a top-level default before run_schema_migration
+  // is even defined, so a deploy where run_schema_migration is SKIPped (no live
+  // DB) or never flips still reaches the health-check block with a defined flag.
+  const defaultDeclIdx = deploy.indexOf('PAYLOAD_FLIPPED=0');
+  const runSchemaMigrationDefIdx = indexOf('run_schema_migration() {');
+  assert.ok(defaultDeclIdx >= 0 && defaultDeclIdx < runSchemaMigrationDefIdx, 'PAYLOAD_FLIPPED must default to 0 before run_schema_migration is defined');
+});
+
 test('deploy.sh has a single migration call site and no inline schema DDL helpers', () => {
   assert.match(deploy, /run_schema_migration\(\)/);
   assert.match(deploy, /run_schema_migration \|\| exit 1/);
