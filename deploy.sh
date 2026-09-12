@@ -44,6 +44,12 @@ TMP_DIR="/tmp/osi-os-deploy.$$"
 PAYLOADS_ROOT="/srv/node-red/payloads"
 DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
+# Tracks whether this deploy's staged payload has already been flipped into
+# /srv/node-red/flows.json. Set by run_schema_migration() on a successful
+# migration (issue #222 / F4 — see there) and consulted by the later
+# "Flip payload + local health self-check" block so it never re-flips (or,
+# on the no-op path, still flips exactly once).
+PAYLOAD_FLIPPED=0
 SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 
 cleanup() {
@@ -535,6 +541,21 @@ run_schema_migration() {
     fi
 
     if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then
+        # issue #222 / F4 (Uganda 2026-09-12): flip the staged payload BEFORE
+        # restarting Node-RED. This restart used to run immediately after a
+        # successful migration while the new flows.json was still only
+        # staged (the flip was deferred to the later health-check block far
+        # below) — so it ran the PREVIOUS release's boot node against the
+        # JUST-migrated schema. On Uganda that boot node's unfenced `devices`
+        # rebuild cascade-deleted all of `device_data`. Flipping first means
+        # any restart from this point on always runs the migration-target
+        # flows against the schema it was migrated for.
+        if [ "$PAYLOAD_FLIPPED" != "1" ] && [ -d "$PAYLOADS_ROOT/$DEPLOY_STAMP" ]; then
+            echo "--- Flip payload before Node-RED restart (issue #222 / F4) ---"
+            swap_call flipTo "$DEPLOY_STAMP" >/dev/null
+            PAYLOAD_FLIPPED=1
+            echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+        fi
         if ! restart_node_red; then
             return 1
         fi
@@ -1136,8 +1157,13 @@ fix_mosquitto_ownership() {
 fix_mosquitto_ownership
 
 echo "--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---"
-swap_call flipTo "$DEPLOY_STAMP" >/dev/null
-echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+if [ "$PAYLOAD_FLIPPED" != "1" ]; then
+    swap_call flipTo "$DEPLOY_STAMP" >/dev/null
+    PAYLOAD_FLIPPED=1
+    echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+else
+    echo "OK: payload already flipped -> payloads/$DEPLOY_STAMP (flipped before the post-migration Node-RED restart, issue #222 / F4)"
+fi
 
 /etc/init.d/node-red restart || true
 

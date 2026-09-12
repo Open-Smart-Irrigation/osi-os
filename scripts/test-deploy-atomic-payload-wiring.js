@@ -120,10 +120,18 @@ test('missingFetches fence self-test: a doctored deploy.sh missing one fetch blo
 test('deploy.sh stages flows before migration and flips only after migration succeeds', () => {
   const stageIdx = indexOf('swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS"');
   const migrationIdx = indexOf('run_schema_migration || exit 1');
-  const flipIdx = indexOf('swap_call flipTo "$DEPLOY_STAMP"');
+  // Two `swap_call flipTo "$DEPLOY_STAMP"` sites exist since issue #222 / F4:
+  // one inside run_schema_migration() itself (defined earlier in the file,
+  // textually before this call site, but only EXECUTED after a successful
+  // migrate-cli — covered by test-deploy-migration-wiring.js's own ordering
+  // test) and this top-level one in the "Flip payload + local health
+  // self-check" block, which only runs once run_schema_migration || exit 1
+  // has already returned successfully. Look for the top-level occurrence
+  // specifically (the first one at/after migrationIdx).
+  const flipIdx = deploy.indexOf('swap_call flipTo "$DEPLOY_STAMP"', migrationIdx);
 
   assert.ok(stageIdx < migrationIdx, 'flows payload must be staged before schema migration');
-  assert.ok(migrationIdx < flipIdx, 'flows symlink must flip only after schema migration succeeds');
+  assert.ok(migrationIdx < flipIdx, 'the top-level flip must run only after run_schema_migration returns');
   assert.doesNotMatch(
     deploy,
     /fetch_required "flows\.json"[\s\S]*"\/srv\/node-red\/flows\.json"/,
@@ -132,8 +140,9 @@ test('deploy.sh stages flows before migration and flips only after migration suc
 });
 
 test('deploy.sh captures the previous payload before flip and rolls back to it on failed local self-check', () => {
+  const migrationIdx = indexOf('run_schema_migration || exit 1');
   const prevIdx = indexOf('PREV_STAMP="$(swap_call currentStamp || true)"');
-  const flipIdx = indexOf('swap_call flipTo "$DEPLOY_STAMP"');
+  const flipIdx = deploy.indexOf('swap_call flipTo "$DEPLOY_STAMP"', migrationIdx);
   const rollbackIdx = indexOf('swap_call flipTo "$PREV_STAMP"');
   const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', rollbackIdx);
 

@@ -7,12 +7,23 @@
 #
 # Usage (on-device, after uploading this script + PAYLOAD_DIR's contents):
 #   setsid sh /data/db/uganda-catchup-window.sh /data/osi-catchup-payload \
+#       [--expected-flows-sha <sha256>] \
 #       > /data/db/catchup-$(date -u +%Y%m%dT%H%M%SZ).log 2>&1 &
 #   disown 2>/dev/null || true
+#
+# --expected-flows-sha <sha256> (optional): the sha256 the CURRENTLY-FLIPPED
+#   /srv/node-red/flows.json must already match before this window is
+#   allowed to touch the database or Node-RED (issue #222 / F4 - see the
+#   "flows-flip precondition" section below). If omitted, the same value is
+#   computed from PAYLOAD_DIR's own staged
+#   conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json instead
+#   (so PAYLOAD_DIR should include it unless --expected-flows-sha is given).
 #
 # PAYLOAD_DIR must contain (fetched ahead of time, matching deploy.sh's
 # fetch_migration_runner() list, plus this window's Uganda-specific
 # additions):
+#   conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
+#       (only required as the --expected-flows-sha fallback - see above)
 #   scripts/uganda-catchup-20260911.sql                   (the additive catch-up artifact - static, piped directly to sqlite3)
 #   scripts/ops/uganda-schema-rebuild-20260911.sql         (the table-rebuild artifact - read by the orchestrator below via __dirname, never piped directly)
 #   scripts/ops/generate-uganda-schema-rebuild-20260911.js (guarded orchestrator for the above; kept under scripts/ops/
@@ -42,24 +53,58 @@
 #   UGANDA_DB_PATH          default /data/db/farming.db
 #   UGANDA_CATCHUP_BACKUP_DIR  default /data/backups/uganda-catchup
 #   UGANDA_CATCHUP_COUNTS_FILE default $UGANDA_CATCHUP_BACKUP_DIR/pre-window-counts.tsv
+#   UGANDA_LIVE_FLOWS_PATH  default /srv/node-red/flows.json - the
+#       currently-flipped flows payload checked by the flows-flip
+#       precondition (override only for local rehearsal against a
+#       workstation fixture; NEVER on the real device).
+#   UGANDA_EXPECTED_FLOWS_SHA  same effect as --expected-flows-sha; the CLI
+#       argument wins if both are given.
 #   UGANDA_CATCHUP_STUB_NODE_RED=1   for local rehearsal only: replace
 #       `/etc/init.d/node-red stop|start` with no-op stubs so this script's
 #       control flow can be dry-run on a workstation copy that has no
 #       Node-RED init script. NEVER set this on the real device.
+#   UGANDA_CATCHUP_WINDOW_TEST_SOURCE=1  test-only: `.`-source this script
+#       (rather than run it) to get every function/trap/default defined
+#       without executing the on-device main body - lets
+#       uganda-catchup-window.test.sh exercise the exit trap's restart gate
+#       in isolation. NEVER set this on the real device.
 #
 # Exit codes: 0 = success, postflight all-green, Node-RED restarted.
 #             1 = failure; migrate-cli restore semantics applied (if it got
 #                 that far) or an earlier gate refused; Node-RED restarted
-#                 by the trap regardless.
+#                 by the trap ONLY if the flows-flip precondition held (see
+#                 below) - otherwise the trap leaves Node-RED stopped.
 #             2 = usage error before anything touched the DB.
 
 set -eu
 
-PAYLOAD_DIR="${1:?usage: uganda-catchup-window.sh <payload-dir>}"
+[ $# -ge 1 ] || { echo "usage: uganda-catchup-window.sh <payload-dir> [--expected-flows-sha <sha256>]" >&2; exit 2; }
+PAYLOAD_DIR="$1"
+shift
+EXPECTED_FLOWS_SHA="${UGANDA_EXPECTED_FLOWS_SHA:-}"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --expected-flows-sha)
+            [ $# -ge 2 ] || { echo "ERROR: --expected-flows-sha requires a value" >&2; exit 2; }
+            EXPECTED_FLOWS_SHA="$2"
+            shift 2
+            ;;
+        --expected-flows-sha=*)
+            EXPECTED_FLOWS_SHA="${1#--expected-flows-sha=}"
+            shift
+            ;;
+        *)
+            echo "ERROR: unknown argument: $1" >&2
+            exit 2
+            ;;
+    esac
+done
 DB_PATH="${UGANDA_DB_PATH:-/data/db/farming.db}"
 BACKUP_DIR="${UGANDA_CATCHUP_BACKUP_DIR:-/data/backups/uganda-catchup}"
 COUNTS_FILE="${UGANDA_CATCHUP_COUNTS_FILE:-$BACKUP_DIR/pre-window-counts.tsv}"
 MIGRATIONS_DIR="$PAYLOAD_DIR/database/migrations/ordered"
+LIVE_FLOWS_PATH="${UGANDA_LIVE_FLOWS_PATH:-/srv/node-red/flows.json}"
+BUNDLE_FLOWS_PATH="$PAYLOAD_DIR/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 # Row-count invariant tables (runbook Phase 2 postflight list, plus the
@@ -100,18 +145,31 @@ node_red_wait_stopped() {
     fi
 }
 
-# --- exit trap: Node-RED restarted on EVERY exit path -----------------------
+# --- exit trap: Node-RED restarted on EVERY exit path, but ONLY when the
+# flows-flip precondition held at entry (issue #222 / F4). This is the
+# "safe by construction" half of the fix: regardless of WHY
+# NODE_RED_RESTART_NEEDED ends up "1" on some future exit path, the trap
+# itself refuses to start Node-RED unless FLOWS_PRECONDITION_OK was
+# explicitly set by verify_flows_flipped_precondition() below - so a restart
+# can never run the PREVIOUS release's boot node against a schema this
+# window already migrated. ---------------------------------------------
 NODE_RED_RESTART_NEEDED=0
+FLOWS_PRECONDITION_OK=0
 FINAL_STATUS="did not reach a final status line (script aborted early)"
 
 on_exit() {
     rc=$?
     if [ "$NODE_RED_RESTART_NEEDED" = "1" ]; then
-        log "trap: restarting Node-RED (exit path rc=$rc)"
-        if node_red_start; then
-            log "trap: Node-RED restarted OK"
+        if [ "$FLOWS_PRECONDITION_OK" = "1" ]; then
+            log "trap: restarting Node-RED (exit path rc=$rc)"
+            if node_red_start; then
+                log "trap: Node-RED restarted OK"
+            else
+                log "trap: FATAL - Node-RED failed to restart; manual intervention required"
+            fi
         else
-            log "trap: FATAL - Node-RED failed to restart; manual intervention required"
+            log "trap: REFUSE-TO-RESTART (issue #222 / F4) - the flows-flip precondition was not satisfied at entry, so starting Node-RED now could run the PREVIOUS release's boot node against a migrated schema. Leaving Node-RED STOPPED."
+            log "trap: RECOVERY - if the database was already touched, restore the on-device backup logged above; otherwise run the flows-only deploy (or deploy.sh) to flip /srv/node-red/flows.json to the migration target first. THEN start Node-RED manually: /etc/init.d/node-red start"
         fi
     fi
     log "FINAL: $FINAL_STATUS (rc=$rc)"
@@ -141,6 +199,48 @@ record_counts() {
     done
 }
 
+# --- flows-flip precondition (issue #222 / F4) ------------------------------
+# The 2026-09-12 Uganda incident: this window migrated the schema, then its
+# trap restarted Node-RED - but the flows-only deploy that should have
+# flipped /srv/node-red/flows.json to the migration target had only STAGED
+# its payload ("flip deferred"). The OLD boot node ran against the NEW
+# schema, hit a `devices` CHECK it didn't recognise, and its unfenced
+# `devices` rebuild cascade-deleted all of `device_data`. The runbook's
+# Phase 0 already tells the operator to deploy+restart onto the current
+# flows before running this window; this function ENFORCES that, rather
+# than trusting the checklist, by sha256-comparing the currently-flipped
+# flows.json against the migration target BEFORE anything else in this
+# script touches the database or Node-RED. A mismatch (or an inability to
+# determine the target at all) REFUSE-AND-HOLDs: rc=1, nothing touched.
+verify_flows_flipped_precondition() {
+    if [ -n "$EXPECTED_FLOWS_SHA" ]; then
+        expected="$EXPECTED_FLOWS_SHA"
+        expected_source="--expected-flows-sha argument"
+    elif [ -f "$BUNDLE_FLOWS_PATH" ]; then
+        expected="$(sha256sum "$BUNDLE_FLOWS_PATH" | awk '{print $1}')"
+        expected_source="staged bundle flows.json ($BUNDLE_FLOWS_PATH)"
+    else
+        fail "REFUSE-AND-HOLD (issue #222 / F4): cannot verify the flows-flip precondition - no --expected-flows-sha given and no staged bundle flows.json at $BUNDLE_FLOWS_PATH. Pass --expected-flows-sha <sha256>, or include conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json in the payload, then retry. Node-RED has NOT been touched."
+    fi
+
+    [ -f "$LIVE_FLOWS_PATH" ] || fail "REFUSE-AND-HOLD (issue #222 / F4): cannot verify the flows-flip precondition - no live flows.json at $LIVE_FLOWS_PATH. Node-RED has NOT been touched."
+    live_sha="$(sha256sum "$LIVE_FLOWS_PATH" | awk '{print $1}')"
+
+    if [ "$live_sha" != "$expected" ]; then
+        fail "REFUSE-AND-HOLD (issue #222 / F4): the currently-flipped flows payload ($LIVE_FLOWS_PATH, sha256 $live_sha) does not match the migration target ($expected_source, sha256 $expected). Run the flows-only deploy (deploy.sh, letting it flip the payload) and confirm Node-RED is stable on it FIRST, then retry this window - never restart Node-RED against a newly-migrated schema while it is still running an older flows payload. Node-RED has NOT been touched."
+    fi
+    log "flows-flip precondition ok: $LIVE_FLOWS_PATH matches $expected_source (sha256 $live_sha)"
+    FLOWS_PRECONDITION_OK=1
+}
+
+# --- Test hook: `.`-source this script (UGANDA_CATCHUP_WINDOW_TEST_SOURCE=1)
+# to get every function/trap/default defined above without running the
+# on-device main body below - lets uganda-catchup-window.test.sh drive
+# on_exit()'s restart gate directly. NEVER set this on the real device.
+if [ "${UGANDA_CATCHUP_WINDOW_TEST_SOURCE:-0}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 log "=== Uganda catch-up + baseline + migrate-to-head window starting ==="
 log "DB: $DB_PATH  payload: $PAYLOAD_DIR  backups: $BACKUP_DIR"
 
@@ -148,6 +248,8 @@ log "DB: $DB_PATH  payload: $PAYLOAD_DIR  backups: $BACKUP_DIR"
 command -v sqlite3 >/dev/null 2>&1 || fail "sqlite3 CLI not present"
 command -v node >/dev/null 2>&1 || fail "node not present"
 [ -d "$MIGRATIONS_DIR" ] || fail "migrations dir not found in payload: $MIGRATIONS_DIR"
+
+verify_flows_flipped_precondition
 
 mkdir -p "$BACKUP_DIR"
 
