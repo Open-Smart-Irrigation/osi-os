@@ -8,6 +8,7 @@
     "activity": "Registrar actividad"
   },
   "data": "Datos",
+  "network": "Red",
   "admin": "Admin",
   "adminMenu": {
     "users": "Usuarios",

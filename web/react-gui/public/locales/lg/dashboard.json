@@ -8,6 +8,7 @@
     "activity": "Wandiika ky'okoze"
   },
   "data": "Data",
+  "network": "Omukutu",
   "admin": "Admin",
   "adminMenu": {
     "users": "Users",
