@@ -120,6 +120,27 @@ path runs the identical `sh deploy.sh <port>` invocation the tunnel flow
 runs, just reading `deploy.sh` from local disk instead of via the first
 `curl … | sh` fetch.
 
+### The ordering rule this path (and every deploy path) must preserve
+
+**Never restart Node-RED against a newly reconciled/migrated schema while it
+is still running an older flows payload.** The 2026-09-12 Uganda incident
+(issue #222 / F4) happened this way on the catch-up window: schema migrations
+ran, then a trap restarted Node-RED before the new flows payload had actually
+been flipped in (it was only staged — "flip deferred"). The old boot node's
+unfenced `devices` rebuild then ran against the new schema and
+cascade-deleted `device_data`.
+
+`deploy.sh`'s `run_schema_migration()` now enforces the fix directly: on a
+successful migration it flips the staged payload (`swap_call flipTo
+"$DEPLOY_STAMP"`) *before* calling `restart_node_red()`, tracked by a
+`PAYLOAD_FLIPPED` flag so the later "Flip payload + local health self-check"
+block doesn't re-flip. This applies to every deploy over this offline path
+exactly as it does to the tunnel flow — `deploy.sh` itself is unmodified
+between the two, so the fix lands here for free. The Uganda catch-up window
+(`scripts/ops/uganda-catchup-window.sh`, `docs/operations/uganda-catchup-runbook.md`)
+enforces the same rule independently with a `--expected-flows-sha` check,
+since that script restarts Node-RED without ever flipping a payload itself.
+
 ## Constraints and non-goals
 
 - `deploy-bundle.sh` never builds the GUI itself (see AGENTS.md's build
