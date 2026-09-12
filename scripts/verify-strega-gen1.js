@@ -259,6 +259,79 @@ async function verifyStregaNormalizationContract(flows, fixture, object, label, 
   console.log(`OK ${label} STREGA normalization fixture`);
 }
 
+// Regression test for the FF FF FF FF box-sensor sentinel: strega_gen1_decoder.js
+// already normalizes that sentinel to `Temperature: null, Hygrometry: null` (see
+// verifyDecodeContract above), but Build Telemetry / Process STREGA's own
+// numberOrNull() used to coerce that explicit null to 0 via `Number(null) === 0`
+// before this fix, so device_data ended up with a fabricated 0.0 C / 0 % RH pair
+// for valves with no enclosure climate sensor. Unlike the "codec handoff" case
+// above (which deletes the keys, i.e. Number(undefined) === NaN and was never
+// affected), this exercises the actual explicit-null shape the codec emits.
+async function verifyExplicitNullSentinelContract(flows, fixture, decoded) {
+  await verifyStregaNormalizationContract(
+    flows,
+    fixture,
+    { ...decoded.data },
+    'explicit null sentinel (Temperature: null, Hygrometry: null)',
+    {
+      ambientTemperature: null,
+      relativeHumidity: null,
+      batPct: 100,
+      batteryRaw: 100,
+      currentState: 'CLOSED',
+    },
+  );
+}
+
+async function verifyBuildTelemetryStregaContract(flows, fixture, object, label, expected = {}) {
+  const node = getFunctionNode(flows, 'Build Telemetry');
+  const sandbox = {
+    Buffer,
+    console,
+    crypto,
+    msg: {
+      payload: {
+        deviceInfo: {
+          devEui: fixture.deviceEui,
+          deviceProfileName: 'STREGA',
+          deviceProfileId: 'strega-profile',
+        },
+        object,
+        fPort: fixture.fPort,
+        time: '2026-04-22T00:00:00.000Z',
+      },
+    },
+    env: {
+      get(name) {
+        if (name === 'DEVICE_EUI') return 'GATEWAY-TEST-EUI';
+        return '';
+      },
+    },
+    global: {
+      get(name) {
+        if (name === 'fs') return fs;
+        return undefined;
+      },
+    },
+    node: {
+      status() {},
+      error() {},
+      warn() {},
+    },
+  };
+  const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.vm.js`);
+  const resolved = result && typeof result.then === 'function' ? await result : result;
+
+  assert.ok(resolved, `${node.name} must return a result for ${label}`);
+  assert.equal(typeof resolved.payload, 'string', `${node.name} must serialize payload for ${label}`);
+  const parsed = JSON.parse(resolved.payload);
+  assert.equal(parsed.ambient_temperature, expected.ambientTemperature ?? null, `${label} should preserve the expected ambient temperature`);
+  assert.equal(parsed.relative_humidity, expected.relativeHumidity ?? null, `${label} should preserve the expected relative humidity`);
+  assert.equal(parsed.bat_pct, expected.batPct ?? 100, `${label} should preserve the numeric battery percent`);
+  assert.equal(parsed.battery_raw, expected.batteryRaw ?? 100, `${label} should preserve the raw battery value`);
+  console.log(`OK ${label} Build Telemetry STREGA normalization fixture`);
+}
+
 async function verifyCommandMatrix(flows, fixture) {
   const secret = 'strega-gen1-test-secret';
   const cases = [
@@ -313,6 +386,20 @@ async function main() {
   delete managedCodecObject.Temperature;
   delete managedCodecObject.Hygrometry;
   await verifyStregaNormalizationContract(flows, fixture, managedCodecObject, 'codec handoff');
+  await verifyExplicitNullSentinelContract(flows, fixture, decoded);
+  await verifyBuildTelemetryStregaContract(flows, fixture, { ...decoded.data }, 'explicit null sentinel', {
+    ambientTemperature: null,
+    relativeHumidity: null,
+    batPct: 100,
+    batteryRaw: 100,
+  });
+  await verifyBuildTelemetryStregaContract(
+    flows,
+    fixture,
+    { Battery: 72, Valve: '1', Temperature: 21.4, Hygrometry: 56.8 },
+    'valid environmental object',
+    { ambientTemperature: 21.4, relativeHumidity: 56.8, batPct: 72, batteryRaw: 72 },
+  );
   await verifyStregaNormalizationContract(
     flows,
     fixture,
