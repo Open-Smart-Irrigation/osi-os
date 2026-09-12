@@ -286,8 +286,8 @@ expectIncludes('deploy.sh', deploySource,
 
 expectIncludes('deploy.sh', deploySource, 'if [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; then', 'preserves the missing-DB sidecar guard');
 expectIncludes('deploy.sh', deploySource,
-  'swap_call flipTo "$DEPLOY_STAMP" >/dev/null\necho "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"\n\n/etc/init.d/node-red restart || true',
-  'retains the direct Node-RED restart immediately after the live payload flip and its existing log');
+  'if [ "$PAYLOAD_FLIPPED" != "1" ]; then\n    swap_call flipTo "$DEPLOY_STAMP" >/dev/null\n    PAYLOAD_FLIPPED=1\n    echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"\nelse\n    echo "OK: payload already flipped -> payloads/$DEPLOY_STAMP (flipped before the post-migration Node-RED restart, issue #222 / F4)"\nfi\n\n/etc/init.d/node-red restart || true',
+  'retains the direct Node-RED restart immediately after the live payload flip (or its issue #222/F4 already-flipped no-op) and its existing log');
 expectIncludes('deploy.sh', deploySource, 'swap_call flipTo "$PREV_STAMP" >/dev/null\n        /etc/init.d/node-red restart || true', 'retains the rollback restart');
 expectCondition(countMatches(deploySource, /\/etc\/init\.d\/node-red restart/g) === 2,
   'deploy.sh: only payload flip and rollback directly restart Node-RED',
