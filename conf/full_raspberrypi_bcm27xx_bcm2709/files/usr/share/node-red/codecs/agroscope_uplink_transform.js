@@ -1,6 +1,7 @@
 'use strict';
 
 function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
   var numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
