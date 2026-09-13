@@ -1,13 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
-import { devicesAPI, getApiErrorMessage, s2120API } from '../../services/api';
+import { getApiErrorMessage, s2120API } from '../../services/api';
 import type { Device } from '../../types/farming';
 import { formatWindDirection } from '../../utils/wind';
 import { RainMonitor } from './RainMonitor';
 import { SensorMonitor } from './SensorMonitor';
 import { WindMonitor } from './WindMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
+import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 
 interface Props {
   device: Device;
@@ -15,6 +17,8 @@ interface Props {
   onUpdate?: () => void;
   allZones?: Array<{ id: number; name: string }>;
   readOnly?: boolean;
+  /** Required: 'zone' detaches from the zone only, 'farm' unlinks from the account. */
+  removeContext: DeviceRemoveContext;
 }
 
 type SensorMonitorConfig = {
@@ -158,13 +162,12 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
   onUpdate,
   allZones = [],
   readOnly = false,
+  removeContext,
 }) => {
-  const { t: tc } = useTranslation('common');
+  const { t } = useTranslation('devices');
   const data = device.latest_data ?? {};
   const [showConfig, setShowConfig] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
   const [sensorMonitor, setSensorMonitor] = useState<SensorMonitorConfig | null>(null);
   const [showWindMonitor, setShowWindMonitor] = useState(false);
   const [showRainMonitor, setShowRainMonitor] = useState(false);
@@ -177,18 +180,6 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
       ? `${data.rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}`
       : null)
     ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
-
-  const handleRemove = async () => {
-    setIsRemoving(true);
-    setError(null);
-    try {
-      await devicesAPI.remove(device.deveui);
-      onRemove?.();
-    } catch (err: unknown) {
-      setError(getApiErrorMessage(err, 'Failed to remove device'));
-      setIsRemoving(false);
-    }
-  };
 
   const zoneLabel = device.zone_names?.length
     ? device.zone_names.join(' · ')
@@ -224,10 +215,11 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
             />
           )}
           {!readOnly && <button
-            onClick={() => setShowConfirm(true)}
-            disabled={isRemoving}
+            onClick={removal.openConfirm}
+            disabled={removal.isRemoving}
             className="rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
-            title="Remove device"
+            aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
+            title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
           >
             ✕
           </button>}
@@ -236,33 +228,19 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
 
       <p className="mb-3 truncate text-xs font-mono text-[var(--text-tertiary)]">{device.deveui}</p>
 
-      {error && (
+      {removal.error && (
         <div className="mb-3 rounded-lg bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
-          {error}
+          {removal.error}
         </div>
       )}
 
-      {!readOnly && showConfirm && (
-        <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
-          <p className="mb-2 font-bold">Remove weather station?</p>
-          <p className="mb-3 text-sm">This will delete all stored readings and zone assignments.</p>
-          <div className="flex gap-2">
-            <button
-              onClick={handleRemove}
-              disabled={isRemoving}
-              className="rounded-lg bg-[var(--error-bg)] px-4 py-2 font-bold text-[var(--error-text)] disabled:cursor-not-allowed"
-            >
-              {isRemoving ? 'Removing...' : 'Yes, remove'}
-            </button>
-            <button
-              onClick={() => setShowConfirm(false)}
-              disabled={isRemoving}
-              className="rounded-lg bg-[var(--secondary-bg)] px-4 py-2 font-bold text-[var(--text)] hover:bg-[var(--border)]"
-            >
-              {tc('cancel')}
-            </button>
-          </div>
-        </div>
+      {!readOnly && removal.showConfirm && (
+        <DeviceRemoveConfirm
+          removeContext={removeContext}
+          isRemoving={removal.isRemoving}
+          onConfirm={() => void removal.confirmRemove()}
+          onCancel={removal.cancelConfirm}
+        />
       )}
 
       <div className="grid grid-cols-2 gap-2">

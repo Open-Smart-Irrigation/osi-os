@@ -1,14 +1,18 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import { devicesAPI, getApiErrorMessage } from '../../services/api';
 import type { Device } from '../../types/farming';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
+import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 
 interface LoRainGaugeCardProps {
   device: Device;
   onRemove?: () => void;
   readOnly?: boolean;
+  /** Required: 'zone' detaches from the zone only, 'farm' unlinks from the account. */
+  removeContext: DeviceRemoveContext;
 }
 
 type SensorMonitorConfig = {
@@ -70,11 +74,11 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   device,
   onRemove,
   readOnly = false,
+  removeContext,
 }) => {
+  const { t } = useTranslation('devices');
   const data = device.latest_data ?? {};
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
   const [sensorMonitor, setSensorMonitor] = useState<SensorMonitorConfig | null>(null);
 
   const intervalLabel = formatCounterInterval(data.counter_interval_seconds);
@@ -97,20 +101,6 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
     ],
   });
 
-  const handleRemove = async () => {
-    setIsRemoving(true);
-    setError(null);
-    try {
-      await devicesAPI.remove(device.deveui);
-      onRemove?.();
-      setShowConfirm(false);
-      setIsRemoving(false);
-    } catch (err: unknown) {
-      setError(getApiErrorMessage(err, 'Failed to remove device'));
-      setIsRemoving(false);
-    }
-  };
-
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="mb-0.5 flex items-center justify-between gap-2">
@@ -121,48 +111,32 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           </span>
           {!readOnly && <button
             type="button"
-            onClick={() => setShowConfirm(true)}
-            disabled={isRemoving}
-            aria-label={isRemoving ? 'Removing device' : 'Remove device'}
-            title="Remove device"
+            onClick={removal.openConfirm}
+            disabled={removal.isRemoving}
+            aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
+            title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
             className={`rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_VISIBLE_RING}`}
           >
-            x
+            ✕
           </button>}
         </div>
       </div>
 
       <p className="mb-3 truncate font-mono text-xs text-[var(--text-tertiary)]">{device.deveui}</p>
 
-      {error && (
+      {removal.error && (
         <div className="mb-3 rounded-lg bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
-          {error}
+          {removal.error}
         </div>
       )}
 
-      {!readOnly && showConfirm && (
-        <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
-          <p className="mb-2 font-bold">Remove rain gauge?</p>
-          <p className="mb-3 text-sm">This will delete the local device record and stored readings.</p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => void handleRemove()}
-              disabled={isRemoving}
-              className={`rounded-lg bg-[var(--error-bg)] px-4 py-2 font-bold text-[var(--error-text)] disabled:cursor-not-allowed ${FOCUS_VISIBLE_RING}`}
-            >
-              {isRemoving ? 'Removing...' : 'Yes, remove'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowConfirm(false)}
-              disabled={isRemoving}
-              className={`rounded-lg bg-[var(--secondary-bg)] px-4 py-2 font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed ${FOCUS_VISIBLE_RING}`}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+      {!readOnly && removal.showConfirm && (
+        <DeviceRemoveConfirm
+          removeContext={removeContext}
+          isRemoving={removal.isRemoving}
+          onConfirm={() => void removal.confirmRemove()}
+          onCancel={removal.cancelConfirm}
+        />
       )}
 
       <div className="grid grid-cols-2 gap-2">

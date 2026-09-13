@@ -3,7 +3,12 @@ import { useTranslation } from 'react-i18next';
 
 import type { DeviceRemoveContext } from './useDeviceRemoval';
 
-type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+/**
+ * Loose on purpose: every card holds a namespace-typed TFunction from
+ * `useTranslation('devices')`, and the test suites substitute a plain
+ * `(key: string) => string`. Both must be passable here.
+ */
+type TranslateFn = (key: any) => string;
 
 /**
  * Label for the ✕ button, so the control says what it will actually do —

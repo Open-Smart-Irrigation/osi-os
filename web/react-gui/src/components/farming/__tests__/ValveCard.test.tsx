@@ -126,7 +126,9 @@ function renderCard(overrides: Partial<Device> = {}, props: Record<string, unkno
     const todayLiters = { value: 42.5, source: 'estimated_duration_flow_rate' as const };
     const device = { ...mockDevice, ...overrides, type_id: mockDevice.type_id } as Device;
     const result = render(
-        React.createElement(StregaValveCard, { device, onUpdate, onRemove, todayLiters, ...props }),
+        // removeContext has no default on the card any more (a missing context was the
+        // bug); 'farm' is the pre-existing behaviour every test here was written against.
+        React.createElement(StregaValveCard, { device, onUpdate, onRemove, todayLiters, removeContext: 'farm' as const, ...props }),
     );
     return { ...result, onUpdate, onRemove, todayLiters };
 }
@@ -307,7 +309,7 @@ describe('StregaValveCard', () => {
         expect(devicesAPI.remove).not.toHaveBeenCalled();
     });
 
-    it('default removeContext ("farm"): confirming remove calls devicesAPI.remove, then onRemove', async () => {
+    it('removeContext="farm": confirming remove calls devicesAPI.remove, then onRemove', async () => {
         const { onRemove } = renderCard();
         fireEvent.click(await screen.findByTitle('stregaValve.removeDeviceTitle'));
         fireEvent.click(await screen.findByText('stregaValve.yesRemove'));

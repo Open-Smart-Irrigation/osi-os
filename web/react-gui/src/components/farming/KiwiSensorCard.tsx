@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Device } from '../../types/farming';
-import { deviceMetadataAPI, devicesAPI, kiwiAPI } from '../../services/api';
+import { deviceMetadataAPI, kiwiAPI } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
+import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { canonicalSwtChannels, formatSwtValue } from '../../utils/swt';
 
@@ -13,6 +15,8 @@ interface KiwiSensorCardProps {
   onRemove?: () => void;
   onUpdate?: () => void;
   readOnly?: boolean;
+  /** Required: 'zone' detaches from the zone only, 'farm' unlinks from the account. */
+  removeContext: DeviceRemoveContext;
 }
 
 interface SensorDef {
@@ -310,6 +314,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
   onRemove,
   onUpdate,
   readOnly = false,
+  removeContext,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
@@ -321,23 +326,9 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
   const minutesAgo = lastSeen
     ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
     : null;
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [monitor, setMonitor] = useState<SensorDef | null>(null);
-
-  const handleRemove = async () => {
-    setIsRemoving(true);
-    setError(null);
-    try {
-      await devicesAPI.remove(device.deveui);
-      onRemove?.();
-    } catch (err: any) {
-      setError(err.response?.data?.message || t('kiwiSensor.failedToRemove'));
-      setIsRemoving(false);
-    }
-  };
+  const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
 
   const renderValue = (field: string, formatted: string | null) => {
     const sensor = SENSOR_BY_FIELD[field];
@@ -384,10 +375,11 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
             />
           )}
           {!readOnly && <button
-            onClick={() => setShowConfirm(true)}
-            disabled={isRemoving}
+            onClick={removal.openConfirm}
+            disabled={removal.isRemoving}
             className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Remove device"
+            aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
+            title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
           >
             ✕
           </button>}
@@ -395,40 +387,19 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
       </div>
       <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
 
-      {error && (
+      {removal.error && (
         <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
-          {error}
+          {removal.error}
         </div>
       )}
 
-      {!readOnly && showConfirm && (
-        <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
-          <p className="font-bold mb-2">{t('kiwiSensor.removeConfirm')}</p>
-          <p className="text-sm mb-3">{t('kiwiSensor.removeSubtitle')}</p>
-          <div className="flex gap-2">
-            <button
-              onClick={handleRemove}
-              disabled={isRemoving}
-              className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center gap-2 disabled:text-[var(--text-disabled)]"
-            >
-              {isRemoving ? (
-                <>
-                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                  {t('kiwiSensor.removing')}
-                </>
-              ) : (
-                t('kiwiSensor.yesRemove')
-              )}
-            </button>
-            <button
-              onClick={() => setShowConfirm(false)}
-              disabled={isRemoving}
-              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
-            >
-              {tc('cancel')}
-            </button>
-          </div>
-        </div>
+      {!readOnly && removal.showConfirm && (
+        <DeviceRemoveConfirm
+          removeContext={removeContext}
+          isRemoving={removal.isRemoving}
+          onConfirm={() => void removal.confirmRemove()}
+          onCancel={removal.cancelConfirm}
+        />
       )}
 
       <div className="grid grid-cols-1 gap-3">

@@ -461,6 +461,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           onUpdate={onUpdate}
                           readOnly={!canWrite}
+                          removeContext="zone"
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -512,6 +513,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           readOnly={!canWrite}
+                          removeContext="zone"
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -535,6 +537,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onOpenSettings={() => setSdi12SettingsDevice(device)}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          readOnly={!canWrite}
+                          removeContext="zone"
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -560,6 +564,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           onUpdate={onUpdate}
                           allZones={allZones ?? [{ id: zone.id, name: zone.name }]}
                           readOnly={!canWrite}
+                          removeContext="zone"
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -583,6 +588,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           readOnly={!canWrite}
+                          removeContext="zone"
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">

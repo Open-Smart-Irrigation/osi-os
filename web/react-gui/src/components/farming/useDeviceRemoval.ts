@@ -62,12 +62,13 @@ export function useDeviceRemoval({ deveui, removeContext, onRemove }: DeviceRemo
         await devicesAPI.remove(deveui);
       }
       onRemove?.();
-      if (removeContext === 'zone') {
-        // A zone detach leaves the card mounted in several layouts; close the
-        // panel so a failed-then-retried detach cannot strand it open.
-        setShowConfirm(false);
-        setIsRemoving(false);
-      }
+      // Close the panel and drop the busy flag in both contexts. Most parents
+      // unmount or re-render the card on success, but a zone detach leaves it
+      // mounted in several layouts and LoRainGaugeCard already relied on this,
+      // so a card that survives its own removal must not be left with a
+      // stranded spinner and an open confirm panel.
+      setShowConfirm(false);
+      setIsRemoving(false);
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { message?: string } } } | null)?.response?.data?.message;
       setError(message || t(removeContext === 'zone' ? 'deviceRemoval.failedZone' : 'deviceRemoval.failedFarm'));
