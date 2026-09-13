@@ -346,5 +346,19 @@
     "yesRemove": "Sì, rimuovi",
     "removing": "Rimozione in corso...",
     "failedToRemove": "Impossibile rimuovere il dispositivo"
+  },
+  "deviceRemoval": {
+    "titleZone": "Rimuovere da questa zona?",
+    "titleFarm": "Rimuovere questo dispositivo?",
+    "subtitleZone": "Il dispositivo resta registrato e mantiene le sue misure — lascia solo questa zona.",
+    "subtitleFarm": "Il dispositivo verrà scollegato dal tuo account. Le misure restano sul gateway.",
+    "confirmZone": "Sì, rimuovi dalla zona",
+    "confirmFarm": "Sì, rimuovi",
+    "removingZone": "Rimozione dalla zona...",
+    "removingFarm": "Rimozione in corso...",
+    "failedZone": "Impossibile rimuovere il dispositivo dalla zona",
+    "failedFarm": "Impossibile rimuovere il dispositivo",
+    "buttonZone": "Rimuovi da questa zona",
+    "buttonFarm": "Rimuovi dispositivo"
   }
 }

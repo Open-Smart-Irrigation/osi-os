@@ -346,5 +346,19 @@
     "yesRemove": "Ja, entfernen",
     "removing": "Wird entfernt...",
     "failedToRemove": "Gerät konnte nicht entfernt werden"
+  },
+  "deviceRemoval": {
+    "titleZone": "Aus dieser Zone entfernen?",
+    "titleFarm": "Dieses Gerät entfernen?",
+    "subtitleZone": "Das Gerät bleibt registriert und behält seine Messwerte — es verlässt nur diese Zone.",
+    "subtitleFarm": "Das Gerät wird von Ihrem Konto getrennt. Die Messwerte bleiben auf dem Gateway.",
+    "confirmZone": "Ja, aus Zone entfernen",
+    "confirmFarm": "Ja, entfernen",
+    "removingZone": "Wird aus Zone entfernt...",
+    "removingFarm": "Wird entfernt...",
+    "failedZone": "Gerät konnte nicht aus der Zone entfernt werden",
+    "failedFarm": "Gerät konnte nicht entfernt werden",
+    "buttonZone": "Aus dieser Zone entfernen",
+    "buttonFarm": "Gerät entfernen"
   }
 }
