@@ -69,6 +69,7 @@ const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src
 const dendroDrawerPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'dendrometer', 'DendrometerMonitor.tsx');
 const draginoTempCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoTempCard.tsx');
 const loRainGaugeCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'LoRainGaugeCard.tsx');
+const useDeviceRemovalPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'useDeviceRemoval.ts');
 const draginoSettingsModalPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoSettingsModal.tsx');
 const draginoDendroCalibrationPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoDendroCalibrationSection.tsx');
 const draginoChameleonSwtSectionPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoChameleonSwtSection.tsx');
@@ -136,6 +137,7 @@ const dendroMonitorSource = fs.readFileSync(dendroMonitorPath, 'utf8');
 const dendroDrawerSource = fs.readFileSync(dendroDrawerPath, 'utf8');
 const draginoTempCardSource = fs.readFileSync(draginoTempCardPath, 'utf8');
 const loRainGaugeCardSource = fs.existsSync(loRainGaugeCardPath) ? fs.readFileSync(loRainGaugeCardPath, 'utf8') : '';
+const useDeviceRemovalSource = fs.existsSync(useDeviceRemovalPath) ? fs.readFileSync(useDeviceRemovalPath, 'utf8') : '';
 const draginoSettingsModalSource = fs.readFileSync(draginoSettingsModalPath, 'utf8');
 const draginoDendroCalibrationSource = fs.readFileSync(draginoDendroCalibrationPath, 'utf8');
 const draginoChameleonSwtSectionSource = fs.existsSync(draginoChameleonSwtSectionPath)
@@ -2588,7 +2590,13 @@ expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'format
 expectFileIncludes('farming.ts', farmingTypesSource, 'AQUASCOPE_LORAIN', 'types Aqua-Scope LoRain as a supported device');
 expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_delta', 'renders LoRain interval rainfall');
 expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_10min', 'shows normalized LoRain rain-rate history options');
-expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'devicesAPI.remove', 'removes LoRain devices through the existing device API');
+// Every device card now removes through the shared hook, which is the only place allowed
+// to call devicesAPI.remove (the account unlink) and does so only in 'farm' context. A
+// card that calls it directly again is the zone-detach-deletes-the-device bug returning.
+expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'useDeviceRemoval', 'removes LoRain devices through the shared context-gated removal hook');
+expectFileExcludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'devicesAPI.remove', 'never unlinks the device from the account straight out of the LoRain card');
+expectFileIncludes('useDeviceRemoval.ts', useDeviceRemovalSource, 'devicesAPI.remove', 'removes devices from the account through the existing device API');
+expectFileIncludes('useDeviceRemoval.ts', useDeviceRemovalSource, "if (removeContext === 'farm') {", 'gates the account unlink on farm context so a zone detach only detaches');
 expectFileIncludes('FarmingDashboard.tsx', farmingDashboardSource, "d.type_id === 'AQUASCOPE_LORAIN'", 'groups unassigned LoRain gauges');
 expectFileIncludes('FarmingDashboard.tsx', farmingDashboardSource, '<LoRainGaugeCard', 'renders unassigned LoRain gauges');
 expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, "d.type_id === 'AQUASCOPE_LORAIN'", 'groups assigned LoRain gauges');
