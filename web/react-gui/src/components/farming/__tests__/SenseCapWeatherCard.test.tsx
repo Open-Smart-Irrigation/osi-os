@@ -62,25 +62,25 @@ describe('SenseCapWeatherCard history wiring (issue #33 regression net)', () => 
     ['5.4k lux', 'light_lux'],
     ['5.1 UVI', 'uv_index'],
   ])('opens SensorMonitor for the %s tile with field %s', (buttonName, field) => {
-    render(<SenseCapWeatherCard device={s2120Device} />);
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
     fireEvent.click(screen.getByRole('button', { name: buttonName }));
     expect(screen.getByTestId('sensor-monitor')).toHaveTextContent(field);
   });
 
   it('opens WindMonitor from the wind speed tile', () => {
-    render(<SenseCapWeatherCard device={s2120Device} />);
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
     fireEvent.click(screen.getByRole('button', { name: '3.2 m/s' }));
     expect(screen.getByTestId('wind-monitor')).toBeInTheDocument();
   });
 
   it('opens WindMonitor from the wind direction tile', () => {
-    render(<SenseCapWeatherCard device={s2120Device} />);
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
     fireEvent.click(screen.getByRole('button', { name: 'NE 45°' }));
     expect(screen.getByTestId('wind-monitor')).toBeInTheDocument();
   });
 
   it('opens RainMonitor (not SensorMonitor) from the Rain Today tile', () => {
-    render(<SenseCapWeatherCard device={s2120Device} />);
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
     fireEvent.click(screen.getByRole('button', { name: '4.2 mm' }));
     expect(screen.getByTestId('rain-monitor')).toBeInTheDocument();
     expect(screen.queryByTestId('sensor-monitor')).not.toBeInTheDocument();

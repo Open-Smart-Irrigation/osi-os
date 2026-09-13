@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Device } from '../../types/farming';
-import { devicesAPI } from '../../services/api';
 import { DendrometerMonitor } from './DendrometerMonitor';
 import { DraginoSettingsModal } from './DraginoSettingsModal';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
+import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { formatSwtValue } from '../../utils/swt';
 
@@ -66,6 +68,8 @@ interface DraginoTempCardProps {
   onRemove?: () => void;
   onUpdate?: () => void;
   readOnly?: boolean;
+  /** Required: 'zone' detaches from the zone only, 'farm' unlinks from the account. */
+  removeContext: DeviceRemoveContext;
 }
 
 export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
@@ -73,7 +77,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
   onRemove,
   onUpdate,
   readOnly = false,
+  removeContext,
 }) => {
+  const { t } = useTranslation('devices');
   const data = device.latest_data;
   const lastSeenStr = device.last_seen ?? null;
   const { swtUnit } = useDisplayPreferences();
@@ -128,8 +134,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
     { field: 'swt_3', label: 'SWT3', value: data?.swt_3, depth: device.chameleon_swt3_depth_cm, color: '#7c3aed' },
   ] as const;
 
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
   const [sensorMonitor, setSensorMonitor] = useState<{
@@ -141,19 +145,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
     initialField?: string;
     seriesOptions?: Array<{ field: string; label: string; unit: string; color?: string; decimals?: number }>;
   } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleRemove = async () => {
-    setIsRemoving(true);
-    setError(null);
-    try {
-      await devicesAPI.remove(device.deveui);
-      onRemove?.();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to remove device');
-      setIsRemoving(false);
-    }
-  };
+  const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
 
   const batColour =
     data?.bat_v === undefined ? 'var(--text-tertiary)' :
@@ -185,10 +177,10 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
           {!readOnly && showConfig && <DraginoSettingsModal device={device} dendroNeedsCalibration={dendroNeedsCalibration} onUpdate={() => { onUpdate?.(); }} onClose={() => setShowConfig(false)} />}
           {!readOnly && <button
             type="button"
-            onClick={() => setShowConfirm(true)}
-            disabled={isRemoving}
-            aria-label={isRemoving ? 'Removing device' : 'Remove device'}
-            title={isRemoving ? 'Removing device' : 'Remove device'}
+            onClick={removal.openConfirm}
+            disabled={removal.isRemoving}
+            aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
+            title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
             className={`p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed ${FOCUS_VISIBLE_RING}`}
           >
             ✕
@@ -197,40 +189,19 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
       </div>
       <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
 
-      {error && (
+      {removal.error && (
         <div className="mb-4 rounded-lg border border-[var(--error-bg)] bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
-          {error}
+          {removal.error}
         </div>
       )}
 
-      {!readOnly && showConfirm && (
-        <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
-          <p className="mb-2 font-bold">Remove this device?</p>
-          <p className="mb-3 text-sm">This will unlink the device from your account.</p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => void handleRemove()}
-              disabled={isRemoving}
-              className={`flex items-center gap-2 rounded-lg bg-[var(--error-bg)] px-4 py-2 font-bold text-[var(--error-text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] ${FOCUS_VISIBLE_RING}`}
-            >
-              {isRemoving ? (
-                <>
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Removing…
-                </>
-              ) : 'Yes, Remove'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowConfirm(false)}
-              disabled={isRemoving}
-              className={`rounded-lg bg-[var(--secondary-bg)] px-4 py-2 font-bold text-[var(--text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] ${FOCUS_VISIBLE_RING}`}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+      {!readOnly && removal.showConfirm && (
+        <DeviceRemoveConfirm
+          removeContext={removeContext}
+          isRemoving={removal.isRemoving}
+          onConfirm={() => void removal.confirmRemove()}
+          onCancel={removal.cancelConfirm}
+        />
       )}
 
       <div className="grid grid-cols-1 gap-3">

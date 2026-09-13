@@ -313,6 +313,7 @@ export const FarmingDashboard: React.FC = () => {
                             onRemove={handleUpdate}
                             onUpdate={handleUpdate}
                             readOnly={!canWrite}
+                            removeContext="farm"
                           />
                         ))}
                       </div>
@@ -334,6 +335,7 @@ export const FarmingDashboard: React.FC = () => {
                             timeZone={device.irrigation_zone_id ? zoneTimezones.get(device.irrigation_zone_id) : undefined}
                             valve={valvesByEui.get(device.deveui)}
                             readOnly={!canWrite}
+                            removeContext="farm"
                           />
                         ))}
                       </div>
@@ -352,6 +354,7 @@ export const FarmingDashboard: React.FC = () => {
                             onRemove={handleUpdate}
                             onUpdate={handleUpdate}
                             readOnly={!canWrite}
+                            removeContext="farm"
                           />
                         ))}
                       </div>
@@ -369,6 +372,8 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onOpenSettings={() => setSdi12SettingsDevice(device)}
                             onRemove={handleUpdate}
+                            readOnly={!canWrite}
+                            removeContext="farm"
                           />
                         ))}
                       </div>
@@ -385,8 +390,10 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             allZones={allZones.map((z) => ({ id: z.id, name: z.name }))}
+                            onRemove={handleUpdate}
                             onUpdate={handleUpdate}
                             readOnly={!canWrite}
+                            removeContext="farm"
                           />
                         ))}
                       </div>
@@ -404,6 +411,7 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onRemove={handleUpdate}
                             readOnly={!canWrite}
+                            removeContext="farm"
                           />
                         ))}
                       </div>

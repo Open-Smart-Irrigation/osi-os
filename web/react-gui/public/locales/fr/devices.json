@@ -346,5 +346,19 @@
     "yesRemove": "Oui, supprimer",
     "removing": "Suppression en cours...",
     "failedToRemove": "Impossible de supprimer l'appareil"
+  },
+  "deviceRemoval": {
+    "titleZone": "Retirer de cette zone ?",
+    "titleFarm": "Supprimer cet appareil ?",
+    "subtitleZone": "L'appareil reste enregistré et garde ses mesures — il quitte seulement cette zone.",
+    "subtitleFarm": "L'appareil sera dissocié de votre compte. Ses mesures restent sur la passerelle.",
+    "confirmZone": "Oui, retirer de la zone",
+    "confirmFarm": "Oui, supprimer",
+    "removingZone": "Retrait de la zone...",
+    "removingFarm": "Suppression en cours...",
+    "failedZone": "Impossible de retirer l'appareil de la zone",
+    "failedFarm": "Impossible de supprimer l'appareil",
+    "buttonZone": "Retirer de cette zone",
+    "buttonFarm": "Supprimer l'appareil"
   }
 }

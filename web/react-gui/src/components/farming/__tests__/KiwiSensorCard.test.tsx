@@ -39,14 +39,14 @@ describe('KiwiSensorCard SWT unit preference', () => {
   });
 
   it('renders SWT in kPa by default', () => {
-    render(<KiwiSensorCard device={kiwiDevice} />);
+    render(<KiwiSensorCard device={kiwiDevice} removeContext="farm" />);
     expect(screen.getByText('30.0 kPa')).toBeInTheDocument();
     expect(screen.queryByText('2.48 pF')).not.toBeInTheDocument();
   });
 
   it('renders SWT in pF when the display preference is pF', () => {
     window.localStorage.setItem('osi.display.swtUnit', 'pF');
-    render(<KiwiSensorCard device={kiwiDevice} />);
+    render(<KiwiSensorCard device={kiwiDevice} removeContext="farm" />);
     expect(screen.getByText('2.48 pF')).toBeInTheDocument();
     expect(screen.queryByText('30.0 kPa')).not.toBeInTheDocument();
   });

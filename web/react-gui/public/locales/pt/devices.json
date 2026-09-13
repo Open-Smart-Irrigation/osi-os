@@ -346,5 +346,19 @@
     "yesRemove": "Sim, remover",
     "removing": "A remover...",
     "failedToRemove": "Falha ao remover dispositivo"
+  },
+  "deviceRemoval": {
+    "titleZone": "Remover desta zona?",
+    "titleFarm": "Remover este dispositivo?",
+    "subtitleZone": "O dispositivo continua registado e mantém as suas leituras — apenas sai desta zona.",
+    "subtitleFarm": "O dispositivo será desvinculado da sua conta. As leituras ficam na gateway.",
+    "confirmZone": "Sim, remover da zona",
+    "confirmFarm": "Sim, remover",
+    "removingZone": "A remover da zona...",
+    "removingFarm": "A remover...",
+    "failedZone": "Falha ao remover dispositivo da zona",
+    "failedFarm": "Falha ao remover dispositivo",
+    "buttonZone": "Remover desta zona",
+    "buttonFarm": "Remover dispositivo"
   }
 }

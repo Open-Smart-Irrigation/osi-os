@@ -346,5 +346,19 @@
     "yesRemove": "Yee, Ggyawo",
     "removing": "Tikuggyawo...",
     "failedToRemove": "Okuggyawo ekyuma kugaanye"
+  },
+  "deviceRemoval": {
+    "titleZone": "Remove from this zone?",
+    "titleFarm": "Remove this device?",
+    "subtitleZone": "The device stays registered and keeps its readings — it only leaves this zone.",
+    "subtitleFarm": "This will unlink the device from your account. Its readings stay on the gateway.",
+    "confirmZone": "Yes, unassign",
+    "confirmFarm": "Yes, remove",
+    "removingZone": "Unassigning...",
+    "removingFarm": "Removing...",
+    "failedZone": "Failed to remove device from zone",
+    "failedFarm": "Failed to remove device",
+    "buttonZone": "Unassign from this zone",
+    "buttonFarm": "Remove device"
   }
 }

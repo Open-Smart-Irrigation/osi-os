@@ -346,5 +346,19 @@
     "yesRemove": "Sí, eliminar",
     "removing": "Eliminando...",
     "failedToRemove": "Error al eliminar el dispositivo"
+  },
+  "deviceRemoval": {
+    "titleZone": "¿Retirar de esta zona?",
+    "titleFarm": "¿Eliminar este dispositivo?",
+    "subtitleZone": "El dispositivo sigue registrado y conserva sus mediciones — solo sale de esta zona.",
+    "subtitleFarm": "El dispositivo se desvinculará de tu cuenta. Sus mediciones permanecen en la pasarela.",
+    "confirmZone": "Sí, retirar de la zona",
+    "confirmFarm": "Sí, eliminar",
+    "removingZone": "Retirando de la zona...",
+    "removingFarm": "Eliminando...",
+    "failedZone": "Error al retirar el dispositivo de la zona",
+    "failedFarm": "Error al eliminar el dispositivo",
+    "buttonZone": "Retirar de esta zona",
+    "buttonFarm": "Eliminar dispositivo"
   }
 }

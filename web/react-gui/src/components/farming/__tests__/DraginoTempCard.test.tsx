@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Device } from '../../../types/farming';
 import { DraginoTempCard } from '../DraginoTempCard';
 
+// t() returns the key itself, matching this codebase's convention.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
 vi.mock('../../../services/api', () => ({
   devicesAPI: { remove: vi.fn().mockResolvedValue(undefined) },
 }));
@@ -33,7 +38,7 @@ describe('DraginoTempCard SWT unit preference', () => {
 
   it('renders Chameleon SWT tiles in pF when the display preference is pF', () => {
     window.localStorage.setItem('osi.display.swtUnit', 'pF');
-    render(<DraginoTempCard device={chameleonDevice} />);
+    render(<DraginoTempCard device={chameleonDevice} removeContext="farm" />);
 
     expect(screen.getByText('2.48 pF')).toBeInTheDocument();
     expect(screen.queryByText('30.0 kPa')).not.toBeInTheDocument();

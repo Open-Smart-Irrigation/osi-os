@@ -6,6 +6,11 @@ import { devicesAPI } from '../../../services/api';
 import type { Device } from '../../../types/farming';
 import { LoRainGaugeCard } from '../LoRainGaugeCard';
 
+// t() returns the key itself, matching this codebase's convention.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
 vi.mock('../../../services/api', () => ({
   devicesAPI: {
     remove: vi.fn().mockResolvedValue(undefined),
@@ -46,7 +51,7 @@ describe('LoRainGaugeCard', () => {
   });
 
   it('renders LoRain identity and rain telemetry', () => {
-    render(<LoRainGaugeCard device={lorainDevice} />);
+    render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
 
     expect(screen.getByText('North rain gauge')).toBeInTheDocument();
     expect(screen.getByText('LoRain')).toBeInTheDocument();
@@ -59,24 +64,24 @@ describe('LoRainGaugeCard', () => {
   });
 
   it('handles missing telemetry without throwing', () => {
-    render(<LoRainGaugeCard device={{ ...lorainDevice, latest_data: {} }} />);
+    render(<LoRainGaugeCard device={{ ...lorainDevice, latest_data: {} }} removeContext="farm" />);
 
     expect(screen.getByText('North rain gauge')).toBeInTheDocument();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
   it('renders invalid last-seen timestamps as never seen', () => {
-    render(<LoRainGaugeCard device={{ ...lorainDevice, last_seen: 'not-a-date' }} />);
+    render(<LoRainGaugeCard device={{ ...lorainDevice, last_seen: 'not-a-date' }} removeContext="farm" />);
 
     expect(screen.getByText(/Never seen/)).toBeInTheDocument();
   });
 
   it('removes the device after confirmation', async () => {
     const onRemove = vi.fn();
-    render(<LoRainGaugeCard device={lorainDevice} onRemove={onRemove} />);
+    render(<LoRainGaugeCard device={lorainDevice} onRemove={onRemove} removeContext="farm" />);
 
-    fireEvent.click(screen.getByTitle('Remove device'));
-    fireEvent.click(screen.getByRole('button', { name: /yes, remove/i }));
+    fireEvent.click(screen.getByTitle('deviceRemoval.buttonFarm'));
+    fireEvent.click(screen.getByText('deviceRemoval.confirmFarm'));
 
     await waitFor(() => {
       expect(devicesAPI.remove).toHaveBeenCalledWith(lorainDevice.deveui);
@@ -85,17 +90,17 @@ describe('LoRainGaugeCard', () => {
   });
 
   it('clears confirmation state when removal succeeds without parent unmount', async () => {
-    render(<LoRainGaugeCard device={lorainDevice} />);
+    render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
 
-    fireEvent.click(screen.getByTitle('Remove device'));
-    fireEvent.click(screen.getByRole('button', { name: /yes, remove/i }));
+    fireEvent.click(screen.getByTitle('deviceRemoval.buttonFarm'));
+    fireEvent.click(screen.getByText('deviceRemoval.confirmFarm'));
 
     await waitFor(() => {
       expect(devicesAPI.remove).toHaveBeenCalledWith(lorainDevice.deveui);
     });
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /yes, remove/i })).not.toBeInTheDocument();
+      expect(screen.queryByText('deviceRemoval.confirmFarm')).not.toBeInTheDocument();
     });
-    expect(screen.getByTitle('Remove device')).toBeEnabled();
+    expect(screen.getByTitle('deviceRemoval.buttonFarm')).toBeEnabled();
   });
 });

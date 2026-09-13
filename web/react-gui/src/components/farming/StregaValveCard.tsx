@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import type { DeviceRemoveContext } from './useDeviceRemoval';
 import type { Device, StregaModel, ValveSummary } from '../../types/farming';
 import { devicesAPI, stregaAPI, valveAPI, type IrrigationActuation } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
@@ -18,9 +19,10 @@ interface StregaValveCardProps {
   // irrigationZonesAPI.removeDevice call) while the device stays registered on the
   // farm; the unassigned-grid slot's ✕ fully removes the device (this card's own
   // devicesAPI.remove call below, unconditionally). Both share the same confirm title
-  // and buttons -- only the explanatory subtitle differs. Defaults to 'farm' so an
-  // unassigned-style caller that omits this prop keeps the pre-existing copy.
-  removeContext?: 'zone' | 'farm';
+  // and buttons -- only the explanatory subtitle differs. Required with no default:
+  // typecheck then refuses a call site that does not state which one it means.
+  /** Required: 'zone' detaches from the zone only, 'farm' unlinks from the account. */
+  removeContext: DeviceRemoveContext;
   // The valve-list row for this device (from GET /api/valves) — the single source of
   // truth for STREGA generation and the enclosure temperature/humidity reading. `device`
   // (from GET /api/devices) carries neither reliably: it has no strega_generation field
@@ -644,7 +646,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   todayLiters,
   irrigationActuations = [],
   timeZone,
-  removeContext = 'farm',
+  removeContext,
   valve,
   readOnly = false,
 }) => {

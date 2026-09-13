@@ -35,7 +35,7 @@ function makeDevice(
 
 describe('Sdi12SoilCard', () => {
   it('renders populated vwc depths with labels and status chip', () => {
-    render(<Sdi12SoilCard device={makeDevice({
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
       sdi12_probe_status: 'identified',
       soil_moisture_probe_depths_json: { vwc_1: 10, vwc_2: 20 },
@@ -49,7 +49,7 @@ describe('Sdi12SoilCard', () => {
   });
 
   it('sorts configured modules by depth and shows VWC with adjacent VIC or missing markers', () => {
-    render(<Sdi12SoilCard device={makeDevice({
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
       sdi12_channel_layout_json: { version: 1, address: 'L', sensors: [
         { channel: 7, response_position: 2, depth_cm: 80, type: 'ENVIROSCAN' },
@@ -66,7 +66,7 @@ describe('Sdi12SoilCard', () => {
   });
 
   it('surfaces an invalid stored Sentek layout status', () => {
-    render(<Sdi12SoilCard device={makeDevice({
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
       sdi12_layout_status: 'invalid',
     })} />);
@@ -74,7 +74,7 @@ describe('Sdi12SoilCard', () => {
   });
 
   it('shows commissioning state without hiding old readings and labels only compatible deployment as active', () => {
-    render(<Sdi12SoilCard device={makeDevice({
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
       sdi12_channel_layout_json: { version: 1, address: '7', sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' }] },
       sdi12_recipe_deployment: { desired_version: 2, desired_layout_hash: 'abc', status: 'observed_compatible', queued_at: null, queue_drained_at: null, commissioning_deadline_at: null, last_observed_at: null, compatible_at: null, updated_at: null, frame_count: 1, compatible_available: true, last_error_code: null },
@@ -86,7 +86,7 @@ describe('Sdi12SoilCard', () => {
   });
 
   it('shows pending state when unidentified', () => {
-    render(<Sdi12SoilCard device={makeDevice({
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_status: 'pending_identify',
       latest: { bat_v: 3.3 },
     })} />);
@@ -95,7 +95,7 @@ describe('Sdi12SoilCard', () => {
   });
 
   it('renders the status chip from the device status field', () => {
-    render(<Sdi12SoilCard device={makeDevice({
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_status: 'unmatched',
     })} />);
 
@@ -104,7 +104,7 @@ describe('Sdi12SoilCard', () => {
 
   it('shows the client-derived no-response state once pending_identify has aged past the timeout', () => {
     const stale = new Date(Date.now() - 16 * 60000).toISOString();
-    render(<Sdi12SoilCard device={makeDevice({
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_status: 'pending_identify',
       updated_at: stale,
       latest: { bat_v: 3.3 },
@@ -118,17 +118,17 @@ describe('Sdi12SoilCard', () => {
     const onRemove = vi.fn();
     vi.mocked(devicesAPI.remove).mockResolvedValueOnce(undefined as never);
     const device = makeDevice();
-    render(<Sdi12SoilCard device={device} onRemove={onRemove} />);
+    render(<Sdi12SoilCard device={device} onRemove={onRemove} removeContext="farm" />);
 
-    fireEvent.click(screen.getByTitle('Remove device'));
-    fireEvent.click(screen.getByText('sdi12Soil.yesRemove'));
+    fireEvent.click(screen.getByTitle('deviceRemoval.buttonFarm'));
+    fireEvent.click(screen.getByText('deviceRemoval.confirmFarm'));
 
     await waitFor(() => expect(devicesAPI.remove).toHaveBeenCalledWith(device.deveui));
     await waitFor(() => expect(onRemove).toHaveBeenCalled());
   });
 
   it('does not render a remove button in readOnly mode', () => {
-    render(<Sdi12SoilCard device={makeDevice()} readOnly />);
-    expect(screen.queryByTitle('Remove device')).not.toBeInTheDocument();
+    render(<Sdi12SoilCard device={makeDevice()} readOnly removeContext="farm" />);
+    expect(screen.queryByTitle('deviceRemoval.buttonFarm')).not.toBeInTheDocument();
   });
 });
