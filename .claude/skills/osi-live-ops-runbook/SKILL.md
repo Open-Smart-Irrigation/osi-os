@@ -309,10 +309,10 @@ Reading straight through the script, in order:
 5. Runs `seed_db_if_missing` — the guarded, non-destructive DB step above.
 6. Deploys the Node-RED runtime `package.json`/`package-lock.json`,
    the full helper-module set (every `fetch_required "<name> package.json"` in
-   `deploy.sh`; 20 modules on 2026-09-14, list them with
+   `deploy.sh`; list them with
    `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `edge-channels.json`,
    the `chirpstack-bootstrap.js` bootstrap script, every file under `codecs/`
-   that `deploy.sh` names (six device decoders on 2026-09-14),
+   that `deploy.sh` names (list them with `grep -o 'codecs/[a-z0-9_]*\.js' deploy.sh | sort -u`),
    and the Agroscope uplink transform (`agroscope_uplink_transform.js`, an
    edge→cloud forwarding transform, not a device decoder).
 7. Runs `npm install --omit=dev --no-fund --no-audit` in `/srv/node-red`, exiting
