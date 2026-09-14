@@ -383,7 +383,7 @@ const protectedNodeHashes = {
   // declaration against the seed and against every ALTER TABLE devices ADD COLUMN in
   // database/migrations/ordered. Hash re-derived on this branch.
   // Previous pin: 69aed774a08b5372c251d1c22c1f70ee7f983b7dbe1f17ff9ee01e5d0b944bbf
-  'sync-init-fn': '37d4e80985c5c31c8bdb704d7e15a3d4f6cbf1016ed8b5eb6c420b2306e00a3e',
+  'sync-init-fn': '878ef2417b5ec01e46acf05b160ebbb409b979d9ba7474955b3a35b328202978',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
@@ -1108,13 +1108,13 @@ if (sizeAllowances) {
   // node_allowances ceiling, so that per-node pin is unchanged) and the SDI-12 identify
   // dispatch case (Build UPDATE SQL +284, Route Command +492 inside its existing 706
   // ceiling).
-  // 26430: boot-node schema safety Wave 1 Task 1 (osi-os#173/#219/#220) raises the
-  // wave3-edge-durable figure above by the 4537 chars measured for sync-init-fn's
+  // 26409: boot-node schema safety Wave 1 Task 1 (osi-os#173/#219/#220) raises the
+  // wave3-edge-durable figure above by the 4516 chars measured for sync-init-fn's
   // DEVICES_COLUMNS table (verify-flows-size-ratchet totalChars over both byte-identical
-  // profiles: origin/main 1470784 -> HEAD 1475321). That branch changes no other node.
-  expectCondition(sizeAllowances.total_allowance?.delta === 26430,
-    'size total allowance: exact cumulative delta 26430',
-    'size total allowance: expected exact cumulative delta 26430');
+  // profiles: origin/main 1470784 -> HEAD 1475300). That branch changes no other node.
+  expectCondition(sizeAllowances.total_allowance?.delta === 26409,
+    'size total allowance: exact cumulative delta 26409',
+    'size total allowance: expected exact cumulative delta 26409');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
