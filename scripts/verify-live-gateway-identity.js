@@ -372,7 +372,18 @@ const protectedNodeHashes = {
   // layout. Same sanctioned class of edit as 0027/0028's literal extensions, applied in
   // the same commit as the migration. Hash re-derived on this branch.
   // Previous pin: b0f432fb7c972905a0d45797537d69ef16c04a64024de624638a561f68400c69
-  'sync-init-fn': '69aed774a08b5372c251d1c22c1f70ee7f983b7dbe1f17ff9ee01e5d0b944bbf',
+  // Re-pinned #4 (boot-node schema safety Wave 1 Task 1, osi-os#173/#219/#220): the two
+  // hand-written literals this pin last guarded are gone. DEVICES_NEW_DDL and the
+  // positional DEVICES_COPY_SQL are now built from one DEVICES_COLUMNS table generated
+  // from database/seed-blank.sql in seed order, and the copy reads the live column set
+  // with t.all('PRAGMA table_info(devices)') inside the rebuild transaction, aborting on
+  // a column the payload does not know instead of dropping it. Sanctioned class: the
+  // guarded devices CHECK rebuild, for safety. What the pin used to protect by hand is
+  // now protected by verify-devices-rebuild-fence.js, which compares every column
+  // declaration against the seed and against every ALTER TABLE devices ADD COLUMN in
+  // database/migrations/ordered. Hash re-derived on this branch.
+  // Previous pin: 69aed774a08b5372c251d1c22c1f70ee7f983b7dbe1f17ff9ee01e5d0b944bbf
+  'sync-init-fn': '37d4e80985c5c31c8bdb704d7e15a3d4f6cbf1016ed8b5eb6c420b2306e00a3e',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
@@ -1097,9 +1108,13 @@ if (sizeAllowances) {
   // node_allowances ceiling, so that per-node pin is unchanged) and the SDI-12 identify
   // dispatch case (Build UPDATE SQL +284, Route Command +492 inside its existing 706
   // ceiling).
-  expectCondition(sizeAllowances.total_allowance?.delta === 21893,
-    'size total allowance: exact cumulative delta 21893',
-    'size total allowance: expected exact cumulative delta 21893');
+  // 26430: boot-node schema safety Wave 1 Task 1 (osi-os#173/#219/#220) raises the
+  // wave3-edge-durable figure above by the 4537 chars measured for sync-init-fn's
+  // DEVICES_COLUMNS table (verify-flows-size-ratchet totalChars over both byte-identical
+  // profiles: origin/main 1470784 -> HEAD 1475321). That branch changes no other node.
+  expectCondition(sizeAllowances.total_allowance?.delta === 26430,
+    'size total allowance: exact cumulative delta 26430',
+    'size total allowance: expected exact cumulative delta 26430');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,

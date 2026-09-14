@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { parseBootDevicesColumns } = require('./verify-devices-rebuild-fence');
 
 const repo = path.resolve(__dirname, '..');
 const SEED = path.join(repo, 'database/seed-blank.sql');
@@ -138,8 +139,11 @@ function run() {
     if (!node) throw new Error(`${rel}: sync-init-fn node not found`);
 
     // (a) devices_new CHECK — the regression site (specific to sync-init-fn's rebuild).
-    const dm = /devices_new\s*\(id[\s\S]*?CHECK\s*\(\s*type_id\s+IN\s*\(([\s\S]*?)\)/i.exec(node.func || '');
-    const devTypes = new Set(((dm && dm[1].match(/'[^']*'/g)) || []).map((s) => s.slice(1, -1)));
+    // The rebuild DDL is assembled from the DEVICES_COLUMNS table rather than shipped as
+    // one literal (osi-os#219), so read the type_id declaration through the fence
+    // verifier's parser instead of regexing the function text.
+    const typeCol = parseBootDevicesColumns(node.func || '').find((c) => c.name === 'type_id');
+    const devTypes = new Set(((((typeCol && typeCol.ddl) || '').match(/'[^']*'/g)) || []).map((s) => s.slice(1, -1)));
     if (!setEq(devTypes, canonDevices)) {
       problems.push(`${rel}: sync-init-fn devices_new CHECK != canonical seed. missing=[${diff(canonDevices, devTypes)}] extra=[${diff(devTypes, canonDevices)}]`);
     }

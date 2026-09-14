@@ -2670,13 +2670,20 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN de
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_span REAL', 'adds the device-level dendrometer ratio span calibration');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'adds the canonical retracted-ratio dendrometer calibration column');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'adds the canonical extended-ratio dendrometer calibration column');
-expectIncludes('Sync Init Schema + Triggers', 'dendro_stroke_mm REAL, dendro_ratio_at_retracted REAL, dendro_ratio_at_extended REAL, dendro_ratio_zero REAL, dendro_ratio_span REAL', 'preserves canonical dendrometer ratio columns when rebuilding the devices table');
-expectIncludes('Sync Init Schema + Triggers', 'dendro_stroke_mm,COALESCE(dendro_ratio_at_retracted,dendro_ratio_zero),COALESCE(dendro_ratio_at_extended,dendro_ratio_span),dendro_ratio_zero,dendro_ratio_span', 'copies canonical dendrometer ratios through the devices table rebuild');
+// The rebuild DDL and copy are no longer two hand-written literals: both are built from the
+// DEVICES_COLUMNS table, generated from database/seed-blank.sql in seed order (osi-os#173/
+// #219/#220). The declarations are asserted per entry, and the legacy dendrometer fallbacks
+// that the positional COALESCE(...) used to carry now live in each entry's `from` list.
+expectIncludes('Sync Init Schema + Triggers', '{ name: "dendro_stroke_mm", ddl: "dendro_stroke_mm REAL"', 'preserves the dendrometer stroke column when rebuilding the devices table');
+expectIncludes('Sync Init Schema + Triggers', '{ name: "dendro_ratio_at_retracted", ddl: "dendro_ratio_at_retracted REAL"', 'preserves the canonical retracted-ratio column when rebuilding the devices table');
+expectIncludes('Sync Init Schema + Triggers', '{ name: "dendro_ratio_at_extended", ddl: "dendro_ratio_at_extended REAL"', 'preserves canonical dendrometer ratio columns when rebuilding the devices table');
+expectIncludes('Sync Init Schema + Triggers', 'from: ["dendro_ratio_at_retracted", "dendro_ratio_zero"]', 'copies canonical dendrometer ratios through the devices table rebuild');
+expectIncludes('Sync Init Schema + Triggers', 'from: ["dendro_ratio_at_extended", "dendro_ratio_span"]', 'falls back to the legacy span field for the extended ratio through the rebuild');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_position_mm REAL', 'adds a persisted edge baseline for comparable stem-change signals');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_mode_used TEXT', 'tracks which conversion path the stem-change baseline was captured with');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_calibration_signature TEXT', 'tracks calibration changes that should reset the stem-change baseline');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_pending INTEGER DEFAULT 0', 'adds a persisted pending-baseline flag on devices');
-expectIncludes('Sync Init Schema + Triggers', 'COALESCE(dendro_baseline_pending,0)', 'preserves the pending-baseline flag when rebuilding the devices table');
+expectIncludes('Sync Init Schema + Triggers', '{ name: "dendro_baseline_pending", ddl: "dendro_baseline_pending INTEGER DEFAULT 0", from: ["dendro_baseline_pending"], dflt: "0" }', 'preserves the pending-baseline flag when rebuilding the devices table');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_invert_direction INTEGER DEFAULT 0', 'adds the device-level dendrometer inversion flag');
 expectIncludes('Sync Init Schema + Triggers', 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'backfills canonical retracted-ratio calibration from legacy dendrometer fields');
 expectIncludes('Sync Init Schema + Triggers', 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'backfills canonical extended-ratio calibration from legacy dendrometer fields');
