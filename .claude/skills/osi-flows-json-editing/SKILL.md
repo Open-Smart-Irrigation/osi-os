@@ -525,7 +525,7 @@ Enforced by `node scripts/verify-profile-parity.js`, which is chained from
 ```
 === conf/full_raspberrypi_bcm27xx_bcm2709 ===
 OK:   files/etc/board.d/02_network
-... (25 OK: / absent: lines total — 20 file-parity checks incl. flows.json, 5 absence checks)
+... (one OK: line per CANONICAL_PAYLOAD entry, one absent: line per FORBIDDEN_IN_MIRROR entry; the lists live in scripts/verify-profile-parity.js)
 
 All parity checks passed.
 ```
@@ -537,10 +537,9 @@ conf/full_raspberrypi_bcm27xx_bcm2709` and exits non-zero.
 ## MQTT IN topic rule
 
 Every `mqtt in` node in `flows.json` must subscribe to the literal topic
-`application/+/device/+/event/up`. Confirmed by inspecting all 7 `mqtt in`
-nodes in the canonical file (`Local Device Uplinks`, `MQTT IN (Field Testing)`,
-`Local Sensor Uplinks`, `LSN50 IN`, `S2120 IN`, `LoRain IN`, `UC512 IN`) —
-all 7 use exactly that topic string. ChirpStack generates a fresh
+`application/+/device/+/event/up`. Every `mqtt in` node in the canonical file uses exactly that topic string; list
+them with `grep -c '"type": "mqtt in"' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json`
+and let `scripts/check-mqtt-topics.sh` do the checking rather than trusting a count written here. ChirpStack generates a fresh
 per-installation application UUID at bootstrap; a topic hardcoded to one
 gateway's UUID (e.g. `application/<uuid>/device/+/event/up`) will silently
 never match on any other gateway — no error, just zero uplinks. Device-type

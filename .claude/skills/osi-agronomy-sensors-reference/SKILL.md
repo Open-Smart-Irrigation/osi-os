@@ -48,7 +48,7 @@ Do NOT use this skill for (route instead):
 | `MILESIGHT_UC512` | Sensors | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
 
 File locations for all OSI-authored decoders:
-`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/{aquascope_lorain_decoder.js, dragino_lsn50_decoder.js, milesight_uc512_decoder.js, sensecap_s2120_decoder.js, strega_gen1_decoder.js}`.
+`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/` (list with `ls` there; as of 2026-09-14: aquascope_lorain, dragino_lsn50, milesight_uc512, sensecap_s2120, strega_gen1, strega_gen2).
 The same directory also holds `agroscope_uplink_transform.js`, the edge→Agroscope IoT forwarding transform (osi-os PR #110) — it is not a device decoder.
 KIWI/CLOVER have no file here — their payload arrives already decoded (vendor/ChirpStack-side codec), which is why the table above says "No".
 
@@ -86,7 +86,7 @@ between them.
   1. The Chameleon resistance→kPa conversion clamps to `[MIN_KPA=0, MAX_KPA=300]`
      — `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/index.js`,
      function `resistanceOhmsToKpa`.
-  2. The irrigation scheduler's decision rule is `const irrigate = (meanKpa >= threshold);`
+  2. The irrigation scheduler compares `meanKpa >= threshold` (drier soil reads as a larger positive kPa); locate the current predicate with the grep in the provenance section
      — `flows.json` node id `5f0d2b7e9b9b1b3a` ("Decide + build actuator cmd +
      build DB logs"). Rising kPa past the threshold triggers irrigation, i.e.
      higher kPa = drier = irrigate.
@@ -460,14 +460,14 @@ and analog-only periodic variants omit both fields rather than sending a
 placeholder. When present, the two values derive from two 16-bit fields as
 `(v/65536)*165-40` and `(v/65536)*100`. Two independent guards null the
 sentinel: the decoder itself tests `box_temp === 65535 && box_hum === 65535`
-(`strega_gen1_decoder.js:224`, added in `d261d2c7`), and `strega-process-fn`
+(`strega_gen1_decoder.js`, the `box_temp === 65535 && box_hum === 65535` guard, added in `d261d2c7`), and `strega-process-fn`
 in flows.json separately tests the decoded pair 125 °C / 100 %
 (`normalizeStregaEnvironment`) — the vendor codec at
 `docs/hardware/strega-codecs/ChirpStack-STREGA-CODEC-Decoder-Gen1` has no
 such guard. Both of ours landed together in `d261d2c7`, so treat them as one
 defence in two places rather than one compensating for the other — and note
 that ChirpStack is provisioned with our guarded decoder, not the vendor file
-(`chirpstack-bootstrap.js:97`). The values
+(`chirpstack-bootstrap.js`, the `stregaCodecPath` and `stregaGen2CodecPath` provisioning; Gen2 is provisioned from `strega_gen2_decoder.js`, not from the vendor file). The values
 land in `device_data.ambient_temperature` and `relative_humidity`, the same
 columns sensor devices use.
 

@@ -99,18 +99,18 @@ key with a default, then commits.
 | `openagri_weather_current_cache_minutes` | Current-conditions cache TTL | `30` | exports as `OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES` |
 | `openagri_weather_forecast_cache_minutes` | Forecast cache TTL | `120` | exports as `OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES` |
 | `chirpstack_app_sensors`, `chirpstack_app_actuators`, `chirpstack_app_field_tester` | Per-installation ChirpStack application UUIDs | unset until bootstrap runs | Written by `chirpstack-bootstrap.js`; see section 3 |
-| `chirpstack_profile_kiwi`, `chirpstack_profile_strega`, `chirpstack_profile_lsn50`, `chirpstack_profile_clover`, `chirpstack_profile_rak10701`, `chirpstack_profile_s2120`, `chirpstack_profile_lorain`, `chirpstack_profile_uc512` | Per-installation ChirpStack device-profile UUIDs | unset until bootstrap runs | Written by `chirpstack-bootstrap.js`; see section 3 |
+| `chirpstack_profile_kiwi`, `chirpstack_profile_strega`, `chirpstack_profile_lsn50`, `chirpstack_profile_clover`, `chirpstack_profile_rak10701`, `chirpstack_profile_s2120`, `chirpstack_profile_lorain`, `chirpstack_profile_uc512`, `chirpstack_profile_strega_gen2` | Per-installation ChirpStack device-profile UUIDs | unset until bootstrap runs | Written by `chirpstack-bootstrap.js`; see section 3 |
 
-Note: `chirpstack-bootstrap.js` writes both `CHIRPSTACK_PROFILE_LORAIN` and
-`CHIRPSTACK_PROFILE_UC512` to both the env file and UCI — `chirpstack_profile_lorain`
+Note: `chirpstack-bootstrap.js` writes all three `CHIRPSTACK_PROFILE_LORAIN`,
+`CHIRPSTACK_PROFILE_UC512` and `CHIRPSTACK_PROFILE_STREGA_GEN2` to both the env file and UCI — `chirpstack_profile_lorain`
 and `chirpstack_profile_uc512` **are** mapped in `toUciCloudKey()`
 (`scripts/chirpstack-bootstrap.js`, mirrored at
 `conf/.../usr/share/node-red/chirpstack-bootstrap.js`). The real asymmetry is
 in `node-red.init`: its `resolve_chirpstack_value` list and `procd_set_param
-env` block omit both `CHIRPSTACK_PROFILE_LORAIN` and `CHIRPSTACK_PROFILE_UC512`,
-so at Node-RED runtime the LoRain and Milesight UC512 profile IDs arrive only
+env` block omit `CHIRPSTACK_PROFILE_LORAIN`, `CHIRPSTACK_PROFILE_UC512` and `CHIRPSTACK_PROFILE_STREGA_GEN2`,
+so at Node-RED runtime the LoRain, Milesight UC512 and STREGA Gen2 profile IDs arrive only
 via `settings.js`'s `.chirpstack.env` compat loader, not via the UCI→procd
-path the other profiles use (as of 2026-07-19).
+path the other profiles use (as of 2026-09-14; recheck with `grep -c STREGA_GEN2 feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init`, expected 0 until plumbed).
 
 **Live inspection:** `uci show osi-server` on the Pi. This prints
 `mqtt_password`, `openagri_weather_password`, and
@@ -467,46 +467,10 @@ grep -n "osi-db-helper" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/no
 
 ## 6. `deploy.sh` knobs
 
-`deploy.sh` (repo root, re-verified 2026-07-19) runs **on the Pi**, fetching
-artifacts over a tunnelled local HTTP server. Actual tunables and decision
-points, read from the file (no invented ones):
-
-| Knob | What it does |
-|---|---|
-| `$1` (positional arg, default `9876`) | HTTP port the deploy source server is tunnelled on (`PORT="${1:-9876}"`) |
-| `/proc/device-tree/model` | Auto-detects Pi 5 vs Pi 4/400/3/2 vs Pi Zero/Model to pick the matching seed DB path (`detect_seed_db_rel`); unknown models fall back to the bcm2712 (Pi 5) seed as the canonical default |
-| DB seeding gate | `seed_db_if_missing` only copies the bundled seed DB when `/data/db/farming.db` is **absent** *and* no `-wal`/`-shm`/`-journal` sidecar files exist; otherwise it refuses (exits 1) or skips. **Never** overwrite a live DB — full rule and recovery steps are in `osi-live-ops-runbook`. |
-| `run_schema_migration()` | Runs after `npm install`. Skips (`return 0`) if `/data/db/farming.db` is absent. Otherwise: ensures the `sqlite3` CLI (`opkg install sqlite3-cli`); fetches `CHECKSUMS.json` + every ordered migration + the Stage 0 helpers (`repair-sync-outbox-v2.js`, `baseline-existing-db.js`, `migrate-cli.js`, `semantic-schema-compare.js`) + `lib/osi-migrate` modules; stops Node-RED (waits up to 30s for the process to exit); WAL-checkpoints and integrity-checks the DB; on a ledger-less DB runs the outbox-v2 repair then `baseline-existing-db.js`; runs `migrate-cli.js` with its backup dir; restarts Node-RED afterward — **except** on `migrate-cli.js` exit code `3` (backup-restore integrity failure), which deliberately leaves Node-RED stopped for the operator. |
-| `MIGRATE_BACKUP_DIR` (env override) | Where `migrate-cli.js` writes its pre-migration backup; default `/data/backups/migrate` |
-| `PAYLOAD_KEEP_N` (env override) | Number of staged `payloads/<stamp>` directories kept after a committed flip; default `5` |
-| Payload flip + self-check + auto-rollback | `flows.json` is staged early as `/srv/node-red/payloads/<UTC stamp>` (`scripts/deploy-payload-swap.js`); the flip is deferred until after the migration and mosquitto steps, when the `/srv/node-red/flows.json` symlink is repointed at the new stamp, Node-RED is restarted, and `http://127.0.0.1:1880/gui` is probed after a 5s wait. Pass → commit the flip and prune old payload dirs to `PAYLOAD_KEEP_N`. Fail → flip back to the previous stamp, restart Node-RED, and exit 1 (any DB migration already committed is **not** auto-undone). |
-| `run_communication_preflight` | Fetches `scripts/verify-communication-contract.js` plus copies of flows.json (all three hardware profiles), `node-red.init`, `settings.js`, `chirpstack-bootstrap.js`, `diagnose-pi-communication.sh` into a temp dir and runs the contract verifier against them **before** touching the live install. Aborts the whole deploy on failure. |
-| `npm install --omit=dev --no-fund --no-audit` | Installs Node-RED runtime dependencies on-device from the fetched `package.json`/`package-lock.json`; failure aborts the deploy (last 80 log lines printed to stderr) |
-| `fix_mosquitto_ownership` | Repairs file ownership/permissions on `mosquitto.passwd`/`.acl`/`/var/lib/mosquitto` if mosquitto is installed, using the UCI-configured mosquitto user if set |
-| React GUI swap | Fetches `react_gui.tar.gz`, wipes `/usr/lib/node-red/gui/*` (including dotfiles), extracts fresh bundle; runs after the payload flip/self-check step above |
-
-**What it restarts:** `deploy.sh` itself now restarts Node-RED up to twice in
-the normal path. `run_schema_migration()` stops Node-RED before touching the
-database and restarts it once the migration completes — but only when a live
-`/data/db/farming.db` exists; on a fresh Pi that step SKIPs, so this restart
-does not happen. Then, after the
-payload flip, the script issues `/etc/init.d/node-red restart` again and
-probes `/gui` before deciding whether to commit or auto-roll-back (rolling
-back restarts Node-RED a further time on the previous payload). The one
-deliberate exception is `migrate-cli.js` exit code `3` (backup-restore
-integrity failure) — that path leaves Node-RED stopped on purpose for
-operator intervention rather than restarting it. ChirpStack re-provisioning
-is unchanged: `osi-bootstrap` (`START=99`) only runs automatically on the
-next full boot, or can be triggered manually with
-`node /usr/share/node-red/chirpstack-bootstrap.js`.
-
-**Re-verify:**
-```sh
-grep -n "^[a-z_]*() {" deploy.sh
-grep -n "restart\|flipTo\|stagePayload" deploy.sh   # executed restarts around the migration step and payload flip
-```
-
----
+`deploy.sh` tunables (`PAYLOAD_KEEP_N`, `MIGRATE_BACKUP_DIR`, canary-gate
+values) are documented once, in `osi-live-ops-runbook` under "What deploy.sh
+actually does end-to-end". Read them there; two descriptions of one script
+drift.
 
 ## 7. Feature flags: `/api/system/features`
 

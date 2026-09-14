@@ -307,14 +307,12 @@ Reading straight through the script, in order:
    after the schema-migration step; the previous stamp (if any) is recorded so
    a failed flip can be rolled back to it.
 5. Runs `seed_db_if_missing` — the guarded, non-destructive DB step above.
-6. Deploys the Node-RED runtime `package.json`/`package-lock.json`, the full
-   helper-module set (`osi-chirpstack-helper`, `osi-db-helper`,
-   `osi-health-helper`, `osi-dendro-helper`, `osi-dendro-analytics`,
-   `osi-zone-env`, `osi-history-helper`, `osi-history-router`, `osi-journal`,
-   `osi-command-ledger`, `osi-history-sync-helper`, `osi-chameleon-helper`,
-   `osi-cloud-http`, `osi-lib`, `osi-device-writer`, `osi-lsn50-normalize`,
-   `osi-uc512-normalize`), `edge-channels.json`, the `chirpstack-bootstrap.js`
-   bootstrap script, five device codecs (STREGA, LSN50, S2120, LoRain, UC512),
+6. Deploys the Node-RED runtime `package.json`/`package-lock.json`,
+   the full helper-module set (every `fetch_required "<name> package.json"` in
+   `deploy.sh`; 20 modules on 2026-09-14, list them with
+   `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `edge-channels.json`,
+   the `chirpstack-bootstrap.js` bootstrap script, every file under `codecs/`
+   that `deploy.sh` names (six device decoders on 2026-09-14),
    and the Agroscope uplink transform (`agroscope_uplink_transform.js`, an
    edge→cloud forwarding transform, not a device decoder).
 7. Runs `npm install --omit=dev --no-fund --no-audit` in `/srv/node-red`, exiting

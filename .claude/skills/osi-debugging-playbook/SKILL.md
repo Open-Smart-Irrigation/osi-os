@@ -43,13 +43,10 @@ Read this table top to bottom. Run the "first discriminating experiment" before 
 
 ## GUI test invocation (web/react-gui)
 
-As of 2026-07-06, `web/react-gui/package.json` defines:
-
-```
-"test:unit": "npm run test:unit:tsx-runner && npm run test:unit:vitest",
-"test:unit:tsx-runner": "tsx --test 'tests/**/*.test.ts'",
-"test:unit:vitest": "vitest run src/analysis/__tests__ src/components/analysis/__tests__ src/components/farming/__tests__ src/components/history/__tests__ src/components/__tests__ src/pages/__tests__ src/utils/__tests__ src/channels/__tests__ src/history/__tests__ --passWithNoTests"
-```
+`web/react-gui/package.json` defines `test:unit` as two chained runners; read the
+current definition with `grep -n '"test:unit' web/react-gui/package.json` rather
+than trusting a copy here. The vitest half runs an explicit directory allow-list,
+so a new `__tests__` directory is silently skipped until it is added there.
 
 `npm run test:unit` is two runners chained: a `tsx --test` pass over `tests/**/*.test.ts`, then a scoped `vitest run` over an explicit list of `src/**/__tests__` directories. A bare `npx vitest run` only runs the vitest half and skips the `tsx --test` suite entirely — it will look "mostly green" while silently omitting a whole test population. Always use `npm run test:unit` (or `cd web/react-gui && npm run test:unit`) for a full signal, never bare `npx vitest run`.
 
@@ -61,7 +58,7 @@ All paths below are relative to the repo root. "Cheap" means: runs against stati
 |---|---|---|---|---|
 | `scripts/verify-sync-flow.js` | Master sync/flows verifier; chains device fixtures (S2120, DB-helper transaction semantics) and internally spawns `verify-profile-parity.js` | `node scripts/verify-sync-flow.js` | Prints one `OK <check>` line per assertion, prints `Sync flow verification passed` at the end of its own section, then spawns `verify-profile-parity.js`; a healthy full run ends `All parity checks passed.`, exit 0 | CI-gated (`.github/workflows/verify-sync-flow.yml`). Verified clean in this worktree on 2026-07-06 (all checks OK, includes profile-parity sub-run) |
 | `scripts/verify-profile-parity.js` | Confirms bcm2709 (Pi 4) payload files are byte-identical mirrors of bcm2712 (Pi 5) canonical source | `node scripts/verify-profile-parity.js` | Per-file `OK: <path>` / `OK: absent: <path>` lines, ends `All parity checks passed.`; any `MISMATCH`/`FAIL` blocks a merge | Not its own CI workflow but is invoked from inside `verify-sync-flow.js`, which is CI-gated. Verified clean in this worktree on 2026-07-06 (output shape and check count live in **osi-flows-json-editing** §Profile parity) |
-| `scripts/verify-migrations.js` | Validates the ordered migration set under `database/migrations/ordered/` (naming, checksums/structure) | `node scripts/verify-migrations.js` | One-line summary `verify-migrations: OK (<n> migrations)`; nonzero exit on malformed migration | CI-gated via `.github/workflows/migrations.yml`. Verified clean in this worktree on 2026-07-06: `verify-migrations: OK (2 migrations)` |
+| `scripts/verify-migrations.js` | Validates the ordered migration set under `database/migrations/ordered/` (naming, checksums/structure) | `node scripts/verify-migrations.js` | One-line summary `verify-migrations: OK (<n> migrations)`; nonzero exit on malformed migration | CI-gated via `.github/workflows/migrations.yml`. Compares against `origin/main`; a branch behind main fails with `base migration missing`, which is red-on-base, not your change |
 | `scripts/check-mqtt-topics.sh` | Enforces the MQTT-IN topic rule (`application/+/device/+/event/up`, no hardcoded per-install UUIDs) across all shipped `flows.json` profiles | `scripts/check-mqtt-topics.sh` (or `bash scripts/check-mqtt-topics.sh`) | One `OK: <path> — no UUID patterns in MQTT IN topics` line per profile; any hardcoded UUID fails the line | Not wired into a GitHub workflow file directly (no dedicated `.yml`), but is the canonical enforcement AGENTS.md cites for this rule. Verified clean in this worktree on 2026-07-06 across bcm2712/bcm2709/bcm2708 |
 | `scripts/verify-seed-replay.js` | Confirms the seed DB replays cleanly through the migration runner (CI-time only invocation path for `applyPending`) | `node scripts/verify-seed-replay.js` | Pass/fail summary; consult script header for exact format | CI-gated via `migrations.yml`. Not run in this session — no live-device dependency but not in the mandatory cheap set; treat as unverified here |
 | `scripts/verify-runtime-schema-parity.js` | Fails if the shipped boot-DDL flow ever downgrades `database/seed-blank.sql` (devices CHECK / triggers) | `node scripts/verify-runtime-schema-parity.js` | Pass/fail summary | CI-gated via `migrations.yml`. Not run in this session; not in the mandatory cheap set — treat as unverified here |
@@ -74,15 +71,10 @@ All paths below are relative to the repo root. "Cheap" means: runs against stati
 
 ## Debugging method
 
-Distilled from `docs/engineering-playbook.md` §6 ("When you are stuck or debugging") — read that section for the full version:
-
-1. **Reproduce before theorizing.** Run the failing thing yourself; capture exact output. Don't debug a described symptom you haven't seen.
-2. **Read the actual code, not your memory of it.** Line numbers move; claims rot — this is why every row in the triage table above was re-verified against current source before being written down.
-3. **Bisect with history when the cause isn't obvious:** `git log -S "<string>"` finds when a behavior appeared; `git show <ref>:<path>` compares generations without switching branches.
-4. **Test hypotheses empirically and cheaply:** a temp SQLite DB built from the seed, a ten-line Node script in the scratchpad, one `curl`. Minutes, not arguments.
-5. **Root cause, then fix.** A signal that pattern-matches a known failure may have a different cause — the "duplicate column" row above is the canonical example: it looked like a boot-DDL regression and was actually a stale test baseline.
-6. **Fix the class, not the instance,** and grep for siblings once you've found the real cause.
-7. **If your fix fights the harness or the conventions, you misread the system.** Stop and re-read AGENTS.md and the nearest working precedent before continuing.
+Follow `docs/engineering-playbook.md` §6 ("When you are stuck or debugging").
+The one repo-specific addition: the `duplicate column` row in the triage table
+is the canonical case of a signal with a different cause than it pattern-matches
+to (issue #84, a stale test baseline, not the boot DDL).
 
 ## Common mistakes
 
