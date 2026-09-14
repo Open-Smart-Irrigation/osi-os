@@ -14,6 +14,27 @@
 
 Reviewed and approved by Phil on 2026-09-13. Implementation starts 2026-09-14 09:00. Wave 1 (Tasks 1-3) and Wave 2 (Task 4) proceed first, built in a worktree from `origin/main`, shipping on the next fleet redeploy after the 2026-09-13 deploy train (edge `main` `04dca4f8b`, cloud `244c73b0`). Wave 3 (Tasks 5-6) is DEFERRED to its own program: Task 5 lands a destructive migration `0057` that the fleet must take immediately after that train; its trigger-text change interacts with the W5 customer-lineage reconciliation fixtures whose numbering is undecided; and the link-node attribution change touches the sync path just repaired on Uganda on 2026-09-12. Task 7 close-out stays but depends on Wave 1 evidence (#222 already fixed by PR #225, #87 by the Uganda head-56 deploy). No collision with PRs #231/#232: those touch other flow nodes, the GUI, and `verify-sync-flow.js` only. The boot node, `lib/osi-migrate`, the migrations and the ratchet allowances are unchanged since baseline `3eee141f5`.
 
+## Execution record (2026-09-14)
+
+Wave 1 and Wave 2 are merged on edge `main` at `df5fcabe9`. No fleet deploy of this code has happened yet on any gateway — Phil decided to finalize Task 7's documentation now, without waiting on a Uganda deploy.
+
+| Task | PR | Merge SHA | Issues closed | Issues still open |
+|---|---|---|---|---|
+| 1 (boot-node column list + fence) | #237 | `69ec8e142` | #173, #219, #220 | — |
+| 2 (DROP-TABLE cascade scanner) | #235 | `c8b74d819` | #224 | — |
+| 3 (boot-node log capture) | #236 | `9587a63fa` | — | #223, until the live check in `docs/operations/node-red-log-capture-verification.md` is executed |
+| 4 (schema-comparator characterisation) | #239 | `df5fcabe9` | #221 | — |
+
+Rehearsal is 8 of the 9 `rehearse-devices-rebuild.test.js` cases; case 9 is tracked in #238, not yet closed.
+
+Wave 3 (Tasks 5-6, the Silvan EUI literal and the catalog healer) remains deferred, per the decision above, to its own program. The Rollout section below — Stage 0 rehearsal through Stage 3 Uganda — remains pending; no stage of it has started.
+
+Task 7 (this wave):
+- [x] Step 1: read the current runbook against origin/main.
+- [x] Step 2: rewrite the runbook's status section, moving Uganda's status into a dated 2026-09-12 outcome section and adding a "Not yet done" line for the undeployed Wave 1 boot node.
+- [x] Step 3: slop check passes (`slop-check: PASS (no tier-1 findings)`; two pre-existing tier-2 "genuinely" hits, not introduced by this edit).
+- [x] Step 4: committed.
+
 ## Global constraints
 
 - Baseline is `origin/main` at `3eee141f5`. The working checkout `feat/valve-control` is hundreds of commits behind; branch every task from `origin/main` and re-verify any claim below before acting on it.
@@ -841,23 +862,23 @@ git commit -m "chore(boot): delete the unfenced writable_schema devices_old heal
 **Files:**
 - Modify: `docs/operations/uganda-catchup-runbook.md`
 
-- [ ] **Step 1: Read the current document**
+- [x] **Step 1: Read the current document**
 
 Run: `git show origin/main:docs/operations/uganda-catchup-runbook.md`
 It still describes execution as gated on a stable-connectivity window and on Uganda being pre-history-sync. Both are stale.
 
-- [ ] **Step 2: Rewrite the status section against the verified state**
+- [x] **Step 2: Rewrite the status section against the verified state**
 
 State, with the 2026-09-12 read-only evidence: `schema_migrations` head 56; `devices` carrying all 45 columns including the five `sdi12_*`; `device_data` at 70,578 rows with ingest live (newest `2026-09-12T19:19:49Z`); five incident-window backups under `/data/db/`. Replace the "blocked on connectivity" framing with what the catch-up produced and what the incident cost (70,176 rows deleted by an unfenced cascade, since restored). Link the incident log and the issues that fix the generating defects.
 
 Keep the operational procedure — it is still the recipe for the next behind-schema gateway — but move the Uganda-specific status into a dated outcome section so a future reader does not mistake history for a pending task.
 
-- [ ] **Step 3: Run the slop check**
+- [x] **Step 3: Run the slop check**
 
 Run: `node .claude/skills/anti-slop-writing/slop-check.js docs/operations/uganda-catchup-runbook.md`
 Expected: `slop-check: PASS (no tier-1 findings)`, exit 0. Read every tier-2 warning; do not bulk-suppress.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/operations/uganda-catchup-runbook.md
