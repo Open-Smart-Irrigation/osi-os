@@ -1,28 +1,31 @@
 # Uganda catch-up + schema baseline runbook (issue #87, refactor item 2.1)
 
-> ## ⚠ SCHEMA WORK REHEARSED GREEN — THREE GATES STILL OPEN
+> ## Executed 2026-09-11/12 — this window has already run on Uganda
 >
-> The schema catch-up + rebuild + migrate-to-head pipeline (G4) is rehearsed
-> end-to-end on a byte-copy of the real Uganda database and reaches head
-> cleanly (`docs/operations/uganda-schema-rebuild-20260911-report.md` §6, §12).
-> That is the hard part this runbook exists to de-risk, and it is done.
+> The window this runbook describes ran against the real gateway on
+> 2026-09-11/12 and Uganda is now at migration head 56 with a working
+> `sync_link_state` link. The run itself was not clean: an unfenced boot-node
+> `devices` rebuild dropped 70,176 rows of `device_data` mid-window; the
+> incident, its root cause, and the recovery are recorded in the
+> "2026-09-12 outcome" section below. The verified current state,
+> superseding every "OPEN" gate and
+> "__________" evidence line that follows, is in that section — read it before
+> the hard-gates table or the operator procedure.
 >
-> Three gates are not evidenced yet and must close before anyone runs this on
-> the real gateway:
-> 1. **The `Kaweza` user must exist again on `server.opensmartirrigation.org`.**
->    That test server's database was reset; Uganda's outbox backlog cannot
->    land anywhere until the account is recreated there.
-> 2. **A confirmed good-connectivity window** for the on-device run (§Phase 0).
-> 3. **Phil's explicit go-ahead to execute against the real gateway.**
+> The **operator procedure** (hard gates, catch-up + rebuild artifacts, phased
+> checklist) below is kept as the recipe for the next gateway that turns up
+> behind-schema with missing sync tables. It is not a template to replay
+> as-is: the next gateway needs its own gate evidence filled in, and it
+> inherits the fixes this incident produced (flows-flip precondition, DROP
+> TABLE cascade audit, boot-node column-superset fence) rather than the
+> unfenced boot node Uganda actually ran against.
 >
-> **This document is the plan of record for that window; it is not
-> authorization to run it.** Uganda is the one gateway in the fleet without a
-> cloud mirror of its own history (see "Why Uganda is special" below). Do not
-> run Phase 3/4 against the real device until all three items above are
-> closed.
+> **This document is the plan of record for that class of window; it is not
+> standing authorization to run it against any other gateway.**
 
-**Status:** Runbook — schema rehearsal (G4) GREEN; execution blocked on the
-three gates above. Implements
+**Status:** Runbook — executed against Uganda 2026-09-11/12 (see outcome
+section); procedure retained for reuse on the next behind-schema gateway.
+Implements
 [`docs/superpowers/plans/2026-07-05-option-b-boot-path-cutover.md`](../superpowers/plans/2026-07-05-option-b-boot-path-cutover.md)
 §5 as an operator checklist, using the artifacts, generators, and window
 script produced by
@@ -38,6 +41,73 @@ separate touches.
 touch a live gateway), `.claude/skills/osi-schema-change-control/SKILL.md`,
 AGENTS.md live-deploy safety rules.
 
+## 2026-09-12 outcome: the window ran, and what it cost
+
+The window below executed against the real Uganda gateway starting
+2026-09-11 late evening and finishing 2026-09-12. This section is the
+dated record; everything else in this document is the procedure, kept
+for reuse, not a description of a pending task.
+
+**What happened.** The catch-up and rebuild artifacts reached head cleanly
+on the first pass, and the trap restarted Node-RED. That first flows
+deploy had only *staged* its payload without flipping it (issue #222): the
+post-migration restart at 22:48:54Z ran Uganda's OLD boot node — a
+pre-`81d70a212` (2026-06-27) build whose `devices` rebuild used
+`devices_new` → `RENAME` → `DROP TABLE devices_old` on a connection with
+`foreign_keys=ON`. The rebuild artifact had just added a canonical
+`device_data.deveui REFERENCES devices(deveui) ON DELETE CASCADE`, so the
+implicit `DELETE` behind that `DROP TABLE` cascaded across the FK and
+removed 70,176 rows of `device_data` (`sqlite_sequence` still read 70,179,
+confirming rows were deleted rather than the table recreated). The same
+rebuild had dropped the five migration-added `sdi12_*` columns from
+`devices`, which stalled all further ingestion silently: `sync_outbox`'s
+`trg_sentek_data_outbox_payload_ai` trigger reads
+`devices.sdi12_channel_layout_json`, so every `device_data` insert aborted
+even though uplinks kept arriving at ChirpStack/MQTT the whole time. Only
+`device_data` was affected; all other 41 tables compared clean.
+
+**Recovery.** Root-caused and reproduced byte-for-byte on a copy, then: (1)
+five `ALTER TABLE devices ADD COLUMN` statements per migrations `0026`/`0028`
+restored ingestion; (2) `restore-device-data.sh` re-inserted the 70,176 rows
+from the pre-window backup, in-transaction, `NOT EXISTS`-guarded, with IDs
+and timestamps preserved and zero new `sync_outbox` events generated; (3) a
+clean Node-RED restart re-converged the `devices` CHECK constraint; (4)
+`schema_object_fingerprints` were restamped and validated against a copy
+first. Backups taken across the incident and still retained on- and
+off-device: `farming.db.bak-2026-09-11T22-4*` (pre-window, mid-incident
+snapshots — do not rehearse against these, they predate the repair) and
+`farming.db.bak-prehistoryfix-20260912T194416Z` (pre-restore).
+
+**Verified state (read-only checks, 2026-09-12, before Wave 1 of the
+boot-node schema safety plan landed on `main`):** `schema_migrations` head
+56; `devices` carrying all 45 columns including the five `sdi12_*`;
+`device_data` at 70,578 rows with ingest live, newest row
+`2026-09-12T19:19:49Z`. A later preflight on 2026-09-13 (ahead of an
+unrelated edge-main deploy) showed 71,145 rows, ledger 56/56, and
+`PRAGMA integrity_check` `ok` — ingestion kept running cleanly after the
+repair.
+
+**Fixing the generating defects.** Four fleet issues came out of this
+incident (osi-os #173, #219, #220, #221, #222, #223, #224); the fixes for
+five of them are merged on edge `main` as of `df5fcabe9`:
+
+| Issue | Fix | Merge |
+|---|---|---|
+| #222 (flows staged but not flipped before the post-migration restart caused the OLD boot node to run against the NEW schema) | PR #225, `deploy.sh` flips the staged payload before the post-migration restart and refuses if the precondition doesn't hold | edge `main` `b79bdf4a` (2026-09-12) |
+| #173, #219, #220 (boot node's hand-written `devices` column list disagreed with the seed on order and nullability, with no fence against a superset/subset mismatch) | PR #237 | `69ec8e142` |
+| #224 (no scanner catches an unfenced `DROP TABLE`-cascade rebuild like the one above before it ships) | PR #235 | `c8b74d819` |
+| #223 (Node-RED boot-node output isn't captured to a persistent log, so this class of failure is invisible between physical visits) | PR #236 — stays open until the live log-capture check in [`docs/operations/node-red-log-capture-verification.md`](node-red-log-capture-verification.md) is actually executed | `9587a63fa` |
+| #221 (characterise whether the schema comparator's residual `table\|devices` diff shape is real) | PR #239 — closed; the comparator never emitted that diff shape, and #173/#219 were the real components of Uganda's refusal | `df5fcabe9` |
+
+**Not yet done.** The Wave 1 boot node (PR #237, and PRs #235/#236/#239)
+has **not been deployed to any gateway**. Uganda, kaba100, and Silvan are
+all still running the boot node that produced this incident; only the
+merge to edge `main` is done. The next fleet redeploy of any gateway should
+be built from current `main`, not from the pre-incident payload described
+in the Phase 0-4 procedure below. See
+`docs/superpowers/plans/2026-09-12-boot-node-schema-safety.md` for the
+rollout plan and its remaining stages.
+
 ## Precondition: network migrations 0054–0056 (PR #213) must be on main first
 
 `database/migrations/ordered/` currently ends at `0053__installation_identity_backfill.sql`
@@ -52,6 +122,11 @@ weeks later. If PR #213 has not merged when the other three gates close, wait
 for it; do not split the window.
 
 ## HARD GATES (all must be TRUE before this runbook may run)
+
+All five gates below closed for the 2026-09-11/12 Uganda window; see the
+outcome section above for what the run actually produced. Kept here,
+unedited from the pre-run version, as the gate list the next behind-schema
+gateway needs to re-satisfy from scratch — its evidence will differ.
 
 | # | Gate | Status | Evidence |
 |---|---|---|---|
@@ -173,17 +248,38 @@ exactly this boot-rewrite case and should NOT need
 `restamp-fingerprints.js` run by hand. If it still reports drift, that is a
 signal to investigate before restamping, not to restamp reflexively.
 
-## Post-run evidence (fill after a real execution — this is what closes item 2.1)
+## Post-run evidence (2026-09-11/12 execution — item 2.1, closed with a caveat)
 
-- Execution date/operator: __________
-- Matched baseline N: __________
-- Migrations applied by `migrate-cli`: __________
-- Row-count invariants: __________ (must be IDENTICAL except the newly-empty sync tables)
-- Heartbeat `schema_sig` before → after: __________
-- `Kaweza` user recreated on `server.opensmartirrigation.org`, date: __________
-- Cloud dead-letter count during backlog replay: __________ (expect 0)
-- Backups retained (paths, expiry): __________
-- Surprises / findings: __________
+This closes item 2.1 in the sense that the window ran and Uganda reached
+head. It does not close clean: the surprise below is the P0 incident
+covered in the outcome section, and the fixing PRs listed there are the
+real closure of the defects it exposed.
+
+- Execution date/operator: 2026-09-11 late evening → 2026-09-12, incident
+  response and repair completed 2026-09-12 (Opus incident worker, Phil
+  authorizing recovery).
+- Matched baseline N: 1 (rehearsal and live run both).
+- Migrations applied by `migrate-cli`: to head 56.
+- Row-count invariants: NOT identical across the window — `device_data`
+  dropped 70,176 rows mid-window and was restored row-for-row afterward
+  (see outcome section); every other history-bearing table held.
+- Heartbeat `schema_sig` before → after: pre-window drifted signature →
+  56 (head), confirmed live post-repair.
+- `Kaweza` user recreated on `server.opensmartirrigation.org`: yes, ahead
+  of this window; the subsequent re-link surfaced its own sync issues
+  (stale seed-image EUI in `sync_link_state`, bootstrap-abort on an
+  unrecognized previous-gateway EUI) tracked separately from this runbook.
+- Cloud dead-letter count during backlog replay: non-zero — a second,
+  independent incident during the cloud re-link (not this window's
+  schema work) rejected 1,119 events; recorded and repaired outside this
+  document's scope.
+- Backups retained: `farming.db.bak-2026-09-11T22-4*` (pre-window),
+  `farming.db.bak-prehistoryfix-20260912T194416Z` (pre-restore), plus
+  off-device gzip copies referenced in the outcome section.
+- Surprises / findings: the P0 incident itself — an unfenced boot-node
+  `devices` rebuild cascade-deleting `device_data` because a flows deploy
+  had staged but not flipped its payload before the post-migration
+  restart. Full account and fixes in the outcome section above.
 
 ## Runbook history
 
