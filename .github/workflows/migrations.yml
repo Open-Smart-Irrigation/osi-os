@@ -174,3 +174,5 @@ jobs:
           fi
       - run: node scripts/verify-command-safety.js
       - run: node scripts/verify-command-ack-postconditions.js
+      - run: node scripts/verify-init-log-capture.js
+      - run: node --test scripts/verify-init-log-capture.test.js
