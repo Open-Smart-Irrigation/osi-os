@@ -176,3 +176,6 @@ jobs:
       - run: node scripts/verify-command-ack-postconditions.js
       - run: node scripts/verify-init-log-capture.js
       - run: node --test scripts/verify-init-log-capture.test.js
+      - name: Rename-swap FK fence scan (migrations, ops SQL/generators, flows function nodes)
+        run: node scripts/verify-rename-swap-fence.js
+      - run: node --test scripts/verify-rename-swap-fence.test.js
