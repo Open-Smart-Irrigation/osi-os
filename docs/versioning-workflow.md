@@ -77,12 +77,12 @@ Keep entries user-facing: what changed and why it matters. Reference deploy.sh s
 ```bash
 cd web/react-gui && npm install && npm run build
 cd ../..
-tar -czf react_gui.tar.gz -C web/react-gui/dist .
+tar -czf react_gui.tar.gz -C web/react-gui/build .
 ```
 
 Verify the bundle includes the new version string:
 ```bash
-grep -r "v0\." web/react-gui/dist/ | head -5
+grep -r "v0\." web/react-gui/build/ | head -5
 ```
 
 ---
@@ -191,7 +191,9 @@ Do not store production SSH credentials, private keys, or host aliases in this r
 Run the deploy through SSH with the rollout key. Replace the host with the selected cloud environment from the table.
 
 ```bash
-ssh -i /path/to/ephemeral-key rocky@osicloud.ch <<'REMOTE'
+# Test host shown. Production (osicloud.ch) needs explicit consent in the current
+# conversation; see AGENTS.md "Production cloud access".
+ssh -i /path/to/ephemeral-key rocky@server.opensmartirrigation.org <<'REMOTE'
 set -e
 git -C /home/rocky/docker/osi-server pull --ff-only origin main
 cd /home/rocky/docker/osi-server/docker
