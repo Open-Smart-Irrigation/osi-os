@@ -194,6 +194,9 @@ test('compareSchemas never emits a changed|table diff for any drift shape', asyn
   ];
   for (const sql of shapes) {
     const res = compareSchemas(await snapOf(sql), ref, ref);
+    // Without this the sweep would pass vacuously on any shape the comparator
+    // reports nothing for.
+    assert.equal(res.ok, false, `expected drift for shape:\n${sql}\n${JSON.stringify(res.diffs)}`);
     for (const d of res.diffs) {
       assert.notEqual(`${d.class}|${d.kind}`, 'changed|table',
         `unexpected changed|table diff for shape:\n${sql}\n${JSON.stringify(d)}`);
