@@ -94,6 +94,35 @@ test('a DROP of an unrelated table is not a swap', () => {
     scanSqlText('f.sql', 'ALTER TABLE zones RENAME TO zones_old;\nDROP TABLE scratch_tmp;'), []);
 });
 
+test('a destructive marker below the header line does not fence anything', () => {
+  const p = scanSqlText('ops.sql', '-- rebuild notes\n-- risk: destructive (see 0027)\n' + SUFFIX_SWAP);
+  assert.strictEqual(p.length, 1);
+  assert.match(p[0], /rename-swap involving zones_old without an FK fence/);
+});
+
+test('identifiers compare case-insensitively, as SQLite folds them', () => {
+  const p = scanSqlText('f.sql', 'ALTER TABLE zones RENAME TO zones_old;\nDROP TABLE ZONES_OLD;');
+  assert.strictEqual(p.length, 1);
+  assert.match(p[0], /rename-swap involving zones_old without an FK fence/);
+});
+
+test('foreign keys switched back on before a later swap leave it unfenced', () => {
+  const sql = 'PRAGMA foreign_keys=OFF;\n' + DROP_FIRST_SWAP + '\nPRAGMA foreign_keys=ON;\n' + SUFFIX_SWAP;
+  const p = scanSqlText('ops.sql', sql);
+  assert.strictEqual(p.length, 1);
+  assert.match(p[0], /rename-swap involving zones_old without an FK fence/);
+});
+
+test('PRAGMA foreign_keys=0 fences as OFF does', () => {
+  assert.deepStrictEqual(scanSqlText('ops.sql', 'PRAGMA foreign_keys = 0;\n' + DROP_FIRST_SWAP), []);
+});
+
+test('the live-Pi repair tool is scanned', () => {
+  const { collectCorpora } = require('./verify-rename-swap-fence');
+  const labels = collectCorpora().map((c) => c.label);
+  assert.ok(labels.includes('scripts/repair-pi-schema.js'), 'repair-pi-schema.js scanned');
+});
+
 test('the repository corpora are clean', () => {
   const { collectCorpora } = require('./verify-rename-swap-fence');
   const corpora = collectCorpora();

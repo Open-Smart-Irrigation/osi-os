@@ -11,14 +11,16 @@
 //
 // The rule: inside one text, a `DROP TABLE [IF EXISTS] <t>` whose <t> is the
 // source or the target of a `RENAME TO` in the same text is a rename-swap. It
-// must be fenced, either by the `-- risk: destructive` header (the ordered
-// migration runner wraps those in `PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
-// …; COMMIT; PRAGMA foreign_keys=ON;`) or by an explicit
-// `PRAGMA foreign_keys=OFF` appearing before the first of the two statements.
+// must be fenced, either by a `-- risk: destructive` header on the first
+// non-blank line (the ordered migration runner wraps those in
+// `PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE; …; COMMIT;
+// PRAGMA foreign_keys=ON;`) or by foreign keys being off at the swap: the
+// nearest preceding `PRAGMA foreign_keys=…` must say `OFF`.
 //
 // Corpora: ordered migrations, the executed `scripts/ops/*.sql` artifacts,
-// their `scripts/ops/*.js` generators, and every function-node body in both
-// `flows.json` profiles.
+// their `scripts/ops/*.js` generators, `scripts/repair-pi-schema.js` (the
+// live-Pi repair tool deploy.sh fetches, which rebuilds `devices` the same
+// way), and every function-node body in both `flows.json` profiles.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -40,8 +42,32 @@ const RENAME_RE = new RegExp(
   `ALTER\\s+TABLE\\s+${GLUE}(${IDENT})${GLUE}RENAME\\s+TO\\s+${GLUE}(${IDENT})`, 'gi');
 const DROP_RE = new RegExp(
   `DROP\\s+TABLE\\s+${GLUE}(?:IF\\s+EXISTS\\s+${GLUE})?(${IDENT})`, 'gi');
-const DESTRUCTIVE_RE = /--\s*risk:\s*destructive/i;
-const FK_OFF_RE = /PRAGMA\s+foreign_keys\s*=\s*OFF/i;
+// The risk header is the migration's first non-blank line (AGENTS.md); a later
+// line mentioning the marker is not a header and does not fence anything.
+const DESTRUCTIVE_HEADER_RE = /^\s*--\s*risk:\s*destructive\b/i;
+const FK_PRAGMA_RE = /PRAGMA\s+foreign_keys\s*=\s*(OFF|ON|0|1|TRUE|FALSE)/gi;
+
+// SQLite folds unquoted and quoted identifiers to the same name; a generator's
+// `${...}` placeholder is compared verbatim.
+function identKey(name) {
+  return name.startsWith('${') ? name : name.toLowerCase();
+}
+
+function hasDestructiveHeader(sql) {
+  const first = String(sql == null ? '' : sql).split('\n').find((l) => l.trim() !== '');
+  return first != null && DESTRUCTIVE_HEADER_RE.test(first);
+}
+
+// Foreign keys as of `index`, from the nearest preceding PRAGMA. A text that
+// turns them back on between two swaps leaves the second one unfenced.
+function fkOffAt(text, index) {
+  let off = false;
+  FK_PRAGMA_RE.lastIndex = 0;
+  for (let m = FK_PRAGMA_RE.exec(text); m && m.index < index; m = FK_PRAGMA_RE.exec(text)) {
+    off = /^(OFF|0|FALSE)$/i.test(m[1]);
+  }
+  return off;
+}
 
 /**
  * Report every unfenced rename-swap in one text.
@@ -50,31 +76,31 @@ const FK_OFF_RE = /PRAGMA\s+foreign_keys\s*=\s*OFF/i;
  * @returns {string[]} one message per swapped table, empty when clean
  */
 function scanSqlText(label, sql) {
+  if (hasDestructiveHeader(sql)) return [];
   const text = String(sql == null ? '' : sql).replace(/\s+/g, ' ');
-  if (DESTRUCTIVE_RE.test(text)) return [];
 
-  const renamed = new Map(); // table name -> index of the earliest RENAME touching it
+  const renamed = new Map(); // table key -> {name, index of the earliest RENAME touching it}
   RENAME_RE.lastIndex = 0;
   for (let m = RENAME_RE.exec(text); m; m = RENAME_RE.exec(text)) {
     for (const name of [m[1], m[2]]) {
-      if (!renamed.has(name)) renamed.set(name, m.index);
+      if (!renamed.has(identKey(name))) renamed.set(identKey(name), { name, index: m.index });
     }
   }
   if (renamed.size === 0) return [];
 
-  const fkOff = text.search(FK_OFF_RE);
   const problems = [];
   const seen = new Set();
   DROP_RE.lastIndex = 0;
   for (let m = DROP_RE.exec(text); m; m = DROP_RE.exec(text)) {
-    const name = m[1];
-    if (!renamed.has(name) || seen.has(name)) continue;
-    const first = Math.min(m.index, renamed.get(name));
-    if (fkOff >= 0 && fkOff < first) continue;
-    seen.add(name);
+    const key = identKey(m[1]);
+    const rename = renamed.get(key);
+    if (!rename || seen.has(key)) continue;
+    const first = Math.min(m.index, rename.index);
+    if (fkOffAt(text, first)) continue;
+    seen.add(key);
     problems.push(
-      `${label}: rename-swap involving ${name} without an FK fence `
-      + '(needs "-- risk: destructive" or PRAGMA foreign_keys=OFF before the swap)');
+      `${label}: rename-swap involving ${rename.name} without an FK fence `
+      + '(needs a "-- risk: destructive" header or PRAGMA foreign_keys=OFF before the swap)');
   }
   return problems;
 }
@@ -93,7 +119,8 @@ function collectCorpora() {
   const files = [
     ...listDir(MIGRATIONS_DIR, (f) => f.endsWith('.sql')),
     ...listDir(OPS_DIR, (f) => f.endsWith('.sql') || f.endsWith('.js')),
-  ];
+    path.join(REPO, 'scripts/repair-pi-schema.js'),
+  ].filter((fp) => fs.existsSync(fp));
   for (const fp of files) {
     corpora.push({ label: path.relative(REPO, fp), sql: fs.readFileSync(fp, 'utf8') });
   }
