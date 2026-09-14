@@ -1,0 +1,10 @@
+{
+  "_comment": "PLACEHOLDER - NOT A REAL CAPTURE. The uganda-post-repair-columns rehearsal case replays Uganda's devices column set as it stands after the 2026-09-12 manual repair (chameleon_enabled re-added by hand, out of seed order). Uganda is a production gateway, so the list must be read from a fresh sqlite3 .backup copy of /data/db/farming.db with Phil's explicit go in the turn it happens - never invented from memory. While pending_capture is true the rehearsal case SKIPS with the status message below; it never silently passes.",
+  "pending_capture": true,
+  "status": "pending Uganda capture (needs Phil go)",
+  "capture": "PRAGMA table_info(devices) on a fresh .backup of Uganda /data/db/farming.db; write the name column, in table order, into \"columns\" and set pending_capture to false",
+  "issue": "osi-os#238",
+  "issue_url": "https://github.com/Open-Smart-Irrigation/osi-os/issues/238",
+  "blocks": "osi-os#219",
+  "columns": []
+}
