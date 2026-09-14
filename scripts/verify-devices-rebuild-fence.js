@@ -61,8 +61,26 @@ function columnsFromCreateTable(sql, nameRe) {
   return cols;
 }
 
+const DEVICES_CREATE_RE = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`[]?devices["`\]]?\s*\(/i;
+
 function parseSeedDevicesColumns(seedSql) {
-  return columnsFromCreateTable(String(seedSql), /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`[]?devices["`\]]?\s*\(/i);
+  return columnsFromCreateTable(String(seedSql), DEVICES_CREATE_RE);
+}
+
+// The boot node's DEVICES_COLUMNS entries exactly as shipped, including the `from` and
+// `dflt` fields that never reach the DDL. Returns [] on a pre-#219 payload.
+function parseBootDevicesTable(funcText) {
+  const src = String(funcText || '');
+  const start = src.indexOf('const DEVICES_COLUMNS = [');
+  if (start < 0) return [];
+  const open = src.indexOf('[', start);
+  let depth = 0, end = -1;
+  for (let i = open; i < src.length; i += 1) {
+    if (src[i] === '[') depth += 1;
+    else if (src[i] === ']') { depth -= 1; if (depth === 0) { end = i; break; } }
+  }
+  if (end < 0) throw new Error('unterminated DEVICES_COLUMNS array literal');
+  return new Function(`'use strict'; return (${src.slice(open, end + 1)});`)();
 }
 
 // Extracts the boot node's DEVICES_COLUMNS table, rebuilds the CREATE TABLE text the
@@ -70,16 +88,8 @@ function parseSeedDevicesColumns(seedSql) {
 // so the parser still reads a pre-#219 payload.
 function parseBootDevicesColumns(funcText) {
   const src = String(funcText || '');
-  const start = src.indexOf('const DEVICES_COLUMNS = [');
-  if (start >= 0) {
-    const open = src.indexOf('[', start);
-    let depth = 0, end = -1;
-    for (let i = open; i < src.length; i += 1) {
-      if (src[i] === '[') depth += 1;
-      else if (src[i] === ']') { depth -= 1; if (depth === 0) { end = i; break; } }
-    }
-    if (end < 0) throw new Error('unterminated DEVICES_COLUMNS array literal');
-    const table = new Function(`'use strict'; return (${src.slice(open, end + 1)});`)();
+  const table = parseBootDevicesTable(src);
+  if (table.length) {
     const ddl = 'CREATE TABLE devices_new (' + table.map((c) => c.ddl).join(', ') + ')';
     const cols = columnsFromCreateTable(ddl, /CREATE\s+TABLE\s+devices_new\s*\(/i);
     cols.forEach((c, i) => {
@@ -92,8 +102,24 @@ function parseBootDevicesColumns(funcText) {
   return columnsFromCreateTable(JSON.parse(m[1]), /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?devices(?:_new)?\s*\(/i);
 }
 
-// Every `ALTER TABLE devices ADD COLUMN <col>` across the ordered migrations. Other
-// tables (devices_audit, device_data, ...) are ignored: the table name must match
+// Every column any `CREATE TABLE devices (...)` in one SQL text declares. Migrations
+// 0001, 0010 and 0027 recreate the table wholesale rather than ALTERing it, and a future
+// one could too: a rebuild migration that adds a column the boot node does not know would
+// hard-abort every boot on the unknown-column refusal.
+function createTableDevicesColumns(sql) {
+  const text = String(sql);
+  const all = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`[]?devices["`\]]?\s*\(/gi;
+  const out = new Set();
+  let m;
+  while ((m = all.exec(text)) !== null) {
+    for (const c of columnsFromCreateTable(text.slice(m.index), DEVICES_CREATE_RE)) out.add(c.name);
+  }
+  return out;
+}
+
+// Every devices column the ordered migrations introduce, from both shapes: an
+// `ALTER TABLE devices ADD COLUMN <col>` and a wholesale `CREATE TABLE devices (...)`.
+// Other tables (devices_audit, device_data, ...) are ignored: the table name must match
 // exactly, with its own word boundary.
 function migrationAddedDevicesColumns(migrationsDir) {
   const re = /\bALTER\s+TABLE\s+(?:"devices"|`devices`|\[devices\]|devices)\s+ADD\s+(?:COLUMN\s+)?(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))/gi;
@@ -102,8 +128,27 @@ function migrationAddedDevicesColumns(migrationsDir) {
     const sql = fs.readFileSync(path.join(migrationsDir, f), 'utf8');
     let m;
     while ((m = re.exec(sql)) !== null) out.add(m[1] || m[2] || m[3] || m[4]);
+    for (const name of createTableDevicesColumns(sql)) out.add(name);
   }
   return out;
+}
+
+// Gates over the DEVICES_COLUMNS entries themselves. `ddl` is compared against the seed
+// elsewhere; these two invariants are what the copy builder relies on and neither is
+// visible in the DDL: a `from` list that does not start with the column's own name would
+// silently prefer another column's value, and a NOT NULL column with dflt 'NULL' would
+// violate its own constraint the moment a source lacks it.
+function checkDevicesColumnTable(entries) {
+  const problems = [];
+  for (const e of entries) {
+    if (!Array.isArray(e.from) || e.from[0] !== e.name) {
+      problems.push(`devices.${e.name}: from must start with the column's own name (got ${JSON.stringify(e.from)})`);
+    }
+    if (/NOT\s+NULL/i.test(String(e.ddl)) && e.dflt === 'NULL') {
+      problems.push(`devices.${e.name}: declared NOT NULL but dflt is NULL; a source missing it would violate the constraint`);
+    }
+  }
+  return problems;
 }
 
 function run() {
@@ -145,6 +190,8 @@ function run() {
         if (!bootNames.has(col)) problems.push(`${rel}: boot DDL is missing migration-added devices.${col}`);
       }
     }
+    // The copy builder's own invariants, invisible in the DDL the gates above compare.
+    for (const p of checkDevicesColumnTable(parseBootDevicesTable(func))) problems.push(`${rel}: ${p}`);
     // #220/#219: the copy is built from the live column set, read inside the transaction,
     // and a live column the payload does not know aborts instead of being dropped.
     if (!/t\.all\(\s*'PRAGMA table_info\(devices\)'\s*\)/.test(func)) problems.push(`${rel}: rebuild must read the live column set with t.all inside the transaction`);
@@ -154,5 +201,8 @@ function run() {
   console.log(`verify-devices-rebuild-fence: OK (${FLOWS.length} flows)`); process.exit(0);
 }
 
-module.exports = { parseSeedDevicesColumns, parseBootDevicesColumns, migrationAddedDevicesColumns, run };
+module.exports = {
+  parseSeedDevicesColumns, parseBootDevicesColumns, parseBootDevicesTable,
+  migrationAddedDevicesColumns, createTableDevicesColumns, checkDevicesColumnTable, run,
+};
 if (require.main === module) run();

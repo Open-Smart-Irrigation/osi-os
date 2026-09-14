@@ -4,7 +4,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  parseSeedDevicesColumns, parseBootDevicesColumns, migrationAddedDevicesColumns,
+  parseSeedDevicesColumns, parseBootDevicesColumns, parseBootDevicesTable,
+  migrationAddedDevicesColumns, createTableDevicesColumns, checkDevicesColumnTable,
 } = require('./verify-devices-rebuild-fence');
 
 const repo = path.resolve(__dirname, '..');
@@ -57,4 +58,62 @@ test('the copy is built inside the transaction and refuses unknown live columns'
     assert.match(f, /devices rebuild ABORTED: unknown live column/,
       `${rel}: an unknown live column must abort the rebuild, not be dropped`);
   }
+});
+
+test('migrationAddedDevicesColumns also reads a wholesale CREATE TABLE devices', () => {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'recreate-'));
+  fs.writeFileSync(path.join(dir, '0002__rebuild.sql'),
+    '-- risk: destructive\nCREATE TABLE devices_scratch (nope TEXT);\n' +
+    'CREATE TABLE devices (id INTEGER PRIMARY KEY, deveui TEXT NOT NULL, ' +
+    "type_id TEXT CHECK(type_id IN ('A','B')), rebuilt_col TEXT, " +
+    'FOREIGN KEY (id) REFERENCES users(id));\n');
+  const added = migrationAddedDevicesColumns(dir);
+  assert.deepStrictEqual([...added].sort(), ['deveui', 'id', 'rebuilt_col', 'type_id']);
+  assert.ok(!added.has('nope'), 'devices_scratch is a different table');
+});
+
+test('createTableDevicesColumns reads every devices rebuild in one text', () => {
+  const cols = createTableDevicesColumns(
+    'CREATE TABLE devices (id INTEGER, a TEXT);\nDROP TABLE devices;\n' +
+    'CREATE TABLE IF NOT EXISTS devices (id INTEGER, b TEXT);');
+  assert.deepStrictEqual([...cols].sort(), ['a', 'b', 'id']);
+});
+
+test('the shipped DEVICES_COLUMNS table passes its own from/dflt invariants', () => {
+  for (const rel of FLOWS) {
+    const entries = parseBootDevicesTable(bootFunc(rel));
+    assert.ok(entries.length > 40, `${rel}: sanity: the table parser found the real entries`);
+    assert.deepStrictEqual(checkDevicesColumnTable(entries), [], rel);
+  }
+});
+
+test('a from list that does not start with the column itself is rejected', () => {
+  const problems = checkDevicesColumnTable([
+    { name: 'dendro_ratio_at_retracted', ddl: 'dendro_ratio_at_retracted REAL',
+      from: ['dendro_ratio_zero', 'dendro_ratio_at_retracted'], dflt: 'NULL' },
+  ]);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /from must start with the column's own name/);
+});
+
+test('an empty from list is rejected', () => {
+  const problems = checkDevicesColumnTable([
+    { name: 'chameleon_enabled', ddl: 'chameleon_enabled INTEGER DEFAULT 0', from: [], dflt: '0' },
+  ]);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /from must start with the column's own name/);
+});
+
+test('a NOT NULL column with dflt NULL is rejected', () => {
+  const problems = checkDevicesColumnTable([
+    { name: 'deveui', ddl: 'deveui TEXT UNIQUE NOT NULL', from: ['deveui'], dflt: 'NULL' },
+  ]);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /declared NOT NULL but dflt is NULL/);
+});
+
+test('a nullable column with dflt NULL is fine', () => {
+  assert.deepStrictEqual(checkDevicesColumnTable([
+    { name: 'dendro_stroke_mm', ddl: 'dendro_stroke_mm REAL', from: ['dendro_stroke_mm'], dflt: 'NULL' },
+  ]), []);
 });
