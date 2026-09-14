@@ -28,6 +28,14 @@ function readDevices(dbPath) {
 function makeFacadeShim(dbPath) {
   const db = new DatabaseSync(dbPath);
   const call = (kind) => (sql, cb) => {
+    // osi-db-helper's run/get/all/exec take (sql, callback) only -- there is no
+    // bound-parameter overload on the facade. Without this guard a
+    // `run(sql, params)` call would silently resolve here (params ignored,
+    // callback never fired) and only fail on the Pi, which is the opposite of
+    // what a rehearsal is for.
+    if (cb !== undefined && typeof cb !== 'function') {
+      throw new TypeError(`osi-db facade ${kind}(sql, cb): second argument must be a callback, got ${typeof cb}`);
+    }
     try {
       let r;
       if (kind === 'run' || kind === 'exec') { db.exec(sql); r = undefined; }
@@ -238,4 +246,12 @@ async function main() {
   console.log(JSON.stringify(result));
   process.exit(result.ok ? 0 : 1);
 }
-main().catch((e) => { console.log(JSON.stringify({ case: process.argv[2], ok: false, error: e.message })); process.exit(1); });
+// Guarded so lib/osi-migrate/__tests__/helpers/boot-rehearsal.js can reuse
+// makeFacadeShim instead of keeping a second copy of it (osi-os#221 review L7).
+// The .test.js harness runs this file as a subprocess, where require.main is
+// this module, so the CLI behavior is unchanged.
+if (require.main === module) {
+  main().catch((e) => { console.log(JSON.stringify({ case: process.argv[2], ok: false, error: e.message })); process.exit(1); });
+}
+
+module.exports = { makeFacadeShim };

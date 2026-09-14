@@ -122,6 +122,106 @@ ALTER TABLE chameleon_readings ADD COLUMN swt_3 REAL;`);
     ['extra_allowlisted', 'extra_allowlisted', 'extra_allowlisted']);
 });
 
+// --- osi-os#221 characterisation ------------------------------------------
+// #221 asks the runner's drift gate to tolerate a `table|devices` diff. No such
+// diff shape exists. These pin the emitted taxonomy so the next reader does not
+// have to re-derive it from the source: `table` diffs carry only `missing`,
+// `extra_forward` or `extra_unknown`, and a table whose CONTENTS changed is
+// always reported as `column`, `check` or `foreign_key`.
+
+test('a truncated table reports column/check diffs, never changed|table', async () => {
+  const live = await snapOf('CREATE TABLE t1 (id INTEGER PRIMARY KEY);');
+  const ref = await snapOf(BASE);
+  const res = compareSchemas(live, ref, ref);
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.diffs.map((d) => [d.class, d.kind, d.name]).sort(), [
+    ['changed', 'check', 't1'],
+    ['missing', 'column', 't1.name'],
+    ['missing', 'column', 't1.v'],
+    ['missing', 'index', 'idx_t1'],
+    ['missing', 'trigger', 'trg_t1'],
+  ]);
+});
+
+test('a reference table absent from the live DB is missing|table', async () => {
+  const live = await snapOf(BASE);
+  const ref = await snapOf(BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY);');
+  const res = compareSchemas(live, ref, ref);
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.diffs.map((d) => [d.class, d.kind, d.name]), [['missing', 'table', 't2']]);
+});
+
+test('a changed table-level CHECK is changed|check, keyed by table name', async () => {
+  const live = await snapOf('CREATE TABLE t1 (id INTEGER PRIMARY KEY, kind TEXT, CHECK (kind IN (\'a\')));');
+  const ref = await snapOf('CREATE TABLE t1 (id INTEGER PRIMARY KEY, kind TEXT, CHECK (kind IN (\'a\',\'b\')));');
+  const res = compareSchemas(live, ref, ref);
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.diffs.map((d) => [d.class, d.kind, d.name]), [['changed', 'check', 't1']]);
+  assert.match(res.diffs[0].detail, /liveOnly=\[.*'a'.*\] refOnly=\[.*'b'.*\]/);
+});
+
+test('a live-only CHECK present in reference(head) is extra_forward|check', async () => {
+  const live = await snapOf('CREATE TABLE t1 (id INTEGER PRIMARY KEY, kind TEXT CHECK (kind IN (\'a\')));');
+  const ref = await snapOf('CREATE TABLE t1 (id INTEGER PRIMARY KEY, kind TEXT);');
+  const head = await snapOf('CREATE TABLE t1 (id INTEGER PRIMARY KEY, kind TEXT CHECK (kind IN (\'a\')));');
+  const res = compareSchemas(live, ref, head);
+  assert.equal(res.ok, true, JSON.stringify(res.diffs));
+  assert.deepEqual(res.diffs.map((d) => [d.class, d.kind, d.name]), [['extra_forward', 'check', 't1']]);
+});
+
+test('a live-only FK present in reference(head) is extra_forward|foreign_key', async () => {
+  const PARENT = 'CREATE TABLE parent (id INTEGER PRIMARY KEY);';
+  const WITH_FK = PARENT + 'CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER '
+    + 'REFERENCES parent(id) ON DELETE CASCADE);';
+  const live = await snapOf(WITH_FK);
+  const ref = await snapOf(PARENT + 'CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER);');
+  const head = await snapOf(WITH_FK);
+  const res = compareSchemas(live, ref, head);
+  assert.equal(res.ok, true, JSON.stringify(res.diffs));
+  assert.deepEqual(res.diffs.map((d) => [d.class, d.kind, d.name]), [['extra_forward', 'foreign_key', 'child']]);
+});
+
+test('compareSchemas never emits a changed|table diff for any drift shape', async () => {
+  const T2 = 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id));';
+  const T3 = 'CREATE TABLE t3 (z TEXT);';
+  const ref = await snapOf(BASE + T2);
+  // `head` defaults to ref; a shape that needs reference(head) to differ from
+  // reference(N) -- the only way to reach the extra_forward classes -- supplies
+  // its own. `ok` says whether the shape is expected to fail the gate.
+  const shapes = [
+    { sql: BASE, ok: false },                                             // table dropped
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER);', ok: false }, // FK removed
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id), extra TEXT);', ok: false },
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n TEXT REFERENCES t1(id));', ok: false }, // retyped
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id), CHECK (k <> \'\'));', ok: false },
+    { sql: BASE + T2 + T3, ok: false },                                   // live-only table, no head match
+    // extra_forward|table: t3 exists in live AND in reference(head), so the
+    // comparator classifies it as forward drift delivered early, not a failure.
+    { sql: BASE + T2 + T3, head: BASE + T2 + T3, ok: true },
+  ];
+  const seenTableClasses = new Set();
+  for (const { sql, head, ok } of shapes) {
+    const headSnap = head ? await snapOf(head) : ref;
+    const res = compareSchemas(await snapOf(sql), ref, headSnap);
+    // Without this the sweep would pass vacuously on any shape the comparator
+    // reports nothing for.
+    assert.equal(res.ok, ok, `unexpected gate result for shape:\n${sql}\n${JSON.stringify(res.diffs)}`);
+    assert.ok(res.diffs.length > 0, `expected at least one diff for shape:\n${sql}`);
+    for (const d of res.diffs) {
+      assert.notEqual(`${d.class}|${d.kind}`, 'changed|table',
+        `unexpected changed|table diff for shape:\n${sql}\n${JSON.stringify(d)}`);
+      if (d.kind === 'table') {
+        assert.ok(['missing', 'extra_forward', 'extra_unknown'].includes(d.class),
+          `table diffs carry only missing/extra_forward/extra_unknown, got ${d.class}`);
+        seenTableClasses.add(d.class);
+      }
+    }
+  }
+  // The sweep must actually reach all three table classes, or "table diffs
+  // carry only these three" is an untested claim about two of them.
+  assert.deepEqual([...seenTableClasses].sort(), ['extra_forward', 'extra_unknown', 'missing']);
+});
+
 test('sqlite_sequence presence difference is ignored', async () => {
   const SEQT = 'CREATE TABLE s (id INTEGER PRIMARY KEY AUTOINCREMENT, x TEXT);';
   const live = await snapOf(BASE + SEQT + "INSERT INTO s (x) VALUES ('row');");
