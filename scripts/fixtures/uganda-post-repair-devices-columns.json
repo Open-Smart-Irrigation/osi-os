@@ -3,6 +3,8 @@
   "pending_capture": true,
   "status": "pending Uganda capture (needs Phil go)",
   "capture": "PRAGMA table_info(devices) on a fresh .backup of Uganda /data/db/farming.db; write the name column, in table order, into \"columns\" and set pending_capture to false",
-  "issue": "osi-os#219",
+  "issue": "osi-os#238",
+  "issue_url": "https://github.com/Open-Smart-Irrigation/osi-os/issues/238",
+  "blocks": "osi-os#219",
   "columns": []
 }
