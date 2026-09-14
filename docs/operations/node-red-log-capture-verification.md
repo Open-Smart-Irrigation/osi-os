@@ -60,10 +60,16 @@ ls -l /data/log/
 df -h /data
 ```
 
-Expect `log_file='/data/log/osi-system.log'`, `log_size='2048'`, and
-`log_buffer_size='64'`. The buffer value matters: `log.init` derives logd's RAM
-ring from `log_size` when `log_buffer_size` is unset, so an unpinned buffer
-would silently grow logd from 64 KiB to 2 MiB of RAM and restart it.
+Expect `log_file='/data/log/osi-system.log'` and `log_size='2048'`.
+`log_buffer_size` should read `128` on a stock gateway, because OpenWrt's
+generated `/etc/config/system` ships `log_size='128'` and that is the ring logd
+is already running; on a gateway where an operator raised either value, expect
+that value instead. The pin matters: `log.init` derives logd's RAM ring from
+`log_size` when `log_buffer_size` is 0, so an unpinned buffer would silently
+take logd from 128 KiB to 2 MiB of RAM and restart it, losing the ring.
+
+A `log_buffer_size` of `64` means an older build of this change is deployed.
+Nothing breaks, but retention is halved against the OpenWrt default; redeploy.
 
 Worst case on disk is `osi-system.log` plus one rotated `osi-system.log.0`,
 about 4 MiB. If `df` shows /data tight enough for 4 MiB to matter, that is a
@@ -99,7 +105,29 @@ grep '<the line noted in step 3>' /data/log/osi-system.log
 the pre-reboot line. If it does not, the sink is not working and #223 is not
 closed regardless of what steps 1 to 3 showed.
 
-### 5. The ring is not being flooded
+### 5. The cap actually rotates
+
+The size bound is only real if `logread -S` enforces it, and nothing else in
+this change would notice if it did not. Force the file past 2048 KiB and watch
+what happens to it:
+
+```sh
+ls -l /data/log/
+i=0; while [ $i -lt 40000 ]; do logger -t osi-rotation-probe "rotation probe $i padding padding padding padding padding padding"; i=$((i+1)); done
+sleep 10
+ls -l /data/log/
+```
+
+Expect exactly two files afterwards, `osi-system.log` and `osi-system.log.0`,
+the live one well under 2048 KiB because it restarted after the rename. Three
+or more files, or one file past 2048 KiB, means the cap is not being applied
+and the worst-case disk figure in this document is wrong — stop and report it
+before the next gateway.
+
+Run this on Silvan only. It writes about 40 k syslog lines, which on a
+production gateway pushes real history out of both the ring and the file.
+
+### 6. The ring is not being flooded
 
 An hour after the restart:
 
@@ -114,11 +142,11 @@ capture.
 
 ## Evidence
 
-| Gateway | Date | Steps 1-2 | Step 3 | Step 4 | Step 5 growth | Operator |
-|---|---|---|---|---|---|---|
-| Silvan | | | | | | |
-| kaba100 | | | | | | |
-| Uganda | | | | | | |
+| Gateway | Date | Steps 1-2 | Step 3 restart | Step 4 reboot | Step 5 rotation | Step 6 growth | Operator |
+|---|---|---|---|---|---|---|---|
+| Silvan | | | | | | | |
+| kaba100 | | | | | n/a | | |
+| Uganda | | | | | n/a | | |
 
 Paste the verbatim command output into the PR that closes #223, not only the
 pass/fail marks in this table.

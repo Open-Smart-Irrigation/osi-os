@@ -23,6 +23,39 @@ const path = require('node:path');
 const INIT_REL = 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init';
 const INIT_PATH = path.resolve(__dirname, '..', INIT_REL);
 
+// OpenWrt's generated /etc/config/system carries log_size='128'
+// (openwrt/package/base-files/files/bin/config_generate), so 128 KiB is the
+// ring a stock gateway is running and nothing here may pin below it.
+const MIN_LOGD_BUFFER_KIB = 128;
+
+// Drops `<<'TAG' … TAG` heredoc bodies so a brace or a `}` at column 0 inside
+// the embedded Node script cannot be read as shell structure.
+function stripHeredocs(text) {
+  const out = [];
+  let terminator = null;
+  for (const line of String(text).split('\n')) {
+    if (terminator === null) {
+      const open = line.match(/<<-?\s*'?([A-Za-z_][A-Za-z0-9_]*)'?\s*$/);
+      if (open) terminator = open[1];
+      out.push(line);
+    } else if (line.trim() === terminator) {
+      terminator = null;
+    }
+  }
+  return out.join('\n');
+}
+
+// The body of start_service(), from its opening line to the first `}` at
+// column 0. A call anywhere else in the file starts nothing.
+function startServiceBlock(text) {
+  const lines = stripHeredocs(text).split('\n');
+  const start = lines.findIndex((line) => /^start_service\s*\(\)\s*\{\s*$/.test(line));
+  if (start === -1) return null;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^\}\s*$/.test(line));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
 // The procd instance block. Params outside it configure nothing.
 function instanceBlock(text) {
   const open = String(text).indexOf('procd_open_instance');
@@ -61,7 +94,10 @@ function scanPersistentSink(text) {
       + 'so stdout/stderr capture alone is lost on reboot (osi-os#223)',
     );
   }
-  if (!/^\s*ensure_persistent_syslog_sink\s*$/m.test(source)) {
+  const startBody = startServiceBlock(source);
+  if (startBody === null) {
+    problems.push('no start_service() definition found, so nothing can call the sink setup');
+  } else if (!/^\s*ensure_persistent_syslog_sink\s*$/m.test(startBody)) {
     problems.push('ensure_persistent_syslog_sink is defined but never called from start_service');
   }
   if (!/uci -q set system\.@system\[0\]\.log_file=/.test(source)) {
@@ -73,11 +109,35 @@ function scanPersistentSink(text) {
       + 'unbounded file and fills /data',
     );
   }
-  if (!/uci -q set system\.@system\[0\]\.log_buffer_size=/.test(source)) {
+  const pin = source.match(/uci -q set system\.@system\[0\]\.log_buffer_size="([^"]*)"/);
+  if (!pin) {
     problems.push(
       'the sink must pin system.@system[0].log_buffer_size: log.init derives logd\'s RAM ring '
-      + 'from log_size when it is unset, which would restart logd and drop the buffered lines',
+      + 'from log_size when it is 0, which would restart logd and drop the buffered lines',
     );
+  } else if (!/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(pin[1])) {
+    problems.push(
+      `log_buffer_size is pinned to the literal "${pin[1]}": it must be a variable read back from `
+      + 'the live config, so the pin matches the ring this gateway is already running',
+    );
+  } else if (!/uci -q get system\.@system\[0\]\.log_buffer_size/.test(source)
+      || !/uci -q get system\.@system\[0\]\.log_size/.test(source)) {
+    problems.push(
+      'the log_buffer_size pin must be derived from both live values (log_buffer_size, then '
+      + 'log_size), the way log.init derives the ring itself',
+    );
+  }
+  const floorMatch = source.match(/OSI_LOGD_MIN_BUFFER_KIB="(\d+)"/);
+  if (!floorMatch) {
+    problems.push('OSI_LOGD_MIN_BUFFER_KIB is not declared as a plain integer of KiB');
+  } else if (Number(floorMatch[1]) < MIN_LOGD_BUFFER_KIB) {
+    problems.push(
+      `OSI_LOGD_MIN_BUFFER_KIB=${floorMatch[1]} is below ${MIN_LOGD_BUFFER_KIB}: OpenWrt's `
+      + 'generated /etc/config/system ships log_size=128, so a smaller pin shrinks the ring a '
+      + 'stock gateway is running and restarts logd',
+    );
+  } else if (!new RegExp(`-lt\\s+"\\$OSI_LOGD_MIN_BUFFER_KIB"`).test(source)) {
+    problems.push('OSI_LOGD_MIN_BUFFER_KIB is declared but never enforced as a floor on the pin');
   }
   const sizeMatch = source.match(/OSI_PERSISTENT_LOG_SIZE_KIB="(\d+)"/);
   if (!sizeMatch) {

@@ -29,14 +29,39 @@ CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
 # prunes or rotates on a schedule; the size cap is the whole mechanism.
 OSI_PERSISTENT_LOG_FILE="/data/log/osi-system.log"
 OSI_PERSISTENT_LOG_SIZE_KIB="2048"
-OSI_LOGD_BUFFER_SIZE_KIB="64"
+# The floor for logd's in-RAM ring. 128 KiB is what OpenWrt's generated
+# /etc/config/system carries (config_generate: set log_size='128'), so it is
+# the effective ring on a stock gateway and this value must never shrink it.
+OSI_LOGD_MIN_BUFFER_KIB="128"
+
+# Reports the ring size logd is running with right now, in KiB, following
+# log.init's own derivation: log_buffer_size when set and non-zero, otherwise
+# log_size, otherwise log.init's built-in 64. A non-numeric UCI value counts
+# as unset, the same way uci_load_validate's uinteger rule treats it.
+osi_effective_log_ring_kib() {
+    local buffer
+    local size
+
+    buffer="$(uci -q get system.@system[0].log_buffer_size 2>/dev/null || echo "")"
+    size="$(uci -q get system.@system[0].log_size 2>/dev/null || echo "")"
+    case "$buffer" in ''|*[!0-9]*) buffer=0 ;; esac
+    case "$size" in ''|*[!0-9]*) size=0 ;; esac
+
+    if [ "$buffer" -gt 0 ]; then
+        printf '%s' "$buffer"
+    elif [ "$size" -gt 0 ]; then
+        printf '%s' "$size"
+    else
+        printf '%s' "$OSI_LOGD_MIN_BUFFER_KIB"
+    fi
+}
 
 # Idempotent, and fail-soft by construction: logging configuration must never
 # be the reason irrigation does not start, so every step returns 0 on failure
 # and the caller ignores the result.
 ensure_persistent_syslog_sink() {
     local existing
-    local existing_buffer
+    local ring
 
     command -v uci >/dev/null 2>&1 || return 0
 
@@ -49,14 +74,20 @@ ensure_persistent_syslog_sink() {
         return 0
     fi
 
-    # Pin logd's in-RAM buffer before touching log_size. ubox's log.init
-    # derives log_buffer_size from log_size when the former is unset, so
-    # setting log_size alone would grow logd's ring from 64 KiB to 2 MiB and
-    # restart logd -- dropping the very lines this change exists to keep.
-    existing_buffer="$(uci -q get system.@system[0].log_buffer_size 2>/dev/null || echo "")"
-    if [ -z "$existing_buffer" ]; then
-        uci -q set system.@system[0].log_buffer_size="$OSI_LOGD_BUFFER_SIZE_KIB" || return 0
+    # Pin logd's in-RAM ring at the value it already has, before touching
+    # log_size. log.init derives log_buffer_size from log_size when the former
+    # is 0, so setting log_size alone would take a stock gateway's ring from
+    # 128 KiB to 2 MiB and restart logd -- dropping the very lines this change
+    # exists to keep. The pin is read back from the live config rather than
+    # hardcoded, so it matches whatever this gateway is actually running.
+    ring="$(osi_effective_log_ring_kib)"
+    case "$ring" in ''|*[!0-9]*) ring="$OSI_LOGD_MIN_BUFFER_KIB" ;; esac
+    if [ "$ring" -lt "$OSI_LOGD_MIN_BUFFER_KIB" ]; then
+        # Below the OpenWrt default: raise to the floor rather than pin a
+        # smaller ring. This is the one case that does restart logd, once.
+        ring="$OSI_LOGD_MIN_BUFFER_KIB"
     fi
+    uci -q set system.@system[0].log_buffer_size="$ring" || return 0
     uci -q set system.@system[0].log_file="$OSI_PERSISTENT_LOG_FILE" || return 0
     uci -q set system.@system[0].log_size="$OSI_PERSISTENT_LOG_SIZE_KIB" || return 0
     uci -q commit system || return 0
@@ -71,7 +102,7 @@ ensure_persistent_syslog_sink() {
     if [ -x /etc/init.d/log ]; then
         /etc/init.d/log reload >/dev/null 2>&1 || true
     fi
-    logger -t node-red.init "persistent syslog sink enabled (log_file=$OSI_PERSISTENT_LOG_FILE log_size=${OSI_PERSISTENT_LOG_SIZE_KIB}KiB, max 2 files)"
+    logger -t node-red.init "persistent syslog sink enabled (log_file=$OSI_PERSISTENT_LOG_FILE log_size=${OSI_PERSISTENT_LOG_SIZE_KIB}KiB, max 2 files, logd ring pinned at ${ring}KiB)"
 }
 
 load_chirpstack_env_value() {

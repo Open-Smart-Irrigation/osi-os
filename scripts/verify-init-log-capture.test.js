@@ -73,3 +73,48 @@ test('logd buffer pinning is required', () => {
   assert.strictEqual(problems.length, 1);
   assert.match(problems[0], /log_buffer_size/);
 });
+
+test('a hardcoded logd buffer pin is reported', () => {
+  // The defect the review caught: pinning a literal 64 when OpenWrt's
+  // generated /etc/config/system ships log_size=128, so the pin restarts logd
+  // and halves the ring instead of leaving it alone.
+  const literal = initText().replace(
+    /uci -q set system\.@system\[0\]\.log_buffer_size="[^"]*"/,
+    'uci -q set system.@system[0].log_buffer_size="64"',
+  );
+  const problems = scanPersistentSink(literal);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /pinned to the literal "64"/);
+});
+
+test('a pin not derived from the live values is reported', () => {
+  const undereived = initText().replace(/uci -q get system\.@system\[0\]\.log_size/g, 'uci -q get nothing');
+  const problems = scanPersistentSink(undereived);
+  assert.ok(problems.some((p) => /derived from both live values/.test(p)));
+});
+
+test('a floor below the OpenWrt default ring is reported', () => {
+  const low = initText().replace(/OSI_LOGD_MIN_BUFFER_KIB="\d+"/, 'OSI_LOGD_MIN_BUFFER_KIB="64"');
+  const problems = scanPersistentSink(low);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /is below 128/);
+});
+
+test('a declared but unenforced floor is reported', () => {
+  const unenforced = initText().replace(/-lt "\$OSI_LOGD_MIN_BUFFER_KIB"/, '-lt "0"');
+  const problems = scanPersistentSink(unenforced);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /never enforced as a floor/);
+});
+
+test('a call outside start_service does not count as wiring', () => {
+  // Moves the call into stop_service, which never runs at startup.
+  const moved = initText().replace(
+    /^(start_service\(\) \{\n)(.*\n)(\n    ensure_persistent_syslog_sink\n)/m,
+    '$1$2\n',
+  );
+  const elsewhere = 'stop_service() {\n    ensure_persistent_syslog_sink\n}\n' + moved;
+  const problems = scanPersistentSink(elsewhere);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /never called from start_service/);
+});
