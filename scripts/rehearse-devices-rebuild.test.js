@@ -38,12 +38,20 @@ test('a row the target CHECK rejects is NEVER silently dropped, and the abort is
   assert.strictEqual(code, 0, JSON.stringify(json));
   assert.strictEqual(json.rowsPreserved, true);
   assert.strictEqual(json.errorSurfaced, true);
+  // The cascade guard: device_data hangs off devices(deveui) ON DELETE CASCADE, so an
+  // abort that rolled back badly, or an unfenced swap, would take the telemetry with it.
+  assert.strictEqual(json.telemetryBefore, 6, 'two devices x three device_data rows');
+  assert.strictEqual(json.telemetryAfter, 6, 'device_data must survive the aborted rebuild');
 });
 
 test('legit upgrade: rebuild succeeds, rows preserved, CHECK gains AQUASCOPE_LORAIN', () => {
   const { json, code } = runCase('legit-upgrade');
   assert.strictEqual(code, 0, JSON.stringify(json));
   assert.strictEqual(json.hasLorain, true);
+  // A real rebuild drops and renames the parent table. With the FK fence intact the
+  // cascade never fires; without it every device_data row would go (the Uganda class).
+  assert.strictEqual(json.telemetryBefore, 6, 'two devices x three device_data rows');
+  assert.strictEqual(json.telemetryAfter, 6, 'device_data must survive the real rebuild');
 });
 
 test('SDI-12 sentinels survive the rebuild with all five columns present, including the Sentek layout', () => {
@@ -79,6 +87,8 @@ test('extra live column: rebuild ABORTS and devices is left intact', async () =>
   assert.ok(res.columns.includes('future_col'), 'the live column and its data survive');
   assert.strictEqual(res.rowCount, 2);
   assert.strictEqual(res.rows[0].future_col, 'KEEPME');
+  assert.strictEqual(res.telemetryBefore, 6, 'two devices x three device_data rows');
+  assert.strictEqual(res.telemetryAfter, 6, 'device_data must survive the refusal');
 });
 
 test('null chameleon_enabled survives the rebuild', async () => {
@@ -89,10 +99,21 @@ test('null chameleon_enabled survives the rebuild', async () => {
 
 test('Uganda post-repair column set: rebuild succeeds on the manually-repaired shape', {
   skip: UGANDA_FIXTURE.pending_capture
-    ? `${UGANDA_FIXTURE.status}: ${UGANDA_FIXTURE.capture}`
+    ? `${UGANDA_FIXTURE.status} - tracked in ${UGANDA_FIXTURE.issue}: ${UGANDA_FIXTURE.capture}`
     : false,
 }, async () => {
   const res = await rehearse('uganda-post-repair-columns');
   assert.strictEqual(res.aborted, false, 'rebuild must not abort: ' + (res.error || ''));
   assert.ok(res.columns.includes('chameleon_enabled'));
+});
+
+test('every rehearsal case preserves device_data across the FK cascade', () => {
+  for (const mode of ['healthy', 'would-drop', 'legit-upgrade', 'sdi12-sentinels', 'extra-type',
+                      'missing-source-columns', 'extra-live-column', 'null-chameleon']) {
+    const { json, code } = runCase(mode);
+    assert.strictEqual(code, 0, `${mode}: ${JSON.stringify(json)}`);
+    assert.ok(json.telemetryBefore > 0, `${mode}: the case must seed device_data to witness the cascade`);
+    assert.strictEqual(json.telemetryAfter, json.telemetryBefore,
+      `${mode}: device_data lost rows to the devices(deveui) ON DELETE CASCADE`);
+  }
 });

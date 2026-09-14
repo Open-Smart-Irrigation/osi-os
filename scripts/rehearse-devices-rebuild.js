@@ -17,8 +17,10 @@ function readDevices(dbPath) {
   const db = new DatabaseSync(dbPath);
   const ddl = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='devices'").get() || {}).sql || '';
   const count = Number(db.prepare('SELECT COUNT(*) c FROM devices').get().c);
+  // The FK-cascade witness: device_data hangs off devices(deveui) ON DELETE CASCADE.
+  const telemetry = Number(db.prepare('SELECT COUNT(*) c FROM device_data').get().c);
   db.close();
-  return { ddl, count };
+  return { ddl, count, telemetry };
 }
 
 // Facade-compatible shim over node:sqlite (REAL engine). Mirrors the osi-db-helper API the
@@ -128,11 +130,20 @@ const DRIFTED_TYPES = REQUIRED.filter((t) => t !== 'AQUASCOPE_LORAIN' && t !== '
 const SDI12_COLUMNS = ['sdi12_probe_profile', 'sdi12_probe_status', 'sdi12_identity', 'sdi12_value_count', 'sdi12_channel_layout_json'];
 const UGANDA_FIXTURE = path.join(__dirname, 'fixtures/uganda-post-repair-devices-columns.json');
 
+// device_data.deveui REFERENCES devices(deveui) ON DELETE CASCADE. That cascade is why the
+// rebuild is fenced: if PRAGMA foreign_keys were ever left ON across the rename-swap, the
+// DROP/RENAME would take every telemetry row for the device with it. Every case seeds three
+// rows per device and the harness reports the surviving count, so a rebuild that silently
+// deletes history fails the rehearsal instead of shipping (the Uganda incident class).
+const TELEMETRY_PER_DEVICE = 3;
+
 function seed(db, mode) {
   sh(db, fs.readFileSync(SEED, 'utf8'));
   const now = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
-  const row = (eui, type) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at) VALUES ('${eui}','n','${type}',${now},${now});`;
-  const sdi12Row = (eui) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at,sdi12_probe_profile,sdi12_probe_status,sdi12_identity,sdi12_value_count,sdi12_channel_layout_json) VALUES ('${eui}','n','KIWI_SENSOR',${now},${now},'SENTINEL_P','manual','SENTINEL_I',5,'{"version":1,"address":"0"}');`;
+  const telemetry = (eui) => Array.from({ length: TELEMETRY_PER_DEVICE }, (_, i) =>
+    `INSERT INTO device_data (deveui,recorded_at,swt_wm1) VALUES ('${eui}',${now},${10 + i});`).join('');
+  const row = (eui, type) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at) VALUES ('${eui}','n','${type}',${now},${now});` + telemetry(eui);
+  const sdi12Row = (eui) => `INSERT INTO devices (deveui,name,type_id,created_at,updated_at,sdi12_probe_profile,sdi12_probe_status,sdi12_identity,sdi12_value_count,sdi12_channel_layout_json) VALUES ('${eui}','n','KIWI_SENSOR',${now},${now},'SENTINEL_P','manual','SENTINEL_I',5,'{"version":1,"address":"0"}');` + telemetry(eui);
   if (mode === 'healthy') sh(db, row('AAAA000000000001', 'AQUASCOPE_LORAIN') + row('AAAA000000000002', 'KIWI_SENSOR'));
   else if (mode === 'would-drop') {
     reseedDevicesCheck(db, REQUIRED.filter((t) => t !== 'AQUASCOPE_LORAIN').concat(['BOGUS_TYPE']));
@@ -198,6 +209,9 @@ async function main() {
     case: mode, before: before.count, after: after.count,
     columns, rows, rowCount: after.count,
     aborted: Boolean(abortMsg), error: abortMsg,
+    // FK-cascade witness: device_data rows must survive both an abort and a real rebuild.
+    telemetryBefore: before.telemetry, telemetryAfter: after.telemetry,
+    telemetryPreserved: after.telemetry === before.telemetry,
     skipped: before.ddl === after.ddl,
     rowsPreserved: after.count === before.count,
     hasLorain: /'AQUASCOPE_LORAIN'/.test(after.ddl),
@@ -219,6 +233,8 @@ async function main() {
   // #173: chameleon_enabled is nullable in the seed; the COALESCE default fills it on rebuild.
   else if (mode === 'null-chameleon') result.ok = !result.aborted && result.rows[0] && result.rows[0].chameleon_enabled === 0;
   else if (mode === 'uganda-post-repair-columns') result.ok = !result.aborted && result.columns.includes('chameleon_enabled') && result.rowsPreserved;
+  // Universal: no case, abort or rebuild, may lose a device_data row to the FK cascade.
+  result.ok = Boolean(result.ok) && result.telemetryPreserved;
   console.log(JSON.stringify(result));
   process.exit(result.ok ? 0 : 1);
 }
