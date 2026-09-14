@@ -129,7 +129,7 @@ ALTER TABLE chameleon_readings ADD COLUMN swt_3 REAL;`);
 // `extra_forward` or `extra_unknown`, and a table whose CONTENTS changed is
 // always reported as `column`, `check` or `foreign_key`.
 
-test('a dropped table is missing|table, never changed|table', async () => {
+test('a truncated table reports column/check diffs, never changed|table', async () => {
   const live = await snapOf('CREATE TABLE t1 (id INTEGER PRIMARY KEY);');
   const ref = await snapOf(BASE);
   const res = compareSchemas(live, ref, ref);
@@ -182,30 +182,44 @@ test('a live-only FK present in reference(head) is extra_forward|foreign_key', a
 });
 
 test('compareSchemas never emits a changed|table diff for any drift shape', async () => {
-  const ref = await snapOf(BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id));');
+  const T2 = 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id));';
+  const T3 = 'CREATE TABLE t3 (z TEXT);';
+  const ref = await snapOf(BASE + T2);
+  // `head` defaults to ref; a shape that needs reference(head) to differ from
+  // reference(N) -- the only way to reach the extra_forward classes -- supplies
+  // its own. `ok` says whether the shape is expected to fail the gate.
   const shapes = [
-    BASE,                                                             // table dropped
-    BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER);',        // FK removed
-    BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id), extra TEXT);',
-    BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n TEXT REFERENCES t1(id));', // column retyped
-    BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id), CHECK (k <> \'\'));',
-    BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id));'
-      + 'CREATE TABLE t3 (z TEXT);',                                  // live-only table
+    { sql: BASE, ok: false },                                             // table dropped
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER);', ok: false }, // FK removed
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id), extra TEXT);', ok: false },
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n TEXT REFERENCES t1(id));', ok: false }, // retyped
+    { sql: BASE + 'CREATE TABLE t2 (k TEXT PRIMARY KEY, n INTEGER REFERENCES t1(id), CHECK (k <> \'\'));', ok: false },
+    { sql: BASE + T2 + T3, ok: false },                                   // live-only table, no head match
+    // extra_forward|table: t3 exists in live AND in reference(head), so the
+    // comparator classifies it as forward drift delivered early, not a failure.
+    { sql: BASE + T2 + T3, head: BASE + T2 + T3, ok: true },
   ];
-  for (const sql of shapes) {
-    const res = compareSchemas(await snapOf(sql), ref, ref);
+  const seenTableClasses = new Set();
+  for (const { sql, head, ok } of shapes) {
+    const headSnap = head ? await snapOf(head) : ref;
+    const res = compareSchemas(await snapOf(sql), ref, headSnap);
     // Without this the sweep would pass vacuously on any shape the comparator
     // reports nothing for.
-    assert.equal(res.ok, false, `expected drift for shape:\n${sql}\n${JSON.stringify(res.diffs)}`);
+    assert.equal(res.ok, ok, `unexpected gate result for shape:\n${sql}\n${JSON.stringify(res.diffs)}`);
+    assert.ok(res.diffs.length > 0, `expected at least one diff for shape:\n${sql}`);
     for (const d of res.diffs) {
       assert.notEqual(`${d.class}|${d.kind}`, 'changed|table',
         `unexpected changed|table diff for shape:\n${sql}\n${JSON.stringify(d)}`);
       if (d.kind === 'table') {
         assert.ok(['missing', 'extra_forward', 'extra_unknown'].includes(d.class),
           `table diffs carry only missing/extra_forward/extra_unknown, got ${d.class}`);
+        seenTableClasses.add(d.class);
       }
     }
   }
+  // The sweep must actually reach all three table classes, or "table diffs
+  // carry only these three" is an untested claim about two of them.
+  assert.deepEqual([...seenTableClasses].sort(), ['extra_forward', 'extra_unknown', 'missing']);
 });
 
 test('sqlite_sequence presence difference is ignored', async () => {
