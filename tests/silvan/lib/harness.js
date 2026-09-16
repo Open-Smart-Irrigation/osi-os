@@ -44,7 +44,16 @@ class Ctx {
     this.sleep = sleep;
     this.until = until;
     this.simDeveui = simDeveui;
+    // Run-scoped salt: a case that needs a device with NO history must use
+    // freshDeveui(), because DELETE /api/devices only unclaims -- the device row
+    // and all its device_data survive a "delete", so a stable DevEUI is dirty on
+    // the second run.
+    this.runSalt = '';
     this.assertSimulatedDevice = assertSimulatedDevice;
+  }
+
+  freshDeveui(label) {
+    return simDeveui(String(label) + '@' + this.runSalt);
   }
 
   // --- assertions -----------------------------------------------------------
@@ -154,10 +163,21 @@ async function readGatewayEnv(ssh) {
     }
   };
 
-  const procEnv = await ssh.exec(
-    'PID=$(pgrep -f node-red | head -1); ' +
-    'tr "\\0" "\\n" < /proc/$PID/environ | grep -E "^CHIRPSTACK_APP_|^CHIRPSTACK_PROFILE_|^DEVICE_EUI=|^OSI_SCOPED_ACCESS=|^TZ="'
-  );
+  // Several processes match "node-red" (the runtime plus procd/watchdog
+  // wrappers) and only one carries the real environment, so read them all and
+  // keep whichever exports the most CHIRPSTACK_ keys. Never fatal: if Node-RED
+  // is mid-restart, the .chirpstack.env read below still yields the profiles.
+  let procEnv = '';
+  try {
+    procEnv = await ssh.exec(
+      'best=""; bestn=0; for p in $(pgrep -f node-red); do ' +
+      '  [ -r /proc/$p/environ ] || continue; ' +
+      '  out=$(tr "\\0" "\\n" < /proc/$p/environ | grep -E "^CHIRPSTACK_APP_|^CHIRPSTACK_PROFILE_|^DEVICE_EUI=|^OSI_SCOPED_ACCESS=|^TZ=" || true); ' +
+      '  n=$(printf "%s" "$out" | grep -c . || true); ' +
+      '  if [ "${n:-0}" -gt "$bestn" ]; then bestn=$n; best=$out; fi; ' +
+      'done; printf "%s\\n" "$best"'
+    );
+  } catch (e) { /* Node-RED may be restarting; fall back to the env file */ }
   absorb(procEnv, true);
 
   let fileEnv = '';

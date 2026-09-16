@@ -158,6 +158,7 @@ async function main() {
     const before = transcript.length;
     const ctx = new Ctx({ cfg, ssh, rest, transcript, evidence: ev, observer, profiles, env, user: auth });
     ctx.runDir = runDir;
+    ctx.runSalt = meta.startedAt + '|' + meta.harnessAccount;
     ctx.keep = opts.keep;
     ctx.anonRest = anonRest;
 
