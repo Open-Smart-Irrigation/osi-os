@@ -79,6 +79,7 @@ const scheduleSectionPath = path.resolve(__dirname, '..', 'web', 'react-gui', 's
 const senseCapWeatherCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'SenseCapWeatherCard.tsx');
 const windMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'WindMonitor.tsx');
 const swtUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'swt.ts');
+const zoneSoilUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'zoneSoil.ts');
 const windUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'wind.ts');
 const onlineTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'OnlineTab.tsx');
 const soilTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'SoilTab.tsx');
@@ -150,6 +151,7 @@ const scheduleSectionSource = fs.readFileSync(scheduleSectionPath, 'utf8');
 const senseCapWeatherCardSource = fs.readFileSync(senseCapWeatherCardPath, 'utf8');
 const windMonitorSource = fs.readFileSync(windMonitorPath, 'utf8');
 const swtUtilsSource = fs.readFileSync(swtUtilsPath, 'utf8');
+const zoneSoilUtilsSource = fs.readFileSync(zoneSoilUtilsPath, 'utf8');
 const windUtilsSource = fs.readFileSync(windUtilsPath, 'utf8');
 const onlineTabSource = fs.readFileSync(onlineTabPath, 'utf8');
 const soilTabSource = fs.readFileSync(soilTabPath, 'utf8');
@@ -2575,8 +2577,16 @@ expectFileExcludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionS
 expectFileExcludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Restore workbook defaults', 'retired the workbook-default restore UI');
 expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_1) ?? toFiniteSwtValue(data?.swt_wm1)', 'uses canonical SWT1 with legacy Kiwi fallback in shared GUI SWT utilities');
 expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_2) ?? toFiniteSwtValue(data?.swt_wm2)', 'uses canonical SWT2 with legacy Kiwi fallback in shared GUI SWT utilities');
-expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'summarizeSwtValues(collectDeviceSwtValues(devices))', 'computes Soil now from canonical SWT values across sensor families');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'summarizeZoneSoil(devices)', 'computes Soil now from canonical SWT values across sensor families');
 expectFileExcludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '[data?.swt_wm1, data?.swt_wm2]', 'prevents Soil now from reading only legacy Kiwi SWT values');
+// Soil now renders only for a zone that actually carries a soil sensor, and a
+// configured-but-silent sensor keeps the tile with a status line: hiding a
+// failure and showing no sensor must stay distinguishable.
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '{soilNow.hasSensor && (', 'gates the Soil now tile on a configured soil sensor');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '{hasFlowMeter && (', 'gates the measured-irrigation tile on a flow meter existing in the zone');
+expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, 'row?.swt_1 ?? row?.swt_wm1', 'uses canonical SWT1 with legacy Kiwi fallback when summarizing zone soil');
+expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, 'row?.swt_2 ?? row?.swt_wm2', 'uses canonical SWT2 with legacy Kiwi fallback when summarizing zone soil');
+expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, 'SENSOR_FRESHNESS_WINDOW_MS = 3 * 60 * 60 * 1000', 'keeps the GUI soil freshness window aligned with osi-zone-env buildLocalEnvironment');
 expectFileIncludes('SoilTab.tsx', soilTabSource, 'const swtReadings = collectDeviceSwtValues(devices);', 'computes soil environment SWT from canonical sensor-family-neutral values');
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_1'", 'uses canonical SWT1 for Kiwi live display and history');
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_2'", 'uses canonical SWT2 for Kiwi live display and history');
