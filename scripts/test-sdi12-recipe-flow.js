@@ -330,6 +330,11 @@ test('the 60-second recipe poller is isolated and failure-visible', async () => 
   assert.deepEqual(poll.wires, [[]]);
 
   const db = seedTestDb();
+  // #252: the poller now skips the ChirpStack round trip entirely when this
+  // gateway has no DRAGINO_SDI12 devices (seedTestDb()'s baseline fixture has
+  // none). Seed one so this test still exercises pollDeployments failure
+  // visibility, which is what it is actually asserting.
+  insertDevice(db, { deveui: 'A840410000000181' });
   let clientClosed = false;
   try {
     const response = await executeFunction(poll, {
@@ -356,6 +361,135 @@ test('the 60-second recipe poller is isolated and failure-visible', async () => 
     assert.equal(response.warnings.some((warning) => warning.includes('recipe poll failed')), true);
   } finally {
     db.close();
+  }
+});
+
+test('the recipe poller distinguishes a real helper failure from having no SDI-12 hardware (#252)', async () => {
+  const poll = nodeById('sdi12-recipe-poll-fn', 'function');
+
+  // Case 1: the helper module itself fails to load -- a real defect. This
+  // must stay loud (a warn, code=helper_unavailable) regardless of whether
+  // the gateway has SDI-12 devices, and must never reach the ChirpStack
+  // client factory.
+  {
+    const db = seedTestDb();
+    insertDevice(db, { deveui: 'A840410000000182' });
+    try {
+      const response = await executeFunction(poll, {
+        msg: { payload: Date.now() },
+        env: {},
+        db,
+        libOverrides: {
+          osiLib: { require: () => ({ ok: false, error: 'sdi12-commissioning unavailable: ENOENT' }) },
+        },
+      });
+      assert.equal(response.result, null);
+      assert.equal(
+        response.warnings.some((warning) => warning.includes('code=helper_unavailable')),
+        true,
+      );
+      assert.equal(
+        response.warnings.some((warning) => warning.includes('ENOENT')),
+        true,
+        'the real underlying load error must be visible, not swallowed',
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  // Case 2: no DRAGINO_SDI12 devices on this gateway (the reported #252
+  // symptom: no SDI-12 ChirpStack profile / no SDI-12 hardware). This is the
+  // expected, permanent state for most of the fleet -- it must not warn and
+  // must not touch ChirpStack at all. Before the fix this always warned
+  // code=helper_unavailable every tick regardless of device presence.
+  {
+    const db = seedTestDb(); // baseline fixture has zero DRAGINO_SDI12 devices
+    let pollCalled = false;
+    let clientFactoryCalled = false;
+    try {
+      const response = await executeFunction(poll, {
+        msg: { payload: Date.now() },
+        env: {},
+        db,
+        osiLibModules: {
+          'sdi12-commissioning': {
+            pollDeployments: async () => { pollCalled = true; return []; },
+          },
+          chirpstack: {
+            createProvisioningClientFromEnv: () => {
+              clientFactoryCalled = true;
+              return { close: () => [] };
+            },
+          },
+        },
+      });
+      assert.equal(response.result, null);
+      assert.equal(pollCalled, false, 'pollDeployments must not be called with no SDI-12 devices');
+      assert.equal(clientFactoryCalled, false, 'ChirpStack client must not be created with no SDI-12 devices');
+      assert.equal(response.warnings.length, 0, 'no-devices case must never warn');
+      assert.equal(
+        response.logs.some((line) => line.includes('no DRAGINO_SDI12 devices')),
+        true,
+        'no-devices case must log an info line the first time',
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  // Case 3: still zero devices on the very next tick -- the info line must
+  // not repeat until either the device count changes or 30 minutes pass.
+  {
+    const db = seedTestDb();
+    try {
+      const response = await executeFunction(poll, {
+        msg: { payload: Date.now() },
+        env: {},
+        db,
+        flowState: {
+          sdi12_recipe_poll_last_device_count: 0,
+          sdi12_recipe_poll_no_devices_noticed_at: Date.now(),
+        },
+        osiLibModules: {
+          'sdi12-commissioning': { pollDeployments: async () => [] },
+          chirpstack: { createProvisioningClientFromEnv: () => ({ close: () => [] }) },
+        },
+      });
+      assert.equal(response.warnings.length, 0);
+      assert.equal(response.logs.length, 0, 'must not repeat the info line inside the recheck window');
+    } finally {
+      db.close();
+    }
+  }
+
+  // Case 4: zero devices again, but the last notice was over 30 minutes ago
+  // -- the info line is allowed to repeat as a periodic reminder.
+  {
+    const db = seedTestDb();
+    try {
+      const response = await executeFunction(poll, {
+        msg: { payload: Date.now() },
+        env: {},
+        db,
+        flowState: {
+          sdi12_recipe_poll_last_device_count: 0,
+          sdi12_recipe_poll_no_devices_noticed_at: Date.now() - (31 * 60 * 1000),
+        },
+        osiLibModules: {
+          'sdi12-commissioning': { pollDeployments: async () => [] },
+          chirpstack: { createProvisioningClientFromEnv: () => ({ close: () => [] }) },
+        },
+      });
+      assert.equal(response.warnings.length, 0);
+      assert.equal(
+        response.logs.some((line) => line.includes('no DRAGINO_SDI12 devices')),
+        true,
+        'the info line may repeat once the 30-minute recheck window has passed',
+      );
+    } finally {
+      db.close();
+    }
   }
 });
 

@@ -25,6 +25,14 @@ const NAME_TO_PATH = {
   'device-commands': 'osi-device-commands',
   'osi-journal': 'osi-journal',
 'journal-replication': 'osi-journal-replication',
+  // #252 root cause: this name was referenced by sdi12-recipe-poll-fn
+  // (osiLib.require('chirpstack')) but was never registered here, so the
+  // load always failed with "unknown osi-lib module: chirpstack" on every
+  // gateway -- not only ones without an SDI-12 profile. The package itself
+  // (osi-chirpstack-helper) was already fully wired into package.json,
+  // package-lock.json, the seed module-copy loop, and deploy.sh; only this
+  // registry entry was missing.
+  'chirpstack': 'osi-chirpstack-helper',
   // Authorization cache must have one module instance. Flow consumers load it
   // only through osiLib.require('scope'), never with a bare/relative require.
   'scope': 'osi-scope-helper',
