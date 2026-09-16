@@ -17,8 +17,11 @@ import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
-import { collectDeviceSwtValues, formatSwtValue, summarizeSwtValues } from '../../utils/swt';
+import { formatSwtValue } from '../../utils/swt';
+import { summarizeZoneSoil, zoneHasFlowMeter } from '../../utils/zoneSoil';
+import { useDateFormat } from '../../utils/datetime';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
 interface IrrigationZoneCardProps {
@@ -39,46 +42,61 @@ function formatWaterValue(value: number | null | undefined, unit: string, digits
   return `${value.toFixed(digits)} ${unit}`;
 }
 
-function formatWaterAction(code: string | null | undefined): string {
-  switch (code) {
-    case 'delay_irrigation':
-      return 'Delay irrigation';
-    case 'irrigate_today':
-      return 'Irrigate today';
-    case 'monitor_today':
-      return 'Monitor today';
-    case 'maintain_rain_suppression':
-      return 'Rain suppression active';
-    case 'maintain_recovery_hold':
-      return 'Recovery hold active';
-    case 'increase_10':
-      return 'Increase irrigation slightly';
-    case 'increase_20':
-      return 'Increase irrigation';
-    case 'decrease_10':
-      return 'Decrease irrigation slightly';
-    case 'decrease_20':
-      return 'Decrease irrigation';
-    case 'emergency_irrigate':
-      return 'Emergency irrigation';
-    default:
-      return 'Monitor water status';
-  }
+type Translate = TFunction<'devices'>;
+
+// Recommendation codes come from the edge water-balance node and the cloud
+// recommendation payload; they are stable identifiers, so each one gets its
+// own locale key instead of being rendered verbatim.
+const WATER_ACTION_LABELS: Record<string, string> = {
+  delay_irrigation: 'Delay irrigation',
+  irrigate_today: 'Irrigate today',
+  monitor_today: 'Monitor today',
+  maintain_rain_suppression: 'Rain suppression active',
+  maintain_recovery_hold: 'Recovery hold active',
+  increase_10: 'Increase irrigation slightly',
+  increase_20: 'Increase irrigation',
+  decrease_10: 'Decrease irrigation slightly',
+  decrease_20: 'Decrease irrigation',
+  emergency_irrigate: 'Emergency irrigation',
+};
+
+const DISPLAY_MODE_LABELS: Record<string, string> = {
+  shared_server: 'OSI Server',
+  shared_server_stale: 'OSI Server stale',
+  local_fallback: 'Local fallback',
+  unlinked_local: 'Local only',
+};
+
+const SCHEDULE_METRIC_LABELS: Record<string, string> = {
+  DENDRO: 'Dendro trigger',
+  VWC: 'VWC trigger',
+  SWT_1: 'Soil tension (S1)',
+  SWT_2: 'Soil tension (S2)',
+  SWT_3: 'Soil tension (S3)',
+  SWT_WM1: 'Soil tension (S1)',
+  SWT_WM2: 'Soil tension (S2)',
+  SWT_AVG: 'Soil tension (avg)',
+};
+
+function formatWaterAction(t: Translate, code: string | null | undefined): string {
+  const fallback = code ? WATER_ACTION_LABELS[code] : undefined;
+  return fallback
+    ? t(`zone.water.action.${code}`, { defaultValue: fallback })
+    : t('zone.water.action.default', { defaultValue: 'Monitor water status' });
 }
 
-function formatDisplayMode(mode: string | null | undefined): string {
-  switch (mode) {
-    case 'shared_server':
-      return 'OSI Server';
-    case 'shared_server_stale':
-      return 'OSI Server stale';
-    case 'local_fallback':
-      return 'Local fallback';
-    case 'unlinked_local':
-      return 'Local only';
-    default:
-      return 'Water source';
-  }
+function formatDisplayMode(t: Translate, mode: string | null | undefined): string {
+  const fallback = mode ? DISPLAY_MODE_LABELS[mode] : undefined;
+  return fallback
+    ? t(`zone.water.source.${mode}`, { defaultValue: fallback })
+    : t('zone.water.source.default', { defaultValue: 'Water source' });
+}
+
+function formatScheduleMetric(t: Translate, metric: string): string {
+  const fallback = SCHEDULE_METRIC_LABELS[metric];
+  return fallback
+    ? t(`zone.chips.metric.${metric}`, { defaultValue: fallback })
+    : t('zone.chips.metric.default', { defaultValue: 'Soil tension' });
 }
 
 function buildJournalHref(zone: IrrigationZone): string {
@@ -107,6 +125,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
+  const dateFormat = useDateFormat();
   const { swtUnit, modules } = useDisplayPreferences();
   const [zoneCollapsed, setZoneCollapsed] = useState(true);
   const [devicesCollapsed, setDevicesCollapsed] = useState(true);
@@ -158,8 +177,45 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const schedEnabled = zone.schedule?.enabled ?? false;
   const cropType = zone.cropType;
   const soilType = zone.soilType;
-  const soilNow = summarizeSwtValues(collectDeviceSwtValues(devices));
+  const soilNow = summarizeZoneSoil(devices);
+  const hasFlowMeter = zoneHasFlowMeter(devices);
   const showZoneDataLink = !isDesktopBrowser();
+
+  const soilValue = soilNow.mean === null
+    ? null
+    : soilNow.quantity === 'tension'
+      ? formatSwtValue(soilNow.mean, swtUnit)
+      : `${soilNow.mean.toFixed(1)} %`;
+  // Wet/Moderate/Dry is a kPa bucketing (utils/swt.ts); there is no reviewed
+  // equivalent for volumetric water content, so that path names the quantity
+  // instead of inventing thresholds for it.
+  const soilDescriptor = soilNow.quantity === 'volumetric'
+    ? t('zone.water.soil.volumetric', { defaultValue: 'Volumetric water content' })
+    : soilNow.mean === null
+      ? null
+      : soilNow.mean < 20
+        ? t('zone.water.soil.wet', { defaultValue: 'Wet' })
+        : soilNow.mean < 60
+          ? t('zone.water.soil.moderate', { defaultValue: 'Moderate' })
+          : t('zone.water.soil.dry', { defaultValue: 'Dry' });
+  const soilObservedRelative = dateFormat.relativeToNow(soilNow.observedAt);
+  const soilStatusLine = soilNow.invalid
+    ? t('zone.water.soil.invalidReading', { defaultValue: 'Invalid reading' })
+    : soilNow.stale
+      ? soilObservedRelative
+        ? t('zone.water.soil.noReadingSince', {
+            since: soilObservedRelative,
+            defaultValue: 'No reading since {{since}}',
+          })
+        : t('zone.water.soil.noReadingYet', { defaultValue: 'No reading yet' })
+      : null;
+  const soilLastValid = soilStatusLine !== null && soilValue !== null && soilNow.observedAt
+    ? t('zone.water.soil.lastValid', {
+        value: soilValue,
+        time: dateFormat.dateTime(soilNow.observedAt) ?? soilNow.observedAt,
+        defaultValue: 'Last valid {{value}} · {{time}}',
+      })
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -216,7 +272,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               <button
                 onClick={() => setShowConfigModal(true)}
                 className="p-2 rounded-md text-[var(--text-secondary)] hover:bg-[var(--card)] transition-colors text-xl"
-                title="Configure"
+                title={t('zone.configure', { defaultValue: 'Configure' })}
+                aria-label={t('zone.configure', { defaultValue: 'Configure' })}
               >
                 ⚙
               </button>
@@ -267,29 +324,20 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         )}
         {hasDendroDevices && (
           <span className="inline-flex items-center gap-1 bg-teal-50 border border-teal-200 text-teal-800 text-xs px-2.5 py-1 rounded-full font-medium">
-            <span>📏</span> Dendro active
+            <span>📏</span> {t('zone.chips.dendroActive', { defaultValue: 'Dendro active' })}
           </span>
         )}
-        {zone.schedule && schedEnabled && schedMetric && (() => {
-          const metricLabel =
-            schedMetric === 'DENDRO'   ? 'Dendro trigger' :
-            schedMetric === 'VWC'      ? 'VWC trigger' :
-            schedMetric === 'SWT_1'    ? 'Soil tension (S1)' :
-            schedMetric === 'SWT_2'    ? 'Soil tension (S2)' :
-            schedMetric === 'SWT_3'    ? 'Soil tension (S3)' :
-            schedMetric === 'SWT_WM1'  ? 'Soil tension (S1)' :
-            schedMetric === 'SWT_WM2'  ? 'Soil tension (S2)' :
-            schedMetric === 'SWT_AVG'  ? 'Soil tension (avg)' :
-                                         'Soil tension';
-          return (
-            <span className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-1 rounded-full">
-              <span>⏱</span> {metricLabel} enabled
-            </span>
-          );
-        })()}
+        {zone.schedule && schedEnabled && schedMetric && (
+          <span className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-1 rounded-full">
+            <span>⏱</span> {t('zone.chips.metricEnabled', {
+              metric: formatScheduleMetric(t, schedMetric),
+              defaultValue: '{{metric}} enabled',
+            })}
+          </span>
+        )}
         {zone.schedule && !schedEnabled && (
           <span className="inline-flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text-tertiary)] text-xs px-2.5 py-1 rounded-full">
-            <span>⏸</span> Scheduler off
+            <span>⏸</span> {t('zone.chips.schedulerOff', { defaultValue: 'Scheduler off' })}
           </span>
         )}
       </div>
@@ -301,16 +349,22 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         <div data-testid="water-today-card" className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--primary)]">Water balance</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--primary)]">
+                {t('zone.water.title', { defaultValue: 'Water balance' })}
+              </p>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                {environmentSummary.water.action?.reasoning ?? 'Daily rain, irrigation, and crop demand summary for this zone.'}
+                {environmentSummary.water.action?.reasoning
+                  ?? t('zone.water.subtitle', { defaultValue: 'Daily rain, irrigation, and crop demand summary for this zone.' })}
               </p>
             </div>
             <div className="flex flex-col items-end gap-1 text-xs text-[var(--text-tertiary)]">
-              <div>Updated {environmentSummary.water.observedAt ? new Date(environmentSummary.water.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
+              <div>{t('zone.water.updated', {
+                time: dateFormat.time(environmentSummary.water.observedAt) ?? '—',
+                defaultValue: 'Updated {{time}}',
+              })}</div>
               <div className="flex flex-wrap justify-end gap-1">
                 <span className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 font-semibold text-[var(--primary)]">
-                  {formatDisplayMode(environmentSummary.display?.mode)}
+                  {formatDisplayMode(t, environmentSummary.display?.mode)}
                 </span>
               </div>
             </div>
@@ -320,51 +374,92 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {environmentSummary.display.fallbackReason}
             </div>
           )}
-          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <div className={`mt-4 grid grid-cols-2 gap-2 ${hasFlowMeter ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain today</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                {t('zone.water.rainToday', { defaultValue: 'Rain today' })}
+              </p>
               <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
             </div>
+            {/* A measured litre count needs a flow meter; without one the tile
+                would show the same em dash as a zone whose meter has not
+                reported yet. */}
+            {hasFlowMeter && (
+              <div data-testid="water-flow-meter-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {t('zone.water.measured', { defaultValue: 'Measured (flow meter)' })}
+                </p>
+                <p className="mt-2 text-2xl font-bold text-[var(--success-text)]">
+                  {formatWaterValue(environmentSummary.water.irrigationTodayMeasuredLiters, 'L', 0)}
+                </p>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  {t('zone.water.estimated', {
+                    value: formatWaterValue(environmentSummary.water.irrigationTodayEstimatedLiters, 'L', 0),
+                    defaultValue: 'Estimated (valve time × calibration): {{value}}',
+                  })}
+                </p>
+              </div>
+            )}
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Measured (flow meter)</p>
-              <p className="mt-2 text-2xl font-bold text-[var(--success-text)]">
-                {formatWaterValue(environmentSummary.water.irrigationTodayMeasuredLiters, 'L', 0)}
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                {t('zone.water.nextRain', { defaultValue: 'Next rain' })}
               </p>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Estimated (valve time x calibration): {formatWaterValue(environmentSummary.water.irrigationTodayEstimatedLiters, 'L', 0)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Next rain</p>
               <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.next24hRainMm, 'mm', 1)}</p>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">Forecast next 24 h</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                {t('zone.water.forecastNext24h', { defaultValue: 'Forecast next 24 h' })}
+              </p>
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Action</p>
-              <p className="mt-2 text-2xl font-bold text-[var(--warn-text)]">{formatWaterAction(environmentSummary.water.action?.code)}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                {t('zone.water.actionTitle', { defaultValue: 'Action' })}
+              </p>
+              <p className="mt-2 text-2xl font-bold text-[var(--warn-text)]">{formatWaterAction(t, environmentSummary.water.action?.code)}</p>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                {environmentSummary.water.action?.source === 'dendro' ? 'Driven by dendrometer recommendation' : 'Driven by water balance'}
+                {environmentSummary.water.action?.source === 'dendro'
+                  ? t('zone.water.drivenByDendro', { defaultValue: 'Driven by dendrometer recommendation' })
+                  : t('zone.water.drivenByBalance', { defaultValue: 'Driven by water balance' })}
               </p>
             </div>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Soil now</p>
-              <p className="mt-1 text-lg font-semibold text-[var(--text)]">
-                {formatSwtValue(soilNow.swt, swtUnit) ?? '—'}
-              </p>
-              <p className="text-sm text-[var(--text-secondary)]">{soilNow.label}</p>
-            </div>
+            {/* Gated the way the tree-stress tile already is: no configured
+                soil sensor means there is nothing to report, not a reading of
+                zero. A configured-but-silent sensor keeps the tile and says so. */}
+            {soilNow.hasSensor && (
+              <div data-testid="water-soil-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {t('zone.water.soil.title', { defaultValue: 'Soil now' })}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-[var(--text)]">
+                  {soilStatusLine === null ? soilValue ?? '—' : '—'}
+                </p>
+                {soilDescriptor && soilStatusLine === null && (
+                  <p className="text-sm text-[var(--text-secondary)]">{soilDescriptor}</p>
+                )}
+                {soilStatusLine && (
+                  <p className="text-sm font-semibold text-[var(--warn-text)]">{soilStatusLine}</p>
+                )}
+                {soilLastValid && (
+                  <p className="text-xs text-[var(--text-secondary)]">{soilLastValid}</p>
+                )}
+              </div>
+            )}
             {hasDendroDevices && (
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Tree stress</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {t('zone.water.treeStress', { defaultValue: 'Tree stress' })}
+                </p>
                 <p className="mt-1 text-lg font-semibold text-[var(--text)]">
-                  {latestZoneRecommendation?.zone_stress_summary?.replace(/_/g, ' ') ?? 'Awaiting recommendation'}
+                  {latestZoneRecommendation?.zone_stress_summary?.replace(/_/g, ' ')
+                    ?? t('zone.water.awaitingRecommendation', { defaultValue: 'Awaiting recommendation' })}
                 </p>
                 <p className="text-sm text-[var(--text-secondary)]">
                   {latestZoneRecommendation?.zone_confidence_score != null
-                    ? `${Math.round(latestZoneRecommendation.zone_confidence_score * 100)}% confidence`
-                    : 'Confidence updates with the latest dendro run'}
+                    ? t('zone.water.confidence', {
+                        percent: Math.round(latestZoneRecommendation.zone_confidence_score * 100),
+                        defaultValue: '{{percent}}% confidence',
+                      })
+                    : t('zone.water.confidencePending', { defaultValue: 'Confidence updates with the latest dendro run' })}
                 </p>
               </div>
             )}
@@ -505,7 +600,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {/* LSN50 Nodes */}
               {lsn50Nodes.length > 0 && (
                 <div className="mb-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Dragino LSN50 Nodes</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('zone.groups.lsn50Nodes', { defaultValue: 'Dragino LSN50 Nodes' })}</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {lsn50Nodes.map((device) => (
                       <div key={device.deveui} className="relative">
@@ -529,7 +624,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {/* SDI-12 Soil Nodes */}
               {sdi12Nodes.length > 0 && (
                 <div className="mb-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">SDI-12 Soil Nodes</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('zone.groups.sdi12Nodes', { defaultValue: 'SDI-12 Soil Nodes' })}</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {sdi12Nodes.map((device) => (
                       <div key={device.deveui} className="relative">
@@ -554,7 +649,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {/* Weather Stations */}
               {s2120Stations.length > 0 && (
                 <div className="mb-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Weather Stations</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('zone.groups.weatherStations', { defaultValue: 'Weather Stations' })}</p>
                   <div className="grid grid-cols-1 gap-4">
                     {s2120Stations.map((device) => (
                       <div key={device.deveui} className="relative">
@@ -580,7 +675,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {/* Rain Gauges */}
               {loRainGauges.length > 0 && (
                 <div className="mb-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Rain Gauges</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('zone.groups.rainGauges', { defaultValue: 'Rain Gauges' })}</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {loRainGauges.map((device) => (
                       <div key={device.deveui} className="relative">

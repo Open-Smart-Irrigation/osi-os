@@ -1,5 +1,8 @@
 {
   "network": {
+    "loadingDevices": "Chargement des appareils…",
+    "noDevices": "Aucun appareil connu de cette passerelle",
+    "loadingObservations": "Chargement des observations…",
     "title": "Observations réseau",
     "device": "Appareil",
     "location": "Emplacement installé",

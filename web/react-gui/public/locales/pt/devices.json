@@ -183,6 +183,77 @@
       "intervalNote": "A OSI define o intervalo normal de caixa fechada no FPort 11. O intervalo de caixa aberta permanece fixo em 2 minutos e a deteção de adulteração permanece ativada."
     },
   "zone": {
+    "configure": "Configurar",
+    "chips": {
+      "dendroActive": "Dendrómetro ativo",
+      "schedulerOff": "Programação desativada",
+      "metricEnabled": "Acionamento ativo: {{metric}}",
+      "metric": {
+        "DENDRO": "Dendrómetro",
+        "VWC": "Teor de água (VWC)",
+        "SWT_1": "Tensão hídrica (S1)",
+        "SWT_2": "Tensão hídrica (S2)",
+        "SWT_3": "Tensão hídrica (S3)",
+        "SWT_WM1": "Tensão hídrica (S1)",
+        "SWT_WM2": "Tensão hídrica (S2)",
+        "SWT_AVG": "Tensão hídrica (média)",
+        "default": "Tensão hídrica"
+      }
+    },
+    "groups": {
+      "lsn50Nodes": "Nós Dragino LSN50",
+      "sdi12Nodes": "Nós de solo SDI-12",
+      "weatherStations": "Estações meteorológicas",
+      "rainGauges": "Pluviómetros"
+    },
+    "water": {
+      "title": "Balanço hídrico",
+      "subtitle": "Resumo diário da chuva, da rega e da procura da cultura nesta zona.",
+      "updated": "Atualizado {{time}}",
+      "rainToday": "Chuva hoje",
+      "measured": "Medido (caudalímetro)",
+      "estimated": "Estimado (tempo de válvula × calibração): {{value}}",
+      "nextRain": "Próxima chuva",
+      "forecastNext24h": "Previsão 24 h",
+      "actionTitle": "Ação",
+      "drivenByDendro": "Com base na recomendação do dendrómetro",
+      "drivenByBalance": "Com base no balanço hídrico",
+      "treeStress": "Stress da árvore",
+      "awaitingRecommendation": "Recomendação pendente",
+      "confidence": "{{percent}} % de confiança",
+      "confidencePending": "A confiança é atualizada no próximo cálculo dendro",
+      "action": {
+        "delay_irrigation": "Adiar a rega",
+        "irrigate_today": "Regar hoje",
+        "monitor_today": "Monitorizar hoje",
+        "maintain_rain_suppression": "Suspensão por chuva ativa",
+        "maintain_recovery_hold": "Pausa de recuperação ativa",
+        "increase_10": "Aumentar ligeiramente a rega",
+        "increase_20": "Aumentar a rega",
+        "decrease_10": "Reduzir ligeiramente a rega",
+        "decrease_20": "Reduzir a rega",
+        "emergency_irrigate": "Rega de emergência",
+        "default": "Monitorizar o estado hídrico"
+      },
+      "source": {
+        "shared_server": "OSI Server",
+        "shared_server_stale": "OSI Server desatualizado",
+        "local_fallback": "Alternativa local",
+        "unlinked_local": "Apenas local",
+        "default": "Fonte de água"
+      },
+      "soil": {
+        "title": "Solo agora",
+        "wet": "Húmido",
+        "moderate": "Moderado",
+        "dry": "Seco",
+        "volumetric": "Teor volumétrico de água",
+        "noReadingSince": "Sem leituras desde {{since}}",
+        "noReadingYet": "Ainda sem leituras",
+        "invalidReading": "Leitura inválida",
+        "lastValid": "Última válida {{value}} · {{time}}"
+      }
+    },
     "deviceCount_one": "{{count}} dispositivo",
     "deviceCount_other": "{{count}} dispositivos",
     "assignDevice": "+ Dispositivo",
@@ -236,6 +307,13 @@
     "triggerHint": "Aciona se {{metric}} ≥ {{threshold}} kPa (verificado uma vez por dia às 06:00)."
   },
   "environment": {
+    "soil": {
+      "moistureSwtVwc": "Humidade do solo (SWT e VWC)",
+      "moistureSwt": "Humidade do solo (SWT)",
+      "moistureVwc": "Humidade do solo (VWC)",
+      "moisture": "Humidade do solo"
+    },
+    "generatedAt": "Gerado {{time}}",
     "sectionTitle": "Ambiente e previsão do tempo",
     "tabs": {
       "local": "Local",
@@ -284,6 +362,10 @@
       "fromSource": "de {{source}}"
     },
     "forecast": {
+      "dayToday": "Hoje",
+      "dayTomorrow": "Amanhã",
+      "etaToday": "{{time}} hoje",
+      "etaTomorrow": "{{time}} amanhã",
       "next24h": "Próx. 24 h",
       "next72h": "Próx. 72 h",
       "nextRain": "Próxima chuva",
@@ -366,5 +448,8 @@
     "failedFarm": "Falha ao remover dispositivo",
     "buttonZone": "Remover desta zona",
     "buttonFarm": "Remover dispositivo"
+  },
+  "common": {
+    "viewHistory": "Ver histórico"
   }
 }

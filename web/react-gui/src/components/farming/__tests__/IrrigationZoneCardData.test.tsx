@@ -47,15 +47,25 @@ vi.mock('../../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => false),
 }));
 
+// Resolves `defaultValue` and `{{placeholders}}` the way i18next does, so the
+// assertions below keep reading the English the card actually renders rather
+// than a bare key.
+const FIXED: Record<string, string> = {
+  'zone.deviceCount': '2 devices',
+  'zone.assignDevice': 'Assign Device',
+  'zone.deleteZone': 'Delete Zone',
+  'addMenu.activity': 'Log activity',
+};
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'en' },
     t: (key: string, options?: unknown) => {
       if (typeof options === 'string') return options;
-      if (key === 'zone.deviceCount') return '2 devices';
-      if (key === 'zone.assignDevice') return 'Assign Device';
-      if (key === 'zone.deleteZone') return 'Delete Zone';
-      if (key === 'addMenu.activity') return 'Log activity';
-      return key;
+      if (FIXED[key]) return FIXED[key];
+      const values = (options ?? {}) as Record<string, unknown>;
+      const template = typeof values.defaultValue === 'string' ? values.defaultValue : key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(values[name] ?? ''));
     },
   }),
 }));

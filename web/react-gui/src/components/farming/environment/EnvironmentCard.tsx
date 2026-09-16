@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDateFormat } from '../../../utils/datetime';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 import { environmentAPI } from '../../../services/api';
 import { LocalTab } from './LocalTab';
@@ -67,6 +68,7 @@ function DisplayBadge({ data }: { data: ZoneEnvironmentSummary }) {
 
 export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
   const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -186,7 +188,10 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
               </div>
 
               <p className="pt-1 text-[10px] text-[var(--text-tertiary)]">
-                Generated {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {t('environment.generatedAt', {
+                  time: fmt.time(data.generatedAt) ?? '\u2014',
+                  defaultValue: 'Generated {{time}}',
+                })}
                 {' · '}
                 {t(`environment.location.${data.location.source}`, { defaultValue: data.location.source })}
               </p>

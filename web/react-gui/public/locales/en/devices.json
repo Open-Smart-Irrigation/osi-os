@@ -180,6 +180,77 @@
       "invalidOpenDuration": "Enter an open duration between 1 and 255 minutes."
     },
   "zone": {
+    "configure": "Configure",
+    "chips": {
+      "dendroActive": "Dendro active",
+      "schedulerOff": "Scheduler off",
+      "metricEnabled": "{{metric}} enabled",
+      "metric": {
+        "DENDRO": "Dendro trigger",
+        "VWC": "VWC trigger",
+        "SWT_1": "Soil tension (S1)",
+        "SWT_2": "Soil tension (S2)",
+        "SWT_3": "Soil tension (S3)",
+        "SWT_WM1": "Soil tension (S1)",
+        "SWT_WM2": "Soil tension (S2)",
+        "SWT_AVG": "Soil tension (avg)",
+        "default": "Soil tension"
+      }
+    },
+    "groups": {
+      "lsn50Nodes": "Dragino LSN50 Nodes",
+      "sdi12Nodes": "SDI-12 Soil Nodes",
+      "weatherStations": "Weather Stations",
+      "rainGauges": "Rain Gauges"
+    },
+    "water": {
+      "title": "Water balance",
+      "subtitle": "Daily rain, irrigation, and crop demand summary for this zone.",
+      "updated": "Updated {{time}}",
+      "rainToday": "Rain today",
+      "measured": "Measured (flow meter)",
+      "estimated": "Estimated (valve time × calibration): {{value}}",
+      "nextRain": "Next rain",
+      "forecastNext24h": "Forecast next 24 h",
+      "actionTitle": "Action",
+      "drivenByDendro": "Driven by dendrometer recommendation",
+      "drivenByBalance": "Driven by water balance",
+      "treeStress": "Tree stress",
+      "awaitingRecommendation": "Awaiting recommendation",
+      "confidence": "{{percent}}% confidence",
+      "confidencePending": "Confidence updates with the latest dendro run",
+      "action": {
+        "delay_irrigation": "Delay irrigation",
+        "irrigate_today": "Irrigate today",
+        "monitor_today": "Monitor today",
+        "maintain_rain_suppression": "Rain suppression active",
+        "maintain_recovery_hold": "Recovery hold active",
+        "increase_10": "Increase irrigation slightly",
+        "increase_20": "Increase irrigation",
+        "decrease_10": "Decrease irrigation slightly",
+        "decrease_20": "Decrease irrigation",
+        "emergency_irrigate": "Emergency irrigation",
+        "default": "Monitor water status"
+      },
+      "source": {
+        "shared_server": "OSI Server",
+        "shared_server_stale": "OSI Server stale",
+        "local_fallback": "Local fallback",
+        "unlinked_local": "Local only",
+        "default": "Water source"
+      },
+      "soil": {
+        "title": "Soil now",
+        "wet": "Wet",
+        "moderate": "Moderate",
+        "dry": "Dry",
+        "volumetric": "Volumetric water content",
+        "noReadingSince": "No reading since {{since}}",
+        "noReadingYet": "No reading yet",
+        "invalidReading": "Invalid reading",
+        "lastValid": "Last valid {{value}} · {{time}}"
+      }
+    },
     "deviceCount_one": "{{count}} device",
     "deviceCount_other": "{{count}} devices",
     "assignDevice": "+ Device",
@@ -233,6 +304,13 @@
     "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (checked once a day at 06:00)."
   },
   "environment": {
+    "soil": {
+      "moistureSwtVwc": "Soil Moisture (SWT & VWC)",
+      "moistureSwt": "Soil Moisture (SWT)",
+      "moistureVwc": "Soil Moisture (VWC)",
+      "moisture": "Soil Moisture"
+    },
+    "generatedAt": "Generated {{time}}",
     "sectionTitle": "Environment & weather forecast",
     "tabs": {
       "local": "Local",
@@ -281,6 +359,10 @@
       "fromSource": "from {{source}}"
     },
     "forecast": {
+      "dayToday": "Today",
+      "dayTomorrow": "Tomorrow",
+      "etaToday": "{{time}} today",
+      "etaTomorrow": "{{time}} tomorrow",
       "next24h": "Next 24 h",
       "next72h": "Next 72 h",
       "nextRain": "Next rain",
@@ -363,5 +445,8 @@
     "failedFarm": "Failed to remove device",
     "buttonZone": "Unassign from this zone",
     "buttonFarm": "Remove device"
+  },
+  "common": {
+    "viewHistory": "View history"
   }
 }

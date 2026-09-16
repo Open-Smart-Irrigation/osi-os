@@ -212,7 +212,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
               <button
                 onClick={() => setSensorMonitor({ field: 'ext_temperature_c', label: 'Temperature', unit: '°C', color: '#f97316', decimals: 1 })}
                 className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-                title="View history"
+                title={t('common.viewHistory', { defaultValue: 'View history' })}
               >
                 {data.ext_temperature_c.toFixed(1)} °C
               </button>
@@ -229,7 +229,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
               onClick={() => setSensorMonitor({ field: 'bat_v', label: 'Battery Voltage', unit: 'V', color: '#22c55e', decimals: 2 })}
               className={`cursor-pointer text-left text-2xl font-bold tabular-nums underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75 ${FOCUS_VISIBLE_RING}`}
               style={{ color: batColour }}
-              title="View history"
+              title={t('common.viewHistory', { defaultValue: 'View history' })}
             >
               {data.bat_v.toFixed(2)} V
             </button>
@@ -300,7 +300,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                 ],
               })}
               className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-              title="View history"
+              title={t('common.viewHistory', { defaultValue: 'View history' })}
             >
               {data?.rain_mm_delta != null ? `${data.rain_mm_delta.toFixed(1)} mm` : '—'}
             </button>
@@ -338,7 +338,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                 ],
               })}
               className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-              title="View history"
+              title={t('common.viewHistory', { defaultValue: 'View history' })}
             >
               {data?.flow_liters_delta != null ? `${data.flow_liters_delta.toFixed(0)} L` : '—'}
             </button>

@@ -64,4 +64,42 @@ describe('NetworkPage', () => {
     expect(await screen.findByText('No observations')).toBeInTheDocument();
     expect(await screen.findByText('Updates paused')).toBeInTheDocument();
   });
+
+  it('says it is still loading instead of claiming the gateway has nothing', async () => {
+    let releaseDevices: (value: unknown[]) => void = () => {};
+    mocks.getAll.mockReturnValue(new Promise((resolve) => { releaseDevices = resolve; }));
+    renderPage();
+
+    expect(await screen.findByText('Loading devices…')).toBeInTheDocument();
+    expect(screen.getByText('Loading observations…')).toBeInTheDocument();
+    expect(screen.queryByText('No observations')).not.toBeInTheDocument();
+    expect(screen.queryByText('No known positions')).not.toBeInTheDocument();
+    expect(screen.queryByText('0 observations')).not.toBeInTheDocument();
+
+    releaseDevices([device]);
+    await waitFor(() => expect(screen.queryByText('Loading devices…')).not.toBeInTheDocument());
+    expect(await screen.findByText('No observations')).toBeInTheDocument();
+  });
+
+  it('separates a gateway with no devices from a gateway still answering', async () => {
+    mocks.getAll.mockResolvedValue([]);
+    renderPage();
+
+    expect(await screen.findByText('No devices are known to this gateway yet')).toBeInTheDocument();
+    expect(screen.queryByText('Loading observations…')).not.toBeInTheDocument();
+    expect(screen.getByText('No observations')).toBeInTheDocument();
+  });
+
+  it('formats the observation timestamp instead of printing the raw column', async () => {
+    mocks.observations.mockResolvedValue({
+      rows: [{ deveui: device.deveui, recorded_at: '2026-09-10T08:30:00.000Z', rssi: -91, metadata_json: '{}' }],
+      truncated: false, nextOffset: null, from: '', to: '',
+    });
+    renderPage();
+
+    const formatted = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' })
+      .format(new Date('2026-09-10T08:30:00.000Z'));
+    expect(await screen.findByText(new RegExp(formatted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument();
+    expect(screen.queryByText(/2026-09-10T08:30:00\.000Z/)).not.toBeInTheDocument();
+  });
 });

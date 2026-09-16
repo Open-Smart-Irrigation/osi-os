@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
@@ -7,6 +8,7 @@ import {
 import type { ForecastEnvironment, DailyForecast, HourlyForecast } from '../../../types/farming';
 import { formatForecastHighLow } from '../../../utils/forecastFormat';
 import { WeatherIcon } from './WeatherIcon';
+import { useDateFormat, type DateFormatter } from '../../../utils/datetime';
 
 interface Props {
   forecast: ForecastEnvironment;
@@ -15,36 +17,32 @@ interface Props {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtDay(dateStr: string): string {
+type Translate = TFunction<'devices'>;
+
+function isSameCalendarDay(date: Date, offsetDays: number): boolean {
+  const other = new Date();
+  other.setDate(other.getDate() + offsetDays);
+  return date.toDateString() === other.toDateString();
+}
+
+function fmtDay(dateStr: string, fmt: DateFormatter, t: Translate): string {
   const d = new Date(dateStr + 'T12:00:00');
-  const today    = new Date();
-  const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
-
-  const isToday    = d.toDateString() === today.toDateString();
-  const isTomorrow = d.toDateString() === tomorrow.toDateString();
-
-  if (isToday)    return 'Today';
-  if (isTomorrow) return 'Tomorrow';
-  return d.toLocaleDateString([], { weekday: 'short' });
+  if (isSameCalendarDay(d, 0)) return t('environment.forecast.dayToday', { defaultValue: 'Today' });
+  if (isSameCalendarDay(d, 1)) return t('environment.forecast.dayTomorrow', { defaultValue: 'Tomorrow' });
+  return fmt.weekday(d) ?? '\u2014';
 }
 
-function fmtHour(isoStr: string): string {
-  return new Date(isoStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function fmtHour(isoStr: string, fmt: DateFormatter): string {
+  return fmt.time(isoStr) ?? '\u2014';
 }
 
-function fmtEta(isoStr: string | null): string {
-  if (!isoStr) return '—';
+function fmtEta(isoStr: string | null, fmt: DateFormatter, t: Translate): string {
+  const time = fmt.time(isoStr);
+  if (isoStr === null || time === null) return '\u2014';
   const d = new Date(isoStr);
-  const today    = new Date();
-  const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
-
-  const isToday    = d.toDateString() === today.toDateString();
-  const isTomorrow = d.toDateString() === tomorrow.toDateString();
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-  if (isToday)    return `${time} today`;
-  if (isTomorrow) return `${time} tomorrow`;
-  return d.toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  if (isSameCalendarDay(d, 0)) return t('environment.forecast.etaToday', { time, defaultValue: '{{time}} today' });
+  if (isSameCalendarDay(d, 1)) return t('environment.forecast.etaTomorrow', { time, defaultValue: '{{time}} tomorrow' });
+  return fmt.weekday(d, { hour: '2-digit', minute: '2-digit' }) ?? time;
 }
 
 function rainClass(mm: number): string {
@@ -72,6 +70,7 @@ const RainPill: React.FC<RainPillProps> = ({ label, value, highlight }) => (
 
 const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isToday }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
   const rain = day.rainMm ?? 0;
   const highLow = formatForecastHighLow(day.maxTempC, day.minTempC);
   return (
@@ -79,7 +78,7 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
       ${isToday
         ? 'bg-[var(--primary)]/10 border-[var(--primary)]'
         : 'bg-[var(--card)] border-[var(--border)]'}`}>
-      <span className="text-xs font-semibold text-[var(--text-secondary)]">{fmtDay(day.date)}</span>
+      <span className="text-xs font-semibold text-[var(--text-secondary)]">{fmtDay(day.date, fmt, t)}</span>
       <WeatherIcon code={day.weatherCode} description={day.description} size={40} animated={!isToday} />
       <span className="min-h-[16px] text-xs font-medium tabular-nums text-[var(--text)] whitespace-nowrap">
         {highLow === 'Unavailable'
@@ -106,6 +105,7 @@ interface ChartPoint { hour: string; rain: number; prob: number }
 
 const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
   if (hourly.length === 0) return null;
 
   // Next 24 h only
@@ -113,7 +113,7 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
   const points: ChartPoint[] = hourly
     .filter(h => new Date(h.time).getTime() <= cutoff)
     .map(h => ({
-      hour: fmtHour(h.time),
+      hour: fmtHour(h.time, fmt),
       rain: h.rainMm ?? 0,
       prob: h.rainProbabilityPct ?? 0,
     }));
@@ -184,6 +184,7 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
 
 export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
 
   if (!forecast.available || !forecast.rainFocus) {
     const msg = location.source === 'unavailable'
@@ -215,7 +216,7 @@ export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
         />
         <RainPill
           label={t('environment.forecast.nextRain', { defaultValue: 'Next rain' })}
-          value={fmtEta(rf.nextRainEta)}
+          value={fmtEta(rf.nextRainEta, fmt, t)}
           highlight={rf.nextRainEta != null}
         />
         <RainPill

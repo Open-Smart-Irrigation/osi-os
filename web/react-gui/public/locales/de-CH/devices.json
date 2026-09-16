@@ -183,6 +183,77 @@
       "intervalNote": "OSI legt das normale Meldeintervall bei geschlossenem Gehäuse auf FPort 11 fest. Das Intervall bei geöffnetem Gehäuse bleibt fest bei 2 Minuten, und die Manipulationserkennung bleibt aktiviert."
     },
   "zone": {
+    "configure": "Konfigurieren",
+    "chips": {
+      "dendroActive": "Dendrometer aktiv",
+      "schedulerOff": "Zeitplan aus",
+      "metricEnabled": "Auslöser aktiv: {{metric}}",
+      "metric": {
+        "DENDRO": "Dendrometer",
+        "VWC": "Wassergehalt (VWC)",
+        "SWT_1": "Bodenwasserspannung (S1)",
+        "SWT_2": "Bodenwasserspannung (S2)",
+        "SWT_3": "Bodenwasserspannung (S3)",
+        "SWT_WM1": "Bodenwasserspannung (S1)",
+        "SWT_WM2": "Bodenwasserspannung (S2)",
+        "SWT_AVG": "Bodenwasserspannung (Ø)",
+        "default": "Bodenwasserspannung"
+      }
+    },
+    "groups": {
+      "lsn50Nodes": "Dragino-LSN50-Knoten",
+      "sdi12Nodes": "SDI-12-Bodenknoten",
+      "weatherStations": "Wetterstationen",
+      "rainGauges": "Regenmesser"
+    },
+    "water": {
+      "title": "Wasserbilanz",
+      "subtitle": "Tagesübersicht über Regen, Bewässerung und Kulturbedarf dieser Zone.",
+      "updated": "Aktualisiert {{time}}",
+      "rainToday": "Regen heute",
+      "measured": "Gemessen (Durchflussmesser)",
+      "estimated": "Geschätzt (Ventilzeit × Kalibrierung): {{value}}",
+      "nextRain": "Nächster Regen",
+      "forecastNext24h": "Prognose nächste 24 h",
+      "actionTitle": "Massnahme",
+      "drivenByDendro": "Aus der Dendrometer-Empfehlung",
+      "drivenByBalance": "Aus der Wasserbilanz",
+      "treeStress": "Baumstress",
+      "awaitingRecommendation": "Empfehlung ausstehend",
+      "confidence": "{{percent}}% Konfidenz",
+      "confidencePending": "Die Konfidenz wird beim nächsten Dendro-Lauf aktualisiert",
+      "action": {
+        "delay_irrigation": "Bewässerung verschieben",
+        "irrigate_today": "Heute bewässern",
+        "monitor_today": "Heute beobachten",
+        "maintain_rain_suppression": "Regensperre aktiv",
+        "maintain_recovery_hold": "Erholungspause aktiv",
+        "increase_10": "Bewässerung leicht erhöhen",
+        "increase_20": "Bewässerung erhöhen",
+        "decrease_10": "Bewässerung leicht reduzieren",
+        "decrease_20": "Bewässerung reduzieren",
+        "emergency_irrigate": "Notbewässerung",
+        "default": "Wasserstatus beobachten"
+      },
+      "source": {
+        "shared_server": "OSI Server",
+        "shared_server_stale": "OSI Server veraltet",
+        "local_fallback": "Lokaler Rückfall",
+        "unlinked_local": "Nur lokal",
+        "default": "Wasserquelle"
+      },
+      "soil": {
+        "title": "Boden aktuell",
+        "wet": "Feucht",
+        "moderate": "Mittel",
+        "dry": "Trocken",
+        "volumetric": "Volumetrischer Wassergehalt",
+        "noReadingSince": "Keine Messung seit {{since}}",
+        "noReadingYet": "Noch keine Messung",
+        "invalidReading": "Ungültige Messung",
+        "lastValid": "Letzte gültige {{value}} · {{time}}"
+      }
+    },
     "deviceCount_one": "{{count}} Gerät",
     "deviceCount_other": "{{count}} Geräte",
     "assignDevice": "+ Gerät",
@@ -236,6 +307,13 @@
     "triggerHint": "Auslösen, wenn {{metric}} ≥ {{threshold}} kPa (Prüfung einmal täglich um 06:00)."
   },
   "environment": {
+    "soil": {
+      "moistureSwtVwc": "Bodenfeuchte (SWT & VWC)",
+      "moistureSwt": "Bodenfeuchte (SWT)",
+      "moistureVwc": "Bodenfeuchte (VWC)",
+      "moisture": "Bodenfeuchte"
+    },
+    "generatedAt": "Erstellt {{time}}",
     "sectionTitle": "Umgebung & Wettervorhersage",
     "tabs": {
       "local": "Lokal",
@@ -284,6 +362,10 @@
       "fromSource": "von {{source}}"
     },
     "forecast": {
+      "dayToday": "Heute",
+      "dayTomorrow": "Morgen",
+      "etaToday": "{{time}} heute",
+      "etaTomorrow": "{{time}} morgen",
       "next24h": "Nächste 24 Std.",
       "next72h": "Nächste 72 Std.",
       "nextRain": "Nächster Regen",
@@ -366,5 +448,8 @@
     "failedFarm": "Gerät konnte nicht entfernt werden",
     "buttonZone": "Aus dieser Zone entfernen",
     "buttonFarm": "Gerät entfernen"
+  },
+  "common": {
+    "viewHistory": "Verlauf anzeigen"
   }
 }

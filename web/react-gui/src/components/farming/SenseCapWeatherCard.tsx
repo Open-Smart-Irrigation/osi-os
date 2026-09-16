@@ -249,7 +249,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: 'Air Temperature', unit: '°C', color: '#ea580c', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#ea580c' }}
           >
             {fmtNum(data.ambient_temperature, 1, '°C')}
@@ -261,7 +261,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setSensorMonitor({ field: 'relative_humidity', label: 'Humidity', unit: '%', color: '#0891b2', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#0891b2' }}
           >
             {fmtNum(data.relative_humidity, 0, '%')}
@@ -273,7 +273,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#4f46e5' }}
           >
             {fmtNum(data.wind_speed_mps, 1, 'm/s')}
@@ -288,7 +288,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#7c3aed' }}
           >
             {formatWindDirection(data.wind_direction_deg)}
@@ -300,7 +300,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setShowRainMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#2563eb' }}
           >
             {fmtNum(data.rain_mm_today, 1, 'mm')}
@@ -323,7 +323,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setSensorMonitor({ field: 'barometric_pressure_hpa', label: 'Pressure', unit: 'hPa', color: '#475569', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#475569' }}
           >
             {fmtNum(data.barometric_pressure_hpa, 0, 'hPa')}
@@ -335,7 +335,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setSensorMonitor({ field: 'light_lux', label: 'Light Intensity', unit: 'lux', color: '#d97706', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#d97706' }}
           >
             {fmtLux(data.light_lux)}
@@ -347,7 +347,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           <button
             onClick={() => setSensorMonitor({ field: 'uv_index', label: 'UV Index', unit: 'UVI', color: '#ca8a04', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#ca8a04' }}
           >
             {fmtNum(data.uv_index, 1, 'UVI')}
