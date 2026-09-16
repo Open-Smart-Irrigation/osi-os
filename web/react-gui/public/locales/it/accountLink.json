@@ -57,6 +57,11 @@
     "pendingAfterResponse": "L'applicazione locale continua dopo il ritorno di questa risposta.",
     "lastError": "Ultimo errore da {{source}}: {{message}}"
   },
+  "rejected": {
+    "title": "Rifiutato da OSI Server",
+    "count": "{{total}} aggiornamento/i sono stati rifiutati in modo definitivo e non verranno ritentati ({{last24h}} nelle ultime 24 ore).",
+    "lastReason": "Più recente: {{op}} rifiutato per {{reason}} il {{date}}"
+  },
   "reauth": {
     "title": "Token di sincronizzazione scaduto",
     "description": "Autenticati di nuovo con OSI Server per generare un nuovo token di sincronizzazione per questo gateway.",
@@ -64,6 +69,7 @@
     "username": "Nome utente server",
     "password": "Password OSI Server",
     "submit": "Aggiorna connessione",
-    "running": "Aggiornamento in corso..."
+    "running": "Aggiornamento in corso...",
+    "detected": "Il collegamento al cloud richiede una nuova autenticazione. L'ultimo tentativo di sincronizzazione è stato rifiutato con HTTP {{statusCode}}."
   }
 }

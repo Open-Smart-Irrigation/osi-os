@@ -57,6 +57,11 @@
     "pendingAfterResponse": "La aplicación local continúa después de que se reciba esta respuesta.",
     "lastError": "Último error de {{source}}: {{message}}"
   },
+  "rejected": {
+    "title": "Rechazado por OSI Server",
+    "count": "{{total}} actualización(es) fueron rechazadas de forma definitiva y no se reintentarán ({{last24h}} en las últimas 24 horas).",
+    "lastReason": "Más reciente: {{op}} rechazado por {{reason}} el {{date}}"
+  },
   "reauth": {
     "title": "Token de sincronización caducado",
     "description": "Vuelve a autenticarte con OSI Server para generar un nuevo token de sincronización para esta gateway.",
@@ -64,6 +69,7 @@
     "username": "Nombre de usuario del servidor",
     "password": "Contraseña de OSI Server",
     "submit": "Actualizar conexión",
-    "running": "Actualizando..."
+    "running": "Actualizando...",
+    "detected": "El enlace con la nube necesita autenticarse de nuevo. El último intento de sincronización fue rechazado con HTTP {{statusCode}}."
   }
 }
