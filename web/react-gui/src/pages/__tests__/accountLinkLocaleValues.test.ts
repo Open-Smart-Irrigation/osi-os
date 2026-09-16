@@ -71,6 +71,23 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
   pt: new Set(['navLink']),
 };
 
+// Distinct from REVIEWED_IDENTICAL_KEYS above: these are not cognates, they
+// are keys where the previously shipped Luganda became a stale/incorrect
+// translation of an English string that has since changed meaning, and no
+// corrected human Luganda text exists yet. Shipping the current English text
+// verbatim (an honest fallback) is preferred over leaving the old, now-wrong
+// translation in place or inventing an unreviewed one. See
+// docs/i18n/pending-luganda-translations.md for the tracked list and reason
+// per key; a human Luganda pass must remove the key from this set when it
+// lands.
+const PENDING_HUMAN_TRANSLATION: Partial<Record<Locale, ReadonlySet<string>>> = {
+  lg: new Set(['warning.message']),
+};
+
+function isReviewedIdentical(locale: Locale, key: string): boolean {
+  return REVIEWED_IDENTICAL_KEYS[locale].has(key) || (PENDING_HUMAN_TRANSLATION[locale]?.has(key) ?? false);
+}
+
 describe('accountLink locale value parity', () => {
   it('keeps all six locales translated except reviewed shared technical values', () => {
     const english = localeLeaves('en');
@@ -82,13 +99,14 @@ describe('accountLink locale value parity', () => {
       expect([...translatedKeys].filter((key) => !englishKeys.has(key)), `${locale} extra keys`).toEqual([]);
       expect([...englishKeys].filter((key) => !translatedKeys.has(key)), `${locale} missing keys`).toEqual([]);
 
-      const missingAllowlistKeys = [...REVIEWED_IDENTICAL_KEYS[locale]].filter((key) =>
+      const allAllowlistKeys = [...REVIEWED_IDENTICAL_KEYS[locale], ...(PENDING_HUMAN_TRANSLATION[locale] ?? [])];
+      const missingAllowlistKeys = allAllowlistKeys.filter((key) =>
         !Object.prototype.hasOwnProperty.call(english, key) || !Object.prototype.hasOwnProperty.call(translated, key));
       expect(missingAllowlistKeys, `${locale} allowlisted keys missing from a locale resource`).toEqual([]);
 
       const identicalKeys = Object.keys(english).filter((key) => translated[key] === english[key]);
-      const unexpected = identicalKeys.filter((key) => !REVIEWED_IDENTICAL_KEYS[locale].has(key));
-      const staleAllowlist = [...REVIEWED_IDENTICAL_KEYS[locale]].filter((key) => translated[key] !== english[key]);
+      const unexpected = identicalKeys.filter((key) => !isReviewedIdentical(locale, key));
+      const staleAllowlist = allAllowlistKeys.filter((key) => translated[key] !== english[key]);
       expect(unexpected, `${locale} unreviewed English-identical values`).toEqual([]);
       expect(staleAllowlist, `${locale} stale identical-value allowlist entries`).toEqual([]);
 

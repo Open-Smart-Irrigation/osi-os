@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Kigambiddwa",
-    "message": "Oluvannyuma lw'okuyunga, oteekwa okukozesa ebikwata ku kuyingira ebya OSI Server okuyingira. OSI OS ekuuma ku Gateway eno enkoppi ey'obukuumi eteetaaga yintaneeti ey'ebyokuyingira byo ebyunze, ekikusobozesa okweyongera okuyingira ne bwe wataba na yintaneeti.",
+    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
     "proceed": "Komezagana"
   },
   "success": {
