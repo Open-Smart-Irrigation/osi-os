@@ -332,6 +332,284 @@ async function verifyBuildTelemetryStregaContract(flows, fixture, object, label,
   console.log(`OK ${label} Build Telemetry STREGA normalization fixture`);
 }
 
+// Gen2 (SV2) battery regression: strega_gen2_decoder.js's `Battery` field is a raw
+// millivolt reading (parseInt(payload.substr(0,3), 16), see the codec comments and
+// docs/hardware/strega-codecs/ChirpStack-JS-CODEC-Decoder-STREGA-Gen2-CS4.17-and-up),
+// not a 0-100 percent like Gen1's vendor-computed Battery field. Feeding a raw mV
+// value straight into normalizeBatteryPercent() clamps every Gen2 valve to 100%
+// regardless of true charge. No documented Gen2 mV->percent curve exists in this
+// repo (checked docs/hardware/strega-codecs and both decoders' comments), so per
+// the missing-data rule this must not be invented: Gen2 gets bat_pct=null and the
+// real bat_v (millivolts/1000) instead.
+const GEN2_PROFILE_ID = 'strega-gen2-test-profile';
+
+async function verifyGen2ProcessStregaBattery(flows, fixture) {
+  const node = getFunctionNode(flows, 'Process STREGA');
+  const sandbox = {
+    Buffer,
+    console,
+    crypto,
+    msg: {
+      payload: {
+        deviceInfo: {
+          devEui: fixture.deviceEui,
+          deviceProfileName: 'STREGA GEN2',
+          deviceProfileId: GEN2_PROFILE_ID,
+        },
+        object: { Battery: 3600, Actuator: '1' },
+        fPort: fixture.fPort,
+        time: '2026-09-16T00:00:00.000Z',
+      },
+    },
+    env: {
+      get(name) {
+        if (name === 'CHIRPSTACK_PROFILE_STREGA_GEN2') return GEN2_PROFILE_ID;
+        return '';
+      },
+    },
+    global: {
+      get(name) {
+        if (name === 'fs') return fs;
+        return undefined;
+      },
+    },
+    osiDb: {
+      Database: class {
+        all(_sql, callback) {
+          callback(null, [{ type_id: 'STREGA_VALVE' }]);
+        }
+
+        close(callback) {
+          callback();
+        }
+      },
+    },
+    node: {
+      status() {},
+      error() {},
+      warn() {},
+    },
+  };
+  const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.gen2.vm.js`);
+  const resolved = result && typeof result.then === 'function' ? await result : result;
+
+  assert.ok(resolved, 'Process STREGA must return a result for a Gen2 uplink');
+  assert.ok(resolved.formattedData, 'Process STREGA must attach formattedData for a Gen2 uplink');
+  assert.equal(
+    resolved.formattedData.batPct,
+    null,
+    'Process STREGA must not fabricate a Gen2 battery percent from raw millivolts'
+  );
+  assert.equal(
+    resolved.formattedData.batteryRaw,
+    3600,
+    'Process STREGA must preserve the raw Gen2 millivolt reading in batteryRaw'
+  );
+  assert.equal(
+    resolved.formattedData.batV,
+    3.6,
+    'Process STREGA must derive batV as millivolts/1000 for a Gen2 uplink'
+  );
+  assert.equal(
+    resolved.formattedData.currentState,
+    'OPEN',
+    'Process STREGA must still decode valve state via the Actuator alias for Gen2'
+  );
+  console.log('OK Process STREGA Gen2 battery: bat_pct=null, batV=3.6 (mV/1000), no fabricated percent');
+}
+
+async function verifyGen2ProcessStregaBatteryByNameFallback(flows, fixture) {
+  // Codex P2 (PR #247 review): CHIRPSTACK_PROFILE_STREGA_GEN2 can be missing or stale
+  // while ChirpStack still identifies the device by deviceProfileName (e.g.
+  // "OSI STREGA Valve Gen2", the chirpstack-bootstrap.js default). getProfileKind()
+  // already resolves STREGA_VALVE via profile-ID-env-first-then-profileName-fallback
+  // (AGENTS.md's documented "CHIRPSTACK_PROFILE_* env vars and deviceProfileName
+  // fallback" rule); the Gen2-detection helper must use that same resolution order,
+  // not profile-ID alone, or this case silently falls back to Gen1 percent handling
+  // and fabricates bat_pct=100 from the raw millivolt reading.
+  const node = getFunctionNode(flows, 'Process STREGA');
+  const sandbox = {
+    Buffer,
+    console,
+    crypto,
+    msg: {
+      payload: {
+        deviceInfo: {
+          devEui: fixture.deviceEui,
+          deviceProfileName: 'OSI STREGA Valve Gen2',
+          deviceProfileId: 'stale-unrelated-profile-id',
+        },
+        object: { Battery: 3600, Actuator: '1' },
+        fPort: fixture.fPort,
+        time: '2026-09-16T00:00:00.000Z',
+      },
+    },
+    env: {
+      get(name) {
+        // Simulate CHIRPSTACK_PROFILE_STREGA_GEN2 missing/stale: never returns a
+        // value that matches deviceProfileId above.
+        return '';
+      },
+    },
+    global: {
+      get(name) {
+        if (name === 'fs') return fs;
+        return undefined;
+      },
+    },
+    osiDb: {
+      Database: class {
+        all(_sql, callback) {
+          callback(null, [{ type_id: 'STREGA_VALVE' }]);
+        }
+
+        close(callback) {
+          callback();
+        }
+      },
+    },
+    node: {
+      status() {},
+      error() {},
+      warn() {},
+    },
+  };
+  const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.gen2-name-fallback.vm.js`);
+  const resolved = result && typeof result.then === 'function' ? await result : result;
+
+  assert.ok(resolved, 'Process STREGA must return a result for a name-fallback Gen2 uplink');
+  assert.ok(resolved.formattedData, 'Process STREGA must attach formattedData for a name-fallback Gen2 uplink');
+  assert.equal(
+    resolved.formattedData.batPct,
+    null,
+    'Process STREGA must not fabricate a battery percent when Gen2 is identified only by deviceProfileName'
+  );
+  assert.equal(
+    resolved.formattedData.batteryRaw,
+    3600,
+    'Process STREGA must preserve the raw millivolt reading when Gen2 is identified only by deviceProfileName'
+  );
+  assert.equal(
+    resolved.formattedData.batV,
+    3.6,
+    'Process STREGA must derive batV as millivolts/1000 when Gen2 is identified only by deviceProfileName'
+  );
+  console.log('OK Process STREGA Gen2-by-name-fallback battery: bat_pct=null, batV=3.6, no fabricated percent');
+}
+
+async function verifyGen2BuildTelemetryBatteryByNameFallback(flows, fixture) {
+  // Same Codex P2 gap, verified against the "Build Telemetry" duplicate of the
+  // Gen2-detection helper (a separate function node, not a shared module).
+  const node = getFunctionNode(flows, 'Build Telemetry');
+  const sandbox = {
+    Buffer,
+    console,
+    crypto,
+    msg: {
+      payload: {
+        deviceInfo: {
+          devEui: fixture.deviceEui,
+          deviceProfileName: 'OSI STREGA Valve Gen2',
+          deviceProfileId: 'stale-unrelated-profile-id',
+        },
+        object: { Battery: 3712, Actuator: '0' },
+        fPort: fixture.fPort,
+        time: '2026-09-16T00:00:00.000Z',
+      },
+    },
+    env: {
+      get(name) {
+        if (name === 'DEVICE_EUI') return 'GATEWAY-TEST-EUI';
+        // CHIRPSTACK_PROFILE_STREGA_GEN2 missing/stale, same as above.
+        return '';
+      },
+    },
+    global: {
+      get(name) {
+        if (name === 'fs') return fs;
+        return undefined;
+      },
+    },
+    node: {
+      status() {},
+      error() {},
+      warn() {},
+    },
+  };
+  const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.gen2-name-fallback.vm.js`);
+  const resolved = result && typeof result.then === 'function' ? await result : result;
+
+  assert.ok(resolved, 'Build Telemetry must return a result for a name-fallback Gen2 uplink');
+  assert.equal(typeof resolved.payload, 'string', 'Build Telemetry must serialize payload for a name-fallback Gen2 uplink');
+  const parsed = JSON.parse(resolved.payload);
+  assert.equal(parsed.bat_pct, null, 'Build Telemetry must not fabricate a battery percent when Gen2 is identified only by deviceProfileName');
+  assert.equal(parsed.battery_raw, 3712, 'Build Telemetry must preserve the raw millivolt reading when Gen2 is identified only by deviceProfileName');
+  assert.equal(parsed.bat_v, 3.712, 'Build Telemetry must derive bat_v as millivolts/1000 when Gen2 is identified only by deviceProfileName');
+  console.log('OK Build Telemetry Gen2-by-name-fallback battery: bat_pct=null, bat_v=3.712, no fabricated percent');
+}
+
+async function verifyGen1BatteryUnaffectedByGen2Fix(flows, fixture) {
+  // Same shape as the existing "valid environmental object" Gen1 case, re-asserted
+  // here to pin that adding Gen2 handling did not change Gen1's already-correct
+  // percent-based Battery interpretation.
+  await verifyStregaNormalizationContract(
+    flows,
+    fixture,
+    { Battery: 72, Valve: '1', Temperature: 21.4, Hygrometry: 56.8 },
+    'Gen1 unaffected by Gen2 battery fix',
+    { ambientTemperature: 21.4, relativeHumidity: 56.8, batPct: 72, batteryRaw: 72, currentState: 'OPEN' },
+  );
+}
+
+async function verifyGen2BuildTelemetryBattery(flows, fixture) {
+  const node = getFunctionNode(flows, 'Build Telemetry');
+  const sandbox = {
+    Buffer,
+    console,
+    crypto,
+    msg: {
+      payload: {
+        deviceInfo: {
+          devEui: fixture.deviceEui,
+          deviceProfileName: 'STREGA GEN2',
+          deviceProfileId: GEN2_PROFILE_ID,
+        },
+        object: { Battery: 3712, Actuator: '0' },
+        fPort: fixture.fPort,
+        time: '2026-09-16T00:00:00.000Z',
+      },
+    },
+    env: {
+      get(name) {
+        if (name === 'DEVICE_EUI') return 'GATEWAY-TEST-EUI';
+        if (name === 'CHIRPSTACK_PROFILE_STREGA_GEN2') return GEN2_PROFILE_ID;
+        return '';
+      },
+    },
+    global: {
+      get(name) {
+        if (name === 'fs') return fs;
+        return undefined;
+      },
+    },
+    node: {
+      status() {},
+      error() {},
+      warn() {},
+    },
+  };
+  const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.gen2.vm.js`);
+  const resolved = result && typeof result.then === 'function' ? await result : result;
+
+  assert.ok(resolved, 'Build Telemetry must return a result for a Gen2 uplink');
+  assert.equal(typeof resolved.payload, 'string', 'Build Telemetry must serialize payload for a Gen2 uplink');
+  const parsed = JSON.parse(resolved.payload);
+  assert.equal(parsed.bat_pct, null, 'Build Telemetry must not fabricate a Gen2 battery percent');
+  assert.equal(parsed.battery_raw, 3712, 'Build Telemetry must preserve the raw Gen2 millivolt reading');
+  assert.equal(parsed.bat_v, 3.712, 'Build Telemetry must derive bat_v as millivolts/1000 for a Gen2 uplink');
+  console.log('OK Build Telemetry Gen2 battery: bat_pct=null, bat_v=3.712 (mV/1000), no fabricated percent');
+}
+
 async function verifyCommandMatrix(flows, fixture) {
   const secret = 'strega-gen1-test-secret';
   const cases = [
@@ -429,6 +707,12 @@ async function main() {
     },
   );
   await verifyCommandMatrix(flows, fixture);
+
+  await verifyGen2ProcessStregaBattery(flows, fixture);
+  await verifyGen2ProcessStregaBatteryByNameFallback(flows, fixture);
+  await verifyGen1BatteryUnaffectedByGen2Fix(flows, fixture);
+  await verifyGen2BuildTelemetryBattery(flows, fixture);
+  await verifyGen2BuildTelemetryBatteryByNameFallback(flows, fixture);
 
   const schedulerAckFixture = loadJson(schedulerAckFixturePath);
   const clockSyncAckFixture = loadJson(clockSyncAckFixturePath);
