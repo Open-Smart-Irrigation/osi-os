@@ -89,6 +89,27 @@ function fakeHttp(database, routes, calls) {
   };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// #251 backoff tests use tiny real windows (the module reads these env vars
+// live, not at module load) so the tests stay fast and deterministic without
+// mocking Date.
+function withTinyJournalBackoff(t, { initialMs = 20, capMs = 50 } = {}) {
+  const previousInitial = process.env.JOURNAL_V2_BACKOFF_INITIAL_MS;
+  const previousCap = process.env.JOURNAL_V2_BACKOFF_CAP_MS;
+  process.env.JOURNAL_V2_BACKOFF_INITIAL_MS = String(initialMs);
+  process.env.JOURNAL_V2_BACKOFF_CAP_MS = String(capMs);
+  t.after(() => {
+    if (previousInitial === undefined) delete process.env.JOURNAL_V2_BACKOFF_INITIAL_MS;
+    else process.env.JOURNAL_V2_BACKOFF_INITIAL_MS = previousInitial;
+    if (previousCap === undefined) delete process.env.JOURNAL_V2_BACKOFF_CAP_MS;
+    else process.env.JOURNAL_V2_BACKOFF_CAP_MS = previousCap;
+    replication._resetJournalV2BackoffForTests();
+  });
+}
+
 test('worker rejects the all-01 provisional gateway identity before any cloud request', async (t) => {
   const { database } = fixture(t, 'invalid-gateway-identity');
   t.after(() => database.close());
@@ -552,4 +573,124 @@ test('a 404 from /capabilities after a prior successful link is a loud, non-retr
   }
   assert.equal(caught.code, 'workspace_link_lost');
   assert.equal(Boolean(caught.retryable), false);
+});
+
+test('a 403 from /capabilities marks the cloud journal-unsupported and stops calling it within the backoff window (#251)', async (t) => {
+  const { database } = fixture(t, 'capabilities-403-backoff');
+  t.after(() => database.close());
+  withTinyJournalBackoff(t, { initialMs: 200, capMs: 200 });
+  const calls = [];
+  const http = fakeHttp(database, [
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => ({ statusCode: 403, payload: { error: 'forbidden' } }),
+    },
+  ], calls);
+
+  let first = null;
+  try {
+    await replication.runReplicationTick(facade(database), http, fs, config());
+    assert.fail('expected runReplicationTick to reject');
+  } catch (cause) {
+    first = cause;
+  }
+  assert.equal(first.code, 'journal_unsupported');
+  assert.equal(first.journalUnsupported, true);
+  assert.equal(first.attempted, true);
+  assert.equal(first.message, 'cloud rejected journal replication (HTTP 403)');
+  assert.equal(calls.length, 1, 'the first 403 is one real capabilities attempt');
+  // Nothing is persisted for an unsupported cloud -- there is no accepted
+  // capability relationship to record.
+  assert.equal(
+    database.prepare('SELECT COUNT(*) AS count FROM journal_gateway_v2_capability').get().count,
+    0,
+  );
+
+  // Immediately retrying, still well inside the backoff window, must not
+  // make a second HTTP call at all -- this is the observed #251 symptom
+  // (a warn/HTTP round trip every 30s against a cloud that will never
+  // support Journal V2 until it is upgraded).
+  let second = null;
+  try {
+    await replication.runReplicationTick(facade(database), http, fs, config());
+    assert.fail('expected runReplicationTick to reject while backed off');
+  } catch (cause) {
+    second = cause;
+  }
+  assert.equal(second.code, 'journal_unsupported');
+  assert.equal(second.attempted, false, 'a backed-off tick must not have attempted a cloud call');
+  assert.equal(calls.length, 1, 'no additional HTTP call was made while backed off');
+});
+
+test('the journal-unsupported backoff clears on the first 2xx and a later 403 restarts at the initial window (#251)', async (t) => {
+  const { database } = fixture(t, 'capabilities-403-then-2xx-then-403');
+  t.after(() => database.close());
+  withTinyJournalBackoff(t, { initialMs: 30, capMs: 10000 });
+  let mode = 'reject';
+  const calls = [];
+  const http = fakeHttp(database, [
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => (mode === 'reject'
+        ? { statusCode: 403, payload: { error: 'forbidden' } }
+        : { statusCode: 200, payload: acceptedCapability() }),
+    },
+    {
+      match: (request) => request.url.includes('/replication?'),
+      respond: () => ({ statusCode: 200, payload: [] }),
+    },
+  ], calls);
+
+  await assert.rejects(
+    () => replication.runReplicationTick(facade(database), http, fs, config()),
+    (cause) => cause.code === 'journal_unsupported' && cause.attempted === true,
+  );
+  assert.equal(calls.length, 1);
+
+  // Let the tiny backoff window elapse, then succeed -- this must clear the
+  // backoff state for this link entirely.
+  await sleep(60);
+  mode = 'accept';
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(result.capability_state, 'accepted');
+  assert.ok(calls.length > 1, 'the tick attempted the cloud again once the window elapsed');
+
+  // A subsequent 403 must restart at the initial backoff window rather than
+  // continuing any prior doubled state -- proven by immediately retrying
+  // and observing a fresh backoff (attempted:false) without needing to wait
+  // out a longer, previously-doubled interval.
+  mode = 'reject';
+  const callsBeforeThirdAttempt = calls.length;
+  await assert.rejects(
+    () => replication.runReplicationTick(facade(database), http, fs, config()),
+    (cause) => cause.code === 'journal_unsupported' && cause.attempted === true && cause.backoffMs === 30,
+  );
+  assert.equal(calls.length, callsBeforeThirdAttempt + 1);
+});
+
+test('repeated 403s double the backoff window up to the configured cap (#251)', async (t) => {
+  const { database } = fixture(t, 'capabilities-403-doubling');
+  t.after(() => database.close());
+  withTinyJournalBackoff(t, { initialMs: 20, capMs: 50 });
+  const http = fakeHttp(database, [
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => ({ statusCode: 403, payload: { error: 'forbidden' } }),
+    },
+  ], []);
+
+  const observedBackoffs = [];
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await assert.rejects(
+      () => replication.runReplicationTick(facade(database), http, fs, config()),
+      (cause) => {
+        if (cause.attempted) observedBackoffs.push(cause.backoffMs);
+        return true;
+      },
+    );
+    // Sleep past whatever the current backoff window is so the next
+    // iteration always represents a fresh, real attempt.
+    await sleep(60);
+  }
+  assert.deepEqual(observedBackoffs, [20, 40, 50, 50]);
 });
