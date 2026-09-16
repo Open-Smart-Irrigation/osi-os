@@ -28,6 +28,7 @@ const CASES = [
   { id: 'D1', file: './cases/D1-sensor-data.js' },
   { id: 'ST1', file: './cases/ST1-settings.js' },
   { id: 'C1', file: './cases/C1-sync-outbox.js' },
+  { id: 'U1', file: './ui/smoke.js' },
 ];
 
 function parseArgs(argv) {
