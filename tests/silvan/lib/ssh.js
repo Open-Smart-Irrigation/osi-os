@@ -25,6 +25,7 @@ class Ssh {
       '-i', this.key,
       '-o', 'IdentitiesOnly=yes',
       '-o', 'BatchMode=yes',
+      '-o', 'LogLevel=ERROR',
       '-o', 'ConnectTimeout=15',
       this.user + '@' + this.host,
       command,

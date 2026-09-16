@@ -13,7 +13,7 @@ const { execFileSync } = require('node:child_process');
 
 const {
   Ctx, config, assertSilvanViaSsh, assertSilvanViaApi,
-  Ssh, Rest, DownlinkObserver, readGatewayEnv,
+  Ssh, Rest, DownlinkObserver, readGatewayEnv, readDeployedFlows,
 } = require('./lib/harness');
 const { makeProfiles } = require('./lib/uplinks');
 const { CaseEvidence, writeRunSummary } = require('./lib/evidence');
@@ -123,6 +123,7 @@ async function main() {
   const transcript = [];
   const anonRest = new Rest(cfg.apiBase, { transcript });
   const env = await readGatewayEnv(ssh);
+  const deployedFlows = await readDeployedFlows(ssh);
   const profiles = makeProfiles(env);
 
   const auth = await bootstrapAuth(anonRest, ssh, null, opts);
@@ -147,6 +148,7 @@ async function main() {
     commit: gitCommit(),
     harnessAccount: auth.username,
     scopedAccess: env.OSI_SCOPED_ACCESS === '1',
+    deployedFlows,
   };
 
   const results = [];

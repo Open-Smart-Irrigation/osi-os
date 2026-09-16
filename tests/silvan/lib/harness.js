@@ -124,20 +124,66 @@ function truncate(value, max = 400) {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
-// Reads the gateway's Node-RED environment (ChirpStack application/profile IDs
-// only -- never secrets) so the simulator claims the exact profile UUIDs the
-// running flows are configured with.
+// Reads the gateway's effective Node-RED environment (ChirpStack application /
+// profile IDs only -- never secrets) so the simulator claims the exact profile
+// UUIDs the running flows resolve.
+//
+// Two sources, merged the way the gateway itself merges them: the process
+// environment exported by node-red.init, THEN /srv/node-red/.chirpstack.env,
+// which settings.js loads into process.env at startup for every key not already
+// set ("if (process.env[key]) continue"). Reading only /proc/<pid>/environ is
+// wrong: it is the process's INITIAL environment, so keys settings.js adds at
+// boot (CHIRPSTACK_PROFILE_LORAIN, _UC512, _STREGA_GEN2 on this gateway) are
+// invisible there even though env.get() resolves them inside a function node.
 async function readGatewayEnv(ssh) {
-  const out = await ssh.exec(
+  const WANTED = /^(CHIRPSTACK_APP_|CHIRPSTACK_PROFILE_|DEVICE_EUI=|OSI_SCOPED_ACCESS=|TZ=)/;
+  const env = {};
+  const absorb = (text, overwrite) => {
+    for (const line of String(text).split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const i = trimmed.indexOf('=');
+      if (i <= 0) continue;
+      const key = trimmed.slice(0, i).trim();
+      if (!WANTED.test(key + '=') && !WANTED.test(key)) continue;
+      let value = trimmed.slice(i + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (overwrite || env[key] === undefined) env[key] = value;
+    }
+  };
+
+  const procEnv = await ssh.exec(
     'PID=$(pgrep -f node-red | head -1); ' +
     'tr "\\0" "\\n" < /proc/$PID/environ | grep -E "^CHIRPSTACK_APP_|^CHIRPSTACK_PROFILE_|^DEVICE_EUI=|^OSI_SCOPED_ACCESS=|^TZ="'
   );
-  const env = {};
-  for (const line of out.split('\n')) {
-    const i = line.indexOf('=');
-    if (i > 0) env[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-  }
+  absorb(procEnv, true);
+
+  let fileEnv = '';
+  try {
+    fileEnv = await ssh.exec(
+      'grep -E "^(CHIRPSTACK_APP_|CHIRPSTACK_PROFILE_)" /srv/node-red/.chirpstack.env 2>/dev/null || true'
+    );
+  } catch (_) { /* file absent on some images; the process env is then authoritative */ }
+  absorb(fileEnv, false);
+
   return env;
 }
 
-module.exports = { Ctx, config, assertSilvanViaSsh, assertSilvanViaApi, Ssh, Rest, DownlinkObserver, readGatewayEnv, sleep, until, simDeveui };
+// Fingerprints the flows payload the gateway is actually running. Assertions are
+// only meaningful against a known backend version, and the deployed flows.json
+// is regularly a different payload from the repo checkout.
+async function readDeployedFlows(ssh) {
+  try {
+    const out = await ssh.exec(
+      'F=/srv/node-red/flows.json; readlink -f "$F" 2>/dev/null; md5sum "$F" 2>/dev/null | cut -d" " -f1'
+    );
+    const lines = out.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+    return { path: lines[0] || null, md5: lines[lines.length - 1] || null };
+  } catch (e) {
+    return { path: null, md5: null, error: e.message };
+  }
+}
+
+module.exports = { Ctx, config, assertSilvanViaSsh, assertSilvanViaApi, Ssh, Rest, DownlinkObserver, readGatewayEnv, readDeployedFlows, sleep, until, simDeveui };
