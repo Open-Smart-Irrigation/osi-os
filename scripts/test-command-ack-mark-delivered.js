@@ -230,8 +230,10 @@ async function testMixedResultsPerEntry() {
 }
 
 // ===========================================================================
-// 3. statusCode=0 (transport failure): every row retries. Already correct on
-//    origin/main; must stay correct after the rewrite.
+// 3. statusCode=0 (transport failure): every row is left pending. The cloud
+//    never answered, so this must not consume any of the RETRY_CAP budget
+//    (Codex P1 on PR #243: the cap must only count responses the cloud
+//    actually sent per entry).
 // ===========================================================================
 async function testTransportFailureZeroRetriesAll() {
   const db = freshDb();
@@ -247,14 +249,16 @@ async function testTransportFailureZeroRetriesAll() {
   await resultPromise;
   const rows = rowsById(db);
   assert.equal(rows[201].delivered_at, null);
-  assert.equal(rows[201].retry_count, 1);
+  assert.equal(rows[201].retry_count, 0, 'a transport failure must never advance the RETRY_CAP counter');
   assert.equal(rows[202].delivered_at, null);
-  assert.equal(rows[202].retry_count, 1);
+  assert.equal(rows[202].retry_count, 0, 'a transport failure must never advance the RETRY_CAP counter');
   db.close();
 }
 
 // ===========================================================================
-// 4. HTTP 500: every row retries (non-2xx, no results array to consult).
+// 4. HTTP 500: every row is left pending (non-2xx, no results array to
+//    consult) and the RETRY_CAP counter must not advance -- same reasoning
+//    as the transport-failure case above.
 // ===========================================================================
 async function testHttp500RetriesAll() {
   const db = freshDb();
@@ -269,7 +273,98 @@ async function testHttp500RetriesAll() {
   await resultPromise;
   const rows = rowsById(db);
   assert.equal(rows[301].delivered_at, null);
-  assert.equal(rows[301].retry_count, 1);
+  assert.equal(rows[301].retry_count, 0, 'an HTTP 5xx response must never advance the RETRY_CAP counter');
+  db.close();
+}
+
+// ===========================================================================
+// 3b. Codex P1 (PR #243 review): 25 CONSECUTIVE statusCode=0 transport
+//     failures (more than RETRY_CAP=20) must never dead-letter the row --
+//     the cloud never answered any of these, so none of them may count
+//     toward the cap. RED on pre-fix code: the shipped node buckets every
+//     transport-failure id into the same capped retryReasons map used for
+//     real per-entry cloud answers, so the 20th consecutive tick sets
+//     delivered_at via the retry-cap CASE expression even though the cloud
+//     was never reached.
+// ===========================================================================
+async function testTransportFailureRepeatedNeverDeadLetters() {
+  const db = freshDb();
+  seedAck(db, 501, 'cmd-501');
+  const node = nodeById('command-ack-mark-delivered');
+  for (let i = 0; i < 25; i += 1) {
+    const { resultPromise } = execute(node, {
+      statusCode: 0,
+      _commandAckIds: [501],
+      _localAckCorrelation: { 'cmd-501': [501] },
+      payload: { error: 'Command ACK REST IPv4 request failed', code: 'ECONNREFUSED' },
+    }, db);
+    await resultPromise;
+  }
+  const rows = rowsById(db);
+  assert.equal(rows[501].delivered_at, null,
+    '25 consecutive transport failures must never dead-letter a row the cloud never answered');
+  assert.equal(rows[501].retry_count, 0,
+    'transport failures must never advance the RETRY_CAP counter, however many happen in a row');
+  db.close();
+}
+
+// ===========================================================================
+// 4b. Codex P1 (PR #243 review): 25 CONSECUTIVE HTTP 503 responses must also
+//     never dead-letter the row. Same reasoning as 3b: a 5xx/429 response
+//     means the cloud did not answer per entry, so it must not spend the
+//     RETRY_CAP budget. RED on pre-fix code for the same reason as 3b.
+// ===========================================================================
+async function testHttp503RepeatedNeverDeadLetters() {
+  const db = freshDb();
+  seedAck(db, 601, 'cmd-601');
+  const node = nodeById('command-ack-mark-delivered');
+  for (let i = 0; i < 25; i += 1) {
+    const { resultPromise } = execute(node, {
+      statusCode: 503,
+      _commandAckIds: [601],
+      _localAckCorrelation: { 'cmd-601': [601] },
+      payload: { error: 'Service Unavailable' },
+    }, db);
+    await resultPromise;
+  }
+  const rows = rowsById(db);
+  assert.equal(rows[601].delivered_at, null,
+    '25 consecutive HTTP 503 responses must never dead-letter a row the cloud never answered per entry');
+  assert.equal(rows[601].retry_count, 0,
+    'HTTP 5xx responses must never advance the RETRY_CAP counter, however many happen in a row');
+  db.close();
+}
+
+// ===========================================================================
+// 5b. Codex P1 (PR #243 review) control case: 20 CONSECUTIVE real 200
+//     responses that each carry a per-entry LEASE_MISMATCH result for the
+//     same row must still dead-letter on the 20th, exactly as before the
+//     fix -- proving the fix narrows the cap to genuine per-entry answers
+//     without breaking the cap itself. Uses repeated real node invocations
+//     (not a pre-seeded retry_count) to exercise the same code path 3b/4b
+//     exercise.
+// ===========================================================================
+async function testRepeatedLeaseMismatchStillDeadLettersAtCap() {
+  const db = freshDb();
+  seedAck(db, 701, 'cmd-701');
+  const node = nodeById('command-ack-mark-delivered');
+  let rows;
+  for (let i = 0; i < 20; i += 1) {
+    const { resultPromise } = execute(node, {
+      statusCode: 200,
+      _commandAckIds: [701],
+      _localAckCorrelation: { 'cmd-701': [701] },
+      payload: { results: [{ commandId: 'cmd-701', status: 'LEASE_MISMATCH', terminal: false }] },
+    }, db);
+    await resultPromise;
+    rows = rowsById(db);
+    if (i < 19) {
+      assert.equal(rows[701].delivered_at, null, 'row must stay pending before the 20th LEASE_MISMATCH answer');
+    }
+  }
+  assert.equal(rows[701].retry_count, 20, 'retry_count must reach RETRY_CAP after 20 genuine per-entry answers');
+  assert.ok(rows[701].delivered_at, 'the 20th genuine LEASE_MISMATCH answer must still dead-letter, unchanged by the fix');
+  assert.match(rows[701].last_error || '', /retry_cap_exceeded/);
   db.close();
 }
 
@@ -344,6 +439,9 @@ function testPendingSplitHttp200StillReplays() {
   await checkAsync('command-ack-mark-delivered: statusCode=0 retries every row', testTransportFailureZeroRetriesAll);
   await checkAsync('command-ack-mark-delivered: HTTP 500 retries every row', testHttp500RetriesAll);
   await checkAsync('command-ack-mark-delivered: retry cap dead-letters instead of retrying forever', testRetryCapDeadLetters);
+  await checkAsync('command-ack-mark-delivered: 25 consecutive transport failures never dead-letter (Codex P1)', testTransportFailureRepeatedNeverDeadLetters);
+  await checkAsync('command-ack-mark-delivered: 25 consecutive HTTP 503 responses never dead-letter (Codex P1)', testHttp503RepeatedNeverDeadLetters);
+  await checkAsync('command-ack-mark-delivered: 20 consecutive genuine LEASE_MISMATCH answers still dead-letter at the cap (Codex P1 control)', testRepeatedLeaseMismatchStillDeadLettersAtCap);
   await checkAsync('sync-pending-split: statusCode=0 reports itself as a transport failure', testPendingSplitTransportZero);
   await checkAsync('sync-pending-split: a real 200 still replays commands', testPendingSplitHttp200StillReplays);
 
