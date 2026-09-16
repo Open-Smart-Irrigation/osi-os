@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
-import { StregaValveCard } from '../StregaValveCard';
+import { StregaValveCard, getStregaTargetIntent } from '../StregaValveCard';
 import { devicesAPI } from '../../../services/api';
 import type { IrrigationActuation } from '../../../services/api';
 import type { Device, ValveSummary } from '../../../types/farming';
@@ -256,6 +256,152 @@ describe('StregaValveCard', () => {
             minute: '2-digit',
         }).format(new Date('2026-05-29T10:09:00Z'));
         expect(await screen.findByText(`Translated closed at ${expectedCloseLabel}`)).toBeInTheDocument();
+    });
+
+    // Valve-state honesty fix (polish scan 2026-09-17, Cat 6 "valve state language"):
+    // getDisplayedStregaState used to fall back from current_state (a decoded uplink --
+    // physical confirmation) to target_state (set the instant a downlink command is queued
+    // -- a network write, not a report from the valve). A valve that had only been sent an
+    // open command, and never actually reported it, rendered as a headline OPEN.
+    it('reads a commanded-but-never-reported valve as unknown, never as OPEN, with its still-unacknowledged target shown as pending intent', async () => {
+        renderCard({
+            current_state: undefined,
+            target_state: 'OPEN',
+            activeValveActuation: { expectationId: 'vae-pending', reconciliationState: 'PENDING_OBSERVATION' },
+        } as Partial<Device>);
+        expect(await screen.findByText('stregaValve.neverSeen')).toBeInTheDocument();
+        expect(screen.queryByText('stregaValve.open')).not.toBeInTheDocument();
+        expect(screen.queryByText('stregaValve.closed')).not.toBeInTheDocument();
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.pending/);
+    });
+
+    it('shows the last-reported CLOSED state as closed, with a still-unacknowledged OPEN target shown as pending intent underneath', async () => {
+        renderCard({
+            current_state: 'CLOSED',
+            target_state: 'OPEN',
+            activeValveActuation: { expectationId: 'vae-pending', reconciliationState: 'PENDING_OBSERVATION' },
+        } as Partial<Device>);
+        expect(await screen.findByText('stregaValve.closed')).toBeInTheDocument();
+        expect(screen.queryByText('stregaValve.open')).not.toBeInTheDocument();
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.pending/);
+    });
+
+    it('shows an observed OPEN state as open, with no target-intent line once nothing is left unconfirmed', async () => {
+        renderCard({ current_state: 'OPEN' } as Partial<Device>);
+        expect(await screen.findByText('stregaValve.open')).toBeInTheDocument();
+        expect(document.body.textContent).not.toMatch(/stregaValve\.targetIntent/);
+    });
+
+    it('classifies an OBSERVED_RUNNING active actuation as an acknowledged target, not a bare pending', async () => {
+        renderCard({
+            current_state: 'CLOSED',
+            target_state: 'OPEN',
+            activeValveActuation: { expectationId: 'vae-ack', reconciliationState: 'OBSERVED_RUNNING' },
+        } as Partial<Device>);
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.acknowledged/);
+    });
+
+    it('classifies a COMMAND_FAILED actuation-history row as a failed target', async () => {
+        renderCard({ current_state: 'CLOSED', target_state: 'OPEN' } as Partial<Device>, {
+            irrigationActuations: [actuationFixture({ status: 'COMMAND_FAILED' })],
+        });
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.failed/);
+    });
+
+    it('classifies an OPEN_TIMEOUT actuation-history row as an expired target', async () => {
+        renderCard({ current_state: 'CLOSED', target_state: 'OPEN' } as Partial<Device>, {
+            irrigationActuations: [actuationFixture({ status: 'OPEN_TIMEOUT' })],
+        });
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.expired/);
+    });
+
+    // Follow-up fix (independent-verifier defect on PR #256): target_state is only ever reset
+    // by an explicit cancel (osi-valve-control/cancel.js), never by a normal self-closing
+    // OPEN_FOR_DURATION -- so after an ordinary open/close cycle, target_state stays OPEN
+    // while current_state correctly settles to CLOSED and the active VAE row clears. Without
+    // this fix, getStregaTargetIntent fell through its old unconditional default and returned
+    // 'pending' forever for the latest actuation's COMPLETED row -- "Target: Open · pending"
+    // never went away for any valve, on any farm, after its very first successful watering.
+    describe('getStregaTargetIntent (resolved/stale actuations carry no live intent)', () => {
+        it('(a) returns no intent for a COMPLETED actuation, even though target_state was never reset back to CLOSED', () => {
+            const device = { ...mockDevice, current_state: 'CLOSED', target_state: 'OPEN' } as Device;
+            const rows = [actuationFixture({
+                status: 'COMPLETED',
+                observedOpenAt: '2026-05-29T10:01:00Z',
+                observedCloseAt: '2026-05-29T10:09:00Z',
+            })];
+            expect(getStregaTargetIntent(device, rows)).toBeNull();
+        });
+
+        it('(b) returns no intent for a CANCELLED actuation', () => {
+            const device = { ...mockDevice, current_state: 'CLOSED', target_state: 'OPEN' } as Device;
+            const rows = [actuationFixture({ status: 'CANCELLED', cancelReason: 'user requested' })];
+            expect(getStregaTargetIntent(device, rows)).toBeNull();
+        });
+
+        it('(c) reports an OPEN_TIMEOUT as expired while the device has not reported again since', () => {
+            const device = {
+                ...mockDevice,
+                current_state: 'CLOSED',
+                target_state: 'OPEN',
+                last_seen: '2026-05-29T09:00:00Z', // before the timeout's expectedCloseAt -- no newer observation
+            } as Device;
+            const rows = [actuationFixture({ status: 'OPEN_TIMEOUT', expectedCloseAt: '2026-05-29T10:10:00Z' })];
+            expect(getStregaTargetIntent(device, rows)).toBe('expired');
+        });
+
+        it('never leaves an expired actuation stuck once the device has reported again since the timeout', () => {
+            const device = {
+                ...mockDevice,
+                current_state: 'CLOSED',
+                target_state: 'OPEN',
+                last_seen: '2026-05-29T12:00:00Z', // after expectedCloseAt -- we've heard from it since
+            } as Device;
+            const rows = [actuationFixture({ status: 'OPEN_TIMEOUT', expectedCloseAt: '2026-05-29T10:10:00Z' })];
+            expect(getStregaTargetIntent(device, rows)).toBeNull();
+        });
+
+        // Follow-up fix (2nd independent-verifier defect on PR #256): an OPEN_TIMEOUT/
+        // CLOSE_TIMEOUT row cannot even exist until the backend's own 1800s
+        // (RECONCILIATION_GRACE_SEC / GRACE_MS) grace has elapsed past expectedCloseAt -- see
+        // flows.json's "STREGA Reconciliation Monitor" and "Compute derived per-row status".
+        // Comparing device.last_seen against the *bare* expectedCloseAt meant any device
+        // reporting on a normal cadence (2 min default) already had last_seen past
+        // expectedCloseAt long before the row could ever be classified as a timeout in the
+        // first place -- 'expired' was suppressed the instant it could first appear, hiding
+        // the one case that matters most: an otherwise-alive valve that silently missed a
+        // command.
+        it('keeps an OPEN_TIMEOUT shown as expired for a device that reported shortly after the timeout window, within the backend grace', () => {
+            const device = {
+                ...mockDevice,
+                current_state: 'CLOSED',
+                target_state: 'OPEN',
+                last_seen: '2026-05-29T10:20:00Z', // expectedCloseAt + 10 min -- inside the 30 min grace
+            } as Device;
+            const rows = [actuationFixture({ status: 'OPEN_TIMEOUT', expectedCloseAt: '2026-05-29T10:10:00Z' })];
+            expect(getStregaTargetIntent(device, rows)).toBe('expired');
+        });
+
+        it('clears an OPEN_TIMEOUT once the device has reported past the backend grace window', () => {
+            const device = {
+                ...mockDevice,
+                current_state: 'CLOSED',
+                target_state: 'OPEN',
+                last_seen: '2026-05-29T10:41:00Z', // expectedCloseAt + 31 min -- past the 30 min grace
+            } as Device;
+            const rows = [actuationFixture({ status: 'OPEN_TIMEOUT', expectedCloseAt: '2026-05-29T10:10:00Z' })];
+            expect(getStregaTargetIntent(device, rows)).toBeNull();
+        });
+
+        it('(d) reports an active PENDING_OBSERVATION actuation as pending regardless of actuation history', () => {
+            const device = {
+                ...mockDevice,
+                current_state: 'CLOSED',
+                target_state: 'OPEN',
+                activeValveActuation: { expectationId: 'vae-live', reconciliationState: 'PENDING_OBSERVATION' },
+            } as Device;
+            expect(getStregaTargetIntent(device, [])).toBe('pending');
+        });
     });
 
     it('shows the labelled enclosure reading when the valve-list row carries one', async () => {

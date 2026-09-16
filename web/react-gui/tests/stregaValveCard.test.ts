@@ -53,6 +53,12 @@ async function renderStregaCard(device: Device): Promise<string> {
             open: 'Open',
             closed: 'Closed',
             target: 'Target: {{state}}',
+            targetIntent: {
+              pending: 'pending',
+              acknowledged: 'acknowledged',
+              failed: 'failed',
+              expired: 'expired',
+            },
             opening: 'Opening',
             closing: 'Closing',
             lastSeen: 'Last seen: {{minutes}} minutes ago',
@@ -157,12 +163,73 @@ test('current state stays primary while a different target state is shown as pen
   assert.equal(shouldShowStregaTargetState(device), true);
 });
 
-test('target state becomes the displayed fallback when current state is still missing', () => {
+// Valve-state honesty fix (polish scan 2026-09-17, Cat 6 "valve state language"): this test
+// used to pin the bug it is now guarding against -- target_state (a network write the instant
+// a downlink command is queued) is never a substitute for current_state (set only from a
+// decoded uplink, i.e. a physical confirmation). A valve that has never reported its state
+// must read as UNKNOWN, not as whatever was last commanded.
+test('a missing current state reads as unknown, never as the commanded target', () => {
   const device = buildDevice({
     current_state: undefined,
     target_state: 'OPEN',
   });
 
-  assert.equal(getDisplayedStregaState(device), 'OPEN');
+  assert.equal(getDisplayedStregaState(device), 'UNKNOWN');
   assert.equal(shouldShowStregaTargetState(device), true);
+});
+
+test('renders "Never seen" (not OPEN) with a pending target when the valve has never reported', async () => {
+  const html = await renderStregaCard(
+    buildDevice({
+      current_state: undefined,
+      target_state: 'OPEN',
+      // A live, unconfirmed actuation is what makes "pending" honest here -- without one,
+      // getStregaTargetIntent renders no intent line at all (see the follow-up fix below).
+      activeValveActuation: { expectationId: 'vae-pending', reconciliationState: 'PENDING_OBSERVATION' },
+    }),
+  );
+
+  const text = getRenderedText(html);
+  // The headline status (right after the "Status" label) reads "Never seen", not a guessed
+  // "Open" -- the word "Open" still appears once, but only inside "Target: Open · pending"
+  // (the commanded intent), never as the standalone headline value.
+  assert.ok(text.includes('StatusNever seen'), `expected the headline to read "Never seen", got: ${text}`);
+  assert.ok(text.includes('Target: Open · pending'));
+});
+
+test('renders the last-reported CLOSED state as closed, with the unconfirmed OPEN target shown as pending', async () => {
+  const html = await renderStregaCard(
+    buildDevice({
+      current_state: 'CLOSED',
+      target_state: 'OPEN',
+      activeValveActuation: { expectationId: 'vae-pending', reconciliationState: 'PENDING_OBSERVATION' },
+    }),
+  );
+
+  const text = getRenderedText(html);
+  assert.ok(text.includes('Closed'));
+  assert.ok(text.includes('Target: Open · pending'));
+});
+
+// Follow-up fix (independent-verifier defect on PR #256): target_state is only ever reset by
+// an explicit cancel (osi-valve-control/cancel.js), never by a normal self-closing
+// OPEN_FOR_DURATION. So after an ordinary open/close cycle, target_state stays OPEN while
+// current_state correctly settles to CLOSED and the active VAE row clears -- without this fix
+// getStregaTargetIntent unconditionally defaulted to 'pending' whenever it had no live
+// actuation to classify, so "Target: Open · pending" never went away, on every valve, after
+// its very first successful watering. With no active VAE and no actuation-history row passed
+// (the two rendered-here signals of a *live* actuation), the honest answer is no intent line
+// at all -- never a guessed "pending". The COMPLETED-row case itself is covered directly
+// against getStregaTargetIntent in ValveCard.test.tsx.
+test('renders no target-intent line when there is no live actuation to back the still-mismatched target', async () => {
+  const html = await renderStregaCard(
+    buildDevice({
+      current_state: 'CLOSED',
+      target_state: 'OPEN',
+    }),
+  );
+
+  const text = getRenderedText(html);
+  assert.ok(text.includes('Closed'));
+  assert.ok(!text.includes('Target:'), `expected no residual "Target:" line, got: ${text}`);
 });

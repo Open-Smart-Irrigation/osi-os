@@ -33,6 +33,13 @@ test('devices locale files include irrigation actuation translation keys', () =>
     'irrigationOutcomes.timestampTitle',
     'irrigationOutcomes.settings',
     'irrigationOutcomes.advancedView',
+    // `stregaValve.targetIntent.*` is read by StregaValveCard.tsx (getStregaTargetIntent) --
+    // the ACK-path vocabulary shown next to an unconfirmed "Target: …" line (valve-state
+    // honesty fix, polish scan 2026-09-17 Cat 6).
+    'stregaValve.targetIntent.pending',
+    'stregaValve.targetIntent.acknowledged',
+    'stregaValve.targetIntent.failed',
+    'stregaValve.targetIntent.expired',
   ];
 
   for (const locale of ['en', 'de-CH', 'es', 'fr', 'it', 'lg', 'pt']) {
