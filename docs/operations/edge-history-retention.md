@@ -115,6 +115,23 @@ Two environment knobs control the daily `Prune Sync Outbox` job:
 | `OSI_OUTBOX_RETENTION_DAYS` | `30` | Deletes delivered rows older than this many days. Undelivered rows are not affected by this time-prune. |
 | `OSI_OUTBOX_MAX_ROWS` | `50000` | Caps total queue size. Values below `1000` are floored to `1000` so a bad setting cannot aggressively evict telemetry. |
 
+A third window is a fixed constant rather than an env knob:
+`REJECTED_RETENTION_DAYS = 14` deletes rows the cloud terminally **rejected**
+(`rejected_at IS NOT NULL`) once they are older than 14 days. A rejected row is
+never retried and is never re-selected by `sync-outbox-build`, so nothing but
+forensics keeps it; without a window the pile grows without bound (the Silvan
+gateway held 17,996 such rows spanning ten weeks). Fourteen days matches the
+`command_ack_outbox` dead-letter window and is deliberately independent of
+`OSI_OUTBOX_RETENTION_DAYS`, which governs delivered rows only. The DELETE is
+keyed on `rejected_at`, never on `delivered_at IS NULL`, so the live undelivered
+backlog is never touched by it.
+
+`GET /api/sync/state` reports the rejected pile alongside the pending queue:
+`rejectedOutboxCount`, `rejectedLast24h`, and `lastRejection` (`at`, `op`,
+`reason`, read from `sync_outbox.rejection_reason`). A batch the cloud rejects in
+full no longer advances `lastOutboxDeliverySuccessAt` and leaves a rejection
+summary in `lastError`; only an `APPLIED`/`DUPLICATE` result counts as accepted.
+
 When the total-row cap is exceeded, the job evicts only oldest telemetry-class
 rows, delivered rows first and then undelivered rows by `occurred_at`.
 Evictable telemetry aggregates are `DEVICE_DATA`, `CHAMELEON_READING`,
