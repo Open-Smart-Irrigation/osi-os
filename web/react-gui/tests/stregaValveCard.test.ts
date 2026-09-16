@@ -183,6 +183,9 @@ test('renders "Never seen" (not OPEN) with a pending target when the valve has n
     buildDevice({
       current_state: undefined,
       target_state: 'OPEN',
+      // A live, unconfirmed actuation is what makes "pending" honest here -- without one,
+      // getStregaTargetIntent renders no intent line at all (see the follow-up fix below).
+      activeValveActuation: { expectationId: 'vae-pending', reconciliationState: 'PENDING_OBSERVATION' },
     }),
   );
 
@@ -199,10 +202,34 @@ test('renders the last-reported CLOSED state as closed, with the unconfirmed OPE
     buildDevice({
       current_state: 'CLOSED',
       target_state: 'OPEN',
+      activeValveActuation: { expectationId: 'vae-pending', reconciliationState: 'PENDING_OBSERVATION' },
     }),
   );
 
   const text = getRenderedText(html);
   assert.ok(text.includes('Closed'));
   assert.ok(text.includes('Target: Open · pending'));
+});
+
+// Follow-up fix (independent-verifier defect on PR #256): target_state is only ever reset by
+// an explicit cancel (osi-valve-control/cancel.js), never by a normal self-closing
+// OPEN_FOR_DURATION. So after an ordinary open/close cycle, target_state stays OPEN while
+// current_state correctly settles to CLOSED and the active VAE row clears -- without this fix
+// getStregaTargetIntent unconditionally defaulted to 'pending' whenever it had no live
+// actuation to classify, so "Target: Open · pending" never went away, on every valve, after
+// its very first successful watering. With no active VAE and no actuation-history row passed
+// (the two rendered-here signals of a *live* actuation), the honest answer is no intent line
+// at all -- never a guessed "pending". The COMPLETED-row case itself is covered directly
+// against getStregaTargetIntent in ValveCard.test.tsx.
+test('renders no target-intent line when there is no live actuation to back the still-mismatched target', async () => {
+  const html = await renderStregaCard(
+    buildDevice({
+      current_state: 'CLOSED',
+      target_state: 'OPEN',
+    }),
+  );
+
+  const text = getRenderedText(html);
+  assert.ok(text.includes('Closed'));
+  assert.ok(!text.includes('Target:'), `expected no residual "Target:" line, got: ${text}`);
 });

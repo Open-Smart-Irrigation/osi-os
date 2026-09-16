@@ -78,26 +78,62 @@ export function shouldShowStregaTargetState(device: Device): boolean {
 
 export type StregaTargetIntent = 'pending' | 'acknowledged' | 'failed' | 'expired';
 
+// `target_state` is only ever reset by an explicit cancel (osi-valve-control/cancel.js) --
+// a normal self-closing OPEN_FOR_DURATION never resets it, so a valve that opened and closed
+// on schedule keeps target_state=OPEN forever with current_state=CLOSED. Once that happens the
+// latest actuation row for the device is COMPLETED (or CANCELLED), and neither of those has
+// any live intent left to report -- the same rule valveState.ts/ValveTile follow (an inactive
+// actuation renders no residual state).
+const RESOLVED_ACTUATION_STATUSES = new Set(['COMPLETED', 'CANCELLED']);
+
+function toEpochMs(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const parsed = Date.parse(iso);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * True once the device has reported again (any uplink, tracked via `last_seen`) after the
+ * moment a failed/timed-out actuation gave up on hearing from it. A fresher report means we
+ * now know more about the valve than we did at the moment it failed/timed out, so that old
+ * failure/timeout no longer describes the present -- it must not stick around forever.
+ */
+function hasNewerDeviceObservationThan(device: Device, terminalAtIso: string | null | undefined): boolean {
+  const terminalAt = toEpochMs(terminalAtIso);
+  const lastSeen = toEpochMs(device.last_seen);
+  return terminalAt !== null && lastSeen !== null && lastSeen > terminalAt;
+}
+
 /**
  * Classifies an unconfirmed command target using the same reconciliation signals
  * `hasActiveValveActuation`/`getStregaActuationFeedback` already read (the actuation
  * expectation's reconciliation state, then the latest command-ACK-path status for this
  * device), so the intent word shown next to "Target: …" always agrees with the actuation
- * badge rendered just below it. Defaults to 'pending' when a target has been commanded but
- * nothing is yet known about how it went -- the honest reading of "we don't know yet",
- * never an implied success.
+ * badge rendered just below it. Returns null -- render no intent line at all -- whenever the
+ * commanded target is not actually backed by a live, unresolved actuation: never guesses
+ * 'pending' just because nothing else matched.
  */
-export function getStregaTargetIntent(device: Device, rows: IrrigationActuation[] = []): StregaTargetIntent {
+export function getStregaTargetIntent(device: Device, rows: IrrigationActuation[] = []): StregaTargetIntent | null {
   const active = device.activeValveActuation ?? device.active_valve_actuation ?? null;
   const activeState = String(active?.reconciliationState ?? active?.reconciliation_state ?? '').trim().toUpperCase();
   if (activeState === 'OBSERVED_RUNNING') return 'acknowledged';
   if (activeState === 'PENDING_OBSERVATION') return 'pending';
 
   const row = latestActuationForDevice(device.deveui, rows);
-  if (row?.status === 'RUNNING') return 'acknowledged';
-  if (row?.status === 'COMMAND_FAILED') return 'failed';
-  if (row?.status === 'OPEN_TIMEOUT' || row?.status === 'CLOSE_TIMEOUT') return 'expired';
-  return 'pending';
+  if (!row) return null;
+  if (RESOLVED_ACTUATION_STATUSES.has(row.status)) return null;
+  if (row.status === 'RUNNING') return 'acknowledged';
+  if (row.status === 'PENDING_OPEN') return 'pending';
+
+  if (row.status === 'COMMAND_FAILED') {
+    return hasNewerDeviceObservationThan(device, row.commandAppliedAt ?? row.commandedAt) ? null : 'failed';
+  }
+  if (row.status === 'OPEN_TIMEOUT' || row.status === 'CLOSE_TIMEOUT') {
+    return hasNewerDeviceObservationThan(device, row.expectedCloseAt ?? row.commandedAt) ? null : 'expired';
+  }
+
+  // UNKNOWN, or any future status this function does not yet recognise -- silence, not a guess.
+  return null;
 }
 
 type ValveFeedbackTone = 'queued' | 'running' | 'closed';
