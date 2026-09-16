@@ -258,6 +258,55 @@ describe('StregaValveCard', () => {
         expect(await screen.findByText(`Translated closed at ${expectedCloseLabel}`)).toBeInTheDocument();
     });
 
+    // Valve-state honesty fix (polish scan 2026-09-17, Cat 6 "valve state language"):
+    // getDisplayedStregaState used to fall back from current_state (a decoded uplink --
+    // physical confirmation) to target_state (set the instant a downlink command is queued
+    // -- a network write, not a report from the valve). A valve that had only been sent an
+    // open command, and never actually reported it, rendered as a headline OPEN.
+    it('reads a commanded-but-never-reported valve as unknown, never as OPEN, with its target shown as pending intent', async () => {
+        renderCard({ current_state: undefined, target_state: 'OPEN' } as Partial<Device>);
+        expect(await screen.findByText('stregaValve.neverSeen')).toBeInTheDocument();
+        expect(screen.queryByText('stregaValve.open')).not.toBeInTheDocument();
+        expect(screen.queryByText('stregaValve.closed')).not.toBeInTheDocument();
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.pending/);
+    });
+
+    it('shows the last-reported CLOSED state as closed, with a still-unconfirmed OPEN target shown as pending intent underneath', async () => {
+        renderCard({ current_state: 'CLOSED', target_state: 'OPEN' } as Partial<Device>);
+        expect(await screen.findByText('stregaValve.closed')).toBeInTheDocument();
+        expect(screen.queryByText('stregaValve.open')).not.toBeInTheDocument();
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.pending/);
+    });
+
+    it('shows an observed OPEN state as open, with no target-intent line once nothing is left unconfirmed', async () => {
+        renderCard({ current_state: 'OPEN' } as Partial<Device>);
+        expect(await screen.findByText('stregaValve.open')).toBeInTheDocument();
+        expect(document.body.textContent).not.toMatch(/stregaValve\.targetIntent/);
+    });
+
+    it('classifies an OBSERVED_RUNNING active actuation as an acknowledged target, not a bare pending', async () => {
+        renderCard({
+            current_state: 'CLOSED',
+            target_state: 'OPEN',
+            activeValveActuation: { expectationId: 'vae-ack', reconciliationState: 'OBSERVED_RUNNING' },
+        } as Partial<Device>);
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.acknowledged/);
+    });
+
+    it('classifies a COMMAND_FAILED actuation-history row as a failed target', async () => {
+        renderCard({ current_state: 'CLOSED', target_state: 'OPEN' } as Partial<Device>, {
+            irrigationActuations: [actuationFixture({ status: 'COMMAND_FAILED' })],
+        });
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.failed/);
+    });
+
+    it('classifies an OPEN_TIMEOUT actuation-history row as an expired target', async () => {
+        renderCard({ current_state: 'CLOSED', target_state: 'OPEN' } as Partial<Device>, {
+            irrigationActuations: [actuationFixture({ status: 'OPEN_TIMEOUT' })],
+        });
+        expect(document.body.textContent).toMatch(/stregaValve\.targetIntent\.expired/);
+    });
+
     it('shows the labelled enclosure reading when the valve-list row carries one', async () => {
         renderCard({}, {
             valve: makeValveSummary({ enclosureTemperatureC: 21.5, enclosureHumidityPct: 48.2 }),

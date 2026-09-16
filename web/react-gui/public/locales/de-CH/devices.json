@@ -90,6 +90,12 @@
       "open": "OFFEN",
       "closed": "GESCHLOSSEN",
       "target": "Ziel: {{state}}",
+      "targetIntent": {
+        "pending": "ausstehend",
+        "acknowledged": "bestätigt",
+        "failed": "fehlgeschlagen",
+        "expired": "abgelaufen"
+      },
       "opening": "Wird geöffnet...",
       "closing": "Wird geschlossen...",
       "removeConfirm": "Dieses Gerät entfernen?",

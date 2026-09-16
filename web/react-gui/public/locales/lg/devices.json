@@ -90,6 +90,12 @@
       "open": "GGULE",
       "closed": "GGANGWE",
       "target": "Eggwe: {{state}}",
+      "targetIntent": {
+        "pending": "pending",
+        "acknowledged": "acknowledged",
+        "failed": "failed",
+        "expired": "expired"
+      },
       "opening": "Tikuggulawo...",
       "closing": "Tikuganga...",
       "removeConfirm": "Ggyawo ekyuma kino?",

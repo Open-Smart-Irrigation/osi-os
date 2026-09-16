@@ -90,6 +90,12 @@
       "open": "APERTA",
       "closed": "CHIUSA",
       "target": "Obiettivo: {{state}}",
+      "targetIntent": {
+        "pending": "in sospeso",
+        "acknowledged": "confermato",
+        "failed": "fallito",
+        "expired": "scaduto"
+      },
       "opening": "Apertura in corso...",
       "closing": "Chiusura in corso...",
       "removeConfirm": "Rimuovere questo dispositivo?",

@@ -58,18 +58,46 @@ export function getRecognizedStregaModel(device: Device): RecognizedStregaModel 
   return 'UNKNOWN';
 }
 
-export function getDisplayedStregaState(device: Device): 'OPEN' | 'CLOSED' {
+// Honesty fix (polish scan 2026-09-17, Cat 6 "valve state language"): `current_state` is set
+// only from a decoded uplink -- a physical confirmation from the valve. `target_state` is set
+// the instant a downlink command is queued -- a network write, not a report from the valve.
+// This used to fall back to target_state when current_state was unset, so a valve that had
+// only been *sent* an open command (and never actually reported it) rendered as a headline
+// OPEN. A valve that has never reported must read as UNKNOWN, never as a guessed OPEN/CLOSED --
+// see the same observed-vs-commanded model already used by ValveTile/deriveValveGlyphState.
+export function getDisplayedStregaState(device: Device): 'OPEN' | 'CLOSED' | 'UNKNOWN' {
   if (device.current_state === 'OPEN' || device.current_state === 'CLOSED') {
     return device.current_state;
   }
-  if (device.target_state === 'OPEN' || device.target_state === 'CLOSED') {
-    return device.target_state;
-  }
-  return 'CLOSED';
+  return 'UNKNOWN';
 }
 
 export function shouldShowStregaTargetState(device: Device): boolean {
   return Boolean(device.target_state && device.target_state !== device.current_state);
+}
+
+export type StregaTargetIntent = 'pending' | 'acknowledged' | 'failed' | 'expired';
+
+/**
+ * Classifies an unconfirmed command target using the same reconciliation signals
+ * `hasActiveValveActuation`/`getStregaActuationFeedback` already read (the actuation
+ * expectation's reconciliation state, then the latest command-ACK-path status for this
+ * device), so the intent word shown next to "Target: …" always agrees with the actuation
+ * badge rendered just below it. Defaults to 'pending' when a target has been commanded but
+ * nothing is yet known about how it went -- the honest reading of "we don't know yet",
+ * never an implied success.
+ */
+export function getStregaTargetIntent(device: Device, rows: IrrigationActuation[] = []): StregaTargetIntent {
+  const active = device.activeValveActuation ?? device.active_valve_actuation ?? null;
+  const activeState = String(active?.reconciliationState ?? active?.reconciliation_state ?? '').trim().toUpperCase();
+  if (activeState === 'OBSERVED_RUNNING') return 'acknowledged';
+  if (activeState === 'PENDING_OBSERVATION') return 'pending';
+
+  const row = latestActuationForDevice(device.deveui, rows);
+  if (row?.status === 'RUNNING') return 'acknowledged';
+  if (row?.status === 'COMMAND_FAILED') return 'failed';
+  if (row?.status === 'OPEN_TIMEOUT' || row?.status === 'CLOSE_TIMEOUT') return 'expired';
+  return 'pending';
 }
 
 type ValveFeedbackTone = 'queued' | 'running' | 'closed';
@@ -688,8 +716,14 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
 
   const displayedState = getDisplayedStregaState(device);
   const isOpen = displayedState === 'OPEN';
+  const isUnknown = displayedState === 'UNKNOWN';
   const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t as Translate);
   const hasActiveActuation = hasActiveValveActuation(device);
+  // The intent line only makes sense while there is a commanded target to explain; once it's
+  // shown, classify it with the same ACK-path vocabulary as the actuation badge below it.
+  const targetIntent = shouldShowStregaTargetState(device)
+    ? getStregaTargetIntent(device, irrigationActuations)
+    : null;
 
   // Sourced from the `valve` prop (GET /api/valves), not `device` — see the prop's
   // doc comment above for why. R1 review caught the card and the tile reading two
@@ -833,18 +867,25 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           />
           <p
             className={`text-2xl font-bold tabular-nums ${
-              isOpen ? 'text-[var(--toggle-on)]' : 'text-[var(--text-tertiary)]'
+              isOpen ? 'text-[var(--toggle-on)]' : isUnknown ? 'text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'
             }`}
           >
-            {isOpen ? t('stregaValve.open') : t('stregaValve.closed')}
+            {/* Honesty fix (polish scan Cat 6): a valve that has never reported its state
+                reads as "Never seen", never as a guessed OPEN/CLOSED. */}
+            {isOpen ? t('stregaValve.open') : isUnknown ? t('stregaValve.neverSeen') : t('stregaValve.closed')}
           </p>
         </div>
-        {shouldShowStregaTargetState(device) && (
+        {targetIntent && (
           <p className="text-xs text-[var(--text-secondary)] mt-1">
             {/* Copy repair (fresh review C2): interpolate the already-localized OPEN/CLOSED
                 word, not the raw device.target_state enum -- fr previously rendered the
                 English "Cible : OPEN" here regardless of locale. */}
             {t('stregaValve.target', { state: device.target_state === 'OPEN' ? t('stregaValve.open') : t('stregaValve.closed') })}
+            {' · '}
+            {/* Same ACK-path vocabulary as the actuation badge below: pending / acknowledged
+                / failed / expired -- a commanded target is always shown as an intent, never
+                as a fact the valve itself reported. */}
+            {t(`stregaValve.targetIntent.${targetIntent}`)}
           </p>
         )}
         {actuationFeedback && <ValveActuationBadge feedback={actuationFeedback} />}
