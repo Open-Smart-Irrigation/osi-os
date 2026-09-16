@@ -108,6 +108,7 @@ async function readGatewayTimezone(db, warn) {
 async function handleHttpRequest(options) {
   const { msg, Database } = options;
   const environment = options.environment || {};
+  const scopedMode = options.scopedMode === true;
   const warn = typeof options.warn === 'function' ? options.warn : function () {};
   const respond = (statusCode, payload) => { msg.statusCode = statusCode; msg.payload = payload; msg.headers = HEADERS; return msg; };
   const method = String(msg.req && msg.req.method || '').toUpperCase();
@@ -116,6 +117,25 @@ async function handleHttpRequest(options) {
     const secret = resolveAuthSecret(environment, warn);
     const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization, secret);
     db = new Database(environment.dbPath || '/data/db/farming.db');
+
+    // PR-N (Fable consult Q5/Q7): scoped-mode role guard on the WRITE path
+    // only -- GET stays open, mirroring main's read-vs-write split elsewhere.
+    // Flag-gated exactly like the #201 hermetic rule: the scope helper is
+    // require()'d only on this branch, so a lost/corrupt osi-scope-helper
+    // file cannot 500 this route when OSI_SCOPED_ACCESS is off.
+    if (method === 'PUT' && scopedMode) {
+      let scope = options.scope;
+      if (!scope) {
+        try {
+          // eslint-disable-next-line global-require
+          scope = require('../osi-scope-helper');
+        } catch (error) {
+          warn('[sys-settings] scope helper unavailable: ' + String(error && error.message ? error.message : error));
+          throw apiError(500, 'scope_unavailable', 'System write authorization is unavailable');
+        }
+      }
+      await scope.assertAuthenticatedRole(db, auth, 'admin', { scopedMode: true });
+    }
 
     if (method === 'GET') {
       const gatewayTimezone = await readGatewayTimezone(db, warn);

@@ -2864,3 +2864,138 @@ test('W10: the zone-assigned delete gate is unchanged', async () => {
     scopeHelper._resetForTests();
   }
 });
+
+// PR-N (Fable consult Q5/Q7, consult-consolidated.md): POST /api/system/reboot
+// ('Reboot'), POST /api/system/fan ('Fan Control') and PUT /api/system/settings
+// verified a bearer token but never a role, so under scope any authenticated
+// viewer could reboot the gateway or drive the fan -- main's own W1 rule is
+// "ownership+role-gated writes". Mirrors the 4 Admin Read Guards' use of
+// scope.authorizeAdminRead, via assertAuthenticatedRole(db, auth, 'admin', ...)
+// instead since these are bearer-verified inline (no shared admin-read guard
+// node to reuse). Flag-gated exactly like the #201 hermetic rule: the new
+// block only calls osiLib.require('scope') when OSI_SCOPED_ACCESS is on, so a
+// lost/corrupt osi-scope-helper file cannot 500 either route when the flag is
+// off (verify-auth-flag-off-hermetic.js covers this).
+
+const noopCp = { exec: () => {} };
+// No simulated fan hardware: findFanControl() must fail closed to "not
+// available" (503) rather than touch this real host's /sys/class/hwmon or
+// /sys/class/pwm -- this workstation is not a gateway and must never have its
+// real fan hardware driven by a test.
+const fakeFsNoFanHardware = {
+  readdirSync: () => { const e = new Error('ENOENT (hermetic test stub)'); e.code = 'ENOENT'; throw e; },
+  accessSync: () => { const e = new Error('ENOENT (hermetic test stub)'); e.code = 'ENOENT'; throw e; },
+};
+
+function systemWriteRequest(userId, username, body = {}) {
+  return {
+    req: {
+      headers: { authorization: makeAuthHeader({ userId, username, secret: AUTH_SECRET }) },
+      body,
+    },
+    payload: body,
+  };
+}
+
+test('PR-N: Reboot rejects a viewer with 403 under scope', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('sys-reboot-fn'), {
+      msg: systemWriteRequest(3, 'view1'),
+      env: ENV,
+      db,
+      globals: { cp: noopCp },
+    });
+    assert.equal(response.result.statusCode, 403);
+    assert.equal(response.result.payload.error, 'Forbidden');
+  } finally {
+    db.close();
+  }
+});
+
+test('PR-N: Reboot allows an admin under scope', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('sys-reboot-fn'), {
+      msg: systemWriteRequest(1, 'admin1'),
+      env: ENV,
+      db,
+      globals: { cp: noopCp },
+    });
+    assert.equal(response.result.statusCode, 200);
+    assert.equal(response.result.payload.status, 'rebooting');
+  } finally {
+    db.close();
+  }
+});
+
+test('PR-N: Reboot flag-off preserves the legacy bearer-only behavior for a viewer', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('sys-reboot-fn'), {
+      msg: systemWriteRequest(3, 'view1'),
+      env: { ...ENV, OSI_SCOPED_ACCESS: '0' },
+      db,
+      globals: { cp: noopCp },
+    });
+    assert.equal(response.result.statusCode, 200, 'flag-off must not role-gate the legacy route');
+  } finally {
+    db.close();
+  }
+});
+
+test('PR-N: Fan Control rejects a viewer with 403 under scope', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('sys-fan-fn'), {
+      msg: systemWriteRequest(3, 'view1', { speed: 100 }),
+      env: ENV,
+      db,
+      globals: { fs: fakeFsNoFanHardware },
+    });
+    assert.equal(response.result.statusCode, 403);
+    assert.equal(response.result.payload.error, 'Forbidden');
+  } finally {
+    db.close();
+  }
+});
+
+test('PR-N: Fan Control allows an admin past the role gate under scope', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('sys-fan-fn'), {
+      msg: systemWriteRequest(1, 'admin1', { speed: 100 }),
+      env: ENV,
+      db,
+      globals: { fs: fakeFsNoFanHardware },
+    });
+    // This test env simulates no fan hardware, so the node's own
+    // hardware-availability check returns 503 after the role gate --
+    // asserting "not 403" proves the admin passed the role gate itself.
+    assert.notEqual(response.result.statusCode, 403);
+    assert.equal(response.result.statusCode, 503);
+  } finally {
+    db.close();
+  }
+});
+
+test('PR-N: Fan Control flag-off preserves the legacy bearer-only behavior for a viewer', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('sys-fan-fn'), {
+      msg: systemWriteRequest(3, 'view1', { speed: 100 }),
+      env: { ...ENV, OSI_SCOPED_ACCESS: '0' },
+      db,
+      globals: { fs: fakeFsNoFanHardware },
+    });
+    assert.notEqual(response.result.statusCode, 403, 'flag-off must not role-gate the legacy route');
+  } finally {
+    db.close();
+  }
+});
