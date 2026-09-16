@@ -383,7 +383,18 @@ const protectedNodeHashes = {
   // declaration against the seed and against every ALTER TABLE devices ADD COLUMN in
   // database/migrations/ordered. Hash re-derived on this branch.
   // Previous pin: 69aed774a08b5372c251d1c22c1f70ee7f983b7dbe1f17ff9ee01e5d0b944bbf
-  'sync-init-fn': '878ef2417b5ec01e46acf05b160ebbb409b979d9ba7474955b3a35b328202978',
+  // Re-pinned #5 (PR #242 verifier fix 2, Uganda cascade-delete post-restart probe,
+  // YELLOW should-fix): the frozen node's only prior success-path signal was
+  // node.status({fill:'green',shape:'dot',text:'sync ready'}), a Node-RED admin-UI
+  // status update that never reaches `logread` -- deploy.sh's post-restart bounded
+  // poll (grepping logread for a positive completion marker or the negative
+  // 'devices rebuild ABORTED' line) had nothing log-visible to poll for on the
+  // success path. Added a single node.log('sync-init: schema init complete');
+  // immediately before the existing node.status call, at the very end of the
+  // IIFE's success path -- no schema/DDL/rebuild logic touched. Hash re-derived
+  // on this branch.
+  // Previous pin: 878ef2417b5ec01e46acf05b160ebbb409b979d9ba7474955b3a35b328202978
+  'sync-init-fn': 'e3fea2f2a2247e20f23e75415589efb02af8b4df225290742c5ad8e9df50e133',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
@@ -1112,9 +1123,13 @@ if (sizeAllowances) {
   // wave3-edge-durable figure above by the 4516 chars measured for sync-init-fn's
   // DEVICES_COLUMNS table (verify-flows-size-ratchet totalChars over both byte-identical
   // profiles: origin/main 1470784 -> HEAD 1475300). That branch changes no other node.
-  expectCondition(sizeAllowances.total_allowance?.delta === 26409,
-    'size total allowance: exact cumulative delta 26409',
-    'size total allowance: expected exact cumulative delta 26409');
+  // 26454: PR #242 verifier fix 2 raises 26409 by the 45 chars measured for
+  // sync-init-fn's added node.log('sync-init: schema init complete'); positive
+  // completion marker (verify-flows-size-ratchet totalChars over both byte-identical
+  // profiles: origin/main 1470784 -> HEAD 1475345). No other node changed.
+  expectCondition(sizeAllowances.total_allowance?.delta === 26454,
+    'size total allowance: exact cumulative delta 26454',
+    'size total allowance: expected exact cumulative delta 26454');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,

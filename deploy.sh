@@ -1233,12 +1233,64 @@ if [ "$PROBE_OK" != "0" ]; then
     fi
 fi
 
+# osi-os stabilization program, PR-L / external consult Q1 fix 2 (PR #242
+# YELLOW should-fix): a single immediate grep here races the boot node it is
+# meant to catch. /gui is served by Node-RED's static-file route as soon as
+# the HTTP listener binds -- before flows finish deploying -- while
+# sync-init-fn (the node that can log the abort, and now also logs a positive
+# completion marker on success) is only triggered by the sync-init-inject
+# inject node (onceDelay: 1s after flow deploy) and then runs a long async
+# sequence of sqlite exec() calls before it can reach either branch. The old
+# single grep, run the instant /gui answers, could observe neither line yet
+# and would report PROBE_OK=0 (commit) regardless of what the boot node was
+# about to decide -- exactly the false-negative this safety net exists to
+# prevent (the Uganda cascade-delete incident this PR cites).
+#
+# Poll logread for up to NODE_RED_INIT_TIMEOUT seconds (default 45,
+# env-overridable like NODE_RED_HEALTH_TIMEOUT above) for EITHER the positive
+# "sync-init: schema init complete" marker (-> OK) OR the negative
+# "devices rebuild ABORTED" line (-> PROBE_OK=1, ALERT). If the window
+# elapses with neither line seen, fail closed: WARN that schema
+# initialization could not be confirmed and set PROBE_OK=1 so the payload is
+# NOT committed (the auto-rollback path below runs) -- an unconfirmed boot is
+# treated as unhealthy, not healthy, on the theory that a false rollback is
+# recoverable but a false commit of an aborted rebuild is not.
+# init log check begin
 if [ "$PROBE_OK" = "0" ] && command -v logread >/dev/null 2>&1; then
-    if logread 2>/dev/null | tail -n "+$((NODE_RED_LOG_MARK + 1))" | grep -q "devices rebuild ABORTED"; then
-        echo "ALERT: /gui is reachable but the boot node logged 'devices rebuild ABORTED' during this restart; schema initialization did not complete (PR-L / external consult Q1)" >&2
-        PROBE_OK=1
-    fi
+    NODE_RED_INIT_TIMEOUT="${NODE_RED_INIT_TIMEOUT:-45}"
+    case "$NODE_RED_INIT_TIMEOUT" in
+        ''|*[!0-9]*|0) NODE_RED_INIT_TIMEOUT=45 ;;
+    esac
+    INIT_LOG_RESULT=""
+    init_elapsed=0
+    while [ "$init_elapsed" -lt "$NODE_RED_INIT_TIMEOUT" ]; do
+        INIT_LOG_TAIL="$(logread 2>/dev/null | tail -n "+$((NODE_RED_LOG_MARK + 1))")"
+        if printf '%s\n' "$INIT_LOG_TAIL" | grep -q "devices rebuild ABORTED"; then
+            INIT_LOG_RESULT="ABORTED"
+            break
+        fi
+        if printf '%s\n' "$INIT_LOG_TAIL" | grep -q "sync-init: schema init complete"; then
+            INIT_LOG_RESULT="OK"
+            break
+        fi
+        sleep 2
+        init_elapsed=$((init_elapsed + 2))
+    done
+    case "$INIT_LOG_RESULT" in
+        ABORTED)
+            echo "ALERT: /gui is reachable but the boot node logged 'devices rebuild ABORTED' during this restart; schema initialization did not complete (PR-L / external consult Q1)" >&2
+            PROBE_OK=1
+            ;;
+        OK)
+            echo "OK: boot node confirmed 'sync-init: schema init complete' after ${init_elapsed}s"
+            ;;
+        *)
+            echo "WARN: schema initialization could not be confirmed via logread within ${NODE_RED_INIT_TIMEOUT}s (neither the completion marker nor an abort line was seen); failing closed - NOT committing this payload (PR #242 verifier fix 2)" >&2
+            PROBE_OK=1
+            ;;
+    esac
 fi
+# init log check end
 
 if [ "$PROBE_OK" = "0" ]; then
     echo "OK: committing payload $DEPLOY_STAMP"
