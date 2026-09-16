@@ -142,11 +142,30 @@ exports.run = async (ctx) => {
   });
   const rolloverUuid = uuidOf(rollover.body);
   if (rolloverUuid) state.schedules.push(rolloverUuid);
-  ctx.expect('a window that runs past midnight is handled without a 500',
-    rollover.status !== 500, { status: rollover.status, body: rollover.body });
-  ev.note('Midnight rollover (23:50 + 30 min) returned HTTP ' + rollover.status + '. The Gen1 on-valve plan is ' +
-    'one window list PER WEEKDAY, so a window crossing midnight cannot be expressed as a single entry; ' +
-    'this is the behaviour to review against the spec.');
+  // compileWindows() encodes a cross-midnight window on its START weekday and
+  // separately treats the [0, endMin-1440) spillover as occupied on the NEXT
+  // weekday for conflict detection (plan.js, "Cross-midnight spillover"), so
+  // accepting this is deliberate, not an oversight.
+  ctx.expect('a window that runs past midnight is accepted and encoded on its start weekday',
+    rollover.status < 300, { status: rollover.status, body: rollover.body });
+
+  // The other half of that contract: a window on the FOLLOWING weekday that
+  // starts inside the spillover must be refused.
+  const spilloverClash = await rest.post('/api/valves/' + eui + '/schedules', {
+    kind: 'WEEKLY', weekdays_mask: 32, start_time: '00:10', duration_minutes: 10, label: 'spillover ' + tag,
+  });
+  const spilloverUuid = uuidOf(spilloverClash.body);
+  if (spilloverUuid) state.schedules.push(spilloverUuid);
+  ctx.expectStatus('a window on the next weekday that starts inside a cross-midnight spillover is refused with 422',
+    spilloverClash, 422);
+
+  const spilloverOk = await rest.post('/api/valves/' + eui + '/schedules', {
+    kind: 'WEEKLY', weekdays_mask: 32, start_time: '00:25', duration_minutes: 10, label: 'after-spillover ' + tag,
+  });
+  const spilloverOkUuid = uuidOf(spilloverOk.body);
+  if (spilloverOkUuid) state.schedules.push(spilloverOkUuid);
+  ctx.expect('a window on the next weekday that starts after the spillover ends is accepted',
+    spilloverOk.status < 300, { status: spilloverOk.status, body: spilloverOk.body });
 
   // --- enable / disable -----------------------------------------------------
   const disable = await rest.put('/api/valves/' + eui + '/schedules/' + uuid, {
