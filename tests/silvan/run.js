@@ -65,6 +65,26 @@ function gitCommit() {
   } catch (_) { return 'unknown'; }
 }
 
+// Mints a throwaway, short-lived, read-only identity token so the API identity
+// guard can run BEFORE the first mutation.
+//
+// /api/sync/state is bearer-gated, but its handler does `userRows[0] || {}` --
+// it tolerates a token whose user does not exist and still returns
+// gatewayIdentity.currentEui. That matters: a freshly deployed gateway has an
+// EMPTY users table, so there is no real account to borrow, and registering one
+// first would mean mutating a gateway whose HTTP identity is still unverified.
+//
+// The token is signed with the gateway's own secret (computed on the Pi, never
+// copied off it) and expires in 60 seconds.
+async function mintIdentityProbeToken(ssh) {
+  return ssh.mintToken({
+    userId: 0,
+    username: 'osi-harness-identity-probe',
+    iat: Date.now(),
+    exp: Date.now() + 60 * 1000,
+  });
+}
+
 // Authenticates the run. Assumes NOTHING about existing gateway state: a freshly
 // deployed gateway has an empty users table, so the default path registers its
 // own throwaway account through the real /auth/register + /auth/login routes.
@@ -123,16 +143,22 @@ async function main() {
 
   const transcript = [];
   const anonRest = new Rest(cfg.apiBase, { transcript });
+
+  // GUARD 2 (over the tunnel, still BEFORE any mutation): the HTTP endpoint must
+  // be the same gateway the SSH guard just verified. This runs before
+  // bootstrapAuth registers anything, so a tunnel aimed at the wrong Node-RED
+  // is caught before this harness writes a single row to it.
+  const probeToken = await mintIdentityProbeToken(ssh);
+  const apiEui = await assertSilvanViaApi(new Rest(cfg.apiBase, { token: probeToken, transcript }));
+  console.log('EUI guard (api): ' + apiEui + ' OK');
+
   const env = await readGatewayEnv(ssh);
   const deployedFlows = await readDeployedFlows(ssh);
   const profiles = makeProfiles(env);
 
+  // Only now, with both guards green, is the gateway written to.
   const auth = await bootstrapAuth(anonRest, ssh, null, opts);
   const rest = new Rest(cfg.apiBase, { token: auth.token, transcript });
-
-  // GUARD 2 (over the tunnel): the HTTP endpoint must be the same gateway.
-  const apiEui = await assertSilvanViaApi(rest);
-  console.log('EUI guard (api): ' + apiEui + ' OK');
   console.log('harness account: ' + auth.username + (auth.created ? ' (registered by this run)' : ' (existing)'));
 
   const observer = await new DownlinkObserver({

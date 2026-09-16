@@ -21,6 +21,7 @@
 //   'observe'   record only; the case answers by hand
 
 const { connect } = require('./mqtt');
+const { assertEndpointGuardPassed } = require('./config');
 const U = require('./uplinks');
 
 const DOWNLINK_FILTER = 'application/+/device/+/command/down';
@@ -38,6 +39,10 @@ class DownlinkObserver {
   }
 
   async start() {
+    // The observer is the only component that opens a raw TCP socket to a
+    // broker, so it re-checks that its config cleared the endpoint guard rather
+    // than trusting the caller to have used config().
+    assertEndpointGuardPassed(this.cfg, 'the MQTT downlink observer');
     this.client = await connect({
       host: this.cfg.mqttHost,
       port: this.cfg.mqttPort,

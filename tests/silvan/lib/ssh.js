@@ -8,11 +8,13 @@
 // code path works, not that the harness can write rows.
 
 const { execFile } = require('node:child_process');
+const { assertEndpointGuardPassed } = require('./config');
 
 const FORBIDDEN_SQL = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM|ATTACH|PRAGMA\s+\w+\s*=)\b/i;
 
 class Ssh {
   constructor(cfg) {
+    assertEndpointGuardPassed(cfg, 'the SSH client');
     this.host = cfg.sshHost;
     this.user = cfg.sshUser;
     this.key = cfg.sshKey;

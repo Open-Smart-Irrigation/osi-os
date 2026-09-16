@@ -21,11 +21,22 @@ anything under `lib/`.
 |---|---|---|
 | EUI guard, pre-flight | `lib/config.js` `assertSilvanViaSsh` | Reads `uci get osi-server.cloud.device_eui` over SSH **before any HTTP request** and aborts unless it is `0016C001F11715E2`. |
 | EUI guard, over the tunnel | `lib/config.js` `assertSilvanViaApi` | Reads `gatewayIdentity.currentEui` from `GET /api/sync/state` and aborts on a mismatch, so a tunnel terminating on a different Node-RED than the SSH session cannot go unnoticed. |
-| Forbidden hosts | `lib/config.js` `FORBIDDEN_HOSTS` | Refuses to start against the Uganda production gateway, `osicloud.ch`, the OSI test server, or `100.99.212.115`. |
-| Host lock | `lib/config.js` `config()` | Refuses any `sshHost` other than Silvan's unless `SILVAN_ALLOW_ALT_HOST` is set — and the EUI guard still applies on top. |
+| Forbidden hosts | `lib/config.js` `assertEndpointsAllowed` | Applies `FORBIDDEN_HOSTS` (by IP **and** by name) to **every** endpoint — SSH host, `SILVAN_API_BASE`, `SILVAN_GUI_BASE`, `SILVAN_MQTT_HOST` — unconditionally, and **before** `SILVAN_ALLOW_ALT_HOST` is even read. That escape hatch can never reach the Uganda production gateway, `osicloud.ch`, the OSI test server or `100.99.212.115`. |
+| Endpoint consistency | `lib/config.js` `assertEndpointsAllowed` | Every non-SSH endpoint must be either a loopback tunnel address (`127.0.0.1`, `localhost`, `::1`) or exactly the SSH host the EUI guards verify. This closes the gap where SSH points at Silvan — so both EUI guards pass — while the HTTP or MQTT client is quietly aimed elsewhere. `SILVAN_MQTT_PORT` must be a real TCP port. |
+| Host lock | `lib/config.js` `assertEndpointsAllowed` | Refuses any `sshHost` other than Silvan's unless `SILVAN_ALLOW_ALT_HOST` is set — checked last, after the two rules above, and the EUI guards still apply on top. |
+| Guarded clients only | `lib/config.js` `assertEndpointGuardPassed` | `config()` marks a cleared config with a `Symbol`. The SSH client and the MQTT observer both refuse to start unless their config carries it, so a hand-written object literal cannot slip past the checks. |
+| Evidence redaction | `lib/rest.js` `redact` | `password`, `token`, `sync_token`, `mqtt_password`, `appkey`, `Authorization` and friends are replaced with `[redacted]` **as the transcript record is built**, not filtered later — so no path exists that records a secret and relies on a downstream filter. |
 | Simulated devices only | `lib/config.js` `assertSimulatedDevice` | Every DevEUI the harness registers, actuates or answers for must start with `70B3D57ED00`. Commanding anything else throws. |
 | Read-only SQL | `lib/ssh.js` `Ssh.sql` | Opens the database `file:...?mode=ro` with `sqlite3 -readonly` and refuses any statement matching INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/REPLACE/VACUUM/ATTACH. The harness can never reseed or repair `farming.db`. |
 | No cloud link changes | case `C1` | Observes the outbox only. It never links, unlinks, cuts the network, or pushes this gateway's data anywhere. |
+
+Both EUI guards run **before the first mutation**. The API guard needs a bearer
+token, so the runner mints a 60-second read-only one on the Pi for that check
+alone: `/api/sync/state` tolerates a token whose user does not exist
+(`userRows[0] || {}`) and still reports `gatewayIdentity.currentEui`, which
+matters because a freshly deployed gateway has an empty users table and
+registering an account first would mean writing to a gateway whose HTTP identity
+is still unverified.
 
 The gateway's auth secret **never leaves the Pi**: `Ssh.mintToken` runs the HMAC
 in a one-shot `node -e` over SSH and only the finished token comes back. That is
@@ -47,6 +58,13 @@ ssh -N -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
 
 `18800` is Node-RED (HTTP API + GUI), `18830` is the gateway's mosquitto
 (`allow_anonymous true`, no credentials).
+
+First, the offline self-test — it needs no gateway, no SSH and no tunnel, and
+proves the safety machinery still refuses what it should:
+
+```bash
+node tests/silvan/selftest.js
+```
 
 Then, from the repo root:
 
@@ -94,6 +112,9 @@ the smoke tests the bundle the gateway is actually serving.
 | `ST1` | Settings read/write/validate/persist/restore, per-zone timezone, feature flags, system stats. |
 | `C1` | Local writes and outbox growth while the cloud is unreachable, observed through `/api/sync/state` and `sync_outbox`. Deliberately partial — see below. |
 | `U1` | Browser smoke: real login form, screenshots at 1366×768 and 390×844 for every route, and a French hardcoded-English scan. |
+
+`selftest.js` is separate from the matrix: it tests the harness, not the
+gateway. Run it after any change under `lib/`.
 
 ---
 

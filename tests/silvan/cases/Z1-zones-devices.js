@@ -126,7 +126,7 @@ exports.run = async (ctx) => {
   ctx.expectStatus('DELETE /api/devices removes the sensor', delDev, 200);
   // Pinned ACTUAL behaviour, not the behaviour the sync contract implies:
   // delete-device-unlink ("Unlink Device") runs
-  //   UPDATE devices SET user_id = NULL, irrigation_zone_id = NULL, ... 
+  //   UPDATE devices SET user_id = NULL, irrigation_zone_id = NULL, ...
   // It never sets deleted_at. So a "deleted" device is UNCLAIMED, not
   // tombstoned -- the row survives and the same DevEUI can be re-claimed later.
   // docs/contracts/sync-schema says tombstones cross the sync boundary as
