@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { useTranslation } from 'react-i18next';
+import { useDateFormat } from '../../../utils/datetime';
 import type { WaterEnvironment } from '../../../types/farming';
 
 interface Props {
@@ -53,6 +54,7 @@ function formatAction(code: string | null | undefined): string {
 
 export const WaterTab: React.FC<Props> = ({ water }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
   const hasSetup = water.areaM2 != null && water.irrigationEfficiencyPct != null;
   const measuredLiters = water.irrigationTodayMeasuredLiters ?? null;
   const estimatedLiters = water.irrigationTodayEstimatedLiters ?? null;
@@ -64,7 +66,7 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
     measuredIrrigationNetMm: day.measuredIrrigationNetMm ?? null,
     estimatedIrrigationLiters: day.estimatedIrrigationLiters ?? null,
     estimatedIrrigationNetMm: day.estimatedIrrigationNetMm ?? null,
-    shortDate: new Date(day.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+    shortDate: fmt.date(day.date) ?? day.date,
   }));
 
   if (!water.available) {

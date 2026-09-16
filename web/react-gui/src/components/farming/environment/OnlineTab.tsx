@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { OnlineEnvironment, EnvironmentLocation } from '../../../types/farming';
 import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
+import { useDateFormat, type DateFormatter } from '../../../utils/datetime';
 
 interface Props {
   online: OnlineEnvironment;
@@ -11,9 +12,8 @@ interface Props {
 
 // Helpers
 
-function fmtTime(isoStr: string | null): string {
-  if (!isoStr) return '\u2014';
-  return new Date(isoStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function fmtTime(isoStr: string | null, fmt: DateFormatter): string {
+  return fmt.time(isoStr) ?? '\u2014';
 }
 
 // Cache / source badges
@@ -76,6 +76,7 @@ const UnavailableState: React.FC<{ location: EnvironmentLocation }> = ({ locatio
 
 export const OnlineTab: React.FC<Props> = ({ online, location }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
 
   if (!online.available || !online.current) {
     return <UnavailableState location={location} />;
@@ -145,8 +146,8 @@ export const OnlineTab: React.FC<Props> = ({ online, location }) => {
         {online.expiresAt && (
           <span className="text-xs text-[var(--text-tertiary)] ml-auto">
             {t('environment.online.updatesAt', {
-              time: fmtTime(online.expiresAt),
-              defaultValue: `Updates at ${fmtTime(online.expiresAt)}`,
+              time: fmtTime(online.expiresAt, fmt),
+              defaultValue: 'Updates at {{time}}',
             })}
           </span>
         )}
