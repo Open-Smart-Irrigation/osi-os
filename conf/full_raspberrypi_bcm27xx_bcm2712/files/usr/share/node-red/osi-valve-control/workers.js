@@ -172,7 +172,11 @@ async function runClockTick({ db, now, appId, warn }) {
   const staleDeviceEuis = await store.staleQueuedPlanDeviceEuis(db, staleCutoffIso);
   await store.failStalePushes(db, staleCutoffIso);
   for (const eui of staleDeviceEuis) {
-    try { await runtime.emitRuntimeChanged(db, eui, warn); }
+    // PR-H: pass nowDate through so buildRuntimePayload's store.pushSummary() 30-day window is
+    // computed against this tick's own clock, not SQLite's independent wall clock (see
+    // runtime.js's emitRuntimeChanged/buildRuntimePayload comments and store.js's pushSummary
+    // comment for the full history).
+    try { await runtime.emitRuntimeChanged(db, eui, warn, nowDate); }
     catch (e) { warn && warn('[valve-control] runClockTick: stale-push runtime emit failed for ' + eui + ': ' + (e && e.message ? e.message : e)); }
   }
   // (I2, spec §5.4): FPort 12 must encode local wall-clock digits in the SCHEDULE's timezone,

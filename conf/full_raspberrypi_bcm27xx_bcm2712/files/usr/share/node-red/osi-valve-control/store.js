@@ -228,10 +228,23 @@ async function staleQueuedPlanDeviceEuis(db, olderThanIso) {
 // row's decoded daymask, via the same daymaskOf() used by lastPushHashes), keep only the
 // newest row per slot, and count states from that reduced set. last_plan_queued_at/
 // last_plan_acked_at are unrelated to the per-slot ratio and keep their prior semantics.
-async function pushSummary(db, deviceEui) {
+// PR-H: the 30-day lookback below used to be SQLite's own wall clock (bare `datetime('now',
+// '-30 day')`), ignoring any clock a caller had injected for test determinism (runClockTick /
+// runHousekeeping thread a `now` through workers.js precisely so a fixed test date produces
+// deterministic results). A caller that fixes `now` in the past (or the future) got a filter
+// window computed against the *real* current wall-clock time instead of its own `now`, so a
+// row backdated relative to the injected clock could silently fall outside (or inside) the
+// window depending only on how far the real clock has since moved from the fixture's date --
+// workers.test.js's P3-E1 runClockTick regression is exactly this: a push backdated 3 days
+// before a 2026-08-19 fixture `now` looks correctly within-window against that fixture, but
+// drifts out of a *real* 30-day-ago cutoff as soon as the actual calendar date moves far enough
+// past 2026-08-19. `now` is optional (ISO string or Date, default `new Date()`) so callers with
+// no clock of their own keep exactly the previous (real-wall-clock) behaviour.
+async function pushSummary(db, deviceEui, now) {
+  const nowIso = now instanceof Date ? now.toISOString() : (now || new Date().toISOString());
   const rows = await db.all(
-    "SELECT purpose, weekday, payload_hex, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') AND queued_at > datetime('now','-30 day') ORDER BY queued_at DESC",
-    [deviceEui]
+    "SELECT purpose, weekday, payload_hex, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') AND queued_at > datetime(?,'-30 day') ORDER BY queued_at DESC",
+    [deviceEui, nowIso]
   );
   const latestStateBySlot = {};
   for (const r of rows) {
@@ -258,7 +271,7 @@ async function pushSummary(db, deviceEui) {
   const meta = await db.get(`SELECT
       MAX(CASE WHEN purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') THEN queued_at END) AS last_plan_queued_at,
       MAX(CASE WHEN purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state='ACKED' THEN acked_at END) AS last_plan_acked_at
-    FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND queued_at > datetime('now','-30 day')`, [deviceEui]);
+    FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND queued_at > datetime(?,'-30 day')`, [deviceEui, nowIso]);
   return {
     queued, acked, failed,
     last_plan_queued_at: (meta && meta.last_plan_queued_at) || null,

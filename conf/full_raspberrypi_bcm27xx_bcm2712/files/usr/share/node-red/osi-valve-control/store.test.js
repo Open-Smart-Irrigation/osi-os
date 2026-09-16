@@ -191,6 +191,40 @@ test('pushSummary (final-fix-wave IMPORTANT 1): last_plan_queued_at/last_plan_ac
   db.close();
 });
 
+test('pushSummary (PR-H): the 30-day lookback is computed against an injected `now`, not SQLite\'s own wall clock', async () => {
+  const { db } = await tempDb();
+  // Fixture `now` is deliberately far from the real wall clock: with the old bare
+  // datetime('now','-30 day') filter, a row backdated relative to THIS `now` would be judged
+  // against the REAL current time instead and silently disappear/reappear depending only on
+  // how far the real clock has drifted from the fixture -- exactly workers.test.js's P3-E1
+  // runClockTick regression.
+  const now = new Date('2020-01-19T10:00:00Z');
+  await store.insertPushes(db, [{ push_id: 'p1', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 0, fport: 30, payload_hex: '00', plan_hash: 'h1' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime('2020-01-19 10:00:00', '-3 days') WHERE push_id='p1'");
+
+  const summary = await store.pushSummary(db, '0016C001F1000001', now);
+  assert.equal(summary.queued, 1, 'a row 3 days before the injected now must count against ITS window');
+
+  // A second row 31 days before that SAME injected now must be excluded from it.
+  await store.insertPushes(db, [{ push_id: 'p2', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 31, payload_hex: '00', plan_hash: 'h2' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime('2020-01-19 10:00:00', '-31 days') WHERE push_id='p2'");
+  const summary2 = await store.pushSummary(db, '0016C001F1000001', now);
+  assert.equal(summary2.queued, 1, 'the 31-day-old row must stay excluded by the injected now, regardless of the real wall clock');
+
+  // The documented contract accepts an ISO string too, not only a Date instance.
+  const summary3 = await store.pushSummary(db, '0016C001F1000001', now.toISOString());
+  assert.equal(summary3.queued, 1, 'an ISO string `now` must behave identically to a Date `now`');
+  db.close();
+});
+
+test('pushSummary: with no `now` argument, defaults to the real wall clock (unchanged behaviour for existing callers)', async () => {
+  const { db } = await tempDb();
+  await store.insertPushes(db, [{ push_id: 'fresh', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 0, fport: 30, payload_hex: '00', plan_hash: 'h1' }]);
+  const summary = await store.pushSummary(db, '0016C001F1000001');
+  assert.equal(summary.queued, 1, 'a just-inserted row must count under the default real-wall-clock window');
+  db.close();
+});
+
 test('getGatewaySetting (FW-T5): returns the stored value when the key is present', async () => {
   const { db } = await tempDb();
   await db.run("INSERT INTO app_settings(key, value) VALUES ('gateway_timezone', 'Europe/Zurich')");

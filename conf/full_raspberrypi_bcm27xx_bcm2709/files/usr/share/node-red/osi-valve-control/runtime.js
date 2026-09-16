@@ -50,14 +50,18 @@ function buildActiveActuation(row) {
 // pushSummary() use for the edge GET /api/valves response, so the cloud sees exactly the field
 // values/casing the edge GUI itself renders from.
 //
-// `now` (optional Date) is a snapshot-build-time override, for test determinism only -- see
-// emitRuntimeChanged's comment below for why production callers never pass one.
+// `now` (optional Date) is a snapshot-build-time override. Most callers never pass one (see
+// emitRuntimeChanged's comment below on `as_of`), but PR-H threads it into store.pushSummary's
+// own 30-day lookback too: runClockTick (workers.js) is a real production caller that already
+// carries an injected/real `now` and passes it here specifically so pushSummary's window is
+// computed against the SAME clock the tick itself is using, not SQLite's independent wall clock
+// (store.js's own comment on pushSummary has the full history of that drift bug).
 async function buildRuntimePayload(db, deviceEui, now) {
   const eui = String(deviceEui).toUpperCase();
   const [active, staleState, pushes, settings] = await Promise.all([
     store.activeActuation(db, eui),
     store.recentStaleState(db, eui),
-    store.pushSummary(db, eui),
+    store.pushSummary(db, eui, now),
     store.getSettings(db, eui),
   ]);
   const pushState = {
@@ -116,8 +120,15 @@ async function buildRuntimePayload(db, deviceEui, now) {
 // gateway_device_eui is an undeliverable orphan, not a harmless placeholder.
 //
 // `warn` is optional (best-effort logging only -- every call site here is itself best-effort, see
-// each seam's own try/catch). `now` is a snapshot-build-time override for test determinism only;
-// production callers never pass it (see buildRuntimePayload's comment on as_of above).
+// each seam's own try/catch). `now` is a snapshot-build-time override; most callers (handleUplink,
+// runObserveTick, runHousekeeping, push.js, cancel.js) never pass it, so `as_of` stamps the real
+// wall clock for them exactly as before (see buildRuntimePayload's comment on as_of above).
+// runClockTick (workers.js) is the one production caller that does pass its own `now` -- not to
+// change `as_of` semantics, but so buildRuntimePayload's store.pushSummary() call filters its
+// 30-day window against the SAME clock the tick is using (PR-H; see store.js's pushSummary
+// comment). In real production runClockTick's `now` is always the real current time anyway (it
+// defaults to `new Date()` the same way this function does), so this is a no-op there and only
+// matters for deterministic tests that inject a fixed `now`.
 async function emitRuntimeChanged(db, deviceEui, warn, now) {
   const link = await resolveLinkAndGateway(db, deviceEui);
   if (!link.linked) return null;
