@@ -502,31 +502,43 @@ run_schema_migration() {
         # a device that ran the AgroLink or Bovey/Valve-focused line has
         # schema_migrations rows whose version numbers collide with main's
         # own (e.g. v22 is journal_catalog_v2 there, valve_control on main).
-        # A cheap, read-only probe — compare the ledger's stored checksum for
-        # the lowest applied version above the shared 0001-0021 prefix
-        # against main's own checksum for that SAME version number — decides
-        # whether reconciliation is even needed. A main-numbered gateway's
-        # checksums already agree here, so it falls straight through this
-        # block untouched (the fast path): no extra fetch, no extra node
-        # invocation beyond the two read-only sqlite3 queries below.
-        recon_probe_version="$(sqlite3 "$DB_PATH" "SELECT MIN(version) FROM schema_migrations WHERE version > 21;")"
+        #
+        # A cheap, read-only probe compares EVERY applied ledger row above
+        # the shared 0001-0021 prefix against main's own checksum for that
+        # SAME version number, and decides to reconcile at the FIRST
+        # mismatch. This used to compare only MIN(version) WHERE version >
+        # 21 against main's checksum for that one row — but a lineage whose
+        # early foreign-numbered versions happen to be byte-identical to
+        # main's own migrations at those same numbers slips straight past a
+        # single-row probe (osi-os stabilization program, PR-L / external
+        # consult Q1, 2026-09-16: Bovey's 0022-0024 collide with AND
+        # byte-match main; only 0025's header-comment-only checksum
+        # differs). That gateway's deploy never ran reconciliation and
+        # lib/osi-migrate/runner.js later refused applyPending with
+        # repair_required at version 25.
+        #
+        # A main-numbered gateway's checksums already agree at every row, so
+        # it still falls straight through this block untouched (the fast
+        # path): ONE read-only sqlite3 query for the whole ledger, and ONE
+        # node invocation that loads the manifest once and returns as soon
+        # as it finds a mismatch (empty output = none found).
+        # reconcile probe begin
+        recon_ledger_rows="$(sqlite3 "$DB_PATH" "SELECT version, checksum FROM schema_migrations WHERE version > 21 ORDER BY version;")"
+        recon_probe_version="$(printf '%s\n' "$recon_ledger_rows" | node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const lines=fs.readFileSync(0, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); for (const line of lines) { const sep=line.indexOf('|'); if (sep===-1) continue; const version=line.slice(0, sep); const ledgerChecksum=line.slice(sep + 1); const padded=String(Number(version)).padStart(4,'0'); const name=Object.keys(manifest).find((n) => n.startsWith(padded + '__')); const mainChecksum=name ? manifest[name] : ''; if (mainChecksum && mainChecksum !== ledgerChecksum) { process.stdout.write(version); process.exit(0); } }" "$migrations_dir/CHECKSUMS.json")"
+        # reconcile probe end
         if [ -n "$recon_probe_version" ]; then
-            recon_ledger_checksum="$(sqlite3 "$DB_PATH" "SELECT checksum FROM schema_migrations WHERE version=$recon_probe_version;")"
-            recon_main_checksum="$(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const v=String(process.argv[2]).padStart(4,'0'); const name=Object.keys(manifest).find((n) => n.startsWith(v + '__')); process.stdout.write(name ? manifest[name] : '');" "$migrations_dir/CHECKSUMS.json" "$recon_probe_version")"
-            if [ -n "$recon_main_checksum" ] && [ "$recon_ledger_checksum" != "$recon_main_checksum" ]; then
-                echo "--- Foreign-numbered schema_migrations ledger detected (v$recon_probe_version checksum mismatch vs main); running ledger numbering reconciliation ---"
-                fetch_reconciliation_assets
-                if ! node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH" \
-                    --migrations-dir "$migrations_dir" \
-                    --fixtures-dir "$TMP_DIR/scripts/fixtures/lineages" \
-                    --backup-dir "$backup_dir" \
-                    --apply
-                then
-                    echo "ERROR: ledger numbering reconciliation refused or failed; aborting schema migration" >&2
-                    return 1
-                fi
-                echo "OK: ledger numbering reconciliation applied"
+            echo "--- Foreign-numbered schema_migrations ledger detected (v$recon_probe_version checksum mismatch vs main); running ledger numbering reconciliation ---"
+            fetch_reconciliation_assets
+            if ! node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH" \
+                --migrations-dir "$migrations_dir" \
+                --fixtures-dir "$TMP_DIR/scripts/fixtures/lineages" \
+                --backup-dir "$backup_dir" \
+                --apply
+            then
+                echo "ERROR: ledger numbering reconciliation refused or failed; aborting schema migration" >&2
+                return 1
             fi
+            echo "OK: ledger numbering reconciliation applied"
         fi
     else
         if ! node "$TMP_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH"; then
@@ -541,6 +553,20 @@ run_schema_migration() {
     fi
 
     if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then
+        # osi-os stabilization program, PR-L / external consult Q1: verify the
+        # post-migration ledger AND schema fingerprints agree with what main
+        # expects, BEFORE flipping to the new flows payload or restarting
+        # Node-RED. applyPending (above) validates each migration's checksum
+        # as it applies it, but not the broader ledger-vs-manifest and
+        # fingerprint-vs-live-schema agreement verifyHead checks; a ledger
+        # that reconciled cleanly but a schema that still drifts from what
+        # main's boot node expects must not proceed to a live restart.
+        if ! node "$TMP_DIR/scripts/verify-head-cli.js" "$DB_PATH" --migrations-dir "$migrations_dir"; then
+            echo "ERROR: verify-head-cli reported a non-ok ledger/schema-fingerprint state after migration; aborting before the payload flip" >&2
+            return 1
+        fi
+        echo "OK: verify-head-cli confirmed the post-migration ledger and schema fingerprints"
+
         # issue #222 / F4 (Uganda 2026-09-12): flip the staged payload BEFORE
         # restarting Node-RED. This restart used to run immediately after a
         # successful migration while the new flows.json was still only
@@ -1165,6 +1191,19 @@ else
     echo "OK: payload already flipped -> payloads/$DEPLOY_STAMP (flipped before the post-migration Node-RED restart, issue #222 / F4)"
 fi
 
+# osi-os stabilization program, PR-L / external consult Q1: a refused boot-node
+# devices-CHECK rebuild does not stop Node-RED or its HTTP listener (it logs
+# `node.error('devices rebuild ABORTED ...')` and carries on) -- so /gui
+# reachability alone cannot prove schema initialization actually completed.
+# Mark the log BEFORE the restart so only lines from THIS restart are
+# considered; a stale abort from a much earlier boot must not fail a healthy
+# deploy.
+NODE_RED_LOG_MARK=0
+if command -v logread >/dev/null 2>&1; then
+    NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"
+    case "$NODE_RED_LOG_MARK" in ''|*[!0-9]*) NODE_RED_LOG_MARK=0 ;; esac
+fi
+
 /etc/init.d/node-red restart || true
 
 PROBE_OK=1
@@ -1188,6 +1227,13 @@ if [ "$PROBE_OK" != "0" ]; then
         echo "WARN: Node-RED process alive but /gui not reachable after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
     else
         echo "ALERT: Node-RED process not found after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
+    fi
+fi
+
+if [ "$PROBE_OK" = "0" ] && command -v logread >/dev/null 2>&1; then
+    if logread 2>/dev/null | tail -n "+$((NODE_RED_LOG_MARK + 1))" | grep -q "devices rebuild ABORTED"; then
+        echo "ALERT: /gui is reachable but the boot node logged 'devices rebuild ABORTED' during this restart; schema initialization did not complete (PR-L / external consult Q1)" >&2
+        PROBE_OK=1
     fi
 fi
 
