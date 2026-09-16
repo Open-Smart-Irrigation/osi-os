@@ -18,7 +18,7 @@ const SCHEMA_FINGERPRINT = crypto.createHash('sha256').update(fs.readFileSync(pa
   ROOT,
   'docs/contracts/sync-schema/journal-v2.schema.json',
 ))).digest('hex');
-const PRIOR_WORKER_SHA256 = 'cc3f55c7212b2d0a7ea3c5f0d058978f9902a6166d161de8713990ac51042918';
+const PRIOR_WORKER_SHA256 = '7998f113a0a3ade1cd569ccc814f013932bc719d3e310a2d29a9d48a7cf77bb1';
 
 function serialize(flows) {
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
@@ -88,6 +88,14 @@ try {
   return msg;
 } catch (cause) {
   const detail = String(cause && cause.message ? cause.message : cause);
+  if (cause && cause.journalUnsupported) {
+    if (cause.attempted) {
+      node.error(detail, msg);
+    } else {
+      node.status({fill:'yellow',shape:'ring',text:detail.slice(0,48)});
+    }
+    return null;
+  }
   if (cause && cause.retryable) {
     node.warn('Journal V2 replication transient retry: ' + detail);
     return null;

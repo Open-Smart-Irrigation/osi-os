@@ -123,6 +123,7 @@ async function executeFunction(node, options) {
   } = options;
   const errors = [];
   const warnings = [];
+  const logs = [];
   const flowStore = new Map(Object.entries(flowState));
   const globalStore = new Map();
   const databaseFacade = facadeDb(db);
@@ -136,7 +137,7 @@ async function executeFunction(node, options) {
     node: {
       error: (message) => errors.push(String(message)),
       warn: (message) => warnings.push(String(message)),
-      log: () => {},
+      log: (message) => logs.push(String(message)),
       status: () => {},
     },
     flow: {
@@ -195,6 +196,7 @@ async function executeFunction(node, options) {
     result,
     errors,
     warnings,
+    logs,
     flowState: Object.fromEntries(flowStore),
   };
 }

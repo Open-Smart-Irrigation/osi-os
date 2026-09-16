@@ -1134,9 +1134,23 @@ if (sizeAllowances) {
   // sync-init-fn's added node.log('sync-init: schema init complete'); positive
   // completion marker (verify-flows-size-ratchet totalChars over both byte-identical
   // profiles: origin/main 1470784 -> HEAD 1475345). No other node changed.
-  expectCondition(sizeAllowances.total_allowance?.delta === 26454,
-    'size total allowance: exact cumulative delta 26454',
-    'size total allowance: expected exact cumulative delta 26454');
+  // 26668: osi-os #251 fix (T08 edge-noise, do-not-merge branch fix/edge-log-noise)
+  // raises 26454 by the 214 chars measured for journal-v2-replication-worker on branch
+  // fix/edge-log-noise off origin/main 5df7ead65 (verify-flows-size-ratchet nodeSizes
+  // over both byte-identical profiles): 2727 -> 2941 (+214). Classifies an HTTP 403 from
+  // the Journal V2 /capabilities probe as journal_unsupported with exponential backoff
+  // (30s doubling to a 1h cap) instead of a malformed-request node.error every 30s tick.
+  // No other node changed in that commit.
+  // 28562: osi-os #252 fix (T08 edge-noise, same branch) raises 26668 by the 1894 chars
+  // measured for sdi12-recipe-poll-fn (verify-flows-size-ratchet nodeSizes over both
+  // byte-identical profiles): 1191 -> 3085 (+1894). Distinguishes a real helper-load
+  // failure (kept loud) from having zero DRAGINO_SDI12 devices on this gateway (the
+  // expected, permanent state for most of the fleet), skipping the ChirpStack round trip
+  // and logging at info level at most once per device-count transition or 30-minute
+  // recheck window. No other node changed in this commit.
+  expectCondition(sizeAllowances.total_allowance?.delta === 28562,
+    'size total allowance: exact cumulative delta 28562',
+    'size total allowance: expected exact cumulative delta 28562');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,

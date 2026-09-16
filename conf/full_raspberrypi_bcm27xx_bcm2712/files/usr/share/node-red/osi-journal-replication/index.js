@@ -721,6 +721,57 @@ function workspaceNotLinked(message) {
   return value;
 }
 
+// #251: a cloud that answers the journal /capabilities probe with HTTP 403
+// (e.g. an interim cloud branch without Journal V2 routed at all) is not a
+// transient condition and not a malformed request -- it means this specific
+// gateway/cloud link does not support Journal V2. Repeating the probe every
+// tick just spams the log, so this link is marked unsupported and backed off
+// exponentially (30s doubling to a 1h cap, both overridable for tests) until
+// either the window elapses or the link identity changes (a different
+// gateway_device_eui/server_url pair starts at a fresh 30s window because it
+// is a different map key). The first 2xx capabilities response for a key
+// clears its entry, so a cloud that is later upgraded to support Journal V2
+// is picked back up immediately instead of staying backed off.
+const JOURNAL_V2_BACKOFF_INITIAL_DEFAULT_MS = 30000;
+const JOURNAL_V2_BACKOFF_CAP_DEFAULT_MS = 3600000;
+const journalUnsupportedBackoff = new Map(); // linkKey -> { backoffMs, nextAttemptAt }
+
+function journalV2BackoffInitialMs() {
+  return Number(process.env.JOURNAL_V2_BACKOFF_INITIAL_MS || JOURNAL_V2_BACKOFF_INITIAL_DEFAULT_MS);
+}
+
+function journalV2BackoffCapMs() {
+  return Number(process.env.JOURNAL_V2_BACKOFF_CAP_MS || JOURNAL_V2_BACKOFF_CAP_DEFAULT_MS);
+}
+
+function journalV2LinkKey(config) {
+  return config.gateway_device_eui + '|' + config.server_url;
+}
+
+function noteJournalUnsupported(key) {
+  const previous = journalUnsupportedBackoff.get(key);
+  const backoffMs = previous
+    ? Math.min(previous.backoffMs * 2, journalV2BackoffCapMs())
+    : journalV2BackoffInitialMs();
+  journalUnsupportedBackoff.set(key, { backoffMs, nextAttemptAt: Date.now() + backoffMs });
+  return backoffMs;
+}
+
+function clearJournalUnsupported(key) {
+  journalUnsupportedBackoff.delete(key);
+}
+
+function _resetJournalV2BackoffForTests() {
+  journalUnsupportedBackoff.clear();
+}
+
+function journalUnsupportedError(message, extra) {
+  const value = error('journal_unsupported', message);
+  value.journalUnsupported = true;
+  Object.assign(value, extra || {});
+  return value;
+}
+
 function gatewayEndpoint(config, suffix) {
   return config.server_url + '/api/v2/journal/gateways/' +
     encodeURIComponent(config.gateway_device_eui) + suffix;
@@ -810,6 +861,14 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     };
   }
   const config = validateWorkerConfig(inputConfig, fsApi);
+  const journalLinkKey = journalV2LinkKey(config);
+  const journalBackoff = journalUnsupportedBackoff.get(journalLinkKey);
+  if (journalBackoff && Date.now() < journalBackoff.nextAttemptAt) {
+    throw journalUnsupportedError(
+      'cloud rejected journal replication (HTTP 403)',
+      { attempted: false, backoffMs: journalBackoff.backoffMs, nextAttemptAt: journalBackoff.nextAttemptAt }
+    );
+  }
   let capabilityPayload;
   try {
     capabilityPayload = await cloudRequest(httpApi, {
@@ -826,6 +885,13 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
       timeoutMs: 30000,
     }, [200]);
   } catch (cause) {
+    if (cause && cause.code === 'cloud_protocol_failure' && cause.status === 403) {
+      const backoffMs = noteJournalUnsupported(journalLinkKey);
+      throw journalUnsupportedError(
+        'cloud rejected journal replication (HTTP 403)',
+        { attempted: true, backoffMs }
+      );
+    }
     if (cause && cause.code === 'cloud_protocol_failure' && cause.status === 404) {
       // The server 404s this endpoint (requireGateway -> activeWorkspaceForGateway)
       // whenever no journal workspace is bound to this gateway yet. Until a
@@ -858,6 +924,7 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     }
     throw cause;
   }
+  clearJournalUnsupported(journalLinkKey);
   const capability = await persistCapability(db, config, capabilityPayload);
 
   let sentMutations = 0;
@@ -1068,4 +1135,5 @@ module.exports = {
   recordOutcome,
   resolveMediaRoot,
   runReplicationTick,
+  _resetJournalV2BackoffForTests,
 };
