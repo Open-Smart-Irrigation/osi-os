@@ -1,0 +1,358 @@
+#!/usr/bin/env node
+// PR-G / consult Q6 (docs/superpowers/reviews/2026-09-16-readiness-fable-consult.md
+// "Recommended change"; external-consult-codex-2026-09-16.md Q6, whose
+// q6-ack-harness.js is this file's starting point -- extended with the
+// per-entry outcome matrix, a real SQLite-backed osiDb seam so the shipped
+// SQL (including the retry-cap CASE expressions) actually executes, and
+// command-ack-build-batch/sync-pending-split coverage).
+//
+// Extracts the SHIPPED command-ack-build-batch, command-ack-mark-delivered
+// and sync-pending-split function bodies from flows.json and runs them
+// against a real in-memory SQLite command_ack_outbox table (node:sqlite) via
+// a recording osiDb seam. Asserts the CORRECT per-entry behaviour, so this is
+// RED on origin/main (whole-batch marking) for the reason stated in each
+// assertion, and GREEN once command-ack-mark-delivered is rewritten per-entry.
+//
+// Run: node scripts/test-command-ack-mark-delivered.js
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { DatabaseSync } = require('node:sqlite');
+
+const FLOWS_PATH = path.resolve(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
+const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+
+function nodeById(id) {
+  const found = flows.find((n) => n.id === id);
+  assert.ok(found, 'missing flow node ' + id);
+  return found;
+}
+
+// --- A real sqlite-backed osiDb seam --------------------------------------
+// The node's own SQL (UPDATE ... CASE ... WHEN retry_count + 1 >= N) runs for
+// real against an in-memory command_ack_outbox table, rather than being
+// pattern-matched as text: this is the only way to trust the retry-cap logic.
+
+function makeOsiDb(sqliteDb) {
+  class Database {
+    run(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      try {
+        sqliteDb.prepare(sql).run(...(params || []));
+        callback(null);
+      } catch (error) {
+        callback(error);
+      }
+    }
+    all(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      try {
+        callback(null, sqliteDb.prepare(sql).all(...(params || [])));
+      } catch (error) {
+        callback(error, null);
+      }
+    }
+    close(callback) { callback(); }
+  }
+  return { Database };
+}
+
+function execute(node, msg, sqliteDb, opts) {
+  opts = opts || {};
+  const flowState = opts.flowState || {};
+  const flow = {
+    get(key) { return flowState[key]; },
+    set(key, value) { flowState[key] = value; },
+  };
+  const env = { get(key) { return (opts.env || {})[key]; } };
+  const globalCtx = { get(key) { return (opts.global || {})[key]; } };
+  const warnings = [];
+  const context = {
+    msg, flow, env, global: globalCtx,
+    osiDb: makeOsiDb(sqliteDb),
+    node: { warn(m) { warnings.push(String(m)); }, error(m) { warnings.push(String(m)); }, status() {} },
+    console, Date, Number, String, Array, Object, Map, Set, Boolean, Math, JSON, Promise,
+    parseInt, parseFloat,
+  };
+  vm.createContext(context);
+  const rawPromise = vm.runInContext('(async () => {\n' + node.func + '\n})()', context, { timeout: 5000 });
+  // The vm context is a separate realm: arrays/objects it returns are not
+  // `instanceof` this process's Array/Object, which trips assert.deepEqual's
+  // reference-equality fast path. Round-trip through JSON to normalize into
+  // plain outer-realm values -- every assertion below only inspects JSON-safe
+  // shapes (numbers/strings/booleans/plain objects/arrays), so this is lossless.
+  const resultPromise = rawPromise.then((value) => (value === undefined ? value : JSON.parse(JSON.stringify(value))));
+  return { resultPromise, warnings, flowState };
+}
+
+function freshDb() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE command_ack_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      command_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      delivered_at TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT
+    );
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_url TEXT, server_sync_token TEXT, server_linked_at TEXT
+    );
+  `);
+  return db;
+}
+
+function seedAck(db, id, commandId, createdAtOffsetSeconds, retryCount) {
+  db.prepare(
+    'INSERT INTO command_ack_outbox (id, command_id, payload_json, created_at, retry_count) VALUES (?,?,?,?,?)'
+  ).run(id, commandId, JSON.stringify({ commandId }), new Date(Date.now() - (createdAtOffsetSeconds || 0) * 1000).toISOString(), retryCount || 0);
+}
+
+function rowsById(db) {
+  const out = {};
+  for (const r of db.prepare('SELECT * FROM command_ack_outbox').all()) out[r.id] = r;
+  return out;
+}
+
+let failures = 0;
+function check(name, fn) {
+  try {
+    fn();
+    console.log('PASS: ' + name);
+  } catch (error) {
+    failures += 1;
+    console.error('FAIL: ' + name);
+    console.error('  ' + (error && error.message ? error.message : error));
+  }
+}
+
+async function checkAsync(name, fn) {
+  try {
+    await fn();
+    console.log('PASS: ' + name);
+  } catch (error) {
+    failures += 1;
+    console.error('FAIL: ' + name);
+    console.error('  ' + (error && error.message ? error.message : error));
+  }
+}
+
+// ===========================================================================
+// 1. command-ack-build-batch produces a per-commandId correlation map.
+//    RED on origin/main: the shipped SELECT is `SELECT id, payload_json ...`
+//    (no command_id column) and never sets msg._localAckCorrelation at all.
+// ===========================================================================
+async function testBuildBatchCorrelation() {
+  const db = freshDb();
+  db.prepare("INSERT INTO users (server_url, server_sync_token, server_linked_at) VALUES ('https://cloud.example', 'tok', '2026-01-01')").run();
+  seedAck(db, 101, 'cmd-101', 50);
+  seedAck(db, 102, 'cmd-102', 40);
+  seedAck(db, 103, 'cmd-103', 30);
+  const node = nodeById('command-ack-build-batch');
+  const { resultPromise } = execute(node, {}, db, {
+    env: { DEVICE_EUI: 'AABBCCDDEEFF0011', DEVICE_EUI_CONFIDENCE: 'confirmed' },
+    global: { fs: { existsSync: () => false } },
+    flowState: { sync_state: {} },
+  });
+  const out = await resultPromise;
+  assert.ok(out, 'command-ack-build-batch must produce a message when acks are queued');
+  assert.deepEqual(out._commandAckIds, [101, 102, 103]);
+  assert.ok(out._localAckCorrelation && typeof out._localAckCorrelation === 'object',
+    'command-ack-build-batch must set msg._localAckCorrelation so command-ack-mark-delivered can key its per-entry outcome by cloud commandId, not by local row id');
+  assert.deepEqual(out._localAckCorrelation['cmd-101'], [101]);
+  assert.deepEqual(out._localAckCorrelation['cmd-102'], [102]);
+  assert.deepEqual(out._localAckCorrelation['cmd-103'], [103]);
+  db.close();
+}
+
+// ===========================================================================
+// 2. command-ack-mark-delivered: the exact scenario from the task brief.
+//    HTTP 200 with results {101 ACKED, 102 UNKNOWN, 103 LEASE_MISMATCH,
+//    104 CORRELATION_MISMATCH}, plus local row 105 which the response is
+//    silent about entirely (no correlation entry).
+//    Expected: 101 + 102 delivered; 103 + 105 retry_count+1 with last_error;
+//    104 dead-lettered (delivered_at set, last_error names it a dead letter).
+//    RED on origin/main: the shipped node has exactly one branch on
+//    `msg.statusCode >= 200 && < 300` and marks EVERY id in _commandAckIds
+//    delivered_at on any 2xx -- so 103, 104 and 105 all come back delivered
+//    (105 doesn't even have a chance to be inspected: the shipped node never
+//    looks at msg.payload.results at all).
+// ===========================================================================
+async function testMixedResultsPerEntry() {
+  const db = freshDb();
+  seedAck(db, 101, 'cmd-101');
+  seedAck(db, 102, 'cmd-102');
+  seedAck(db, 103, 'cmd-103');
+  seedAck(db, 104, 'cmd-104');
+  seedAck(db, 105, 'cmd-105'); // present locally, absent from the cloud response
+  const node = nodeById('command-ack-mark-delivered');
+  const { resultPromise, warnings } = execute(node, {
+    statusCode: 200,
+    _commandAckIds: [101, 102, 103, 104, 105],
+    _localAckCorrelation: { 'cmd-101': [101], 'cmd-102': [102], 'cmd-103': [103], 'cmd-104': [104] },
+    payload: {
+      results: [
+        { commandId: 'cmd-101', status: 'ACKED', terminal: true },
+        { commandId: 'cmd-102', status: 'UNKNOWN', terminal: true, error: 'unknown command' },
+        { commandId: 'cmd-103', status: 'LEASE_MISMATCH', terminal: false, error: 'command is not leased to gateway' },
+        { commandId: 'cmd-104', status: 'CORRELATION_MISMATCH', terminal: false, error: 'edge/cloud commandId mismatch' },
+      ],
+    },
+  }, db);
+  await resultPromise;
+  assert.deepEqual(warnings, [], 'no warnings expected on the happy mixed-result path');
+  const rows = rowsById(db);
+
+  assert.ok(rows[101].delivered_at, '101 ACKED must be delivered');
+  assert.equal(rows[101].retry_count, 0);
+  assert.equal(rows[101].last_error, null);
+
+  assert.ok(rows[102].delivered_at, '102 UNKNOWN is terminal (a retry would reproduce the same business rejection) and must be delivered, not retried forever');
+  assert.equal(rows[102].retry_count, 0);
+
+  assert.equal(rows[103].delivered_at, null, '103 LEASE_MISMATCH is non-terminal and must stay pending for redelivery');
+  assert.equal(rows[103].retry_count, 1);
+  assert.ok(rows[103].last_error, '103 must record why it is being retried');
+
+  assert.ok(rows[104].delivered_at, '104 CORRELATION_MISMATCH is an edge-side result-shape bug a retry cannot fix and must be dead-lettered (delivered_at set) rather than retried forever');
+  assert.match(rows[104].last_error || '', /dead_letter/, '104 dead-letter marker must be visible in last_error since the schema has no dedicated terminal-marker column');
+
+  assert.equal(rows[105].delivered_at, null, '105 has no entry in the cloud response at all and must be retried, never silently marked delivered');
+  assert.equal(rows[105].retry_count, 1);
+  assert.ok(rows[105].last_error, '105 must record that its result entry was missing');
+  db.close();
+}
+
+// ===========================================================================
+// 3. statusCode=0 (transport failure): every row retries. Already correct on
+//    origin/main; must stay correct after the rewrite.
+// ===========================================================================
+async function testTransportFailureZeroRetriesAll() {
+  const db = freshDb();
+  seedAck(db, 201, 'cmd-201');
+  seedAck(db, 202, 'cmd-202');
+  const node = nodeById('command-ack-mark-delivered');
+  const { resultPromise } = execute(node, {
+    statusCode: 0,
+    _commandAckIds: [201, 202],
+    _localAckCorrelation: { 'cmd-201': [201], 'cmd-202': [202] },
+    payload: { error: 'Command ACK REST IPv4 request failed', code: 'ECONNREFUSED' },
+  }, db);
+  await resultPromise;
+  const rows = rowsById(db);
+  assert.equal(rows[201].delivered_at, null);
+  assert.equal(rows[201].retry_count, 1);
+  assert.equal(rows[202].delivered_at, null);
+  assert.equal(rows[202].retry_count, 1);
+  db.close();
+}
+
+// ===========================================================================
+// 4. HTTP 500: every row retries (non-2xx, no results array to consult).
+// ===========================================================================
+async function testHttp500RetriesAll() {
+  const db = freshDb();
+  seedAck(db, 301, 'cmd-301');
+  const node = nodeById('command-ack-mark-delivered');
+  const { resultPromise } = execute(node, {
+    statusCode: 500,
+    _commandAckIds: [301],
+    _localAckCorrelation: { 'cmd-301': [301] },
+    payload: { error: 'Internal Server Error' },
+  }, db);
+  await resultPromise;
+  const rows = rowsById(db);
+  assert.equal(rows[301].delivered_at, null);
+  assert.equal(rows[301].retry_count, 1);
+  db.close();
+}
+
+// ===========================================================================
+// 5. Retry cap: a row already at retry_count=19 (one more retry would be the
+//    20th) is dead-lettered instead of retried forever.
+// ===========================================================================
+async function testRetryCapDeadLetters() {
+  const db = freshDb();
+  seedAck(db, 401, 'cmd-401', 0, 19);
+  const node = nodeById('command-ack-mark-delivered');
+  const { resultPromise } = execute(node, {
+    statusCode: 200,
+    _commandAckIds: [401],
+    _localAckCorrelation: { 'cmd-401': [401] },
+    payload: { results: [{ commandId: 'cmd-401', status: 'LEASE_MISMATCH', terminal: false }] },
+  }, db);
+  await resultPromise;
+  const rows = rowsById(db);
+  assert.equal(rows[401].retry_count, 20, 'retry_count must still increment on the capping retry');
+  assert.ok(rows[401].delivered_at, 'the 20th retry must dead-letter instead of leaving the row retryable forever');
+  assert.match(rows[401].last_error || '', /retry_cap_exceeded/);
+  db.close();
+}
+
+// ===========================================================================
+// 6. sync-pending-split: strict integer-2xx predicate reports a transport
+//    failure (statusCode=0) as a transport failure, not the generic
+//    "Unexpected pending command response" / statusCode: null fallback.
+//    RED on origin/main: `msg.statusCode && (...)` treats 0 as falsy, so the
+//    branch is skipped and the transport error payload falls through to the
+//    array-shape check, misreporting itself with statusCode: null.
+// ===========================================================================
+function testPendingSplitTransportZero() {
+  const db = freshDb();
+  const node = nodeById('sync-pending-split');
+  const { resultPromise, flowState } = execute(node, {
+    statusCode: 0,
+    payload: { error: 'Pending command REST IPv4 request failed', detail: 'connect ECONNREFUSED' },
+  }, db);
+  // sync-pending-split is synchronous (no `return (async()=>{...})()` wrapper);
+  // still invoked through the async IIFE harness, so unwrap the resolved value.
+  return resultPromise.then((out) => {
+    assert.equal(out, null);
+    assert.ok(flowState.sync_state && flowState.sync_state.lastError, 'sync_state.lastError must be set');
+    assert.equal(flowState.sync_state.lastError.source, 'pending-commands');
+    assert.equal(flowState.sync_state.lastError.message, 'Pending command poll failed',
+      'a statusCode=0 transport failure must be reported as a poll failure, not fall through to the generic "Unexpected pending command response" branch');
+    assert.equal(flowState.sync_state.lastError.statusCode, 0,
+      'statusCode must be reported as the real transport sentinel 0, not null');
+    db.close();
+  });
+}
+
+function testPendingSplitHttp200StillReplays() {
+  const db = freshDb();
+  const node = nodeById('sync-pending-split');
+  const { resultPromise } = execute(node, {
+    statusCode: 200,
+    payload: [{ commandId: 1, commandType: 'SET_STREGA_TIMED_ACTION', eventUuid: 'e1', aggregateType: 'DEVICE', aggregateKey: 'AABBCCDDEEFF0011' }],
+  }, db);
+  return resultPromise.then((out) => {
+    assert.ok(Array.isArray(out), 'sync-pending-split must still return the split output arrays on a real 200');
+    assert.equal(out[0].length, 1);
+    db.close();
+  });
+}
+
+(async () => {
+  await checkAsync('command-ack-build-batch sets msg._localAckCorrelation from command_id', testBuildBatchCorrelation);
+  await checkAsync('command-ack-mark-delivered: mixed 200 result set marks each row by its own outcome', testMixedResultsPerEntry);
+  await checkAsync('command-ack-mark-delivered: statusCode=0 retries every row', testTransportFailureZeroRetriesAll);
+  await checkAsync('command-ack-mark-delivered: HTTP 500 retries every row', testHttp500RetriesAll);
+  await checkAsync('command-ack-mark-delivered: retry cap dead-letters instead of retrying forever', testRetryCapDeadLetters);
+  await checkAsync('sync-pending-split: statusCode=0 reports itself as a transport failure', testPendingSplitTransportZero);
+  await checkAsync('sync-pending-split: a real 200 still replays commands', testPendingSplitHttp200StillReplays);
+
+  if (failures > 0) {
+    console.error('\ntest-command-ack-mark-delivered: FAIL (' + failures + ' failing check(s))');
+    process.exit(1);
+  }
+  console.log('\ntest-command-ack-mark-delivered: PASS');
+})().catch((error) => {
+  console.error(error.stack || error);
+  process.exit(1);
+});
