@@ -1054,9 +1054,11 @@ if (silentCatchBaseline) {
   // 7e30e6a4/77d3c52a/45e2a57e) converts auth-db-query's and al-link-finalize's
   // DB-close catch(_){} to visible node.warn while wiring installation_uuid
   // through the touched auth/account-link/bootstrap/sync-state nodes: 97 -> 95.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 95 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 95,
-    'silent-catch baseline records 95 for both maintained profiles',
-    'silent-catch baseline must be 95 for both maintained profiles');
+  // 94: PR-G, consult Q6 -- command-ack-mark-delivered's close() catch(_){} converted
+  // to a visible node.warn while rewriting the node for per-entry outcome marking: 95 -> 94.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 94 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 94,
+    'silent-catch baseline records 94 for both maintained profiles',
+    'silent-catch baseline must be 94 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
