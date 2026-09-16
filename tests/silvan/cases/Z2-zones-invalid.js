@@ -65,7 +65,9 @@ exports.run = async (ctx) => {
   ctx.expectStatus('deleting a zone with a non-numeric id returns 400', badId, 400);
 
   // --- device: invalid input ------------------------------------------------
-  const goodEui = ctx.simDeveui('Z2-dev', 1);
+  // Fresh per run: this case asserts that rejected requests created NO device
+  // row, and a "deleted" device survives (DELETE only unclaims).
+  const goodEui = ctx.freshDeveui('Z2-dev');
   state.devices.push(goodEui);
 
   const badType = await rest.post('/api/devices', {
@@ -96,7 +98,7 @@ exports.run = async (ctx) => {
   // for that type is unset. On this gateway, LORAIN, UC512 and STREGA_GEN2 are
   // NOT exported by node-red.init (they are env-file-only), so those device
   // types cannot be registered at all through the API.
-  const lorainEui = ctx.simDeveui('Z2-lorain', 1);
+  const lorainEui = ctx.freshDeveui('Z2-lorain');
   const lorain = await rest.post('/api/devices', {
     deveui: lorainEui, name: 'Sim LoRain ' + tag, type_id: 'AQUASCOPE_LORAIN', appkey: '00112233445566778899AABBCCDDEEFF',
   });
@@ -125,7 +127,7 @@ exports.run = async (ctx) => {
   let assignGhostStatus = null;
   let assignGhostHung = false;
   try {
-    const r = await rest.put('/api/irrigation-zones/' + zone.id + '/devices/' + ctx.simDeveui('Z2-ghost', 9), {}, { timeoutMs: 8000 });
+    const r = await rest.put('/api/irrigation-zones/' + zone.id + '/devices/' + ctx.freshDeveui('Z2-ghost-9'), {}, { timeoutMs: 8000 });
     assignGhostStatus = r.status;
   } catch (e) {
     assignGhostHung = true;
@@ -173,7 +175,7 @@ exports.run = async (ctx) => {
   ctx.expect('SQLite: the device itself survives the zone delete', !!orphan && orphan.deleted_at === null, orphan);
 
   // --- delete a device that does not exist ---------------------------------
-  const delGhostDev = await rest.del('/api/devices/' + ctx.simDeveui('Z2-ghost', 8));
+  const delGhostDev = await rest.del('/api/devices/' + ctx.freshDeveui('Z2-ghost-8'));
   // Pinned ACTUAL behaviour: delete-device-unlink runs an UPDATE with no
   // row-count check and the response node always sets 200, so deleting a device
   // that was never registered reports success.

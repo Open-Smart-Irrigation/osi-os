@@ -22,7 +22,9 @@ const state = { zones: [], devices: [] };
 exports.run = async (ctx) => {
   const { rest, ssh, ev, observer } = ctx;
   const tag = 'v1-' + Date.now().toString(36);
-  const valveEui = ctx.simDeveui('V1-valve', 1);
+  // Fresh per run: this case asserts the valve's INITIAL state and counts its
+  // own expectation rows, and a "deleted" device keeps both (DELETE only unclaims).
+  const valveEui = ctx.freshDeveui('V1-valve');
   state.devices.push(valveEui);
 
   const zone = await rest.post('/api/irrigation-zones', { name: 'Valve Zone ' + tag, timezone: 'Europe/Zurich' });
@@ -159,7 +161,7 @@ exports.run = async (ctx) => {
     observer.downlinksFor(valveEui).length === dlAfterInvalid, { downlinks: observer.downlinksFor(valveEui).length });
 
   // --- actuating someone else's / an unregistered valve ---------------------
-  const ghost = ctx.simDeveui('V1-ghost', 9);
+  const ghost = ctx.freshDeveui('V1-ghost');
   const ghostCmd = await rest.put('/api/devices/' + ghost + '/strega/timed-action', { action: 'OPEN', unit: 'minutes', amount: 1 }, { timeoutMs: 8000 })
     .catch(() => ({ status: 0, body: 'no response (hung)' }));
   ctx.expect('actuating an unregistered valve is refused, never silently queued',

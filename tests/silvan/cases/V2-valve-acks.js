@@ -26,7 +26,9 @@ async function pushRows(ssh, eui) {
 exports.run = async (ctx) => {
   const { rest, ssh, ev, observer } = ctx;
   const tag = 'v2-' + Date.now().toString(36);
-  const eui = ctx.simDeveui('V2-valve', 1);
+  // Fresh per run: the ACK ledger assertions count valve_schedule_pushes rows,
+  // which survive a device delete (DELETE only unclaims).
+  const eui = ctx.freshDeveui('V2-valve');
   state.devices.push(eui);
 
   const zone = await rest.post('/api/irrigation-zones', { name: 'ACK Zone ' + tag, timezone: 'Europe/Zurich' });

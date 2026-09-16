@@ -16,7 +16,9 @@ const uuidOf = (body) => (body && (body.schedule_uuid || (body.schedule && body.
 exports.run = async (ctx) => {
   const { rest, ssh, ev, observer } = ctx;
   const tag = 's1-' + Date.now().toString(36);
-  const eui = ctx.simDeveui('S1-valve', 1);
+  // Fresh per run: schedule rows are tombstoned, not removed, so a stable
+  // DevEUI accumulates them across runs.
+  const eui = ctx.freshDeveui('S1-valve');
   state.devices.push(eui);
 
   const zone = await rest.post('/api/irrigation-zones', { name: 'Sched Zone ' + tag, timezone: 'Europe/Zurich' });
@@ -210,7 +212,7 @@ exports.run = async (ctx) => {
   ctx.expectStatus('deleting a schedule that never existed returns 404', delGhost, 404);
 
   // --- schedules on a valve that is not registered -------------------------
-  const ghost = ctx.simDeveui('S1-ghost', 9);
+  const ghost = ctx.freshDeveui('S1-ghost');
   const ghostSched = await rest.post('/api/valves/' + ghost + '/schedules', {
     kind: 'WEEKLY', weekdays_mask: 2, start_time: '06:00', duration_minutes: 10,
   }, { timeoutMs: 8000 }).catch(() => ({ status: 0, body: 'no response (hung)' }));
