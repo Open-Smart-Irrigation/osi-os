@@ -1,5 +1,11 @@
+# The Node-RED editor/admin API is closed by settings.js httpAdminRoot: false
+# (see feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js). This
+# location used to redirect straight to the port-1880 editor; that surface no
+# longer exists to redirect to, so return 404 rather than send a browser to a
+# closed admin route. Re-enabling the editor for field repair is a deliberate
+# shell/deploy-path operation, not something this proxy path should expose.
 location /apps/node-red {
-    return 302 http://$host:1880;
+    return 404;
 }
 
 location /gui/ {

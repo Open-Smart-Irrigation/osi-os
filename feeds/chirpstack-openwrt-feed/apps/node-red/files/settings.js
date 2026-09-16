@@ -40,6 +40,19 @@ module.exports = {
     userDir: "/srv/node-red",
     uiPort: process.env.PORT || 1880,
 
+    // Editor/admin API closed by default: an unauthenticated visitor on the
+    // shared :1880 listener could otherwise deploy a function node and run
+    // code as the gateway's (root) service account. httpAdminRoot: false
+    // disables the editor and the /flows, /settings, /nodes admin routes
+    // while leaving HTTP-node product routes and httpStatic/httpStaticRoot
+    // below untouched on the same listener. Do NOT set uiHost: that would
+    // bind the whole listener to loopback and remove LAN access to /gui and
+    // /api for every farmer browser on the shared port. Re-enabling the
+    // editor for field repair is a deliberate shell/deploy-path operation
+    // (see AGENTS.md "Security"), not a config default. Durable per-device
+    // adminAuth is a tracked follow-up (see PR body / consult Q3).
+    httpAdminRoot: false,
+
     // Serve React GUI at /gui path
     httpStatic: '/usr/lib/node-red/gui',
     httpStaticRoot: '/gui',

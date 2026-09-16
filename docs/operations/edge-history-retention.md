@@ -231,5 +231,8 @@ which fetches and executes the migration file — additive-only, idempotent)
 before the operator restarts Node-RED. Post-deploy check: run the node
 one-liner above ~2 minutes after `/etc/init.d/node-red restart` and expect
 `n >= 1` with a fresh `last` timestamp. The first hourly rollups appear after
-the next 02:10 tick (or trigger `Gateway Health Rollup Tick` manually in the
-Node-RED editor).
+the next 02:10 tick. The Node-RED editor is closed by default
+(`httpAdminRoot: false`, see AGENTS.md "Security"); do not rely on manually
+triggering `Gateway Health Rollup Tick` from it for a routine post-deploy
+check — wait for the scheduled tick, or re-enable the editor through the
+field-repair path first.
