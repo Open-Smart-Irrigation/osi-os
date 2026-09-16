@@ -92,16 +92,26 @@ function toEpochMs(iso: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Mirrors the two backend sites that decide when a row becomes a timeout in the first place --
+// conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json's "STREGA Reconciliation
+// Monitor" (RECONCILIATION_GRACE_SEC) and its "Compute derived per-row status" node (GRACE_MS),
+// both 1800s (one Class-A uplink cycle each leg). An OPEN_TIMEOUT/CLOSE_TIMEOUT row cannot even
+// exist before that grace has elapsed since expectedCloseAt, so a device reporting on any
+// normal cadence already has last_seen past a *bare* expectedCloseAt the moment the row first
+// appears -- comparing without the same grace made 'expired' disappear instantly, hiding the
+// one case that matters most: an otherwise-alive valve that silently missed a command.
+const RECONCILIATION_GRACE_MS = 1800 * 1000;
+
 /**
- * True once the device has reported again (any uplink, tracked via `last_seen`) after the
- * moment a failed/timed-out actuation gave up on hearing from it. A fresher report means we
- * now know more about the valve than we did at the moment it failed/timed out, so that old
- * failure/timeout no longer describes the present -- it must not stick around forever.
+ * True once the device has reported again (any uplink, tracked via `last_seen`) at least
+ * `graceMs` after the moment a failed/timed-out actuation gave up on hearing from it. A
+ * fresher report means we now know more about the valve than we did at that moment, so the
+ * old failure/timeout no longer describes the present -- it must not stick around forever.
  */
-function hasNewerDeviceObservationThan(device: Device, terminalAtIso: string | null | undefined): boolean {
+function hasNewerDeviceObservationThan(device: Device, terminalAtIso: string | null | undefined, graceMs = 0): boolean {
   const terminalAt = toEpochMs(terminalAtIso);
   const lastSeen = toEpochMs(device.last_seen);
-  return terminalAt !== null && lastSeen !== null && lastSeen > terminalAt;
+  return terminalAt !== null && lastSeen !== null && lastSeen > terminalAt + graceMs;
 }
 
 /**
@@ -126,10 +136,14 @@ export function getStregaTargetIntent(device: Device, rows: IrrigationActuation[
   if (row.status === 'PENDING_OPEN') return 'pending';
 
   if (row.status === 'COMMAND_FAILED') {
+    // A command failure is an immediate ACK-path rejection, not a wait-and-see timeout -- no
+    // grace component here, unlike the branch below.
     return hasNewerDeviceObservationThan(device, row.commandAppliedAt ?? row.commandedAt) ? null : 'failed';
   }
   if (row.status === 'OPEN_TIMEOUT' || row.status === 'CLOSE_TIMEOUT') {
-    return hasNewerDeviceObservationThan(device, row.expectedCloseAt ?? row.commandedAt) ? null : 'expired';
+    return hasNewerDeviceObservationThan(device, row.expectedCloseAt ?? row.commandedAt, RECONCILIATION_GRACE_MS)
+      ? null
+      : 'expired';
   }
 
   // UNKNOWN, or any future status this function does not yet recognise -- silence, not a guess.

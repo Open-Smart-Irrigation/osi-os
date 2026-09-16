@@ -361,6 +361,38 @@ describe('StregaValveCard', () => {
             expect(getStregaTargetIntent(device, rows)).toBeNull();
         });
 
+        // Follow-up fix (2nd independent-verifier defect on PR #256): an OPEN_TIMEOUT/
+        // CLOSE_TIMEOUT row cannot even exist until the backend's own 1800s
+        // (RECONCILIATION_GRACE_SEC / GRACE_MS) grace has elapsed past expectedCloseAt -- see
+        // flows.json's "STREGA Reconciliation Monitor" and "Compute derived per-row status".
+        // Comparing device.last_seen against the *bare* expectedCloseAt meant any device
+        // reporting on a normal cadence (2 min default) already had last_seen past
+        // expectedCloseAt long before the row could ever be classified as a timeout in the
+        // first place -- 'expired' was suppressed the instant it could first appear, hiding
+        // the one case that matters most: an otherwise-alive valve that silently missed a
+        // command.
+        it('keeps an OPEN_TIMEOUT shown as expired for a device that reported shortly after the timeout window, within the backend grace', () => {
+            const device = {
+                ...mockDevice,
+                current_state: 'CLOSED',
+                target_state: 'OPEN',
+                last_seen: '2026-05-29T10:20:00Z', // expectedCloseAt + 10 min -- inside the 30 min grace
+            } as Device;
+            const rows = [actuationFixture({ status: 'OPEN_TIMEOUT', expectedCloseAt: '2026-05-29T10:10:00Z' })];
+            expect(getStregaTargetIntent(device, rows)).toBe('expired');
+        });
+
+        it('clears an OPEN_TIMEOUT once the device has reported past the backend grace window', () => {
+            const device = {
+                ...mockDevice,
+                current_state: 'CLOSED',
+                target_state: 'OPEN',
+                last_seen: '2026-05-29T10:41:00Z', // expectedCloseAt + 31 min -- past the 30 min grace
+            } as Device;
+            const rows = [actuationFixture({ status: 'OPEN_TIMEOUT', expectedCloseAt: '2026-05-29T10:10:00Z' })];
+            expect(getStregaTargetIntent(device, rows)).toBeNull();
+        });
+
         it('(d) reports an active PENDING_OBSERVATION actuation as pending regardless of actuation history', () => {
             const device = {
                 ...mockDevice,
