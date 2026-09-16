@@ -42,6 +42,30 @@ async function call(dbPath, msg) {
   return handleHttpRequest({ msg, Database: TestDatabase, environment: { authTokenSecret: SECRET, dbPath }, warn: () => {} });
 }
 
+// PR-N (Fable consult Q5/Q7, consult-consolidated.md): PUT /api/system/settings
+// verified a bearer token but never a role, so under scope any authenticated
+// viewer could change gateway settings -- main's own W1 rule is
+// "ownership+role-gated writes". tokenAs lets a test authenticate as a
+// specific username (the default token() above always claims 'u'), which the
+// role check needs to resolve a real users row.
+function tokenAs(userId, username) {
+  const payload = Buffer.from(JSON.stringify({ userId, username, exp: Date.now() + 60000 })).toString('base64url');
+  return 'Bearer ' + payload + '.' + crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+}
+function reqAs(method, body, userId, username) {
+  return { req: { method, headers: { authorization: tokenAs(userId, username) } }, payload: body };
+}
+function insertUser(dbPath, { id, username, role }) {
+  const raw = new DatabaseSync(dbPath);
+  raw.prepare(
+    "INSERT INTO users(id, username, password_hash, created_at, role) VALUES (?, ?, 'x', datetime('now'), ?)"
+  ).run(id, username, role);
+  raw.close();
+}
+async function callScoped(dbPath, msg, extra = {}) {
+  return handleHttpRequest({ msg, Database: TestDatabase, environment: { authTokenSecret: SECRET, dbPath }, scopedMode: true, warn: () => {}, ...extra });
+}
+
 test('GET /api/system/settings defaults to UTC when no gateway_timezone row exists', async () => {
   const dbPath = await tempDb();
   const out = await call(dbPath, req('GET'));
@@ -208,4 +232,69 @@ test('PUT /api/system/settings: table-missing-safe, returns 503 schema_pending i
   const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich' }));
   assert.equal(out.statusCode, 503);
   assert.equal(out.payload.error, 'schema_pending');
+});
+
+test('PUT /api/system/settings (scoped mode): a viewer is rejected with 403 and no write happens', async () => {
+  const dbPath = await tempDb();
+  insertUser(dbPath, { id: 1, username: 'viewer1', role: 'viewer' });
+  const out = await callScoped(dbPath, reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'viewer1'));
+  assert.equal(out.statusCode, 403);
+  const raw = new DatabaseSync(dbPath);
+  const row = raw.prepare("SELECT value FROM app_settings WHERE key='gateway_timezone'").get();
+  raw.close();
+  assert.equal(row, undefined, 'a role-denied PUT must never write app_settings');
+});
+
+test('PUT /api/system/settings (scoped mode): a researcher (mutation-capable elsewhere, not admin here) is rejected with 403', async () => {
+  const dbPath = await tempDb();
+  insertUser(dbPath, { id: 1, username: 'res1', role: 'researcher' });
+  const out = await callScoped(dbPath, reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'res1'));
+  assert.equal(out.statusCode, 403, 'system settings are admin-only, unlike zone/device writes');
+});
+
+test('PUT /api/system/settings (scoped mode): an admin is allowed and the write happens', async () => {
+  const dbPath = await tempDb();
+  insertUser(dbPath, { id: 1, username: 'admin1', role: 'admin' });
+  const out = await callScoped(dbPath, reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'admin1'));
+  assert.equal(out.statusCode, 200);
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0 });
+});
+
+test('GET /api/system/settings (scoped mode): reads stay open for a non-admin', async () => {
+  const dbPath = await tempDb();
+  insertUser(dbPath, { id: 1, username: 'viewer1', role: 'viewer' });
+  const out = await callScoped(dbPath, reqAs('GET', undefined, 1, 'viewer1'));
+  assert.equal(out.statusCode, 200, 'GET must stay open -- only the write path is role-gated');
+});
+
+test('PUT /api/system/settings: flag-off preserves the legacy bearer-only behavior for a non-admin', async () => {
+  const dbPath = await tempDb();
+  insertUser(dbPath, { id: 1, username: 'viewer1', role: 'viewer' });
+  // scopedMode omitted -- defaults to false, matching production when
+  // sys-settings-router-fn reads OSI_SCOPED_ACCESS unset/'0'.
+  const out = await handleHttpRequest({
+    msg: reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'viewer1'),
+    Database: TestDatabase,
+    environment: { authTokenSecret: SECRET, dbPath },
+    warn: () => {},
+  });
+  assert.equal(out.statusCode, 200, 'flag-off must not role-gate the legacy route');
+});
+
+test('PUT /api/system/settings: flag-off never touches the scope helper (hermetic, mirrors #201)', async () => {
+  const dbPath = await tempDb();
+  insertUser(dbPath, { id: 1, username: 'viewer1', role: 'viewer' });
+  const scopeMustNotBeTouched = {
+    assertAuthenticatedRole() {
+      throw new Error('scope helper must never be referenced when scopedMode is false');
+    },
+  };
+  const out = await handleHttpRequest({
+    msg: reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'viewer1'),
+    Database: TestDatabase,
+    environment: { authTokenSecret: SECRET, dbPath },
+    scope: scopeMustNotBeTouched,
+    warn: () => {},
+  });
+  assert.equal(out.statusCode, 200);
 });

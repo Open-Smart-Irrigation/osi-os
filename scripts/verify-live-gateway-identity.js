@@ -1056,9 +1056,14 @@ if (silentCatchBaseline) {
   // through the touched auth/account-link/bootstrap/sync-state nodes: 97 -> 95.
   // 94: PR-G, consult Q6 -- command-ack-mark-delivered's close() catch(_){} converted
   // to a visible node.warn while rewriting the node for per-entry outcome marking: 95 -> 94.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 94 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 94,
-    'silent-catch baseline records 94 for both maintained profiles',
-    'silent-catch baseline must be 94 for both maintained profiles');
+  // 89: PR #244 Codex P1 follow-up (rebased onto origin/main) -- sys-fan-fn's
+  // findFanControl (hwmon enumeration, per-dir hwmon name read, pwmchip2 access check)
+  // and its raw-PWM setup path (period read, pre-period-write disable) had five
+  // catch(e){} blocks left empty by the role-gate port; all five now log via
+  // node.warn: 94 -> 89.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 89 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 89,
+    'silent-catch baseline records 89 for both maintained profiles',
+    'silent-catch baseline must be 89 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
