@@ -6,15 +6,9 @@ const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..');
 
-const seedDatabasePaths = [
-  'conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
-  'conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
-  'conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db',
-  'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
-  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
-  'database/farming.db',
-  'web/react-gui/farming.db',
-].map((relativePath) => path.join(repoRoot, relativePath));
+// One source of truth for which images ship: scripts/seed-db-paths.js, shared
+// with scripts/build-seed-db.js and scripts/verify-seed-db-ledger.js.
+const { SEED_DB_PATHS: seedDatabasePaths } = require('./seed-db-paths');
 
 const schemaContract = {
   radio_store_identity: ["singleton_id", "radio_store_uuid", "installation_uuid", "state", "created_at", "updated_at"],
