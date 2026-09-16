@@ -30,10 +30,10 @@ export const SoilTab: React.FC<Props> = ({ local, devices }) => {
   const hasVwc = soilMoistureMetric != null;
 
   const moistureLabel =
-    hasSwt && hasVwc ? 'Soil Moisture (SWT & VWC)' :
-    hasSwt           ? 'Soil Moisture (SWT)' :
-    hasVwc           ? 'Soil Moisture (VWC)' :
-                       'Soil Moisture';
+    hasSwt && hasVwc ? t('environment.soil.moistureSwtVwc', { defaultValue: 'Soil Moisture (SWT & VWC)' }) :
+    hasSwt           ? t('environment.soil.moistureSwt', { defaultValue: 'Soil Moisture (SWT)' }) :
+    hasVwc           ? t('environment.soil.moistureVwc', { defaultValue: 'Soil Moisture (VWC)' }) :
+                       t('environment.soil.moisture', { defaultValue: 'Soil Moisture' });
 
   return (
     <div className="flex flex-col gap-2">

@@ -146,7 +146,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
             type="button"
             onClick={openRainHistory}
             className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
           >
             {formatNumber(data.rain_mm_delta, 1, 'mm')}
           </button>
@@ -161,7 +161,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
             type="button"
             onClick={openRainHistory}
             className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
           >
             {formatNumber(data.rain_mm_today, 1, 'mm')}
           </button>
@@ -174,7 +174,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
             type="button"
             onClick={openRainHistory}
             className={`cursor-pointer text-left text-xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-            title="View history"
+            title={t('common.viewHistory', { defaultValue: 'View history' })}
           >
             {rateLabel}
           </button>

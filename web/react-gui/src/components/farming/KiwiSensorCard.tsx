@@ -339,7 +339,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
       <button
         onClick={() => setMonitor(sensor)}
         className="text-2xl font-bold tabular-nums text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
-        title="View history"
+        title={t('common.viewHistory', { defaultValue: 'View history' })}
       >
         {formatted}
       </button>
