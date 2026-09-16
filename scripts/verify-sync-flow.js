@@ -2327,7 +2327,7 @@ expectIncludesById('s2120-process-fn', 'data.object?.messages', 'accepts live de
 expectIncludesById('s2120-process-fn', 'data.object?.data?.messages', 'accepts nested decoded S2120 message shape');
 expectIncludesById('s2120-process-fn', "normalizePressureHpa(measurements['4101'])", 'uses current S2120 pressure ID');
 expectIncludesById('s2120-process-fn', "measurements['4113']", 'uses the Seeed cumulative-rain measurement ID');
-expectIncludesById('s2120-process-fn', "measurements['4213'] ?? measurements['4191']", 'uses current and legacy S2120 wind-gust IDs');
+expectIncludesById('s2120-process-fn', "windGustMps: measurements['4191'] ?? null", "reads only measurement 4191 (Peak Wind Gust) for wind gust -- 4213 is Rain Accumulation and must never be read as gust (PR-I fix/s2120-gust-and-gen2-battery)");
 expectIncludesById('s2120-process-fn', "measurements['4103'] ?? measurements.bat_pct", 'uses the decoded S2120 battery-percent field');
 expectIncludesById('s2120-process-fn', 'duplicate_timestamp', 'skips duplicate S2120 rain-counter uplinks');
 expectIncludesById('s2120-process-fn', 'out_of_order', 'skips out-of-order S2120 rain-counter uplinks');
@@ -3945,7 +3945,12 @@ if (!dendroHelperPath) {
               { measurementId: 4105, measurementValue: 3.2 },
               { measurementId: 4113, measurementValue: options.rainGaugeCumulativeMm ?? 12.4 },
               { measurementId: 4190, measurementValue: 2.7 },
-              { measurementId: 4213, measurementValue: options.windGustMps ?? 7.6 },
+              // 4191 is the real Peak Wind Gust id; 4213 (Rain Accumulation) is included
+              // as a same-uplink distractor with a deliberately different value so this
+              // fixture also proves windGustMps never reads it (PR-I regression: s2120-process-fn
+              // used to prefer 4213 over 4191 for windGustMps).
+              { measurementId: 4191, measurementValue: options.windGustMps ?? 7.6 },
+              { measurementId: 4213, measurementValue: options.rainAccumulationMm ?? 99.9 },
             ]],
           },
         },
@@ -4332,7 +4337,7 @@ if (!dendroHelperPath) {
       );
       const formatted = processedMsg.formattedData || {};
       expectEqual(formatted.rainGaugeCumulativeMm, 12.4, 'S2120 fixture maps measurement 4113 to cumulative rain');
-      expectEqual(formatted.windGustMps, 7.6, 'S2120 fixture maps measurement 4213 to wind gust');
+      expectEqual(formatted.windGustMps, 7.6, 'S2120 fixture maps measurement 4191 to wind gust, ignoring the 4213 (Rain Accumulation) distractor');
       expectEqual(formatted.batPct, 84, 'S2120 fixture maps measurement 4103 to battery percent');
       expectApprox(formatted.barometricPressureHpa, 1008.7, 0.000001, 'S2120 fixture normalizes pressure to hPa');
       expectEqual(formatted.rainDeltaStatus, 'first_sample', 'S2120 fixture marks the first rain sample without fabricating a delta');
