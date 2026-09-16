@@ -153,39 +153,50 @@ test('deploy migration wiring uses persistent backup path and lifecycle-aware cl
 
 test('deploy migration wiring probes for a foreign-numbered ledger only after SKIP, before the second checkpoint', () => {
   const skipIdx = indexOf('SKIP: schema_migrations ledger already has rows');
-  const probeIdx = indexOf('recon_probe_version="$(sqlite3 "$DB_PATH" "SELECT MIN(version) FROM schema_migrations WHERE version > 21;")"');
-  const ledgerChecksumIdx = indexOf('recon_ledger_checksum="$(sqlite3 "$DB_PATH" "SELECT checksum FROM schema_migrations WHERE version=$recon_probe_version;")"');
-  const mainChecksumIdx = indexOf('recon_main_checksum="$(node -e');
-  const mismatchIdx = indexOf('if [ -n "$recon_main_checksum" ] && [ "$recon_ledger_checksum" != "$recon_main_checksum" ]; then');
+  const beginMarkerIdx = indexOf('# reconcile probe begin');
+  const probeIdx = indexOf('recon_ledger_rows="$(sqlite3 "$DB_PATH" "SELECT version, checksum FROM schema_migrations WHERE version > 21 ORDER BY version;")"');
+  const decisionIdx = indexOf('recon_probe_version="$(printf \'%s\\n\' "$recon_ledger_rows" | node -e');
+  const endMarkerIdx = indexOf('# reconcile probe end');
+  const mismatchIdx = indexOf('if [ -n "$recon_probe_version" ]; then');
   const fetchAssetsCallIdx = deploy.indexOf('fetch_reconciliation_assets', mismatchIdx);
   const reconcileCallIdx = indexOf('node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH"');
   const reconcileRefuseIdx = indexOf('ERROR: ledger numbering reconciliation refused or failed; aborting schema migration');
   const secondCheckpointIdx = deploy.indexOf('if ! checkpoint_live_db; then', skipIdx);
   const migrateIdx = indexOf('node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"');
 
-  assert.ok(skipIdx < probeIdx, 'the foreign-ledger probe runs inside the ledger-already-has-rows branch, after the SKIP message');
-  assert.ok(probeIdx < ledgerChecksumIdx && ledgerChecksumIdx < mainChecksumIdx, 'lowest post-0021 version must be found before either checksum is read');
-  assert.ok(mainChecksumIdx < mismatchIdx, 'both checksums must be read before they are compared');
+  assert.ok(skipIdx < beginMarkerIdx, 'the foreign-ledger probe runs inside the ledger-already-has-rows branch, after the SKIP message');
+  assert.ok(beginMarkerIdx < probeIdx && probeIdx < decisionIdx, 'the whole-ledger query must be read before the per-row decision is computed');
+  assert.ok(decisionIdx < endMarkerIdx && endMarkerIdx < mismatchIdx, 'the probe markers must bracket exactly the read + decide steps, ending before the reconcile-invocation branch');
   assert.ok(mismatchIdx < fetchAssetsCallIdx, 'reconciliation assets are fetched only inside the mismatch branch (lazy fetch)');
   assert.ok(fetchAssetsCallIdx < reconcileCallIdx, 'assets must be fetched before the reconciliation CLI is invoked');
   assert.ok(reconcileCallIdx < reconcileRefuseIdx, 'a refusing/failing reconcile run must abort the deploy');
   assert.ok(reconcileRefuseIdx < secondCheckpointIdx, 'reconciliation (or its absence) resolves before the pre-migrate-cli checkpoint');
   assert.ok(secondCheckpointIdx < migrateIdx, 'second checkpoint still precedes migrate-cli');
   assert.match(deploy, /--apply\s*$/m, 'the deploy hook must invoke reconciliation in --apply mode, never --report');
+
+  // The probe must compare EVERY applied row above 0021, not just the lowest
+  // one: a single-row MIN(version) probe misses a lineage whose early
+  // foreign-numbered versions happen to be byte-identical to main's own
+  // migrations at those same numbers (osi-os stabilization program PR-L /
+  // external consult Q1: Bovey 0022-0024 match, only 0025 differs). Behavior
+  // is proven against a real sqlite3 fixture ledger in
+  // scripts/test-deploy-reconcile-probe.js; this is only the static shape.
+  assert.doesNotMatch(deploy, /SELECT MIN\(version\) FROM schema_migrations/, 'must not regress to a single-row MIN(version) probe');
+  assert.match(deploy, /ORDER BY version/, 'the whole-ledger probe query must read rows in ascending version order (first mismatch wins)');
 });
 
 test('deploy migration wiring: a main-numbered gateway (checksums already match) takes the untouched fast path', () => {
-  // Static proof that nothing beyond two read-only sqlite3 queries and a
-  // string compare runs when the ledger is already main-numbered: the ONLY
+  // Static proof that nothing beyond one read-only sqlite3 query and one
+  // node invocation runs when the ledger is already main-numbered: the ONLY
   // way to reach fetch_reconciliation_assets or the reconcile CLI call is
-  // through the checksum-mismatch conditional — there is no other call site.
+  // through the recon_probe_version conditional — there is no other call site.
   const fetchAssetsDefIdx = indexOf('fetch_reconciliation_assets() {');
   const fetchAssetsCallSites = [...deploy.matchAll(/\bfetch_reconciliation_assets\b/g)].map((m) => m.index);
   assert.equal(fetchAssetsCallSites.length, 2, 'fetch_reconciliation_assets must have exactly one definition and one call site');
   assert.ok(fetchAssetsDefIdx === fetchAssetsCallSites[0]);
   const callSiteIdx = fetchAssetsCallSites[1];
-  const mismatchIdx = indexOf('if [ -n "$recon_main_checksum" ] && [ "$recon_ledger_checksum" != "$recon_main_checksum" ]; then');
-  const mismatchFiIdx = deploy.indexOf('\n            fi\n', mismatchIdx);
+  const mismatchIdx = indexOf('if [ -n "$recon_probe_version" ]; then');
+  const mismatchFiIdx = deploy.indexOf('\n        fi\n', mismatchIdx);
   assert.ok(mismatchFiIdx > mismatchIdx, 'must find the mismatch conditional\'s own closing fi');
   assert.ok(mismatchIdx < callSiteIdx && callSiteIdx < mismatchFiIdx,
     'the only call to fetch_reconciliation_assets must be inside the checksum-mismatch branch');
@@ -241,6 +252,48 @@ test('deploy migration wiring flips the payload BEFORE restarting Node-RED on mi
   const defaultDeclIdx = deploy.indexOf('PAYLOAD_FLIPPED=0');
   const runSchemaMigrationDefIdx = indexOf('run_schema_migration() {');
   assert.ok(defaultDeclIdx >= 0 && defaultDeclIdx < runSchemaMigrationDefIdx, 'PAYLOAD_FLIPPED must default to 0 before run_schema_migration is defined');
+});
+
+test('deploy migration wiring verifies the post-migration ledger/fingerprint head before flipping the payload (PR-L / external consult Q1)', () => {
+  const migrateSuccessIdx = indexOf(
+    'if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then'
+  );
+  const migrateFailureIdx = indexOf('migration_rc=$?');
+  const successBlock = deploy.slice(migrateSuccessIdx, migrateFailureIdx);
+
+  const verifyHeadCallIdx = successBlock.indexOf('node "$TMP_DIR/scripts/verify-head-cli.js" "$DB_PATH" --migrations-dir "$migrations_dir"');
+  const verifyHeadAbortIdx = successBlock.indexOf('aborting before the payload flip');
+  const flipCallIdx = successBlock.indexOf('swap_call flipTo "$DEPLOY_STAMP"');
+  const restartCallIdx = successBlock.indexOf('if ! restart_node_red; then');
+
+  assert.ok(verifyHeadCallIdx >= 0, 'migrate-cli success branch must invoke verify-head-cli.js against the migrated DB');
+  assert.ok(verifyHeadAbortIdx > verifyHeadCallIdx, 'a non-ok verify-head-cli result must abort the deploy');
+  assert.ok(verifyHeadAbortIdx < flipCallIdx, 'verify-head-cli must be checked BEFORE the payload flip');
+  assert.ok(flipCallIdx < restartCallIdx, 'payload flip still precedes the Node-RED restart');
+
+  // verify-head-cli.js and lib/osi-migrate are already fetched by
+  // fetch_migration_runner (osi-os#212) — this must be the only place that
+  // invokes the CLI, and it must not re-fetch it.
+  const fetchListIdx = indexOf('verify-head-cli.js \\');
+  assert.ok(fetchListIdx < migrateSuccessIdx, 'verify-head-cli.js must already be in the Stage 1 fetch list, not fetched again here');
+});
+
+test('deploy migration wiring: a boot-node "devices rebuild ABORTED" log line during the post-restart window turns the health self-check red (PR-L / external consult Q1)', () => {
+  // A refused devices-CHECK rebuild does not stop Node-RED or its HTTP
+  // listener, so /gui reachability alone cannot prove schema init succeeded.
+  const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
+  const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
+  const logMarkIdx = indexOf('NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"');
+  const probeLoopIdx = indexOf('while [ "$probe_elapsed" -lt "$NODE_RED_HEALTH_TIMEOUT" ]; do');
+  const grepIdx = indexOf('grep -q "devices rebuild ABORTED"');
+  const overrideIdx = deploy.indexOf('PROBE_OK=1', grepIdx);
+  const commitDecisionIdx = deploy.indexOf('if [ "$PROBE_OK" = "0" ]; then\n    echo "OK: committing payload $DEPLOY_STAMP"');
+
+  assert.ok(logMarkIdx >= 0 && logMarkIdx < restartIdx, 'the log line count must be captured BEFORE the restart, so only new lines from this restart are considered');
+  assert.ok(restartIdx < probeLoopIdx, 'restart still precedes the /gui reachability probe loop');
+  assert.ok(probeLoopIdx < grepIdx, 'the abort-log check runs after the reachability probe loop has settled PROBE_OK');
+  assert.ok(grepIdx < overrideIdx && overrideIdx < commitDecisionIdx, 'a found abort log line must flip PROBE_OK back to failing BEFORE the commit/rollback decision');
+  assert.match(deploy, /tail -n "\+\$\(\(NODE_RED_LOG_MARK \+ 1\)\)"/, 'must only scan log lines appended since the mark (busybox tail -n +N), never the whole ring including stale prior aborts');
 });
 
 test('deploy.sh has a single migration call site and no inline schema DDL helpers', () => {
