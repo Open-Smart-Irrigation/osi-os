@@ -1,5 +1,8 @@
 {
   "network": {
+    "loadingDevices": "Geräte werden geladen…",
+    "noDevices": "Diesem Gateway ist noch kein Gerät bekannt",
+    "loadingObservations": "Beobachtungen werden geladen…",
     "title": "Netzwerkbeobachtungen",
     "device": "Gerät",
     "location": "Installierter Standort",

@@ -177,6 +177,77 @@
       "intervalNote": "OSI establece el intervalo normal de caja cerrada en FPort 11. El intervalo de caja abierta permanece fijo en 2 minutos y la protección antimanipulación permanece activada."
     },
   "zone": {
+    "configure": "Configurar",
+    "chips": {
+      "dendroActive": "Dendrómetro activo",
+      "schedulerOff": "Programación desactivada",
+      "metricEnabled": "Disparador activo: {{metric}}",
+      "metric": {
+        "DENDRO": "Dendrómetro",
+        "VWC": "Contenido de agua (VWC)",
+        "SWT_1": "Tensión hídrica (S1)",
+        "SWT_2": "Tensión hídrica (S2)",
+        "SWT_3": "Tensión hídrica (S3)",
+        "SWT_WM1": "Tensión hídrica (S1)",
+        "SWT_WM2": "Tensión hídrica (S2)",
+        "SWT_AVG": "Tensión hídrica (media)",
+        "default": "Tensión hídrica"
+      }
+    },
+    "groups": {
+      "lsn50Nodes": "Nodos Dragino LSN50",
+      "sdi12Nodes": "Nodos de suelo SDI-12",
+      "weatherStations": "Estaciones meteorológicas",
+      "rainGauges": "Pluviómetros"
+    },
+    "water": {
+      "title": "Balance hídrico",
+      "subtitle": "Resumen diario de lluvia, riego y demanda del cultivo para esta zona.",
+      "updated": "Actualizado {{time}}",
+      "rainToday": "Lluvia hoy",
+      "measured": "Medido (caudalímetro)",
+      "estimated": "Estimado (tiempo de válvula × calibración): {{value}}",
+      "nextRain": "Próxima lluvia",
+      "forecastNext24h": "Previsión 24 h",
+      "actionTitle": "Acción",
+      "drivenByDendro": "Según la recomendación del dendrómetro",
+      "drivenByBalance": "Según el balance hídrico",
+      "treeStress": "Estrés del árbol",
+      "awaitingRecommendation": "Recomendación pendiente",
+      "confidence": "{{percent}} % de confianza",
+      "confidencePending": "La confianza se actualiza con el próximo cálculo dendro",
+      "action": {
+        "delay_irrigation": "Retrasar el riego",
+        "irrigate_today": "Regar hoy",
+        "monitor_today": "Vigilar hoy",
+        "maintain_rain_suppression": "Suspensión por lluvia activa",
+        "maintain_recovery_hold": "Pausa de recuperación activa",
+        "increase_10": "Aumentar ligeramente el riego",
+        "increase_20": "Aumentar el riego",
+        "decrease_10": "Reducir ligeramente el riego",
+        "decrease_20": "Reducir el riego",
+        "emergency_irrigate": "Riego de emergencia",
+        "default": "Vigilar el estado hídrico"
+      },
+      "source": {
+        "shared_server": "OSI Server",
+        "shared_server_stale": "OSI Server desactualizado",
+        "local_fallback": "Respaldo local",
+        "unlinked_local": "Solo local",
+        "default": "Fuente de agua"
+      },
+      "soil": {
+        "title": "Suelo ahora",
+        "wet": "Húmedo",
+        "moderate": "Moderado",
+        "dry": "Seco",
+        "volumetric": "Contenido volumétrico de agua",
+        "noReadingSince": "Sin lecturas desde {{since}}",
+        "noReadingYet": "Todavía sin lecturas",
+        "invalidReading": "Lectura no válida",
+        "lastValid": "Última válida {{value}} · {{time}}"
+      }
+    },
     "deviceCount_one": "{{count}} dispositivo",
     "deviceCount_other": "{{count}} dispositivos",
     "assignDevice": "+ Dispositivo",
@@ -230,6 +301,13 @@
     "triggerHint": "Activa si {{metric}} ≥ {{threshold}} kPa (se comprueba una vez al día a las 06:00)."
   },
   "environment": {
+    "soil": {
+      "moistureSwtVwc": "Humedad del suelo (SWT y VWC)",
+      "moistureSwt": "Humedad del suelo (SWT)",
+      "moistureVwc": "Humedad del suelo (VWC)",
+      "moisture": "Humedad del suelo"
+    },
+    "generatedAt": "Generado {{time}}",
     "sectionTitle": "Entorno y previsión meteorológica",
     "tabs": {
       "local": "Local",
@@ -278,6 +356,10 @@
       "fromSource": "de {{source}}"
     },
     "forecast": {
+      "dayToday": "Hoy",
+      "dayTomorrow": "Mañana",
+      "etaToday": "{{time}} hoy",
+      "etaTomorrow": "{{time}} mañana",
       "next24h": "Próx. 24 h",
       "next72h": "Próx. 72 h",
       "nextRain": "Próxima lluvia",
@@ -360,5 +442,8 @@
     "failedFarm": "Error al eliminar el dispositivo",
     "buttonZone": "Retirar de esta zona",
     "buttonFarm": "Eliminar dispositivo"
+  },
+  "common": {
+    "viewHistory": "Ver historial"
   }
 }

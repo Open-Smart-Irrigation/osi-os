@@ -1,5 +1,8 @@
 {
   "network": {
+    "loadingDevices": "A carregar dispositivos…",
+    "noDevices": "Este gateway ainda não conhece dispositivos",
+    "loadingObservations": "A carregar observações…",
     "title": "Observações de rede",
     "device": "Dispositivo",
     "location": "Localização instalada",

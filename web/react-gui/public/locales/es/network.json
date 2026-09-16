@@ -1,5 +1,8 @@
 {
   "network": {
+    "loadingDevices": "Cargando dispositivos…",
+    "noDevices": "Esta pasarela aún no conoce ningún dispositivo",
+    "loadingObservations": "Cargando observaciones…",
     "title": "Observaciones de red",
     "device": "Dispositivo",
     "location": "Ubicación instalada",

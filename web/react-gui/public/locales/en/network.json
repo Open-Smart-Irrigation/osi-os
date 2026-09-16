@@ -1,5 +1,8 @@
 {
   "network": {
+    "loadingDevices": "Loading devices…",
+    "noDevices": "No devices are known to this gateway yet",
+    "loadingObservations": "Loading observations…",
     "title": "Network observations",
     "device": "Device",
     "location": "Installed location",

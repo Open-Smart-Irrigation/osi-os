@@ -24,6 +24,18 @@ Tracked in code at
 `en` without failing the locale-parity guard, and requires it to be removed
 from that set once corrected.
 
+## `devices.json` and `network.json` — water card, sensor gating, dates
+
+| Keys | Reason |
+|---|---|
+| `zone.configure`, `zone.chips.*`, `zone.groups.*`, `zone.water.*` (title, tiles, action codes, source modes, soil status), `common.viewHistory`, `environment.soil.moisture*`, `environment.forecast.dayToday`/`dayTomorrow`/`etaToday`/`etaTomorrow`, `environment.generatedAt` (67 keys in `devices.json`); `network.loadingDevices`, `network.noDevices`, `network.loadingObservations` (3 keys in `network.json`) | New keys added when the irrigation zone card's water card, the zone chips and the date/time helpers were routed through `t()`. The English text is the source text; no Luganda has been authored for any of them yet, and the shipped `lg` value is the English fallback rather than a machine translation. |
+
+Tracked in code at `web/react-gui/tests/waterCardLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change; the test fails otherwise, so the
+two cannot drift apart.
+
 ## Related keys not listed here
 
 Two other `accountLink.json` keys recovered from PR #150 in the same
