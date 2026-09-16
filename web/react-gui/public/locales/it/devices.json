@@ -451,5 +451,34 @@
   },
   "common": {
     "viewHistory": "Vedi cronologia"
+  },
+  "systemPanel": {
+    "title": "Gateway",
+    "subtitle": "Stato del sistema",
+    "updated": "Aggiornato {{time}}",
+    "refresh": "Aggiorna",
+    "loadError": "Impossibile caricare le statistiche",
+    "cpuTemperature": "Temperatura CPU",
+    "maxTemperature": "max {{max}}°C",
+    "memory": "Memoria",
+    "memoryUsed": "{{used}} / {{total}} MB utilizzati",
+    "cpuLoad": "Carico CPU ({{count}} core)",
+    "load1m": "1 min:",
+    "load5m": "5 min:",
+    "load15m": "15 min:",
+    "fanControl": "Ventola",
+    "fanCurrent": "Attuale:",
+    "fanOff": "Spenta",
+    "fanLow": "Bassa",
+    "fanMedium": "Media",
+    "fanHigh": "Alta",
+    "fanMax": "Max",
+    "fanError": "Controllo ventola non riuscito",
+    "noFanDetected": "Nessuna ventola rilevata",
+    "rebootButton": "Riavvia gateway",
+    "rebootConfirmTitle": "Riavviare il gateway ora?",
+    "rebootConfirmYes": "Sì, riavvia",
+    "rebootingMessage": "Riavvio… il gateway sarà offline per circa 30 secondi.",
+    "rebootError": "Riavvio non riuscito"
   }
 }

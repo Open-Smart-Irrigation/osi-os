@@ -5,6 +5,7 @@
   "delete": "Eliminar",
   "na": "N/D",
   "retry": "Tentar novamente",
+  "adminOnly": "Apenas administradores",
   "scope": {
     "loadError": "Não foi possível carregar as permissões."
   },

@@ -451,5 +451,34 @@
   },
   "common": {
     "viewHistory": "Ver historial"
+  },
+  "systemPanel": {
+    "title": "Gateway",
+    "subtitle": "Estado del sistema",
+    "updated": "Actualizado {{time}}",
+    "refresh": "Actualizar",
+    "loadError": "No se pudieron cargar las estadísticas",
+    "cpuTemperature": "Temperatura de la CPU",
+    "maxTemperature": "máx. {{max}}°C",
+    "memory": "Memoria",
+    "memoryUsed": "{{used}} / {{total}} MB usados",
+    "cpuLoad": "Carga de CPU ({{count}} núcleos)",
+    "load1m": "1 min:",
+    "load5m": "5 min:",
+    "load15m": "15 min:",
+    "fanControl": "Ventilador",
+    "fanCurrent": "Actual:",
+    "fanOff": "Apagado",
+    "fanLow": "Bajo",
+    "fanMedium": "Medio",
+    "fanHigh": "Alto",
+    "fanMax": "Máx",
+    "fanError": "Error al controlar el ventilador",
+    "noFanDetected": "No se detectó ningún ventilador",
+    "rebootButton": "Reiniciar gateway",
+    "rebootConfirmTitle": "¿Reiniciar el gateway ahora?",
+    "rebootConfirmYes": "Sí, reiniciar",
+    "rebootingMessage": "Reiniciando… el gateway estará fuera de línea durante unos 30 segundos.",
+    "rebootError": "Error al reiniciar"
   }
 }

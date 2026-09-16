@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { systemAPI, type SystemStats } from '../../services/api';
+import { useScope } from '../../contexts/ScopeContext';
 
 const FAN_PRESETS = [
-  { label: 'Off',    speed: 0 },
-  { label: 'Low',    speed: 64 },
-  { label: 'Medium', speed: 128 },
-  { label: 'High',   speed: 192 },
-  { label: 'Max',    speed: 255 },
-];
+  { labelKey: 'systemPanel.fanOff', speed: 0 },
+  { labelKey: 'systemPanel.fanLow', speed: 64 },
+  { labelKey: 'systemPanel.fanMedium', speed: 128 },
+  { labelKey: 'systemPanel.fanHigh', speed: 192 },
+  { labelKey: 'systemPanel.fanMax', speed: 255 },
+] as const;
 
 function tempColor(c: number): string {
   if (c < 55) return 'var(--toggle-on)';
@@ -23,6 +25,16 @@ function loadColor(load: number, cores: number): string {
 }
 
 export const SystemPanel: React.FC = () => {
+  const { t } = useTranslation('devices');
+  const { t: tc } = useTranslation('common');
+  const { isAdmin, isScoped, loading: scopeLoading } = useScope();
+  // F20: the backend (#244) allows reboot/fan writes from admins only once
+  // OSI_SCOPED_ACCESS is on; non-scoped installs keep today's behavior
+  // unchanged (no role gate at all). Fail closed while scope is still
+  // resolving, same D5 pattern used elsewhere in the GUI.
+  const systemWriteAllowed = isScoped ? isAdmin && !scopeLoading : true;
+  const adminOnlyTitle = systemWriteAllowed ? undefined : tc('adminOnly');
+
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,11 +56,11 @@ export const SystemPanel: React.FC = () => {
       setError(null);
       if (data.fan_value !== null) setFanSpeed(data.fan_value);
     } catch (e: any) {
-      setError(e.response?.data?.error || e.message || 'Failed to load stats');
+      setError(e.response?.data?.error || e.message || t('systemPanel.loadError'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchStats();
@@ -57,26 +69,28 @@ export const SystemPanel: React.FC = () => {
   }, [fetchStats]);
 
   const handleFan = async (speed: number) => {
+    if (!systemWriteAllowed) return;
     setFanBusy(true);
     setFanError(null);
     try {
       await systemAPI.setFan(speed);
       setFanSpeed(speed);
     } catch (e: any) {
-      setFanError(e.response?.data?.error || 'Fan control failed');
+      setFanError(e.response?.data?.error || t('systemPanel.fanError'));
     } finally {
       setFanBusy(false);
     }
   };
 
   const handleReboot = async () => {
+    if (!systemWriteAllowed) return;
     setRebooting(true);
     try {
       await systemAPI.reboot();
-      setRebootMsg('Rebooting… gateway will be offline for ~30 seconds.');
+      setRebootMsg(t('systemPanel.rebootingMessage'));
       setShowRebootConfirm(false);
     } catch (e: any) {
-      setRebootMsg(e.response?.data?.error || 'Reboot failed');
+      setRebootMsg(e.response?.data?.error || t('systemPanel.rebootError'));
     } finally {
       setRebooting(false);
     }
@@ -87,13 +101,13 @@ export const SystemPanel: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-base font-semibold text-[var(--text)]">Gateway</h2>
-          <p className="text-xs text-[var(--text-tertiary)]">System status</p>
+          <h2 className="text-base font-semibold text-[var(--text)]">{t('systemPanel.title')}</h2>
+          <p className="text-xs text-[var(--text-tertiary)]">{t('systemPanel.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           {lastUpdated && (
             <span className="text-[var(--text-tertiary)] text-xs">
-              Updated {lastUpdated.toLocaleTimeString()}
+              {t('systemPanel.updated', { time: lastUpdated.toLocaleTimeString() })}
             </span>
           )}
           <button
@@ -101,7 +115,7 @@ export const SystemPanel: React.FC = () => {
             disabled={loading}
             className="px-2.5 py-1.5 rounded-md bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] text-sm font-semibold transition-colors disabled:opacity-50"
           >
-            ↻ Refresh
+            ↻ {t('systemPanel.refresh')}
           </button>
         </div>
       </div>
@@ -123,7 +137,7 @@ export const SystemPanel: React.FC = () => {
 
           {/* CPU Temperature */}
           <div className="bg-[var(--card)] rounded-lg p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">CPU TEMPERATURE</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">{t('systemPanel.cpuTemperature')}</p>
             <p className="text-2xl font-bold tabular-nums" style={{ color: tempColor(stats.cpu_temp_c) }}>
               {stats.cpu_temp_c.toFixed(1)}°C
             </p>
@@ -136,12 +150,12 @@ export const SystemPanel: React.FC = () => {
                 }}
               />
             </div>
-            <p className="text-[var(--text-tertiary)] text-xs mt-1">max 85°C</p>
+            <p className="text-[var(--text-tertiary)] text-xs mt-1">{t('systemPanel.maxTemperature', { max: 85 })}</p>
           </div>
 
           {/* Memory */}
           <div className="bg-[var(--card)] rounded-lg p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">MEMORY</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">{t('systemPanel.memory')}</p>
             <p className="text-2xl font-bold tabular-nums text-[var(--text)]">{stats.mem_percent}%</p>
             <div className="mt-2 h-2 bg-[var(--border)] rounded-full overflow-hidden">
               <div
@@ -150,14 +164,14 @@ export const SystemPanel: React.FC = () => {
               />
             </div>
             <p className="text-[var(--text-tertiary)] text-xs mt-1">
-              {stats.mem_used_mb} / {stats.mem_total_mb} MB used
+              {t('systemPanel.memoryUsed', { used: stats.mem_used_mb, total: stats.mem_total_mb })}
             </p>
           </div>
 
           {/* CPU Load */}
           <div className="bg-[var(--card)] rounded-lg p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-              CPU LOAD ({stats.cpu_count} cores)
+              {t('systemPanel.cpuLoad', { count: stats.cpu_count })}
             </p>
             <p
               className="text-2xl font-bold tabular-nums"
@@ -166,19 +180,19 @@ export const SystemPanel: React.FC = () => {
               {stats.load_1.toFixed(2)}
             </p>
             <div className="mt-2 flex gap-2 text-xs text-[var(--text-tertiary)]">
-              <span>1m: <strong className="text-[var(--text)]">{stats.load_1.toFixed(2)}</strong></span>
-              <span>5m: <strong className="text-[var(--text)]">{stats.load_5.toFixed(2)}</strong></span>
-              <span>15m: <strong className="text-[var(--text)]">{stats.load_15.toFixed(2)}</strong></span>
+              <span>{t('systemPanel.load1m')} <strong className="text-[var(--text)]">{stats.load_1.toFixed(2)}</strong></span>
+              <span>{t('systemPanel.load5m')} <strong className="text-[var(--text)]">{stats.load_5.toFixed(2)}</strong></span>
+              <span>{t('systemPanel.load15m')} <strong className="text-[var(--text)]">{stats.load_15.toFixed(2)}</strong></span>
             </div>
           </div>
 
           {/* Fan Control */}
           <div className="bg-[var(--card)] rounded-lg p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">FAN CONTROL</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">{t('systemPanel.fanControl')}</p>
             {stats.fan_available ? (
               <>
                 <p className="text-[var(--text)] text-sm mb-2">
-                  Current: <strong>{fanSpeed === 0 ? 'Off' : fanSpeed >= 255 ? 'Max' : fanSpeed}</strong>
+                  {t('systemPanel.fanCurrent')} <strong>{fanSpeed === 0 ? t('systemPanel.fanOff') : fanSpeed >= 255 ? t('systemPanel.fanMax') : fanSpeed}</strong>
                   {stats.fan_mode === 'pwm' && <span className="text-[var(--text-tertiary)]"> / 255</span>}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -186,14 +200,15 @@ export const SystemPanel: React.FC = () => {
                     <button
                       key={p.speed}
                       onClick={() => handleFan(p.speed)}
-                      disabled={fanBusy}
+                      disabled={fanBusy || !systemWriteAllowed}
+                      title={adminOnlyTitle}
                       className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
                         fanSpeed === p.speed
                           ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                           : 'bg-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
                       }`}
                     >
-                      {p.label}
+                      {t(p.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -202,7 +217,7 @@ export const SystemPanel: React.FC = () => {
                 )}
               </>
             ) : (
-              <p className="text-[var(--text-tertiary)] text-sm mt-1">No fan detected</p>
+              <p className="text-[var(--text-tertiary)] text-sm mt-1">{t('systemPanel.noFanDetected')}</p>
             )}
           </div>
         </div>
@@ -214,28 +229,31 @@ export const SystemPanel: React.FC = () => {
           <p className="text-[var(--warn-text)] text-sm font-semibold">{rebootMsg}</p>
         ) : showRebootConfirm ? (
           <>
-            <p className="text-[var(--text)] text-sm font-semibold">Reboot gateway now?</p>
+            <p className="text-[var(--text)] text-sm font-semibold">{t('systemPanel.rebootConfirmTitle')}</p>
             <button
               onClick={handleReboot}
-              disabled={rebooting}
+              disabled={rebooting || !systemWriteAllowed}
+              title={adminOnlyTitle}
               className="bg-[var(--error-bg)] hover:opacity-90 text-[var(--error-text)] font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
             >
               {rebooting && <span className="animate-spin h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full" />}
-              Yes, Reboot
+              {t('systemPanel.rebootConfirmYes')}
             </button>
             <button
               onClick={() => setShowRebootConfirm(false)}
               className="bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg text-sm"
             >
-              Cancel
+              {tc('cancel')}
             </button>
           </>
         ) : (
           <button
             onClick={() => setShowRebootConfirm(true)}
-            className="bg-[var(--card)] hover:bg-[var(--error-bg)] text-[var(--danger-fg)] hover:text-[var(--error-text)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
+            disabled={!systemWriteAllowed}
+            title={adminOnlyTitle}
+            className="bg-[var(--card)] hover:bg-[var(--error-bg)] text-[var(--danger-fg)] hover:text-[var(--error-text)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
           >
-            ⟳ Reboot Gateway
+            ⟳ {t('systemPanel.rebootButton')}
           </button>
         )}
       </div>

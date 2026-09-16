@@ -451,5 +451,34 @@
   },
   "common": {
     "viewHistory": "Verlauf anzeigen"
+  },
+  "systemPanel": {
+    "title": "Gateway",
+    "subtitle": "Systemstatus",
+    "updated": "Aktualisiert {{time}}",
+    "refresh": "Aktualisieren",
+    "loadError": "Statistiken konnten nicht geladen werden",
+    "cpuTemperature": "CPU-Temperatur",
+    "maxTemperature": "max. {{max}} °C",
+    "memory": "Speicher",
+    "memoryUsed": "{{used}} / {{total}} MB belegt",
+    "cpuLoad": "CPU-Auslastung ({{count}} Kerne)",
+    "load1m": "1 Min.:",
+    "load5m": "5 Min.:",
+    "load15m": "15 Min.:",
+    "fanControl": "Lüftersteuerung",
+    "fanCurrent": "Aktuell:",
+    "fanOff": "Aus",
+    "fanLow": "Niedrig",
+    "fanMedium": "Mittel",
+    "fanHigh": "Hoch",
+    "fanMax": "Max",
+    "fanError": "Lüftersteuerung fehlgeschlagen",
+    "noFanDetected": "Kein Lüfter erkannt",
+    "rebootButton": "Gateway neu starten",
+    "rebootConfirmTitle": "Gateway jetzt neu starten?",
+    "rebootConfirmYes": "Ja, neu starten",
+    "rebootingMessage": "Neustart… das Gateway ist für ca. 30 Sekunden nicht erreichbar.",
+    "rebootError": "Neustart fehlgeschlagen"
   }
 }

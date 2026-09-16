@@ -451,5 +451,34 @@
   },
   "common": {
     "viewHistory": "Voir l'historique"
+  },
+  "systemPanel": {
+    "title": "Passerelle",
+    "subtitle": "État du système",
+    "updated": "Mis à jour {{time}}",
+    "refresh": "Actualiser",
+    "loadError": "Impossible de charger les statistiques",
+    "cpuTemperature": "Température CPU",
+    "maxTemperature": "max {{max}} °C",
+    "memory": "Mémoire",
+    "memoryUsed": "{{used}} / {{total}} Mo utilisés",
+    "cpuLoad": "Charge CPU ({{count}} cœurs)",
+    "load1m": "1 min :",
+    "load5m": "5 min :",
+    "load15m": "15 min :",
+    "fanControl": "Ventilateur",
+    "fanCurrent": "Actuel :",
+    "fanOff": "Arrêt",
+    "fanLow": "Faible",
+    "fanMedium": "Moyen",
+    "fanHigh": "Élevé",
+    "fanMax": "Max",
+    "fanError": "Échec du contrôle du ventilateur",
+    "noFanDetected": "Aucun ventilateur détecté",
+    "rebootButton": "Redémarrer la passerelle",
+    "rebootConfirmTitle": "Redémarrer la passerelle maintenant ?",
+    "rebootConfirmYes": "Oui, redémarrer",
+    "rebootingMessage": "Redémarrage… la passerelle sera hors ligne pendant environ 30 secondes.",
+    "rebootError": "Échec du redémarrage"
   }
 }

@@ -152,6 +152,7 @@ vi.mock('react-i18next', () => ({
         impact_idea: 'Idea',
         on: 'On',
         off: 'Off',
+        adminOnly: 'Admin only',
       };
       let result = map[key] ?? key;
       if (typeof options === 'object' && options) {
@@ -186,6 +187,18 @@ beforeEach(() => {
   apiMocks.getSystemSettings.mockReset();
   apiMocks.getSystemSettings.mockResolvedValue({ gatewayTimezone: 'UTC' });
   apiMocks.updateSystemSettings.mockReset();
+  // Reset the shared useScope() mock to this suite's original default
+  // (writable, non-scoped, role admin but isAdmin false — see the comment
+  // above scopeMocks) so tests that mutate it for the F20 role-gating
+  // matrix below don't leak state into unrelated tests.
+  Object.assign(scopeMocks.scopeState, {
+    loading: false,
+    isScoped: false,
+    role: 'admin',
+    canWrite: true,
+    isAdmin: false,
+    error: null,
+  });
 });
 
 afterEach(() => {
@@ -510,5 +523,63 @@ describe('SettingsPage', () => {
       applyToAllZones: true,
     }));
     expect(await within(timeZone).findByText('Updated 3 zones to Europe/Zurich.')).toBeInTheDocument();
+  });
+});
+
+// F20: PUT /api/system/settings (the gateway time zone save/apply-to-all
+// controls) is role-gated to admin only once OSI_SCOPED_ACCESS is on (#244,
+// merged). canWrite (admin+researcher) is too permissive for this specific
+// route, so the client now checks isAdmin whenever isScoped is true, and
+// falls back to today's unchanged (ungated) behavior when isScoped is false.
+describe('SettingsPage time zone role gating (F20)', () => {
+  it.each([
+    ['viewer', false, true],
+    ['researcher', false, true],
+    ['admin', false, true],
+    ['viewer', true, false],
+    ['researcher', true, false],
+    ['admin', true, true],
+  ] as const)(
+    'role=%s, scoped=%s -> time zone controls writable=%s',
+    async (role, isScoped, expectWritable) => {
+      Object.assign(scopeMocks.scopeState, {
+        role,
+        isScoped,
+        canWrite: role !== 'viewer',
+        isAdmin: role === 'admin',
+      });
+      renderSettings();
+
+      const timeZone = screen.getByRole('region', { name: 'Time zone' });
+      const input = await within(timeZone).findByLabelText('Gateway time zone') as HTMLInputElement;
+      const saveButton = within(timeZone).getByRole('button', { name: 'Save' });
+      const applyAllButton = within(timeZone).getByRole('button', { name: 'Apply to all zones' });
+
+      expect(input.disabled).toBe(!expectWritable);
+      // canSaveTimezone also requires a non-empty, valid value; the seeded
+      // 'UTC' fetch response already satisfies that, so any residual
+      // disabled state here is attributable to the role gate.
+      expect(saveButton.hasAttribute('disabled')).toBe(!expectWritable);
+      expect(applyAllButton.hasAttribute('disabled')).toBe(!expectWritable);
+
+      if (expectWritable) {
+        expect(saveButton).not.toHaveAttribute('title');
+        expect(applyAllButton).not.toHaveAttribute('title');
+      } else {
+        expect(saveButton).toHaveAttribute('title', 'Admin only');
+        expect(applyAllButton).toHaveAttribute('title', 'Admin only');
+      }
+    },
+  );
+
+  it('does not call the backend when a scoped non-admin forces a save via a direct click', async () => {
+    Object.assign(scopeMocks.scopeState, { role: 'researcher', isScoped: true, canWrite: true, isAdmin: false });
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    await within(timeZone).findByLabelText('Gateway time zone');
+    fireEvent.click(within(timeZone).getByRole('button', { name: 'Save' }));
+
+    expect(apiMocks.updateSystemSettings).not.toHaveBeenCalled();
   });
 });

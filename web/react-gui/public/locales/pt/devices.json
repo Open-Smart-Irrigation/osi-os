@@ -451,5 +451,34 @@
   },
   "common": {
     "viewHistory": "Ver histórico"
+  },
+  "systemPanel": {
+    "title": "Gateway",
+    "subtitle": "Estado do sistema",
+    "updated": "Atualizado {{time}}",
+    "refresh": "Atualizar",
+    "loadError": "Não foi possível carregar as estatísticas",
+    "cpuTemperature": "Temperatura da CPU",
+    "maxTemperature": "máx. {{max}}°C",
+    "memory": "Memória",
+    "memoryUsed": "{{used}} / {{total}} MB usados",
+    "cpuLoad": "Carga da CPU ({{count}} núcleos)",
+    "load1m": "1 min:",
+    "load5m": "5 min:",
+    "load15m": "15 min:",
+    "fanControl": "Ventoinha",
+    "fanCurrent": "Atual:",
+    "fanOff": "Desligada",
+    "fanLow": "Baixa",
+    "fanMedium": "Média",
+    "fanHigh": "Alta",
+    "fanMax": "Máx",
+    "fanError": "Falha no controlo da ventoinha",
+    "noFanDetected": "Nenhuma ventoinha detetada",
+    "rebootButton": "Reiniciar gateway",
+    "rebootConfirmTitle": "Reiniciar a gateway agora?",
+    "rebootConfirmYes": "Sim, reiniciar",
+    "rebootingMessage": "A reiniciar… a gateway ficará offline durante cerca de 30 segundos.",
+    "rebootError": "Falha ao reiniciar"
   }
 }

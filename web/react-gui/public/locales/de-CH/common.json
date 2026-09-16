@@ -5,6 +5,7 @@
   "delete": "Löschen",
   "na": "N/A",
   "retry": "Erneut versuchen",
+  "adminOnly": "Nur für Administratoren",
   "scope": {
     "loadError": "Berechtigungen konnten nicht geladen werden."
   },
