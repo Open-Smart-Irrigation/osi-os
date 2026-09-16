@@ -3,6 +3,8 @@ import type { Device, Lsn50Mode } from '../../types/farming';
 import { lsn50API } from '../../services/api';
 import { DraginoChameleonSwtSection } from './DraginoChameleonSwtSection';
 import { DraginoDendroCalibrationSection } from './DraginoDendroCalibrationSection';
+import { useDateFormat } from '../../utils/datetime';
+import { HelpTip } from './shared/HelpTip';
 
 type SensorKey = 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled' | 'chameleon_enabled';
 
@@ -156,6 +158,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState(
     device.dendro_enabled === 1 ? String(DEFAULT_DENDRO_WARMUP_MS) : ''
   );
+  const dateFormat = useDateFormat();
   // Tracks whether the operator has edited the warm-up field, so auto-defaulting never clobbers input.
   const warmupTouchedRef = useRef(false);
   const [externalSensorInfo, setExternalSensorInfo] = useState<string | null>(null);
@@ -165,11 +168,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const openerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   const currentMode = getCurrentLsn50Mode(device);
-  const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
-  const observedAtDate = observedAt ? new Date(observedAt) : null;
-  const observedAtLabel = observedAtDate && !Number.isNaN(observedAtDate.getTime())
-    ? observedAtDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : null;
+  const observedAtLabel = dateFormat.time(device.latest_data?.lsn50_mode_observed_at ?? null);
   const selectedModeDescription = LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '';
   const titleId = `dragino-settings-title-${device.deveui}`;
   const modeSelectId = `lsn50-mode-${device.deveui}`;
@@ -519,16 +518,21 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
             description="Lower-emphasis controls for external sensor inputs and non-default integrations."
             className="mt-3 bg-[var(--surface)]"
           >
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((value) => !value)}
-              aria-expanded={showAdvanced}
-              aria-controls={advancedSettingsId}
-              className={`flex w-full items-center justify-between rounded-lg bg-[var(--card)] px-3 py-2 text-left text-sm font-semibold text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
-            >
-              <span>Advanced device settings</span>
-              <span className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((value) => !value)}
+                aria-expanded={showAdvanced}
+                aria-controls={advancedSettingsId}
+                className={`flex flex-1 items-center justify-between rounded-lg bg-[var(--card)] px-3 py-2 text-left text-sm font-semibold text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
+              >
+                <span>Advanced device settings</span>
+                <span className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
+              </button>
+              <HelpTip label="About advanced device settings">
+                Only external sensors and non-standard LSN50 wiring need these. A stock node works without them.
+              </HelpTip>
+            </div>
             {showAdvanced && (
               <div id={advancedSettingsId} className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
                 <div>
@@ -556,9 +560,14 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                   </button>
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-warmup-${device.deveui}`}>
-                    5V warm-up time (ms)
-                  </label>
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-warmup-${device.deveui}`}>
+                      5V warm-up time (ms)
+                    </label>
+                    <HelpTip label="About 5V warm-up time">
+                      Delays sampling so the probe supply can settle. 1000 ms suits most probes; check the probe datasheet before changing it.
+                    </HelpTip>
+                  </div>
                   <input
                     id={`lsn50-warmup-${device.deveui}`}
                     type="number"
@@ -575,7 +584,6 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                     placeholder="1000"
                     className={`w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
                   />
-                  <p className="mt-2 text-xs text-[var(--text-tertiary)]">Useful for probes that need sensor power to settle before sampling.</p>
                   <button
                     type="button"
                     onClick={() => void applyFiveVoltWarmup()}
@@ -585,7 +593,6 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                     {busy === 'warmup' ? 'Applying 5V warm-up…' : 'Apply 5V warm-up'}
                   </button>
                 </div>
-                <p className="text-xs text-[var(--warn-text)]">These controls are intended for external sensors and non-default LSN50 integrations.</p>
                 {externalSensorInfo && <p className="text-xs text-[var(--text-tertiary)]">{externalSensorInfo}</p>}
               </div>
             )}
