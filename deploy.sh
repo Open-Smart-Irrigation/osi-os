@@ -1183,13 +1183,6 @@ fix_mosquitto_ownership() {
 fix_mosquitto_ownership
 
 echo "--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---"
-if [ "$PAYLOAD_FLIPPED" != "1" ]; then
-    swap_call flipTo "$DEPLOY_STAMP" >/dev/null
-    PAYLOAD_FLIPPED=1
-    echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
-else
-    echo "OK: payload already flipped -> payloads/$DEPLOY_STAMP (flipped before the post-migration Node-RED restart, issue #222 / F4)"
-fi
 
 # osi-os stabilization program, PR-L / external consult Q1: a refused boot-node
 # devices-CHECK rebuild does not stop Node-RED or its HTTP listener (it logs
@@ -1197,11 +1190,21 @@ fi
 # reachability alone cannot prove schema initialization actually completed.
 # Mark the log BEFORE the restart so only lines from THIS restart are
 # considered; a stale abort from a much earlier boot must not fail a healthy
-# deploy.
+# deploy. Captured here, before the flip, since nothing between this point and
+# the restart below touches logread -- the flip/no-op and restart must stay
+# directly adjacent (issue #222 / F4).
 NODE_RED_LOG_MARK=0
 if command -v logread >/dev/null 2>&1; then
     NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"
     case "$NODE_RED_LOG_MARK" in ''|*[!0-9]*) NODE_RED_LOG_MARK=0 ;; esac
+fi
+
+if [ "$PAYLOAD_FLIPPED" != "1" ]; then
+    swap_call flipTo "$DEPLOY_STAMP" >/dev/null
+    PAYLOAD_FLIPPED=1
+    echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+else
+    echo "OK: payload already flipped -> payloads/$DEPLOY_STAMP (flipped before the post-migration Node-RED restart, issue #222 / F4)"
 fi
 
 /etc/init.d/node-red restart || true
