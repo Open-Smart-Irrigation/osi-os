@@ -319,6 +319,9 @@ ssh root@<pi-ip> '/etc/init.d/node-red restart'
 
 No need to re-run `chirpstack-bootstrap.js` unless ChirpStack was re-provisioned or device profiles are missing.
 
+Deploying a branded customer build (`customer/<name>`) instead of the generic
+product above follows a different procedure: [docs/operations/customer-gateway-deploy-runbook.md](docs/operations/customer-gateway-deploy-runbook.md). Customer branches live only in the private repo `Open-Smart-Irrigation/osi-os-customers`, never on this repo's `main`.
+
 ---
 
 ## Default Wi-Fi Access Point (first boot)

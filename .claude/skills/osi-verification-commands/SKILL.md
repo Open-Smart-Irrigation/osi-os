@@ -57,6 +57,7 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | Bare require scan | `node scripts/flows-bare-require-scan.js` | Exit 0. Fails if any function node uses bare `require()` instead of `osiLib.require()`. |
 | Channel manifest parity | `node scripts/verify-channel-manifest-parity.js` | Exit 0. GUI and edge manifest byte-identical. |
 | Command safety | `node scripts/verify-command-safety.js` | Exit 0. Actuator duration-bound + registry parity assertions. |
+| Live gateway identity | `node scripts/verify-live-gateway-identity.js` | Ends `Live gateway identity verification passed.`, exit 0. |
 | Heartbeat health | `node scripts/verify-heartbeat-health.js` | Exit 0. |
 | Dendro contract mirror | `node scripts/verify-dendro-contract-mirror.js` | Exit 0. |
 | Contract schemas | `node scripts/test-contract-schemas.js` | Exit 0. |
@@ -78,6 +79,7 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | React GUI | `npm run test:unit` and `npm run build` from `web/react-gui`; add contract/edge verifiers if GUI semantics depend on changed edge fields. |
 | Sync contract docs or payload schemas | `verify-communication-contract.js` plus the edge/server tests named by the contract change. |
 | Server/backend companion work | Use the sister `osi-server` repo gates for backend changes. OSI OS edge verifiers do not prove cloud Java/Postgres behavior. |
+| Re-cut `customer/<name>` branch (private `osi-os-customers` repo) before pushing | `cd web/react-gui && npm run typecheck`, `cd web/react-gui && npm run test:unit` (must include the branch's own branding pin, e.g. `tests/boveyBranding.test.ts`), `node scripts/verify-command-safety.js`, `node scripts/verify-profile-parity.js`, `node scripts/verify-live-gateway-identity.js`, `node scripts/verify-sync-flow.js`. This is the minimum evidence set; add surface-specific gates above for anything the re-cut also touched beyond the overlay. |
 
 ## Common Mistakes
 

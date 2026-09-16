@@ -176,6 +176,57 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 
 ---
 
+## Customer branches and the private repo
+
+`main` in this (public) repo is the generic product. A customer's branded
+build lives on `customer/<name>` (today `customer/bovey`; `customer/agrolink`
+planned) in the separate **private** repo `Open-Smart-Irrigation/osi-os-customers`,
+added as a `customers` remote (`git@github.com:Open-Smart-Irrigation/osi-os-customers.git`).
+That repo's `main` is a read-only mirror of `origin/main`, fast-forwarded
+before each customer branch is re-cut. `osi-server` is already private, so its
+own customer branches (also `customer/<name>`) live inside `osi-server`
+directly; there is no `osi-server-customers` split.
+
+A customer branch is `main` plus an overlay: branding (a logo component,
+favicon, the `index.css` palette block, product-name substitutions in locale
+files, and a pinning test such as `tests/boveyBranding.test.ts`) plus whatever
+customer features have not yet been ported to `main`. Design and inventory:
+[docs/superpowers/specs/2026-09-11-w5-customer-overlays-design.md](docs/superpowers/specs/2026-09-11-w5-customer-overlays-design.md)
+and [docs/superpowers/reviews/2026-09-11-w5-edge-overlay-inventory.md](docs/superpowers/reviews/2026-09-11-w5-edge-overlay-inventory.md).
+
+**Customer branches, and archive tags of retired customer refs, must never be
+pushed to the public `origin`.** A tag pushed to `origin` is public; an
+archived branch reference is not sanitized for public release the way `main`
+is.
+
+**Fixes land on `main` first.** A bug affecting a customer gateway is fixed on
+`main` through the normal PR process, then the customer branch is re-cut on
+top of the new `main`:
+
+```sh
+git rebase --onto origin/main <old-base> customer/<name>   # keep the -x cherry-pick trailers
+# run the customer-branch gate set (see osi-verification-commands)
+git push --force-with-lease=customer/<name>:<old-head> customers HEAD:customer/<name>
+```
+
+That `--force-with-lease` is the **only** place a force push is sanctioned in
+either repo. Never merge `main` into a customer branch, and never cherry-pick
+sideways between two customer branches — each overlay is derived from `main`
+independently.
+
+**Retiring a customer ref.** Do not delete an old customer branch outright.
+Tag it `archive/<name>-<date>` in the private repo first, then delete the
+branch, and only once the replacement `customer/<name>` has been deployed and
+verified on that customer's gateway.
+
+**Luganda in a ported string.** Substituting the product name inside an
+existing human-translated `lg` string (`substring` only, e.g. swapping "OSI
+Server" for a customer's brand name) is allowed. Retranslating or "improving"
+the surrounding Luganda text is not — edge `lg` is human work product, not
+machine output to be revised in passing.
+
+Deploying a customer build to a live gateway: [docs/operations/customer-gateway-deploy-runbook.md](docs/operations/customer-gateway-deploy-runbook.md).
+
 ## Device catalog
 
 | Device | ChirpStack app | Profile | Sensors |
@@ -248,12 +299,13 @@ cd web/react-gui && npm run build             # frontend build
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
-- **Foreign-numbered ledger recovery:** a gateway that ran the AgroLink or Bovey/Valve-focused line has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on AgroLink, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever the ledger's checksum for the lowest applied version above 0021 disagrees with main's; a main-numbered gateway's checksums already agree there and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
+- **Foreign-numbered ledger recovery:** a gateway that ran the AgroLink or Bovey/Valve-focused line has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on AgroLink, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever any applied ledger row above 0021 disagrees with main's checksum for that same version number (PR #242 — an earlier version of this probe compared only the lowest such row, which let a lineage byte-identical to main at its earliest foreign-numbered versions slip past undetected); a main-numbered gateway's checksums already agree at every row and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values are legacy
   artifacts. Current `node-red.init` does not read identity from that file, and
   `settings.js` protects identity keys, but operators should still remove stale
   identity lines during repair so no future or manual env-file path can revive
   them. Canonical EUI is uppercase and comes from the helper / UCI path.
+- **Customer gateway deploys** follow [docs/operations/customer-gateway-deploy-runbook.md](docs/operations/customer-gateway-deploy-runbook.md) — the same schema-safety rules above apply, plus cloud-before-edge ordering and a foreign-numbered ledger's own risk: never flip the flows payload live by hand before its schema migration/reconciliation has actually succeeded, or the next boot's `sync-init-fn` rebuild runs against a schema still missing columns a later migration adds and fails with `duplicate column name` on every subsequent deploy.
 
 ## Production cloud access
 

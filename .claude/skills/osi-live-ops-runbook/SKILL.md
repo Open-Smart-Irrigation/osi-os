@@ -374,6 +374,37 @@ post-flip self-check, which either auto-rolls back and exits 1, or — when ther
 no previous payload — exits 1 with an `ERROR` and leaves the new payload live. All
 of these are hard aborts (`exit 1`), not partial continues.
 
+### Customer gateway (branded branch)
+
+A gateway running a branded customer line (`customer/<name>`, private repo
+`osi-os-customers`) follows the same deploy runbook above with four
+differences. Full procedure: `docs/operations/customer-gateway-deploy-runbook.md`.
+
+- **Source of payload.** Build and deploy from a worktree of
+  `customers/customer/<name>`, never from the primary osi-os checkout and
+  never from a customer ref on the public `origin` remote.
+- **Ledger reconciliation.** A gateway that ran a customer line has a
+  foreign-numbered `schema_migrations` ledger. Since PR #242,
+  `run_schema_migration()` detects and reconciles it automatically — no
+  operator step needed on a gateway deployed after that fix landed. If the
+  deploy still reports `repair_required`, fall back to the explicit sequence
+  in `AGENTS.md`'s "Foreign-numbered ledger recovery"
+  (`reconcile-ledger-numbering.js --report` then `--apply`, `migrate-cli.js`,
+  `verify-head-cli.js`) — the customer runbook has the exact commands with a
+  customer-branch example.
+- **Never flip the payload by hand before migration succeeds.** Doing so runs
+  the boot node's `devices` rebuild against a schema still missing columns a
+  later migration adds, and every later deploy then fails with
+  `duplicate column name`.
+- **Cloud first.** Deploy or upgrade the customer's cloud instance before the
+  edge gateway. A main-lineage edge against an older customer cloud sends sync
+  ops the cloud does not recognize, and that failure cannot be requeued later.
+
+After a customer gateway's first deploy, run the hardening checklist in the
+customer runbook (root password, `httpAdminRoot` confirmation, AP passphrase
+rotation, Tailscale ACL, port 1880 exposure) — test gateways may skip it, but
+customer sites must not.
+
 ---
 
 ## Post-deploy verification checklist
