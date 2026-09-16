@@ -50,6 +50,7 @@ async function main() {
   const head = migrations[migrations.length - 1].version;
 
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-seed-ledger-'));
+  process.on('exit', () => fs.rmSync(scratch, { recursive: true, force: true }));
   const failures = [];
   const digests = new Map();
 

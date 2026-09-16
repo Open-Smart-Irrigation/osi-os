@@ -60,7 +60,8 @@ async function main(argv) {
   }
 
   const started = Date.now();
-  const { dbPath } = await buildSeedImage();
+  const { dbPath, scratch } = await buildSeedImage();
+  process.on('exit', () => fs.rmSync(scratch, { recursive: true, force: true }));
   const targets = out ? [out] : SEED_DB_PATHS;
   for (const target of targets) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
