@@ -2887,6 +2887,25 @@ const fakeFsNoFanHardware = {
   accessSync: () => { const e = new Error('ENOENT (hermetic test stub)'); e.code = 'ENOENT'; throw e; },
 };
 
+// Simulates the raw-PWM branch (no hwmon, a pwmchip2 channel that is already
+// exported) with the PWM period read and the pre-period-write disable both
+// failing, to exercise the two empty catches Codex flagged in the raw-PWM
+// setup path (PR #244 flows.json:4582) without touching real hardware.
+const fakeFsRawPwmReadFailures = {
+  readdirSync: () => { const e = new Error('ENOENT (no hwmon, hermetic test stub)'); e.code = 'ENOENT'; throw e; },
+  accessSync: () => {}, // pwmchip2 detected, and the pwm3 channel is already exported
+  readFileSync: (p) => {
+    if (String(p).endsWith('/period')) throw new Error('EIO period read (hermetic test stub)');
+    throw new Error('unexpected readFileSync path in fakeFsRawPwmReadFailures: ' + p);
+  },
+  writeFileSync: (p, value) => {
+    if (String(p).endsWith('/enable') && value === '0') {
+      throw new Error('EIO disable write (hermetic test stub)');
+    }
+    // period/duty_cycle/enable=1 writes succeed silently.
+  },
+};
+
 function systemWriteRequest(userId, username, body = {}) {
   return {
     req: {
@@ -2979,6 +2998,46 @@ test('PR-N: Fan Control allows an admin past the role gate under scope', async (
     // asserting "not 403" proves the admin passed the role gate itself.
     assert.notEqual(response.result.statusCode, 403);
     assert.equal(response.result.statusCode, 503);
+    // findFanControl()'s hwmon/pwmchip2 catches must surface the underlying
+    // read/access failure via node.warn instead of swallowing it silently
+    // (Codex P1, PR #244 flows.json:4582) -- fakeFsNoFanHardware throws on
+    // both readdirSync and accessSync, so both catches must fire here.
+    assert.ok(
+      response.warnings.some((w) => w.includes('Fan Control: hwmon enumeration failed')),
+      'hwmon enumeration failure must be logged, not swallowed'
+    );
+    assert.ok(
+      response.warnings.some((w) => w.includes('Fan Control: pwmchip2 access check failed')),
+      'pwmchip2 access failure must be logged, not swallowed'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('Fan Control: raw-PWM setup catches surface period-read/disable failures via node.warn', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('sys-fan-fn'), {
+      msg: systemWriteRequest(1, 'admin1', { speed: 100 }),
+      env: ENV,
+      db,
+      globals: { fs: fakeFsRawPwmReadFailures },
+    });
+    // Both failures are recovered from (curPeriod defaults to 0, the period
+    // write proceeds unconditionally), so the request still completes --
+    // the point of this test is that the two previously-empty catches now
+    // log instead of swallowing.
+    assert.equal(response.result.statusCode, 200);
+    assert.ok(
+      response.warnings.some((w) => w.includes('Fan Control: PWM period read failed')),
+      'PWM period read failure must be logged, not swallowed'
+    );
+    assert.ok(
+      response.warnings.some((w) => w.includes('Fan Control: PWM disable before period write failed')),
+      'PWM disable-before-period-write failure must be logged, not swallowed'
+    );
   } finally {
     db.close();
   }
