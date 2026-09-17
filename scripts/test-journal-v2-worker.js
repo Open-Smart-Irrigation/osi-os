@@ -13,6 +13,11 @@ const replication = require(path.join(
   ROOT,
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication',
 ));
+const { settingForField } = require(path.join(
+  ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults',
+));
+const JOURNAL_MODULE_ENABLED_KEY = settingForField('journalModuleEnabled').key;
 const golden = JSON.parse(fs.readFileSync(
   path.join(ROOT, 'docs/contracts/sync-schema/journal-v2-golden.json'),
   'utf8',
@@ -73,6 +78,15 @@ function fixture(t, name) {
   const databasePath = path.join(directory, 'farming.db');
   const database = new DatabaseSync(databasePath);
   database.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
+  // This suite exercises runReplicationTick's actual replication behavior,
+  // which is gated on the journal module being on (osi-module-defaults). A
+  // customer branch may ship that module off by default (an explicit,
+  // supported product choice -- see osi-module-defaults/index.js); write the
+  // row explicitly here so these tests keep proving the ON-path behavior
+  // regardless of what a given branch's shipped default is, exactly as a
+  // customer who flips the switch back on would see.
+  database.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)')
+    .run(JOURNAL_MODULE_ENABLED_KEY, 'true');
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   return { directory, databasePath, database };
 }
