@@ -39,8 +39,11 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
 // All four visibility modules are GATEWAY-level settings (Phil, 2026-09-17):
 // every user of a gateway sees the same surface, and the choice survives a
 // browser change. The header reads them through this hook.
+// `flags` is null until the gateway answers -- the hook's unknown state, which
+// the header has to render as "nothing gated yet" rather than guessing.
 const gatewayModules = vi.hoisted(() => ({
-  flags: { data: true, network: true, gatewayHub: true, journal: true },
+  flags: { data: true, network: true, gatewayHub: true, journal: true } as
+    { data: boolean; network: boolean; gatewayHub: boolean; journal: boolean } | null,
 }));
 
 vi.mock('../../hooks/useGatewayModules', () => ({
@@ -73,8 +76,21 @@ describe('AppHeader module visibility', () => {
     expect(screen.getByRole('link', { name: 'Journal' })).toHaveAttribute('href', '/journal');
   });
 
+  // Rendering either answer before the gateway has given one flashes the wrong
+  // header on some gateway: the tabs appear and are taken away, or the reverse.
+  it('renders no gated tab while the gateway has not answered yet', () => {
+    gatewayModules.flags = null;
+    renderAppHeader();
+
+    expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Journal' })).not.toBeInTheDocument();
+    // Ungated navigation is unaffected: this is about the switchable entries.
+    expect(screen.getByRole('link', { name: 'Zones' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+  });
+
   it('hides the Data tab when the data module is off and keeps the others', () => {
-    gatewayModules.flags.data = false;
+    gatewayModules.flags!.data = false;
     renderAppHeader();
 
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
@@ -83,7 +99,7 @@ describe('AppHeader module visibility', () => {
   });
 
   it('hides the Journal tab when the journal module is off and keeps the others', () => {
-    gatewayModules.flags.journal = false;
+    gatewayModules.flags!.journal = false;
     renderAppHeader();
 
     expect(screen.queryByRole('link', { name: 'Journal' })).not.toBeInTheDocument();
@@ -92,8 +108,8 @@ describe('AppHeader module visibility', () => {
   });
 
   it('hides both the Data and Journal tabs when both modules are off', () => {
-    gatewayModules.flags.journal = false;
-    gatewayModules.flags.data = false;
+    gatewayModules.flags!.journal = false;
+    gatewayModules.flags!.data = false;
     renderAppHeader();
 
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
@@ -102,7 +118,7 @@ describe('AppHeader module visibility', () => {
   });
 
   it('keeps Settings and Account reachable with the data module off', () => {
-    gatewayModules.flags.data = false;
+    gatewayModules.flags!.data = false;
     renderAppHeader();
 
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');

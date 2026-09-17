@@ -22,6 +22,7 @@
     "osi-history-sync-helper": "file:osi-history-sync-helper",
     "osi-installation-helper": "file:osi-installation-helper",
     "osi-lib": "file:osi-lib",
+    "osi-module-defaults": "file:osi-module-defaults",
     "osi-dendro-analytics": "file:osi-dendro-analytics",
     "osi-zone-env": "file:osi-zone-env",
     "osi-history-router": "file:osi-history-router",

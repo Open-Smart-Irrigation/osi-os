@@ -366,8 +366,13 @@ export function SettingsPage() {
   // a label key is a compile error here instead of a raw key rendered in the UI.
   type GatewayModuleLabelKey = 'dataModule' | 'networkModule' | 'gatewayHub' | 'journalModule';
 
+  // A module the gateway has never had switched reads as absent; what absent
+  // MEANS is the gateway's own business (osi-module-defaults, reported as
+  // moduleDefaults), so this page reads it from the response instead of keeping
+  // a copy that a customer branch would have to flip a second time. The final
+  // `true` only covers a gateway older than that contract.
   const gatewayModuleEnabled = (field: GatewayModuleField): boolean =>
-    systemSettings?.[field] ?? true;
+    systemSettings?.[field] ?? systemSettings?.moduleDefaults?.[field] ?? true;
 
   const updateGatewayModule = async (field: GatewayModuleField, enabled: boolean) => {
     // Authorization gate: the control's disabled attribute is an affordance,
@@ -389,6 +394,7 @@ export function SettingsPage() {
           networkModuleEnabled: result.networkModuleEnabled,
           gatewayHubModuleEnabled: result.gatewayHubModuleEnabled,
           journalModuleEnabled: result.journalModuleEnabled,
+          moduleDefaults: result.moduleDefaults ?? current?.moduleDefaults,
           [field]: result[field] ?? enabled,
         }),
         { revalidate: false },

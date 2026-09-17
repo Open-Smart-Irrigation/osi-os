@@ -38,8 +38,11 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => true),
 }));
 
+// `flags` is null until the gateway answers -- the hook's unknown state, which
+// the header has to render as "nothing gated yet" rather than guessing.
 const gatewayModules = vi.hoisted(() => ({
-  flags: { data: true, network: true, gatewayHub: true, journal: true },
+  flags: { data: true, network: true, gatewayHub: true, journal: true } as
+    { data: boolean; network: boolean; gatewayHub: boolean; journal: boolean } | null,
 }));
 
 vi.mock('../../hooks/useGatewayModules', () => ({
@@ -133,15 +136,25 @@ describe('DashboardHeader (osi-os)', () => {
     expect(screen.getByRole('link', { name: 'Network' })).toHaveAttribute('href', '/network');
   });
 
+  it('renders no gated header entry while the gateway has not answered yet', () => {
+    gatewayModules.flags = null;
+    renderHeader();
+
+    expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
+    // The ungated controls stay put: only the switchable entries wait.
+    expect(screen.getByRole('button', { name: 'Add' })).toBeInTheDocument();
+  });
+
   it('hides the Data link when the data module is off, leaving Network alone', () => {
-    gatewayModules.flags.data = false;
+    gatewayModules.flags!.data = false;
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Network' })).toBeInTheDocument();
   });
 
   it('hides the Network link when the network module is off, leaving Data alone', () => {
-    gatewayModules.flags.network = false;
+    gatewayModules.flags!.network = false;
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument();
@@ -156,7 +169,7 @@ describe('DashboardHeader (osi-os)', () => {
   });
 
   it('hides the journal capture entry from the Add menu when the journal module is off', () => {
-    gatewayModules.flags.journal = false;
+    gatewayModules.flags!.journal = false;
     renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(screen.queryByRole('menuitem', { name: 'Activity' })).not.toBeInTheDocument();

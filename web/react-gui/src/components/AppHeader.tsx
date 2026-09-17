@@ -49,6 +49,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   // gateway sees the same tabs. A tab disappearing here does not unregister its
   // route -- /analysis, /history and /journal stay reachable by URL, and a page
   // rendered under a hidden tab still renders.
+  //
+  // null until the gateway has answered: the gated tabs render nothing until
+  // then, rather than appearing and being taken away (or the reverse) once the
+  // answer arrives.
   const modules = useGatewayModules();
 
   const dataTarget = isDesktopBrowser() ? '/analysis' : '/history';
@@ -64,10 +68,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       to: '/dashboard',
       active: activeTab === 'zones' || pathname === '/dashboard',
     },
-    ...(modules.data
+    ...(modules?.data
       ? [{ key: 'data' as const, label: t('tabs.data'), to: dataTarget, active: dataActive }]
       : []),
-    ...(modules.journal
+    ...(modules?.journal
       ? [{
         key: 'journal' as const,
         label: t('tabs.journal'),

@@ -1195,8 +1195,8 @@ export const systemAPI = {
 };
 
 /**
- * Gateway-level module switches. Each is absent on a gateway that predates the
- * setting, which means enabled.
+ * Gateway-level module switches. Each is absent until the switch has been
+ * written on that gateway, which means "use the gateway's declared default".
  */
 export interface GatewayModuleSettings {
   dataModuleEnabled?: boolean;
@@ -1205,8 +1205,18 @@ export interface GatewayModuleSettings {
   journalModuleEnabled?: boolean;
 }
 
+/**
+ * What each module is set to on a gateway where the switch has never been
+ * written. Declared by the gateway itself (osi-module-defaults on the edge) and
+ * reported on every GET/PUT, so the browser holds no copy: a branch that ships
+ * a module hidden changes one file on the gateway and this response follows.
+ * Absent from a gateway older than the contract.
+ */
+export type GatewayModuleDefaults = Required<GatewayModuleSettings>;
+
 export interface SystemSettings extends GatewayModuleSettings {
   gatewayTimezone: string;
+  moduleDefaults?: GatewayModuleDefaults;
 }
 
 /**
@@ -1221,6 +1231,7 @@ export type UpdateSystemSettingsRequest =
 export interface UpdateSystemSettingsResult extends GatewayModuleSettings {
   gatewayTimezone: string;
   zonesUpdated: number;
+  moduleDefaults?: GatewayModuleDefaults;
 }
 
 export const systemSettingsAPI = {
