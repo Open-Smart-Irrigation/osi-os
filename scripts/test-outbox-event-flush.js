@@ -36,6 +36,7 @@ const LINK_IN_ID = 'sync-outbox-flush-link-in';
 const GATE_ID = 'sync-outbox-flush-coalesce';
 const FLUSH_BUILD_ID = 'sync-outbox-build';
 const ZONE_COMMAND_APPLY_ID = 'zone-command-apply-fn';
+const FLUSH_MARK_ID = 'sync-outbox-mark';
 const MQTT_ACK_ID = '9d5e3035c3d069c4';
 const SYNC_TAB = '93b1537a596e0e6d';
 const DEVICE_API_TAB = 'device-api-tab';
@@ -121,6 +122,40 @@ for (const profile of FLOW_PROFILES) {
     const inject = nodeById(flows, 'sync-outbox-inject', profile);
     assert.equal(inject.repeat, '30');
     assert.deepEqual(inject.wires, [[FLUSH_BUILD_ID]]);
+  });
+
+  test(`[${profile}] only one outbox flush may be in flight across both triggers`, () => {
+    // F134. The event-driven gate and the 30 s inject are independent entry points into
+    // the same flush chain, and the chain neither claims rows nor tracked a flush in
+    // progress, so both could POST the same undelivered rows. Measured on Silvan after
+    // the gate shipped: 11 sync_outbox rows carrying delivered_at AND rejected_at at
+    // once, none before it shipped. The lease lives in "Build Edge Event Batch" so the
+    // inject path is covered by the same guard, not just the gate.
+    const build = nodeById(flows, FLUSH_BUILD_ID, profile);
+    assert.match(build.func, /outboxFlushInFlightAt/,
+      'the builder must take a flush lease');
+    assert.match(build.func, /outboxFlushFollowUp/,
+      'a trigger arriving mid-flush must record a follow-up instead of being dropped');
+
+    const mark = nodeById(flows, FLUSH_MARK_ID, profile);
+    assert.match(mark.func, /outboxFlushInFlightAt/, 'the chain end must release the lease');
+    assert.deepEqual(mark.wires, [[GATE_ID]],
+      'the chain end must be able to drive exactly one follow-up flush through the gate');
+  });
+
+  test(`[${profile}] a terminal outbox row can never be marked twice`, () => {
+    // The same overlap left rows with both delivered_at and rejected_at set, because
+    // neither UPDATE excluded rows another flush had already settled. First terminal
+    // write wins; a late duplicate response cannot overwrite it.
+    const mark = nodeById(flows, FLUSH_MARK_ID, profile);
+    // Each UPDATE is one line of JS string concatenation, so match to end of line
+    // rather than to the next quote.
+    const updates = mark.func.match(/UPDATE sync_outbox SET (?:delivered_at|rejected_at)[^\n]*/g) || [];
+    assert.equal(updates.length, 2, `expected the delivered and rejected updates, got ${updates.length}`);
+    for (const sql of updates) {
+      assert.match(sql, /delivered_at IS NULL/, `missing delivered guard in: ${sql}`);
+      assert.match(sql, /rejected_at IS NULL/, `missing rejected guard in: ${sql}`);
+    }
   });
 
   test(`[${profile}] the gate uses a single timer and no polling primitive`, () => {
@@ -263,6 +298,113 @@ test('finalize clears a pending timer so a redeploy cannot leak it', () => {
   });
   script.runInNewContext(harness.sandbox, { timeout: 1000 });
   assert.equal(harness.timers[0].cleared, true);
+});
+
+// --- behaviour: the flush lease, run against the shipped builder source ----
+
+const canonicalBuild = (() => {
+  const flows = loadFlows(FLOW_PROFILES[0]);
+  return nodeById(flows, FLUSH_BUILD_ID, FLOW_PROFILES[0]);
+})();
+
+const OUTBOX_ROWS = [
+  { event_uuid: 'e1', aggregate_type: 'ZONE', aggregate_key: 'z1', op: 'ZONE_UPSERTED', payload_json: '{"zone_uuid":"z1"}', sync_version: 1, occurred_at: '2026-09-17T14:00:00.000Z' },
+  { event_uuid: 'e2', aggregate_type: 'ZONE', aggregate_key: 'z2', op: 'ZONE_UPSERTED', payload_json: '{"zone_uuid":"z2"}', sync_version: 1, occurred_at: '2026-09-17T14:00:01.000Z' },
+];
+
+function fakeDate(nowMs) {
+  const RealDate = Date;
+  function FakeDate(...args) {
+    return args.length ? new RealDate(...args) : new RealDate(nowMs);
+  }
+  FakeDate.now = () => nowMs;
+  FakeDate.parse = RealDate.parse;
+  FakeDate.UTC = RealDate.UTC;
+  FakeDate.prototype = RealDate.prototype;
+  return FakeDate;
+}
+
+function buildHarness(store, nowMs) {
+  const warnings = [];
+  const queries = [];
+  function rowsFor(sql) {
+    queries.push(sql);
+    if (/FROM users/.test(sql)) {
+      return [{ id: 1, server_url: 'https://cloud.example', server_sync_token: 'tok' }];
+    }
+    if (/FROM sync_outbox/.test(sql)) return OUTBOX_ROWS;
+    return [];
+  }
+  class Database {
+    all(sql, params, cb) {
+      const done = typeof params === 'function' ? params : cb;
+      done(null, rowsFor(String(sql)));
+    }
+    run(sql, params, cb) {
+      const done = typeof params === 'function' ? params : cb;
+      if (done) done(null);
+    }
+    close(cb) { if (cb) cb(null); }
+  }
+  return {
+    warnings,
+    queries,
+    sandbox: {
+      osiDb: { Database },
+      env: { get: (key) => ({ DEVICE_EUI: '0016C001F11715E2', DEVICE_EUI_CONFIDENCE: 'authoritative' }[key]) },
+      flow: { get: (k) => store.get(k), set: (k, v) => { store.set(k, v); } },
+      global: { get: (k) => (k === 'fs' ? { existsSync: () => false, readFileSync: () => '{}' } : undefined) },
+      node: { warn: (m) => warnings.push(String(m)), error: (m) => warnings.push(String(m)), log: () => {} },
+      Date: fakeDate(nowMs),
+      JSON, Number, Math, String, Object, Array, Boolean, Promise, Set, Map, isFinite, parseInt, parseFloat, RegExp, Error,
+      console: { log: () => {}, warn: () => {}, error: () => {} },
+    },
+  };
+}
+
+async function runBuild(store, nowMs) {
+  const harness = buildHarness(store, nowMs);
+  harness.sandbox.msg = { payload: nowMs };
+  const script = new vm.Script(`(async function () {\n${canonicalBuild.func}\n})()`, {
+    filename: `${FLUSH_BUILD_ID}.js`,
+  });
+  const out = await script.runInNewContext(harness.sandbox, { timeout: 5000 });
+  return { out, harness };
+}
+
+test('two overlapping triggers POST each outbox row once, not twice', async () => {
+  const store = new Map();
+
+  const first = await runBuild(store, 1_000_000);
+  assert.ok(first.out, `the first flush must build a POST; warnings: ${first.harness.warnings.join(' | ')}`);
+  assert.deepEqual(first.out._syncEventIds, ['e1', 'e2']);
+
+  // The 30 s inject fires while that POST is still in flight (the chain end has not
+  // run, so the lease is still held). It must not re-send the same rows.
+  const second = await runBuild(store, 1_000_120);
+  assert.equal(second.out, null, 'the second overlapping trigger must not build a second POST');
+  assert.equal(second.harness.queries.some((sql) => /FROM sync_outbox/.test(sql)), false,
+    'the skipped flush must not even re-read the outbox');
+  assert.equal(store.get('outboxFlushFollowUp'), true,
+    'the skipped trigger must be recorded as a follow-up, not silently dropped');
+});
+
+test('the flush lease is released by the chain end, and a stale lease cannot wedge the chain', async () => {
+  const store = new Map();
+  await runBuild(store, 2_000_000);
+  assert.ok(store.get('outboxFlushInFlightAt'), 'a flush in progress holds the lease');
+
+  // Chain end ran: lease released, next trigger proceeds.
+  store.set('outboxFlushInFlightAt', 0);
+  const afterRelease = await runBuild(store, 2_000_050);
+  assert.ok(afterRelease.out, 'once the lease is released the next trigger flushes');
+
+  // Chain end never ran (process died mid-POST): the lease must expire, not wedge.
+  const wedged = new Map([['outboxFlushInFlightAt', 3_000_000]]);
+  const blocked = await runBuild(wedged, 3_000_100);
+  assert.equal(blocked.out, null, 'a fresh lease still blocks');
+  const expired = await runBuild(wedged, 3_000_000 + 120_000);
+  assert.ok(expired.out, 'a stale lease must expire so the chain recovers on its own');
 });
 
 test('both shipped profiles carry a byte-identical gate', () => {
