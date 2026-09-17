@@ -18,6 +18,8 @@
   "deleteConfirmBody": "Ela será removida do painel. As programações já presentes na válvula continuam em execução até que ela seja readicionada.",
   "deleteConfirmButton": "Sim, remover",
   "neverSeen": "Nunca vista",
+  "enclosure": "Caixa da válvula",
+  "enclosure": "Caixa da válvula",
   "state": { "closed": "Closed", "pending": "Waiting for valve", "open": "Open", "closing": "Closing", "failed": "Attention" },
   "pendingHint": "Waiting for the valve's next contact",
   "closesAt": "closes ≈ {{time}}",

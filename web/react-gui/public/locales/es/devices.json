@@ -624,7 +624,8 @@
     "buttonFarm": "Eliminar dispositivo"
   },
   "common": {
-    "viewHistory": "Ver historial"
+    "viewHistory": "Ver historial",
+    "batteryEstimated": "Estimado a partir del voltaje de la batería"
   },
   "systemPanel": {
     "title": "Gateway",

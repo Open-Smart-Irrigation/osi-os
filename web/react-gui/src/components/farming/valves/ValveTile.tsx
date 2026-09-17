@@ -122,13 +122,21 @@ export const ValveTile: React.FC<ValveTileProps> = ({
       : t('nextRun', { when, minutes: valve.nextRun.minutes });
   }
 
+  // `box_temp`/`box_hum` from inside the buried STREGA housing, which land in
+  // the same `device_data.ambient_temperature` column the weather station
+  // writes. Unlabelled on the tile — and the tile is where it is read — it
+  // passes for zone air temperature; rising humidity in that box is water
+  // ingress, a maintenance signal, not a growing condition.
   const climatePair =
     valve.stregaGeneration === 'GEN2' ? null
     : valve.enclosureTemperatureC == null && valve.enclosureHumidityPct == null ? null
     : [
-        valve.enclosureTemperatureC != null ? t('format.temperature', { value: valve.enclosureTemperatureC }) : null,
-        valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
-      ].filter(Boolean).join(' · ');
+        t('enclosure', { defaultValue: 'Valve enclosure' }),
+        [
+          valve.enclosureTemperatureC != null ? t('format.temperature', { value: valve.enclosureTemperatureC }) : null,
+          valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
+        ].filter(Boolean).join(' · '),
+      ].join(' ');
 
   // Shown only when part of the plan genuinely did not reach the valve, and phrased as the
   // consequence the farmer can act on rather than as transport bookkeeping. Deliberately not

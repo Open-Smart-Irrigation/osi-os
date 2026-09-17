@@ -24,6 +24,9 @@ vi.mock('react-i18next', () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       const table: Record<string, string> = {
         nextRun: 'Next: {{when}} · {{minutes}} min',
+        enclosure: 'Valve enclosure',
+        'format.temperature': '{{value}} °C',
+        'format.humidity': '{{value}} % RH',
         'state.closed': 'Closed',
         'lastSeen.never': 'Last seen: never',
       };
@@ -110,5 +113,33 @@ describe('valve clock locale', () => {
 
     // 03:30 UTC is 05:30 in Europe/Zurich in July.
     expect(screen.queryByText(/03:30/)).not.toBeInTheDocument();
+  });
+});
+
+describe('valve enclosure climate', () => {
+  it('names the enclosure rather than printing bare field conditions', () => {
+    language.current = 'en';
+    render(
+      <ValveTile
+        valve={{ ...valve(), enclosureTemperatureC: 24.5, enclosureHumidityPct: 47 }}
+        nowMs={Date.parse('2026-07-08T02:00:00.000Z')}
+        onOpen={vi.fn()}
+        onSchedule={vi.fn()}
+        onCancel={vi.fn()}
+        onSkipToday={vi.fn()}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onResend={vi.fn()}
+        onSettings={vi.fn()}
+        onService={vi.fn()}
+        onDelete={vi.fn()}
+        busy={false}
+      />,
+    );
+
+    // box_temp / box_hum from inside the buried housing, landing in the same
+    // device_data column the weather station writes. Unlabelled on the tile it
+    // read as zone air temperature.
+    expect(screen.getByText(/Valve enclosure/)).toBeInTheDocument();
   });
 });

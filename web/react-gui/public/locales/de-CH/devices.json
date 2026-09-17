@@ -624,7 +624,8 @@
     "buttonFarm": "Gerät entfernen"
   },
   "common": {
-    "viewHistory": "Verlauf anzeigen"
+    "viewHistory": "Verlauf anzeigen",
+    "batteryEstimated": "Aus der Batteriespannung geschätzt"
   },
   "systemPanel": {
     "title": "Gateway",

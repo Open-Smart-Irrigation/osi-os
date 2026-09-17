@@ -18,6 +18,8 @@
   "deleteConfirmBody": "This removes it from the dashboard. Schedules already on the valve keep running until it is re-added.",
   "deleteConfirmButton": "Yes, delete",
   "neverSeen": "Never seen",
+  "enclosure": "Valve enclosure",
+  "enclosure": "Valve enclosure",
   "state": { "closed": "Closed", "pending": "Waiting for valve", "open": "Open", "closing": "Closing", "failed": "Attention" },
   "pendingHint": "Waiting for the valve's next contact",
   "closesAt": "closes ≈ {{time}}",

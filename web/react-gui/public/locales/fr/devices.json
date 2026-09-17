@@ -624,7 +624,8 @@
     "buttonFarm": "Supprimer l'appareil"
   },
   "common": {
-    "viewHistory": "Voir l'historique"
+    "viewHistory": "Voir l'historique",
+    "batteryEstimated": "Estimé d'après la tension de la pile"
   },
   "systemPanel": {
     "title": "Passerelle",

@@ -18,6 +18,8 @@
   "deleteConfirmBody": "Ejja kuggibwa ku dashboard. Enteekateeka eziriwo ku bbomba zeeyongera okukola okutuusa nga ezzeeyo.",
   "deleteConfirmButton": "Yee, sazaamu",
   "neverSeen": "Teyalabika",
+  "enclosure": "Valve enclosure",
+  "enclosure": "Valve enclosure",
   "state": { "closed": "Closed", "pending": "Waiting for valve", "open": "Open", "closing": "Closing", "failed": "Attention" },
   "pendingHint": "Waiting for the valve's next contact",
   "closesAt": "closes ≈ {{time}}",

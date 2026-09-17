@@ -18,6 +18,8 @@
   "deleteConfirmBody": "Elle sera retirée du tableau de bord. Les programmes déjà sur la vanne continuent de s'exécuter tant qu'elle n'est pas réajoutée.",
   "deleteConfirmButton": "Oui, supprimer",
   "neverSeen": "Jamais vue",
+  "enclosure": "Boîtier de la vanne",
+  "enclosure": "Boîtier de la vanne",
   "state": { "closed": "Fermée", "pending": "En attente de la vanne", "open": "Ouverte", "closing": "Fermeture en cours", "failed": "À vérifier" },
   "pendingHint": "En attente du prochain contact de la vanne",
   "closesAt": "fermeture ≈ {{time}}",

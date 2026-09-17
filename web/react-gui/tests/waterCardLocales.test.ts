@@ -95,6 +95,7 @@ const DEVICES_KEYS = [
   'zone.water.soil.invalidReading',
   'zone.water.soil.lastValid',
   'common.viewHistory',
+  'common.batteryEstimated',
   // Zone environment card, Water tab (WaterTab.tsx). These ten were called
   // with a defaultValue but existed in no locale file, so the tab rendered
   // English in all seven languages; see tests/i18nDefaultValueCoverage.test.ts.

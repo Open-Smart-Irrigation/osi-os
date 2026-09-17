@@ -624,7 +624,8 @@
     "buttonFarm": "Remover dispositivo"
   },
   "common": {
-    "viewHistory": "Ver histórico"
+    "viewHistory": "Ver histórico",
+    "batteryEstimated": "Estimado a partir da tensão da bateria"
   },
   "systemPanel": {
     "title": "Gateway",
