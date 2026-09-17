@@ -1042,6 +1042,20 @@ async function verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPa
   );
 }
 
+// F83: several device_data-writing decode functions now call
+// osiLib.require('uplink-dedup') before doing any device-specific work. These
+// executeFunctionNodeById fixtures pin decode/mapping behavior, not dedup, so
+// the stub always reports "never a duplicate" -- exactly what a real osi-lib
+// would answer for the first delivery of every fixture payload here.
+function makeUplinkDedupOsiLibStub() {
+  return {
+    require: (name) => {
+      if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
+      return { ok: false, error: 'unexpected osiLib.require in fixture: ' + name };
+    },
+  };
+}
+
 async function executeFunctionNodeById(nodeId, msg, options = {}) {
   const node = findNodeById(nodeId);
   if (!node) {
@@ -1055,6 +1069,12 @@ async function executeFunctionNodeById(nodeId, msg, options = {}) {
     process,
     setTimeout,
     clearTimeout,
+    // F83: every device_data-writing decode function now calls
+    // osiLib.require('uplink-dedup'). Default to a "never a duplicate" stub so
+    // fixtures that predate F83 and never mention osiLib keep working
+    // unchanged; a caller that needs to exercise dedup itself overrides this
+    // via options.scope.osiLib (Object.assign below lets it win).
+    osiLib: makeUplinkDedupOsiLibStub(),
   }, options.scope || {}));
   const flowApi = {
     get(key) {

@@ -47,9 +47,11 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'sdi12-reassemble',
     'sdi12-recipe',
     'uc512-normalize',
+    'uplink-dedup',
     'zone-commands',
     'zone-env',
   ]);
+  assert.equal(osiLib.NAME_TO_PATH['uplink-dedup'], 'osi-uplink-dedup-guard');
   assert.equal(osiLib.NAME_TO_PATH['history-sync'], 'osi-history-sync-helper');
   assert.equal(osiLib.NAME_TO_PATH['chirpstack'], 'osi-chirpstack-helper');
   assert.equal(osiLib.NAME_TO_PATH['dendro-analytics'], 'osi-dendro-analytics');

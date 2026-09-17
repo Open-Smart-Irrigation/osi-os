@@ -21,6 +21,19 @@ const codecPath = path.resolve(
   'strega_gen1_decoder.js',
 );
 const fixturePath = path.resolve(__dirname, 'fixtures', 'strega-gen1', 'valve-white-fport4-sample.json');
+// F83: Process STREGA now calls osiLib.require('uplink-dedup') right after
+// the STREGA_VALVE profile match succeeds. These fixtures pin Gen1/Gen2
+// normalization, not dedup, so the stub always reports "never a duplicate" --
+// exactly what a real osi-lib would answer for the first delivery of every
+// synthetic uplink built in this file.
+function makeUplinkDedupOsiLibStub() {
+  return {
+    require(name) {
+      if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
+      return { ok: false, error: 'unexpected osiLib.require in fixture: ' + name };
+    },
+  };
+}
 const schedulerAckFixturePath = path.resolve(__dirname, 'fixtures', 'strega-gen1', 'scheduler-ack-schlport16-fport2-sample.json');
 const clockSyncAckFixturePath = path.resolve(__dirname, 'fixtures', 'strega-gen1', 'clock-sync-ack-rtcport12-fport2-sample.json');
 const flowPath = path.resolve(
@@ -241,6 +254,7 @@ async function verifyStregaNormalizationContract(flows, fixture, object, label, 
         }
       },
     },
+    osiLib: makeUplinkDedupOsiLibStub(),
     node: {
       status() {},
       error() {},
@@ -384,6 +398,7 @@ async function verifyGen2ProcessStregaBattery(flows, fixture) {
         }
       },
     },
+    osiLib: makeUplinkDedupOsiLibStub(),
     node: {
       status() {},
       error() {},
@@ -468,6 +483,7 @@ async function verifyGen2ProcessStregaBatteryByNameFallback(flows, fixture) {
         }
       },
     },
+    osiLib: makeUplinkDedupOsiLibStub(),
     node: {
       status() {},
       error() {},

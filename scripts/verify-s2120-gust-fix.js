@@ -52,7 +52,7 @@ function getFunctionNodeById(flows, id) {
 // an AsyncFunction), so the harness must supply that wrapper explicitly.
 function buildFunction(node) {
   const script = new vm.Script(
-    `(async function(msg, node, osiDb) {${node.func}\n})`,
+    `(async function(msg, node, osiDb, osiLib) {${node.func}\n})`,
     { filename: `${node.id}.vm.js` }
   );
   return script.runInNewContext({
@@ -60,6 +60,18 @@ function buildFunction(node) {
     console,
   });
 }
+
+// F83: s2120-process-fn now calls osiLib.require('uplink-dedup') right after
+// its SENSECAP_S2120 type_id match succeeds. This fixture pins the wind-gust
+// mixup fix, not dedup, so the stub always reports "never a duplicate" --
+// exactly what a real osi-lib would answer for the first delivery of every
+// synthetic uplink built here.
+const osiLibStub = {
+  require: (name) => {
+    if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
+    return { ok: false, error: 'unexpected osiLib.require in fixture: ' + name };
+  },
+};
 
 function buildMsg(devEui, group) {
   return {
@@ -100,7 +112,7 @@ async function main() {
     { measurementId: '4213', measurementValue: rainValue, type: 'Rain Accumulation' },
   ]);
 
-  const result = await fn(msg, nodeApi, osiDb);
+  const result = await fn(msg, nodeApi, osiDb, osiLibStub);
 
   assert.ok(Array.isArray(result), 's2120-process-fn must return a Node-RED output array');
   const outMsg = result[0];
@@ -122,7 +134,7 @@ async function main() {
   const gustOnlyMsg = buildMsg('2CF7F1C0043A0001', [
     { measurementId: '4191', measurementValue: 5.1, type: ' Peak Wind Gust' },
   ]);
-  const gustOnlyResult = await fn(gustOnlyMsg, nodeApi, osiDb);
+  const gustOnlyResult = await fn(gustOnlyMsg, nodeApi, osiDb, osiLibStub);
   assert.equal(
     gustOnlyResult[0].formattedData.windGustMps,
     5.1,

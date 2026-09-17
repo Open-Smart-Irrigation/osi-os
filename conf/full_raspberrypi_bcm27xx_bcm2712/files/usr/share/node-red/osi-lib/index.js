@@ -48,6 +48,10 @@ const NAME_TO_PATH = {
   'osi-valve-control': 'osi-valve-control',
   'osi-system-settings': 'osi-system-settings',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
+  // F83 (2026-09-17 overnight): bounded in-memory idempotency guard shared by
+  // every device_data-writing decode function, so a redelivered/retried
+  // ChirpStack uplink is dropped exactly once instead of double-inserted.
+  'uplink-dedup': 'osi-uplink-dedup-guard',
 };
 
 const cache = new Map();         // name -> loaded module (success only)
