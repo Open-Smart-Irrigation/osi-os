@@ -17,6 +17,10 @@
 
 exports.title = 'Valve: open/close/stop, repeated clicks, state round-trip';
 
+const fs = require('node:fs');
+const path = require('node:path');
+const { redact } = require('../lib/rest');
+
 const state = { zones: [], devices: [] };
 
 exports.run = async (ctx) => {
@@ -170,9 +174,11 @@ exports.run = async (ctx) => {
     observer.downlinksFor(ghost).length === 0, { downlinks: observer.downlinksFor(ghost).length });
 
   ev.artifact('downlinks observed', 'V1-downlinks.json');
-  require('node:fs').writeFileSync(
-    require('node:path').join(ctx.runDir, 'V1-downlinks.json'),
-    JSON.stringify({ downlinks: observer.downlinksFor(valveEui), uplinks: observer.uplinksSent }, null, 2) + '\n'
+  // F136 follow-up: every evidence write goes through the same redact(),
+  // including a sidecar file assembled outside CaseEvidence itself.
+  fs.writeFileSync(
+    path.join(ctx.runDir, 'V1-downlinks.json'),
+    JSON.stringify(redact({ downlinks: observer.downlinksFor(valveEui), uplinks: observer.uplinksSent }), null, 2) + '\n'
   );
 };
 

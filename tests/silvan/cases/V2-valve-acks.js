@@ -13,6 +13,10 @@
 
 exports.title = 'Valve ACKs: delayed, refused, duplicated, out-of-order, dropped';
 
+const fs = require('node:fs');
+const path = require('node:path');
+const { redact } = require('../lib/rest');
+
 const state = { zones: [], devices: [] };
 const sched = [];
 
@@ -172,9 +176,11 @@ exports.run = async (ctx) => {
   ev.note('STALE_OPEN_OBSERVED needs RECONCILIATION_GRACE_SEC = 1800s past expected_close_at, so the ' +
     'stale-open path is out of reach of a single short run; it needs a soak run or an injected clock.');
 
-  require('node:fs').writeFileSync(
-    require('node:path').join(ctx.runDir, 'V2-ack-ledger.json'),
-    JSON.stringify({ pushes: await pushRows(ssh, eui), downlinks: observer.downlinksFor(eui), uplinks: observer.uplinksSent }, null, 2) + '\n'
+  // F136 follow-up: every evidence write goes through the same redact(),
+  // including a sidecar file assembled outside CaseEvidence itself.
+  fs.writeFileSync(
+    path.join(ctx.runDir, 'V2-ack-ledger.json'),
+    JSON.stringify(redact({ pushes: await pushRows(ssh, eui), downlinks: observer.downlinksFor(eui), uplinks: observer.uplinksSent }), null, 2) + '\n'
   );
   ev.artifact('ack ledger + downlinks', 'V2-ack-ledger.json');
 };

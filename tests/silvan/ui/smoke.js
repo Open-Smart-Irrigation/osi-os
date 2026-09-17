@@ -16,6 +16,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { browserRequestDecision, originOf } = require('../lib/browserGuard');
+const { redact } = require('../lib/rest');
+const { buildInterpolatedMatchers, matchesInterpolatedLocale, ENGLISH_MARKERS } = require('../lib/i18nScan');
 
 const PLAYWRIGHT_DIR = process.env.OSI_PLAYWRIGHT_DIR || '/home/phil/osi-tools/playwright';
 
@@ -108,12 +110,20 @@ exports.run = async (ctx) => {
     englishOnly.set(v.trim(), k);
   }
   const frValues = new Set(Object.values(fr).map((v) => v.trim()));
+  // Real, currently-served interpolated French templates (e.g. devices.json's
+  // "max {{max}} °C") -- matched against what they RENDER as, since the raw
+  // template never appears verbatim in frValues once i18next has substituted
+  // the placeholder. See lib/i18nScan.js for why this is narrow, not a
+  // blanket exemption (the "max 85 °C" false positive).
+  const frInterpolatedMatchers = buildInterpolatedMatchers(fr);
 
   // Heuristic 3 (below): English function words that never occur in French UI
   // copy. Deliberately short and boring -- it is meant to catch a whole
   // untranslated card, not to grade prose. A word here only counts as a finding
   // when the surrounding string is not itself a French translation.
-  const ENGLISH_MARKERS = /\b(the|and|with|your|ago|used|not|available|updated|refresh|reboot|status|memory|temperature|settings|gateway|current|load|control|off|low|medium|high|max)\b/i;
+  // ENGLISH_MARKERS itself lives in lib/i18nScan.js -- the SAME word list the
+  // per-slot interpolated-value check above uses, so the two can never drift
+  // apart from each other.
   // i18next renders these literally when a key resolves badly.
   const I18N_ERROR = /returned an object instead of string|missingKey|^\[object Object\]$/i;
 
@@ -180,7 +190,19 @@ exports.run = async (ctx) => {
         if (p.auth && !loggedIn) continue;
         if (p.name === 'login') continue;             // already captured, pre-login
         await page.goto(cfg.guiBase + p.hash, { waitUntil: 'networkidle', timeout: 45000 }).catch(() => {});
-        await page.waitForTimeout(1500);
+        // F124: a fixed wait here used to race the route's own lazy-loaded
+        // chunk (e.g. /analysis's ~490 KB echarts chunk, AnalysisRoute.tsx's
+        // <Suspense> fallback) -- goto's own `waitUntil: 'networkidle'` does
+        // not reliably cover it, because a HashRouter navigation to a URL that
+        // differs only by hash is a same-document navigation: React only
+        // triggers the route's dynamic import() AFTER that navigation is
+        // already considered settled, so the chunk fetch can start (and still
+        // be in flight) after goto() has already resolved. Waiting for
+        // network idle AGAIN here, after the route change has had a chance to
+        // kick off that fetch, waits for the chunk itself to finish loading --
+        // deterministically, for a chunk of any size -- instead of guessing a
+        // fixed delay long enough for the largest one observed so far.
+        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
         const shot = path.join(uiDir, vp.id + '-' + p.name + '.png');
         await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
         shots.push(path.relative(ctx.runDir, shot));
@@ -226,7 +248,12 @@ exports.run = async (ctx) => {
             findings.rawKeys.push({ viewport: vp.id, page: p.name, text: t });
             continue;
           }
-          // 4. English that is not in ANY locale bundle: a string that was never
+          // 4. A real, currently-served interpolated French template rendered
+          //    correctly (e.g. "max {{max}} °C" -> "max 85 °C"): a legitimate
+          //    translation, recognised by its actual template rather than left
+          //    for heuristic 5 to misjudge as untranslated English.
+          if (matchesInterpolatedLocale(t, frInterpolatedMatchers)) continue;
+          // 5. English that is not in ANY locale bundle: a string that was never
           //    translated at all, so heuristic 2 is blind to it.
           if (t.length >= 3 && t.length <= 80 && ENGLISH_MARKERS.test(t) && !/[àâçéèêëîïôûùüÿœ]/i.test(t)) {
             findings.englishBlocks.push({ viewport: vp.id, page: p.name, text: t });
@@ -290,8 +317,12 @@ exports.run = async (ctx) => {
   ctx.expect('the GUI raises no uncaught page errors',
     findings.pageErrors.length === 0, { errors: findings.pageErrors.slice(0, 8) });
 
+  // F136: this sidecar JSON is a screenshot companion, not an HTTP transcript,
+  // so nothing upstream has already redacted it -- console/page error text in
+  // particular is free-form browser output that could echo a header or a URL
+  // carrying a token. Same shared redaction function as every other writer.
   const reportPath = path.join(uiDir, 'i18n-scan.json');
-  fs.writeFileSync(reportPath, JSON.stringify({
+  fs.writeFileSync(reportPath, JSON.stringify(redact({
     language: 'fr',
     comparedKeys: Object.keys(en).length,
     missingFrenchKeys: missingFr,
@@ -302,7 +333,7 @@ exports.run = async (ctx) => {
     consoleErrors: findings.consoleErrors,
     pageErrors: findings.pageErrors,
     screenshots: shots,
-  }, null, 2) + '\n');
+  }), null, 2) + '\n');
   ev.artifact('French i18n scan', path.relative(ctx.runDir, reportPath));
   for (const s of shots) ev.artifact('screenshot', s);
   ev.note('GUI account "' + username + '" was registered for this smoke and cannot be removed through the API.');

@@ -22,14 +22,26 @@ const {
   config, assertEndpointsAllowed, assertEndpointGuardPassed, hostOf, isLoopback,
   assertSimulatedDevice, simDeveui, ENDPOINT_GUARD_PASSED, DEFAULTS,
 } = require('./lib/config');
-const { Rest, redact, redactHeaders, isSecretKey, REDACTED } = require('./lib/rest');
+const { Rest, redact, redactString, redactHeaders, isSecretKey, REDACTED } = require('./lib/rest');
 const { Ssh } = require('./lib/ssh');
 const { DownlinkObserver } = require('./lib/observer');
-const { hasRejectedOutboxShape, isKnownTerminalReason } = require('./lib/rejections');
+const {
+  hasRejectedOutboxShape, isKnownTerminalReason, classifyOutboxEventOutcome,
+  isOwnershipAllowedForAggregate, isExplainedRejection,
+} = require('./lib/rejections');
 const { classifyOnceOutcome, ONCE_GRACE_MS } = require('./lib/onceGrace');
 const { hasAdminRouterScopedGate, hasScopedOnlyRoleAssert } = require('./lib/roleGates');
 const { hasBlackholeRoute, firstIpv4, parsePingResolvedIp } = require('./lib/routeParse');
 const planRef = require('./lib/planRef');
+const { truncate } = require('./lib/harness');
+const { CaseEvidence } = require('./lib/evidence');
+const {
+  templateToMatcher, buildInterpolatedMatchers, matchesInterpolatedLocale, isValueLikeSlot, isNameLikePlaceholder,
+} = require('./lib/i18nScan');
+const {
+  CLOUD_REST_TIMEOUT_MS, PENDING_POLL_INTERVAL_MS, resumeBudgetMs,
+  OUTBOX_FLUSH_LEASE_MS, OUTBOX_FLUSH_DEBOUNCE_MS, OUTBOX_FLUSH_MIN_GAP_MS, outboxSettleBudgetMs, firstSuccessOrFail,
+} = require('./lib/edgeTimeouts');
 // Lazily required so a missing module fails ONE assertion instead of the run.
 let browserGuard = null;
 try { browserGuard = require('./lib/browserGuard'); } catch (_) { browserGuard = null; }
@@ -624,6 +636,177 @@ async function main() {
     assert.strictEqual(original.password, 'hunter2');
   });
 
+  console.log('\n-- F134/F136: a JWT-shaped string is stripped from every evidence writer');
+  // A realistic three-part JWT -- the shape the brief asks this selftest to
+  // probe with, even though OSI's own real tokens are two-part
+  // (header.signature, see A1's "login returns a two-part signed token").
+  const JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
+    'eyJzdWIiOiJvc2lfc2VsZnRlc3QiLCJpYXQiOjE3MjY1Mjk2MDB9.' +
+    'QWERTYUIOPASDFGHJKLZXCVBNM1234567890abcdefghijklmno';
+  await check('a JWT-shaped string with NO secret-named key and NO "Bearer " prefix is still redacted ' +
+    '(the gap behind F134: a token embedded in free text, or a value under an unrecognised key name)', () => {
+    assert.ok(!redact('the session id is ' + JWT).includes(JWT), 'the bare token survived a plain-text value');
+    assert.ok(!redact({ jwt: JWT }).jwt.includes(JWT), 'the token survived under a non-secret-named key ("jwt")');
+    assert.ok(redact('the session id is ' + JWT).includes(REDACTED), 'nothing was actually redacted');
+  });
+  await check('a JWT-shaped string under a recognised secret key is still redacted structurally', () => {
+    assert.strictEqual(redact({ token: JWT }).token, REDACTED);
+  });
+  await check('a "Bearer "-prefixed JWT is redacted (existing coverage, still intact)', () => {
+    assert.ok(!redactString('Authorization: Bearer ' + JWT).includes(JWT));
+  });
+  await check('an ISO timestamp, a filename and a dotted hostname are NOT mistaken for a token by shape', () => {
+    for (const benign of [
+      '2026-09-17T14:04:14.422Z', 'index-Bu5qTxv9.js', 'server.opensmartirrigation.org', 'bovey.cloud',
+    ]) {
+      assert.strictEqual(redactString(benign), benign, benign + ' must survive redaction unchanged');
+    }
+  });
+  await check('lib/harness.js\'s truncate() redacts BEFORE truncating, not after (F134\'s actual bug: ' +
+    'expectStatus built its check detail from `truncate(res.body)`, and a `{"token":"..."}` body cut to a ' +
+    'fixed length by truncate() first is no longer valid JSON, so a later redaction pass could only fall back ' +
+    'to a much weaker text scan)', () => {
+    const longBody = { token: JWT, ok: true, note: 'x'.repeat(500) };
+    const out = truncate(longBody);
+    assert.ok(!out.includes(JWT), 'the token survived truncate() despite exceeding the 400-char default cutoff');
+    assert.ok(out.includes(REDACTED), 'nothing was redacted at all');
+  });
+  await check('a CaseEvidence case that hands a JWT to step()/check()/note()/cleanupStep()/finish() never writes ' +
+    'it to disk, in EITHER the JSON or the Markdown file (every evidence writer shares the one redaction ' +
+    'choke point)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-selftest-evidence-'));
+    try {
+      const ev = new CaseEvidence(dir, 'SELFTEST', 'F136 redaction selftest');
+      ev.step('a step carrying a token', { token: JWT });
+      ev.note('a note that embeds a bearer token: Bearer ' + JWT);
+      ev.note('a note with a bare token and no key context: ' + JWT);
+      ev.check('a check with a token buried in detail', true, { nested: { sync_token: JWT }, keep: 'me' });
+      ev.cleanupStep('a cleanup step with a token', true, { appkey: JWT });
+      ev.finish('FAIL', new Error('boom, response was ' + JSON.stringify({ token: JWT })));
+      const { jsonPath, mdPath } = ev.write();
+      const jsonText = fs.readFileSync(jsonPath, 'utf8');
+      const mdText = fs.readFileSync(mdPath, 'utf8');
+      assert.ok(!jsonText.includes(JWT), 'the JWT leaked into the case JSON evidence');
+      assert.ok(!mdText.includes(JWT), 'the JWT leaked into the case Markdown evidence');
+      assert.ok(jsonText.includes(REDACTED) && mdText.includes(REDACTED), 'nothing was actually redacted');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+  await check('ui/smoke.js\'s i18n-scan.json sidecar is redacted before it is written (a screenshot companion, ' +
+    'not an HTTP transcript, so nothing upstream has already redacted it)', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'ui', 'smoke.js'), 'utf8');
+    assert.match(src, /writeFileSync\(reportPath, JSON\.stringify\(redact\(/,
+      'the i18n-scan.json write must pass the report object through the shared redact() first');
+  });
+
+  console.log('\n-- verifier follow-up (PR #301 review): TOKEN_SHAPE_RE padding and EUI-pair exclusion');
+  const PADDED_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvc2kifQ==';
+  await check('a base64-padded token (bare, no key, no "Bearer " prefix) is still redacted by shape', () => {
+    assert.ok(!redactString('token is ' + PADDED_TOKEN).includes(PADDED_TOKEN));
+    assert.ok(redactString('token is ' + PADDED_TOKEN).includes(REDACTED));
+  });
+  await check('a single trailing "=" or "==" is accepted as padding, not just a bare base64url segment', () => {
+    const onePad = 'x'.repeat(20) + '.' + 'y'.repeat(20) + '=';
+    const twoPad = 'a'.repeat(20) + '.' + 'b'.repeat(20) + '==';
+    assert.strictEqual(redactString('value: ' + onePad + ' end'), 'value: ' + REDACTED + ' end');
+    assert.strictEqual(redactString('value: ' + twoPad + ' end'), 'value: ' + REDACTED + ' end');
+  });
+  await check('two 16-hex-character EUIs joined by a dot are NOT redacted -- pure-hex segments of exactly EUI ' +
+    'length are an identifier pairing (e.g. a gateway migration log line), never a token', () => {
+    const euiPair = '0016C001F11715E2.0016C001F11369DE';
+    assert.strictEqual(redactString('migrated ' + euiPair + ' done'), 'migrated ' + euiPair + ' done');
+    assert.strictEqual(redactString(euiPair), euiPair);
+  });
+  await check('a mixed pairing -- one EUI-length hex segment and one real token segment -- is still redacted ' +
+    '(the EUI exclusion only applies when EVERY segment is pure EUI-length hex)', () => {
+    const mixed = '0016C001F11715E2.' + 'g'.repeat(20); // 'g' is not a hex digit
+    assert.ok(!redactString('ref ' + mixed).includes(mixed));
+  });
+  await check('ISO timestamps, semver, hostnames and file names introduced earlier still survive unredacted ' +
+    'after the padding/EUI changes (no regression)', () => {
+    for (const benign of [
+      '2026-09-17T14:04:14.422Z', 'index-Bu5qTxv9.js', 'server.opensmartirrigation.org', 'bovey.cloud', '5.1.7',
+    ]) {
+      assert.strictEqual(redactString(benign), benign, benign + ' must survive redaction unchanged');
+    }
+  });
+
+  console.log('\n-- verifier follow-up: every evidence writer in tests/silvan goes through the shared redact()');
+  await check('cases/V1-valve-actions.js and cases/V2-valve-acks.js now redact their own sidecar JSON writes ' +
+    '(they used to bypass the choke point with a raw fs.writeFileSync + JSON.stringify)', () => {
+    for (const file of ['V1-valve-actions.js', 'V2-valve-acks.js']) {
+      const src = fs.readFileSync(path.join(__dirname, 'cases', file), 'utf8');
+      assert.match(src, /JSON\.stringify\(redact\(/, file + ' must redact its sidecar payload before stringifying');
+    }
+  });
+  await check('every fs.writeFileSync/appendFileSync/appendFile(...) call site in tests/silvan is either the ' +
+    'shared writer itself, an explicitly reasoned non-evidence exception, or passes through redact() -- so a ' +
+    'future evidence-writing call cannot silently reintroduce this bypass', () => {
+    // Allow-listed by exact relative path, each with its own reason -- a new
+    // file is never implicitly exempt.
+    const ALLOW = new Map([
+      ['tests/silvan/lib/evidence.js',
+        'this IS the shared evidence writer: write()/writeRunSummary() are the choke point every case\'s own ' +
+        'step()/check()/note()/cleanupStep() output already passed through redact() to reach (see lib/evidence.js)'],
+      ['tests/silvan/selftest.js',
+        'writes only its OWN throwaway scratch fixtures (an ssh_config fixture in a mkdtemp dir, a ' +
+        'CaseEvidence redaction-selftest run) for this selftest\'s own offline use -- never real run evidence'],
+    ]);
+    const root = path.join(__dirname);
+    const files = [];
+    (function walk(dir) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules') continue;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.js')) files.push(full);
+      }
+    })(root);
+    const repoRoot = path.join(__dirname, '..', '..');
+    // Orchestrator follow-up 2 (optional item): also catch the async/stream
+    // writer forms, and require redact( INSIDE the matched call's own
+    // balanced argument list, not just somewhere in a character window
+    // (a window can both miss a redact() several lines away in a
+    // multi-line call, and false-accept an unrelated one nearby).
+    const CALL_RE = /\b(?:fs\.)?(?:promises\.)?(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\s*\(/g;
+    // Balanced-paren argument extraction, not a real JS parser: a literal
+    // '(' or ')' inside a string/template argument would confuse it. None of
+    // the calls in this tree do that (paths and JSON payloads only), so this
+    // stays a deliberately small sweep, not a full parser.
+    function callArgs(src, openParenIndex) {
+      let depth = 0;
+      for (let i = openParenIndex; i < src.length; i++) {
+        if (src[i] === '(') depth += 1;
+        else if (src[i] === ')') {
+          depth -= 1;
+          if (depth === 0) return src.slice(openParenIndex + 1, i);
+        }
+      }
+      return src.slice(openParenIndex + 1);
+    }
+    const offenders = [];
+    let sweptFiles = 0;
+    let sweptCalls = 0;
+    for (const file of files) {
+      const rel = path.relative(repoRoot, file).split(path.sep).join('/');
+      if (ALLOW.has(rel)) continue;
+      sweptFiles += 1;
+      const src = fs.readFileSync(file, 'utf8');
+      let m;
+      while ((m = CALL_RE.exec(src))) {
+        sweptCalls += 1;
+        const openParenIndex = m.index + m[0].length - 1;
+        if (!/redact\(/.test(callArgs(src, openParenIndex))) {
+          const line = src.slice(0, m.index).split('\n').length;
+          offenders.push(rel + ':' + line);
+        }
+      }
+    }
+    assert.ok(sweptFiles > 0 && sweptCalls > 0, 'the sweep must actually scan files and find real call sites, ' +
+      'or this check proves nothing');
+    assert.deepStrictEqual(offenders, [],
+      'writeFileSync/appendFile call(s) with no nearby redact(): ' + offenders.join(', '));
+  });
+
   console.log('\n-- rejected-outbox shape (F30 / osi-os#262), against fixture JSON');
   // These fixtures stand in for GET /api/sync/state bodies so this logic is
   // checked offline, without a gateway, both before and after #262 lands.
@@ -829,6 +1012,416 @@ async function main() {
   await check('isDstTransitionWithin detects the spring-forward transition and reports none on an ordinary day', () => {
     assert.strictEqual(planRef.isDstTransitionWithin('Europe/Zurich', Date.UTC(2026, 2, 29, 0), Date.UTC(2026, 2, 29, 23)), true);
     assert.strictEqual(planRef.isDstTransitionWithin('Europe/Zurich', Date.UTC(2026, 5, 15, 0), Date.UTC(2026, 5, 15, 23)), false);
+  });
+
+  console.log('\n-- U1 i18n scan: interpolated-template recognition (the "max 85 °C" false positive)');
+  // The real devices.json/fr entry this false positive came from (verified
+  // 2026-09-17, web/react-gui/public/locales/fr/devices.json): genuinely
+  // translated (note the French template has a space before °C that the
+  // English one lacks), but the RENDERED text ("max 85 °C") appears in
+  // neither locale bundle verbatim, since the bundle only ever holds the
+  // un-interpolated template.
+  const FR_DEVICES_FIXTURE = { 'devices.maxTemperature': 'max {{max}} °C', 'devices.plain': 'Réglages' };
+  await check('templateToMatcher builds a {regex, placeholderNames} matcher from a real interpolated template', () => {
+    const m = templateToMatcher('max {{max}} °C');
+    assert.ok(m && m.regex.test('max 85 °C'), 'the matcher must accept the real rendering');
+    assert.deepStrictEqual(m.placeholderNames, ['max']);
+    assert.ok(m && !m.regex.test('max 85°C'), 'the matcher must be exact about the template\'s own literal text ' +
+      '(the space before °C is part of what makes this a genuine, distinct French translation)');
+  });
+  await check('a template with no placeholder at all yields no matcher (smoke.js\'s exact-value check already ' +
+    'covers a plain string)', () => {
+    assert.strictEqual(templateToMatcher('Réglages'), null);
+  });
+  await check('a template that is (almost) nothing but a placeholder yields no matcher -- it would match nearly ' +
+    'any string, hiding a real leak instead of recognising one specific known-good rendering', () => {
+    assert.strictEqual(templateToMatcher('{{value}}'), null);
+    assert.strictEqual(templateToMatcher('{{a}}{{b}}'), null);
+  });
+  await check('a template whose literal text has no actual letter in it yields no matcher (symbols/spaces alone ' +
+    'are not "real substance")', () => {
+    assert.strictEqual(templateToMatcher('{{a}} - {{b}}'), null, 'a bare hyphen separator has no letter');
+    assert.ok(templateToMatcher('max {{max}} °C'), 'sanity: "max ... °C" DOES have letters and must still match');
+  });
+  await check('buildInterpolatedMatchers + matchesInterpolatedLocale recognise the real "max 85 °C" rendering as ' +
+    'a legitimate translation, not a hardcoded-English leak', () => {
+    const matchers = buildInterpolatedMatchers(FR_DEVICES_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('max 85 °C', matchers), true);
+    assert.strictEqual(matchesInterpolatedLocale('max 200 °C', matchers), true, 'any substituted value must match, ' +
+      'not just the one recorded in evidence');
+  });
+  await check('the narrowed rule does NOT exempt unrelated English text that merely contains a marker word -- it ' +
+    'only recognises a rendering that traces back to a REAL template, so the underlying heuristic stays exactly ' +
+    'as strict for anything that is not one', () => {
+    const matchers = buildInterpolatedMatchers(FR_DEVICES_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('current status: not available', matchers), false);
+    assert.strictEqual(matchesInterpolatedLocale('max', matchers), false, 'the bare marker word alone is not a ' +
+      'rendering of the template and must still be free to be caught');
+  });
+  await check('U1 recognises a translated interpolated string by its real template BEFORE the English-marker ' +
+    'heuristic runs, and does not weaken that heuristic itself', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'ui', 'smoke.js'), 'utf8');
+    const matchIdx = src.indexOf('matchesInterpolatedLocale(t, frInterpolatedMatchers)');
+    const markerIdx = src.indexOf('ENGLISH_MARKERS.test(t)');
+    assert.ok(matchIdx > 0, 'smoke.js must call the shared interpolated-template matcher');
+    assert.ok(markerIdx > 0, 'the English-marker heuristic must still exist, unweakened');
+    assert.ok(matchIdx < markerIdx, 'the template check must run before the marker heuristic, not replace it');
+  });
+
+  console.log('\n-- orchestrator follow-up 2: a slot is judged by its PLACEHOLDER, not by scanning its text ' +
+    'for English marker words');
+  // The verifier's exact counterexample: valves.json/fr's own real template
+  // has almost no literal text around its ONE placeholder, so the old lazy
+  // `[\s\S]*?` wildcard (then a word-count+marker slot check) accepted
+  // English prose ending in " °C". Separately, the OLD word-count+marker
+  // check would have started rejecting a legitimate customer NAME that
+  // happens to contain a marker word ("High tunnel control") -- a false
+  // positive that did not exist before. Both are fixed by classifying the
+  // placeholder itself: "value" is not name-like, so its slot must be
+  // value-like; "name" is name-like, so its slot accepts free text.
+  const FR_VALVES_FIXTURE = { 'valves.format.temperature': '{{value}} °C' };
+  const FR_OPEN_DIALOG_FIXTURE = { 'valves.openDialog.title': 'Ouvrir {{name}}' };
+  const ALL_FIXTURES = Object.assign({}, FR_DEVICES_FIXTURE, FR_VALVES_FIXTURE, FR_OPEN_DIALOG_FIXTURE);
+  await check('isNameLikePlaceholder: exactly the placeholders this codebase\'s real en locale bundles use for ' +
+    'user/customer content (name, zone, zoneName, username, crop, variety, names) are name-like; a value-shaped ' +
+    'placeholder like "value" or "max" is not', () => {
+    for (const n of ['name', 'zone', 'zoneName', 'username', 'crop', 'variety', 'names', 'NAME']) {
+      assert.strictEqual(isNameLikePlaceholder(n), true, n + ' must be name-like (case-insensitive)');
+    }
+    for (const n of ['value', 'max', 'min', 'count', 'minutes', 'percent', 'label', 'title']) {
+      assert.strictEqual(isNameLikePlaceholder(n), false, n + ' must NOT be name-like');
+    }
+  });
+  await check('isValueLikeSlot: a number, a unit-qualified number, a time, an ISO date and a spelled-month date ' +
+    'are value-like; ANY free-form phrase -- even one with no marker word -- is not', () => {
+    assert.strictEqual(isValueLikeSlot('85'), true);
+    assert.strictEqual(isValueLikeSlot('-3°C'), true);
+    assert.strictEqual(isValueLikeSlot('5 min'), true);
+    assert.strictEqual(isValueLikeSlot('20 kPa'), true);
+    assert.strictEqual(isValueLikeSlot('14:04'), true);
+    assert.strictEqual(isValueLikeSlot('2026-09-17'), true);
+    assert.strictEqual(isValueLikeSlot('17 septembre 2026'), true, 'a formatted date shape, not free prose, ' +
+      'despite containing one word');
+    assert.strictEqual(isValueLikeSlot('Gateway temperature high 85'), false, 'the verifier\'s first-round ' +
+      'counterexample slot content');
+    assert.strictEqual(isValueLikeSlot('please try again'), false, 'a marker-FREE English phrase -- this is ' +
+      'exactly the round-1 regression: word-count+marker alone would have accepted this');
+    assert.strictEqual(isValueLikeSlot('no data yet'), false, 'same family: no marker word, still not value-like');
+    assert.strictEqual(isValueLikeSlot(''), false);
+  });
+  await check('the verifier\'s first-round counterexample -- "Gateway temperature high 85 °C" against ' +
+    'valves.json/fr\'s own "{{value}} °C" template -- is REJECTED, not accepted as a French translation', () => {
+    const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('Gateway temperature high 85 °C', matchers), false);
+  });
+  await check('"max 85 °C" is still accepted even with the other templates also in play (the original false ' +
+    'positive stays fixed)', () => {
+    const matchers = buildInterpolatedMatchers(ALL_FIXTURES);
+    assert.strictEqual(matchesInterpolatedLocale('max 85 °C', matchers), true);
+  });
+  await check('"please try again" in a {{value}} slot is rejected (the verifier\'s second-round regression: a ' +
+    'marker-free English phrase used to slip through)', () => {
+    const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('please try again °C', matchers), false);
+  });
+  await check('"Ouvrir High tunnel control" is accepted under valves.json/fr\'s real "Ouvrir {{name}}" template ' +
+    '-- a customer valve/zone name that happens to contain marker words ("control", "high") must not be flagged', () => {
+    const matchers = buildInterpolatedMatchers(FR_OPEN_DIALOG_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir High tunnel control', matchers), true);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir Control valve north', matchers), true);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir Low field 2', matchers), true);
+  });
+  await check('a harness-created identifier like "osi_zone_ab12" is accepted through a name-like placeholder ' +
+    '(this IS the realistic path: a zone/device name flows through {{name}}/{{zoneName}}, never through a ' +
+    'value-shaped placeholder like {{value}})', () => {
+    const matchers = buildInterpolatedMatchers(FR_OPEN_DIALOG_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir osi_zone_ab12', matchers), true);
+  });
+  await check('an English sentence that merely CONTAINS a French name template\'s static word, but is otherwise ' +
+    'English, is still flagged: the STATIC text is matched byte-for-byte, so an English rendering of the same ' +
+    'concept does not match this template at all and falls through to the marker heuristic unchanged', () => {
+    const matchers = buildInterpolatedMatchers(FR_OPEN_DIALOG_FIXTURE);
+    // "Open High tunnel control" does not start with the template's own
+    // French literal text "Ouvrir " -- no match, by construction.
+    assert.strictEqual(matchesInterpolatedLocale('Open High tunnel control', matchers), false);
+  });
+  await check('near-empty templates are still excluded after the slot-validation change (unaffected: this is ' +
+    'governed by MIN_LITERAL_CHARS/the letter check, not by isValueLikeSlot)', () => {
+    assert.strictEqual(templateToMatcher('{{value}}'), null);
+  });
+
+  console.log('\n-- U1 F124: the per-route wait after navigation is deterministic, not a fixed delay');
+  await check('the per-page wait uses networkidle (covers a same-document hash navigation\'s lazy chunk fetch, ' +
+    'which the initial goto()\'s own networkidle can miss) instead of a bare fixed timeout', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'ui', 'smoke.js'), 'utf8');
+    assert.match(src, /waitForLoadState\('networkidle'/, 'the fixed page.waitForTimeout(1500) must be replaced ' +
+      'with a deterministic wait for the route\'s own network activity to settle');
+    // The per-route wait must be inside the PAGES loop, after the route's own
+    // goto() -- not just present somewhere else in the file.
+    const gotoIdx = src.indexOf("page.goto(cfg.guiBase + p.hash");
+    const waitIdx = src.indexOf("waitForLoadState('networkidle'", gotoIdx);
+    assert.ok(gotoIdx > 0 && waitIdx > gotoIdx, 'the networkidle wait must follow the per-route goto()');
+  });
+
+  console.log('\n-- R1 F125/F146: resume budget derived from the edge\'s own HTTP client timeout, not a guess');
+  // Drift guard: read the REAL edge source (both firmware profiles) so this
+  // harness's assumed constants cannot silently diverge from what the
+  // product actually does.
+  await check('the edge\'s cloud-REST default timeout is 30000ms on both firmware profiles (osi-cloud-http/' +
+    'index.js), matching lib/edgeTimeouts.js\'s CLOUD_REST_TIMEOUT_MS', () => {
+    for (const profile of ['bcm27xx_bcm2712', 'bcm27xx_bcm2709']) {
+      const p = path.join(__dirname, '..', '..', 'conf', 'full_raspberrypi_' + profile, 'files', 'usr', 'share',
+        'node-red', 'osi-cloud-http', 'index.js');
+      const src = fs.readFileSync(p, 'utf8');
+      assert.match(src, /const DEFAULT_TIMEOUT_MS = 30000;/, profile + ' must define the timeout this constant assumes');
+    }
+    assert.strictEqual(CLOUD_REST_TIMEOUT_MS, 30000);
+  });
+  await check('the pending-commands poll\'s own outbound request uses OSI_CLOUD_REST_TIMEOUT_MS with the same ' +
+    '30000ms default (flows.json node "sync-pending-http"), and its inject fires every 30s (node ' +
+    '"sync-pending-inject"), matching lib/edgeTimeouts.js\'s PENDING_POLL_INTERVAL_MS', () => {
+    const flowsPath = path.join(__dirname, '..', '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr',
+      'share', 'flows.json');
+    const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+    const httpNode = flows.find((n) => n.id === 'sync-pending-http');
+    const injectNode = flows.find((n) => n.id === 'sync-pending-inject');
+    assert.ok(httpNode, 'sync-pending-http node must exist');
+    assert.match(httpNode.func, /OSI_CLOUD_REST_TIMEOUT_MS'\)\s*\|\|\s*30000/,
+      'the poll\'s own request must default to the same 30000ms timeout');
+    assert.ok(injectNode, 'sync-pending-inject node must exist');
+    assert.strictEqual(injectNode.repeat, '30', 'the poll cadence lib/edgeTimeouts.js assumes must match the ' +
+      'inject node\'s actual repeat interval');
+    assert.strictEqual(PENDING_POLL_INTERVAL_MS, 30000);
+  });
+  await check('resumeBudgetMs() is derived from those two constants (two full timeout+interval cycles), not a ' +
+    'bare guessed number, and comfortably exceeds the 90000ms budget that F146 observed as insufficient', () => {
+    assert.strictEqual(resumeBudgetMs(), (CLOUD_REST_TIMEOUT_MS + PENDING_POLL_INTERVAL_MS) * 2);
+    assert.strictEqual(resumeBudgetMs(), 120000);
+    assert.ok(resumeBudgetMs() > 90000, 'the new budget must exceed the one F146 found insufficient');
+  });
+  await check('R1 sizes its post-blackhole resume wait from resumeBudgetMs(), not a bare numeric literal', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'R1-runtime-recovery.js'), 'utf8');
+    assert.ok(/timeoutMs: resumeBudgetMs\(\)/.test(src), 'R1 must call the shared, source-derived budget');
+    assert.ok(!/timeoutMs:\s*90000\b/.test(src), 'the old guessed 90000ms literal must be gone');
+  });
+  await check('R1 waits for the first successful post-restart pending-commands poll BEFORE taking its "before" ' +
+    'snapshot and arming the blackhole (F125/F146: it used to race that very first poll)', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'R1-runtime-recovery.js'), 'utf8');
+    const waitIdx = src.indexOf('the first pending-commands poll to succeed before arming the blackhole');
+    const s0Idx = src.indexOf('const s0 = await rest.get');
+    // The header comment (top of file) mentions "ip route add blackhole" in
+    // free text before any code does; search for the actual call instead.
+    const routeAddIdx = src.indexOf("ssh.exec('ip route add blackhole");
+    assert.ok(waitIdx > 0, 'R1 must wait for a real first success');
+    assert.ok(s0Idx > 0 && routeAddIdx > 0, 'both the snapshot and the route-add call must be present');
+    assert.ok(waitIdx < s0Idx, 'the wait must happen before the "before" snapshot is taken');
+    assert.ok(s0Idx < routeAddIdx, 'the snapshot must precede the route add (unchanged ordering otherwise)');
+  });
+
+  console.log('\n-- verifier follow-up: a timed-out first-poll wait fails EXPLICITLY, not via a bare note');
+  await check('firstSuccessOrFail (lib/edgeTimeouts.js) returns an explicit, named failure when the wait times ' +
+    'out -- stubbed so this is checked offline, without a real restart+poll cycle', async () => {
+    const neverResolves = () => Promise.reject(new Error('timed out after 120000ms'));
+    const decision = await firstSuccessOrFail(neverResolves,
+      '(b) the edge did not poll pending-commands successfully within 120s after the restart; blackhole not armed');
+    assert.strictEqual(decision.ok, false);
+    assert.match(decision.message, /did not poll pending-commands successfully within 120s after the restart; blackhole not armed/);
+  });
+  await check('firstSuccessOrFail reports ok (and hands back the real result) when the wait succeeds', async () => {
+    const resolves = () => Promise.resolve({ lastPendingCommandPollSuccessAt: '2026-01-01T00:00:00Z' });
+    const decision = await firstSuccessOrFail(resolves, 'unused message');
+    assert.strictEqual(decision.ok, true);
+    assert.strictEqual(decision.result.lastPendingCommandPollSuccessAt, '2026-01-01T00:00:00Z');
+  });
+  await check('R1 fails the case explicitly, by name, and RETURNS (skipping the blackhole) when the first-poll ' +
+    'wait times out -- not a bare ev.note that lets the case proceed to arm the blackhole on an unconfirmed ' +
+    'baseline and fail later on a less specific assertion', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'R1-runtime-recovery.js'), 'utf8');
+    assert.match(src, /const firstPollDecision = await firstSuccessOrFail\(/,
+      'R1 must use the shared explicit-failure helper, not its own bare note');
+    const declIdx = src.indexOf('const firstPollDecision = await firstSuccessOrFail(');
+    const failIdx = src.indexOf('if (!firstPollDecision.ok) {');
+    const expectIdx = src.indexOf('ctx.expect(firstPollDecision.message, false,', failIdx);
+    const returnIdx = src.indexOf('return;', failIdx);
+    const routeAddIdx = src.indexOf("ssh.exec('ip route add blackhole");
+    assert.ok(declIdx > 0 && failIdx > declIdx, 'the decision must be checked right after it is made');
+    assert.ok(expectIdx > failIdx, 'a timed-out wait must fail the case (ctx.expect(..., false, ...)), by name');
+    assert.ok(returnIdx > expectIdx && returnIdx < routeAddIdx,
+      'the case must return -- skipping the blackhole -- before ever reaching the route-add call');
+  });
+
+  console.log('\n-- C1 F122/F146: the "cloud unreachable" premise no longer asserts a state the product ' +
+    'does not promise');
+  await check('C1 no longer asserts that the outbox "grows rather than dropping" from the cloudReachable guess ' +
+    '(F122: the guess said unreachable while the outbox actually drained -- a real, controlled outage is ' +
+    'R1(b)\'s job, not something this case can assert into existence)', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.ok(!/grows rather than dropping events/.test(src), 'the fragile growth assertion must be gone');
+    assert.ok(!/surfaces the growing backlog to the operator/.test(src), 'the fragile API-surfaces-growth ' +
+      'assertion must be gone too (same heuristic, same race)');
+  });
+  await check('verifier follow-up: the old tautological final assertion (`outboxAfter >= 0 && !!zoneEvent && ' +
+    '!!deviceEvent` -- always-true first term, two stale creation-time snapshots) is gone from C1', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.ok(!/outboxAfter >= 0 && !!zoneEvent && !!deviceEvent/.test(src),
+      'the tautological assertion the verifier proved with a stub must be gone');
+  });
+  await check('C1 re-queries each of ITS OWN events by event_uuid at the END of the run and asserts each one ' +
+    'survived (delivered, still queued, or a documented never-seen-resource rejection) -- so a write that is ' +
+    'queued and later silently removed from sync_outbox now fails the case', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /await assertOutboxEventSurvived\(ctx, 'the zone create', zoneEvent && zoneEvent\.event_uuid\)/);
+    assert.match(src, /await assertOutboxEventSurvived\(ctx, 'the device registration', deviceEvent && deviceEvent\.event_uuid\)/);
+    assert.match(src, /await assertOutboxEventSurvived\(ctx, 'the telemetry append', telemetryEvent && telemetryEvent\.event_uuid\)/);
+    // Placed after the T16f additions (duplicate delivery / expired action /
+    // stale push), i.e. genuinely at the end of the run, not right after
+    // creation where the old snapshots were taken.
+    const lastAdditionIdx = src.indexOf('=== T16f additions');
+    const survivedIdx = src.indexOf("assertOutboxEventSurvived(ctx, 'the zone create'");
+    assert.ok(lastAdditionIdx > 0 && survivedIdx > lastAdditionIdx,
+      'the survival re-query must run after the rest of the case, not immediately after creation');
+  });
+  await check('classifyOutboxEventOutcome (lib/rejections.js): delivered -> survived; still pending -> ' +
+    'survived; row missing (deleted) -> NOT survived; rejected for an unexplained reason -> NOT survived ' +
+    '(aggregate type unchanged by these three cases)', () => {
+    assert.strictEqual(classifyOutboxEventOutcome({ aggregate_type: 'ZONE', delivered_at: '2026-09-17T00:00:00Z', rejected_at: null }).survived, true);
+    assert.strictEqual(classifyOutboxEventOutcome({ aggregate_type: 'ZONE', delivered_at: null, rejected_at: null }).survived, true);
+    assert.strictEqual(classifyOutboxEventOutcome(null).survived, false);
+    assert.strictEqual(classifyOutboxEventOutcome({ aggregate_type: 'DEVICE', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z', rejection_reason: 'equal_version_payload_conflict' }).survived, false);
+  });
+  console.log('\n-- orchestrator follow-up 2 (PR #301 review): the ownership_denied allowance depends on WHICH ' +
+    'aggregate it landed on, not the reason alone');
+  await check('classifyOutboxEventOutcome: ownership_denied on a ZONE is an UNEXPLAINED rejection -- F21 means ' +
+    'a zone this harness creates through its own authenticated session is accepted, never ownership_denied; ' +
+    'allowing it here would let exactly that defect class pass silently', () => {
+    const outcome = classifyOutboxEventOutcome({
+      aggregate_type: 'ZONE', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z',
+      rejection_reason: 'ownership_denied: zone never seen',
+    });
+    assert.strictEqual(outcome.survived, false);
+    assert.strictEqual(outcome.state, 'rejected_unexplained');
+  });
+  await check('classifyOutboxEventOutcome: ownership_denied on a DEVICE survives, and is the documented never-' +
+    'seen-device rule (not a drop)', () => {
+    const outcome = classifyOutboxEventOutcome({
+      aggregate_type: 'DEVICE', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z',
+      rejection_reason: 'ownership_denied: device never seen',
+    });
+    assert.strictEqual(outcome.survived, true);
+    assert.strictEqual(outcome.state, 'rejected_expected');
+  });
+  await check('classifyOutboxEventOutcome: ownership_denied on DEVICE_DATA (telemetry) likewise survives', () => {
+    const outcome = classifyOutboxEventOutcome({
+      aggregate_type: 'DEVICE_DATA', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z',
+      rejection_reason: 'ownership_denied: device_data_row never seen',
+    });
+    assert.strictEqual(outcome.survived, true);
+    assert.strictEqual(outcome.state, 'rejected_expected');
+  });
+  await check('isOwnershipAllowedForAggregate / isExplainedRejection: exactly DEVICE and DEVICE_DATA are ' +
+    'allowed, case-insensitively; ZONE and anything else are not; a reason outside the known-terminal list is ' +
+    'never explained regardless of aggregate type', () => {
+    assert.strictEqual(isOwnershipAllowedForAggregate('DEVICE'), true);
+    assert.strictEqual(isOwnershipAllowedForAggregate('device_data'), true, 'case-insensitive');
+    assert.strictEqual(isOwnershipAllowedForAggregate('ZONE'), false);
+    assert.strictEqual(isOwnershipAllowedForAggregate('VALVE_SCHEDULE'), false);
+    assert.strictEqual(isOwnershipAllowedForAggregate(undefined), false);
+    assert.strictEqual(isExplainedRejection('ownership_denied: x', 'DEVICE'), true);
+    assert.strictEqual(isExplainedRejection('ownership_denied: x', 'ZONE'), false);
+    assert.strictEqual(isExplainedRejection('equal_version_payload_conflict', 'DEVICE'), false,
+      'an unknown reason is never explained, even on an allowed aggregate type');
+  });
+  await check('C1\'s re-query includes aggregate_type (the sync_outbox schema column, ' +
+    'database/seed-blank.sql\'s "CREATE TABLE sync_outbox") so classifyOutboxEventOutcome is never guessing it', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /SELECT aggregate_type, delivered_at, rejected_at, rejection_reason FROM sync_outbox WHERE event_uuid/);
+  });
+  await check('C1\'s run-wide "known terminal reason" delta check and its own-resource "mine" check both use ' +
+    'isExplainedRejection (aggregate-type-aware), not a reason-only isKnownTerminalReason/LIKE filter that ' +
+    'would wave an ownership_denied ZONE rejection through unfiltered', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /unexplainedDelta = rejectedDelta\.filter\(\(r\) => !isExplainedRejection\(r\.rejection_reason, r\.aggregate_type\)\)/);
+    assert.match(src, /freshRejects = freshRejectsAll\.filter\(\(r\) => !isExplainedRejection\(r\.rejection_reason, r\.aggregate_type\)\)/);
+    // The old kind-blind exclusion was a SQL WHERE-clause filter, not a
+    // comment; check the actual freshRejectsAll query has no such filter,
+    // rather than a bare substring scan that would also match a comment or
+    // this file's own unrelated positive-match `simRejects` query below.
+    const freshRejectsAllIdx = src.indexOf('const freshRejectsAll = await ssh.sql(');
+    const freshRejectsAllQuery = src.slice(freshRejectsAllIdx, src.indexOf(');', freshRejectsAllIdx));
+    assert.ok(!/NOT LIKE 'ownership_denied%'/.test(freshRejectsAllQuery),
+      "the freshRejectsAll query itself must not re-exclude ownership_denied in SQL (that was the kind-blind bug)");
+  });
+  await check('C1\'s assertOutboxEventSurvived fails with a message naming the resource -- and refuses to query ' +
+    'with an empty event_uuid -- when the id was never captured in the first place', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /if \(!eventUuid\) \{\s*\n\s*ctx\.expect\(label \+ /,
+      'a missing event_uuid must fail explicitly (naming the resource via `label`), not be silently skipped');
+  });
+  await check('classifyOutboxEventOutcome, end to end via a stubbed db reader (the shape the orchestrator\'s ' +
+    'own verifier proved the OLD assertion missed): a row that existed at creation time but is GONE by the time ' +
+    'the case re-queries it is classified as NOT survived, exactly like a fresh SQL read returning no row', () => {
+    const stubReadRow = (fixtureRows, eventUuid) => fixtureRows.find((r) => r.event_uuid === eventUuid) || null;
+    const rowsAtCreation = [{ event_uuid: 'evt-1', delivered_at: null, rejected_at: null }];
+    const rowsAtEnd = []; // the row was deleted between creation and the end of the case
+    assert.strictEqual(classifyOutboxEventOutcome(stubReadRow(rowsAtCreation, 'evt-1')).survived, true,
+      'at creation time the row is merely queued -- survived');
+    assert.strictEqual(classifyOutboxEventOutcome(stubReadRow(rowsAtEnd, 'evt-1')).survived, false,
+      'the SAME event_uuid, re-read at the end, is gone -- this is the drop the old snapshot-only check missed');
+  });
+
+  console.log('\n-- C1 F146: the outbox settle-poll budget is derived from the flush lease/debounce mechanics');
+  await check('the outbox flush lease/debounce constants match the real edge source (flows.json nodes ' +
+    '"sync-outbox-flush-coalesce" and "sync-outbox-build")', () => {
+    const flowsPath = path.join(__dirname, '..', '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr',
+      'share', 'flows.json');
+    const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+    const coalesce = flows.find((n) => n.id === 'sync-outbox-flush-coalesce');
+    const build = flows.find((n) => n.id === 'sync-outbox-build');
+    assert.ok(coalesce, 'sync-outbox-flush-coalesce node must exist');
+    assert.ok(build, 'sync-outbox-build node must exist');
+    assert.match(coalesce.func, /const DEBOUNCE_MS = 200;/);
+    assert.match(coalesce.func, /const MIN_GAP_MS = 750;/);
+    assert.match(build.func, /const FLUSH_LEASE_MS = 120000;/);
+    assert.strictEqual(OUTBOX_FLUSH_DEBOUNCE_MS, 200);
+    assert.strictEqual(OUTBOX_FLUSH_MIN_GAP_MS, 750);
+    assert.strictEqual(OUTBOX_FLUSH_LEASE_MS, 120000);
+  });
+  await check('outboxSettleBudgetMs() comfortably exceeds run 6\'s observed "within two minutes" settle time ' +
+    'and the old, too-short 20000ms budget, while still being a bounded number a persistent disagreement can ' +
+    'exhaust', () => {
+    const budget = outboxSettleBudgetMs();
+    assert.strictEqual(budget, OUTBOX_FLUSH_LEASE_MS + OUTBOX_FLUSH_MIN_GAP_MS + Math.round(PENDING_POLL_INTERVAL_MS / 2));
+    assert.ok(budget > 120000, 'must exceed the observed two-minute settle time');
+    assert.ok(budget > 20000 * 5, 'must be meaningfully larger than the old 20000ms budget, not a marginal bump');
+    assert.ok(budget < 10 * 60 * 1000, 'must still be a bounded number, not effectively infinite');
+  });
+  await check('C1\'s #5/#7 settle-polls call outboxSettleBudgetMs(), not the old flat 20000ms', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    const timeoutCalls = src.match(/timeoutMs: outboxSettleBudgetMs\(\)/g) || [];
+    assert.strictEqual(timeoutCalls.length, 2, 'both #5 and #7 must use the derived budget');
+  });
+  await check('C1\'s pending/rejected count checks (#5/#7) now poll for the API and SQLite definitions to ' +
+    'settle instead of comparing one point-in-time pair (F146: both are a live COUNT(*) on every call -- ' +
+    'flows.json\'s "sync-state-build" node -- so a stale snapshot was never the mechanism; a shared, backlog-' +
+    'heavy gateway moving between two reads a moment apart, over two different transports, was)', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    const pendingIdx = src.indexOf("what: 'the API pending count to settle with the edge definition of pending'");
+    const rejectedIdx = src.indexOf("what: 'the API rejected count to settle with sync_outbox'");
+    assert.ok(pendingIdx > 0, 'the pending-count check must poll via ctx.until, not a single read pair');
+    assert.ok(rejectedIdx > 0, 'the rejected-count check must poll via ctx.until, not a single read pair');
+  });
+  await check('the sync-state endpoint\'s pending/rejected counts really are an uncached, live COUNT(*) on the ' +
+    'edge (flows.json node "sync-state-build") -- confirming #5/#7\'s fix targets a genuine cross-transport ' +
+    'timing race, not a caching bug that would need a different fix entirely', () => {
+    const flowsPath = path.join(__dirname, '..', '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr',
+      'share', 'flows.json');
+    const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+    const stateNode = flows.find((n) => n.id === 'sync-state-build');
+    assert.ok(stateNode, 'sync-state-build node must exist');
+    assert.match(stateNode.func, /SELECT COUNT\(\*\) AS pending_outbox_count.*FROM sync_outbox WHERE delivered_at IS NULL AND rejected_at IS NULL/,
+      'the pending count must be a live per-request query, not a cached value');
+    assert.match(stateNode.func, /SELECT COUNT\(\*\) AS rejected_outbox_count.*FROM sync_outbox WHERE rejected_at IS NOT NULL/,
+      'the rejected count must be a live per-request query, not a cached value');
   });
 
   // End to end through the real Rest client against a loopback stub, which is

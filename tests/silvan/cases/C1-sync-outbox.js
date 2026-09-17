@@ -20,11 +20,38 @@
 exports.title = 'Cloud-edge (partial): local writes while the cloud is unreachable, outbox growth';
 
 const {
-  PR_262_URL, REJECTED_RETENTION_DAYS, isKnownTerminalReason, hasRejectedOutboxShape,
+  PR_262_URL, REJECTED_RETENTION_DAYS, hasRejectedOutboxShape, classifyOutboxEventOutcome, isExplainedRejection,
 } = require('../lib/rejections');
 const { classifyOnceOutcome, ONCE_GRACE_MS } = require('../lib/onceGrace');
+const { outboxSettleBudgetMs } = require('../lib/edgeTimeouts');
 
 const state = { zones: [], devices: [] };
+
+// Orchestrator follow-up (PR #301 review): re-queries ONE specific
+// sync_outbox row by its own event_uuid (the table's primary key) so the
+// case can tell, at the END of the run, whether a write it made is still
+// there -- delivered, still queued, or terminally rejected for the
+// documented never-seen-resource reason -- rather than trusting a snapshot
+// captured right after creation, which cannot see a row that later vanished.
+// aggregate_type is included so classifyOutboxEventOutcome can tell a ZONE
+// (never expected to be ownership_denied -- F21) from a DEVICE/DEVICE_DATA
+// event (expected to be, against this interim cloud's never-seen registry).
+async function assertOutboxEventSurvived(ctx, label, eventUuid) {
+  if (!eventUuid) {
+    ctx.expect(label + "'s outbox event_uuid was captured so this check can re-query it", false, { label });
+    return;
+  }
+  const row = await ctx.ssh.sqlOne(
+    "SELECT aggregate_type, delivered_at, rejected_at, rejection_reason FROM sync_outbox WHERE event_uuid = '" + eventUuid + "'"
+  );
+  const outcome = classifyOutboxEventOutcome(row);
+  ctx.expect(
+    label + "'s outbox event (" + eventUuid + ') was not silently dropped -- delivered, still queued, or a ' +
+      'documented never-seen-resource rejection, never missing and never an unexplained rejection',
+    outcome.survived,
+    { label, eventUuid, state: outcome.state, row },
+  );
+}
 
 async function syncState(rest) {
   const res = await rest.get('/api/sync/state');
@@ -69,10 +96,37 @@ exports.run = async (ctx) => {
   ev.note('Cloud delivery in the last 10 minutes: ' + (cloudReachable ? 'yes' : 'no') +
     '. The outbox-growth assertions below only hold while the cloud is NOT draining the outbox.');
 
-  const outboxBefore = await pendingOutbox(ssh);
-  ctx.expect('the API pending count matches the edge definition of pending (undelivered AND not rejected)',
-    Math.abs(Number(s0.pendingOutboxCount) - outboxBefore) <= 2,
-    { api: s0.pendingOutboxCount, sqlite: outboxBefore });
+  // F146 C1 #5: pendingOutboxCount is a genuinely LIVE `COUNT(*) ... FROM
+  // sync_outbox WHERE delivered_at IS NULL AND rejected_at IS NULL` on every
+  // call (flows.json node "sync-state-build", ~line 6633) -- there is no
+  // cache to go stale. The two numbers still diverged (API 38 vs SQLite 2,
+  // run 6) because they are read over DIFFERENT transports (HTTP vs an SSH
+  // sqlite3 CLI call) a moment apart, and this shared, backlog-heavy gateway
+  // can move by dozens of rows in that moment once an outbox flush is
+  // actively draining it -- the product never promised these two reads agree
+  // at an arbitrary instant mid-flush, only that they agree once activity
+  // settles (confirmed live: API==SQLite within two minutes). Poll for that
+  // instead of comparing one point-in-time pair, so a genuine drift in the
+  // API's own definition -- not a timing artifact -- still fails this check.
+  // Budget: outboxSettleBudgetMs() (lib/edgeTimeouts.js), derived from the
+  // flush lease/debounce mechanics that own the observed "within two
+  // minutes" -- not the earlier guessed 20000ms, which was itself short
+  // enough to reintroduce this exact flake as a false red.
+  const pendingSettled = await ctx.until(async () => {
+    const apiNow = Number((await syncState(rest)).pendingOutboxCount);
+    const sqlNow = await pendingOutbox(ssh);
+    const diff = Math.abs(apiNow - sqlNow);
+    return diff <= 2 ? { api: apiNow, sqlite: sqlNow, diff } : null;
+  }, { timeoutMs: outboxSettleBudgetMs(), intervalMs: 2000, what: 'the API pending count to settle with the edge definition of pending' })
+    .catch(async () => {
+      const apiNow = Number((await syncState(rest)).pendingOutboxCount);
+      const sqlNow = await pendingOutbox(ssh);
+      return { api: apiNow, sqlite: sqlNow, diff: Math.abs(apiNow - sqlNow) };
+    });
+  ctx.expect('the API pending count matches the edge definition of pending (undelivered AND not rejected), ' +
+    'once outbox activity settles',
+    pendingSettled.diff <= 2, pendingSettled);
+  const outboxBefore = pendingSettled.sqlite;
 
   // Terminally rejected rows are invisible to the pending-outbox count: the API
   // counts only delivered_at IS NULL AND rejected_at IS NULL, so a gateway whose
@@ -113,9 +167,26 @@ exports.run = async (ctx) => {
     }
   );
   if (has262Shape) {
-    ctx.expect('rejectedOutboxCount from /api/sync/state matches sync_outbox (+/- 2 for events rejected mid-read)',
-      Math.abs(Number(s0.rejectedOutboxCount) - rejectedBefore) <= 2,
-      { api: s0.rejectedOutboxCount, sqlite: rejectedBefore });
+    // F146 C1 #7: same family as the pending-count settle above -- also a
+    // live COUNT(*) (same sync-state-build node), also read a moment apart
+    // from the SQLite ground truth over a different transport, also
+    // observed to settle (API 948 vs SQLite 954, settled to 959/959 within
+    // two minutes, run 6). Poll instead of comparing s0's single snapshot,
+    // with the same source-derived budget as #5 above.
+    const rejectedSettled = await ctx.until(async () => {
+      const apiNow = Number((await syncState(rest)).rejectedOutboxCount);
+      const sqlNow = await rejectedOutbox(ssh);
+      const diff = Math.abs(apiNow - sqlNow);
+      return diff <= 2 ? { api: apiNow, sqlite: sqlNow, diff } : null;
+    }, { timeoutMs: outboxSettleBudgetMs(), intervalMs: 2000, what: 'the API rejected count to settle with sync_outbox' })
+      .catch(async () => {
+        const apiNow = Number((await syncState(rest)).rejectedOutboxCount);
+        const sqlNow = await rejectedOutbox(ssh);
+        return { api: apiNow, sqlite: sqlNow, diff: Math.abs(apiNow - sqlNow) };
+      });
+    ctx.expect('rejectedOutboxCount from /api/sync/state matches sync_outbox, once outbox activity settles ' +
+      '(+/- 2 for events rejected mid-read)',
+      rejectedSettled.diff <= 2, rejectedSettled);
   }
 
   // (c) Absolute growth guard: explicit and documented instead of an arbitrary
@@ -161,8 +232,11 @@ exports.run = async (ctx) => {
   }, { timeoutMs: 20000, what: 'the telemetry row' }).catch(() => null);
 
   // --- the writes are queued for the cloud ---------------------------------
+  // event_uuid (sync_outbox's own PRIMARY KEY, database/seed-blank.sql:1000)
+  // captured alongside each row so the end-of-case check below can re-query
+  // this EXACT row later, not just "does some row for this aggregate exist".
   const zoneEvent = await ssh.sqlOne(
-    "SELECT aggregate_type, op, delivered_at, rejected_at, retry_count, gateway_device_eui " +
+    "SELECT event_uuid, aggregate_type, op, delivered_at, rejected_at, retry_count, gateway_device_eui " +
     "FROM sync_outbox WHERE aggregate_key = '" + (zone.body && zone.body.zone_uuid) + "' ORDER BY occurred_at DESC LIMIT 1"
   );
   ctx.expect('SQLite: the zone create is queued in sync_outbox', !!zoneEvent, zoneEvent);
@@ -170,13 +244,13 @@ exports.run = async (ctx) => {
     !!zoneEvent && String(zoneEvent.gateway_device_eui || '').toUpperCase() === ctx.cfg.expectedEui, zoneEvent);
 
   const deviceEvent = await ssh.sqlOne(
-    "SELECT aggregate_type, op FROM sync_outbox WHERE aggregate_key = '" + eui + "' ORDER BY occurred_at DESC LIMIT 1"
+    "SELECT event_uuid, aggregate_type, op FROM sync_outbox WHERE aggregate_key = '" + eui + "' ORDER BY occurred_at DESC LIMIT 1"
   );
   ctx.expect('SQLite: the device registration is queued in sync_outbox', !!deviceEvent, deviceEvent);
 
   const telemetryEvent = await ctx.until(async () => {
     const row = await ssh.sqlOne(
-      "SELECT aggregate_type, op FROM sync_outbox WHERE aggregate_type = 'DEVICE_DATA' " +
+      "SELECT event_uuid, aggregate_type, op FROM sync_outbox WHERE aggregate_type = 'DEVICE_DATA' " +
       "AND payload_json LIKE '%" + eui + "%' ORDER BY occurred_at DESC LIMIT 1"
     );
     return row || null;
@@ -184,61 +258,84 @@ exports.run = async (ctx) => {
   ctx.expect('SQLite: telemetry is queued for the cloud by the device_data INSERT trigger',
     !!telemetryEvent, telemetryEvent);
 
-  // --- nothing is lost while the cloud is away -----------------------------
+  // --- nothing is lost, whether or not the cloud is currently draining -----
+  // F122/F146: this case never creates a real outage -- a bounded, controlled
+  // blackhole is R1(b)'s job (see the file header's SCOPE LIMIT). Fixing the
+  // premise here in the harness sense of the word: `cloudReachable` is only a
+  // heuristic guess from the staleness of lastOutboxDeliverySuccessAt, and it
+  // does not reliably predict what THIS case's short write burst will
+  // observably do to the outbox -- F122 found it guessing "unreachable" while
+  // the outbox actually drained to 0 (the cloud was, in fact, reachable; the
+  // 10-minute staleness window had simply not caught up yet). Asserting
+  // growth-vs-drop from that guess asserts a state this case does not control
+  // and the product never promised from it. What the product DOES promise --
+  // this file's own header invariant, "the edge is authoritative; local
+  // writes must succeed and be durably queued whether or not the cloud is
+  // reachable" -- is checked unconditionally below: a real regression here
+  // (a write silently dropped instead of queued/delivered) still fails this
+  // check regardless of which way the guess points. Whether the backlog
+  // happened to grow or drain during this run is recorded for the reader,
+  // not asserted on -- a point-in-time API-vs-SQL direction comparison would
+  // just reintroduce the same settle-timing race fixed above for #5/#7.
   const outboxAfter = await pendingOutbox(ssh);
   const s1 = await syncState(rest);
-  if (cloudReachable) {
-    ev.note('The cloud was draining the outbox during this run, so an exact growth assertion would be a ' +
-      'race. Recorded instead: pending ' + outboxBefore + ' -> ' + outboxAfter + '.');
-    ctx.expect('local writes are queued or already delivered, never dropped',
-      outboxAfter >= 0 && !!zoneEvent && !!deviceEvent, { before: outboxBefore, after: outboxAfter });
-  } else {
-    ctx.expect('with the cloud unreachable, the pending outbox grows rather than dropping events',
-      outboxAfter > outboxBefore, { before: outboxBefore, after: outboxAfter });
-    ctx.expect('GET /api/sync/state surfaces the growing backlog to the operator',
-      Number(s1.pendingOutboxCount) > Number(s0.pendingOutboxCount),
-      { before: s0.pendingOutboxCount, after: s1.pendingOutboxCount });
-  }
+  ev.note('Cloud reachability guess for this run: ' + (cloudReachable ? 'reachable' : 'unreachable') +
+    ' (lastOutboxDeliverySuccessAt ' + (s0.lastOutboxDeliverySuccessAt || 'never') + '). Observed outbox ' +
+    'movement (report, not an assertion): SQLite pending ' + outboxBefore + ' -> ' + outboxAfter +
+    ', API-reported ' + s0.pendingOutboxCount + ' -> ' + s1.pendingOutboxCount + '.');
+  ev.note('SQLite pending count moved ' + outboxBefore + ' -> ' + outboxAfter + ' (report only; see below for ' +
+    'the actual "never dropped" proof, which re-queries each of this case\'s own events by event_uuid at the ' +
+    'end of the run rather than trusting this snapshot).');
 
   // (a) DELTA: what did THIS run's own traffic (the writes above) add to the
   // rejected pile since this case started, and is every new rejection
-  // classified with a known terminal reason? ownership_denied is the
-  // documented never-seen-resource rule for a simulated device/zone the
-  // interim cloud has never seen -- EXPECTED here, and reported as an
-  // observation below, never as a failure.
+  // classified with a known terminal reason FOR THE AGGREGATE IT LANDED ON?
+  // Orchestrator follow-up 2: ownership_denied is the documented never-seen-
+  // resource rule for a simulated DEVICE/DEVICE_DATA the interim cloud has
+  // never seen -- EXPECTED there, reported as an observation below, never a
+  // failure. It is NOT expected on a ZONE (F21: a first-seen resource binds
+  // to the authenticated gateway/user; this case's own zones are created
+  // through its own authenticated session and are accepted, not denied) --
+  // isExplainedRejection() (lib/rejections.js) enforces that distinction
+  // instead of a reason-only, kind-blind check that would wave an
+  // ownership_denied ZONE rejection through as if it were expected.
   const rejectedAfter = await rejectedOutbox(ssh);
   const rejectedDelta = await ssh.sql(
     'SELECT rejection_reason, aggregate_type, COUNT(*) AS n FROM sync_outbox ' +
     "WHERE rejected_at IS NOT NULL AND rejected_at >= '" + runStartedAt +
     "' GROUP BY rejection_reason, aggregate_type ORDER BY n DESC"
   );
-  const unexplainedDelta = rejectedDelta.filter((r) => !isKnownTerminalReason(r.rejection_reason));
+  const unexplainedDelta = rejectedDelta.filter((r) => !isExplainedRejection(r.rejection_reason, r.aggregate_type));
   ctx.expect("this run's own rejected-outbox rows (" + rejectedBefore + ' -> ' + rejectedAfter +
-    ') are all classified with a known terminal reason',
+    ') are all classified with a known terminal reason for the aggregate type it landed on',
     unexplainedDelta.length === 0,
     { rejectedBefore, rejectedAfter, rows: rejectedDelta, unexplained: unexplainedDelta });
   const expectedDelta = rejectedDelta
-    .filter((r) => isKnownTerminalReason(r.rejection_reason))
+    .filter((r) => isExplainedRejection(r.rejection_reason, r.aggregate_type))
     .reduce((sum, r) => sum + Number(r.n), 0);
   if (expectedDelta > 0) {
     ev.note('OBSERVATION, not a failure: this run added ' + expectedDelta + ' ownership_denied rejection(s) since ' +
       runStartedAt + ' (' + JSON.stringify(rejectedDelta) + '). Expected: the interim cloud denies first-seen ' +
-      'resources, and this run\'s simulated devices/zones are not pre-registered there.');
+      "device/telemetry resources, and this run's simulated devices are not pre-registered there.");
   }
 
   // Simulated devices are unknown to the cloud, so VALVE_*/DEVICE events for them
   // are legitimately answered ownership_denied -- that is the documented
   // never-seen-resource rule, not a defect, and it is excluded here. A rejection
-  // on a ZONE or ZONE_ENVIRONMENT aggregate is a different matter.
+  // on a ZONE or ZONE_ENVIRONMENT aggregate is a different matter (F21) and is
+  // NOT excluded -- isExplainedRejection() enforces that, not a reason-only SQL
+  // filter (the previous `rejection_reason NOT LIKE 'ownership_denied%'` would
+  // have waved an ownership_denied ZONE rejection through unfiltered).
   // Scoped to the resources THIS case created, so a sibling case's leftovers
   // cannot make or break the assertion.
   const mine = "(aggregate_key = '" + eui + "' OR aggregate_key = '" + (zone.body && zone.body.zone_uuid) +
     "' OR payload_json LIKE '%" + eui + "%')";
-  const freshRejects = await ssh.sql(
-    "SELECT aggregate_type, op, rejection_reason FROM sync_outbox " +
-    "WHERE rejected_at IS NOT NULL AND " + mine + " AND rejection_reason NOT LIKE 'ownership_denied%'"
+  const freshRejectsAll = await ssh.sql(
+    "SELECT aggregate_type, op, rejection_reason FROM sync_outbox WHERE rejected_at IS NOT NULL AND " + mine
   );
-  ctx.expect("this case's own zone and telemetry events were not rejected with a version/payload conflict",
+  const freshRejects = freshRejectsAll.filter((r) => !isExplainedRejection(r.rejection_reason, r.aggregate_type));
+  ctx.expect("this case's own zone and telemetry events were not rejected with a version/payload conflict " +
+    '(or, for the zone specifically, ownership_denied -- F21)',
     freshRejects.length === 0, freshRejects);
   if (freshRejects.length) {
     ev.note('A brand-new device\'s first DEVICE_DATA_APPENDED events came back ' +
@@ -419,6 +516,17 @@ exports.run = async (ctx) => {
     'unrelated schedule mutation) never leaves a stale push and its replacement simultaneously QUEUED for the ' +
     'same weekday/purpose slot. The actual cloud-command replay path (flows.json `Route Command`, commandId-' +
     'keyed) is reachable only via the cloud pending-commands poll and is out of reach for this harness by design.');
+
+  // --- the actual "never dropped" proof, at the END of the run -------------
+  // Orchestrator follow-up (PR #301 review): the old final assertion tested
+  // a non-negative outbox count (always true) and two stale snapshots taken
+  // right after creation -- a write that was queued and later silently
+  // removed from sync_outbox passed it. Re-query each of THIS case's own
+  // events by its own event_uuid now, after everything else this case did,
+  // so a row that vanished at any point during the run is caught.
+  await assertOutboxEventSurvived(ctx, 'the zone create', zoneEvent && zoneEvent.event_uuid);
+  await assertOutboxEventSurvived(ctx, 'the device registration', deviceEvent && deviceEvent.event_uuid);
+  await assertOutboxEventSurvived(ctx, 'the telemetry append', telemetryEvent && telemetryEvent.event_uuid);
 };
 
 exports.cleanup = async (ctx) => {

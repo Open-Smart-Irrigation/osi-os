@@ -37,6 +37,7 @@ exports.title = 'Runtime/recovery (bounded): Node-RED restart, cloud disconnect,
 
 const { hostOf, blackholeTargetRefusal } = require('../lib/config');
 const { hasBlackholeRoute, parsePingResolvedIp } = require('../lib/routeParse');
+const { PENDING_POLL_INTERVAL_MS, resumeBudgetMs, firstSuccessOrFail } = require('../lib/edgeTimeouts');
 
 const MIN_FREE_MB_AFTER = 500;
 const DISK_FILE_MB = 200;
@@ -260,6 +261,40 @@ async function cloudDisconnectCase(ctx) {
   const { rest, ssh, ev } = ctx;
   ev.step('(b) bounded cloud disconnect: begin');
 
+  // F125/F146: this case used to take its "before" snapshot and arm the
+  // blackhole immediately on entry. Coming straight off restartNodeRedCase's
+  // own restart, that raced the very FIRST post-restart pending-commands poll
+  // (still null moments after Node-RED restarts): sometimes the snapshot
+  // caught a legitimate success that landed in the gap before the route
+  // existed (ambiguous "before" baseline), and sometimes no poll had EVER
+  // succeeded yet, so the LATER "resumed after removal" comparison had no
+  // real baseline to compare against either. Waiting here for one real
+  // success first means the snapshot below is always a concrete timestamp,
+  // and any subsequent lack of advance is unambiguously attributable to the
+  // blackhole, not to this case's own timing.
+  //
+  // Orchestrator follow-up (PR #301 review): a timeout here used to be
+  // recorded as a bare ev.note and the case then proceeded to arm the
+  // blackhole anyway, on top of a baseline that was never confirmed
+  // healthy -- any later failure would then land on a LESS specific
+  // assertion further down, obscuring the real cause. firstSuccessOrFail
+  // (lib/edgeTimeouts.js) turns that timeout into an explicit, named FAILURE
+  // right here, and this case stops instead of continuing on bad footing.
+  const firstPollWaitMs = PENDING_POLL_INTERVAL_MS * 4;
+  const firstPollDecision = await firstSuccessOrFail(
+    () => ctx.until(async () => {
+      const res = await rest.get('/api/sync/state');
+      return (res.body && res.body.lastPendingCommandPollSuccessAt) ? res : null;
+    }, { timeoutMs: firstPollWaitMs, intervalMs: 3000,
+      what: 'the first pending-commands poll to succeed before arming the blackhole' }),
+    '(b) the edge did not poll pending-commands successfully within ' + Math.round(firstPollWaitMs / 1000) +
+      's after the restart; blackhole not armed'
+  );
+  if (!firstPollDecision.ok) {
+    ctx.expect(firstPollDecision.message, false, { waitedMs: firstPollWaitMs });
+    return;
+  }
+
   const target = await resolveLinkedCloudHost(ctx);
   if (!target) { ctx.expect('(b) skipped: no safe, distinct, linked cloud host to bound-disconnect', true, null); return; }
   const { host, ip } = target;
@@ -339,11 +374,17 @@ async function cloudDisconnectCase(ctx) {
   // not cause and cannot fix.
   const preRemovalPollSuccessAt = await rest.get('/api/sync/state')
     .then((r) => r.body && r.body.lastPendingCommandPollSuccessAt);
+  // F125/F146: this budget used to be a bare guessed 90000ms, which a request
+  // hung on the just-removed blackholed route could outlast. It is now sized
+  // from the edge's own HTTP client timeout and poll cadence (see
+  // lib/edgeTimeouts.js for the exact source citation and the worst-case
+  // reasoning), not a guess.
   const recovered = await ctx.until(async () => {
     const res = await rest.get('/api/sync/state');
     const successAt = res.body && res.body.lastPendingCommandPollSuccessAt;
     return (successAt && successAt !== preRemovalPollSuccessAt) ? res : null;
-  }, { timeoutMs: 90000, intervalMs: 5000, what: 'lastPendingCommandPollSuccessAt to advance after the route is removed' }).catch(() => null);
+  }, { timeoutMs: resumeBudgetMs(), intervalMs: 5000,
+    what: 'lastPendingCommandPollSuccessAt to advance after the route is removed' }).catch(() => null);
   ctx.expect('(b) the pending-commands poll resumes succeeding after connectivity is restored',
     !!recovered, recovered ? { lastPendingCommandPollSuccessAt: recovered.body.lastPendingCommandPollSuccessAt } :
       { preRemovalPollSuccessAt });
