@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDateFormatter,
   formatDate,
+  parseCalendarDay,
   formatDateTime,
   formatRelativeToNow,
   formatTime,
@@ -121,5 +122,33 @@ describe('createDateFormatter', () => {
 
   it('falls back to English when i18next has not resolved a language yet', () => {
     expect(createDateFormatter(undefined).locale).toBe('en');
+  });
+});
+
+describe('parseCalendarDay', () => {
+  // `new Date('2026-05-29')` is parsed as UTC midnight, which is the previous
+  // calendar day everywhere west of Greenwich. A `YYYY-MM-DD` value from the
+  // API names a calendar day, not an instant, so it is anchored at local noon
+  // and always formats as the day it names. The zone-crossing assertions live
+  // in tests/calendarDay.test.ts, which can change TZ at runtime.
+  it('anchors a bare calendar date at local noon on the day it names', () => {
+    const parsed = parseCalendarDay('2026-05-29');
+    expect(parsed?.getFullYear()).toBe(2026);
+    expect(parsed?.getMonth()).toBe(4);
+    expect(parsed?.getDate()).toBe(29);
+    expect(parsed?.getHours()).toBe(12);
+    expect(formatDate(parseCalendarDay('2026-05-29'), 'en')).toBe('May 29');
+  });
+
+  it('leaves timestamps, Date values and unparseable input to toDate', () => {
+    expect(parseCalendarDay(ISO)?.toISOString()).toBe(new Date(ISO).toISOString());
+    const instant = new Date(ISO);
+    expect(parseCalendarDay(instant)).toBe(instant);
+    expect(parseCalendarDay(null)).toBeNull();
+    expect(parseCalendarDay('')).toBeNull();
+    expect(parseCalendarDay('not a date')).toBeNull();
+    // A date-time string is an instant and keeps its offset semantics.
+    expect(parseCalendarDay('2026-05-29T23:30:00Z')?.toISOString())
+      .toBe(new Date('2026-05-29T23:30:00Z').toISOString());
   });
 });

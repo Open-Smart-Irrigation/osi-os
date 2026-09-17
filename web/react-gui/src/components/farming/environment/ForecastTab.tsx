@@ -8,7 +8,7 @@ import {
 import type { ForecastEnvironment, DailyForecast, HourlyForecast } from '../../../types/farming';
 import { formatForecastHighLow } from '../../../utils/forecastFormat';
 import { WeatherIcon } from './WeatherIcon';
-import { useDateFormat, type DateFormatter } from '../../../utils/datetime';
+import { parseCalendarDay, useDateFormat, type DateFormatter } from '../../../utils/datetime';
 
 interface Props {
   forecast: ForecastEnvironment;
@@ -26,7 +26,8 @@ function isSameCalendarDay(date: Date, offsetDays: number): boolean {
 }
 
 function fmtDay(dateStr: string, fmt: DateFormatter, t: Translate): string {
-  const d = new Date(dateStr + 'T12:00:00');
+  const d = parseCalendarDay(dateStr);
+  if (d === null) return '\u2014';
   if (isSameCalendarDay(d, 0)) return t('environment.forecast.dayToday', { defaultValue: 'Today' });
   if (isSameCalendarDay(d, 1)) return t('environment.forecast.dayTomorrow', { defaultValue: 'Tomorrow' });
   return fmt.weekday(d) ?? '\u2014';
@@ -233,7 +234,7 @@ export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
             <DayCard
               key={day.date}
               day={day}
-              isToday={new Date(day.date + 'T12:00:00').toDateString() === todayStr}
+              isToday={parseCalendarDay(day.date)?.toDateString() === todayStr}
             />
           ))}
         </div>

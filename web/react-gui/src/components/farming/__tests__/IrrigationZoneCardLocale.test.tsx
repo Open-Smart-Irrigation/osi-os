@@ -236,6 +236,23 @@ describe('IrrigationZoneCard locale coverage', () => {
     expect(frDevices.zone.water.drivenByDendro).not.toBe('Driven by dendrometer recommendation');
   });
 
+  it('names the provenance chip after the recommendation, not a water supply', async () => {
+    // F36: the chip beside "Updated <time>" reports where the irrigation
+    // recommendation came from (OSI Server, a local fallback, local only).
+    // Its unrecognised-mode label used to read "Water source", which names a
+    // supply of water instead.
+    apiMocks.getSummary.mockResolvedValue({ ...summary, display: { ...summary.display, mode: null } });
+    await renderIn('en');
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent('Recommendation source');
+    expect(card).not.toHaveTextContent('Water source');
+
+    cleanup();
+    apiMocks.getSummary.mockResolvedValue({ ...summary, display: { ...summary.display, mode: null } });
+    await renderIn('fr');
+    expect(screen.getByTestId('water-today-card')).toHaveTextContent('Source de la recommandation');
+  });
+
   it('formats the water-card timestamp with the app language, not the host locale', async () => {
     await renderIn('fr');
     const card = screen.getByTestId('water-today-card');

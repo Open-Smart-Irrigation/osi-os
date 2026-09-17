@@ -53,6 +53,27 @@ export function toDate(value: DateInput): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** `YYYY-MM-DD`, with nothing else attached. */
+const CALENDAR_DAY_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parses a calendar-only date (`YYYY-MM-DD`) as local noon on the day it
+ * names, and leaves everything else to `toDate`.
+ *
+ * `new Date('2026-05-29')` is specified as UTC midnight, which is still the
+ * 28th everywhere west of Greenwich, so an API date rendered through it shows
+ * the wrong day for every user in the Americas. The edge sends these values
+ * for daily rollups: they name a day, not an instant. Anchoring at noon keeps
+ * the local calendar day correct across the whole UTC-12..UTC+14 range.
+ */
+export function parseCalendarDay(value: DateInput): Date | null {
+  if (typeof value === 'string' && CALENDAR_DAY_ONLY.test(value.trim())) {
+    const localNoon = new Date(`${value.trim()}T12:00:00`);
+    if (!Number.isNaN(localNoon.getTime())) return localNoon;
+  }
+  return toDate(value);
+}
+
 function formatWith(
   value: DateInput,
   language: string | null | undefined,

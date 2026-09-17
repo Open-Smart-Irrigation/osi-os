@@ -24,6 +24,8 @@
     "conflict": "Cet appareil a changé. Rechargez et réessayez.",
     "dashboard": "Tableau de bord",
     "map": "Carte du réseau",
+    "zoomIn": "Zoom avant",
+    "zoomOut": "Zoom arrière",
     "noKnownLocations": "Aucune position connue",
     "mapEvidence": "Positions et liaisons enregistrées uniquement ; la couverture de la zone n’est pas déduite.",
     "unknownDevices": "Positions inconnues",

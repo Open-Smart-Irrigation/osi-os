@@ -24,6 +24,8 @@
     "conflict": "This device changed elsewhere. Reload and try again.",
     "dashboard": "Dashboard",
     "map": "Network map",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
     "noKnownLocations": "No known positions",
     "mapEvidence": "Recorded positions and links only; area coverage is not inferred.",
     "unknownDevices": "Unknown positions",

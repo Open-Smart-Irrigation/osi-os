@@ -82,6 +82,19 @@ const DEVICES_KEYS = [
   'zone.water.soil.invalidReading',
   'zone.water.soil.lastValid',
   'common.viewHistory',
+  // Zone environment card, Water tab (WaterTab.tsx). These ten were called
+  // with a defaultValue but existed in no locale file, so the tab rendered
+  // English in all seven languages; see tests/i18nDefaultValueCoverage.test.ts.
+  'environment.water.noData',
+  'environment.water.rainToday',
+  'environment.water.measuredIrrigationToday',
+  'environment.water.estimatedIrrigationToday',
+  'environment.water.waterNeededToday',
+  'environment.water.balance',
+  'environment.water.setupRequired',
+  'environment.water.weeklyTrend',
+  'environment.water.trendNote',
+  'environment.water.nextRain',
   'environment.soil.moistureSwtVwc',
   'environment.soil.moistureSwt',
   'environment.soil.moistureVwc',
@@ -108,8 +121,10 @@ const PENDING_HUMAN_LUGANDA = new Set<string>([...DEVICES_KEYS, ...NETWORK_KEYS]
 
 
 // locale:key pairs where matching English is correct: OSI Server is a product
-// name, and "Action" is the same word in French.
+// name, "Action" is the same word in French, and "Balance" is the Spanish
+// term for the water balance tile.
 const REVIEWED_IDENTICAL = new Set<string>([
+  'es:environment.water.balance',
   'de-CH:zone.water.source.shared_server',
   'es:zone.water.source.shared_server',
   'fr:zone.water.source.shared_server',

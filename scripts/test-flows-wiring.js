@@ -1401,6 +1401,74 @@ for (const node of flows) {
     }
 }
 
+// === Admin read guards: auth-failure telemetry and gate-before-read ===
+//
+// F49: the stats and field-test guards inline the same verifyBearer block as
+// api-me-auth's Decode Token node, but were ported without its
+// `msg._osiAuthFailure` tagging. That tag is what lets the catch/error path
+// tell a genuine 401 apart from a handler crash, so a guard that omits it
+// reports its own auth rejections as untyped failures.
+const authTagFailuresBefore = failures.length;
+for (const guardId of ['system-stats-admin-read-guard', 'fieldtest-download-admin-read-guard']) {
+    const guard = byId[guardId];
+    if (!guard || typeof guard.func !== 'string') {
+        failures.push(guardId + ' is missing from flows.json');
+        continue;
+    }
+    const label = (guard.name || '(unnamed)') + ' [' + guardId + ']';
+    if (!/function verifyBearer\(authHeader\) \{ delete msg\._osiAuthFailure;/.test(guard.func)) {
+        failures.push(label + ' does not clear msg._osiAuthFailure when verifyBearer starts');
+    }
+    for (const code of ['MISSING_BEARER', 'INVALID_TOKEN', 'TOKEN_EXPIRED']) {
+        const tag = "msg._osiAuthFailure = { format: 1, code: '" + code + "', sourceId: '" + guardId + "' }; throw err;";
+        if (!guard.func.includes(tag)) {
+            failures.push(label + " does not tag its " + code + " rejection with _osiAuthFailure (see api-me-auth)");
+        }
+    }
+    const invalidTokenTags = guard.func.split(
+        "msg._osiAuthFailure = { format: 1, code: 'INVALID_TOKEN', sourceId: '" + guardId + "' };"
+    ).length - 1;
+    if (invalidTokenTags !== 4) {
+        failures.push(label + ' tags ' + invalidTokenTags + ' of the 4 INVALID_TOKEN rejection paths');
+    }
+}
+if (failures.length === authTagFailuresBefore) {
+    console.log('OK  admin read guards tag every verifyBearer rejection with _osiAuthFailure');
+}
+
+// F42: GET /download/database always answers a hardcoded 403 ("Database
+// download is disabled"), but the route read the whole of /data/db/farming.db
+// into memory first and then threw the buffer away. The guard must reach the
+// 403 responder directly; no flow node may read the live database file.
+{
+    const gateFailuresBefore = failures.length;
+    const guard = byId['database-download-admin-read-guard'];
+    if (!guard) {
+        failures.push('database-download-admin-read-guard is missing from flows.json');
+    } else {
+        const allowed = (guard.wires && guard.wires[0]) || [];
+        const readers = allowed.filter((id) => byId[id] && byId[id].type === 'file in');
+        if (readers.length > 0) {
+            failures.push(
+                'database-download-admin-read-guard still routes an authorized request into a file-in node ('
+                + readers.join(', ') + ') before the hardcoded 403'
+            );
+        }
+    }
+    const dbReaders = flows.filter((node) => (
+        node.type === 'file in' && typeof node.filename === 'string' && /farming\.db/.test(node.filename)
+    ));
+    if (dbReaders.length > 0) {
+        failures.push(
+            'flows.json reads the live SQLite database through a file-in node ('
+            + dbReaders.map((node) => node.id).join(', ') + ')'
+        );
+    }
+    if (failures.length === gateFailuresBefore) {
+        console.log('OK  /download/database answers its 403 without reading farming.db');
+    }
+}
+
 // === Global Settings module gates ===
 
 const disableAllSchedulesHttp = flows.find((node) => (
