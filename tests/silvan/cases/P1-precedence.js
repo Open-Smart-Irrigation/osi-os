@@ -40,6 +40,16 @@ async function onceRow(ssh, uuid) {
   );
 }
 
+// A fired ONCE schedule reaches the radio as a TIMED_ACTION/OPEN downlink (runOnceTick ->
+// actuatorCommand -> OPEN_FOR_DURATION in osi-valve-control/workers.js), same as any other
+// scheduled or manual open elsewhere in this case (lines below: `dl`, `cancelDownlinks`). Scope
+// the "did the tombstoned schedule fire" count to exactly that kind, so an unrelated housekeeping
+// push -- e.g. a Gen1 CLOCK_SYNC on fPort 12/13, which shares the same devEui and can legitimately
+// land during a 75s wait -- is never mistaken for the schedule firing.
+function isTimedActionOpen(d) {
+  return d.decoded.kind === 'TIMED_ACTION' && d.decoded.valveAction === 'OPEN';
+}
+
 exports.run = async (ctx) => {
   const { rest, ssh, ev, observer } = ctx;
   const tag = 'p1-' + Date.now().toString(36);
@@ -143,16 +153,26 @@ exports.run = async (ctx) => {
   const deletedRow = await onceRow(ssh, queuedUuid);
   ctx.expect('SQLite: the deleted schedule is tombstoned (deleted_at set)', !!deletedRow && deletedRow.deleted_at !== null, deletedRow);
 
-  const downlinksBeforeWait = observer.downlinksFor(eui).length;
+  ctx.expect('[offline] the once-tick downlink filter counts only TIMED_ACTION/OPEN pushes, excluding an ' +
+    'unrelated CLOCK_SYNC housekeeping push (fPort 12/13) and a TIMED_ACTION/CLOSE',
+    [
+      { decoded: { kind: 'TIMED_ACTION', valveAction: 'OPEN' } },
+      { decoded: { kind: 'CLOCK_SYNC' } },
+      { decoded: { kind: 'TIMED_ACTION', valveAction: 'CLOSE' } },
+      { decoded: { kind: 'OPEN' } },
+    ].filter(isTimedActionOpen).length === 1, {});
+
+  const downlinksBeforeWait = observer.downlinksFor(eui).filter(isTimedActionOpen).length;
   // Wait past the schedule's original fire_at plus one 60s tick period, so a
   // tick that ignored the tombstone would have had a full opportunity to fire.
   await ctx.sleep(75000);
-  const downlinksAfterWait = observer.downlinksFor(eui).length;
+  const downlinksAfterWait = observer.downlinksFor(eui).filter(isTimedActionOpen).length;
   const rowAfterWait = await onceRow(ssh, queuedUuid);
   ctx.expect('SQLite: the deleted schedule never fires (once_state was never advanced to FIRED after deletion)',
     !!rowAfterWait && rowAfterWait.once_state !== 'FIRED', rowAfterWait);
-  ctx.expect('no downlink was emitted for the deleted schedule\'s original fire_at window ' +
-    '(the once-tick excludes deleted_at IS NOT NULL rows)',
+  ctx.expect('no TIMED_ACTION/OPEN downlink was emitted for the deleted schedule\'s original fire_at window ' +
+    '(the once-tick excludes deleted_at IS NOT NULL rows); scoped past unrelated housekeeping pushes ' +
+    '(e.g. CLOCK_SYNC) that may legitimately land on this devEui during the wait',
     downlinksAfterWait === downlinksBeforeWait, { before: downlinksBeforeWait, after: downlinksAfterWait });
   ev.note('This wait (75s) is the one place this case spends real wall-clock time, to observe the 60s ' +
     'valve-once-tick actually skip a tombstoned row rather than asserting it from the query text alone.');
