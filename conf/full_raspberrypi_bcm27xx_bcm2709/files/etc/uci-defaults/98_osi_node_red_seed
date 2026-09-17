@@ -47,9 +47,21 @@ for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-comm
     fi
 done
 
+# A COPY, not a symlink. npm's arborist reads the tree off disk on every
+# deploy; the shipped package-lock.json declares sqlite3 as a registry
+# package, so a symlink here reads as a Link where the lockfile says registry,
+# and npm retires it and re-extracts the tarball -- which on armv7l + musl
+# means `prebuild-install || node-gyp rebuild` with no prebuilt and no Python,
+# i.e. a failed deploy. A real directory holding the locked version is left
+# alone. This script re-runs after a sysupgrade, so it is also what keeps the
+# state from reverting. deploy.sh materialises the symlink on images already
+# in the field; see its "Native sqlite3 (F148)" block.
 SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3
 if [ -d "$SQLITE_SRC" ]; then
-    ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"
+    if ! cp -a "$SQLITE_SRC" "$DST/node_modules/sqlite3"; then
+        rm -rf "$DST/node_modules/sqlite3"
+        ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"
+    fi
 fi
 
 chown -R node-red:node-red "$DST" 2>/dev/null || true

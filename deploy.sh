@@ -160,6 +160,273 @@ ensure_journal_media_defaults() {
     echo "OK"
 }
 
+# --- Native sqlite3 (F148) --------------------------------------------------
+# On a stock image /srv/node-red/node_modules/sqlite3 is a SYMLINK into the
+# opkg package node-red-node-sqlite (conf/*/files/etc/uci-defaults/
+# 98_osi_node_red_seed), because that cross-compiled binary is the only
+# sqlite3 built for the gateway's CPU. The shipped package-lock.json declares
+# sqlite3 as an ordinary REGISTRY dependency, so npm's arborist finds a Link
+# where the lockfile says registry, marks the path CHANGE, retires the symlink
+# and re-extracts the tarball -- which carries no binary and whose install
+# script then runs `prebuild-install -r napi || node-gyp rebuild`. On
+# armv7l + musl no prebuilt is published and the gateway has no Python, so
+# that exits 1 and the whole deploy stops (re-cut 9 on the Pi 4B rehearsal
+# gateway, 2026-09-17). The osi-* modules survive the same run because the
+# lockfile declares THEM as links too ("file:" deps).
+#
+# npm leaves a REAL directory holding the locked version alone, so deploy.sh
+# materialises the symlink into a real directory before npm runs. Every claim
+# above is exercised against real npm in scripts/test-deploy-native-sqlite3.js,
+# which also runs these functions' shell text verbatim.
+NODE_RED_ROOT="/srv/node-red"
+# The one place this path is written: 98_osi_node_red_seed copies the module
+# from here, and deploy.sh restores from here when the path under node_modules
+# is empty.
+NATIVE_SQLITE3_FIRMWARE_DIR="/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3"
+NATIVE_ARCH="$(uname -m 2>/dev/null || echo unknown)"
+MUSL_LOADER_GLOB="/lib/ld-musl-*.so.1"
+
+# Requires the sqlite3 module at $1 (an absolute path, or a bare specifier
+# resolved from the current directory) and opens :memory: with it. Errors go to
+# stderr; callers that tolerate a failure redirect it.
+native_sqlite3_dir_loads() {
+    node -e '
+      const target = process.argv[1];
+      const sqlite3 = require(target);
+      const db = new sqlite3.Database(":memory:", function (err) {
+        if (err) {
+          console.error("sqlite3 could not open :memory: -- " + (err && err.message ? err.message : err));
+          process.exit(1);
+        }
+        db.close(function () { process.exit(0); });
+      });
+    ' "$1" >/dev/null
+}
+
+native_build_toolchain_present() {
+    if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+        return 1
+    fi
+    if ! command -v make >/dev/null 2>&1; then
+        return 1
+    fi
+    if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+        return 1
+    fi
+    return 0
+}
+
+# True when npm could not possibly install sqlite3 on this gateway: 32-bit arm
+# with musl is the one combination sqlite3 5.x publishes no napi prebuilt for
+# (it ships linux-arm/glibc, linuxmusl-arm64 and friends), so the only route
+# left is a local node-gyp build, which needs a toolchain the image does not
+# carry.
+native_sqlite3_reinstall_impossible() {
+    case "$NATIVE_ARCH" in
+        arm|armv6l|armv7l|armv8l) ;;
+        *) return 1 ;;
+    esac
+    nsri_musl=0
+    for nsri_loader in $MUSL_LOADER_GLOB; do
+        if [ -e "$nsri_loader" ]; then
+            nsri_musl=1
+        fi
+    done
+    if [ "$nsri_musl" != "1" ]; then
+        return 1
+    fi
+    if native_build_toolchain_present; then
+        return 1
+    fi
+    return 0
+}
+
+# Runs before the first write of the deploy. The one state nothing downstream
+# can rescue is a lockfile that pins a sqlite3 the gateway does not have and
+# cannot obtain; stopping here leaves the gateway exactly as it was found.
+run_native_sqlite3_preflight() {
+    echo "--- Native sqlite3 preflight ---"
+    nsp_installed="$NODE_RED_ROOT/node_modules/sqlite3"
+    nsp_which="installed"
+    nsp_pkg=""
+    if [ -e "$nsp_installed" ]; then
+        nsp_pkg="$nsp_installed/package.json"
+    elif [ -d "$NATIVE_SQLITE3_FIRMWARE_DIR" ]; then
+        # Nothing at the path: a fresh tree, a dangling symlink, or a deploy
+        # killed between the unlink and the move of the swap below. In all
+        # three the module that ends up there is the firmware one, so its
+        # version is the one that has to match the lockfile.
+        nsp_which="firmware"
+        nsp_pkg="$NATIVE_SQLITE3_FIRMWARE_DIR/package.json"
+    fi
+    if [ -z "$nsp_pkg" ]; then
+        echo "SKIP: no sqlite3 module at $nsp_installed and none in the firmware; npm install will provide one"
+        return 0
+    fi
+    nsp_lock="$TMP_DIR/preflight-package-lock.json"
+    fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" "$nsp_lock"
+    nsp_locked="$(node -p 'const l = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const p = (l.packages && l.packages["node_modules/sqlite3"]) || {}; p.version || ""' "$nsp_lock" 2>/dev/null || true)"
+    nsp_have="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$nsp_pkg" 2>/dev/null || true)"
+    if [ -z "$nsp_locked" ]; then
+        echo "WARN: the shipped package-lock.json pins no sqlite3 version; skipping the preflight"
+        return 0
+    fi
+    if [ -z "$nsp_have" ]; then
+        echo "WARN: could not read the $nsp_which sqlite3 version from $nsp_pkg; skipping the preflight"
+        return 0
+    fi
+    if [ "$nsp_have" = "$nsp_locked" ]; then
+        echo "OK: $nsp_which sqlite3 $nsp_have matches the shipped lockfile"
+        return 0
+    fi
+    if native_sqlite3_reinstall_impossible; then
+        echo "ERROR: this gateway's $nsp_which sqlite3 is $nsp_have but the shipped package-lock.json pins sqlite3 $nsp_locked." >&2
+        echo "ERROR: npm would have to install sqlite3 itself, and on $NATIVE_ARCH + musl no sqlite3 prebuilt is published and this gateway has no build toolchain, so that can only fail." >&2
+        echo "ERROR: refusing to start the deploy; nothing has been changed. Ship an image whose node-red-node-sqlite provides sqlite3 $nsp_locked, or pin the lockfile back to $nsp_have." >&2
+        return 1
+    fi
+    echo "WARN: the $nsp_which sqlite3 $nsp_have differs from the locked $nsp_locked; npm will install it, which needs registry access and a prebuilt for this platform"
+    return 0
+}
+
+# Replaces the firmware symlink with a real directory holding the same module,
+# so npm has nothing to retire. Safety: the copy is staged beside the target
+# and proved loadable BEFORE the swap, the swap itself destroys only a symlink
+# (the module stays where the firmware put it), and any failure puts the
+# symlink back.
+#
+# rename(2) cannot replace a symlink with a directory, so the swap has to
+# unlink before it moves. A deploy killed in that instant -- SSH drop, power
+# loss, OOM -- leaves nothing at node_modules/sqlite3, which breaks Node-RED's
+# sqlite nodes on the next boot and makes the next deploy the repair path. So
+# an empty path is not "npm's problem": if the firmware module is still at its
+# canonical location, this restores from it exactly as it would from a
+# symlink, and it clears any staging directory that same kill left behind.
+materialize_native_sqlite3() {
+    echo "--- Native sqlite3 module (materialise before npm) ---"
+    mns_modules="$NODE_RED_ROOT/node_modules"
+    mns_path="$mns_modules/sqlite3"
+    mns_link_target=""
+    mns_source=""
+
+    # Only this function's own staging name, only directly inside
+    # node_modules. npm ignores dot-directories, so a leftover is not a
+    # correctness problem, but 22 MB per interrupted deploy is not free.
+    for mns_stale in "$mns_modules"/.osi-sqlite3-stage.*; do
+        case "$mns_stale" in
+            *'/.osi-sqlite3-stage.*') continue ;;
+        esac
+        if [ -d "$mns_stale" ]; then
+            echo "WARN: removing a staging directory left behind by an interrupted deploy: $mns_stale" >&2
+            rm -rf "$mns_stale"
+        fi
+    done
+
+    if [ -L "$mns_path" ]; then
+        mns_link_target="$(readlink "$mns_path" 2>/dev/null || true)"
+        mns_source="$(readlink -f "$mns_path" 2>/dev/null || true)"
+        if [ -z "$mns_source" ] || [ ! -d "$mns_source" ]; then
+            echo "WARN: $mns_path is a dangling symlink -> ${mns_link_target:-?}; removing it" >&2
+            rm -f "$mns_path"
+            mns_link_target=""
+            mns_source=""
+        fi
+    elif [ -d "$mns_path" ]; then
+        echo "OK: $mns_path is already a real directory; nothing to do"
+        return 0
+    fi
+
+    if [ -z "$mns_source" ]; then
+        if [ ! -d "$NATIVE_SQLITE3_FIRMWARE_DIR" ]; then
+            echo "SKIP: no sqlite3 module at $mns_path and none at $NATIVE_SQLITE3_FIRMWARE_DIR; npm install will provide one"
+            return 0
+        fi
+        mns_source="$NATIVE_SQLITE3_FIRMWARE_DIR"
+        echo "NOTE: nothing at $mns_path; restoring the module from $mns_source"
+    fi
+
+    if ! native_sqlite3_dir_loads "$mns_source" 2>"$TMP_DIR/sqlite3-source-load.err"; then
+        echo "WARN: the firmware sqlite3 module at $mns_source does not load; leaving the install to npm" >&2
+        tail -5 "$TMP_DIR/sqlite3-source-load.err" >&2 || true
+        return 0
+    fi
+
+    mns_need_kb="$(du -sk "$mns_source" 2>/dev/null | awk '{print $1}')"
+    case "$mns_need_kb" in ''|*[!0-9]*) mns_need_kb=0 ;; esac
+    mns_avail_kb="$(df -k "$mns_modules" 2>/dev/null | tail -1 | awk '{print $4}')"
+    case "$mns_avail_kb" in ''|*[!0-9]*) mns_avail_kb=0 ;; esac
+    if [ "$mns_avail_kb" -gt 0 ] && [ "$mns_avail_kb" -lt $((mns_need_kb + 51200)) ]; then
+        echo "ERROR: $mns_modules has ${mns_avail_kb}K free; materialising sqlite3 needs ${mns_need_kb}K plus 50M of headroom. $mns_path is left as it is." >&2
+        return 1
+    fi
+
+    mkdir -p "$mns_modules" 2>/dev/null || true
+    mns_stage="$(mktemp -d "$mns_modules/.osi-sqlite3-stage.XXXXXX" 2>/dev/null || true)"
+    if [ -z "$mns_stage" ] || [ ! -d "$mns_stage" ]; then
+        echo "ERROR: could not create a staging directory under $mns_modules; $mns_path is left as it is" >&2
+        return 1
+    fi
+    if ! cp -a "$mns_source/." "$mns_stage/"; then
+        rm -rf "$mns_stage"
+        echo "ERROR: could not copy $mns_source into $mns_stage; $mns_path is left as it is" >&2
+        return 1
+    fi
+    # The staged copy resolves its peer packages (bindings, ...) from
+    # $mns_modules instead of from the firmware tree, which is precisely the
+    # resolution the gateway will use after the swap -- so this check, not the
+    # one on the source, is the one that decides.
+    if ! native_sqlite3_dir_loads "$mns_stage" 2>"$TMP_DIR/sqlite3-stage-load.err"; then
+        rm -rf "$mns_stage"
+        echo "WARN: the staged copy of sqlite3 does not load from $mns_modules; $mns_path is left as it is and npm decides what to do with it." >&2
+        tail -5 "$TMP_DIR/sqlite3-stage-load.err" >&2 || true
+        return 0
+    fi
+
+    if [ -L "$mns_path" ]; then
+        if ! rm -f "$mns_path"; then
+            rm -rf "$mns_stage"
+            echo "ERROR: could not remove the sqlite3 symlink at $mns_path; leaving it untouched" >&2
+            return 1
+        fi
+    fi
+    if ! mv "$mns_stage" "$mns_path"; then
+        if [ -n "$mns_link_target" ]; then
+            ln -s "$mns_link_target" "$mns_path" 2>/dev/null || true
+        fi
+        rm -rf "$mns_stage"
+        echo "ERROR: could not move $mns_stage to $mns_path; the previous state is restored" >&2
+        return 1
+    fi
+    if ! native_sqlite3_dir_loads "$mns_path"; then
+        rm -rf "$mns_path"
+        if [ -n "$mns_link_target" ]; then
+            ln -s "$mns_link_target" "$mns_path" 2>/dev/null || true
+        fi
+        echo "ERROR: the materialised sqlite3 at $mns_path does not load; the previous state is restored" >&2
+        return 1
+    fi
+
+    mns_owner="$(ls -ld "$mns_modules" 2>/dev/null | awk '{print $3 ":" $4}')"
+    case "$mns_owner" in
+        ''|:*|*:) ;;
+        *) chown -R "$mns_owner" "$mns_path" 2>/dev/null || true ;;
+    esac
+
+    echo "OK: materialised $mns_path from $mns_source (${mns_need_kb}K); npm now leaves the native module alone"
+    return 0
+}
+
+verify_native_sqlite3_after_npm() {
+    echo "--- Native sqlite3 verification ---"
+    if ( cd "$NODE_RED_ROOT" && native_sqlite3_dir_loads sqlite3 ); then
+        echo "OK: require('sqlite3') resolves in $NODE_RED_ROOT and opens :memory:"
+        return 0
+    fi
+    echo "ERROR: require('sqlite3') failed in $NODE_RED_ROOT after npm install." >&2
+    echo "ERROR: Node-RED cannot open the edge database without it; stopping before the schema migration." >&2
+    return 1
+}
+
 seed_db_if_missing() {
     echo "--- farming.db ---"
     if [ -e "$DB_PATH" ]; then
@@ -615,6 +882,7 @@ echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
 
 run_communication_preflight
+run_native_sqlite3_preflight || exit 1
 
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
@@ -1174,6 +1442,8 @@ if [ -f /srv/node-red/.chirpstack.env ] && \
     fi
 fi
 
+materialize_native_sqlite3 || exit 1
+
 echo "--- Node-RED runtime dependencies ---"
 npm_log="$TMP_DIR/npm-install.log"
 if cd /srv/node-red && npm install --omit=dev --no-fund --no-audit >"$npm_log" 2>&1; then
@@ -1183,6 +1453,8 @@ else
     echo "ERROR: npm install failed" >&2
     exit 1
 fi
+
+verify_native_sqlite3_after_npm || exit 1
 
 install_deploy_exit_trap
 quiesce_identityd_for_deploy || exit 1
