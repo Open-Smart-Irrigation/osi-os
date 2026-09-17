@@ -96,7 +96,7 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
           },
           {
             key: 'estimated-irrigation',
-            label: t('environment.water.estimatedIrrigationToday', { defaultValue: 'Estimated (valve time x calibration)' }),
+            label: t('environment.water.estimatedIrrigationToday', { defaultValue: 'Estimated (valve time × calibration)' }),
             value: formatValue(estimatedLiters, 'L', 0),
             detail: hasSetup ? `${formatValue(estimatedNetMm, 'mm', 1)} effective` : 'Needs area + efficiency',
             tone: 'text-emerald-700',
