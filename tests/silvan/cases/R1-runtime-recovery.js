@@ -37,7 +37,7 @@ exports.title = 'Runtime/recovery (bounded): Node-RED restart, cloud disconnect,
 
 const { hostOf, blackholeTargetRefusal } = require('../lib/config');
 const { hasBlackholeRoute, parsePingResolvedIp } = require('../lib/routeParse');
-const { PENDING_POLL_INTERVAL_MS, resumeBudgetMs } = require('../lib/edgeTimeouts');
+const { PENDING_POLL_INTERVAL_MS, resumeBudgetMs, firstSuccessOrFail } = require('../lib/edgeTimeouts');
 
 const MIN_FREE_MB_AFTER = 500;
 const DISK_FILE_MB = 200;
@@ -272,15 +272,27 @@ async function cloudDisconnectCase(ctx) {
   // success first means the snapshot below is always a concrete timestamp,
   // and any subsequent lack of advance is unambiguously attributable to the
   // blackhole, not to this case's own timing.
-  const firstPollOk = await ctx.until(async () => {
-    const res = await rest.get('/api/sync/state');
-    return (res.body && res.body.lastPendingCommandPollSuccessAt) ? res : null;
-  }, { timeoutMs: PENDING_POLL_INTERVAL_MS * 4, intervalMs: 3000,
-    what: 'the first pending-commands poll to succeed before arming the blackhole' }).catch(() => null);
-  if (!firstPollOk) {
-    ev.note('(b) no pending-commands poll had succeeded even ' + Math.round(PENDING_POLL_INTERVAL_MS * 4 / 1000) +
-      's after (a) finished; proceeding anyway, but the "before" baseline below may still be null as a result ' +
-      '(see F125/F146 -- this is now recorded rather than silently racing the blackhole).');
+  //
+  // Orchestrator follow-up (PR #301 review): a timeout here used to be
+  // recorded as a bare ev.note and the case then proceeded to arm the
+  // blackhole anyway, on top of a baseline that was never confirmed
+  // healthy -- any later failure would then land on a LESS specific
+  // assertion further down, obscuring the real cause. firstSuccessOrFail
+  // (lib/edgeTimeouts.js) turns that timeout into an explicit, named FAILURE
+  // right here, and this case stops instead of continuing on bad footing.
+  const firstPollWaitMs = PENDING_POLL_INTERVAL_MS * 4;
+  const firstPollDecision = await firstSuccessOrFail(
+    () => ctx.until(async () => {
+      const res = await rest.get('/api/sync/state');
+      return (res.body && res.body.lastPendingCommandPollSuccessAt) ? res : null;
+    }, { timeoutMs: firstPollWaitMs, intervalMs: 3000,
+      what: 'the first pending-commands poll to succeed before arming the blackhole' }),
+    '(b) the edge did not poll pending-commands successfully within ' + Math.round(firstPollWaitMs / 1000) +
+      's after the restart; blackhole not armed'
+  );
+  if (!firstPollDecision.ok) {
+    ctx.expect(firstPollDecision.message, false, { waitedMs: firstPollWaitMs });
+    return;
   }
 
   const target = await resolveLinkedCloudHost(ctx);

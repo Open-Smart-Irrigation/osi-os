@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { browserRequestDecision, originOf } = require('../lib/browserGuard');
 const { redact } = require('../lib/rest');
-const { buildInterpolatedMatchers, matchesInterpolatedLocale } = require('../lib/i18nScan');
+const { buildInterpolatedMatchers, matchesInterpolatedLocale, ENGLISH_MARKERS } = require('../lib/i18nScan');
 
 const PLAYWRIGHT_DIR = process.env.OSI_PLAYWRIGHT_DIR || '/home/phil/osi-tools/playwright';
 
@@ -121,7 +121,9 @@ exports.run = async (ctx) => {
   // copy. Deliberately short and boring -- it is meant to catch a whole
   // untranslated card, not to grade prose. A word here only counts as a finding
   // when the surrounding string is not itself a French translation.
-  const ENGLISH_MARKERS = /\b(the|and|with|your|ago|used|not|available|updated|refresh|reboot|status|memory|temperature|settings|gateway|current|load|control|off|low|medium|high|max)\b/i;
+  // ENGLISH_MARKERS itself lives in lib/i18nScan.js -- the SAME word list the
+  // per-slot interpolated-value check above uses, so the two can never drift
+  // apart from each other.
   // i18next renders these literally when a key resolves badly.
   const I18N_ERROR = /returned an object instead of string|missingKey|^\[object Object\]$/i;
 

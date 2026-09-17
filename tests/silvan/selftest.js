@@ -25,15 +25,20 @@ const {
 const { Rest, redact, redactString, redactHeaders, isSecretKey, REDACTED } = require('./lib/rest');
 const { Ssh } = require('./lib/ssh');
 const { DownlinkObserver } = require('./lib/observer');
-const { hasRejectedOutboxShape, isKnownTerminalReason } = require('./lib/rejections');
+const { hasRejectedOutboxShape, isKnownTerminalReason, classifyOutboxEventOutcome } = require('./lib/rejections');
 const { classifyOnceOutcome, ONCE_GRACE_MS } = require('./lib/onceGrace');
 const { hasAdminRouterScopedGate, hasScopedOnlyRoleAssert } = require('./lib/roleGates');
 const { hasBlackholeRoute, firstIpv4, parsePingResolvedIp } = require('./lib/routeParse');
 const planRef = require('./lib/planRef');
 const { truncate } = require('./lib/harness');
 const { CaseEvidence } = require('./lib/evidence');
-const { templateToMatcher, buildInterpolatedMatchers, matchesInterpolatedLocale } = require('./lib/i18nScan');
-const { CLOUD_REST_TIMEOUT_MS, PENDING_POLL_INTERVAL_MS, resumeBudgetMs } = require('./lib/edgeTimeouts');
+const {
+  templateToMatcher, buildInterpolatedMatchers, matchesInterpolatedLocale, isValueLikeSlot, MAX_SLOT_WORDS,
+} = require('./lib/i18nScan');
+const {
+  CLOUD_REST_TIMEOUT_MS, PENDING_POLL_INTERVAL_MS, resumeBudgetMs,
+  OUTBOX_FLUSH_LEASE_MS, OUTBOX_FLUSH_DEBOUNCE_MS, OUTBOX_FLUSH_MIN_GAP_MS, outboxSettleBudgetMs, firstSuccessOrFail,
+} = require('./lib/edgeTimeouts');
 // Lazily required so a missing module fails ONE assertion instead of the run.
 let browserGuard = null;
 try { browserGuard = require('./lib/browserGuard'); } catch (_) { browserGuard = null; }
@@ -690,6 +695,96 @@ async function main() {
       'the i18n-scan.json write must pass the report object through the shared redact() first');
   });
 
+  console.log('\n-- verifier follow-up (PR #301 review): TOKEN_SHAPE_RE padding and EUI-pair exclusion');
+  const PADDED_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvc2kifQ==';
+  await check('a base64-padded token (bare, no key, no "Bearer " prefix) is still redacted by shape', () => {
+    assert.ok(!redactString('token is ' + PADDED_TOKEN).includes(PADDED_TOKEN));
+    assert.ok(redactString('token is ' + PADDED_TOKEN).includes(REDACTED));
+  });
+  await check('a single trailing "=" or "==" is accepted as padding, not just a bare base64url segment', () => {
+    const onePad = 'x'.repeat(20) + '.' + 'y'.repeat(20) + '=';
+    const twoPad = 'a'.repeat(20) + '.' + 'b'.repeat(20) + '==';
+    assert.strictEqual(redactString('value: ' + onePad + ' end'), 'value: ' + REDACTED + ' end');
+    assert.strictEqual(redactString('value: ' + twoPad + ' end'), 'value: ' + REDACTED + ' end');
+  });
+  await check('two 16-hex-character EUIs joined by a dot are NOT redacted -- pure-hex segments of exactly EUI ' +
+    'length are an identifier pairing (e.g. a gateway migration log line), never a token', () => {
+    const euiPair = '0016C001F11715E2.0016C001F11369DE';
+    assert.strictEqual(redactString('migrated ' + euiPair + ' done'), 'migrated ' + euiPair + ' done');
+    assert.strictEqual(redactString(euiPair), euiPair);
+  });
+  await check('a mixed pairing -- one EUI-length hex segment and one real token segment -- is still redacted ' +
+    '(the EUI exclusion only applies when EVERY segment is pure EUI-length hex)', () => {
+    const mixed = '0016C001F11715E2.' + 'g'.repeat(20); // 'g' is not a hex digit
+    assert.ok(!redactString('ref ' + mixed).includes(mixed));
+  });
+  await check('ISO timestamps, semver, hostnames and file names introduced earlier still survive unredacted ' +
+    'after the padding/EUI changes (no regression)', () => {
+    for (const benign of [
+      '2026-09-17T14:04:14.422Z', 'index-Bu5qTxv9.js', 'server.opensmartirrigation.org', 'bovey.cloud', '5.1.7',
+    ]) {
+      assert.strictEqual(redactString(benign), benign, benign + ' must survive redaction unchanged');
+    }
+  });
+
+  console.log('\n-- verifier follow-up: every evidence writer in tests/silvan goes through the shared redact()');
+  await check('cases/V1-valve-actions.js and cases/V2-valve-acks.js now redact their own sidecar JSON writes ' +
+    '(they used to bypass the choke point with a raw fs.writeFileSync + JSON.stringify)', () => {
+    for (const file of ['V1-valve-actions.js', 'V2-valve-acks.js']) {
+      const src = fs.readFileSync(path.join(__dirname, 'cases', file), 'utf8');
+      assert.match(src, /JSON\.stringify\(redact\(/, file + ' must redact its sidecar payload before stringifying');
+    }
+  });
+  await check('every fs.writeFileSync/appendFileSync/appendFile(...) call site in tests/silvan is either the ' +
+    'shared writer itself, an explicitly reasoned non-evidence exception, or passes through redact() -- so a ' +
+    'future evidence-writing call cannot silently reintroduce this bypass', () => {
+    // Allow-listed by exact relative path, each with its own reason -- a new
+    // file is never implicitly exempt.
+    const ALLOW = new Map([
+      ['tests/silvan/lib/evidence.js',
+        'this IS the shared evidence writer: write()/writeRunSummary() are the choke point every case\'s own ' +
+        'step()/check()/note()/cleanupStep() output already passed through redact() to reach (see lib/evidence.js)'],
+      ['tests/silvan/selftest.js',
+        'writes only its OWN throwaway scratch fixtures (an ssh_config fixture in a mkdtemp dir, a ' +
+        'CaseEvidence redaction-selftest run) for this selftest\'s own offline use -- never real run evidence'],
+    ]);
+    const root = path.join(__dirname);
+    const files = [];
+    (function walk(dir) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules') continue;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.js')) files.push(full);
+      }
+    })(root);
+    const repoRoot = path.join(__dirname, '..', '..');
+    const CALL_RE = /\b(?:fs\.)?(writeFileSync|appendFileSync|appendFile)\s*\(/g;
+    const offenders = [];
+    let sweptFiles = 0;
+    let sweptCalls = 0;
+    for (const file of files) {
+      const rel = path.relative(repoRoot, file).split(path.sep).join('/');
+      if (ALLOW.has(rel)) continue;
+      sweptFiles += 1;
+      const src = fs.readFileSync(file, 'utf8');
+      let m;
+      while ((m = CALL_RE.exec(src))) {
+        sweptCalls += 1;
+        const windowStart = Math.max(0, m.index - 200);
+        const windowEnd = Math.min(src.length, m.index + 400);
+        if (!/redact\(/.test(src.slice(windowStart, windowEnd))) {
+          const line = src.slice(0, m.index).split('\n').length;
+          offenders.push(rel + ':' + line);
+        }
+      }
+    }
+    assert.ok(sweptFiles > 0 && sweptCalls > 0, 'the sweep must actually scan files and find real call sites, ' +
+      'or this check proves nothing');
+    assert.deepStrictEqual(offenders, [],
+      'writeFileSync/appendFile call(s) with no nearby redact(): ' + offenders.join(', '));
+  });
+
   console.log('\n-- rejected-outbox shape (F30 / osi-os#262), against fixture JSON');
   // These fixtures stand in for GET /api/sync/state bodies so this logic is
   // checked offline, without a gateway, both before and after #262 lands.
@@ -945,6 +1040,52 @@ async function main() {
     assert.ok(matchIdx < markerIdx, 'the template check must run before the marker heuristic, not replace it');
   });
 
+  console.log('\n-- verifier follow-up (PR #301 review): a hardcoded English sentence must not be accepted ' +
+    'by squeezing into a bare placeholder\'s wildcard');
+  // The verifier's exact counterexample: valves.json/fr's own real template
+  // has almost no literal text around its ONE placeholder, so the old lazy
+  // `[\s\S]*?` wildcard accepted ANY prefix -- including a whole hardcoded
+  // English sentence that merely happens to end the way the template's
+  // trailing literal text does.
+  const FR_VALVES_FIXTURE = { 'valves.format.temperature': '{{value}} °C' };
+  const ALL_FIXTURES = Object.assign({}, FR_DEVICES_FIXTURE, FR_VALVES_FIXTURE);
+  await check('isValueLikeSlot: a number, a unit-qualified number and a harness-created identifier are ' +
+    'value-like; an English sentence and a marker-bearing short phrase are not', () => {
+    assert.strictEqual(isValueLikeSlot('85'), true);
+    assert.strictEqual(isValueLikeSlot('osi_zone_ab12'), true, 'a harness-created resource name (one token, no ' +
+      'spaces) must pass');
+    assert.strictEqual(isValueLikeSlot('17 septembre 2026'), true, 'a short (<= ' + MAX_SLOT_WORDS + '-word) ' +
+      'compound/date-like value must still pass');
+    assert.strictEqual(isValueLikeSlot('Gateway temperature high 85'), false, 'the verifier\'s counterexample ' +
+      'slot content: an English sentence fragment, both too long and marker-bearing');
+    assert.strictEqual(isValueLikeSlot('not available'), false, 'short (2-word) but still contains an ' +
+      'ENGLISH_MARKERS word -- the marker check catches what the word-count bound alone would not');
+    assert.strictEqual(isValueLikeSlot(''), false);
+  });
+  await check('the verifier\'s counterexample -- "Gateway temperature high 85 °C" against valves.json/fr\'s own ' +
+    '"{{value}} °C" template -- is REJECTED, not accepted as a French translation', () => {
+    const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('Gateway temperature high 85 °C', matchers), false);
+  });
+  await check('"max 85 °C" is still accepted even with the valves.json template also in play (the original ' +
+    'false positive stays fixed)', () => {
+    const matchers = buildInterpolatedMatchers(ALL_FIXTURES);
+    assert.strictEqual(matchesInterpolatedLocale('max 85 °C', matchers), true);
+  });
+  await check('a slot holding a harness-created name like "osi_zone_ab12" is accepted', () => {
+    const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('osi_zone_ab12 °C', matchers), true);
+  });
+  await check('an English sentence squeezed into the SAME lone-placeholder template is rejected', () => {
+    const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('Please contact support immediately °C', matchers), false,
+      '4 words, none of them an ENGLISH_MARKERS word -- the word-count bound alone must catch this');
+  });
+  await check('near-empty templates are still excluded after the slot-validation change (unaffected: this is ' +
+    'governed by MIN_LITERAL_CHARS, not by isValueLikeSlot)', () => {
+    assert.strictEqual(templateToMatcher('{{value}}'), null);
+  });
+
   console.log('\n-- U1 F124: the per-route wait after navigation is deterministic, not a fixed delay');
   await check('the per-page wait uses networkidle (covers a same-document hash navigation\'s lazy chunk fetch, ' +
     'which the initial goto()\'s own networkidle can miss) instead of a bare fixed timeout', () => {
@@ -1013,6 +1154,38 @@ async function main() {
     assert.ok(s0Idx < routeAddIdx, 'the snapshot must precede the route add (unchanged ordering otherwise)');
   });
 
+  console.log('\n-- verifier follow-up: a timed-out first-poll wait fails EXPLICITLY, not via a bare note');
+  await check('firstSuccessOrFail (lib/edgeTimeouts.js) returns an explicit, named failure when the wait times ' +
+    'out -- stubbed so this is checked offline, without a real restart+poll cycle', async () => {
+    const neverResolves = () => Promise.reject(new Error('timed out after 120000ms'));
+    const decision = await firstSuccessOrFail(neverResolves,
+      '(b) the edge did not poll pending-commands successfully within 120s after the restart; blackhole not armed');
+    assert.strictEqual(decision.ok, false);
+    assert.match(decision.message, /did not poll pending-commands successfully within 120s after the restart; blackhole not armed/);
+  });
+  await check('firstSuccessOrFail reports ok (and hands back the real result) when the wait succeeds', async () => {
+    const resolves = () => Promise.resolve({ lastPendingCommandPollSuccessAt: '2026-01-01T00:00:00Z' });
+    const decision = await firstSuccessOrFail(resolves, 'unused message');
+    assert.strictEqual(decision.ok, true);
+    assert.strictEqual(decision.result.lastPendingCommandPollSuccessAt, '2026-01-01T00:00:00Z');
+  });
+  await check('R1 fails the case explicitly, by name, and RETURNS (skipping the blackhole) when the first-poll ' +
+    'wait times out -- not a bare ev.note that lets the case proceed to arm the blackhole on an unconfirmed ' +
+    'baseline and fail later on a less specific assertion', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'R1-runtime-recovery.js'), 'utf8');
+    assert.match(src, /const firstPollDecision = await firstSuccessOrFail\(/,
+      'R1 must use the shared explicit-failure helper, not its own bare note');
+    const declIdx = src.indexOf('const firstPollDecision = await firstSuccessOrFail(');
+    const failIdx = src.indexOf('if (!firstPollDecision.ok) {');
+    const expectIdx = src.indexOf('ctx.expect(firstPollDecision.message, false,', failIdx);
+    const returnIdx = src.indexOf('return;', failIdx);
+    const routeAddIdx = src.indexOf("ssh.exec('ip route add blackhole");
+    assert.ok(declIdx > 0 && failIdx > declIdx, 'the decision must be checked right after it is made');
+    assert.ok(expectIdx > failIdx, 'a timed-out wait must fail the case (ctx.expect(..., false, ...)), by name');
+    assert.ok(returnIdx > expectIdx && returnIdx < routeAddIdx,
+      'the case must return -- skipping the blackhole -- before ever reaching the route-add call');
+  });
+
   console.log('\n-- C1 F122/F146: the "cloud unreachable" premise no longer asserts a state the product ' +
     'does not promise');
   await check('C1 no longer asserts that the outbox "grows rather than dropping" from the cloudReachable guess ' +
@@ -1023,13 +1196,84 @@ async function main() {
     assert.ok(!/surfaces the growing backlog to the operator/.test(src), 'the fragile API-surfaces-growth ' +
       'assertion must be gone too (same heuristic, same race)');
   });
-  await check('C1 still unconditionally asserts the one thing the product actually promises: a local write is ' +
-    'queued or delivered, never dropped, regardless of cloud reachability -- so a real regression there still ' +
-    'fails this case', () => {
+  await check('verifier follow-up: the old tautological final assertion (`outboxAfter >= 0 && !!zoneEvent && ' +
+    '!!deviceEvent` -- always-true first term, two stale creation-time snapshots) is gone from C1', () => {
     const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
-    assert.match(src, /'local writes are queued or already delivered, never dropped, regardless of cloud reachability'/);
-    assert.ok(/outboxAfter >= 0 && !!zoneEvent && !!deviceEvent/.test(src), 'the assertion must still check the ' +
-      'real evidence (this case\'s own zone/device events actually queued), not just a tautology');
+    assert.ok(!/outboxAfter >= 0 && !!zoneEvent && !!deviceEvent/.test(src),
+      'the tautological assertion the verifier proved with a stub must be gone');
+  });
+  await check('C1 re-queries each of ITS OWN events by event_uuid at the END of the run and asserts each one ' +
+    'survived (delivered, still queued, or a documented never-seen-resource rejection) -- so a write that is ' +
+    'queued and later silently removed from sync_outbox now fails the case', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /await assertOutboxEventSurvived\(ctx, 'the zone create', zoneEvent && zoneEvent\.event_uuid\)/);
+    assert.match(src, /await assertOutboxEventSurvived\(ctx, 'the device registration', deviceEvent && deviceEvent\.event_uuid\)/);
+    assert.match(src, /await assertOutboxEventSurvived\(ctx, 'the telemetry append', telemetryEvent && telemetryEvent\.event_uuid\)/);
+    // Placed after the T16f additions (duplicate delivery / expired action /
+    // stale push), i.e. genuinely at the end of the run, not right after
+    // creation where the old snapshots were taken.
+    const lastAdditionIdx = src.indexOf('=== T16f additions');
+    const survivedIdx = src.indexOf("assertOutboxEventSurvived(ctx, 'the zone create'");
+    assert.ok(lastAdditionIdx > 0 && survivedIdx > lastAdditionIdx,
+      'the survival re-query must run after the rest of the case, not immediately after creation');
+  });
+  await check('classifyOutboxEventOutcome (lib/rejections.js): delivered -> survived; still pending -> ' +
+    'survived; row missing (deleted) -> NOT survived; rejected for an unexplained reason -> NOT survived; ' +
+    'rejected for the documented never-seen-resource reason -> survived', () => {
+    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: '2026-09-17T00:00:00Z', rejected_at: null }).survived, true);
+    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: null, rejected_at: null }).survived, true);
+    assert.strictEqual(classifyOutboxEventOutcome(null).survived, false);
+    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: null, rejected_at: '2026-09-17T00:00:00Z', rejection_reason: 'equal_version_payload_conflict' }).survived, false);
+    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: null, rejected_at: '2026-09-17T00:00:00Z', rejection_reason: 'ownership_denied: zone never seen' }).survived, true);
+  });
+  await check('C1\'s assertOutboxEventSurvived fails with a message naming the resource -- and refuses to query ' +
+    'with an empty event_uuid -- when the id was never captured in the first place', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /if \(!eventUuid\) \{\s*\n\s*ctx\.expect\(label \+ /,
+      'a missing event_uuid must fail explicitly (naming the resource via `label`), not be silently skipped');
+  });
+  await check('classifyOutboxEventOutcome, end to end via a stubbed db reader (the shape the orchestrator\'s ' +
+    'own verifier proved the OLD assertion missed): a row that existed at creation time but is GONE by the time ' +
+    'the case re-queries it is classified as NOT survived, exactly like a fresh SQL read returning no row', () => {
+    const stubReadRow = (fixtureRows, eventUuid) => fixtureRows.find((r) => r.event_uuid === eventUuid) || null;
+    const rowsAtCreation = [{ event_uuid: 'evt-1', delivered_at: null, rejected_at: null }];
+    const rowsAtEnd = []; // the row was deleted between creation and the end of the case
+    assert.strictEqual(classifyOutboxEventOutcome(stubReadRow(rowsAtCreation, 'evt-1')).survived, true,
+      'at creation time the row is merely queued -- survived');
+    assert.strictEqual(classifyOutboxEventOutcome(stubReadRow(rowsAtEnd, 'evt-1')).survived, false,
+      'the SAME event_uuid, re-read at the end, is gone -- this is the drop the old snapshot-only check missed');
+  });
+
+  console.log('\n-- C1 F146: the outbox settle-poll budget is derived from the flush lease/debounce mechanics');
+  await check('the outbox flush lease/debounce constants match the real edge source (flows.json nodes ' +
+    '"sync-outbox-flush-coalesce" and "sync-outbox-build")', () => {
+    const flowsPath = path.join(__dirname, '..', '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr',
+      'share', 'flows.json');
+    const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+    const coalesce = flows.find((n) => n.id === 'sync-outbox-flush-coalesce');
+    const build = flows.find((n) => n.id === 'sync-outbox-build');
+    assert.ok(coalesce, 'sync-outbox-flush-coalesce node must exist');
+    assert.ok(build, 'sync-outbox-build node must exist');
+    assert.match(coalesce.func, /const DEBOUNCE_MS = 200;/);
+    assert.match(coalesce.func, /const MIN_GAP_MS = 750;/);
+    assert.match(build.func, /const FLUSH_LEASE_MS = 120000;/);
+    assert.strictEqual(OUTBOX_FLUSH_DEBOUNCE_MS, 200);
+    assert.strictEqual(OUTBOX_FLUSH_MIN_GAP_MS, 750);
+    assert.strictEqual(OUTBOX_FLUSH_LEASE_MS, 120000);
+  });
+  await check('outboxSettleBudgetMs() comfortably exceeds run 6\'s observed "within two minutes" settle time ' +
+    'and the old, too-short 20000ms budget, while still being a bounded number a persistent disagreement can ' +
+    'exhaust', () => {
+    const budget = outboxSettleBudgetMs();
+    assert.strictEqual(budget, OUTBOX_FLUSH_LEASE_MS + OUTBOX_FLUSH_MIN_GAP_MS + Math.round(PENDING_POLL_INTERVAL_MS / 2));
+    assert.ok(budget > 120000, 'must exceed the observed two-minute settle time');
+    assert.ok(budget > 20000 * 5, 'must be meaningfully larger than the old 20000ms budget, not a marginal bump');
+    assert.ok(budget < 10 * 60 * 1000, 'must still be a bounded number, not effectively infinite');
+  });
+  await check('C1\'s #5/#7 settle-polls call outboxSettleBudgetMs(), not the old flat 20000ms', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    const timeoutCalls = src.match(/timeoutMs: outboxSettleBudgetMs\(\)/g) || [];
+    assert.strictEqual(timeoutCalls.length, 2, 'both #5 and #7 must use the derived budget');
   });
   await check('C1\'s pending/rejected count checks (#5/#7) now poll for the API and SQLite definitions to ' +
     'settle instead of comparing one point-in-time pair (F146: both are a live COUNT(*) on every call -- ' +

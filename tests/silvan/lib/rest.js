@@ -43,15 +43,34 @@ function isSecretKey(key) {
 }
 
 // A bearer/session token by SHAPE alone: two or three dot-separated
-// base64url-ish segments, each long enough that this cannot be an incidental
-// dotted word (a filename, a hostname, an ISO timestamp, a version number).
-// This catches a token that reaches evidence with no recognisable key name
-// (isSecretKey never sees it) and no literal "Bearer " prefix -- e.g. a raw
-// `{"token":"..."}` response body already flattened to a string by a
-// truncator, or a token pasted into a free-text note (F134/F136). OSI's own
-// tokens are two-part (`header.signature`, see A1's own check); this also
-// matches a full three-part JWT, which is what the selftest probes with.
-const TOKEN_SHAPE_RE = /\b[A-Za-z0-9_-]{16,}(?:\.[A-Za-z0-9_-]{16,}){1,2}\b/g;
+// base64url-ish segments (optionally `=`-padded, standard base64's padding
+// character -- base64url proper omits it, but nothing stops a token from
+// being carried in a padded encoding), each long enough that this cannot be
+// an incidental dotted word (a filename, a hostname, an ISO timestamp, a
+// version number). This catches a token that reaches evidence with no
+// recognisable key name (isSecretKey never sees it) and no literal
+// "Bearer " prefix -- e.g. a raw `{"token":"..."}` response body already
+// flattened to a string by a truncator, or a token pasted into a free-text
+// note (F134/F136). OSI's own tokens are two-part (`header.signature`, see
+// A1's own check); this also matches a full three-part JWT, which is what
+// the selftest probes with. The trailing negative lookahead (instead of a
+// `\b` after an optional `=`) is needed because `=` is a non-word character:
+// a `\b` immediately after it would only match if the CHARACTER AFTER that
+// were a word character too, which is never true at a real token's end
+// (whitespace, quote, end of string).
+const TOKEN_SHAPE_RE = /\b[A-Za-z0-9_-]{16,}={0,2}(?:\.[A-Za-z0-9_-]{16,}={0,2}){1,2}(?![A-Za-z0-9_=-])/g;
+
+// Two (or three) EUI-length hex identifiers joined by dots -- e.g. a gateway
+// migration log line naming the old and new device EUI -- are NOT a token:
+// an EUI is exactly 16 hex characters, a strict subset of what TOKEN_SHAPE_RE
+// matches by shape. A real base64/JWT segment routinely contains letters
+// g-z, `+`, `/`, `_` or `-`, or is not exactly 16 characters; something that
+// is pure hex AND exactly EUI-length in EVERY dot-separated segment is an
+// EUI pairing, not a token, and must survive redaction unredacted.
+const EUI_HEX_SEGMENT_RE = /^[0-9A-Fa-f]{16}$/;
+function looksLikeEuiJoin(match) {
+  return match.split('.').every((segment) => EUI_HEX_SEGMENT_RE.test(segment));
+}
 
 // Deep copy with every secret-named value replaced. Returns a NEW structure;
 // the caller's request body is never mutated.
@@ -85,7 +104,7 @@ function redactString(text) {
   }
   return raw
     .replace(/\bBearer\s+\S+/gi, 'Bearer ' + REDACTED)
-    .replace(TOKEN_SHAPE_RE, REDACTED);
+    .replace(TOKEN_SHAPE_RE, (match) => (looksLikeEuiJoin(match) ? match : REDACTED));
 }
 
 function redactHeaders(headers) {

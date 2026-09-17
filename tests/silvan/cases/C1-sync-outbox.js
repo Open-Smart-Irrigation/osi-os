@@ -20,11 +20,35 @@
 exports.title = 'Cloud-edge (partial): local writes while the cloud is unreachable, outbox growth';
 
 const {
-  PR_262_URL, REJECTED_RETENTION_DAYS, isKnownTerminalReason, hasRejectedOutboxShape,
+  PR_262_URL, REJECTED_RETENTION_DAYS, isKnownTerminalReason, hasRejectedOutboxShape, classifyOutboxEventOutcome,
 } = require('../lib/rejections');
 const { classifyOnceOutcome, ONCE_GRACE_MS } = require('../lib/onceGrace');
+const { outboxSettleBudgetMs } = require('../lib/edgeTimeouts');
 
 const state = { zones: [], devices: [] };
+
+// Orchestrator follow-up (PR #301 review): re-queries ONE specific
+// sync_outbox row by its own event_uuid (the table's primary key) so the
+// case can tell, at the END of the run, whether a write it made is still
+// there -- delivered, still queued, or terminally rejected for the
+// documented never-seen-resource reason -- rather than trusting a snapshot
+// captured right after creation, which cannot see a row that later vanished.
+async function assertOutboxEventSurvived(ctx, label, eventUuid) {
+  if (!eventUuid) {
+    ctx.expect(label + "'s outbox event_uuid was captured so this check can re-query it", false, { label });
+    return;
+  }
+  const row = await ctx.ssh.sqlOne(
+    "SELECT delivered_at, rejected_at, rejection_reason FROM sync_outbox WHERE event_uuid = '" + eventUuid + "'"
+  );
+  const outcome = classifyOutboxEventOutcome(row);
+  ctx.expect(
+    label + "'s outbox event (" + eventUuid + ') was not silently dropped -- delivered, still queued, or a ' +
+      'documented never-seen-resource rejection, never missing and never an unexplained rejection',
+    outcome.survived,
+    { label, eventUuid, state: outcome.state, row },
+  );
+}
 
 async function syncState(rest) {
   const res = await rest.get('/api/sync/state');
@@ -81,12 +105,16 @@ exports.run = async (ctx) => {
   // settles (confirmed live: API==SQLite within two minutes). Poll for that
   // instead of comparing one point-in-time pair, so a genuine drift in the
   // API's own definition -- not a timing artifact -- still fails this check.
+  // Budget: outboxSettleBudgetMs() (lib/edgeTimeouts.js), derived from the
+  // flush lease/debounce mechanics that own the observed "within two
+  // minutes" -- not the earlier guessed 20000ms, which was itself short
+  // enough to reintroduce this exact flake as a false red.
   const pendingSettled = await ctx.until(async () => {
     const apiNow = Number((await syncState(rest)).pendingOutboxCount);
     const sqlNow = await pendingOutbox(ssh);
     const diff = Math.abs(apiNow - sqlNow);
     return diff <= 2 ? { api: apiNow, sqlite: sqlNow, diff } : null;
-  }, { timeoutMs: 20000, intervalMs: 2000, what: 'the API pending count to settle with the edge definition of pending' })
+  }, { timeoutMs: outboxSettleBudgetMs(), intervalMs: 2000, what: 'the API pending count to settle with the edge definition of pending' })
     .catch(async () => {
       const apiNow = Number((await syncState(rest)).pendingOutboxCount);
       const sqlNow = await pendingOutbox(ssh);
@@ -140,13 +168,14 @@ exports.run = async (ctx) => {
     // live COUNT(*) (same sync-state-build node), also read a moment apart
     // from the SQLite ground truth over a different transport, also
     // observed to settle (API 948 vs SQLite 954, settled to 959/959 within
-    // two minutes, run 6). Poll instead of comparing s0's single snapshot.
+    // two minutes, run 6). Poll instead of comparing s0's single snapshot,
+    // with the same source-derived budget as #5 above.
     const rejectedSettled = await ctx.until(async () => {
       const apiNow = Number((await syncState(rest)).rejectedOutboxCount);
       const sqlNow = await rejectedOutbox(ssh);
       const diff = Math.abs(apiNow - sqlNow);
       return diff <= 2 ? { api: apiNow, sqlite: sqlNow, diff } : null;
-    }, { timeoutMs: 20000, intervalMs: 2000, what: 'the API rejected count to settle with sync_outbox' })
+    }, { timeoutMs: outboxSettleBudgetMs(), intervalMs: 2000, what: 'the API rejected count to settle with sync_outbox' })
       .catch(async () => {
         const apiNow = Number((await syncState(rest)).rejectedOutboxCount);
         const sqlNow = await rejectedOutbox(ssh);
@@ -200,8 +229,11 @@ exports.run = async (ctx) => {
   }, { timeoutMs: 20000, what: 'the telemetry row' }).catch(() => null);
 
   // --- the writes are queued for the cloud ---------------------------------
+  // event_uuid (sync_outbox's own PRIMARY KEY, database/seed-blank.sql:1000)
+  // captured alongside each row so the end-of-case check below can re-query
+  // this EXACT row later, not just "does some row for this aggregate exist".
   const zoneEvent = await ssh.sqlOne(
-    "SELECT aggregate_type, op, delivered_at, rejected_at, retry_count, gateway_device_eui " +
+    "SELECT event_uuid, aggregate_type, op, delivered_at, rejected_at, retry_count, gateway_device_eui " +
     "FROM sync_outbox WHERE aggregate_key = '" + (zone.body && zone.body.zone_uuid) + "' ORDER BY occurred_at DESC LIMIT 1"
   );
   ctx.expect('SQLite: the zone create is queued in sync_outbox', !!zoneEvent, zoneEvent);
@@ -209,13 +241,13 @@ exports.run = async (ctx) => {
     !!zoneEvent && String(zoneEvent.gateway_device_eui || '').toUpperCase() === ctx.cfg.expectedEui, zoneEvent);
 
   const deviceEvent = await ssh.sqlOne(
-    "SELECT aggregate_type, op FROM sync_outbox WHERE aggregate_key = '" + eui + "' ORDER BY occurred_at DESC LIMIT 1"
+    "SELECT event_uuid, aggregate_type, op FROM sync_outbox WHERE aggregate_key = '" + eui + "' ORDER BY occurred_at DESC LIMIT 1"
   );
   ctx.expect('SQLite: the device registration is queued in sync_outbox', !!deviceEvent, deviceEvent);
 
   const telemetryEvent = await ctx.until(async () => {
     const row = await ssh.sqlOne(
-      "SELECT aggregate_type, op FROM sync_outbox WHERE aggregate_type = 'DEVICE_DATA' " +
+      "SELECT event_uuid, aggregate_type, op FROM sync_outbox WHERE aggregate_type = 'DEVICE_DATA' " +
       "AND payload_json LIKE '%" + eui + "%' ORDER BY occurred_at DESC LIMIT 1"
     );
     return row || null;
@@ -248,8 +280,9 @@ exports.run = async (ctx) => {
     ' (lastOutboxDeliverySuccessAt ' + (s0.lastOutboxDeliverySuccessAt || 'never') + '). Observed outbox ' +
     'movement (report, not an assertion): SQLite pending ' + outboxBefore + ' -> ' + outboxAfter +
     ', API-reported ' + s0.pendingOutboxCount + ' -> ' + s1.pendingOutboxCount + '.');
-  ctx.expect('local writes are queued or already delivered, never dropped, regardless of cloud reachability',
-    outboxAfter >= 0 && !!zoneEvent && !!deviceEvent, { before: outboxBefore, after: outboxAfter });
+  ev.note('SQLite pending count moved ' + outboxBefore + ' -> ' + outboxAfter + ' (report only; see below for ' +
+    'the actual "never dropped" proof, which re-queries each of this case\'s own events by event_uuid at the ' +
+    'end of the run rather than trusting this snapshot).');
 
   // (a) DELTA: what did THIS run's own traffic (the writes above) add to the
   // rejected pile since this case started, and is every new rejection
@@ -470,6 +503,17 @@ exports.run = async (ctx) => {
     'unrelated schedule mutation) never leaves a stale push and its replacement simultaneously QUEUED for the ' +
     'same weekday/purpose slot. The actual cloud-command replay path (flows.json `Route Command`, commandId-' +
     'keyed) is reachable only via the cloud pending-commands poll and is out of reach for this harness by design.');
+
+  // --- the actual "never dropped" proof, at the END of the run -------------
+  // Orchestrator follow-up (PR #301 review): the old final assertion tested
+  // a non-negative outbox count (always true) and two stale snapshots taken
+  // right after creation -- a write that was queued and later silently
+  // removed from sync_outbox passed it. Re-query each of THIS case's own
+  // events by its own event_uuid now, after everything else this case did,
+  // so a row that vanished at any point during the run is caught.
+  await assertOutboxEventSurvived(ctx, 'the zone create', zoneEvent && zoneEvent.event_uuid);
+  await assertOutboxEventSurvived(ctx, 'the device registration', deviceEvent && deviceEvent.event_uuid);
+  await assertOutboxEventSurvived(ctx, 'the telemetry append', telemetryEvent && telemetryEvent.event_uuid);
 };
 
 exports.cleanup = async (ctx) => {

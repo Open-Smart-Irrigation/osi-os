@@ -47,10 +47,46 @@ function hasRejectedOutboxShape(state) {
     Object.prototype.hasOwnProperty.call(lr, 'reason');
 }
 
+// Orchestrator follow-up (PR #301 review, 2026-09-17): C1's old final
+// assertion (`outboxAfter >= 0 && !!zoneEvent && !!deviceEvent`) is a
+// tautology plus two stale snapshots captured right after creation -- a write
+// that was queued and later silently removed from sync_outbox (never
+// delivered, never rejected) passed it. This classifies a FRESH re-query of
+// one specific event, by its own event_uuid (sync_outbox's primary key,
+// database/seed-blank.sql:1000), so the case can tell a survived write from a
+// dropped one at the end of the run, not just right after it was created.
+//
+//   row === null            -- missing: SILENTLY DROPPED (never happens under
+//                               correct behaviour; sync_outbox rows are only
+//                               ever updated in place, never deleted, except
+//                               #262's 14-day retention prune of REJECTED rows
+//                               far older than a single test run)
+//   delivered_at set        -- delivered: survived
+//   both timestamps null    -- still queued: survived (not yet the cloud's
+//                               turn; asserting it must have already resolved
+//                               would reintroduce F122's premise)
+//   rejected_at set:
+//     known terminal reason -- the documented never-seen-resource rule this
+//                               harness's own simulated resources trigger
+//                               against the interim test cloud (see this
+//                               case's other notes) -- survived, not dropped
+//     anything else         -- an unexplained rejection of THIS case's own
+//                               event: SILENTLY DROPPED in the sense that
+//                               matters here (the write never actually landed
+//                               and nothing explains why)
+function classifyOutboxEventOutcome(row) {
+  if (!row) return { survived: false, state: 'missing' };
+  if (row.delivered_at) return { survived: true, state: 'delivered' };
+  if (!row.rejected_at) return { survived: true, state: 'pending' };
+  if (isKnownTerminalReason(row.rejection_reason)) return { survived: true, state: 'rejected_expected' };
+  return { survived: false, state: 'rejected_unexplained' };
+}
+
 module.exports = {
   PR_262_URL,
   REJECTED_RETENTION_DAYS,
   KNOWN_TERMINAL_REASON_PREFIXES,
   isKnownTerminalReason,
   hasRejectedOutboxShape,
+  classifyOutboxEventOutcome,
 };
