@@ -207,6 +207,24 @@ test('back-to-back flushes are rate bounded by a minimum gap', () => {
   );
 });
 
+test('a backwards clock step cannot stall the gate', () => {
+  // An NTP correction can move Date.now() behind the recorded lastAt. Without a
+  // clamp the gate would wait out the whole jump before flushing again.
+  const harness = makeHarness(3_500_000);
+  runGateBody(canonicalGate.func, harness, { payload: 'first' });
+  harness.fire(harness.timers[0]);
+  harness.advance(-3_600_000);
+
+  runGateBody(canonicalGate.func, harness, { payload: 'after-step-back' });
+  assert.equal(harness.timers.length, 2);
+  assert.ok(
+    harness.timers[1].delay <= 750,
+    `wait must stay bounded after a clock step; got ${harness.timers[1].delay} ms`,
+  );
+  harness.fire(harness.timers[1]);
+  assert.equal(harness.sent.length, 2);
+});
+
 test('the flush msg is fresh and never carries the HTTP response object', () => {
   const harness = makeHarness(4_000_000);
   const res = { _isResponse: true };
