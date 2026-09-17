@@ -79,6 +79,56 @@ function replayStatus(result) {
   return 'NACKED';
 }
 
+// F96: applied_commands.result_detail (SQLite TEXT, unbounded) is shipped VERBATIM as
+// ValveActuation.command_result_detail by sync-bootstrap-build/sync-force-build's
+// `ac.result_detail AS command_result_detail` query (valve_actuation_expectations LEFT
+// JOIN applied_commands ON command_id) -- and the cloud's mirror column is varchar(255).
+// OPEN_FOR_DURATION is the ONLY command_type ever referenced by a
+// valve_actuation_expectations.command_id (every local/scheduled/manual valve-open path
+// -- workers.js's actuatorCommand(), flows.json's write-strega-expectation/"Decide +
+// build actuator cmd" -- stamps this same literal; cloud-commands.js's APPLIERS map has
+// no OPEN_FOR_DURATION entry, so it is never cloud-originated either), so ONLY that
+// command type's result_detail can ever reach the cloud through this path -- capping is
+// scoped to it alone, leaving every other command family's (journal/zone/scoped-access)
+// dedup-by-result_detail-content matching (journalEffectProvenanceMatches, zone
+// payloadHash lookup) completely unaffected.
+//
+// Measured fact (see this module's test suite): the ack envelope's OWN structural
+// skeleton -- commandId, eventUuid, aggregateType, aggregateKey, commandType, status,
+// result, appliedAt, requestedSyncVersion, appliedSyncVersion, duplicate -- already
+// serializes to ~284 chars with reason/detail both null, i.e. it exceeds the cloud
+// mirror's 255-char budget with NO free text at all. F96's "319 chars" repro is that same
+// oversized skeleton plus a short error string, not a uniquely long one -- so trimming
+// only reason/detail cannot guarantee compliance; capResultDetailJson truncates the final
+// serialized string itself. A truncated value is no longer valid JSON, which is
+// deliberately tolerated here: parsedResultDetail's JSON.parse already falls back to
+// `{ storedResultDetail: row.result_detail }` on a parse failure, and
+// replayAck/persistReplayAck already reconstruct commandType/effectKey/appliedAt/status/
+// result from applied_commands' own DB columns in that fallback branch (never from the
+// parsed JSON) -- so a truncated OPEN_FOR_DURATION row still replays correctly, it just
+// loses the reason/detail/eventUuid/aggregateType/aggregateKey fields on that one replay
+// (acceptable: those never carried journal/zone dedup semantics for this command family).
+// The caller keeps the FULL, untruncated record for its own return value /
+// command_ack_outbox row / log line; only what is PERSISTED into
+// applied_commands.result_detail is capped.
+const RESULT_DETAIL_MAX_LENGTH = 255;
+const RESULT_DETAIL_CAPPED_COMMAND_TYPES = new Set(['OPEN_FOR_DURATION']);
+const TRUNCATION_MARKER = '…[truncated]';
+
+function truncateWithMarker(value, maxLength) {
+  if (typeof value !== 'string' || value.length <= maxLength) return value;
+  if (maxLength <= TRUNCATION_MARKER.length) return TRUNCATION_MARKER.slice(0, maxLength);
+  return value.slice(0, maxLength - TRUNCATION_MARKER.length) + TRUNCATION_MARKER;
+}
+
+function capResultDetailJson(record, commandType, maxLength) {
+  const full = JSON.stringify(record);
+  if (!RESULT_DETAIL_CAPPED_COMMAND_TYPES.has(String(commandType || '').trim().toUpperCase())) {
+    return full;
+  }
+  return truncateWithMarker(full, maxLength);
+}
+
 function parsedResultDetail(row) {
   let facts = {};
   if (typeof row.result_detail === 'string' && row.result_detail) {
@@ -407,6 +457,14 @@ async function queueCommandAck(db, rawAck, runtime) {
         if (!cloudOriginated) return replayAck(existing, commandId.ack, true);
         return persistReplayAck(tx, existing, commandId.ack, true);
       }
+      const resultDetail = capResultDetailJson(initial, initial.commandType, RESULT_DETAIL_MAX_LENGTH);
+      if (resultDetail.length < JSON.stringify(initial).length) {
+        console.warn(
+          '[osi-command-ledger] result_detail truncated to ' + RESULT_DETAIL_MAX_LENGTH +
+          ' chars for command ' + commandId.stored + ' (full untruncated ack): ' +
+          JSON.stringify(initial)
+        );
+      }
       await tx.run(
         'INSERT INTO applied_commands (' +
           'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator' +
@@ -414,7 +472,7 @@ async function queueCommandAck(db, rawAck, runtime) {
         [commandId.stored, String(ack.effectKey || ack.effect_key || '').trim() || null,
           String(ack.deviceEui || ack.devEui || '').trim().toUpperCase() || 'UNKNOWN',
           String(ack.commandType || '').trim().toUpperCase() || 'UNKNOWN', result, appliedAt,
-          JSON.stringify(initial), 'edge']
+          resultDetail, 'edge']
       );
       const hooks = runtime && runtime.lifecycle_hooks;
       if (hooks && typeof hooks.afterCommandLedger === 'function') {

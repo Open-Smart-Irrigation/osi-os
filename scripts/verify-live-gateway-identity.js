@@ -1084,17 +1084,31 @@ if (sizeAllowances) {
     // migrations 0052-0053): each prior pin (5859 / 1951 / 969) was already fully baked
     // into origin/main's own measured size for that node once its port merged, so this
     // slice's own measured content delta simply replaces it rather than stacking on top.
-    'sync-bootstrap-build': 2483,
-    // 2026-09-17 overnight stabilization T13i (F81): re-pinned from 0 (this node was
-    // byte-identical to origin/main until now) to +1885 for a normalizeIsoTimestamp()
-    // + normalizeOutboxPayload() wrapper on VALVE_SCHEDULE outbox event delivery, fixing
-    // deleted_at's SQLite space-separated datetime('now') format reaching the cloud
-    // unconverted (osi-valve-control/store.js writes it; the 0024 trigger ships it as-is);
-    // reformatted to exactly millisecond precision ('.000Z') per the NullableCanonicalUtcTimestamp
-    // pattern in docs/contracts/sync-schema/resources.schema.json.
-    'sync-outbox-build': 1885,
+    // 2026-09-17 overnight stabilization T13l (F96, edge text caps): re-pinned from 2483 to
+    // +1373. The prior 2483 (installation-identity wave3-edge-durable growth) was already
+    // fully baked into origin/main's own measured size for this node -- the same F16/F18
+    // hygiene pattern every re-pin here documents. This slice adds a capFreeTextFields()
+    // pass to sanitizeSyncRow (cancel_reason/command_result_detail, maxLength 255) and
+    // routes the valve_actuations bootstrap array through sanitizeSyncRow (it previously
+    // bypassed it entirely) -- fixing a 319-char applied_commands.result_detail that 500'd
+    // the whole cloud bootstrap against the cloud's varchar(255) ValveActuation mirror
+    // columns. Re-measured fresh: origin/main 43556 -> HEAD 44929 = +1373.
+    'sync-bootstrap-build': 1373,
+    // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 1885 to +1426 for the
+    // same capFreeTextFields() addition (this node's copy of sanitizeSyncRow/
+    // normalizeOutboxPayload). The prior 1885 (F81's normalizeIsoTimestamp/
+    // normalizeOutboxPayload VALVE_SCHEDULE fix) is already fully baked into origin/main's
+    // own measured size for this node. Re-measured fresh: origin/main 19941 -> HEAD 21367
+    // = +1426.
+    'sync-outbox-build': 1426,
     'sync-pending-build': 1344,
-    'sync-force-build': 5786,
+    // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 5786 to +1466 for the
+    // same capFreeTextFields() addition (this node carries both sanitizeSyncRow and
+    // normalizeOutboxPayload, like sync-bootstrap-build and sync-outbox-build combined,
+    // plus the valve_actuations.map(sanitizeSyncRow) wiring). The prior 5786 is already
+    // fully baked into origin/main's own measured size for this node. Re-measured fresh:
+    // origin/main 65125 -> HEAD 66591 = +1466.
+    'sync-force-build': 1466,
     'command-ack-build-batch': 975,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
     // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded
@@ -1179,9 +1193,13 @@ if (sizeAllowances) {
   // so an unclaimed STREGA valve stops running the weekly plan held in its own firmware.
   // No existing node's func changed; the two rewired nodes changed only their wires arrays,
   // which this ratchet does not measure.
-  expectCondition(sizeAllowances.total_allowance?.delta === 36938,
-    'size total allowance: exact cumulative delta 36938',
-    'size total allowance: expected exact cumulative delta 36938');
+  // 41203: 2026-09-17 overnight stabilization T13l (F96, edge text caps) raises 36938 by
+  // the 4265 chars measured across the three touched nodes above (verify-flows-size-ratchet
+  // nodeSizes over both byte-identical profiles): sync-bootstrap-build +1373,
+  // sync-outbox-build +1426, sync-force-build +1466. No other node changed in this fix.
+  expectCondition(sizeAllowances.total_allowance?.delta === 41203,
+    'size total allowance: exact cumulative delta 41203',
+    'size total allowance: expected exact cumulative delta 41203');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,

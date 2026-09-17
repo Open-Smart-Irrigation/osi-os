@@ -243,6 +243,48 @@ rules above:
   uplink (`reconciliation_state = OBSERVED_COMPLETE` with `observed_open_at`
   still null) as `COMPLETED` with `estimated_gross_liters` attached — the
   phantom-litres class this repo has reverted once already.
+- `cancel_reason` / `command_result_detail` — free text, `maxLength: 255`
+  (F96). Both mirror an `org.osi.server.valve.ValveActuation` `varchar(255)`
+  column on the cloud (`cancelReason`/`commandResultDetail`); the edge's own
+  columns are unbounded SQLite `TEXT`. Silvan reproduced a 319-char
+  `command_result_detail` (shipped verbatim by the pre-fix `ac.result_detail
+  AS command_result_detail` bootstrap query) that 500'd the entire cloud
+  bootstrap (`DataIntegrityViolationException: value too long for type
+  character varying(255)`, `EdgeSyncService.upsertValveActuation`) — a single
+  oversized value on ONE local valve action broke that gateway's whole sync,
+  not just the one row, because the per-item isolation added for F81 cannot
+  help once the database has already rejected the INSERT (the transaction is
+  rollback-only by that point). Capped in two places, never dropping the row:
+  - **Payload boundary** — `sanitizeSyncRow()` (bootstrap: "Build Cloud
+    Bootstrap"/"Run Force Sync") and `normalizeOutboxPayload()` (outbox
+    delivery: "Build Edge Event Batch"/"Run Force Sync", aggregate_type
+    `VALVE_ACTUATION`) both truncate to 255 chars with a trailing
+    `…[truncated]` marker immediately before the payload goes on the wire —
+    covering the bootstrap backfill array AND `VALVE_ACTUATION_ARCHIVED`
+    outbox events (`osi-valve-control/runtime.js`'s `emitActuationArchived`),
+    plus any row already queued with an oversized value baked in.
+  - **Writer** — `osi-valve-control/cancel.js`'s `normalizeReason()` caps
+    `cancel_reason` before it is written to `valve_actuation_expectations`;
+    `osi-command-ledger`'s `queueCommandAck()` caps the serialized ack JSON
+    stored as `applied_commands.result_detail`, scoped to the
+    `OPEN_FOR_DURATION` command type (the only command type a
+    `valve_actuation_expectations.command_id` can ever reference — see that
+    module's F96 comment) so journal/zone command families, whose replay
+    dedup parses `result_detail` as JSON, are unaffected. Measured fact: the
+    ack envelope's own structural skeleton already serializes to ~284 chars
+    with `reason`/`detail` both `null` — over the 255-char budget with NO
+    free text at all — so this is a whole-string truncation, not a
+    reason/detail-only trim; a truncated value is no longer valid JSON,
+    which `parsedResultDetail`'s existing `JSON.parse` failure fallback
+    already tolerates (it falls back to the row's own `command_type`/
+    `result`/`applied_at`/`effect_key` columns, never the parsed JSON, for
+    replay).
+  In both places the marker signals truncation happened rather than silently
+  losing data, and the FULL untruncated text is always preserved elsewhere
+  (a log line at the writer; the unmodified DB column itself, since only the
+  value shipped on the wire — or, for the writer, only what is persisted
+  into `applied_commands.result_detail` — is capped, not the source data the
+  cap is derived from).
 
 ## Conformance
 

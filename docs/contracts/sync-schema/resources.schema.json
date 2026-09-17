@@ -651,8 +651,16 @@
                 "duration_seconds": {"type": ["integer", "null"], "minimum": 0},
                 "estimated_gross_liters": {"type": ["number", "null"], "minimum": 0},
                 "volume_source": {"type": ["string", "null"], "enum": ["unknown", "estimated_duration_flow_rate", "measured_flow_meter", null]},
-                "cancel_reason": {"type": ["string", "null"]},
-                "command_result_detail": {"type": ["string", "null"]},
+                "cancel_reason": {
+                    "type": ["string", "null"],
+                    "maxLength": 255,
+                    "description": "F96: mirrors org.osi.server.valve.ValveActuation.cancelReason (varchar(255)); the edge caps at the payload boundary (sync-bootstrap-build/sync-force-build sanitizeSyncRow) and at the writer (osi-valve-control/cancel.js normalizeReason) with a truncation marker rather than dropping the row."
+                },
+                "command_result_detail": {
+                    "type": ["string", "null"],
+                    "maxLength": 255,
+                    "description": "F96: mirrors org.osi.server.valve.ValveActuation.commandResultDetail (varchar(255)); Silvan reproduced a 319-char value that 500'd the whole cloud bootstrap (DataIntegrityViolationException, value too long for type character varying(255)). The edge caps at the payload boundary (sync-bootstrap-build/sync-force-build sanitizeSyncRow) and at the writer (osi-command-ledger queueCommandAck, scoped to OPEN_FOR_DURATION) with a truncation marker rather than dropping the row."
+                },
                 "archived_at": {
                     "allOf": [{"$ref": "#/definitions/CanonicalUtcTimestamp"}],
                     "description": "Last-write-wins snapshot field -- this table has no sync_version bookkeeping column of its own (unlike ValveSettings). Deterministic from the row's own terminal timestamps (COALESCE(observed_close_at, expected_close_at, commanded_at)), never wall-clock 'now': the row never changes again once terminal, so a repeated emission (bootstrap replay, a later trigger-backfill touching the same row) resolves to the SAME archived_at rather than drifting forward on every re-run. Precisely BECAUSE a correction re-emit ties on archived_at rather than advancing it, the cloud applier MUST resolve ties with >= (a later-ARRIVING event with an equal archived_at wins), not a strict >, or a correction that fixes trigger/estimated_gross_liters/volume_source on an already-applied row would lose the tie and be silently dropped. This deliberately diverges from ValveRuntime.as_of's own strict-last-write-wins ruling (P3-E1) -- as_of is a fresh wall-clock read on every emission and effectively never ties, while archived_at is deliberately reused verbatim across corrections. See canonicalization.md."

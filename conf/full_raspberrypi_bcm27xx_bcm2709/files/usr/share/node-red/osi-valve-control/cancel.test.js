@@ -187,6 +187,41 @@ test('cancelActuation treats an explicit null reason the same as absence: defaul
   db.close();
 });
 
+// F96: valve_actuation_expectations.cancel_reason (SQLite TEXT, unbounded) is shipped
+// verbatim as ValveActuation.cancel_reason by sync-bootstrap-build/sync-force-build's
+// `vae.cancel_reason` column read, and the cloud's mirror column is varchar(255) -- an
+// oversized reason (e.g. free text forwarded from a cloud CANCEL_VALVE_ACTUATION command)
+// would 500 the gateway's whole cloud bootstrap the same way F96's result_detail overflow
+// did. Capped at the writer here (defense in depth alongside the sync-bootstrap-build/
+// sync-force-build payload boundary, which also caps this field).
+test('cancelActuation caps an oversized reason at 255 chars with a truncation marker (F96)', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const longReason = 'cloud-forwarded cancellation note: ' + 'x'.repeat(300);
+  assert.ok(longReason.length > 255, 'fixture must actually exceed the cloud column width');
+  const warnings = [];
+
+  const out = await cancelActuation({
+    db, deviceEui: EUI, reason: longReason, flushQueue: countingFlush(), now: new Date(),
+    warn: (msg) => warnings.push(msg),
+  });
+
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
+  assert.ok(
+    row.cancel_reason.length <= 255,
+    'valve_actuation_expectations.cancel_reason must never exceed the cloud mirror\'s varchar(255) width: got ' +
+      row.cancel_reason.length
+  );
+  assert.ok(row.cancel_reason.includes('…[truncated]'), 'truncation must be marked, never silent');
+  assert.ok(longReason.startsWith(row.cancel_reason.replace('…[truncated]', '')), 'must be a prefix truncation, not garbled');
+  assert.ok(
+    warnings.some((w) => w.includes(longReason)),
+    'the full untruncated reason must still be logged, not just discarded'
+  );
+  db.close();
+});
+
 test('cancelActuation applied twice (command replay) is harmless: second call finds nothing active and does not throw', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
