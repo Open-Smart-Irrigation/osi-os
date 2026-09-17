@@ -373,13 +373,27 @@ function buildOsiDbStub(rows) {
   return { Database: FakeDb };
 }
 
+// F83: strega-process-fn now checks osiLib.require('uplink-dedup') before doing
+// any STREGA-specific work. This harness pins GEN2 profile/decoder behavior, not
+// dedup, so the stub always reports "never a duplicate" -- exactly what a real
+// osi-lib would answer for the first delivery of every uplink these tests build.
+function buildOsiLibStub() {
+  return {
+    require: (name) => {
+      if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
+      throw new Error('unexpected osiLib.require: ' + name);
+    },
+  };
+}
+
 async function runStregaProcess(payload, envVars, fsStub) {
   const node = noopNode();
   const osiDb = buildOsiDbStub([{ type_id: 'STREGA_VALVE' }]);
-  const execute = new Function('osiDb', 'env', 'node', 'msg', 'global', byId['strega-process-fn'].func);
+  const osiLib = buildOsiLibStub();
+  const execute = new Function('osiDb', 'osiLib', 'env', 'node', 'msg', 'global', byId['strega-process-fn'].func);
   const msg = { payload };
   const globalStub = { get: (key) => (key === 'fs' && fsStub ? fsStub : undefined) };
-  const result = await execute(osiDb, makeEnv(envVars), node, msg, globalStub);
+  const result = await execute(osiDb, osiLib, makeEnv(envVars), node, msg, globalStub);
   return { result, node };
 }
 

@@ -1042,6 +1042,20 @@ async function verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPa
   );
 }
 
+// F83: several device_data-writing decode functions now call
+// osiLib.require('uplink-dedup') before doing any device-specific work. These
+// executeFunctionNodeById fixtures pin decode/mapping behavior, not dedup, so
+// the stub always reports "never a duplicate" -- exactly what a real osi-lib
+// would answer for the first delivery of every fixture payload here.
+function makeUplinkDedupOsiLibStub() {
+  return {
+    require: (name) => {
+      if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
+      return { ok: false, error: 'unexpected osiLib.require in fixture: ' + name };
+    },
+  };
+}
+
 async function executeFunctionNodeById(nodeId, msg, options = {}) {
   const node = findNodeById(nodeId);
   if (!node) {
@@ -1055,6 +1069,12 @@ async function executeFunctionNodeById(nodeId, msg, options = {}) {
     process,
     setTimeout,
     clearTimeout,
+    // F83: every device_data-writing decode function now calls
+    // osiLib.require('uplink-dedup'). Default to a "never a duplicate" stub so
+    // fixtures that predate F83 and never mention osiLib keep working
+    // unchanged; a caller that needs to exercise dedup itself overrides this
+    // via options.scope.osiLib (Object.assign below lets it win).
+    osiLib: makeUplinkDedupOsiLibStub(),
   }, options.scope || {}));
   const flowApi = {
     get(key) {
@@ -1169,6 +1189,56 @@ pendingChecks.push((async () => {
   );
 })().catch((error) => {
   fail(`failed to execute Kiwi simulator fixture: ${error.message}`);
+}));
+
+// F83-V1 (required): a call-site-level proof, through this file's own
+// execution sandbox, that the write path still runs even when the
+// uplink-dedup guard itself is broken. Two independent failure shapes:
+// (a) osi-lib hands back a shape-drifted module (`{ value: {} }`, no
+// isDuplicateUplink function at all -- the call site's typeof guard must
+// skip calling it, never throw "not a function"); (b) isDuplicateUplink IS
+// a function but throws when called (the call site's own try/catch must
+// swallow it). Either way, kiwiMsg.formattedData must still be populated --
+// proving the message was not silently dropped.
+pendingChecks.push((async () => {
+  const kiwiFixture = {
+    payload: {
+      deviceProfileName: 'Kiwi Simulator',
+      devEui: 'a8404101fd5ecf43',
+      deviceName: 'F83-V1 shape-drift fixture',
+      time: '2026-05-17T10:00:00.000Z',
+      deduplicationId: 'f83-v1-shape-drift',
+      fCnt: 7,
+      object: { input5_frequency: 4330, input6_frequency: 2820 },
+    },
+  };
+  const shapeDriftedOsiLib = { require: (name) => (name === 'uplink-dedup' ? { ok: true, value: {} } : { ok: false, error: 'unexpected' }) };
+  const kiwiMsgShapeDrift = await executeFunctionNodeById('81c98fb07344a787', kiwiFixture, {
+    env: { CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi' },
+    scope: { osiLib: shapeDriftedOsiLib },
+  });
+  expectCondition(
+    kiwiMsgShapeDrift && kiwiMsgShapeDrift.formattedData && kiwiMsgShapeDrift.formattedData.devEui === 'A8404101FD5ECF43',
+    'F83-V1: a shape-drifted uplink-dedup module ({ value: {} }, no isDuplicateUplink function) never blocks the write',
+    'F83-V1 REGRESSION: a shape-drifted uplink-dedup module dropped the uplink instead of writing it'
+  );
+
+  const throwingOsiLib = {
+    require: (name) => (name === 'uplink-dedup'
+      ? { ok: true, value: { isDuplicateUplink: () => { throw new Error('injected: uplink-dedup guard is broken'); } } }
+      : { ok: false, error: 'unexpected' }),
+  };
+  const kiwiMsgThrows = await executeFunctionNodeById('81c98fb07344a787', kiwiFixture, {
+    env: { CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi' },
+    scope: { osiLib: throwingOsiLib },
+  });
+  expectCondition(
+    kiwiMsgThrows && kiwiMsgThrows.formattedData && kiwiMsgThrows.formattedData.devEui === 'A8404101FD5ECF43',
+    'F83-V1: an uplink-dedup guard that throws when called never blocks the write (fails open, not closed)',
+    'F83-V1 REGRESSION: a throwing uplink-dedup guard dropped the uplink instead of writing it'
+  );
+})().catch((error) => {
+  fail(`failed to execute F83-V1 call-site fail-open fixtures: ${error.message}`);
 }));
 
 pendingChecks.push((async () => {
@@ -2366,6 +2436,25 @@ expectIncludesById('lorain-sql-fn', 'rain_tips_delta', 'persists LoRain tip delt
 expectIncludesById('lorain-rain-agg-fn', 'aquascope_lorain', 'labels LoRain zone rainfall source');
 expectLibById('lorain-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('lorain-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+
+// F83-V5: static pins so a future flows.json edit cannot silently drop the
+// uplink-dedup guard from any of the 7 device_data-writing decode functions
+// it was wired into. These are deliberately plain substring checks (cheap,
+// fast) alongside (not instead of) the execution-based F83-V1 proofs below.
+for (const dedupNodeId of [
+  '81c98fb07344a787', // KIWI/CLOVER "Process Data"
+  'strega-process-fn', // "Process STREGA"
+  's2120-process-fn',
+  'lorain-process-fn',
+  'lsn50-decode-fn', // "Decode LSN50"
+  '6b28e0d879808dd9', // "UC512 Normalize + Write"
+  'sdi12-gate-fn', // "SDI12 Gate + Decode"
+]) {
+  expectIncludesById(dedupNodeId, "osiLib.require('uplink-dedup')", 'still calls the F83 uplink-dedup guard');
+  expectIncludesById(dedupNodeId, "typeof _dedupRes.value.isDuplicateUplink === 'function'",
+    'still typeof-guards the uplink-dedup call (F83-V1, export-shape drift)');
+  expectLibById(dedupNodeId, 'osiLib', 'osi-lib', 'imports osi-lib as osiLib for the F83 uplink-dedup guard');
+}
 expectLibById('merge-device-data', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb for S2120 enrichment');
 expectLibById('s2120-zones-get-fn', 'crypto', 'crypto', 'imports crypto for auth verification');
 expectLibById('s2120-zones-get-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
