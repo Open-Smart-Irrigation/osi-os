@@ -75,5 +75,29 @@
   "impact_cant_work": "Arbeit nicht möglich",
   "impact_workaround": "Workaround vorhanden",
   "impact_annoying": "Störend",
-  "impact_idea": "Idee"
+  "impact_idea": "Idee",
+  "grants": {
+    "eyebrow": "Verwaltung",
+    "title": "Zugriffsrechte",
+    "navUsers": "Benutzer",
+    "navDashboard": "Dashboard",
+    "loadError": "Ressourcen für Zugriffsrechte konnten nicht geladen werden.",
+    "userSectionTitle": "Benutzer",
+    "userSelectLabel": "Benutzer",
+    "grantSectionTitle": "Zugriff gewähren",
+    "grantSectionHint": "Neue Zugriffsrechte erscheinen unten. Bestehende Zugriffsrechte kann die aktuelle Edge-API nicht auflisten.",
+    "zoneSelectLabel": "Zone",
+    "grantZoneButton": "Zone freigeben",
+    "zoneGrantError": "Das Zonen-Zugriffsrecht konnte nicht erstellt werden.",
+    "plotUuidLabel": "Parzellen-UUID",
+    "grantPlotButton": "Parzelle freigeben",
+    "plotGrantError": "Das Parzellen-Zugriffsrecht konnte nicht erstellt werden.",
+    "sessionGrantsTitle": "In dieser Sitzung erstellte Zugriffsrechte",
+    "sessionGrantsEmpty": "Keine neu erstellten Zugriffsrechte.",
+    "revokeButton": "Entziehen",
+    "revokeConfirm": "Dieses Zugriffsrecht entziehen? Der Benutzer verliert den Zugriff, sobald seine Rechte aktualisiert werden.",
+    "revokeError": "Das Zugriffsrecht konnte nicht entzogen werden.",
+    "kindZone": "Zone",
+    "kindPlot": "Parzelle"
+  }
 }

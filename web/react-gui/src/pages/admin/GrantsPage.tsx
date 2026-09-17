@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import type { AdminUser, IrrigationZone } from '../../types/farming';
 import {
   getApiErrorMessage,
@@ -16,6 +17,7 @@ const INPUT = 'rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3
 const BUTTON = 'btn-liquid rounded-lg px-4 py-2 font-semibold text-[var(--text)]';
 
 export function GrantsPage() {
+  const { t } = useTranslation('settings');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [zones, setZones] = useState<IrrigationZone[]>([]);
   const [selectedUser, setSelectedUser] = useState('');
@@ -32,8 +34,8 @@ export function GrantsPage() {
         setSelectedUser(nextUsers[0]?.user_uuid ?? '');
         setZoneUuid(nextZones.find((zone) => zone.zone_uuid)?.zone_uuid ?? '');
       })
-      .catch((cause) => setError(getApiErrorMessage(cause, 'Unable to load grant resources.')));
-  }, []);
+      .catch((cause) => setError(getApiErrorMessage(cause, t('grants.loadError', 'Unable to load grant resources.'))));
+  }, [t]);
 
   async function addZone(event: FormEvent) {
     event.preventDefault();
@@ -42,7 +44,7 @@ export function GrantsPage() {
       setGrants((current) => [...current, { ...grant, kind: 'zone' }]);
       setError('');
     } catch (cause) {
-      setError(getApiErrorMessage(cause, 'The zone grant could not be created.'));
+      setError(getApiErrorMessage(cause, t('grants.zoneGrantError', 'The zone grant could not be created.')));
     }
   }
 
@@ -54,60 +56,63 @@ export function GrantsPage() {
       setPlotUuid('');
       setError('');
     } catch (cause) {
-      setError(getApiErrorMessage(cause, 'The plot grant could not be created.'));
+      setError(getApiErrorMessage(cause, t('grants.plotGrantError', 'The plot grant could not be created.')));
     }
   }
 
   async function remove(grant: VisibleGrant) {
-    if (!window.confirm('Revoke this grant? The user will lose access after their scope refreshes.')) return;
+    if (!window.confirm(t('grants.revokeConfirm', 'Revoke this grant? The user will lose access after their scope refreshes.'))) return;
     try {
       await revokeGrant(grant.kind, grant.assignment_uuid);
       setGrants((current) => current.filter((item) => item.assignment_uuid !== grant.assignment_uuid));
       setError('');
     } catch (cause) {
-      setError(getApiErrorMessage(cause, 'The grant could not be revoked.'));
+      setError(getApiErrorMessage(cause, t('grants.revokeError', 'The grant could not be revoked.')));
     }
   }
 
   const visibleGrants = grants.filter((grant) => grant.user_uuid === selectedUser);
+  const kindLabel = (kind: VisibleGrant['kind']) => (kind === 'zone'
+    ? t('grants.kindZone', 'zone')
+    : t('grants.kindPlot', 'plot'));
 
   return (
     <main className="min-h-screen bg-[var(--bg)] p-4 text-[var(--text)] sm:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
-          <div><p className="text-sm text-[var(--text-secondary)]">Administration</p><h1 className="text-3xl font-bold">Access grants</h1></div>
-          <nav className="flex gap-3" aria-label="Administration"><Link className={BUTTON} to="/admin/users">Users</Link><Link className={BUTTON} to="/dashboard">Dashboard</Link></nav>
+          <div><p className="text-sm text-[var(--text-secondary)]">{t('grants.eyebrow', 'Administration')}</p><h1 className="text-3xl font-bold">{t('grants.title', 'Access grants')}</h1></div>
+          <nav className="flex gap-3" aria-label={t('grants.eyebrow', 'Administration')}><Link className={BUTTON} to="/admin/users">{t('grants.navUsers', 'Users')}</Link><Link className={BUTTON} to="/dashboard">{t('grants.navDashboard', 'Dashboard')}</Link></nav>
         </header>
         {error && <p role="alert" className="rounded-lg border border-red-400 bg-red-50 p-3 text-red-800">{error}</p>}
         <div className="grid gap-6 md:grid-cols-[minmax(14rem,1fr)_2fr]">
           <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-            <h2 className="mb-3 text-xl font-semibold">User</h2>
-            <select aria-label="User" className={`${INPUT} w-full`} value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}>
+            <h2 className="mb-3 text-xl font-semibold">{t('grants.userSectionTitle', 'User')}</h2>
+            <select aria-label={t('grants.userSelectLabel', 'User')} className={`${INPUT} w-full`} value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}>
               {users.map((user) => <option key={user.user_uuid} value={user.user_uuid}>{user.username}</option>)}
             </select>
           </section>
           <section className="space-y-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
             <div>
-              <h2 className="text-xl font-semibold">Grant access</h2>
-              <p className="text-sm text-[var(--text-secondary)]">New grants appear below. Existing grants cannot be listed by the current edge API.</p>
+              <h2 className="text-xl font-semibold">{t('grants.grantSectionTitle', 'Grant access')}</h2>
+              <p className="text-sm text-[var(--text-secondary)]">{t('grants.grantSectionHint', 'New grants appear below. Existing grants cannot be listed by the current edge API.')}</p>
             </div>
             <form className="flex flex-wrap gap-3" onSubmit={addZone}>
-              <select aria-label="Zone" className={`${INPUT} min-w-56 flex-1`} required value={zoneUuid} onChange={(event) => setZoneUuid(event.target.value)}>
+              <select aria-label={t('grants.zoneSelectLabel', 'Zone')} className={`${INPUT} min-w-56 flex-1`} required value={zoneUuid} onChange={(event) => setZoneUuid(event.target.value)}>
                 {zones.filter((zone) => zone.zone_uuid).map((zone) => <option key={zone.zone_uuid!} value={zone.zone_uuid!}>{zone.name}</option>)}
               </select>
-              <button className={BUTTON} disabled={!selectedUser || !zoneUuid} type="submit">Grant zone</button>
+              <button className={BUTTON} disabled={!selectedUser || !zoneUuid} type="submit">{t('grants.grantZoneButton', 'Grant zone')}</button>
             </form>
             <form className="flex flex-wrap gap-3" onSubmit={addPlot}>
-              <input aria-label="Plot UUID" className={`${INPUT} min-w-56 flex-1`} placeholder="Plot UUID" required value={plotUuid} onChange={(event) => setPlotUuid(event.target.value)} />
-              <button className={BUTTON} disabled={!selectedUser || !plotUuid} type="submit">Grant plot</button>
+              <input aria-label={t('grants.plotUuidLabel', 'Plot UUID')} className={`${INPUT} min-w-56 flex-1`} placeholder={t('grants.plotUuidLabel', 'Plot UUID')} required value={plotUuid} onChange={(event) => setPlotUuid(event.target.value)} />
+              <button className={BUTTON} disabled={!selectedUser || !plotUuid} type="submit">{t('grants.grantPlotButton', 'Grant plot')}</button>
             </form>
             <div>
-              <h3 className="mb-2 font-semibold">Grants created this session</h3>
-              {visibleGrants.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">No newly created grants.</p> : (
+              <h3 className="mb-2 font-semibold">{t('grants.sessionGrantsTitle', 'Grants created this session')}</h3>
+              {visibleGrants.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">{t('grants.sessionGrantsEmpty', 'No newly created grants.')}</p> : (
                 <ul className="space-y-2">{visibleGrants.map((grant) => (
                   <li className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] p-3" key={grant.assignment_uuid}>
-                    <span><strong>{grant.kind}</strong> · {grant.zone_uuid ?? grant.plot_uuid}</span>
-                    <button className={BUTTON} type="button" onClick={() => void remove(grant)}>Revoke</button>
+                    <span><strong>{kindLabel(grant.kind)}</strong> · {grant.zone_uuid ?? grant.plot_uuid}</span>
+                    <button className={BUTTON} type="button" onClick={() => void remove(grant)}>{t('grants.revokeButton', 'Revoke')}</button>
                   </li>
                 ))}</ul>
               )}

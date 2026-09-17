@@ -75,5 +75,29 @@
   "impact_cant_work": "Cannot work",
   "impact_workaround": "Workaround available",
   "impact_annoying": "Annoying",
-  "impact_idea": "Idea"
+  "impact_idea": "Idea",
+  "grants": {
+    "eyebrow": "Administration",
+    "title": "Access grants",
+    "navUsers": "Users",
+    "navDashboard": "Dashboard",
+    "loadError": "Unable to load grant resources.",
+    "userSectionTitle": "User",
+    "userSelectLabel": "User",
+    "grantSectionTitle": "Grant access",
+    "grantSectionHint": "New grants appear below. Existing grants cannot be listed by the current edge API.",
+    "zoneSelectLabel": "Zone",
+    "grantZoneButton": "Grant zone",
+    "zoneGrantError": "The zone grant could not be created.",
+    "plotUuidLabel": "Plot UUID",
+    "grantPlotButton": "Grant plot",
+    "plotGrantError": "The plot grant could not be created.",
+    "sessionGrantsTitle": "Grants created this session",
+    "sessionGrantsEmpty": "No newly created grants.",
+    "revokeButton": "Revoke",
+    "revokeConfirm": "Revoke this grant? The user will lose access after their scope refreshes.",
+    "revokeError": "The grant could not be revoked.",
+    "kindZone": "zone",
+    "kindPlot": "plot"
+  }
 }

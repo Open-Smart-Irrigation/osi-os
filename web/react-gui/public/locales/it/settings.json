@@ -75,5 +75,29 @@
   "impact_cant_work": "Non si può lavorare",
   "impact_workaround": "Soluzione alternativa disponibile",
   "impact_annoying": "Fastidioso",
-  "impact_idea": "Idea"
+  "impact_idea": "Idea",
+  "grants": {
+    "eyebrow": "Amministrazione",
+    "title": "Autorizzazioni di accesso",
+    "navUsers": "Utenti",
+    "navDashboard": "Dashboard",
+    "loadError": "Impossibile caricare le risorse per le autorizzazioni.",
+    "userSectionTitle": "Utente",
+    "userSelectLabel": "Utente",
+    "grantSectionTitle": "Concedi accesso",
+    "grantSectionHint": "Le nuove autorizzazioni compaiono qui sotto. Le autorizzazioni esistenti non possono essere elencate dall'API edge attuale.",
+    "zoneSelectLabel": "Zona",
+    "grantZoneButton": "Autorizza zona",
+    "zoneGrantError": "Impossibile creare l'autorizzazione per la zona.",
+    "plotUuidLabel": "UUID della particella",
+    "grantPlotButton": "Autorizza particella",
+    "plotGrantError": "Impossibile creare l'autorizzazione per la particella.",
+    "sessionGrantsTitle": "Autorizzazioni create in questa sessione",
+    "sessionGrantsEmpty": "Nessuna nuova autorizzazione creata.",
+    "revokeButton": "Revoca",
+    "revokeConfirm": "Revocare questa autorizzazione? L'utente perderà l'accesso al successivo aggiornamento dei permessi.",
+    "revokeError": "Impossibile revocare l'autorizzazione.",
+    "kindZone": "zona",
+    "kindPlot": "particella"
+  }
 }

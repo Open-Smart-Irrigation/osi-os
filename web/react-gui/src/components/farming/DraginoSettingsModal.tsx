@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { Device, Lsn50Mode } from '../../types/farming';
 import { lsn50API } from '../../services/api';
 import { DraginoChameleonSwtSection } from './DraginoChameleonSwtSection';
@@ -86,11 +88,20 @@ function enabledSensorsIncompatibleWithMode(device: Device, mode: Lsn50Mode): ty
   });
 }
 
-function requiredModeError(label: string, requiredMode: Lsn50Mode): string {
+function requiredModeError(t: TFunction<'devices'>, label: string, requiredMode: Lsn50Mode): string {
   if (label === 'Chameleon SWT' && requiredMode === 'MOD3') {
-    return 'Chameleon SWT requires MOD3. Apply MOD3 before enabling this sensor.';
+    return t('lsn50Mode.chameleonRequiresMod3', 'Chameleon SWT requires MOD3. Apply MOD3 before enabling this sensor.');
   }
-  return `${label} requires ${requiredMode}. Apply ${requiredMode} before enabling this sensor.`;
+  return t('lsn50Mode.requiredModeGeneric', { defaultValue: '{{label}} requires {{mode}}. Apply {{mode}} before enabling this sensor.', label, mode: requiredMode });
+}
+
+// Only MOD3 (Chameleon SWT) and MOD9 (rain gauge / flow meter) are gated by
+// LSN50_MODE_OPTIONS in requiredModeForSensor, so those two entries are the
+// only ones translated here; MOD1/2/4-8 stay as fixed reference text.
+function describeMode(t: TFunction<'devices'>, mode: Lsn50Mode, fallback: string): string {
+  if (mode === 'MOD3') return t('lsn50Mode.mod3Description', 'Three ADC channels plus I2C mode.');
+  if (mode === 'MOD9') return t('lsn50Mode.mod9Description', 'Rain gauge and flow counter mode.');
+  return fallback;
 }
 
 const FOCUS_VISIBLE_RING =
@@ -145,6 +156,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   onUpdate,
   onClose,
 }) => {
+  const { t } = useTranslation('devices');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedMode, setSelectedMode] = useState<Lsn50Mode>(getCurrentLsn50Mode(device) ?? 'MOD1');
@@ -169,7 +181,11 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const onCloseRef = useRef(onClose);
   const currentMode = getCurrentLsn50Mode(device);
   const observedAtLabel = dateFormat.time(device.latest_data?.lsn50_mode_observed_at ?? null);
-  const selectedModeDescription = LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '';
+  const selectedModeDescription = describeMode(
+    t,
+    selectedMode,
+    LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '',
+  );
   const titleId = `dragino-settings-title-${device.deveui}`;
   const modeSelectId = `lsn50-mode-${device.deveui}`;
   const interruptModeSelectId = `lsn50-interrupt-mode-${device.deveui}`;
@@ -258,7 +274,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
     const current = device[option.key] === 1;
     const requiredMode = requiredModeForSensor(option.key);
     if (!current && requiredMode && !requiredModeReady(requiredMode)) {
-      setError(requiredModeError(option.label, requiredMode));
+      setError(requiredModeError(t, option.label, requiredMode));
       return;
     }
     setBusy(option.key);
@@ -466,10 +482,10 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                 </select>
                 <p className="mt-2 text-xs text-[var(--text-tertiary)]">{selectedModeDescription}</p>
                 {currentMode !== 'MOD9' && pendingMode !== 'MOD9' && (
-                  <p className="mt-2 text-xs text-[var(--warn-text)]">Rain gauge and flow meter can only be enabled after MOD9 is active.</p>
+                  <p className="mt-2 text-xs text-[var(--warn-text)]">{t('lsn50Mode.rainGaugeNeedsMod9', 'Rain gauge and flow meter can only be enabled after MOD9 is active.')}</p>
                 )}
                 {currentMode !== 'MOD3' && pendingMode !== 'MOD3' && (
-                  <p className="mt-2 text-xs text-[var(--warn-text)]">Chameleon SWT can only be enabled after MOD3 is active.</p>
+                  <p className="mt-2 text-xs text-[var(--warn-text)]">{t('lsn50Mode.chameleonNeedsMod3', 'Chameleon SWT can only be enabled after MOD3 is active.')}</p>
                 )}
                 <button
                   type="button"
