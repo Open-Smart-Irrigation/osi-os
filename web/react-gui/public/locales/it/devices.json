@@ -260,6 +260,9 @@
         "shared_server_stale": "OSI Server non aggiornato",
         "local_fallback": "Fallback locale",
         "unlinked_local": "Solo locale",
+        "using_last_synced": "Utilizzo degli ultimi valori sincronizzati di OSI Server.",
+        "bundle_unavailable": "Utilizzo dei valori locali perché i dati di OSI Server non sono disponibili.",
+        "fallback_generic": "Visualizzazione di una fonte di riserva.",
         "default": "Origine della raccomandazione"
       },
       "soil": {

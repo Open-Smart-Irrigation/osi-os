@@ -63,6 +63,18 @@ const ACTION_LABELS: Record<string, string> = {
   emergency_irrigate: 'Emergency irrigation',
 };
 
+// Same duplication as ACTION_LABELS above, and for the same reason: this tab
+// has its own render path and its own English fallback table, through the
+// same `zone.water.reason.*` keys the zone card resolves.
+const REASON_LABELS: Record<string, string> = {
+  supply_covers_demand: "Rain and irrigation cover today's demand",
+  forecast_rain_covers_demand: "Forecast rain covers today's shortfall",
+  demand_exceeds_supply: "Demand exceeds today's rain and irrigation",
+  balance_neutral: 'Water balance is close to neutral',
+  balance_unknown: 'Set zone area and irrigation efficiency',
+  forecast_unknown: 'No rain forecast available',
+};
+
 export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
   const { t } = useTranslation('devices');
   const actionLabel = (code: string | null | undefined): string => {
@@ -71,6 +83,31 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
       ? t(`zone.water.action.${code}`, { defaultValue: fallback })
       : t('zone.water.action.default', { defaultValue: 'Monitor water status' });
   };
+  const reasonLabel = (reasonCode: string | null | undefined): string => {
+    const fallback = reasonCode ? REASON_LABELS[reasonCode] : undefined;
+    return fallback
+      ? t(`zone.water.reason.${reasonCode}`, { defaultValue: fallback })
+      : t('zone.water.reason.default', { defaultValue: 'Waiting for more data' });
+  };
+  // Mirrors IrrigationZoneCard's water-balance subtitle (formatWaterSubtitle):
+  // a `reasonCode` is always preferred; only dendrometer-sourced `reasoning`
+  // is prose this tab may show verbatim, since it is a stored per-zone
+  // analytics sentence rather than a template written for the screen. Any
+  // other `reasoning` — most concretely the cloud's own fabricated English
+  // sentence for a linked gateway (F100/X-01) — is logged at debug and
+  // replaced with the neutral generic reason key.
+  const trendNote = (() => {
+    if (water.action?.reasonCode) return reasonLabel(water.action.reasonCode);
+    if (water.action?.source === 'dendro' && water.action.reasoning) return water.action.reasoning;
+    if (water.action?.reasoning) {
+      // eslint-disable-next-line no-console
+      console.debug('[WaterTab] suppressed non-dendro action.reasoning prose', water.action.reasoning);
+      return reasonLabel(null);
+    }
+    return t('environment.water.trendNote', {
+      defaultValue: 'Compare rainfall against measured and estimated effective irrigation over the last week.',
+    });
+  })();
   const effective = (value: string) => t('environment.water.effective', {
     value,
     defaultValue: '{{value}} effective',
@@ -150,7 +187,9 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
       key: 'balance',
       label: t('environment.water.balance', { defaultValue: 'Balance' }),
       value: formatValue(water.balanceTodayMm, 'mm', 1),
-      detail: water.action?.code ? actionLabel(water.action.code) : null,
+      // A cloud bundle flagging `source: 'insufficient_data'` (F100/T05j)
+      // gets no verb here either, even if it still carries a stale `code`.
+      detail: water.action?.code && water.action.source !== 'insufficient_data' ? actionLabel(water.action.code) : null,
       tone: water.balanceTodayMm >= 0 ? 'text-emerald-700' : 'text-orange-700',
     });
   }
@@ -189,7 +228,7 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
               {t('environment.water.weeklyTrend', { defaultValue: '7-day water trend' })}
             </p>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {water.action?.reasoning ?? t('environment.water.trendNote', { defaultValue: 'Compare rainfall against measured and estimated effective irrigation over the last week.' })}
+              {trendNote}
             </p>
           </div>
           <div className="text-xs text-[var(--text-tertiary)]">

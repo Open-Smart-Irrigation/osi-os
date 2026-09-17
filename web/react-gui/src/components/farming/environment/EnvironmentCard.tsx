@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useDateFormat } from '../../../utils/datetime';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 import { environmentAPI } from '../../../services/api';
@@ -15,6 +16,30 @@ interface Props {
 }
 
 type Tab = 'water' | 'soil' | 'weather' | 'agronomic' | 'sensors';
+type Translate = TFunction<'devices'>;
+
+// Mirrors IrrigationZoneCard's mapping for the same banner field
+// (`display.fallbackReason`): the zone-env-fn flow node still emits these
+// two sentences as plain English (flows.json, "Get Zone Environment
+// Summary", ~L769/772), and the cloud's own linked bundle can populate the
+// same field with its own English prose (F100/X-16). Map the two known
+// sentences and fall back to the generic key for anything else instead of
+// printing raw prose.
+const FALLBACK_REASON_CODES: Record<string, string> = {
+  'Using last synced OSI Server values.': 'using_last_synced',
+  'Using local fallback because the OSI Server bundle is unavailable.': 'bundle_unavailable',
+};
+
+function formatFallbackReason(t: Translate, fallbackReason: string | null | undefined): string | null {
+  if (!fallbackReason) return null;
+  const code = FALLBACK_REASON_CODES[fallbackReason];
+  if (!code) {
+    // eslint-disable-next-line no-console
+    console.debug('[EnvironmentCard] unmapped display.fallbackReason', fallbackReason);
+    return t('zone.water.source.fallback_generic', { defaultValue: 'Showing data from a fallback source.' });
+  }
+  return t(`zone.water.source.${code}`, { defaultValue: fallbackReason });
+}
 
 const CloudIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
@@ -99,7 +124,15 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
         setData(summary);
         setActiveTab((previous) => previous || 'water');
       } catch (e: any) {
-        if (!cancelled) setError(e?.response?.data?.message ?? e?.message ?? t('environment.loadFailed', { defaultValue: 'Failed to load environment data' }));
+        // Never the backend's own prose (`data.message`/`data.error`, or
+        // axios's own English `e.message`) — only the translated generic
+        // key, with the HTTP status appended as a code when there is one
+        // (X-10: "any other backend English on screen" in this card).
+        if (!cancelled) {
+          const status = e?.response?.status;
+          const detail = typeof status === 'number' ? ` (${status})` : '';
+          setError(`${t('environment.loadFailed', { defaultValue: 'Failed to load environment data' })}${detail}`);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -115,6 +148,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
 
   const cropType = zone.cropType ?? zone.crop_type ?? null;
   const phenologicalStage = zone.phenologicalStage ?? zone.phenological_stage ?? null;
+  const fallbackReasonText = data ? formatFallbackReason(t, data.display?.fallbackReason) : null;
 
   const tabs: { id: Tab; label: string; available: boolean }[] = [
     { id: 'water', label: t('environment.tabs.water', { defaultValue: 'Water' }), available: true },
@@ -166,9 +200,9 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
 
           {data && (
             <>
-              {data.display?.fallbackReason && (
+              {fallbackReasonText && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  {data.display.fallbackReason}
+                  {fallbackReasonText}
                 </div>
               )}
               <div className="flex items-center gap-0 overflow-x-auto border-b border-[var(--border)]">

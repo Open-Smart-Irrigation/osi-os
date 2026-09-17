@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation, ValveSummary } from '../../types/farming';
+import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation, ValveSummary, WaterAction } from '../../types/farming';
 import type { IrrigationActuation } from '../../services/api';
 import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../services/api';
 import { KiwiSensorCard } from './KiwiSensorCard';
@@ -113,6 +113,56 @@ function formatWaterReason(t: Translate, reasonCode: string | null | undefined):
   return fallback
     ? t(`zone.water.reason.${reasonCode}`, { defaultValue: fallback })
     : t('zone.water.reason.default', { defaultValue: 'Waiting for more data' });
+}
+
+// The zone-env-fn flow node (flows.json, "Get Zone Environment Summary",
+// ~L769/772) still emits these two banners as plain English; the cloud's own
+// linked bundle can land its own English prose in the same
+// `display.fallbackReason` field (F100/X-16). Mapping the two known
+// sentences to keys here is a stop-gap for the honesty gap until the flow
+// itself emits a code — a follow-up (see FINDINGS.md F100), not this change.
+// Anything unrecognised gets the generic fallback-source key instead of raw
+// prose.
+const FALLBACK_REASON_CODES: Record<string, string> = {
+  'Using last synced OSI Server values.': 'using_last_synced',
+  'Using local fallback because the OSI Server bundle is unavailable.': 'bundle_unavailable',
+};
+
+function formatFallbackReason(t: Translate, fallbackReason: string | null | undefined): string | null {
+  if (!fallbackReason) return null;
+  const code = FALLBACK_REASON_CODES[fallbackReason];
+  if (!code) {
+    // eslint-disable-next-line no-console
+    console.debug('[IrrigationZoneCard] unmapped display.fallbackReason', fallbackReason);
+    return t('zone.water.source.fallback_generic', { defaultValue: 'Showing data from a fallback source.' });
+  }
+  return t(`zone.water.source.${code}`, { defaultValue: fallbackReason });
+}
+
+/**
+ * The "why" under the water-balance title. A `reasonCode` (F100/T13m) is
+ * always preferred and translated. Absent that, only dendrometer-sourced
+ * `reasoning` is prose this card may show verbatim — it is a stored per-zone
+ * analytics sentence, not a template written for the screen. Any other
+ * `reasoning` — most concretely the cloud's own fabricated English sentence
+ * for a linked gateway (F100/X-01: "Available rain and effective irrigation
+ * cover today's estimated demand.") — is logged at debug and replaced with
+ * the neutral generic reason key, so #271's honesty fix cannot be bypassed
+ * by a bundle that has not been ported to reason codes yet.
+ */
+function formatWaterSubtitle(t: Translate, action: WaterAction | null | undefined, defaultSubtitle: string): string {
+  if (action?.reasonCode) {
+    return formatWaterReason(t, action.reasonCode);
+  }
+  if (action?.source === 'dendro' && action.reasoning) {
+    return action.reasoning;
+  }
+  if (action?.reasoning) {
+    // eslint-disable-next-line no-console
+    console.debug('[IrrigationZoneCard] suppressed non-dendro action.reasoning prose', action.reasoning);
+    return formatWaterReason(t, null);
+  }
+  return defaultSubtitle;
 }
 
 function formatDisplayMode(t: Translate, mode: string | null | undefined): string {
@@ -244,6 +294,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   // The action tile always renders; it has its own insufficient-data state.
   const waterTileCount = 1 + (hasRainGauge ? 1 : 0) + (hasFlowMeter ? 1 : 0) + (hasForecastRain ? 1 : 0);
   const showZoneDataLink = !isDesktopBrowser();
+  const waterSubtitle = formatWaterSubtitle(
+    t,
+    environmentSummary?.water.action,
+    t('zone.water.subtitle', { defaultValue: 'Daily rain, irrigation, and crop demand summary for this zone.' }),
+  );
+  const fallbackReasonText = formatFallbackReason(t, environmentSummary?.display?.fallbackReason);
 
   const soilValue = soilNow.value === null
     ? null
@@ -443,15 +499,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--primary)]">
                 {t('zone.water.title', { defaultValue: 'Water balance' })}
               </p>
-              {/* The heuristic's reason arrives as a code and is translated
-                  here; only the dendrometer branch still carries prose, and
-                  that prose is a stored analytics result, not a sentence the
-                  edge wrote for the screen. */}
+              {/* See formatWaterSubtitle: a reasonCode is always preferred,
+                  and only dendrometer reasoning is prose this card may show
+                  verbatim. A linked gateway's fabricated cloud sentence never
+                  reaches the screen (F100/X-01). */}
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                {environmentSummary.water.action?.reasonCode
-                  ? formatWaterReason(t, environmentSummary.water.action.reasonCode)
-                  : environmentSummary.water.action?.reasoning
-                    ?? t('zone.water.subtitle', { defaultValue: 'Daily rain, irrigation, and crop demand summary for this zone.' })}
+                {waterSubtitle}
               </p>
             </div>
             <div className="flex flex-col items-end gap-1 text-xs text-[var(--text-tertiary)]">
@@ -466,9 +519,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               </div>
             </div>
           </div>
-          {environmentSummary.display?.fallbackReason && (
+          {fallbackReasonText && (
             <div className="mt-3 rounded-xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
-              {environmentSummary.display.fallbackReason}
+              {fallbackReasonText}
             </div>
           )}
           <div className={`mt-4 grid grid-cols-2 gap-2 ${WATER_TILE_GRID[waterTileCount]}`}>
@@ -518,12 +571,15 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             {/* An absent action code is the edge saying it could not compute
                 one. It gets a neutral state and the reason, never an
                 irrigation verb: "Delay irrigation" on an unknown balance is
-                the recommendation that costs a crop when it is wrong. */}
+                the recommendation that costs a crop when it is wrong. A cloud
+                bundle that flags `source: 'insufficient_data'` (F100/T05j)
+                gets the same neutral state even if it still carries a stale
+                `code`. */}
             <div data-testid="water-action-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
                 {t('zone.water.actionTitle', { defaultValue: 'Action' })}
               </p>
-              {environmentSummary.water.action?.code ? (
+              {environmentSummary.water.action?.code && environmentSummary.water.action.source !== 'insufficient_data' ? (
                 <>
                   <p className="mt-2 text-2xl font-bold text-[var(--warn-text)]">{formatWaterAction(t, environmentSummary.water.action.code)}</p>
                   <p className="mt-1 text-xs text-[var(--text-secondary)]">
