@@ -43,6 +43,7 @@
   "schedulerDisableSuccess_one": "Enteekateeka {{count}} eggyiddwako.",
   "schedulerDisableSuccess_other": "Enteekateeka {{count}} ziggyiddwako.",
   "schedulerDisableError": "Enteekateeka z'okufukirira tezisobodde kuggyibwako",
+  "journalModuleSaveError": "Could not change the journal module",
   "dataTitle": "Data n'okuzza obuggya",
   "autoRefresh": "Dashboard ezze obuggya yokka",
   "on": "Koleeza",

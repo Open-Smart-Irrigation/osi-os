@@ -43,6 +43,7 @@
   "schedulerDisableSuccess_one": "{{count}} règle active désactivée.",
   "schedulerDisableSuccess_other": "{{count}} règles actives désactivées.",
   "schedulerDisableError": "Impossible de désactiver les règles d'irrigation par capteur",
+  "journalModuleSaveError": "Impossible de modifier le module journal",
   "dataTitle": "Données & actualisation",
   "autoRefresh": "Actualiser automatiquement le tableau de bord",
   "on": "Activé",

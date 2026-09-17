@@ -43,6 +43,7 @@
   "schedulerDisableSuccess_one": "{{count}} programa ativo desativado.",
   "schedulerDisableSuccess_other": "{{count}} programas ativos desativados.",
   "schedulerDisableError": "Não foi possível desativar os programas de irrigação",
+  "journalModuleSaveError": "Não foi possível alterar o módulo de diário",
   "dataTitle": "Dados e atualização",
   "autoRefresh": "Atualizar automaticamente o painel",
   "on": "Ligado",

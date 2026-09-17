@@ -11,14 +11,15 @@ function readNamespace(locale: string, namespace: string): Record<string, unknow
 }
 
 // Module visibility (2026-09-17): the Data view, Network, Gateway and Journal
-// each became a switchable module in Settings. The four new rows need a label
-// in every shipped locale, or the Settings page silently falls back to English
-// on that language -- the same leak waterCardLocales/f37Locales close.
-const SETTINGS_KEYS = ['dataModule', 'networkModule', 'gatewayHub', 'journalModule'];
+// each became a switchable module in Settings. Their labels, and the journal
+// module's write-failure message, need a value in every shipped locale, or the
+// Settings page silently falls back to English on that language -- the same
+// leak waterCardLocales/f37Locales close.
+const SETTINGS_KEYS = ['dataModule', 'networkModule', 'gatewayHub', 'journalModule', 'journalModuleSaveError'];
 
 // Luganda is human translation work product: where no reviewed Luganda exists,
 // the honest shipped value is the English source text, never a machine
-// translation. All four keys are in that state today (tracked in
+// translation. Every key above is in that state today (tracked in
 // docs/i18n/pending-luganda-translations.md), and this assertion forces the
 // doc and the shipped file to move together.
 const PENDING_HUMAN_LUGANDA = new Set<string>(SETTINGS_KEYS);

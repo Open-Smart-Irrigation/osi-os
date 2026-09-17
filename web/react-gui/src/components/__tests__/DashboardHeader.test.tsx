@@ -15,6 +15,7 @@ vi.mock('react-i18next', () => ({
         title: 'Open Smart Irrigation Dashboard',
         'addMenu.zone': 'Zone',
         'addMenu.device': 'Device',
+        'addMenu.activity': 'Activity',
         data: 'Data',
         'dashboard:network': 'Network',
         'settings:entryPoint': 'Settings',
@@ -37,6 +38,12 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => true),
 }));
 
+const gatewayModules = vi.hoisted(() => ({ journalEnabled: true }));
+
+vi.mock('../../hooks/useGatewayModules', () => ({
+  useJournalModuleEnabled: () => gatewayModules.journalEnabled,
+}));
+
 function renderHeader(overrides: Partial<ComponentProps<typeof DashboardHeader>> = {}) {
   const props: ComponentProps<typeof DashboardHeader> = {
     username: 'farmer',
@@ -53,6 +60,7 @@ beforeEach(() => {
   // The Data/Network header entries are gated on osi.modules.*; a leftover
   // key from a sibling test would silently change what this suite renders.
   window.localStorage.clear();
+  gatewayModules.journalEnabled = true;
   vi.mocked(isDesktopBrowser).mockReturnValue(true);
 });
 
@@ -135,6 +143,24 @@ describe('DashboardHeader (osi-os)', () => {
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument();
+  });
+
+  // The journal module is gateway-level; with it off, the Add menu must not
+  // offer the one entry point that lands on /journal.
+  it('offers the journal capture entry in the Add menu when the journal module is on', () => {
+    renderHeader();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: 'Activity' })).toBeInTheDocument();
+  });
+
+  it('hides the journal capture entry from the Add menu when the journal module is off', () => {
+    gatewayModules.journalEnabled = false;
+    renderHeader();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.queryByRole('menuitem', { name: 'Activity' })).not.toBeInTheDocument();
+    // The other Add entries are untouched.
+    expect(screen.getByRole('menuitem', { name: 'Zone' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Device' })).toBeInTheDocument();
   });
 
   it('keeps the Account menu scoped to account linking and logout', () => {

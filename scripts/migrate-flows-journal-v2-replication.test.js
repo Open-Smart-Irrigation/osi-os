@@ -106,3 +106,47 @@ test('migration rejects collisions instead of overwriting a drifted worker', () 
     /Refusing non-exact Journal V2 replication node collision/,
   );
 });
+
+// ---------------------------------------------------------------------------
+// Journal module gate (owner decision 2026-09-17)
+// ---------------------------------------------------------------------------
+// Switching the Field Journal module off must stop this worker before it does
+// anything at all: no cloud request, and no per-tick warn line either (the
+// "waiting for a linked cloud account" warn sits between the gate and the
+// helper call, so gate placement is the assertion that matters, not just its
+// presence).
+test('the shipped worker gates on the journal module before it touches the cloud', () => {
+  for (const profile of PROFILE_PATHS) {
+    const worker = nodesById(source(profile)).get('journal-v2-replication-worker');
+    assert.ok(worker, profile + ' is missing the worker node');
+
+    const gateIndex = worker.func.indexOf('journalModuleEnabled');
+    assert.notEqual(gateIndex, -1, profile + ': worker does not consult the journal module gate');
+
+    const linkedQueryIndex = worker.func.indexOf('server_sync_token FROM users');
+    const helperCallIndex = worker.func.indexOf('runReplicationTick');
+    assert.notEqual(linkedQueryIndex, -1);
+    assert.notEqual(helperCallIndex, -1);
+    assert.ok(
+      gateIndex < linkedQueryIndex,
+      profile + ': the gate must precede the linked-account lookup and its warn line',
+    );
+    assert.ok(
+      gateIndex < helperCallIndex,
+      profile + ': the gate must precede the replication tick',
+    );
+    // The gate reads the gateway-level setting through the helper, not through
+    // a second ad-hoc SQL string that could drift from it.
+    assert.match(worker.func, /replication\.journalModuleEnabled\(db\)/);
+    assert.doesNotMatch(worker.func, /journal_module_enabled/);
+  }
+});
+
+test('the journal module gate is quiet: no warn on the disabled path', () => {
+  const worker = nodesById(source(PROFILE_PATHS[0])).get('journal-v2-replication-worker');
+  const gateIndex = worker.func.indexOf('journalModuleEnabled');
+  const linkedQueryIndex = worker.func.indexOf('server_sync_token FROM users');
+  const gateBlock = worker.func.slice(gateIndex, linkedQueryIndex);
+  assert.doesNotMatch(gateBlock, /node\.warn|node\.error/, 'the disabled path must not log every tick');
+  assert.match(gateBlock, /node\.status/, 'the disabled path should still show why the node is idle');
+});

@@ -43,6 +43,7 @@
   "schedulerDisableSuccess_one": "Disabled {{count}} active schedule.",
   "schedulerDisableSuccess_other": "Disabled {{count}} active schedules.",
   "schedulerDisableError": "Could not disable irrigation schedules",
+  "journalModuleSaveError": "Could not change the journal module",
   "dataTitle": "Data & Refresh",
   "autoRefresh": "Auto-refresh dashboard",
   "on": "On",

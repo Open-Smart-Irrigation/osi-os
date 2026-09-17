@@ -85,3 +85,15 @@ PR #248 pass (`sync.running`, `reauth.running`: ellipsis glyph `…` vs `...`;
 English wording drift since the Luganda was authored, but the drift does not
 change meaning — both are paraphrases of the same fact. They are not tracked
 here.
+
+## `settings.json` — module visibility switches
+
+| Keys | Reason |
+|---|---|
+| `dataModule`, `networkModule`, `gatewayHub`, `journalModule`, `journalModuleSaveError` (5 keys in `settings.json`) | New Settings rows for the Data view, Network, Gateway and Field Journal modules, added when those four became switchable (owner decision, 2026-09-17). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; `gatewayHub` deliberately stays "Gateway" in de-CH/it/es/pt, matching the loanword `devices.json` `systemPanel.title` already ships for those locales, and is "Passerelle" in fr. |
+
+Tracked in code at `web/react-gui/tests/moduleVisibilityLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism the sections above use. A human
+Luganda pass must drop the key from that set and from the table above in the
+same change; the test fails otherwise, so the two cannot drift apart.

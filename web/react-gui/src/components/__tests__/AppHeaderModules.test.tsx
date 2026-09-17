@@ -36,6 +36,16 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => true),
 }));
 
+// The Field Journal module is a GATEWAY-level setting, not a per-browser
+// preference: switching it off also has to stop the journal-v2 replication
+// worker talking to the cloud, which localStorage cannot do. The header reads
+// it through this hook.
+const gatewayModules = vi.hoisted(() => ({ journalEnabled: true }));
+
+vi.mock('../../hooks/useGatewayModules', () => ({
+  useJournalModuleEnabled: () => gatewayModules.journalEnabled,
+}));
+
 function renderAppHeader() {
   render(
     <MemoryRouter initialEntries={['/journal']}>
@@ -46,6 +56,7 @@ function renderAppHeader() {
 
 beforeEach(() => {
   window.localStorage.clear();
+  gatewayModules.journalEnabled = true;
 });
 
 afterEach(() => {
@@ -68,6 +79,25 @@ describe('AppHeader module visibility', () => {
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Zones' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Journal' })).toBeInTheDocument();
+  });
+
+  it('hides the Journal tab when the journal module is off and keeps the others', () => {
+    gatewayModules.journalEnabled = false;
+    renderAppHeader();
+
+    expect(screen.queryByRole('link', { name: 'Journal' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Zones' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument();
+  });
+
+  it('hides both the Data and Journal tabs when both modules are off', () => {
+    gatewayModules.journalEnabled = false;
+    window.localStorage.setItem('osi.modules.data', 'false');
+    renderAppHeader();
+
+    expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Journal' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Zones' })).toBeInTheDocument();
   });
 
   it('keeps Settings and Account reachable with the data module off', () => {

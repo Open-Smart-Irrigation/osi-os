@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 import { useDisplayPreferences } from '../utils/displayPreferences';
+import { useJournalModuleEnabled } from '../hooks/useGatewayModules';
 
 type TabKey = 'zones' | 'data' | 'journal';
 
@@ -49,6 +50,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   // unregister its route -- /analysis and /history stay reachable by URL, and
   // a page rendered under a hidden tab still renders.
   const { modules } = useDisplayPreferences();
+  // Gateway-level, not a browser preference: switching the Field Journal off
+  // also stops the journal-v2 replication worker contacting the cloud.
+  const journalEnabled = useJournalModuleEnabled();
 
   const dataTarget = isDesktopBrowser() ? '/analysis' : '/history';
   const dataActive =
@@ -66,12 +70,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     ...(modules.data
       ? [{ key: 'data' as const, label: t('tabs.data'), to: dataTarget, active: dataActive }]
       : []),
-    {
-      key: 'journal',
-      label: t('tabs.journal'),
-      to: '/journal',
-      active: activeTab === 'journal' || pathname.startsWith('/journal'),
-    },
+    ...(journalEnabled
+      ? [{
+        key: 'journal' as const,
+        label: t('tabs.journal'),
+        to: '/journal',
+        active: activeTab === 'journal' || pathname.startsWith('/journal'),
+      }]
+      : []),
   ];
 
   return (

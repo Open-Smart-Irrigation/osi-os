@@ -43,6 +43,7 @@
   "schedulerDisableSuccess_one": "{{count}} aktiver Plan deaktiviert.",
   "schedulerDisableSuccess_other": "{{count}} aktive Pläne deaktiviert.",
   "schedulerDisableError": "Bewässerungspläne konnten nicht deaktiviert werden",
+  "journalModuleSaveError": "Das Journal-Modul konnte nicht geändert werden",
   "dataTitle": "Daten & Aktualisierung",
   "autoRefresh": "Dashboard automatisch aktualisieren",
   "on": "Ein",

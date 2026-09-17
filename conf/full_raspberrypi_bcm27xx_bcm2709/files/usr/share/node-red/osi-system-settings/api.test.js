@@ -70,7 +70,7 @@ test('GET /api/system/settings defaults to UTC when no gateway_timezone row exis
   const dbPath = await tempDb();
   const out = await call(dbPath, req('GET'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC' });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC', journalModuleEnabled: true });
 });
 
 test('GET /api/system/settings returns the stored gateway_timezone', async () => {
@@ -80,7 +80,7 @@ test('GET /api/system/settings returns the stored gateway_timezone', async () =>
   raw.close();
   const out = await call(dbPath, req('GET'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich' });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', journalModuleEnabled: true });
 });
 
 test('GET /api/system/settings: no token -> 401', async () => {
@@ -96,7 +96,7 @@ test('GET /api/system/settings: table-missing-safe, does not 500 on a pre-migrat
   raw.close();
   const out = await call(dbPath, req('GET'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC' });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC', journalModuleEnabled: true });
 });
 
 test('PUT /api/system/settings validates the timezone with Intl and rejects garbage with 422', async () => {
@@ -116,9 +116,9 @@ test('PUT /api/system/settings upserts the value and a subsequent GET reflects i
   const dbPath = await tempDb();
   const put = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich' }));
   assert.equal(put.statusCode, 200);
-  assert.deepEqual(put.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0 });
+  assert.deepEqual(put.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0, journalModuleEnabled: true });
   const get = await call(dbPath, req('GET'));
-  assert.deepEqual(get.payload, { gatewayTimezone: 'Europe/Zurich' });
+  assert.deepEqual(get.payload, { gatewayTimezone: 'Europe/Zurich', journalModuleEnabled: true });
   // Second PUT (UPDATE branch of the UPSERT), still one row.
   const put2 = await call(dbPath, req('PUT', { gatewayTimezone: 'America/New_York' }));
   assert.equal(put2.statusCode, 200);
@@ -138,7 +138,7 @@ test('PUT applyToAllZones updates only the caller\'s zones whose timezone differ
   raw.close();
   const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1 });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true });
   const raw2 = new DatabaseSync(dbPath);
   const rows = raw2.prepare('SELECT name, timezone FROM irrigation_zones ORDER BY name').all();
   raw2.close();
@@ -156,7 +156,7 @@ test('PUT applyToAllZones (FW-T5 review R1, M1) never touches another user\'s zo
   // token(1) (the default auth() helper below) authenticates as user 1.
   const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1 }, 'must count only the caller\'s own zone');
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true }, 'must count only the caller\'s own zone');
   const raw2 = new DatabaseSync(dbPath);
   const rows = raw2.prepare('SELECT name, user_id, timezone FROM irrigation_zones ORDER BY name').all();
   raw2.close();
@@ -175,7 +175,7 @@ test('PUT applyToAllZones (FW-T5 review R1, M2) excludes soft-deleted zones from
   raw.close();
   const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1 }, 'the soft-deleted zone must not be counted');
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true }, 'the soft-deleted zone must not be counted');
   const raw2 = new DatabaseSync(dbPath);
   const rows = raw2.prepare('SELECT name, timezone FROM irrigation_zones ORDER BY name').all();
   raw2.close();
@@ -257,7 +257,7 @@ test('PUT /api/system/settings (scoped mode): an admin is allowed and the write 
   insertUser(dbPath, { id: 1, username: 'admin1', role: 'admin' });
   const out = await callScoped(dbPath, reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'admin1'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0 });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0, journalModuleEnabled: true });
 });
 
 test('GET /api/system/settings (scoped mode): reads stay open for a non-admin', async () => {
@@ -329,4 +329,88 @@ test('validateTimezone: rejects a non-IANA string with a labeled 422-shaped erro
 test('validateTimezone: trims and returns a valid IANA timezone unchanged', () => {
   assert.equal(validateTimezone('  Africa/Kampala  ', 'timezone'), 'Africa/Kampala');
   assert.equal(validateTimezone('UTC', 'gatewayTimezone'), 'UTC');
+});
+
+// ---------------------------------------------------------------------------
+// Journal module gate (owner decision 2026-09-17)
+// ---------------------------------------------------------------------------
+// The Field Journal became a switchable module, and switching it off has to
+// stop the journal-v2 replication worker from talking to the cloud at all --
+// which a per-browser localStorage preference cannot do. The setting therefore
+// lives in the existing gateway-level app_settings store and rides the existing
+// GET/PUT /api/system/settings route: no new route, no schema migration.
+
+test('GET /api/system/settings reports the journal module enabled by default', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('GET'));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.journalModuleEnabled, true);
+});
+
+test('PUT /api/system/settings persists a journal module switch-off', async () => {
+  const dbPath = await tempDb();
+  const put = await call(dbPath, req('PUT', { journalModuleEnabled: false }));
+  assert.equal(put.statusCode, 200);
+  assert.equal(put.payload.journalModuleEnabled, false);
+
+  const get = await call(dbPath, req('GET'));
+  assert.equal(get.payload.journalModuleEnabled, false);
+
+  const raw = new DatabaseSync(dbPath);
+  const row = raw.prepare("SELECT value FROM app_settings WHERE key='journal_module_enabled'").get();
+  raw.close();
+  assert.equal(row.value, '0');
+});
+
+test('PUT /api/system/settings switches the journal module back on', async () => {
+  const dbPath = await tempDb();
+  await call(dbPath, req('PUT', { journalModuleEnabled: false }));
+  const put = await call(dbPath, req('PUT', { journalModuleEnabled: true }));
+  assert.equal(put.statusCode, 200);
+  assert.equal(put.payload.journalModuleEnabled, true);
+  assert.equal((await call(dbPath, req('GET'))).payload.journalModuleEnabled, true);
+});
+
+test('PUT /api/system/settings rejects a non-boolean journal module value', async () => {
+  const dbPath = await tempDb();
+  for (const value of ['false', 0, null, 'off']) {
+    const out = await call(dbPath, req('PUT', { journalModuleEnabled: value }));
+    assert.equal(out.statusCode, 422, 'value ' + JSON.stringify(value) + ' must be rejected');
+    assert.equal(out.payload.error, 'invalid_request');
+  }
+  assert.equal((await call(dbPath, req('GET'))).payload.journalModuleEnabled, true);
+});
+
+// The timezone contract must not loosen: a PUT that carries no
+// journalModuleEnabled is still a timezone PUT and still requires a valid one.
+test('PUT /api/system/settings still requires a valid timezone when no journal flag is sent', async () => {
+  const dbPath = await tempDb();
+  const missing = await call(dbPath, req('PUT', {}));
+  assert.equal(missing.statusCode, 422);
+  assert.equal(missing.payload.error, 'invalid_timezone');
+
+  const bogus = await call(dbPath, req('PUT', { gatewayTimezone: 'Not/AZone' }));
+  assert.equal(bogus.statusCode, 422);
+  assert.equal(bogus.payload.error, 'invalid_timezone');
+});
+
+test('PUT /api/system/settings still validates a timezone sent alongside the journal flag', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Not/AZone', journalModuleEnabled: false }));
+  assert.equal(out.statusCode, 422);
+  assert.equal(out.payload.error, 'invalid_timezone');
+  // Nothing may be persisted from a rejected request.
+  assert.equal((await call(dbPath, req('GET'))).payload.journalModuleEnabled, true);
+});
+
+test('PUT /api/system/settings writes both fields when both are sent', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Africa/Kampala', journalModuleEnabled: false }));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.gatewayTimezone, 'Africa/Kampala');
+  assert.equal(out.payload.journalModuleEnabled, false);
+
+  const get = await call(dbPath, req('GET'));
+  assert.equal(get.payload.gatewayTimezone, 'Africa/Kampala');
+  assert.equal(get.payload.journalModuleEnabled, false);
 });

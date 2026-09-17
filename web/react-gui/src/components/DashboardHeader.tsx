@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 import { useDisplayPreferences } from '../utils/displayPreferences';
+import { useJournalModuleEnabled } from '../hooks/useGatewayModules';
 
 interface DashboardHeaderProps {
   username: string | null;
@@ -30,6 +31,8 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   const { modules } = useDisplayPreferences();
   const showDesktopData = isDesktopBrowser() && modules.data;
   const showNetwork = isDesktopBrowser() && modules.network;
+  // Gateway-level, not a browser preference -- see useGatewayModules.
+  const journalEnabled = useJournalModuleEnabled();
 
   return (
     <header className="bg-[var(--header-bg)] shadow-xl">
@@ -52,11 +55,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 items={[
                   { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
                   { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-                  {
-                    key: 'activity',
-                    label: t('addMenu.activity'),
-                    onSelect: () => navigate('/journal?capture=1'),
-                  },
+                  ...(journalEnabled
+                    ? [{
+                      key: 'activity',
+                      label: t('addMenu.activity'),
+                      onSelect: () => navigate('/journal?capture=1'),
+                    }]
+                    : []),
                 ]}
               />
             )}

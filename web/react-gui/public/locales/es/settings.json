@@ -43,6 +43,7 @@
   "schedulerDisableSuccess_one": "{{count}} programa activo desactivado.",
   "schedulerDisableSuccess_other": "{{count}} programas activos desactivados.",
   "schedulerDisableError": "No se pudieron desactivar los programas de riego",
+  "journalModuleSaveError": "No se pudo cambiar el módulo de diario",
   "dataTitle": "Datos y actualización",
   "autoRefresh": "Actualizar automáticamente el panel",
   "on": "Activado",
