@@ -38,6 +38,14 @@ vi.mock('../../contexts/ScopeContext', () => ({
   useScope: () => scopeState,
 }));
 
+const gatewayModules = vi.hoisted(() => ({
+  flags: { data: true, network: true, gatewayHub: true, journal: true },
+}));
+
+vi.mock('../../hooks/useGatewayModules', () => ({
+  useGatewayModules: () => gatewayModules.flags,
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, unknown>) => {
@@ -151,9 +159,8 @@ function renderDashboard() {
 }
 
 beforeEach(() => {
-  // The gateway hub panel is gated on osi.modules.gatewayHub; clear so a
-  // sibling test's stored value cannot change what this suite renders.
   window.localStorage.clear();
+  gatewayModules.flags = { data: true, network: true, gatewayHub: true, journal: true };
   headerProps.length = 0;
   getDevices.mockResolvedValue([]);
   getZones.mockResolvedValue([]);
@@ -181,7 +188,7 @@ describe('FarmingDashboard gateway hub module', () => {
   });
 
   it('hides the gateway hub panel when the gatewayHub module is off', async () => {
-    window.localStorage.setItem('osi.modules.gatewayHub', 'false');
+    gatewayModules.flags.gatewayHub = false;
     renderDashboard();
 
     // Wait for the dashboard to finish loading before asserting the absence,

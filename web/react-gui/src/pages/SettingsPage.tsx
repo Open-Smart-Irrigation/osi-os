@@ -232,7 +232,7 @@ export function SettingsPage() {
   const [moduleNotice, setModuleNotice] = useState<string | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
-  const [journalModuleBusy, setJournalModuleBusy] = useState(false);
+  const [gatewayModuleBusy, setGatewayModuleBusy] = useState(false);
 
   const { data: systemSettings, mutate: mutateSystemSettings, error: systemSettingsError } = useSWR(
     '/api/system/settings',
@@ -348,38 +348,72 @@ export function SettingsPage() {
     }
   };
 
-  // The Field Journal module is a GATEWAY-level setting, not a per-browser
-  // display preference: switching it off also stops the journal-v2 replication
-  // worker contacting the cloud, which localStorage cannot do. It therefore
-  // rides the same PUT /api/system/settings -- and the same F20/F51 role gate --
-  // as the gateway time zone. A gateway that predates the setting reports it
-  // absent, which means enabled.
-  const journalModuleEnabled = systemSettings?.journalModuleEnabled ?? true;
-  const updateJournalModule = async (enabled: boolean) => {
+  // Module visibility (Phil, 2026-09-17): the Data view, Network, Gateway hub
+  // and Field Journal are GATEWAY-level settings, not per-browser display
+  // preferences -- every user of a gateway sees the same surface, and the choice
+  // survives a browser change. The Field Journal one has to work this way
+  // regardless: switching it off also stops the journal-v2 replication worker
+  // contacting the cloud, which localStorage could never do. All four ride the
+  // same PUT /api/system/settings -- and the same F20/F51 role gate -- as the
+  // gateway time zone. A gateway predating a setting reports it absent, meaning
+  // enabled.
+  type GatewayModuleField =
+    | 'dataModuleEnabled'
+    | 'networkModuleEnabled'
+    | 'gatewayHubModuleEnabled'
+    | 'journalModuleEnabled';
+  // Literal union rather than `string`: i18next's `t` is key-typed, so a typo in
+  // a label key is a compile error here instead of a raw key rendered in the UI.
+  type GatewayModuleLabelKey = 'dataModule' | 'networkModule' | 'gatewayHub' | 'journalModule';
+
+  const gatewayModuleEnabled = (field: GatewayModuleField): boolean =>
+    systemSettings?.[field] ?? true;
+
+  const updateGatewayModule = async (field: GatewayModuleField, enabled: boolean) => {
     // Authorization gate: the control's disabled attribute is an affordance,
     // not authorization. This check sits in the same function that performs the
     // mutating call (maintainer decision 4 / D5), and fails closed while scope
     // is still resolving.
     if (!systemSettingsWritable) return;
-    if (enabled === journalModuleEnabled) return;
+    if (enabled === gatewayModuleEnabled(field)) return;
     setModuleNotice(null);
     setModuleError(null);
-    setJournalModuleBusy(true);
+    setGatewayModuleBusy(true);
     try {
-      const result = await systemSettingsAPI.update({ journalModuleEnabled: enabled });
+      const result = await systemSettingsAPI.update({ [field]: enabled });
       await mutateSystemSettings(
         (current) => ({
+          ...current,
           gatewayTimezone: result.gatewayTimezone ?? current?.gatewayTimezone ?? '',
-          journalModuleEnabled: result.journalModuleEnabled ?? enabled,
+          dataModuleEnabled: result.dataModuleEnabled,
+          networkModuleEnabled: result.networkModuleEnabled,
+          gatewayHubModuleEnabled: result.gatewayHubModuleEnabled,
+          journalModuleEnabled: result.journalModuleEnabled,
+          [field]: result[field] ?? enabled,
         }),
         { revalidate: false },
       );
     } catch (error) {
-      setModuleError(getApiErrorMessage(error, t('journalModuleSaveError')));
+      setModuleError(getApiErrorMessage(error, t('moduleSaveError')));
     } finally {
-      setJournalModuleBusy(false);
+      setGatewayModuleBusy(false);
     }
   };
+
+  const gatewayModuleRow = (field: GatewayModuleField, labelKey: GatewayModuleLabelKey) => (
+    <ModuleRow
+      label={t(labelKey)}
+      // Phil, 2026-09-17: all four carry an experimental marker for now.
+      warning={t('experimentalOnly')}
+      enabled={gatewayModuleEnabled(field)}
+      disabled={gatewayModuleBusy || !systemSettingsWritable}
+      onChange={(enabled) => {
+        void updateGatewayModule(field, enabled);
+      }}
+      onLabel={t('on')}
+      offLabel={t('off')}
+    />
+  );
 
   const gatewayTimezone = gatewayTimezoneInput ?? systemSettings?.gatewayTimezone ?? '';
   const gatewayTimezoneValid = isValidTimeZone(gatewayTimezone.trim());
@@ -627,54 +661,15 @@ export function SettingsPage() {
               offLabel={t('off')}
             />
             {/*
-              Module visibility (owner decision 2026-09-17): the Data view, the
-              Network view and the gateway hub can be switched off here. These
-              are display-only, per-browser preferences like the rows above --
-              they hide the entry points, they do not unregister the routes, so
-              a bookmark or a deep link still works. Defaults on main are ON;
-              customer branches flip the defaults.
-
-              Appended after the existing rows on purpose: several tests index
-              the module rows positionally, and the established order is part of
+              Gateway-level module switches (Phil, 2026-09-17). Appended after
+              the per-browser rows above on purpose: several tests index the
+              module rows positionally, and the established order is part of
               what those tests pin.
             */}
-            <ModuleRow
-              label={t('dataModule')}
-              enabled={preferences.modules.data}
-              onChange={(enabled) => updateModule('data', enabled)}
-              onLabel={t('on')}
-              offLabel={t('off')}
-            />
-            <ModuleRow
-              label={t('networkModule')}
-              enabled={preferences.modules.network}
-              onChange={(enabled) => updateModule('network', enabled)}
-              onLabel={t('on')}
-              offLabel={t('off')}
-            />
-            <ModuleRow
-              label={t('gatewayHub')}
-              enabled={preferences.modules.gatewayHub}
-              onChange={(enabled) => updateModule('gatewayHub', enabled)}
-              onLabel={t('on')}
-              offLabel={t('off')}
-            />
-            {/*
-              Unlike every row above, this one is gateway-wide: switching the
-              Field Journal off also stops the journal-v2 replication worker
-              from talking to the cloud, so the switch has to be readable by
-              Node-RED rather than living in this browser's localStorage.
-            */}
-            <ModuleRow
-              label={t('journalModule')}
-              enabled={journalModuleEnabled}
-              disabled={journalModuleBusy || !systemSettingsWritable}
-              onChange={(enabled) => {
-                void updateJournalModule(enabled);
-              }}
-              onLabel={t('on')}
-              offLabel={t('off')}
-            />
+            {gatewayModuleRow('dataModuleEnabled', 'dataModule')}
+            {gatewayModuleRow('networkModuleEnabled', 'networkModule')}
+            {gatewayModuleRow('gatewayHubModuleEnabled', 'gatewayHub')}
+            {gatewayModuleRow('journalModuleEnabled', 'journalModule')}
           </div>
           {moduleNotice && (
             <p role="status" className="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-900">

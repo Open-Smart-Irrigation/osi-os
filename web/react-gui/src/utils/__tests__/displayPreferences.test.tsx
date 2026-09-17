@@ -23,9 +23,6 @@ describe('display preferences', () => {
       waterCard: true,
       schedulerUi: true,
       valveControl: true,
-      data: true,
-      network: true,
-      gatewayHub: true,
     },
   };
 
@@ -58,9 +55,6 @@ describe('display preferences', () => {
         waterCard: false,
         schedulerUi: false,
         valveControl: false,
-        data: false,
-        network: false,
-        gatewayHub: false,
       },
     });
 
@@ -71,26 +65,19 @@ describe('display preferences', () => {
       waterCard: false,
       schedulerUi: false,
       valveControl: false,
-      data: false,
-      network: false,
-      gatewayHub: false,
     });
   });
 
-  // The Data view, Network and Gateway modules ship ON on main; a customer
-  // branch flips these defaults, so the storage layer must keep "absent" ==
-  // visible rather than treating a missing key as off.
-  it.each(['data', 'network', 'gatewayHub'] as const)(
-    'defaults the %s module to on and round-trips an explicit off',
+  // The Data view, Network and Gateway modules are GATEWAY settings now (Phil,
+  // 2026-09-17), so this per-browser layer must not carry them at all -- a
+  // leftover localStorage key would be a second, silently diverging source of
+  // truth for the same switch.
+  it.each(['data', 'network', 'gatewayHub', 'journal'] as const)(
+    'does not store the %s module as a browser preference',
     (moduleKey) => {
-      expect(readDisplayPreferences().modules[moduleKey]).toBe(true);
-
-      writeDisplayPreferences({
-        modules: { ...readDisplayPreferences().modules, [moduleKey]: false },
-      });
-
-      expect(window.localStorage.getItem(`osi.modules.${moduleKey}`)).toBe('false');
-      expect(readDisplayPreferences().modules[moduleKey]).toBe(false);
+      expect(Object.keys(readDisplayPreferences().modules)).not.toContain(moduleKey);
+      writeDisplayPreferences({ modules: readDisplayPreferences().modules });
+      expect(window.localStorage.getItem(`osi.modules.${moduleKey}`)).toBeNull();
     },
   );
 

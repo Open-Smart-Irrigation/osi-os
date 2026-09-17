@@ -128,40 +128,76 @@ async function readGatewayTimezone(db, warn) {
   }
 }
 
-// Owner decision 2026-09-17: the Field Journal is a switchable module. Unlike
-// the display-only module toggles (which live in the browser's localStorage),
-// this one has to be readable by the Node-RED journal-v2 replication worker so
-// switching it off actually stops the worker talking to the cloud. It therefore
-// rides the same gateway-level app_settings store as gateway_timezone -- no new
-// route, no schema migration.
-const JOURNAL_MODULE_KEY = 'journal_module_enabled';
-const JOURNAL_MODULE_OFF_VALUES = new Set(['0', 'false', 'off', 'no']);
+// Owner decision 2026-09-17: the Data view, Network, Gateway hub and Field
+// Journal are switchable modules, and all four are GATEWAY settings rather than
+// per-browser preferences -- every user of a gateway sees the same surface, and
+// the choice survives a browser change. The Field Journal additionally has to be
+// readable by the Node-RED journal-v2 replication worker, which no browser-local
+// value could ever be. All four ride the same gateway-level app_settings store
+// as gateway_timezone: no new route, no schema migration.
+//
+// Adding a module here is the only change needed on this route; GET, PUT
+// validation and the response shape are all driven off this table.
+const MODULE_SETTINGS = [
+  { field: 'dataModuleEnabled', key: 'data_module_enabled' },
+  { field: 'networkModuleEnabled', key: 'network_module_enabled' },
+  { field: 'gatewayHubModuleEnabled', key: 'gateway_hub_module_enabled' },
+  { field: 'journalModuleEnabled', key: 'journal_module_enabled' },
+];
+const MODULE_OFF_VALUES = new Set(['0', 'false', 'off', 'no']);
 
 // Table-missing-safe, same contract as readGatewayTimezone: a pre-migration DB
-// and an absent key both resolve to the shipped default, which is ENABLED --
-// failing open keeps a staged deploy replicating exactly as it does today.
-async function readJournalModuleEnabled(db, warn) {
-  try {
-    const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [JOURNAL_MODULE_KEY]);
-    if (!row || row.value === null || row.value === undefined) return true;
-    return !JOURNAL_MODULE_OFF_VALUES.has(String(row.value).trim().toLowerCase());
-  } catch (error) {
-    const detail = String(error && error.message ? error.message : error);
-    if (!/no such table:\s*app_settings\b/i.test(detail)) {
-      warn('[sys-settings] journal_module_enabled read failed: ' + detail);
+// and an absent key both resolve to the shipped default, which is ENABLED.
+// Failing open keeps a staged deploy behaving exactly as it does today rather
+// than hiding a view (or stopping journal replication) because a table is
+// missing.
+async function readModuleSettings(db, warn) {
+  const settings = {};
+  for (const module of MODULE_SETTINGS) {
+    let row = null;
+    try {
+      row = await db.get('SELECT value FROM app_settings WHERE key = ?', [module.key]);
+    } catch (error) {
+      const detail = String(error && error.message ? error.message : error);
+      if (!/no such table:\s*app_settings\b/i.test(detail)) {
+        warn('[sys-settings] ' + module.key + ' read failed: ' + detail);
+      }
+      settings[module.field] = true;
+      continue;
     }
-    return true;
+    settings[module.field] = (!row || row.value === null || row.value === undefined)
+      ? true
+      : !MODULE_OFF_VALUES.has(String(row.value).trim().toLowerCase());
   }
+  return settings;
 }
 
-// Strict boolean only. Accepting 'false'/0 would make a typo in a caller read
-// as "on" (every non-empty string is truthy), which is exactly the failure this
-// switch exists to prevent.
-function validateJournalModuleEnabled(rawValue) {
+// Strict boolean only. Accepting 'false'/0 would make a typo read as "on"
+// (every non-empty string is truthy), which is exactly the failure these
+// switches exist to prevent -- most sharply for the journal module, where "on"
+// means the replication worker keeps calling the cloud.
+function validateModuleEnabled(rawValue, fieldName) {
   if (rawValue !== true && rawValue !== false) {
-    throw apiError(422, 'invalid_request', 'journalModuleEnabled must be a boolean');
+    throw apiError(422, 'invalid_request', fieldName + ' must be a boolean');
   }
   return rawValue;
+}
+
+// Collects every module field present on the body, validating all of them
+// before any write happens: one bad field rejects the whole request rather than
+// leaving the gateway half-updated into a state the caller never asked for.
+function collectModuleWrites(body) {
+  const writes = [];
+  if (body === null || typeof body !== 'object') return writes;
+  for (const module of MODULE_SETTINGS) {
+    if (!Object.prototype.hasOwnProperty.call(body, module.field)) continue;
+    writes.push({
+      key: module.key,
+      field: module.field,
+      value: validateModuleEnabled(body[module.field], module.field),
+    });
+  }
+  return writes;
 }
 
 async function handleHttpRequest(options) {
@@ -198,27 +234,22 @@ async function handleHttpRequest(options) {
 
     if (method === 'GET') {
       const gatewayTimezone = await readGatewayTimezone(db, warn);
-      const journalModuleEnabled = await readJournalModuleEnabled(db, warn);
-      return respond(200, { gatewayTimezone, journalModuleEnabled });
+      const modules = await readModuleSettings(db, warn);
+      return respond(200, Object.assign({ gatewayTimezone }, modules));
     }
 
     if (method === 'PUT') {
       const body = requestBody(msg);
-      const hasJournalModule = body !== null && typeof body === 'object' &&
-        Object.prototype.hasOwnProperty.call(body, 'journalModuleEnabled');
+      const moduleWrites = collectModuleWrites(body);
       const hasTimezone = body !== null && typeof body === 'object' &&
         Object.prototype.hasOwnProperty.call(body, 'gatewayTimezone');
-      // The timezone contract is unchanged: a PUT that is not a journal-module
-      // PUT still requires a valid gatewayTimezone, and a timezone sent
-      // alongside the journal flag is still validated. Only a journal-module-
-      // only PUT is allowed to omit it.
-      const journalModuleEnabled = hasJournalModule
-        ? validateJournalModuleEnabled(body.journalModuleEnabled)
-        : null;
-      const gatewayTimezone = (hasJournalModule && !hasTimezone)
+      // The timezone contract is unchanged: a PUT that carries no module flag
+      // still requires a valid gatewayTimezone, and a timezone sent alongside a
+      // module flag is still validated. Only a module-only PUT may omit it.
+      const gatewayTimezone = (moduleWrites.length > 0 && !hasTimezone)
         ? await readGatewayTimezone(db, warn)
         : validateTimezone(body.gatewayTimezone, 'gatewayTimezone');
-      const writeTimezone = hasTimezone || !hasJournalModule;
+      const writeTimezone = hasTimezone || moduleWrites.length === 0;
       const applyToAllZones = body.applyToAllZones === true;
       const now = new Date().toISOString();
       try {
@@ -228,10 +259,10 @@ async function handleHttpRequest(options) {
             [gatewayTimezone, now]
           );
         }
-        if (journalModuleEnabled !== null) {
+        for (const write of moduleWrites) {
           await db.run(
             'INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at',
-            [JOURNAL_MODULE_KEY, journalModuleEnabled ? '1' : '0', now]
+            [write.key, write.value ? '1' : '0', now]
           );
         }
       } catch (error) {
@@ -269,13 +300,10 @@ async function handleHttpRequest(options) {
           return count;
         });
       }
-      return respond(200, {
-        gatewayTimezone,
-        zonesUpdated,
-        journalModuleEnabled: journalModuleEnabled === null
-          ? await readJournalModuleEnabled(db, warn)
-          : journalModuleEnabled,
-      });
+      // Read back rather than echo: the response then reflects what is actually
+      // stored, including modules this request did not touch.
+      const modules = await readModuleSettings(db, warn);
+      return respond(200, Object.assign({ gatewayTimezone, zonesUpdated }, modules));
     }
 
     return respond(404, { error: 'not_found', message: 'Unknown system-settings route' });
@@ -288,4 +316,4 @@ async function handleHttpRequest(options) {
   }
 }
 
-module.exports = { handleHttpRequest, validateTimezone, validateJournalModuleEnabled };
+module.exports = { handleHttpRequest, validateTimezone, validateModuleEnabled, MODULE_SETTINGS };
