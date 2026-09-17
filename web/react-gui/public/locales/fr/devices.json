@@ -226,6 +226,10 @@
       "reason": {
         "balance_unknown": "Renseignez la surface et l'efficience d'irrigation",
         "forecast_unknown": "Aucune prévision de pluie disponible",
+        "supply_covers_demand": "La pluie et l'irrigation couvrent la demande du jour",
+        "forecast_rain_covers_demand": "La pluie prévue couvre le déficit du jour",
+        "demand_exceeds_supply": "La demande dépasse la pluie et l'irrigation du jour",
+        "balance_neutral": "Le bilan hydrique est proche de l'équilibre",
         "default": "En attente de données"
       },
       "action": {
@@ -333,6 +337,8 @@
     },
     "generatedAt": "Généré {{time}}",
     "sectionTitle": "Environnement et prévisions météo",
+    "loading": "Chargement des données environnementales…",
+    "loadFailed": "Échec du chargement des données environnementales",
     "tabs": {
       "local": "Local",
       "online": "En ligne",

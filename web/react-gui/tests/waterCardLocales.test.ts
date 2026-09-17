@@ -59,6 +59,10 @@ const DEVICES_KEYS = [
   'zone.water.insufficientData',
   'zone.water.reason.balance_unknown',
   'zone.water.reason.forecast_unknown',
+  'zone.water.reason.supply_covers_demand',
+  'zone.water.reason.forecast_rain_covers_demand',
+  'zone.water.reason.demand_exceeds_supply',
+  'zone.water.reason.balance_neutral',
   'zone.water.reason.default',
   'zone.water.action.delay_irrigation',
   'zone.water.action.irrigate_today',
@@ -108,6 +112,8 @@ const DEVICES_KEYS = [
   'environment.forecast.etaToday',
   'environment.forecast.etaTomorrow',
   'environment.generatedAt',
+  'environment.loading',
+  'environment.loadFailed',
 ];
 
 const NETWORK_KEYS = [

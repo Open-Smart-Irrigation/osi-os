@@ -226,6 +226,10 @@
       "reason": {
         "balance_unknown": "Indique la superficie y la eficiencia de riego",
         "forecast_unknown": "Sin previsión de lluvia disponible",
+        "supply_covers_demand": "La lluvia y el riego cubren la demanda de hoy",
+        "forecast_rain_covers_demand": "La lluvia prevista cubre el déficit de hoy",
+        "demand_exceeds_supply": "La demanda supera la lluvia y el riego de hoy",
+        "balance_neutral": "El balance hídrico está casi equilibrado",
         "default": "Esperando más datos"
       },
       "action": {
@@ -333,6 +337,8 @@
     },
     "generatedAt": "Generado {{time}}",
     "sectionTitle": "Entorno y previsión meteorológica",
+    "loading": "Cargando datos ambientales…",
+    "loadFailed": "No se pudieron cargar los datos ambientales",
     "tabs": {
       "local": "Local",
       "online": "Online",

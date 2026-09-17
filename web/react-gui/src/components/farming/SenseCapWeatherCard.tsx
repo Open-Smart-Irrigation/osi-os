@@ -245,9 +245,9 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
 
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Air Temperature</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.air_temperature_c', { defaultValue: 'Air Temp' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: 'Air Temperature', unit: '°C', color: '#ea580c', decimals: 1 })}
+            onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: t('environment.metrics.air_temperature_c', { defaultValue: 'Air Temp' }), unit: '°C', color: '#ea580c', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#ea580c' }}
@@ -257,9 +257,9 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Humidity</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.relative_humidity_pct', { defaultValue: 'Humidity' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'relative_humidity', label: 'Humidity', unit: '%', color: '#0891b2', decimals: 0 })}
+            onClick={() => setSensorMonitor({ field: 'relative_humidity', label: t('environment.metrics.relative_humidity_pct', { defaultValue: 'Humidity' }), unit: '%', color: '#0891b2', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#0891b2' }}
@@ -269,7 +269,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Wind Speed</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.wind_speed_mps', { defaultValue: 'Wind' })}</p>
           <button
             onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
@@ -284,7 +284,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Wind Direction</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.wind_direction_deg', { defaultValue: 'Wind Dir' })}</p>
           <button
             onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
@@ -296,7 +296,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain Today</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('zone.water.rainToday', { defaultValue: 'Rain today' })}</p>
           <button
             onClick={() => setShowRainMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
@@ -305,10 +305,10 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           >
             {fmtNum(data.rain_mm_today, 1, 'mm')}
           </button>
+          {/* The button already carries a "View history" title; the hint
+              said "tap" on a 1366 px desktop screen. */}
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
             {rainRateSummary}
-            {' · '}
-            tap to view history
           </p>
           {rainStatusLabel && rainStatusLabel !== rainRateSummary && (
             <p className="mt-1 text-xs text-[var(--text-tertiary)]">{rainStatusLabel}</p>
@@ -319,9 +319,9 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Pressure</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.pressure_hpa', { defaultValue: 'Pressure' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'barometric_pressure_hpa', label: 'Pressure', unit: 'hPa', color: '#475569', decimals: 0 })}
+            onClick={() => setSensorMonitor({ field: 'barometric_pressure_hpa', label: t('environment.metrics.pressure_hpa', { defaultValue: 'Pressure' }), unit: 'hPa', color: '#475569', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#475569' }}
@@ -331,9 +331,9 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Light Intensity</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.light_lux', { defaultValue: 'Light' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'light_lux', label: 'Light Intensity', unit: 'lux', color: '#d97706', decimals: 0 })}
+            onClick={() => setSensorMonitor({ field: 'light_lux', label: t('environment.metrics.light_lux', { defaultValue: 'Light' }), unit: 'lux', color: '#d97706', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#d97706' }}
@@ -343,9 +343,9 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">UV Index</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.uv_index', { defaultValue: 'UV Index' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'uv_index', label: 'UV Index', unit: 'UVI', color: '#ca8a04', decimals: 1 })}
+            onClick={() => setSensorMonitor({ field: 'uv_index', label: t('environment.metrics.uv_index', { defaultValue: 'UV Index' }), unit: 'UVI', color: '#ca8a04', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
             style={{ color: '#ca8a04' }}

@@ -334,3 +334,45 @@ describe('water card source gating', () => {
     expect(screen.queryByText('0.0 mm')).not.toBeInTheDocument();
   });
 });
+
+describe('water card reason line', () => {
+  it('translates the edge reason code instead of printing its prose', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: {
+          code: 'delay_irrigation',
+          source: 'heuristic',
+          reasonCode: 'supply_covers_demand',
+          recommendationDate: '2026-07-08',
+        },
+      },
+    });
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent("Rain and irrigation cover today's demand");
+    expect(card).not.toHaveTextContent('supply_covers_demand');
+    expect(card).not.toHaveTextContent('Daily rain, irrigation, and crop demand summary');
+  });
+
+  it('keeps the stored dendrometer reasoning, which is data and not prose the edge wrote', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: {
+          code: 'increase_10',
+          source: 'dendro',
+          reasonCode: null,
+          reasoning: 'Stress rose for three consecutive days.',
+          recommendationDate: '2026-07-08',
+        },
+      },
+    });
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    expect(screen.getByTestId('water-today-card')).toHaveTextContent('Stress rose for three consecutive days.');
+  });
+});

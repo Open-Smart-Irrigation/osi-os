@@ -226,6 +226,10 @@
       "reason": {
         "balance_unknown": "Fläche und Bewässerungseffizienz eintragen",
         "forecast_unknown": "Keine Regenprognose verfügbar",
+        "supply_covers_demand": "Regen und Bewässerung decken den heutigen Bedarf",
+        "forecast_rain_covers_demand": "Der erwartete Regen deckt das heutige Defizit",
+        "demand_exceeds_supply": "Der Bedarf übersteigt Regen und Bewässerung von heute",
+        "balance_neutral": "Die Wasserbilanz ist nahezu ausgeglichen",
         "default": "Warten auf weitere Daten"
       },
       "action": {
@@ -333,6 +337,8 @@
     },
     "generatedAt": "Erstellt {{time}}",
     "sectionTitle": "Umgebung & Wettervorhersage",
+    "loading": "Umweltdaten werden geladen…",
+    "loadFailed": "Umweltdaten konnten nicht geladen werden",
     "tabs": {
       "local": "Lokal",
       "online": "Online",

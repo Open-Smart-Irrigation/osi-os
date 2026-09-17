@@ -72,6 +72,10 @@ const DISPLAY_MODE_LABELS: Record<string, string> = {
 // does not know — an older gateway, or the cloud mirror — falls back to the
 // generic key instead of being printed raw.
 const WATER_REASON_LABELS: Record<string, string> = {
+  supply_covers_demand: "Rain and irrigation cover today's demand",
+  forecast_rain_covers_demand: "Forecast rain covers today's shortfall",
+  demand_exceeds_supply: "Demand exceeds today's rain and irrigation",
+  balance_neutral: 'Water balance is close to neutral',
   balance_unknown: 'Set zone area and irrigation efficiency',
   forecast_unknown: 'No rain forecast available',
 };
@@ -386,9 +390,15 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--primary)]">
                 {t('zone.water.title', { defaultValue: 'Water balance' })}
               </p>
+              {/* The heuristic's reason arrives as a code and is translated
+                  here; only the dendrometer branch still carries prose, and
+                  that prose is a stored analytics result, not a sentence the
+                  edge wrote for the screen. */}
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                {environmentSummary.water.action?.reasoning
-                  ?? t('zone.water.subtitle', { defaultValue: 'Daily rain, irrigation, and crop demand summary for this zone.' })}
+                {environmentSummary.water.action?.reasonCode
+                  ? formatWaterReason(t, environmentSummary.water.action.reasonCode)
+                  : environmentSummary.water.action?.reasoning
+                    ?? t('zone.water.subtitle', { defaultValue: 'Daily rain, irrigation, and crop demand summary for this zone.' })}
               </p>
             </div>
             <div className="flex flex-col items-end gap-1 text-xs text-[var(--text-tertiary)]">

@@ -226,6 +226,10 @@
       "reason": {
         "balance_unknown": "Defina a área e a eficiência de rega",
         "forecast_unknown": "Sem previsão de chuva disponível",
+        "supply_covers_demand": "A chuva e a rega cobrem a procura de hoje",
+        "forecast_rain_covers_demand": "A chuva prevista cobre o défice de hoje",
+        "demand_exceeds_supply": "A procura excede a chuva e a rega de hoje",
+        "balance_neutral": "O balanço hídrico está quase equilibrado",
         "default": "A aguardar mais dados"
       },
       "action": {
@@ -333,6 +337,8 @@
     },
     "generatedAt": "Gerado {{time}}",
     "sectionTitle": "Ambiente e previsão do tempo",
+    "loading": "A carregar dados ambientais…",
+    "loadFailed": "Não foi possível carregar os dados ambientais",
     "tabs": {
       "local": "Local",
       "online": "Online",

@@ -223,6 +223,10 @@
       "reason": {
         "balance_unknown": "Set zone area and irrigation efficiency",
         "forecast_unknown": "No rain forecast available",
+        "supply_covers_demand": "Rain and irrigation cover today's demand",
+        "forecast_rain_covers_demand": "Forecast rain covers today's shortfall",
+        "demand_exceeds_supply": "Demand exceeds today's rain and irrigation",
+        "balance_neutral": "Water balance is close to neutral",
         "default": "Waiting for more data"
       },
       "action": {
@@ -330,6 +334,8 @@
     },
     "generatedAt": "Generated {{time}}",
     "sectionTitle": "Environment & weather forecast",
+    "loading": "Loading environment data…",
+    "loadFailed": "Failed to load environment data",
     "tabs": {
       "local": "Local",
       "online": "Online",
