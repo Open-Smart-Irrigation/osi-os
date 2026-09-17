@@ -1152,12 +1152,14 @@ if (sizeAllowances) {
   // expected, permanent state for most of the fleet), skipping the ChirpStack round trip
   // and logging at info level at most once per device-count transition or 30-minute
   // recheck window. No other node changed in this commit.
-  // 33160: 2026-09-17 overnight stabilization T16b (osi-os fix/edge-api-hang-timezone-404,
-  // F31/F31b) raises 28562 by the 4598 chars measured for dendro-tz-fn (verify-flows-size-ratchet
-  // nodeSizes over both byte-identical profiles): 1249 -> 5847. No other node changed in this fix.
-  expectCondition(sizeAllowances.total_allowance?.delta === 33160,
-    'size total allowance: exact cumulative delta 33160',
-    'size total allowance: expected exact cumulative delta 33160');
+  // 34139: 2026-09-17 overnight stabilization T16b (osi-os fix/edge-api-hang-timezone-404)
+  // raises 28562 by the 5577 chars measured across three touched nodes (verify-flows-size-ratchet
+  // nodeSizes over both byte-identical profiles): delete-device-unlink 712 -> 1093 (+381),
+  // delete-device-response 277 -> 875 (+598), dendro-tz-fn 1249 -> 5847 (+4598). No other
+  // node changed in this fix.
+  expectCondition(sizeAllowances.total_allowance?.delta === 34139,
+    'size total allowance: exact cumulative delta 34139',
+    'size total allowance: expected exact cumulative delta 34139');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
