@@ -97,7 +97,7 @@ test('W1: valve boundary hides foreign devices and rejects viewers or disabled u
   }
 });
 
-function expectationMessage(actorUuid = 'u-res1') {
+function expectationMessage(actorUuid = 'u-res1', commandId = 'manual-scope-test') {
   return {
     actor_user_uuid: actorUuid,
     _actorUserUuid: actorUuid,
@@ -107,7 +107,7 @@ function expectationMessage(actorUuid = 'u-res1') {
       duration_minutes: 10,
       device_eui: 'VALVE1',
       zone_id: 1,
-      command_id: 'manual-scope-test',
+      command_id: commandId,
     },
     payload: {
       type: 'actuator_command',
@@ -397,12 +397,23 @@ test('X2: the actor comes only from the verified bearer identity, never from the
 // Before this fix, `if (scopedOn && actorUuid)` skipped the scope check entirely when
 // actorUuid was absent -- exactly the shape of a cloud-dispatched command that never
 // carried one -- so a revoked user could still actuate a valve via the cloud path.
+//
+// F121: this fixture's commandId must be cloud-shaped (a positive-integer string,
+// matching the cloud's CommandAckEntry.commandId Long) for the queued-ack assertion
+// below to mean anything. osi-command-ledger.queueCommandAck's F93 gate
+// (isCloudOriginatedCommandId) classifies a non-numeric commandId as a local,
+// non-cloud-originated action and deliberately never queues it for cloud delivery --
+// so the old 'manual-scope-test' id here (the same shape as a manual GUI/harness
+// action) silently produced zero command_ack_outbox rows, desyncing this test from
+// the fail-closed rejection it's meant to prove reaches the cloud. See the explicit
+// local-id sibling case directly below for the other half of that gate.
 test('E3: a scoped physical command without an actor is rejected fail-closed and never actuates', async () => {
   scopeHelper._resetForTests();
   const db = seedScopedDb();
+  const cloudCommandId = '900101';
   try {
     const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage(null),
+      msg: expectationMessage(null, cloudCommandId),
       env: ENV,
       db,
     });
@@ -413,23 +424,71 @@ test('E3: a scoped physical command without an actor is rejected fail-closed and
     );
     assert.equal(
       db.prepare(
-        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
+        `SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='${cloudCommandId}'`
       ).get().n,
       0,
       'no actuation expectation row may be written -- the command must never actuate'
     );
     const applied = db.prepare(
-      "SELECT result, result_detail FROM applied_commands WHERE command_id='manual-scope-test'"
+      `SELECT result, result_detail FROM applied_commands WHERE command_id='${cloudCommandId}'`
     ).get();
     assert.ok(applied, 'a terminal rejection must still be recorded so a replay is recognized');
     assert.equal(applied.result, 'REJECTED_PERMANENT');
     assert.equal(JSON.parse(applied.result_detail).reason, 'scope_actor_required');
     assert.equal(
       db.prepare(
-        "SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id='manual-scope-test'"
+        `SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id='${cloudCommandId}'`
       ).get().n,
       1,
       'the rejection must be queued for delivery back to the cloud, not silently dropped'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+// F93/F121 explicit sibling: the exact same fail-closed rejection, but for a LOCAL
+// (non-cloud, non-numeric) commandId -- the shape a manual GUI/harness valve action
+// mints on the edge (crypto.randomUUID() fallback), never a cloud-issued integer.
+// queueCommandAck's isCloudOriginatedCommandId gate must still record the terminal
+// rejection in applied_commands (so a replay of the same local action is recognized),
+// but must never queue a command_ack_outbox row for it: the cloud has no way to accept
+// a delivery whose commandId it cannot parse as a Long, and queueing it anyway is
+// exactly the F93 poison (a permanently-stuck retry loop on the whole ack batch).
+test('E3: a scoped physical command without an actor, with a LOCAL commandId, is rejected fail-closed and queues no cloud ack', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  const localCommandId = 'manual-scope-test';
+  try {
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: expectationMessage(null, localCommandId),
+      env: ENV,
+      db,
+    });
+    assert.equal(
+      response.result,
+      null,
+      'an actor-less physical command must never reach the downlink builder wired to this node\'s single output'
+    );
+    assert.equal(
+      db.prepare(
+        `SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='${localCommandId}'`
+      ).get().n,
+      0,
+      'no actuation expectation row may be written -- the command must never actuate'
+    );
+    const applied = db.prepare(
+      `SELECT result, result_detail FROM applied_commands WHERE command_id='${localCommandId}'`
+    ).get();
+    assert.ok(applied, 'a terminal rejection must still be recorded so a replay is recognized');
+    assert.equal(applied.result, 'REJECTED_PERMANENT');
+    assert.equal(JSON.parse(applied.result_detail).reason, 'scope_actor_required');
+    assert.equal(
+      db.prepare(
+        `SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id='${localCommandId}'`
+      ).get().n,
+      0,
+      'F93: a local (non-cloud-numeric) commandId must never produce a command_ack_outbox row'
     );
   } finally {
     db.close();
