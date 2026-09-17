@@ -263,6 +263,11 @@
         "default": "Source de la recommandation"
       },
       "soil": {
+        "titleAtDepth": "Sol maintenant · {{depth}} cm",
+        "titleChannel": "Sol maintenant · {{channel}}",
+        "atTrigger": "Au seuil de déclenchement ou au-delà",
+        "nearTrigger": "Proche du seuil de déclenchement",
+        "belowTrigger": "Sous le seuil de déclenchement",
         "title": "Sol maintenant",
         "wet": "Humide",
         "moderate": "Modéré",

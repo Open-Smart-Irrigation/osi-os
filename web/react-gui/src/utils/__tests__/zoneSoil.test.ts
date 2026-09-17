@@ -22,7 +22,7 @@ describe('summarizeZoneSoil', () => {
     const status = summarizeZoneSoil([], NOW);
     expect(status.hasSensor).toBe(false);
     expect(status.quantity).toBeNull();
-    expect(status.mean).toBeNull();
+    expect(status.value).toBeNull();
   });
 
   it('does not count a valve or a rain gauge as a soil sensor', () => {
@@ -49,16 +49,19 @@ describe('summarizeZoneSoil', () => {
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.hasSensor).toBe(true);
     expect(status.quantity).toBe('tension');
-    expect(status.mean).toBe(45);
+    // The shallowest channel, not the 45 kPa mean of two different depths.
+    expect(status.value).toBe(42);
+    expect(status.channel).toBe('swt_1');
     expect(status.stale).toBe(false);
     expect(status.invalid).toBe(false);
     expect(status.observedAt).toBe(FRESH);
   });
 
-  it('averages canonical and legacy SWT channels and keeps a measured zero', () => {
+  it('reads a legacy SWT alias as its canonical channel and keeps a measured zero', () => {
     const zone = [device({ last_seen: FRESH, latest_data: { swt_wm1: 0, swt_2: 20 } })];
     const status = summarizeZoneSoil(zone, NOW);
-    expect(status.mean).toBe(10);
+    expect(status.value).toBe(0);
+    expect(status.channel).toBe('swt_1');
     expect(status.invalid).toBe(false);
   });
 
@@ -68,7 +71,7 @@ describe('summarizeZoneSoil', () => {
     expect(status.hasSensor).toBe(true);
     expect(status.stale).toBe(true);
     // The last valid value survives so the card can still show it with its timestamp.
-    expect(status.mean).toBe(60);
+    expect(status.value).toBe(60);
     expect(status.observedAt).toBe(STALE);
   });
 
@@ -78,7 +81,7 @@ describe('summarizeZoneSoil', () => {
     expect(status.hasSensor).toBe(true);
     expect(status.stale).toBe(true);
     expect(status.invalid).toBe(false);
-    expect(status.mean).toBeNull();
+    expect(status.value).toBeNull();
     expect(status.observedAt).toBeNull();
   });
 
@@ -86,7 +89,7 @@ describe('summarizeZoneSoil', () => {
     const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 900 } })];
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.invalid).toBe(true);
-    expect(status.mean).toBeNull();
+    expect(status.value).toBeNull();
     expect(status.observedAt).toBe(FRESH);
   });
 
@@ -103,7 +106,7 @@ describe('summarizeZoneSoil', () => {
     })];
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.quantity).toBe('volumetric');
-    expect(status.mean).toBe(30);
+    expect(status.value).toBe(30);
   });
 
   it('prefers tension when a zone carries both kinds', () => {
@@ -113,7 +116,7 @@ describe('summarizeZoneSoil', () => {
     ];
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.quantity).toBe('tension');
-    expect(status.mean).toBe(55);
+    expect(status.value).toBe(55);
   });
 
   it('timestamps the value from the device that supplied it', () => {
@@ -136,5 +139,77 @@ describe('zoneHasFlowMeter', () => {
       device({ type_id: 'STREGA_VALVE' }),
       device({ type_id: 'DRAGINO_LSN50', flow_meter_enabled: 1 }),
     ])).toBe(true);
+  });
+});
+
+describe('summarizeZoneSoil channel selection', () => {
+  it('reports the shallowest configured channel, not a cross-depth mean', () => {
+    // 55.0 and 57.9 kPa at different burial depths became "56.5 kPa" on the
+    // captured screen. A 20 cm and a 60 cm tensiometer answer different
+    // questions and their mean answers neither.
+    const zone = [device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 1,
+      last_seen: FRESH,
+      chameleon_swt1_depth_cm: 60,
+      chameleon_swt2_depth_cm: 20,
+      latest_data: { swt_1: 55, swt_2: 57.9 },
+    })];
+    const status = summarizeZoneSoil(zone, NOW);
+    expect(status.value).toBe(57.9);
+    expect(status.channel).toBe('swt_2');
+    expect(status.depthCm).toBe(20);
+  });
+
+  it('names the channel when no depth is configured', () => {
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 42, swt_2: 48 } })];
+    const status = summarizeZoneSoil(zone, NOW);
+    expect(status.value).toBe(42);
+    expect(status.channel).toBe('swt_1');
+    expect(status.depthCm).toBeNull();
+  });
+
+  it('follows the channel the zone scheduler compares', () => {
+    const zone = [device({
+      last_seen: FRESH,
+      soilMoistureProbeDepths: { swt_1: 20, swt_2: 60 },
+      latest_data: { swt_1: 30, swt_2: 70 },
+    })];
+    const status = summarizeZoneSoil(zone, NOW, 'swt_2');
+    expect(status.value).toBe(70);
+    expect(status.channel).toBe('swt_2');
+    expect(status.depthCm).toBe(60);
+  });
+
+  it('pools every channel when the scheduler triggers on the mean', () => {
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 40, swt_2: 60 } })];
+    const status = summarizeZoneSoil(zone, NOW, 'mean');
+    expect(status.value).toBe(50);
+    expect(status.channel).toBe('mean');
+    expect(status.depthCm).toBeNull();
+  });
+
+  it('averages one channel across every sensor in the zone, as the scheduler does', () => {
+    const zone = [
+      device({ deveui: 'A1', last_seen: FRESH, latest_data: { swt_1: 40 } }),
+      device({ deveui: 'A2', last_seen: FRESH, latest_data: { swt_1: 60 } }),
+    ];
+    const status = summarizeZoneSoil(zone, NOW, 'swt_1');
+    expect(status.value).toBe(50);
+  });
+
+  it('skips a channel with no usable reading rather than reporting nothing', () => {
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 900, swt_2: 40 } })];
+    const status = summarizeZoneSoil(zone, NOW);
+    expect(status.value).toBe(40);
+    expect(status.channel).toBe('swt_2');
+    expect(status.invalid).toBe(false);
+  });
+
+  it('falls back to the requested channel being absent', () => {
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 35 } })];
+    const status = summarizeZoneSoil(zone, NOW, 'swt_3');
+    expect(status.value).toBe(35);
+    expect(status.channel).toBe('swt_1');
   });
 });

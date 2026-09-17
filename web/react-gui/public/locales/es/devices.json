@@ -263,6 +263,11 @@
         "default": "Origen de la recomendación"
       },
       "soil": {
+        "titleAtDepth": "Suelo ahora · {{depth}} cm",
+        "titleChannel": "Suelo ahora · {{channel}}",
+        "atTrigger": "En el umbral de activación o por encima",
+        "nearTrigger": "Cerca del umbral de activación",
+        "belowTrigger": "Por debajo del umbral de activación",
         "title": "Suelo ahora",
         "wet": "Húmedo",
         "moderate": "Moderado",

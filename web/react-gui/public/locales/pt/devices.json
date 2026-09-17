@@ -263,6 +263,11 @@
         "default": "Origem da recomendação"
       },
       "soil": {
+        "titleAtDepth": "Solo agora · {{depth}} cm",
+        "titleChannel": "Solo agora · {{channel}}",
+        "atTrigger": "No limiar de ativação ou acima",
+        "nearTrigger": "Perto do limiar de ativação",
+        "belowTrigger": "Abaixo do limiar de ativação",
         "title": "Solo agora",
         "wet": "Húmido",
         "moderate": "Moderado",

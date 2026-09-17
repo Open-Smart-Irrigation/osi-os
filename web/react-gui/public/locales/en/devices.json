@@ -260,6 +260,11 @@
         "default": "Recommendation source"
       },
       "soil": {
+        "titleAtDepth": "Soil now · {{depth}} cm",
+        "titleChannel": "Soil now · {{channel}}",
+        "atTrigger": "At or past the trigger",
+        "nearTrigger": "Approaching the trigger",
+        "belowTrigger": "Below the trigger",
         "title": "Soil now",
         "wet": "Wet",
         "moderate": "Moderate",

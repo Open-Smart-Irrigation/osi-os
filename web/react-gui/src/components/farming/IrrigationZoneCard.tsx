@@ -10,7 +10,7 @@ import { SenseCapWeatherCard } from './SenseCapWeatherCard';
 import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { Sdi12SoilCard } from './Sdi12SoilCard';
 import { Sdi12SettingsModal } from './Sdi12SettingsModal';
-import { ScheduleSection } from './ScheduleSection';
+import { ScheduleSection, normalizeTriggerMetric } from './ScheduleSection';
 import { ZoneDeviceModal } from './ZoneDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
@@ -20,7 +20,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { formatSwtValue } from '../../utils/swt';
-import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge } from '../../utils/zoneSoil';
+import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge, type SoilChannelSelection } from '../../utils/zoneSoil';
 import { useDateFormat } from '../../utils/datetime';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
@@ -122,6 +122,29 @@ function formatDisplayMode(t: Translate, mode: string | null | undefined): strin
     : t('zone.water.source.default', { defaultValue: 'Recommendation source' });
 }
 
+/**
+ * Which soil channel the zone's scheduler compares. `threshold_kpa` carries an
+ * encoded 1-4 stress level when the metric is DENDRO, and VWC has no edge
+ * telemetry column at all, so neither is a tension the soil reading can be
+ * judged against.
+ */
+function triggerChannelOf(metric: string | null | undefined): SoilChannelSelection | null {
+  switch (metric) {
+    case 'SWT_1': return 'swt_1';
+    case 'SWT_2': return 'swt_2';
+    case 'SWT_3': return 'swt_3';
+    case 'SWT_AVG': return 'mean';
+    default: return null;
+  }
+}
+
+const CHANNEL_METRIC: Record<string, string> = { swt_1: 'SWT_1', swt_2: 'SWT_2', swt_3: 'SWT_3' };
+
+function formatSoilChannel(t: Translate, channel: SoilChannelSelection): string {
+  const metric = CHANNEL_METRIC[channel] ?? 'SWT_AVG';
+  return t(`schedule.metric.${metric}`, { defaultValue: metric === 'SWT_AVG' ? 'Mean (all sensors)' : `Sensor ${metric.slice(-1)}` });
+}
+
 function formatScheduleMetric(t: Translate, metric: string): string {
   const fallback = SCHEDULE_METRIC_LABELS[metric];
   return fallback
@@ -207,7 +230,14 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const schedEnabled = zone.schedule?.enabled ?? false;
   const cropType = zone.cropType;
   const soilType = zone.soilType;
-  const soilNow = summarizeZoneSoil(devices);
+  // The card, the trigger form and the scheduler must all be talking about the
+  // same channel: one screen used to say "56.5 kPa · Moderate" above a form
+  // that read "Irrigate when Sensor 1 exceeds 30 kPa".
+  const triggerChannel = zone.schedule ? triggerChannelOf(normalizeTriggerMetric(schedMetric)) : null;
+  const triggerThresholdKpa = triggerChannel !== null
+    ? Number(zone.schedule?.thresholdKpa ?? zone.schedule?.threshold_kpa)
+    : Number.NaN;
+  const soilNow = summarizeZoneSoil(devices, Date.now(), triggerChannel);
   const hasFlowMeter = zoneHasFlowMeter(devices);
   const hasRainGauge = zoneHasRainGauge(devices) || (environmentSummary?.water.sensorHealth.rainGaugePresent ?? false);
   const hasForecastRain = environmentSummary?.water.next24hRainMm != null;
@@ -215,23 +245,45 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const waterTileCount = 1 + (hasRainGauge ? 1 : 0) + (hasFlowMeter ? 1 : 0) + (hasForecastRain ? 1 : 0);
   const showZoneDataLink = !isDesktopBrowser();
 
-  const soilValue = soilNow.mean === null
+  const soilValue = soilNow.value === null
     ? null
     : soilNow.quantity === 'tension'
-      ? formatSwtValue(soilNow.mean, swtUnit)
-      : `${soilNow.mean.toFixed(1)} %`;
-  // Wet/Moderate/Dry is a kPa bucketing (utils/swt.ts); there is no reviewed
-  // equivalent for volumetric water content, so that path names the quantity
-  // instead of inventing thresholds for it.
+      ? formatSwtValue(soilNow.value, swtUnit)
+      : `${soilNow.value.toFixed(1)} %`;
+  // Which channel the number came from: its depth when the installation
+  // recorded one, otherwise the channel's own name. A cross-depth mean names
+  // nothing, which is why it is no longer reported.
+  const soilTitle = soilNow.depthCm != null
+    ? t('zone.water.soil.titleAtDepth', {
+        depth: soilNow.depthCm,
+        defaultValue: 'Soil now · {{depth}} cm',
+      })
+    : soilNow.channel != null && soilNow.channel !== 'mean'
+      ? t('zone.water.soil.titleChannel', {
+          channel: formatSoilChannel(t, soilNow.channel),
+          defaultValue: 'Soil now · {{channel}}',
+        })
+      : t('zone.water.soil.title', { defaultValue: 'Soil now' });
+  // Judged against the zone's own trigger where there is one. The absolute
+  // Wet/Moderate/Dry bucketing (utils/swt.ts) is identical for every crop and
+  // every soil, and it called a reading "Moderate" that would open the valve
+  // the same night. There is no reviewed equivalent for volumetric water
+  // content, so that path names the quantity instead of inventing thresholds.
   const soilDescriptor = soilNow.quantity === 'volumetric'
     ? t('zone.water.soil.volumetric', { defaultValue: 'Volumetric water content' })
-    : soilNow.mean === null
+    : soilNow.value === null
       ? null
-      : soilNow.mean < 20
-        ? t('zone.water.soil.wet', { defaultValue: 'Wet' })
-        : soilNow.mean < 60
-          ? t('zone.water.soil.moderate', { defaultValue: 'Moderate' })
-          : t('zone.water.soil.dry', { defaultValue: 'Dry' });
+      : Number.isFinite(triggerThresholdKpa) && triggerThresholdKpa > 0
+        ? soilNow.value >= triggerThresholdKpa
+          ? t('zone.water.soil.atTrigger', { defaultValue: 'At or past the trigger' })
+          : soilNow.value >= triggerThresholdKpa * 0.8
+            ? t('zone.water.soil.nearTrigger', { defaultValue: 'Approaching the trigger' })
+            : t('zone.water.soil.belowTrigger', { defaultValue: 'Below the trigger' })
+        : soilNow.value < 20
+          ? t('zone.water.soil.wet', { defaultValue: 'Wet' })
+          : soilNow.value < 60
+            ? t('zone.water.soil.moderate', { defaultValue: 'Moderate' })
+            : t('zone.water.soil.dry', { defaultValue: 'Dry' });
   const soilObservedRelative = dateFormat.relativeToNow(soilNow.observedAt);
   const soilStatusLine = soilNow.invalid
     ? t('zone.water.soil.invalidReading', { defaultValue: 'Invalid reading' })
@@ -498,7 +550,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             {soilNow.hasSensor && (
               <div data-testid="water-soil-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                  {t('zone.water.soil.title', { defaultValue: 'Soil now' })}
+                  {soilTitle}
                 </p>
                 <p className="mt-1 text-lg font-semibold text-[var(--text)]">
                   {soilStatusLine === null ? soilValue ?? '—' : '—'}

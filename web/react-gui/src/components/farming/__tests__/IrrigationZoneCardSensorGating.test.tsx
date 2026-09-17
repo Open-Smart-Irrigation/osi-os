@@ -133,7 +133,9 @@ describe('water card sensor gating', () => {
     await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2, swt_2: 44.8 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('45.0 kPa');
+    // The channel it came from, not the 45.0 kPa mean of two burial depths.
+    expect(tile).toHaveTextContent('Soil now · Sensor 1');
+    expect(tile).toHaveTextContent('45.2 kPa');
     expect(tile).toHaveTextContent('Moderate');
     expect(tile).not.toHaveTextContent('No reading since');
   });
@@ -374,5 +376,85 @@ describe('water card reason line', () => {
     await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
 
     expect(screen.getByTestId('water-today-card')).toHaveTextContent('Stress rose for three consecutive days.');
+  });
+});
+
+describe('soil tile channel and verdict', () => {
+  const scheduledZone = {
+    ...zone,
+    schedule: { irrigation_zone_id: 12, trigger_metric: 'SWT_1', threshold_kpa: 30, enabled: true },
+  } as IrrigationZone;
+
+  async function openScheduled(devices: Device[]) {
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={scheduledZone} devices={devices} unassignedDevices={[]} onUpdate={vi.fn()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+    await screen.findByTestId('water-today-card');
+  }
+
+  it('reports the channel the scheduler triggers on, with its depth', async () => {
+    await openScheduled([sensor({
+      last_seen: FRESH,
+      soilMoistureProbeDepths: { swt_1: 20, swt_2: 60 },
+      latest_data: { swt_1: 56.5, swt_2: 20 },
+    })]);
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Soil now · 20 cm');
+    expect(tile).toHaveTextContent('56.5 kPa');
+  });
+
+  it('judges the reading against the zone trigger, not a global bucket', async () => {
+    // 56.5 kPa against a 30 kPa trigger: the valve opens tonight, and the card
+    // used to call the same reading "Moderate".
+    await openScheduled([sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]);
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('At or past the trigger');
+    expect(tile).not.toHaveTextContent('Moderate');
+  });
+
+  it('says a reading is approaching the trigger within 20 percent of it', async () => {
+    await openScheduled([sensor({ last_seen: FRESH, latest_data: { swt_1: 26 } })]);
+
+    expect(screen.getByTestId('water-soil-tile')).toHaveTextContent('Approaching the trigger');
+  });
+
+  it('says a reading is below the trigger', async () => {
+    await openScheduled([sensor({ last_seen: FRESH, latest_data: { swt_1: 10 } })]);
+
+    expect(screen.getByTestId('water-soil-tile')).toHaveTextContent('Below the trigger');
+  });
+
+  it('keeps the absolute buckets for a zone with no schedule', async () => {
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]);
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).not.toHaveTextContent('trigger');
+  });
+
+  it('does not compare a dendrometer stress level against a kPa reading', async () => {
+    // threshold_kpa carries an encoded 1-4 stress level when the metric is
+    // DENDRO, so it is not a tension the soil reading can be judged against.
+    const dendroZone = {
+      ...zone,
+      schedule: { irrigation_zone_id: 12, trigger_metric: 'DENDRO', threshold_kpa: 2, enabled: true },
+    } as IrrigationZone;
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={dendroZone} devices={[sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]} unassignedDevices={[]} onUpdate={vi.fn()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    await screen.findByTestId('water-today-card');
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).not.toHaveTextContent('trigger');
   });
 });
