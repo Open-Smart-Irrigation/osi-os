@@ -81,7 +81,13 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
 // per key; a human Luganda pass must remove the key from this set when it
 // lands.
 const PENDING_HUMAN_TRANSLATION: Partial<Record<Locale, ReadonlySet<string>>> = {
-  lg: new Set(['warning.message']),
+  lg: new Set([
+    'warning.message',
+    'rejected.title',
+    'rejected.count',
+    'rejected.lastReason',
+    'reauth.detected',
+  ]),
 };
 
 function isReviewedIdentical(locale: Locale, key: string): boolean {

@@ -57,6 +57,11 @@
     "pendingAfterResponse": "L'application locale se poursuit après le retour de cette réponse.",
     "lastError": "Dernière erreur de {{source}} : {{message}}"
   },
+  "rejected": {
+    "title": "Refusé par OSI Server",
+    "count": "{{total}} mise(s) à jour ont été définitivement refusées et ne seront pas réessayées ({{last24h}} au cours des dernières 24 heures).",
+    "lastReason": "Plus récent : {{op}} refusé pour {{reason}} le {{date}}"
+  },
   "reauth": {
     "title": "Jeton de synchronisation expiré",
     "description": "Authentifiez-vous à nouveau auprès d'OSI Server pour générer un nouveau jeton de synchronisation pour cette passerelle.",
@@ -64,6 +69,7 @@
     "username": "Nom d'utilisateur serveur",
     "password": "Mot de passe OSI Server",
     "submit": "Actualiser la connexion",
-    "running": "Actualisation..."
+    "running": "Actualisation...",
+    "detected": "La liaison avec le cloud doit être réauthentifiée. La dernière tentative de synchronisation a été refusée avec HTTP {{statusCode}}."
   }
 }

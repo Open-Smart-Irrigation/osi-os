@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { accountLinkAPI } from '../services/api';
-import type { AccountLinkStatus, AccountLinkResult, ForceSyncResult } from '../services/api';
+import { accountLinkAPI, isSyncTokenAuthFailure } from '../services/api';
+import type { AccountLinkStatus, AccountLinkResult, ForceSyncResult, SyncStateSummary } from '../services/api';
 
 export const AccountLink: React.FC = () => {
   const { t } = useTranslation('accountLink');
@@ -30,12 +30,21 @@ export const AccountLink: React.FC = () => {
   const [showReauth, setShowReauth] = useState(false);
   const [reauthPassword, setReauthPassword] = useState('');
   const [reauthSubmitting, setReauthSubmitting] = useState(false);
+  const [syncState, setSyncState] = useState<SyncStateSummary | null>(null);
+
+  // On a scoped-access gateway GET /api/sync/state is admin-only, so a 403 here is
+  // an expected outcome for a non-admin, not an error worth showing: the panels it
+  // feeds simply stay hidden.
+  const refreshSyncState = () => accountLinkAPI.getSyncState()
+    .then(setSyncState)
+    .catch(() => setSyncState(null));
 
   useEffect(() => {
     accountLinkAPI.getStatus()
       .then(setStatus)
       .catch(() => setStatus({ linked: false, serverUsername: null, linkedAt: null }))
       .finally(() => setLoadingStatus(false));
+    void refreshSyncState();
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -98,6 +107,7 @@ export const AccountLink: React.FC = () => {
     try {
       const res = await accountLinkAPI.forceSync();
       setForceSyncResult(res);
+      await refreshSyncState();
     } catch (err: any) {
       setError(err.response?.data?.error || err.response?.data?.message || t('errors.forceSyncFailed'));
     } finally {
@@ -130,6 +140,7 @@ export const AccountLink: React.FC = () => {
         linkedAt: new Date().toISOString(),
         serverUrl: status.serverUrl,
       });
+      await refreshSyncState();
     } catch (err: any) {
       const code = err.response?.status;
       if (code === 401) {
@@ -144,16 +155,26 @@ export const AccountLink: React.FC = () => {
     }
   };
 
+  // A 401/403 on the sync/refresh path means the 7-day sync token expired while the
+  // gateway was offline; it is only refreshed while still valid, so nothing recovers
+  // on its own. MQTT telemetry keeps flowing and hides the outage, so this has to be
+  // visible without the operator first guessing to press "Force sync now".
+  const passiveReauth = isSyncTokenAuthFailure(syncState?.lastError);
   const needsReauth = Boolean(
     status?.linked &&
     status.serverUsername &&
     status.serverUrl &&
-    forceSyncResult &&
-    !forceSyncResult.success &&
     (
-      forceSyncResult.refresh.statusCode === 401 ||
-      forceSyncResult.refresh.statusCode === 403 ||
-      forceSyncResult.lastError?.source === 'sync-token-refresh'
+      passiveReauth ||
+      (
+        forceSyncResult &&
+        !forceSyncResult.success &&
+        (
+          forceSyncResult.refresh.statusCode === 401 ||
+          forceSyncResult.refresh.statusCode === 403 ||
+          forceSyncResult.lastError?.source === 'sync-token-refresh'
+        )
+      )
     )
   );
 
@@ -292,12 +313,38 @@ export const AccountLink: React.FC = () => {
                 )}
               </div>
 
+              {syncState && syncState.rejectedOutboxCount > 0 && (
+                <div className="bg-[var(--secondary-bg)] rounded-lg p-4 mb-6" data-testid="sync-rejected-panel">
+                  <p className="text-[var(--text)] font-semibold">{t('rejected.title')}</p>
+                  <p className="text-[var(--text-secondary)] text-sm mt-1">
+                    {t('rejected.count', {
+                      total: syncState.rejectedOutboxCount,
+                      last24h: syncState.rejectedLast24h,
+                    })}
+                  </p>
+                  {syncState.lastRejection && (
+                    <p className="text-[var(--text-secondary)] text-sm mt-1 break-words">
+                      {t('rejected.lastReason', {
+                        op: syncState.lastRejection.op || '-',
+                        reason: syncState.lastRejection.reason || '-',
+                        date: new Date(syncState.lastRejection.at).toLocaleString(),
+                      })}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {needsReauth && (
                 <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-6">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
                       <p className="font-bold text-yellow-800">{t('reauth.title')}</p>
                       <p className="text-yellow-700 text-sm mt-1">{t('reauth.description')}</p>
+                      {passiveReauth && syncState?.lastError && (
+                        <p className="text-yellow-800 text-sm mt-2 font-semibold" data-testid="sync-reauth-detected">
+                          {t('reauth.detected', { statusCode: syncState.lastError.statusCode ?? '' })}
+                        </p>
+                      )}
                     </div>
                     {!showReauth && (
                       <button

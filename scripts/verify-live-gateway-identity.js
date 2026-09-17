@@ -1065,9 +1065,12 @@ if (silentCatchBaseline) {
   // run-full2/ST1.md) -- dendro-tz-fn's close() catch(_){} converted to a
   // visible node.warn while adding real verifyBearer + shared timezone
   // validation to the same node: 89 -> 88.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 88 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 88,
-    'silent-catch baseline records 88 for both maintained profiles',
-    'silent-catch baseline must be 88 for both maintained profiles');
+  // 87: sync-health honesty (fix/sync-health-honesty) -- sync-outbox-mark's error-path
+  // DB-close catch(_){} gains a visible node.warn while the node stops counting terminally
+  // rejected events as delivery successes: 88 -> 87.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 87 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 87,
+    'silent-catch baseline records 87 for both maintained profiles',
+    'silent-catch baseline must be 87 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
@@ -1086,7 +1089,12 @@ if (sizeAllowances) {
     'sync-pending-build': 1344,
     'sync-force-build': 5786,
     'command-ack-build-batch': 975,
-    'sync-state-build': 1089,
+    // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
+    // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded
+    // from the pending count, so rejection_reason was read by nothing and an unbounded
+    // rejected backlog was invisible to every operator surface. Measured +1144 for this node;
+    // the live-identity provenance this guard checks for is carried forward in the reason.
+    'sync-state-build': 1144,
     'al-link-build-req': 2511,
     'al-link-restart-node-red': 1761,
     'al-unlink-restart-node-red': 1773,

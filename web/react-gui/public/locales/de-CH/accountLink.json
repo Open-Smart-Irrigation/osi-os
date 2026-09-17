@@ -57,6 +57,11 @@
     "pendingAfterResponse": "Die lokale Anwendung wird fortgesetzt, nachdem diese Antwort zurückkommt.",
     "lastError": "Letzter Fehler von {{source}}: {{message}}"
   },
+  "rejected": {
+    "title": "Von OSI Server abgelehnt",
+    "count": "{{total}} Aktualisierung(en) wurden endgültig abgelehnt und werden nicht erneut gesendet ({{last24h}} in den letzten 24 Stunden).",
+    "lastReason": "Zuletzt: {{op}} abgelehnt wegen {{reason}} am {{date}}"
+  },
   "reauth": {
     "title": "Sync-Token abgelaufen",
     "description": "Authentifizieren Sie sich erneut bei OSI Server, um ein neues Sync-Token für dieses Gateway auszustellen.",
@@ -64,6 +69,7 @@
     "username": "Server-Benutzername",
     "password": "OSI Server-Passwort",
     "submit": "Verbindung aktualisieren",
-    "running": "Wird aktualisiert..."
+    "running": "Wird aktualisiert...",
+    "detected": "Die Cloud-Verbindung muss neu angemeldet werden. Der letzte Synchronisierungsversuch wurde mit HTTP {{statusCode}} abgewiesen."
   }
 }

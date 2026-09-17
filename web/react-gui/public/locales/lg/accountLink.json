@@ -57,6 +57,11 @@
     "pendingAfterResponse": "Okukozesa mu kitundu kugenda mu maaso oluvannyuma lw'okuddamu kuno.",
     "lastError": "Ensobi esembayo okuva ku {{source}}: {{message}}"
   },
+  "rejected": {
+    "title": "Rejected by OSI Server",
+    "count": "{{total}} update(s) were permanently rejected and will not be retried ({{last24h}} in the last 24 hours).",
+    "lastReason": "Most recent: {{op}} rejected as {{reason}} on {{date}}"
+  },
   "reauth": {
     "title": "Token y'okusinkroniza ewedde ekiseera",
     "description": "Yingira nate ku OSI Server okufuna token empya ey'okusinkroniza eya Gateway eno.",
@@ -64,6 +69,7 @@
     "username": "Erinnya ery'omukozesa ku server",
     "password": "Ekigambo ky'okulinda ekya OSI Server",
     "submit": "Zzaawo Okuyunga",
-    "running": "Kirimu okuzzaawo..."
+    "running": "Kirimu okuzzaawo...",
+    "detected": "Cloud link needs re-authentication. The last sync attempt was refused with HTTP {{statusCode}}."
   }
 }

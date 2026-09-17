@@ -1301,12 +1301,53 @@ export interface ForceSyncResult {
   } | null;
 }
 
+export interface SyncLastError {
+  source: string;
+  message: string;
+  statusCode?: number | null;
+  at?: string | null;
+}
+
+export interface SyncStateSummary {
+  pendingOutboxCount: number;
+  rejectedOutboxCount: number;
+  rejectedLast24h: number;
+  lastRejection: { at: string; op: string | null; reason: string | null } | null;
+  lastOutboxDeliverySuccessAt: string | null;
+  lastError: SyncLastError | null;
+}
+
+// Every lastError source that carries the gateway's cloud sync token. A 401/403
+// from any of them means the 7-day sync token has expired (it is only refreshed
+// while still valid, so an outage longer than its lifetime is terminal) and the
+// gateway needs an interactive re-authentication. MQTT telemetry keeps flowing
+// throughout, which is exactly why this has to be surfaced explicitly.
+export const SYNC_TOKEN_ERROR_SOURCES: readonly string[] = [
+  'sync-token-refresh',
+  'outbox',
+  'bootstrap',
+  'pending-commands',
+  'history-build',
+  'history-mark',
+  'history-batch',
+  'history-ack',
+  'history-shadow-ack',
+];
+
+export function isSyncTokenAuthFailure(lastError: SyncLastError | null | undefined): boolean {
+  if (!lastError) return false;
+  const status = lastError.statusCode;
+  if (status !== 401 && status !== 403) return false;
+  return SYNC_TOKEN_ERROR_SOURCES.includes(lastError.source);
+}
+
 export const accountLinkAPI = {
   getStatus: () => api.get<AccountLinkStatus>('/api/account-link/status').then(r => r.data),
   link: (req: AccountLinkRequest) =>
     api.post<AccountLinkResult>('/api/account-link', req).then(r => r.data),
   unlink: () => api.delete('/api/account-link'),
   forceSync: () => api.post<ForceSyncResult>('/api/sync/force').then(r => r.data),
+  getSyncState: () => api.get<SyncStateSummary>('/api/sync/state').then(r => r.data),
 };
 
 export const environmentAPI = {
