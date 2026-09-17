@@ -144,10 +144,21 @@ function makeDb() {
   return { db, directory };
 }
 
+// F93 (2026-09-17): commandId must be cloud-shaped (a positive integer, matching
+// the cloud's CommandAckEntry.commandId Long) for any case that reaches
+// queueVerifiedAck / osiCommandLedger.queueCommandAck expecting a durable
+// command_ack_outbox row. queueCommandAck now classifies a non-numeric
+// commandId (e.g. the descriptive `${type}-command` strings this fixture used
+// before) as a local, non-cloud-originated action and deliberately never
+// queues it for cloud delivery -- so a fixture using string ids for what is
+// meant to represent a real cloud-dispatched command would silently produce
+// no outbox row and desync this test from the pipeline it exercises.
+let nextCloudCommandId = 900001;
+
 function command(type, fields) {
   return Object.assign({
     commandType: type,
-    commandId: `${type}-command`,
+    commandId: nextCloudCommandId++,
     eventUuid: `${type}-event`,
     aggregateType: type === 'UPSERT_SCHEDULE' ? 'IRRIGATION_SCHEDULE' : 'DEVICE',
     aggregateKey: type === 'UPSERT_SCHEDULE' ? 'zone-a' : 'AABBCCDDEEFF0011',
@@ -234,7 +245,7 @@ async function runCases() {
     expectSuccess(scheduled, { commandId: schedule.commandId });
     const queuedSchedule = await queueVerifiedAck(temporary.db, scheduled.ack);
     assert.strictEqual(queuedSchedule.topic, 'devices/AABBCCDDEEFF0011/command_ack');
-    const durableSchedule = JSON.parse(rows(temporary.db, "SELECT payload_json FROM command_ack_outbox WHERE command_id='UPSERT_SCHEDULE-command'" )[0].payload_json);
+    const durableSchedule = JSON.parse(rows(temporary.db, `SELECT payload_json FROM command_ack_outbox WHERE command_id='${schedule.commandId}'`)[0].payload_json);
     const mqttSchedule = JSON.parse(queuedSchedule.payload);
     assert.deepStrictEqual(mqttSchedule, durableSchedule);
     assert.deepStrictEqual({
@@ -256,6 +267,32 @@ async function runCases() {
     });
     expectSuccess(applyAndVerify(temporary.db, schedule), { commandId: schedule.commandId });
     assert.deepStrictEqual(rows(temporary.db, 'SELECT trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version FROM irrigation_schedules'), [{ trigger_metric: 'SWT_WM1', threshold_kpa: 17.5, duration_minutes: 12, enabled: 1, response_mode: 'proportional', sync_version: 4 }]);
+
+    // F93 explicit coverage: a LOCAL (non-cloud) commandId must go through this
+    // same postcondition-verified apply + ACK build + queue pipeline (ROUTER ->
+    // POSTCONDITION -> VERIFY -> ACK -> ACK_QUEUE) without ever producing a
+    // cloud command_ack_outbox row, while still recording its own local ledger
+    // entry in applied_commands (osi-command-ledger.queueCommandAck's gate).
+    const localCommandId = 'local-harness-43526a1e-a3e9-441c-97ea-8dca6f4b6696';
+    const localSchedule = command('UPSERT_SCHEDULE', {
+      commandId: localCommandId, zoneUuid: 'zone-a', triggerMetric: 'SWT_WM1', thresholdKpa: 17.5,
+      durationMinutes: 12, enabled: true, responseMode: 'proportional'
+    });
+    const localScheduled = applyAndVerify(temporary.db, localSchedule);
+    expectSuccess(localScheduled, { commandId: localCommandId });
+    const queuedLocalSchedule = await queueVerifiedAck(temporary.db, localScheduled.ack);
+    assert.strictEqual(queuedLocalSchedule.topic, 'devices/AABBCCDDEEFF0011/command_ack');
+    assert.strictEqual(
+      rows(temporary.db, `SELECT COUNT(*) AS count FROM command_ack_outbox WHERE command_id='${localCommandId}'`)[0].count,
+      0,
+      'F93: a local (non-cloud-numeric) commandId must never produce a command_ack_outbox row'
+    );
+    assert.strictEqual(
+      rows(temporary.db, `SELECT result FROM applied_commands WHERE command_id='${localCommandId}'`)[0].result,
+      'APPLIED',
+      'a local action still keeps its local ledger entry (applied_commands)'
+    );
+
     const updateSchedule = command('UPDATE_SCHEDULE', {
       zoneUuid: 'zone-a', triggerMetric: 'SWT_WM2', thresholdKpa: 18.5,
       durationMinutes: 13, enabled: false, responseMode: 'fixed', appliedSyncVersion: 5
@@ -310,7 +347,7 @@ async function runCases() {
     const applyError = applyAndVerify(temporary.db, Object.assign({}, assign, { deviceEui: 'AABBCCDDEEFF0011', appliedSyncVersion: 10 }));
     assert.strictEqual(applyError.ack, null, 'apply SQL errors must not publish an ACK');
     assert(applyError.applyError, 'expected the real SQLite apply error');
-    assert.strictEqual(rows(temporary.db, "SELECT COUNT(*) AS count FROM command_ack_outbox WHERE command_id='ASSIGN_DEVICE_TO_ZONE-command'")[0].count, 0, 'apply SQL errors must create zero durable ACK rows');
+    assert.strictEqual(rows(temporary.db, `SELECT COUNT(*) AS count FROM command_ack_outbox WHERE command_id='${assign.commandId}'`)[0].count, 0, 'apply SQL errors must create zero durable ACK rows');
   } finally {
     fs.rmSync(temporary.directory, { recursive: true, force: true });
   }
