@@ -1032,6 +1032,104 @@ test('F6: database download remains disabled after the admin guard', async () =>
   }
 });
 
+function unauthenticatedRequest(method, path, params = {}, body = {}) {
+  return {
+    req: { method, path, params, query: {}, headers: {}, body },
+    payload: {},
+  };
+}
+
+const FLAG_OFF_ENV = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' };
+
+test('T16c: GET /api/system/stats requires a bearer token when OSI_SCOPED_ACCESS is off', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const denied = await executeFunction(loadNode('system-stats-admin-read-guard'), {
+      msg: unauthenticatedRequest('GET', '/api/system/stats'),
+      env: FLAG_OFF_ENV,
+      globals: { fs: TEST_FS, os: TEST_OS },
+      db,
+    });
+    const deniedMsg = responseMessage(denied.result);
+    assert.equal(deniedMsg && deniedMsg.statusCode, 401, 'no token must be rejected with 401');
+
+    // A valid bearer token (any authenticated user -- flag-off has no role
+    // check, matching every other authenticated GET such as api-me-auth)
+    // must pass the guard and reach the real System Stats handler, which
+    // responds 200.
+    const guarded = await executeFunction(loadNode('system-stats-admin-read-guard'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/system/stats'),
+      env: FLAG_OFF_ENV,
+      globals: { fs: TEST_FS, os: TEST_OS },
+      db,
+    });
+    const passedMsg = Array.isArray(guarded.result) && guarded.result[0];
+    assert.ok(passedMsg, 'a valid token must reach the guard\'s success output');
+    const stats = await executeFunction(loadNode('sys-stats-fn'), {
+      msg: passedMsg,
+      env: FLAG_OFF_ENV,
+      globals: { fs: TEST_FS, os: TEST_OS },
+      db,
+    });
+    assert.equal(stats.result && stats.result.statusCode, 200);
+  } finally {
+    db.close();
+  }
+});
+
+test('T16c: GET /api/system/stats scoped-mode admin/read rule is unchanged', async () => {
+  for (const testCase of [
+    { userId: 2, username: 'res1', expectForbidden: true, label: 'researcher' },
+    { userId: 1, username: 'admin1', expectForbidden: false, label: 'admin' },
+  ]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    try {
+      const response = await executeFunction(loadNode('system-stats-admin-read-guard'), {
+        msg: historyRequest(testCase.userId, testCase.username, 'GET', '/api/system/stats'),
+        env: ENV,
+        globals: { fs: TEST_FS, os: TEST_OS },
+        db,
+      });
+      const message = responseMessage(response.result);
+      if (testCase.expectForbidden) {
+        assert.equal(message && message.statusCode, 403, `${testCase.label} must still be rejected in scoped mode`);
+      } else {
+        assert.ok(!message || message.statusCode !== 403, `${testCase.label} must still pass the scoped admin guard`);
+      }
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('T16c: GET /download-fieldtest requires a bearer token when OSI_SCOPED_ACCESS is off', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const denied = await executeFunction(loadNode('fieldtest-download-admin-read-guard'), {
+      msg: unauthenticatedRequest('GET', '/download-fieldtest'),
+      env: FLAG_OFF_ENV,
+      globals: { fs: TEST_FS, os: TEST_OS },
+      db,
+    });
+    const deniedMsg = responseMessage(denied.result);
+    assert.equal(deniedMsg && deniedMsg.statusCode, 401, 'no token must be rejected with 401');
+
+    const guarded = await executeFunction(loadNode('fieldtest-download-admin-read-guard'), {
+      msg: historyRequest(2, 'res1', 'GET', '/download-fieldtest'),
+      env: FLAG_OFF_ENV,
+      globals: { fs: TEST_FS, os: TEST_OS },
+      db,
+    });
+    const passedMsg = Array.isArray(guarded.result) && guarded.result[0];
+    assert.ok(passedMsg, 'a valid token must reach the guard\'s success output (the CSV export handler downstream)');
+  } finally {
+    db.close();
+  }
+});
+
 test('F7: catalog is available to every enabled authenticated role', async () => {
   scopeHelper._resetForTests();
   const db = seedScopedDb();
@@ -1243,7 +1341,22 @@ test('F7: recent actuations are account-wide, not owned-plus-granted only', asyn
   }
 });
 
-test('F6: flag-off field-test and system-stat routes remain unauthenticated', async () => {
+// T16c: this used to be named "...routes remain unauthenticated" and treated
+// that as the intended behavior. It is not -- the field-test/system-stats
+// *routes* were unauthenticated because system-stats-admin-read-guard and
+// fieldtest-download-admin-read-guard were bare `return [msg, null]`
+// pass-throughs whenever OSI_SCOPED_ACCESS was off (the default on every
+// gateway), so GET /api/system/stats and GET /download-fieldtest leaked CPU
+// temp/mem/load/fan state/restartPending and raw field-test radio telemetry
+// to any anonymous caller on port 1880. Both guards now require a valid
+// bearer token on the flag-off path too (see the T16c tests above). What
+// this test actually exercises -- and what remains true and correct by
+// design -- is that the two *leaf* handler nodes below never gated on auth
+// themselves; they trust the guard wired in front of them in flows.json to
+// have already authenticated the caller, matching the guard/handler split
+// used throughout this file (e.g. history-api-router-fn's own routing vs.
+// its downstream handlers).
+test('F6: system-stats/field-test leaf handlers trust their upstream admin-read-guard for auth', async () => {
   for (const nodeId of ['fn_build_sql_params', 'sys-stats-fn']) {
     const db = seedScopedDb();
     try {
