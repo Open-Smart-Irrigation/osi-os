@@ -290,6 +290,22 @@ test('known balances keep their shipped verdicts and carry a reason code, not pr
     reasonCode: 'forecast_rain_covers_demand',
     recommendationDate: '2026-07-11',
   });
+  // The boundary the branch order turns on: a balance between 0 and 1 mm is
+  // settled by the balance alone, so no forecast is consulted and the verdict
+  // is the same one the shipped `>= 1 || forecast >= |min(balance, 0)|` guard
+  // produced for it. Narrowing this to `>= 1` sends it down the forecast path.
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, 0.5, 0), {
+    code: 'delay_irrigation',
+    source: 'heuristic',
+    reasonCode: 'supply_covers_demand',
+    recommendationDate: '2026-07-11',
+  });
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, 0.5, null), {
+    code: 'delay_irrigation',
+    source: 'heuristic',
+    reasonCode: 'supply_covers_demand',
+    recommendationDate: '2026-07-11',
+  });
   assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, -0.5, 0), {
     code: 'monitor_today',
     source: 'heuristic',
