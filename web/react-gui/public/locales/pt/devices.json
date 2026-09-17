@@ -443,6 +443,90 @@
       "soil_moisture_pct": "Humidade solo"
     }
   },
+  "zoneConfig": {
+    "title": "Configurar a zona — {{zone}}",
+    "crop": "Cultura",
+    "selectCrop": "— Selecione a cultura de previsão —",
+    "variety": "Variedade",
+    "varietyPlaceholder": "Variedade (opcional)",
+    "soilType": "Tipo de solo",
+    "irrigationMethod": "Método de rega",
+    "area": "Área (m²)",
+    "irrigationEfficiency": "Eficiência de rega (%)",
+    "calibrationTitle": "Calibração da rega",
+    "flowRate": "Caudal (L/min)",
+    "measurementMethod": "Método de medição",
+    "measurementMethodPlaceholder": "Teste do balde, leitura do contador ou outro método",
+    "dendroCalibration": "Calibração dendro",
+    "phenologicalStage": "Estádio fenológico",
+    "timezone": "Fuso horário",
+    "zoneLocation": "Localização da zona",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "deviceGps": "GPS do dispositivo",
+    "useDeviceLocation": "Usar a localização do dispositivo",
+    "locating": "A localizar…",
+    "permissionState": "Permissão {{state}}",
+    "checkingGps": "A verificar se o GPS do dispositivo está disponível…",
+    "locationCaptured": "Localização do dispositivo registada.",
+    "captured": "Registado {{time}}",
+    "capturedAccuracy": ", precisão ~{{meters}} m",
+    "capturedViaApp": ", através da app móvel",
+    "capturedViaBrowser": ", através do navegador",
+    "openAppSettings": "Abrir as definições da app",
+    "openSettingsHint": "Abra as definições da app, ative a permissão de localização e tente novamente.",
+    "notes": "Notas",
+    "notesPlaceholder": "Informação adicional sobre esta zona…",
+    "save": "Guardar",
+    "saving": "A guardar…",
+    "soil": {
+      "select": "— Selecione o tipo de solo —",
+      "sandy": "Arenoso",
+      "sandy_loam": "Franco-arenoso",
+      "loam": "Franco",
+      "clay_loam": "Franco-argiloso",
+      "clay": "Argila",
+      "silt_loam": "Franco-limoso",
+      "other": "Outro"
+    },
+    "method": {
+      "select": "— Selecione o método —",
+      "drip": "Gota a gota / microgota",
+      "sprinkler": "Aspersão",
+      "furrow": "Sulcos",
+      "flood": "Inundação / bacia",
+      "subsurface": "Gota a gota subterrânea",
+      "other": "Outro"
+    },
+    "calibration": {
+      "default": "Predefinido (limiares genéricos)",
+      "apple": "Macieira",
+      "grapevine": "Videira",
+      "olive": "Oliveira"
+    },
+    "stage": {
+      "default": "Predefinido",
+      "dormancy": "Dormência",
+      "budbreak": "Abrolhamento / floração",
+      "fruitset": "Vingamento",
+      "veraison": "Pintor / maturação",
+      "harvest": "Colheita / pós-colheita"
+    },
+    "gps": {
+      "available": "Disponível",
+      "permissionNeeded": "Permissão necessária",
+      "checking": "A verificar…",
+      "unavailable": "Indisponível"
+    },
+    "errors": {
+      "bothCoordinates": "Introduza a latitude e a longitude ou deixe ambas em branco.",
+      "latitudeRange": "A latitude deve estar entre -90 e 90.",
+      "longitudeRange": "A longitude deve estar entre -180 e 180.",
+      "flowRateRequired": "O caudal (L/min) é necessário para guardar a calibração da rega.",
+      "flowRatePositive": "O caudal (L/min) deve ser maior que 0.",
+      "saveFailed": "Não foi possível guardar"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Regas recentes",
     "updated": "atualizado",

@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useId } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { IrrigationZone } from '../../types/farming';
 import { irrigationZonesAPI } from '../../services/api';
 import {
@@ -12,6 +14,7 @@ import {
 import { CROP_GROUPS } from './cropKc';
 import { DataExportSection } from './DataExportSection';
 import { TimezoneInput } from './TimezoneInput';
+import { useDateFormat } from '../../utils/datetime';
 
 interface Props {
   isOpen: boolean;
@@ -20,44 +23,64 @@ interface Props {
   onSaved: () => void;
 }
 
-const SOIL_OPTIONS = [
-  { value: '', label: '— Select soil type —' },
-  { value: 'sandy', label: 'Sandy' },
-  { value: 'sandy_loam', label: 'Sandy Loam' },
-  { value: 'loam', label: 'Loam' },
-  { value: 'clay_loam', label: 'Clay Loam' },
-  { value: 'clay', label: 'Clay' },
-  { value: 'silt_loam', label: 'Silt Loam' },
-  { value: 'other', label: 'Other' },
+type Translate = TFunction<'devices'>;
+
+/**
+ * Option lists as `{ value, key, fallback }`: the value is what the API
+ * stores, the key is what the seven bundles translate, and the fallback is the
+ * English source text this file used to render directly.
+ */
+interface Option { value: string; key: string; fallback: string }
+
+const SOIL_OPTIONS: Option[] = [
+  { value: '', key: 'soil.select', fallback: '— Select soil type —' },
+  { value: 'sandy', key: 'soil.sandy', fallback: 'Sandy' },
+  { value: 'sandy_loam', key: 'soil.sandy_loam', fallback: 'Sandy loam' },
+  { value: 'loam', key: 'soil.loam', fallback: 'Loam' },
+  { value: 'clay_loam', key: 'soil.clay_loam', fallback: 'Clay loam' },
+  { value: 'clay', key: 'soil.clay', fallback: 'Clay' },
+  { value: 'silt_loam', key: 'soil.silt_loam', fallback: 'Silt loam' },
+  { value: 'other', key: 'soil.other', fallback: 'Other' },
 ];
 
-const IRRIGATION_METHODS = [
-  { value: '', label: '— Select method —' },
-  { value: 'drip', label: 'Drip / Micro-drip' },
-  { value: 'sprinkler', label: 'Sprinkler' },
-  { value: 'furrow', label: 'Furrow' },
-  { value: 'flood', label: 'Flood / Basin' },
-  { value: 'subsurface', label: 'Subsurface drip' },
-  { value: 'other', label: 'Other' },
+const IRRIGATION_METHODS: Option[] = [
+  { value: '', key: 'method.select', fallback: '— Select method —' },
+  { value: 'drip', key: 'method.drip', fallback: 'Drip / micro-drip' },
+  { value: 'sprinkler', key: 'method.sprinkler', fallback: 'Sprinkler' },
+  { value: 'furrow', key: 'method.furrow', fallback: 'Furrow' },
+  { value: 'flood', key: 'method.flood', fallback: 'Flood / basin' },
+  { value: 'subsurface', key: 'method.subsurface', fallback: 'Subsurface drip' },
+  { value: 'other', key: 'method.other', fallback: 'Other' },
 ];
 
-const CALIBRATION_KEYS = [
-  { value: 'default', label: 'Default (generic thresholds)' },
-  { value: 'apple', label: 'Apple' },
-  { value: 'grapevine', label: 'Grapevine' },
-  { value: 'olive', label: 'Olive' },
+const CALIBRATION_KEYS: Option[] = [
+  { value: 'default', key: 'calibration.default', fallback: 'Default (generic thresholds)' },
+  { value: 'apple', key: 'calibration.apple', fallback: 'Apple' },
+  { value: 'grapevine', key: 'calibration.grapevine', fallback: 'Grapevine' },
+  { value: 'olive', key: 'calibration.olive', fallback: 'Olive' },
 ];
 
-const PHENOLOGICAL_STAGES = [
-  { value: 'default', label: 'Default' },
-  { value: 'dormancy', label: 'Dormancy' },
-  { value: 'budbreak', label: 'Bud break / flowering' },
-  { value: 'fruitset', label: 'Fruit set' },
-  { value: 'veraison', label: 'Veraison / ripening' },
-  { value: 'harvest', label: 'Harvest / post-harvest' },
+const PHENOLOGICAL_STAGES: Option[] = [
+  { value: 'default', key: 'stage.default', fallback: 'Default' },
+  { value: 'dormancy', key: 'stage.dormancy', fallback: 'Dormancy' },
+  { value: 'budbreak', key: 'stage.budbreak', fallback: 'Bud break / flowering' },
+  { value: 'fruitset', key: 'stage.fruitset', fallback: 'Fruit set' },
+  { value: 'veraison', key: 'stage.veraison', fallback: 'Veraison / ripening' },
+  { value: 'harvest', key: 'stage.harvest', fallback: 'Harvest / post-harvest' },
 ];
+
+function optionLabel(t: Translate, option: Option): string {
+  return t(`zoneConfig.${option.key}`, { defaultValue: option.fallback });
+}
 
 export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSaved }) => {
+  const { t } = useTranslation('devices');
+  const { t: tc } = useTranslation('common');
+  // One id prefix per mounted modal, so a dashboard with several zone cards
+  // open does not produce duplicate control ids.
+  const dateFormat = useDateFormat();
+  const fieldId = useId();
+  const id = (name: string) => `zone-config-${name}-${fieldId}`;
   const [cropType, setCropType] = useState(zone.cropType ?? '');
   const [variety, setVariety] = useState(zone.variety ?? '');
   const [soilType, setSoilType] = useState(zone.soilType ?? '');
@@ -165,15 +188,17 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const parseLocationPayload = () => {
     if (trimmedLatitude === '' && trimmedLongitude === '') return null;
     if (trimmedLatitude === '' || trimmedLongitude === '') {
-      throw new Error('Enter both latitude and longitude or leave both blank.');
+      throw new Error(t('zoneConfig.errors.bothCoordinates', {
+        defaultValue: 'Enter both latitude and longitude or leave both blank.',
+      }));
     }
     const parsedLatitude = Number(trimmedLatitude);
     const parsedLongitude = Number(trimmedLongitude);
     if (!Number.isFinite(parsedLatitude) || parsedLatitude < -90 || parsedLatitude > 90) {
-      throw new Error('Latitude must be between -90 and 90.');
+      throw new Error(t('zoneConfig.errors.latitudeRange', { defaultValue: 'Latitude must be between -90 and 90.' }));
     }
     if (!Number.isFinite(parsedLongitude) || parsedLongitude < -180 || parsedLongitude > 180) {
-      throw new Error('Longitude must be between -180 and 180.');
+      throw new Error(t('zoneConfig.errors.longitudeRange', { defaultValue: 'Longitude must be between -180 and 180.' }));
     }
     return { latitude: parsedLatitude, longitude: parsedLongitude };
   };
@@ -185,11 +210,13 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
     const trimmedFlowRate = measuredFlowRateLpm.trim();
     if (!trimmedFlowRate) {
-      throw new Error('Flow rate (L/min) is required to save irrigation calibration.');
+      throw new Error(t('zoneConfig.errors.flowRateRequired', {
+        defaultValue: 'Flow rate (L/min) is required to save irrigation calibration.',
+      }));
     }
     const parsedFlowRate = Number(trimmedFlowRate);
     if (!Number.isFinite(parsedFlowRate) || parsedFlowRate <= 0) {
-      throw new Error('Flow rate (L/min) must be greater than 0.');
+      throw new Error(t('zoneConfig.errors.flowRatePositive', { defaultValue: 'Flow rate (L/min) must be greater than 0.' }));
     }
     return {
       measuredFlowRateLpm: parsedFlowRate,
@@ -220,7 +247,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       onSaved();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.detail ?? err.message ?? 'Failed to save');
+      setError(err.response?.data?.detail ?? err.message ?? t('zoneConfig.errors.saveFailed', { defaultValue: 'Failed to save' }));
     } finally {
       setSaving(false);
     }
@@ -245,7 +272,9 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
   const handleOpenLocationSettings = () => {
     if (!openNativeLocationSettings()) {
-      setDeviceLocationError('Open the app settings and enable location permission, then try again.');
+      setDeviceLocationError(t('zoneConfig.openSettingsHint', {
+        defaultValue: 'Open the app settings and enable location permission, then try again.',
+      }));
     }
   };
 
@@ -257,19 +286,26 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       ? 'bg-amber-100 text-amber-800'
       : 'bg-slate-100 text-slate-700';
   const deviceLocationStatusLabel = deviceLocationSupport?.available
-    ? 'Available'
+    ? t('zoneConfig.gps.available', { defaultValue: 'Available' })
     : deviceLocationSupport?.reason === 'permission_denied'
-      ? 'Permission needed'
+      ? t('zoneConfig.gps.permissionNeeded', { defaultValue: 'Permission needed' })
       : deviceLocationSupportLoading
-        ? 'Checking…'
-        : 'Unavailable';
+        ? t('zoneConfig.gps.checking', { defaultValue: 'Checking…' })
+        : t('zoneConfig.gps.unavailable', { defaultValue: 'Unavailable' });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-[var(--border)]">
-          <h2 className="text-xl font-bold text-[var(--text)]">Configure Zone — {zone.name}</h2>
-          <button onClick={onClose} className="text-[var(--text-tertiary)] hover:text-[var(--text)] text-2xl leading-none">&times;</button>
+          <h2 className="text-xl font-bold text-[var(--text)]">
+            {t('zoneConfig.title', { zone: zone.name, defaultValue: 'Configure zone — {{zone}}' })}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label={tc('close')}
+            title={tc('close')}
+            className="touch-target text-[var(--text-tertiary)] hover:text-[var(--text)] text-2xl leading-none"
+          >&times;</button>
         </div>
 
         <div className="p-5 flex flex-col gap-4">
@@ -283,14 +319,17 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
           {/* Crop & Variety */}
           <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Crop</p>
+            <label htmlFor={id('crop')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+              {t('zoneConfig.crop', { defaultValue: 'Crop' })}
+            </label>
             <div className="flex gap-2">
               <select
+                id={id('crop')}
                 value={cropType}
                 onChange={e => setCropType(e.target.value)}
                 className="flex-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
               >
-                <option value="">— Select prediction crop —</option>
+                <option value="">{t('zoneConfig.selectCrop', { defaultValue: '— Select prediction crop —' })}</option>
                 {hasLegacyCrop && <option value={cropType}>{cropType}</option>}
                 {CROP_GROUPS.map(g => (
                   <optgroup key={g.groupLabel} label={g.groupLabel}>
@@ -299,10 +338,12 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 ))}
               </select>
               <input
+                id={id('variety')}
+                aria-label={t('zoneConfig.variety', { defaultValue: 'Variety' })}
                 type="text"
                 value={variety}
                 onChange={e => setVariety(e.target.value)}
-                placeholder="Variety (optional)"
+                placeholder={t('zoneConfig.varietyPlaceholder', { defaultValue: 'Variety (optional)' })}
                 className="flex-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
               />
             </div>
@@ -310,32 +351,41 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
           {/* Soil type */}
           <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Soil type</p>
+            <label htmlFor={id('soil')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+              {t('zoneConfig.soilType', { defaultValue: 'Soil type' })}
+            </label>
             <select
+              id={id('soil')}
               value={soilType}
               onChange={e => setSoilType(e.target.value)}
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
             >
-              {SOIL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {SOIL_OPTIONS.map(o => <option key={o.value} value={o.value}>{optionLabel(t, o)}</option>)}
             </select>
           </div>
 
           {/* Irrigation method */}
           <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Irrigation method</p>
+            <label htmlFor={id('method')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+              {t('zoneConfig.irrigationMethod', { defaultValue: 'Irrigation method' })}
+            </label>
             <select
+              id={id('method')}
               value={irrigationMethod}
               onChange={e => setIrrigationMethod(e.target.value)}
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
             >
-              {IRRIGATION_METHODS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {IRRIGATION_METHODS.map(o => <option key={o.value} value={o.value}>{optionLabel(t, o)}</option>)}
             </select>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Area</p>
+              <label htmlFor={id('area')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                {t('zoneConfig.area', { defaultValue: 'Area (m²)' })}
+              </label>
               <input
+                id={id('area')}
                 type="number"
                 min="0"
                 step="0.1"
@@ -346,8 +396,11 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
               />
             </div>
             <div>
-              <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Irrigation efficiency</p>
+              <label htmlFor={id('efficiency')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                {t('zoneConfig.irrigationEfficiency', { defaultValue: 'Irrigation efficiency (%)' })}
+              </label>
               <input
+                id={id('efficiency')}
                 type="number"
                 min="0"
                 max="100"
@@ -364,11 +417,16 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
           {/* Calibration */}
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-4">
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-3">Irrigation calibration</p>
+            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-3">
+              {t('zoneConfig.calibrationTitle', { defaultValue: 'Irrigation calibration' })}
+            </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Flow rate (L/min)</p>
+                <label htmlFor={id('flow-rate')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                  {t('zoneConfig.flowRate', { defaultValue: 'Flow rate (L/min)' })}
+                </label>
                 <input
+                  id={id('flow-rate')}
                   type="number"
                   min="0"
                   step="0.1"
@@ -379,12 +437,15 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 />
               </div>
               <div>
-                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Measurement method</p>
+                <label htmlFor={id('measurement-method')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                  {t('zoneConfig.measurementMethod', { defaultValue: 'Measurement method' })}
+                </label>
                 <input
+                  id={id('measurement-method')}
                   type="text"
                   value={measurementMethod}
                   onChange={e => setMeasurementMethod(e.target.value)}
-                  placeholder="Bucket test, meter read, or other method"
+                  placeholder={t('zoneConfig.measurementMethodPlaceholder', { defaultValue: 'Bucket test, meter read, or other method' })}
                   className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
                 />
               </div>
@@ -392,46 +453,65 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
           </div>
 
           <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Dendro calibration</p>
+            <label htmlFor={id('calibration')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+              {t('zoneConfig.dendroCalibration', { defaultValue: 'Dendro calibration' })}
+            </label>
             <select
+              id={id('calibration')}
               value={calibrationKey}
               onChange={e => setCalibrationKey(e.target.value)}
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
             >
-              {CALIBRATION_KEYS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {CALIBRATION_KEYS.map(o => <option key={o.value} value={o.value}>{optionLabel(t, o)}</option>)}
             </select>
           </div>
 
           {/* Phenological stage */}
           <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Phenological stage</p>
+            <label htmlFor={id('stage')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+              {t('zoneConfig.phenologicalStage', { defaultValue: 'Phenological stage' })}
+            </label>
             <select
+              id={id('stage')}
               value={phenologicalStage}
               onChange={e => setPhenologicalStage(e.target.value)}
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
             >
-              {PHENOLOGICAL_STAGES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {PHENOLOGICAL_STAGES.map(o => <option key={o.value} value={o.value}>{optionLabel(t, o)}</option>)}
             </select>
           </div>
 
           {/* Timezone */}
-          <TimezoneInput label="Timezone" value={timezone} onChange={setTimezone} />
+          <TimezoneInput
+            id={id('timezone')}
+            label={t('zoneConfig.timezone', { defaultValue: 'Timezone' })}
+            value={timezone}
+            onChange={setTimezone}
+          />
 
           <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Zone location</p>
+            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+              {t('zoneConfig.zoneLocation', { defaultValue: 'Zone location' })}
+            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {/* A placeholder is not a label: it disappears as soon as the
+                  field has a value, and axe reports the input as unnamed. */}
               <input
+                id={id('latitude')}
+                aria-label={t('zoneConfig.latitude', { defaultValue: 'Latitude' })}
                 type="number"
                 value={latitude}
                 onChange={e => setLatitude(e.target.value)}
-                placeholder="Latitude"
+                placeholder={t('zoneConfig.latitude', { defaultValue: 'Latitude' })}
                 className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
               />
               <input
+                id={id('longitude')}
+                aria-label={t('zoneConfig.longitude', { defaultValue: 'Longitude' })}
                 type="number"
                 value={longitude}
                 onChange={e => setLongitude(e.target.value)}
-                placeholder="Longitude"
+                placeholder={t('zoneConfig.longitude', { defaultValue: 'Longitude' })}
                 className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
               />
             </div>
@@ -440,7 +520,9 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">Device GPS</p>
+                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
+                  {t('zoneConfig.deviceGps', { defaultValue: 'Device GPS' })}
+                </p>
               </div>
               <button
                 type="button"
@@ -448,7 +530,9 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 disabled={!canRequestDeviceLocation}
                 className="rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] disabled:opacity-50"
               >
-                {deviceLocationLoading ? 'Locating…' : 'Use device location'}
+                {deviceLocationLoading
+                  ? t('zoneConfig.locating', { defaultValue: 'Locating…' })
+                  : t('zoneConfig.useDeviceLocation', { defaultValue: 'Use device location' })}
               </button>
             </div>
 
@@ -457,22 +541,36 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${deviceLocationStatusClass}`}>{deviceLocationStatusLabel}</span>
                 {deviceLocationSupport?.permissionState && deviceLocationSupport.permissionState !== 'unknown' && (
                   <span className="text-[var(--text-tertiary)]">
-                    Permission {deviceLocationSupport.permissionState}
+                    {t('zoneConfig.permissionState', {
+                      state: deviceLocationSupport.permissionState,
+                      defaultValue: 'Permission {{state}}',
+                    })}
                   </span>
                 )}
               </div>
-              <p>{deviceLocationSupport?.message ?? 'Checking whether device GPS is available…'}</p>
+              <p>{deviceLocationSupport?.message
+                ?? t('zoneConfig.checkingGps', { defaultValue: 'Checking whether device GPS is available…' })}</p>
               {deviceLocationMeta && (
                 <div className="space-y-1">
                   <p>
                     {trimmedLatitude && trimmedLongitude
                       ? `${Number(trimmedLatitude).toFixed(6)}, ${Number(trimmedLongitude).toFixed(6)}`
-                      : 'Device location captured.'}
+                      : t('zoneConfig.locationCaptured', { defaultValue: 'Device location captured.' })}
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)]">
-                    Captured {new Date(deviceLocationMeta.capturedAt).toLocaleString()}
-                    {deviceLocationMeta.accuracyM != null ? `, accuracy ~${deviceLocationMeta.accuracyM.toFixed(1)} m` : ''}
-                    {deviceLocationMeta.source === 'native-app' ? ', via mobile app' : ', via browser'}
+                    {t('zoneConfig.captured', {
+                      time: dateFormat.dateTime(deviceLocationMeta.capturedAt) ?? deviceLocationMeta.capturedAt,
+                      defaultValue: 'Captured {{time}}',
+                    })}
+                    {deviceLocationMeta.accuracyM != null
+                      ? t('zoneConfig.capturedAccuracy', {
+                          meters: deviceLocationMeta.accuracyM.toFixed(1),
+                          defaultValue: ', accuracy ~{{meters}} m',
+                        })
+                      : ''}
+                    {deviceLocationMeta.source === 'native-app'
+                      ? t('zoneConfig.capturedViaApp', { defaultValue: ', via mobile app' })
+                      : t('zoneConfig.capturedViaBrowser', { defaultValue: ', via browser' })}
                   </p>
                 </div>
               )}
@@ -482,7 +580,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                   onClick={handleOpenLocationSettings}
                   className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text)]"
                 >
-                  Open app settings
+                  {t('zoneConfig.openAppSettings', { defaultValue: 'Open app settings' })}
                 </button>
               )}
             </div>
@@ -496,12 +594,15 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
           {/* Notes */}
           <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Notes</p>
+            <label htmlFor={id('notes')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+              {t('zoneConfig.notes', { defaultValue: 'Notes' })}
+            </label>
             <textarea
+              id={id('notes')}
               value={notes}
               onChange={e => setNotes(e.target.value)}
               rows={3}
-              placeholder="Any additional info about this zone…"
+              placeholder={t('zoneConfig.notesPlaceholder', { defaultValue: 'Any additional info about this zone…' })}
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)] resize-none"
             />
           </div>
@@ -512,14 +613,16 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
             onClick={onClose}
             className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] px-5 py-2 rounded-lg text-sm font-semibold"
           >
-            Cancel
+            {tc('cancel')}
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
             className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-60 text-[var(--on-primary)] px-5 py-2 rounded-lg text-sm font-semibold"
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving
+              ? t('zoneConfig.saving', { defaultValue: 'Saving…' })
+              : t('zoneConfig.save', { defaultValue: 'Save' })}
           </button>
         </div>
       </div>

@@ -443,6 +443,90 @@
       "soil_moisture_pct": "Humidité sol"
     }
   },
+  "zoneConfig": {
+    "title": "Configurer la zone — {{zone}}",
+    "crop": "Culture",
+    "selectCrop": "— Choisir la culture de prévision —",
+    "variety": "Variété",
+    "varietyPlaceholder": "Variété (facultatif)",
+    "soilType": "Type de sol",
+    "irrigationMethod": "Méthode d'irrigation",
+    "area": "Surface (m²)",
+    "irrigationEfficiency": "Efficience d'irrigation (%)",
+    "calibrationTitle": "Calibrage de l'irrigation",
+    "flowRate": "Débit (L/min)",
+    "measurementMethod": "Méthode de mesure",
+    "measurementMethodPlaceholder": "Test au seau, relevé de compteur ou autre méthode",
+    "dendroCalibration": "Calibrage dendro",
+    "phenologicalStage": "Stade phénologique",
+    "timezone": "Fuseau horaire",
+    "zoneLocation": "Emplacement de la zone",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "deviceGps": "GPS de l'appareil",
+    "useDeviceLocation": "Utiliser la position de l'appareil",
+    "locating": "Localisation…",
+    "permissionState": "Autorisation {{state}}",
+    "checkingGps": "Vérification de la disponibilité du GPS de l'appareil…",
+    "locationCaptured": "Position de l'appareil enregistrée.",
+    "captured": "Enregistré {{time}}",
+    "capturedAccuracy": ", précision ~{{meters}} m",
+    "capturedViaApp": ", via l'application mobile",
+    "capturedViaBrowser": ", via le navigateur",
+    "openAppSettings": "Ouvrir les réglages de l'application",
+    "openSettingsHint": "Ouvrez les réglages de l'application, activez l'autorisation de localisation, puis réessayez.",
+    "notes": "Notes",
+    "notesPlaceholder": "Toute information complémentaire sur cette zone…",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "soil": {
+      "select": "— Choisir le type de sol —",
+      "sandy": "Sableux",
+      "sandy_loam": "Limon sableux",
+      "loam": "Limon",
+      "clay_loam": "Limon argileux",
+      "clay": "Argile",
+      "silt_loam": "Limon fin",
+      "other": "Autre"
+    },
+    "method": {
+      "select": "— Choisir la méthode —",
+      "drip": "Goutte-à-goutte / micro-goutte",
+      "sprinkler": "Aspersion",
+      "furrow": "Sillons",
+      "flood": "Submersion / bassin",
+      "subsurface": "Goutte-à-goutte enterré",
+      "other": "Autre"
+    },
+    "calibration": {
+      "default": "Par défaut (seuils génériques)",
+      "apple": "Pommier",
+      "grapevine": "Vigne",
+      "olive": "Olivier"
+    },
+    "stage": {
+      "default": "Par défaut",
+      "dormancy": "Dormance",
+      "budbreak": "Débourrement / floraison",
+      "fruitset": "Nouaison",
+      "veraison": "Véraison / maturation",
+      "harvest": "Récolte / post-récolte"
+    },
+    "gps": {
+      "available": "Disponible",
+      "permissionNeeded": "Autorisation requise",
+      "checking": "Vérification…",
+      "unavailable": "Indisponible"
+    },
+    "errors": {
+      "bothCoordinates": "Saisissez la latitude et la longitude, ou laissez les deux vides.",
+      "latitudeRange": "La latitude doit être comprise entre -90 et 90.",
+      "longitudeRange": "La longitude doit être comprise entre -180 et 180.",
+      "flowRateRequired": "Le débit (L/min) est requis pour enregistrer le calibrage de l'irrigation.",
+      "flowRatePositive": "Le débit (L/min) doit être supérieur à 0.",
+      "saveFailed": "Échec de l'enregistrement"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Irrigations récentes",
     "updated": "mis à jour",

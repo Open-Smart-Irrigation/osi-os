@@ -440,6 +440,90 @@
       "soil_moisture_pct": "Soil Moisture"
     }
   },
+  "zoneConfig": {
+    "title": "Configure zone — {{zone}}",
+    "crop": "Crop",
+    "selectCrop": "— Select prediction crop —",
+    "variety": "Variety",
+    "varietyPlaceholder": "Variety (optional)",
+    "soilType": "Soil type",
+    "irrigationMethod": "Irrigation method",
+    "area": "Area (m²)",
+    "irrigationEfficiency": "Irrigation efficiency (%)",
+    "calibrationTitle": "Irrigation calibration",
+    "flowRate": "Flow rate (L/min)",
+    "measurementMethod": "Measurement method",
+    "measurementMethodPlaceholder": "Bucket test, meter read, or other method",
+    "dendroCalibration": "Dendro calibration",
+    "phenologicalStage": "Phenological stage",
+    "timezone": "Timezone",
+    "zoneLocation": "Zone location",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "deviceGps": "Device GPS",
+    "useDeviceLocation": "Use device location",
+    "locating": "Locating…",
+    "permissionState": "Permission {{state}}",
+    "checkingGps": "Checking whether device GPS is available…",
+    "locationCaptured": "Device location captured.",
+    "captured": "Captured {{time}}",
+    "capturedAccuracy": ", accuracy ~{{meters}} m",
+    "capturedViaApp": ", via mobile app",
+    "capturedViaBrowser": ", via browser",
+    "openAppSettings": "Open app settings",
+    "openSettingsHint": "Open the app settings and enable location permission, then try again.",
+    "notes": "Notes",
+    "notesPlaceholder": "Any additional info about this zone…",
+    "save": "Save",
+    "saving": "Saving…",
+    "soil": {
+      "select": "— Select soil type —",
+      "sandy": "Sandy",
+      "sandy_loam": "Sandy loam",
+      "loam": "Loam",
+      "clay_loam": "Clay loam",
+      "clay": "Clay",
+      "silt_loam": "Silt loam",
+      "other": "Other"
+    },
+    "method": {
+      "select": "— Select method —",
+      "drip": "Drip / micro-drip",
+      "sprinkler": "Sprinkler",
+      "furrow": "Furrow",
+      "flood": "Flood / basin",
+      "subsurface": "Subsurface drip",
+      "other": "Other"
+    },
+    "calibration": {
+      "default": "Default (generic thresholds)",
+      "apple": "Apple",
+      "grapevine": "Grapevine",
+      "olive": "Olive"
+    },
+    "stage": {
+      "default": "Default",
+      "dormancy": "Dormancy",
+      "budbreak": "Bud break / flowering",
+      "fruitset": "Fruit set",
+      "veraison": "Veraison / ripening",
+      "harvest": "Harvest / post-harvest"
+    },
+    "gps": {
+      "available": "Available",
+      "permissionNeeded": "Permission needed",
+      "checking": "Checking…",
+      "unavailable": "Unavailable"
+    },
+    "errors": {
+      "bothCoordinates": "Enter both latitude and longitude or leave both blank.",
+      "latitudeRange": "Latitude must be between -90 and 90.",
+      "longitudeRange": "Longitude must be between -180 and 180.",
+      "flowRateRequired": "Flow rate (L/min) is required to save irrigation calibration.",
+      "flowRatePositive": "Flow rate (L/min) must be greater than 0.",
+      "saveFailed": "Failed to save"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Recent irrigations",
     "updated": "updated",

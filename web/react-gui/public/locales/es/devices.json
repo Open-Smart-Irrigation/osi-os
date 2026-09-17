@@ -443,6 +443,90 @@
       "soil_moisture_pct": "Humedad suelo"
     }
   },
+  "zoneConfig": {
+    "title": "Configurar la zona — {{zone}}",
+    "crop": "Cultivo",
+    "selectCrop": "— Seleccione el cultivo de predicción —",
+    "variety": "Variedad",
+    "varietyPlaceholder": "Variedad (opcional)",
+    "soilType": "Tipo de suelo",
+    "irrigationMethod": "Método de riego",
+    "area": "Superficie (m²)",
+    "irrigationEfficiency": "Eficiencia de riego (%)",
+    "calibrationTitle": "Calibración del riego",
+    "flowRate": "Caudal (L/min)",
+    "measurementMethod": "Método de medición",
+    "measurementMethodPlaceholder": "Prueba de cubo, lectura del contador u otro método",
+    "dendroCalibration": "Calibración dendro",
+    "phenologicalStage": "Estado fenológico",
+    "timezone": "Zona horaria",
+    "zoneLocation": "Ubicación de la zona",
+    "latitude": "Latitud",
+    "longitude": "Longitud",
+    "deviceGps": "GPS del dispositivo",
+    "useDeviceLocation": "Usar la ubicación del dispositivo",
+    "locating": "Localizando…",
+    "permissionState": "Permiso {{state}}",
+    "checkingGps": "Comprobando si el GPS del dispositivo está disponible…",
+    "locationCaptured": "Ubicación del dispositivo capturada.",
+    "captured": "Capturado {{time}}",
+    "capturedAccuracy": ", precisión ~{{meters}} m",
+    "capturedViaApp": ", a través de la app móvil",
+    "capturedViaBrowser": ", a través del navegador",
+    "openAppSettings": "Abrir los ajustes de la app",
+    "openSettingsHint": "Abra los ajustes de la app, active el permiso de ubicación y vuelva a intentarlo.",
+    "notes": "Notas",
+    "notesPlaceholder": "Información adicional sobre esta zona…",
+    "save": "Guardar",
+    "saving": "Guardando…",
+    "soil": {
+      "select": "— Seleccione el tipo de suelo —",
+      "sandy": "Arenoso",
+      "sandy_loam": "Franco arenoso",
+      "loam": "Franco",
+      "clay_loam": "Franco arcilloso",
+      "clay": "Arcilla",
+      "silt_loam": "Franco limoso",
+      "other": "Otro"
+    },
+    "method": {
+      "select": "— Seleccione el método —",
+      "drip": "Goteo / microgoteo",
+      "sprinkler": "Aspersión",
+      "furrow": "Surcos",
+      "flood": "Inundación / alcorque",
+      "subsurface": "Goteo subterráneo",
+      "other": "Otro"
+    },
+    "calibration": {
+      "default": "Predeterminado (umbrales genéricos)",
+      "apple": "Manzano",
+      "grapevine": "Vid",
+      "olive": "Olivo"
+    },
+    "stage": {
+      "default": "Predeterminado",
+      "dormancy": "Reposo",
+      "budbreak": "Brotación / floración",
+      "fruitset": "Cuajado",
+      "veraison": "Envero / maduración",
+      "harvest": "Cosecha / poscosecha"
+    },
+    "gps": {
+      "available": "Disponible",
+      "permissionNeeded": "Permiso necesario",
+      "checking": "Comprobando…",
+      "unavailable": "No disponible"
+    },
+    "errors": {
+      "bothCoordinates": "Introduzca latitud y longitud o deje ambas en blanco.",
+      "latitudeRange": "La latitud debe estar entre -90 y 90.",
+      "longitudeRange": "La longitud debe estar entre -180 y 180.",
+      "flowRateRequired": "El caudal (L/min) es necesario para guardar la calibración del riego.",
+      "flowRatePositive": "El caudal (L/min) debe ser mayor que 0.",
+      "saveFailed": "No se pudo guardar"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Riegos recientes",
     "updated": "actualizado",
