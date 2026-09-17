@@ -8,6 +8,8 @@
 // header is redacted on the way INTO the transcript -- not on the way out --
 // so there is no path that records a secret and relies on a later filter.
 
+const { assertConnectableBase } = require('./config');
+
 const REDACTED = '[redacted]';
 
 // Matched case-insensitively against a key with separators removed, so
@@ -76,6 +78,10 @@ function redactHeaders(headers) {
 
 class Rest {
   constructor(baseUrl, { token = null, transcript = null } = {}) {
+    // Second check at the client: a base URL must still be the local end of the
+    // tunnel or an allow-listed gateway, with no userinfo and no forbidden host
+    // hidden anywhere in it -- whether or not it came from config().
+    assertConnectableBase(baseUrl, 'the REST client');
     this.baseUrl = String(baseUrl).replace(/\/$/, '');
     this.token = token;
     this.transcript = transcript; // array, or null to skip recording

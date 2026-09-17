@@ -286,6 +286,123 @@ async function main() {
     await assert.rejects(() => configLib.assertGatewayViaSsh(stubSsh('0016C001F11715E2'), cfg), /EUI GUARD TRIPPED/);
   });
 
+  console.log('\n-- endpoint guard: an SSH/MQTT host is a bare host, never a URL (V-297)');
+  // The payloads below defeated the guard as first written: hostOf() reads the
+  // WHATWG URL hostname ("100.81.220.8", allowed) while ssh(1) splits user@host
+  // on the LAST '@' and connects to what follows it. Verified by hand with
+  // `ssh -G root@https://100.81.220.8/@100.99.212.115`, which prints
+  // `hostname 100.99.212.115` -- the Bovey demo Pi.
+  const SSH_URL_PAYLOADS = [
+    { value: 'https://100.81.220.8/@100.99.212.115', gateway: 'silvan', tail: '100.99.212.115' },
+    { value: 'https://100.81.220.8/@osicloud.ch', gateway: 'silvan', tail: 'osicloud.ch' },
+    { value: 'http://100.85.226.64/@100.99.212.115', gateway: 'rpi4-test', tail: '100.99.212.115' },
+  ];
+  for (const p of SSH_URL_PAYLOADS) {
+    await check('SILVAN_SSH_HOST="' + p.value + '" is refused (--gateway ' + p.gateway + ')', () => {
+      withEnv({ SILVAN_SSH_HOST: p.value, SILVAN_ALLOW_ALT_HOST: '1' }, () => {
+        assert.throws(() => config({ gateway: p.gateway }), /REFUSING/);
+      });
+    });
+    await check('the deny-list sees "' + p.tail + '" inside "' + p.value + '", not only the URL hostname', () => {
+      assert.ok(configLib.hostTokens(p.value).includes(p.tail),
+        'hostTokens must expose every host-shaped token of the raw value');
+      assert.strictEqual(configLib.isForbiddenHost(p.tail), true);
+    });
+  }
+  refuses('a URL-shaped SSH host whose tail is NOT deny-listed is still refused, because it is not a bare host',
+    { sshHost: 'https://100.81.220.8/@10.1.2.3' }, ALT);
+  refuses('an SSH host with a :port suffix is refused (the port is SILVAN_MQTT_PORT/the tunnel, not the host)',
+    { sshHost: '100.81.220.8:22' });
+  refuses('an SSH host with whitespace is refused', { sshHost: '100.81.220.8 ' });
+  refuses('an SSH host starting with "-" cannot inject an ssh option',
+    { sshHost: '-oProxyCommand=curl http://example.invalid' }, ALT);
+  refuses('an MQTT host given as a URL is refused', { mqttHost: 'tcp://127.0.0.1/@100.99.212.115' });
+  refuses('an MQTT host with a :port suffix is refused', { mqttHost: '127.0.0.1:1883' });
+  refuses('an MQTT host starting with "-" is refused', { mqttHost: '-oProxyCommand=x' }, ALT);
+  refuses('an SSH user that smuggles an ssh option is refused', { sshUser: 'root -oProxyCommand=x' });
+
+  console.log('\n-- endpoint guard: deny-list matching is normalised (trailing dot, case, subdomain, userinfo)');
+  await check('a trailing-dot forbidden host is refused AS forbidden, not incidentally', () => {
+    assert.throws(() => config({ sshHost: '100.99.212.115.' }), /forbidden-host list/);
+    assert.throws(() => config({ apiBase: 'http://osicloud.ch./' }), /forbidden-host list/);
+  });
+  await check('a forbidden host in a different case is refused as forbidden', () => {
+    assert.throws(() => config({ guiBase: 'https://OSICLOUD.CH/gui/' }), /forbidden-host list/);
+  });
+  await check('a subdomain of a deny-listed name is refused as forbidden', () => {
+    assert.throws(() => config({ apiBase: 'https://api.osicloud.ch/' }), /forbidden-host list/);
+  });
+  await check('a URL that hides a forbidden host in its userinfo position is refused', () => {
+    assert.throws(() => config({ apiBase: 'http://100.81.220.8@100.99.212.115/' }), /REFUSING/);
+  });
+  refuses('an API base carrying userinfo is refused even when the host itself is the tunnel',
+    { apiBase: 'http://user:pass@127.0.0.1:18800' });
+  refuses('a GUI base carrying userinfo is refused', { guiBase: 'http://user:pass@127.0.0.1:18800/gui/' });
+  refuses('an API base on a non-HTTP scheme is refused', { apiBase: 'ftp://100.81.220.8/' });
+
+  console.log('\n-- the allow-list and the deny-list cannot be mutated at runtime');
+  await check('GATEWAYS, its entries, FORBIDDEN_HOSTS and LOOPBACK_HOSTS are all frozen', () => {
+    assert.throws(() => configLib.GATEWAYS.push({ name: 'demo', sshHost: '100.99.212.115' }), TypeError);
+    assert.throws(() => { configLib.GATEWAYS[0] = { name: 'silvan', sshHost: '100.99.212.115' }; }, TypeError);
+    assert.throws(() => { configLib.GATEWAYS[0].sshHost = '100.99.212.115'; }, TypeError);
+    assert.throws(() => configLib.FORBIDDEN_HOSTS.pop(), TypeError);
+    assert.throws(() => configLib.LOOPBACK_HOSTS.push('100.99.212.115'), TypeError);
+    assert.strictEqual(config().sshHost, '100.81.220.8');
+    assert.strictEqual(configLib.isForbiddenHost('100.99.212.115'), true);
+    assert.strictEqual(isLoopback('100.99.212.115'), false);
+  });
+
+  console.log('\n-- clients re-check their destination, so a config mutated after the guard is caught');
+  await check('the SSH client refuses a config whose host was changed to the demo Pi after config()', () => {
+    const cfg = config();
+    cfg.sshHost = '100.99.212.115';
+    assert.throws(() => new Ssh(cfg), /REFUSING/);
+  });
+  await check('the SSH client refuses a host mutated to the OTHER allow-listed gateway after config()', () => {
+    const cfg = config();
+    cfg.sshHost = '100.85.226.64';
+    assert.throws(() => new Ssh(cfg), /REFUSING to start/);
+  });
+  await check('the SSH client refuses a user mutated into an option after config()', () => {
+    const cfg = config();
+    cfg.sshUser = 'root -oProxyCommand=x';
+    assert.throws(() => new Ssh(cfg), /REFUSING to start/);
+  });
+  await check('the MQTT observer refuses a broker on the OTHER allow-listed gateway after config()', async () => {
+    const cfg = config();
+    cfg.mqttHost = '100.85.226.64';
+    const observer = new DownlinkObserver({ cfg, profiles: {}, actuatorsAppId: 'x' });
+    await assert.rejects(() => observer.start(), /REFUSING to start/);
+  });
+  await check('the SSH client refuses a URL-shaped host that was set after config()', () => {
+    const cfg = config();
+    cfg.sshHost = 'https://100.81.220.8/@100.99.212.115';
+    assert.throws(() => new Ssh(cfg), /REFUSING/);
+  });
+  await check('the SSH destination is the allow-list host, option-terminated, and pinned with HostName', () => {
+    const args = new Ssh(config())._args('true');
+    assert.ok(args.includes('-o') && args.includes('HostName=100.81.220.8'), 'HostName must pin the destination');
+    const sep = args.indexOf('--');
+    assert.ok(sep > 0, 'the option list must be terminated with --');
+    assert.strictEqual(args[sep + 1], 'root@100.81.220.8');
+    assert.strictEqual(args[sep + 2], 'true');
+  });
+  await check('the MQTT observer refuses a config whose broker host was changed after config()', async () => {
+    const cfg = config();
+    cfg.mqttHost = '100.99.212.115';
+    const observer = new DownlinkObserver({ cfg, profiles: {}, actuatorsAppId: 'x' });
+    await assert.rejects(() => observer.start(), /REFUSING/);
+  });
+  await check('the REST client refuses a base URL that is not the tunnel or an allow-listed gateway', () => {
+    assert.throws(() => new Rest('http://100.99.212.115:1880'), /REFUSING/);
+    assert.throws(() => new Rest('http://10.1.2.3:1880'), /REFUSING/);
+    assert.throws(() => new Rest('http://user:pass@127.0.0.1:18800'), /REFUSING/);
+  });
+  await check('the REST client accepts the tunnel and an allow-listed gateway', () => {
+    new Rest('http://127.0.0.1:18800');
+    new Rest('http://100.85.226.64:1880');
+  });
+
   console.log('\n-- clients refuse an unguarded configuration');
   await check('the SSH client refuses a hand-built config object', () => {
     assert.throws(() => new Ssh({ sshHost: '100.81.220.8', sshKey: 'k', sshUser: 'root' }), /REFUSING to start/);

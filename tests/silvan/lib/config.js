@@ -18,12 +18,23 @@
 //     itself (assertSimulatedDevice). Real hardware is never commanded.
 //   * Every network endpoint -- SSH host, HTTP API, GUI, MQTT broker -- is
 //     cross-validated against each other and against FORBIDDEN_HOSTS before any
-//     client is built.
+//     client is built. SSH and MQTT destinations must be BARE hosts: ssh(1)
+//     splits user@host on the LAST '@', so a URL-shaped value such as
+//     "https://100.81.220.8/@100.99.212.115" would be validated as one host and
+//     connected to as another (V-297). The deny-list is matched against every
+//     host-shaped token of the raw value, canonicalised (lowercase, no trailing
+//     root dot), so it cannot be dodged by spelling.
+//   * The clients re-check: lib/ssh.js, lib/rest.js and lib/observer.js each
+//     validate their own destination against the allow-list, so a cfg mutated
+//     after the guard -- or a caller that never used config() -- is caught at
+//     the point a socket would open.
+
+const net = require('node:net');
 
 // THE GATEWAY ALLOW-LIST. Adding a gateway is a deliberate, reviewed code
 // change: a name, the host, the DEVICE_EUI both guards will demand, and the
 // credentials file that belongs to it. Nothing at runtime can add an entry.
-const GATEWAYS = [
+const GATEWAYS = Object.freeze([
   Object.freeze({
     name: 'silvan',
     description: 'Silvan test gateway (Pi 5, demo hardware, no valves)',
@@ -38,23 +49,26 @@ const GATEWAYS = [
     expectedEui: '0016C001F11369DE',
     credsFile: '~/osi-tools/.rpi4-test-creds',
   }),
-];
+]);
 
 const DEFAULT_GATEWAY = 'silvan';
 
 // Hosts this harness must never address, whatever the environment says.
-const FORBIDDEN_HOSTS = [
+const FORBIDDEN_HOSTS = Object.freeze([
   '100.99.212.115',
   'osi-uganda-01.tail77bd41.ts.net',
   '100.69.51.98',
   'osicloud.ch',
   'server.opensmartirrigation.org',
   '57.129.7.196',
-];
+]);
 
 // The only non-gateway hosts an endpoint may name: the local end of the SSH
 // tunnel. Anything else must be the SSH-verified gateway itself.
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '0:0:0:0:0:0:0:1']);
+// A frozen array rather than a Set: an exported Set can be widened at runtime
+// (Object.freeze does not stop Set.add), and "which hosts count as loopback" is
+// exactly the kind of list that must not be widenable.
+const LOOPBACK_HOSTS = Object.freeze(['127.0.0.1', 'localhost', '::1', '0:0:0:0:0:0:0:1']);
 
 // Simulated DevEUIs only. Anything this harness commands must be in this range.
 // 70B3D57ED00... is the harness's own reserved prefix; no real OSI device uses it.
@@ -124,9 +138,48 @@ function defaultsFor(entry) {
 
 const DEFAULTS = defaultsFor(resolveGateway(DEFAULT_GATEWAY));
 
+// Canonical comparable form of a host: lowercased, IPv6 brackets removed, and
+// the trailing root dot stripped, so "OSICLOUD.CH", "osicloud.ch." and
+// "osicloud.ch" are one host and the deny-list cannot be dodged by spelling.
+function canonicalHost(value) {
+  let host = String(value == null ? '' : value).trim().toLowerCase();
+  host = host.replace(/^\[/, '').replace(/\]$/, '');
+  while (host.length > 1 && host.endsWith('.')) host = host.slice(0, -1);
+  return host;
+}
+
+// Every host-shaped token in a RAW endpoint value, canonicalised. The deny-list
+// is applied to all of them, so a forbidden host is caught even where a URL
+// parser would ignore it -- "https://100.81.220.8/@100.99.212.115" yields
+// ["https", "100.81.220.8", "100.99.212.115"], and ssh(1) would have connected
+// to the last one.
+function hostTokens(value) {
+  const raw = String(value == null ? '' : value).trim().toLowerCase();
+  const out = [];
+  for (const piece of raw.split(/[^a-z0-9._:\[\]-]+/)) {
+    if (!piece) continue;
+    let token = canonicalHost(piece);
+    const withPort = /^([a-z0-9._-]+):\d{1,5}$/.exec(token);
+    if (withPort) token = withPort[1];
+    if (token && !out.includes(token)) out.push(token);
+  }
+  return out;
+}
+
+const FORBIDDEN_CANON = Object.freeze(FORBIDDEN_HOSTS.map(canonicalHost));
+
+// A deny-listed host, or anything under a deny-listed NAME (api.osicloud.ch).
+function isForbiddenHost(host) {
+  const h = canonicalHost(host);
+  if (!h) return false;
+  return FORBIDDEN_CANON.some((bad) => h === bad || (!net.isIP(bad) && h.endsWith('.' + bad)));
+}
+
 // Extracts a comparable hostname from either a URL ("http://127.0.0.1:18800/gui/")
 // or a bare host ("100.81.220.8"). IPv6 brackets are stripped so "[::1]" and
-// "::1" compare equal.
+// "::1" compare equal. What it returns is the host a CLIENT would address; it
+// is never the whole safety story for a value that ssh(1) or mosquitto parses
+// differently -- see assertBareHost.
 function hostOf(value) {
   const raw = String(value == null ? '' : value).trim();
   if (!raw) return '';
@@ -138,11 +191,157 @@ function hostOf(value) {
       throw new Error('REFUSING to run: "' + raw + '" is not a parseable URL.');
     }
   }
-  return host.replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
+  return canonicalHost(host);
 }
 
 function isLoopback(host) {
-  return LOOPBACK_HOSTS.has(String(host || '').toLowerCase());
+  return LOOPBACK_HOSTS.includes(canonicalHost(host));
+}
+
+// Refuses a value whose RAW text contains a deny-listed host anywhere, in any
+// position, before anything tries to parse it.
+function assertNoForbiddenToken(value, label) {
+  for (const token of hostTokens(value)) {
+    if (isForbiddenHost(token)) {
+      throw new Error(
+        'REFUSING to run: ' + label + ' contains "' + token + '", which is on the forbidden-host list. ' +
+        'No gateway selection and no SILVAN_ALLOW_ALT_HOST overrides this.'
+      );
+    }
+  }
+}
+
+// A BARE hostname or IP literal, and nothing else. SSH and MQTT destinations
+// are hosts, not URLs: `ssh user@X` splits on the LAST '@' and mosquitto takes
+// a plain host, so a scheme, userinfo, path, query, fragment or :port here
+// means the value validated is not the value connected to. A leading '-' is
+// refused too, so a host can never be read as a command-line option.
+function assertBareHost(value, label) {
+  const raw = String(value == null ? '' : value);
+  if (!raw.trim()) {
+    throw new Error('REFUSING to run: ' + label + ' is empty; every endpoint must be explicit.');
+  }
+  if (raw !== raw.trim() || /[\s\u0000-\u001f\u007f]/.test(raw)) {
+    throw new Error('REFUSING to run: ' + label + ' "' + raw + '" contains whitespace or control characters; ' +
+      'it must be a bare hostname or IP address.');
+  }
+  const unbracketed = raw.replace(/^\[/, '').replace(/\]$/, '');
+  if (!net.isIP(unbracketed)) {
+    if (/[@/\\?#:]/.test(raw)) {
+      throw new Error(
+        'REFUSING to run: ' + label + ' "' + raw + '" is not a bare host. SSH and MQTT destinations are ' +
+        'hostnames or IP addresses, never URLs: ssh(1) splits user@host on the LAST "@", so a URL-shaped ' +
+        'value is checked as one host and connected to as another.'
+      );
+    }
+    if (!/^[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)*\.?$/i.test(raw)) {
+      throw new Error('REFUSING to run: ' + label + ' "' + raw + '" is not a valid hostname or IP address.');
+    }
+  }
+  return canonicalHost(unbracketed);
+}
+
+// An http(s) base URL with no credentials in it. Userinfo is refused outright:
+// it hides which host is really addressed and would be a secret in a config
+// value that ends up in evidence.
+function assertHttpBase(value, label) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) {
+    throw new Error('REFUSING to run: ' + label + ' is empty; every endpoint must be explicit.');
+  }
+  let url;
+  try {
+    url = new URL(raw);
+  } catch (_) {
+    throw new Error('REFUSING to run: "' + raw + '" is not a parseable URL.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('REFUSING to run: ' + label + ' "' + raw + '" is not an http(s) URL.');
+  }
+  if (url.username || url.password) {
+    throw new Error(
+      'REFUSING to run: ' + label + ' "' + raw + '" carries userinfo (user:pass@host). Give the endpoint as a ' +
+      'plain URL: credentials in a URL hide which host is really addressed.'
+    );
+  }
+  const host = canonicalHost(url.hostname);
+  if (!host) {
+    throw new Error('REFUSING to run: ' + label + ' "' + raw + '" names no host.');
+  }
+  return host;
+}
+
+// The login name for ssh. A bare user name, so it can never carry an option or
+// a second '@' segment into the destination argument.
+function assertSshUser(value, who) {
+  const raw = String(value == null ? '' : value);
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(raw)) {
+    throw new Error('REFUSING to start ' + (who || 'an SSH session') + ': "' + raw + '" is not a bare SSH user name.');
+  }
+  return raw;
+}
+
+// The canonical hosts of the allow-list. Used by the clients for their own,
+// independent second check.
+function allowListedHosts() {
+  return GATEWAYS.map((g) => canonicalHost(g.sshHost));
+}
+
+// SECOND CHECK, at the SSH client: the destination must still be an
+// allow-listed gateway's own host -- bare, deny-list-clean, and known. With a
+// gateway name it must be THAT gateway, so a cfg mutated from one allow-listed
+// gateway to the other is caught here rather than by the EUI guard afterwards.
+function assertAllowListedSshHost(value, who, gatewayName) {
+  assertNoForbiddenToken(value, (who || 'the SSH destination'));
+  const host = assertBareHost(value, (who || 'the SSH destination'));
+  if (gatewayName !== undefined && gatewayName !== null && gatewayName !== '') {
+    const entry = resolveGateway(gatewayName);
+    if (host !== canonicalHost(entry.sshHost)) {
+      throw new Error(
+        'REFUSING to start ' + (who || 'an SSH session') + ': "' + host + '" is not the selected gateway "' +
+        entry.name + '" (' + entry.sshHost + ').'
+      );
+    }
+    return host;
+  }
+  if (!allowListedHosts().includes(host)) {
+    throw new Error(
+      'REFUSING to start ' + (who || 'an SSH session') + ': "' + host + '" is not an allow-listed test gateway ' +
+      '(' + GATEWAYS.map((g) => g.name + ' = ' + g.sshHost).join(', ') + ').'
+    );
+  }
+  return host;
+}
+
+// SECOND CHECK, at a socket client: a broker/host endpoint must be the local
+// end of the tunnel or, with a gateway name, that gateway itself.
+function assertConnectableHost(value, who, gatewayName) {
+  assertNoForbiddenToken(value, (who || 'a network client'));
+  const host = assertBareHost(value, (who || 'a network client'));
+  if (isLoopback(host)) return host;
+  const allowed = (gatewayName === undefined || gatewayName === null || gatewayName === '')
+    ? allowListedHosts()
+    : [canonicalHost(resolveGateway(gatewayName).sshHost)];
+  if (!allowed.includes(host)) {
+    throw new Error(
+      'REFUSING to start ' + (who || 'a network client') + ': "' + host + '" is neither a loopback tunnel ' +
+      'endpoint nor the gateway this run targets (' + allowed.join(', ') + ').'
+    );
+  }
+  return host;
+}
+
+// SECOND CHECK, at the HTTP client: same rule, for a base URL.
+function assertConnectableBase(value, who) {
+  assertNoForbiddenToken(value, (who || 'the HTTP client'));
+  const host = assertHttpBase(value, (who || 'the HTTP client'));
+  if (!isLoopback(host) && !allowListedHosts().includes(host)) {
+    throw new Error(
+      'REFUSING to start ' + (who || 'the HTTP client') + ': base URL "' + value + '" resolves to "' + host +
+      '", which is neither a loopback tunnel endpoint nor an allow-listed test gateway.'
+    );
+  }
+  return host;
 }
 
 // Set on a cfg that cleared assertEndpointsAllowed(). A Symbol, so it cannot be
@@ -153,48 +352,59 @@ const ENDPOINT_GUARD_PASSED = Symbol('osi.silvan.endpointGuardPassed');
 // checked here, before any client exists.
 //
 // Order matters and is part of the contract:
-//   1. The deny-list is applied to EVERY endpoint, unconditionally. It is
-//      consulted before the gateway selection or SILVAN_ALLOW_ALT_HOST are even
-//      read, so nothing can be used to reach a production gateway or the cloud.
-//   2. Every non-SSH endpoint must be either a loopback tunnel address or
-//      exactly the SSH host the EUI guard will verify. This closes the gap
-//      where SSH points at the test gateway (so both EUI guards pass) while the
-//      HTTP or MQTT client is quietly aimed somewhere else.
-//   3. Only then is the gateway selection consulted, and the SSH host must be
+//   1. The deny-list is applied to EVERY endpoint, unconditionally, over every
+//      host-shaped token of the RAW value -- before anything is parsed and
+//      before the gateway selection or SILVAN_ALLOW_ALT_HOST are read. A
+//      forbidden host is refused wherever it hides in the string.
+//   2. Shape. SSH and MQTT endpoints must be bare hosts (a URL there is checked
+//      as one host and connected to as another); API and GUI bases must be
+//      http(s) URLs with no userinfo.
+//   3. Endpoint consistency: every non-SSH endpoint must be either a loopback
+//      tunnel address or exactly the SSH host the EUI guard will verify. This
+//      closes the gap where SSH points at the selected gateway (so both EUI
+//      guards pass) while the HTTP or MQTT client is quietly aimed elsewhere.
+//   4. Only then is the gateway selection consulted, and the SSH host must be
 //      exactly the selected allow-list entry's host. SILVAN_ALLOW_ALT_HOST
 //      grants nothing here: it cannot add a host to the allow-list.
+//   5. The cfg the clients receive carries canonical values -- the allow-list
+//      entry's own host string, never the raw environment value.
 function assertEndpointsAllowed(cfg) {
-  const forbidden = new Set(FORBIDDEN_HOSTS.map((h) => h.toLowerCase()));
-  const sshHost = hostOf(cfg.sshHost);
-  if (!sshHost) throw new Error('REFUSING to run: no SSH host configured.');
-
   const endpoints = [
-    { label: 'SSH host (SILVAN_SSH_HOST)', value: cfg.sshHost, host: sshHost },
-    { label: 'HTTP API (SILVAN_API_BASE)', value: cfg.apiBase, host: hostOf(cfg.apiBase) },
-    { label: 'GUI (SILVAN_GUI_BASE)', value: cfg.guiBase, host: hostOf(cfg.guiBase) },
-    { label: 'MQTT broker (SILVAN_MQTT_HOST)', value: cfg.mqttHost, host: hostOf(cfg.mqttHost) },
+    { label: 'SSH host (SILVAN_SSH_HOST)', value: cfg.sshHost, kind: 'host' },
+    { label: 'HTTP API (SILVAN_API_BASE)', value: cfg.apiBase, kind: 'url' },
+    { label: 'GUI (SILVAN_GUI_BASE)', value: cfg.guiBase, kind: 'url' },
+    { label: 'MQTT broker (SILVAN_MQTT_HOST)', value: cfg.mqttHost, kind: 'host' },
   ];
 
-  // 1. Deny-list, unconditional, every endpoint, by IP and by name.
+  // 1. Deny-list, unconditional, every endpoint, every token of the raw value.
+  for (const ep of endpoints) assertNoForbiddenToken(ep.value, ep.label);
+
+  // 2. Shape, and the deny-list again on what the client would actually address.
   for (const ep of endpoints) {
-    if (!ep.host) {
-      throw new Error('REFUSING to run: ' + ep.label + ' is empty; every endpoint must be explicit.');
-    }
-    if (forbidden.has(ep.host)) {
+    ep.host = ep.kind === 'host'
+      ? assertBareHost(ep.value, ep.label)
+      : assertHttpBase(ep.value, ep.label);
+    if (isForbiddenHost(ep.host)) {
       throw new Error(
         'REFUSING to run: ' + ep.label + ' resolves to "' + ep.host + '", which is on the ' +
         'forbidden-host list. No gateway selection and no SILVAN_ALLOW_ALT_HOST overrides this.'
       );
     }
   }
+  const sshHost = endpoints[0].host;
+  const sshUser = assertSshUser(cfg.sshUser, 'the SSH client');
+  const sshKey = String(cfg.sshKey == null ? '' : cfg.sshKey);
+  if (!sshKey || sshKey.startsWith('-') || /[\s\u0000-\u001f\u007f]/.test(sshKey)) {
+    throw new Error('REFUSING to run: SILVAN_SSH_KEY "' + sshKey + '" is not a plain key path.');
+  }
 
-  // 2. Endpoint consistency: loopback tunnel, or the very host SSH will verify.
+  // 3. Endpoint consistency: loopback tunnel, or the very host SSH will verify.
   for (const ep of endpoints) {
     if (ep.label.startsWith('SSH host')) continue;
     if (isLoopback(ep.host) || ep.host === sshHost) continue;
     throw new Error(
       'REFUSING to run: ' + ep.label + ' points at "' + ep.host + '", which is neither a loopback ' +
-      'tunnel endpoint (' + [...LOOPBACK_HOSTS].join(', ') + ') nor the SSH host "' + sshHost + '" ' +
+      'tunnel endpoint (' + LOOPBACK_HOSTS.join(', ') + ') nor the SSH host "' + sshHost + '" ' +
       'that the EUI guards verify. Every endpoint must terminate on the same gateway.'
     );
   }
@@ -205,10 +415,10 @@ function assertEndpointsAllowed(cfg) {
     throw new Error('REFUSING to run: SILVAN_MQTT_PORT "' + cfg.mqttPort + '" is not a valid TCP port.');
   }
 
-  // 3. Only now: which gateway may be named at all -- and only one the
+  // 4. Only now: which gateway may be named at all -- and only one the
   //    allow-list already knows, addressed at exactly its own host.
   const entry = resolveGateway(cfg.gateway);
-  if (sshHost !== hostOf(entry.sshHost)) {
+  if (sshHost !== canonicalHost(entry.sshHost)) {
     throw new Error(
       'REFUSING to run against ' + cfg.sshHost + '. The selected gateway "' + entry.name + '" is ' +
       entry.sshHost + ', and this harness only ever addresses an allow-listed test gateway at its own ' +
@@ -225,10 +435,15 @@ function assertEndpointsAllowed(cfg) {
     );
   }
 
-  // Normalised from the allow-list, never from the caller.
+  // 5. Normalised from the allow-list and from the checks above, never from the
+  //    caller: the clients receive the validated host, not the raw env value.
   cfg.gateway = entry.name;
   cfg.expectedEui = entry.expectedEui;
   cfg.credsFile = entry.credsFile;
+  cfg.sshHost = entry.sshHost;
+  cfg.sshUser = sshUser;
+  cfg.mqttHost = endpoints[3].host;
+  cfg.mqttPort = port;
   cfg[ENDPOINT_GUARD_PASSED] = true;
   return cfg;
 }
@@ -329,7 +544,16 @@ module.exports = {
   assertEndpointsAllowed,
   assertEndpointGuardPassed,
   hostOf,
+  canonicalHost,
+  hostTokens,
+  isForbiddenHost,
   isLoopback,
+  assertBareHost,
+  assertHttpBase,
+  assertSshUser,
+  assertAllowListedSshHost,
+  assertConnectableHost,
+  assertConnectableBase,
   ENDPOINT_GUARD_PASSED,
   LOOPBACK_HOSTS,
   resolveGateway,
