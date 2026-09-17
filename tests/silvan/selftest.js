@@ -21,6 +21,10 @@ const { Rest, redact, redactHeaders, isSecretKey, REDACTED } = require('./lib/re
 const { Ssh } = require('./lib/ssh');
 const { DownlinkObserver } = require('./lib/observer');
 const { hasRejectedOutboxShape, isKnownTerminalReason } = require('./lib/rejections');
+const { classifyOnceOutcome, ONCE_GRACE_MS } = require('./lib/onceGrace');
+const { hasAdminRouterScopedGate, hasScopedOnlyRoleAssert } = require('./lib/roleGates');
+const { hasBlackholeRoute, firstIpv4, parsePingResolvedIp } = require('./lib/routeParse');
+const planRef = require('./lib/planRef');
 
 const failures = [];
 let passed = 0;
@@ -250,6 +254,156 @@ async function main() {
     assert.strictEqual(isKnownTerminalReason(''), false);
     assert.strictEqual(isKnownTerminalReason(null), false);
     assert.strictEqual(isKnownTerminalReason(undefined), false);
+  });
+
+  console.log('\n-- once-schedule grace window (P1/C1 additions), against fixture timestamps');
+  await check('a fire_at 2 minutes in the past is within the grace window (fires)', () => {
+    const now = Date.parse('2026-09-17T12:00:00.000Z');
+    assert.strictEqual(classifyOnceOutcome('2026-09-17T11:58:00.000Z', now), 'FIRE');
+  });
+  await check('a fire_at exactly at the grace boundary still fires (strictly-greater-than in the real code)', () => {
+    const now = Date.parse('2026-09-17T12:00:00.000Z');
+    const atBoundary = new Date(now - ONCE_GRACE_MS).toISOString();
+    assert.strictEqual(classifyOnceOutcome(atBoundary, now), 'FIRE');
+  });
+  await check('a fire_at one second past the grace window is SKIPped', () => {
+    const now = Date.parse('2026-09-17T12:00:00.000Z');
+    const pastBoundary = new Date(now - ONCE_GRACE_MS - 1000).toISOString();
+    assert.strictEqual(classifyOnceOutcome(pastBoundary, now), 'SKIP');
+  });
+  await check('a fire_at in the future is treated as FIRE-eligible (not due yet, but not skipped)', () => {
+    const now = Date.parse('2026-09-17T12:00:00.000Z');
+    assert.strictEqual(classifyOnceOutcome('2026-09-17T12:05:00.000Z', now), 'FIRE');
+  });
+  await check('an unparseable fire_at throws rather than silently misclassifying', () => {
+    assert.throws(() => classifyOnceOutcome('not-a-date', Date.now()), /not parseable/);
+  });
+
+  console.log('\n-- role-gate shape classifiers (A2), against literal extracts of the real deployed source');
+  // These snippets are trimmed, literal excerpts of the ACTUAL flows.json node
+  // source (verified 2026-09-17, this repo) -- not hand-invented shapes -- so
+  // this selftest catches drift if a future refactor changes the pattern this
+  // classifier depends on.
+  const REAL_ADMIN_ROUTER_SNIPPET =
+    "return (async () => {\nconst respond = function(statusCode, payload) {\nmsg.statusCode = statusCode;\n" +
+    "return msg;\n};\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n" +
+    "  return respond(404, { message: 'Not found' });\n}\nlet db;\n";
+  const REAL_ROLE_ASSERT_SNIPPET =
+    "const scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';\nif (scopedOn) {\n" +
+    "  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) { }\n" +
+    "  const roleDb = new osiDb.Database('/data/db/farming.db');\n  try {\n" +
+    "    await scopeLoad.value.assertAuthenticatedRole(roleDb, auth, 'admin', { scopedMode: true });\n  } catch (e) {}\n}\n";
+  await check('the admin-router classifier matches the real scoped-admin-account-router shape', () => {
+    assert.strictEqual(hasAdminRouterScopedGate(REAL_ADMIN_ROUTER_SNIPPET), true);
+  });
+  await check('the admin-router classifier does NOT match the reboot/fan shape', () => {
+    assert.strictEqual(hasAdminRouterScopedGate(REAL_ROLE_ASSERT_SNIPPET), false);
+  });
+  await check('the scoped-only-role-assert classifier matches the real reboot/fan shape', () => {
+    assert.strictEqual(hasScopedOnlyRoleAssert(REAL_ROLE_ASSERT_SNIPPET), true);
+  });
+  await check('the scoped-only-role-assert classifier does NOT match the admin-router shape', () => {
+    assert.strictEqual(hasScopedOnlyRoleAssert(REAL_ADMIN_ROUTER_SNIPPET), false);
+  });
+  await check('both classifiers return false on empty/undefined source rather than throwing', () => {
+    assert.strictEqual(hasAdminRouterScopedGate(undefined), false);
+    assert.strictEqual(hasScopedOnlyRoleAssert(null), false);
+  });
+
+  console.log('\n-- route-table parsing (R1b), against fixture `ip route show` text');
+  const ROUTE_SHOW_WITH_BLACKHOLE = 'default via 10.0.0.1 dev eth0\nblackhole 203.0.113.9\n10.0.0.0/24 dev eth0 scope link';
+  const ROUTE_SHOW_WITHOUT = 'default via 10.0.0.1 dev eth0\n10.0.0.0/24 dev eth0 scope link';
+  await check('hasBlackholeRoute finds an exact-match blackhole entry', () => {
+    assert.strictEqual(hasBlackholeRoute(ROUTE_SHOW_WITH_BLACKHOLE, '203.0.113.9'), true);
+  });
+  await check('hasBlackholeRoute finds a /32-suffixed blackhole entry', () => {
+    assert.strictEqual(hasBlackholeRoute('blackhole 203.0.113.9/32\n', '203.0.113.9'), true);
+  });
+  await check('hasBlackholeRoute is false when no blackhole route exists', () => {
+    assert.strictEqual(hasBlackholeRoute(ROUTE_SHOW_WITHOUT, '203.0.113.9'), false);
+  });
+  await check('hasBlackholeRoute does not false-positive on a DIFFERENT blackholed IP', () => {
+    assert.strictEqual(hasBlackholeRoute(ROUTE_SHOW_WITH_BLACKHOLE, '203.0.113.99'), false);
+  });
+  await check('hasBlackholeRoute is false on an empty ip', () => {
+    assert.strictEqual(hasBlackholeRoute(ROUTE_SHOW_WITH_BLACKHOLE, ''), false);
+  });
+  await check('firstIpv4 extracts an address from getent-style output', () => {
+    assert.strictEqual(firstIpv4('bovey.cloud has address 203.0.113.9\n'), '203.0.113.9');
+  });
+  await check('firstIpv4 returns null when nothing IPv4-shaped is present', () => {
+    assert.strictEqual(firstIpv4('no addresses found'), null);
+  });
+  await check('parsePingResolvedIp ties the address to the pinged host (BusyBox format), not a DNS resolver ' +
+    'line that might precede it', () => {
+    assert.strictEqual(parsePingResolvedIp('PING bovey.cloud (83.228.220.63): 56 data bytes\n64 bytes from ...'), '83.228.220.63');
+  });
+  await check('parsePingResolvedIp handles the iputils spelling too', () => {
+    assert.strictEqual(parsePingResolvedIp('PING bovey.cloud (203.0.113.9) 56(84) bytes of data.'), '203.0.113.9');
+  });
+  await check('parsePingResolvedIp does NOT pick up a resolver address from an unrelated preceding line ' +
+    '(the exact bug this function exists to avoid)', () => {
+    const nslookupLikeNoise = 'Server:\t\t100.100.100.100\nAddress:\t100.100.100.100:53\n\n' +
+      'PING bovey.cloud (83.228.220.63): 56 data bytes';
+    assert.strictEqual(parsePingResolvedIp(nslookupLikeNoise), '83.228.220.63');
+  });
+  await check('parsePingResolvedIp returns null on a resolution failure line', () => {
+    assert.strictEqual(parsePingResolvedIp("ping: bad address 'no-such-host.invalid'"), null);
+  });
+
+  console.log('\n-- next_run / DST reference (S2), against the REAL osi-valve-control/plan.js, required directly');
+  await check('plan.js loads standalone from this repo checkout (no gateway globals needed)', () => {
+    assert.strictEqual(typeof planRef.nextRun, 'function');
+    assert.strictEqual(typeof planRef.nextLocalOccurrence, 'function');
+  });
+  await check('nextRun honours the weekday mask and lands on the correct calendar day at a +14h offset ' +
+    '(Pacific/Kiritimati)', () => {
+    const result = planRef.nextRun(
+      [{ enabled: 1, kind: 'WEEKLY', weekdays_mask: 1, start_time: '23:59', timezone: 'Pacific/Kiritimati',
+        duration_minutes: 10, schedule_uuid: 'fixture' }],
+      new Date('2026-09-17T00:00:00Z'), // a Thursday
+      'UTC'
+    );
+    assert.ok(result, 'nextRun returned null');
+    const parts = planRef.localParts(new Date(result.at), 'Pacific/Kiritimati');
+    assert.strictEqual(parts.weekday, 0, 'expected the next Sunday');
+    assert.strictEqual(parts.hour, 23);
+    assert.strictEqual(parts.minute, 59);
+  });
+  await check('nextRun lands on the correct calendar day at a -11h offset (Pacific/Pago_Pago)', () => {
+    const result = planRef.nextRun(
+      [{ enabled: 1, kind: 'WEEKLY', weekdays_mask: 1, start_time: '00:00', timezone: 'Pacific/Pago_Pago',
+        duration_minutes: 5, schedule_uuid: 'fixture' }],
+      new Date('2026-09-17T00:00:00Z'),
+      'UTC'
+    );
+    assert.ok(result);
+    const parts = planRef.localParts(new Date(result.at), 'Pacific/Pago_Pago');
+    assert.strictEqual(parts.weekday, 0);
+    assert.strictEqual(parts.hour, 0);
+    assert.strictEqual(parts.minute, 0);
+  });
+  await check('offsetMinutes reports the expected fixed (no-DST) offsets', () => {
+    assert.strictEqual(planRef.offsetMinutes(new Date('2026-09-17T00:00:00Z'), 'Pacific/Kiritimati'), 840);
+    assert.strictEqual(planRef.offsetMinutes(new Date('2026-09-17T00:00:00Z'), 'Pacific/Pago_Pago'), -660);
+  });
+  await check('nextLocalOccurrence resolves a nonexistent time in the 2026 Europe/Zurich spring-forward gap ' +
+    'to a real instant on the correct calendar day', () => {
+    const occ = planRef.nextLocalOccurrence(new Date('2026-03-27T00:00:00Z'), 'Europe/Zurich', 0, 2, 30);
+    assert.ok(occ, 'expected a resolved instant, not null');
+    const parts = planRef.localParts(occ, 'Europe/Zurich');
+    assert.strictEqual(parts.year, 2026); assert.strictEqual(parts.month, 3); assert.strictEqual(parts.day, 29);
+  });
+  await check('nextLocalOccurrence resolves an ambiguous time in the 2026 Europe/Zurich fall-back repeat ' +
+    'deterministically to the correct calendar day', () => {
+    const occ = planRef.nextLocalOccurrence(new Date('2026-10-23T00:00:00Z'), 'Europe/Zurich', 0, 2, 30);
+    assert.ok(occ);
+    const parts = planRef.localParts(occ, 'Europe/Zurich');
+    assert.strictEqual(parts.year, 2026); assert.strictEqual(parts.month, 10); assert.strictEqual(parts.day, 25);
+  });
+  await check('isDstTransitionWithin detects the spring-forward transition and reports none on an ordinary day', () => {
+    assert.strictEqual(planRef.isDstTransitionWithin('Europe/Zurich', Date.UTC(2026, 2, 29, 0), Date.UTC(2026, 2, 29, 23)), true);
+    assert.strictEqual(planRef.isDstTransitionWithin('Europe/Zurich', Date.UTC(2026, 5, 15, 0), Date.UTC(2026, 5, 15, 23)), false);
   });
 
   // End to end through the real Rest client against a loopback stub, which is

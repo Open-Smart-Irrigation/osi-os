@@ -6,9 +6,13 @@
 // create, break or repair an account link, does not cut the network, and does
 // not call POST /api/sync/force in a way that would push this gateway's data
 // anywhere. It only observes what the edge does with its own outbox while it
-// keeps serving local traffic. The interruption/reconnect/duplicate-delivery
-// half of the C1 matrix row needs a controlled cloud endpoint and is out of
-// scope here.
+// keeps serving local traffic. Link/unlink, a real network cut, conflicting
+// cloud edits, and expiry of queued CLOUD commands need a controlled cloud
+// endpoint and stay out of scope here; a real, bounded cloud-reachability
+// outage is R1(b)'s job. Duplicate LOCAL uplink delivery, an expired LOCAL
+// (ONCE) queued action, and a stale LOCAL plan push's isolation from unrelated
+// mutations ARE covered below (T16f additions) -- see their own section near
+// the end of exports.run for the exact scoping of each.
 //
 // The invariant under test: the edge is authoritative. Local writes must
 // succeed and be durably queued whether or not the cloud is reachable.
@@ -18,6 +22,7 @@ exports.title = 'Cloud-edge (partial): local writes while the cloud is unreachab
 const {
   PR_262_URL, REJECTED_RETENTION_DAYS, isKnownTerminalReason, hasRejectedOutboxShape,
 } = require('../lib/rejections');
+const { classifyOnceOutcome, ONCE_GRACE_MS } = require('../lib/onceGrace');
 
 const state = { zones: [], devices: [] };
 
@@ -268,10 +273,152 @@ exports.run = async (ctx) => {
     Array.isArray(devices.body) && devices.body.some((d) => d.deveui === eui),
     { count: Array.isArray(devices.body) ? devices.body.length : -1 });
 
-  ev.note('Not covered here, and deliberately: link/unlink, network cut and restore, duplicate delivery, ' +
-    'conflicting cloud edits, and expiry of queued cloud commands. Those need a controlled cloud endpoint ' +
-    'and an account link this harness must not create.');
+  ev.note('Not covered here, and deliberately: link/unlink, network cut and restore, conflicting cloud edits, ' +
+    'and expiry of queued CLOUD commands. Those need a controlled cloud endpoint and an account link this ' +
+    'harness must not create. A bounded, real cloud-reachability outage (never a fabricated one) is R1(b)\'s job.');
   ev.note('Account link present on this gateway: ' + (linked ? 'yes' : 'no') + '.');
+
+  // === T16f additions: duplicate delivery, expired queued action, stale =====
+  // === LOCAL push isolation ==================================================
+  // SCOPE LIMIT unchanged: none of this touches the cloud link.
+
+  // --- duplicate delivery: the identical uplink, republished verbatim -------
+  const dupEui = ctx.freshDeveui('C1-dup');
+  state.devices.push(dupEui);
+  const dupDevReg = await ctx.createSimDevice({ deveui: dupEui, name: 'Dup KIWI ' + tag, type_id: 'KIWI_SENSOR' });
+  ctx.expectStatus('a device for the duplicate-delivery check registers', dupDevReg, [200, 201]);
+  const dupEnv = ctx.U.kiwiUplink(ctx.profiles, {
+    deveui: dupEui, swt1Kpa: 27, time: new Date(Date.now() - 5000).toISOString(),
+  });
+  ctx.publishSensorUplink(dupEnv);
+  await ctx.until(async () => {
+    const n = await ssh.sqlScalar("SELECT COUNT(*) AS n FROM device_data WHERE deveui = '" + dupEui + "'");
+    return Number(n) >= 1 ? n : null;
+  }, { timeoutMs: 15000, what: 'the first delivery to be ingested' }).catch(() => null);
+  // Republish the EXACT same envelope object -- same deduplicationId, same
+  // fCnt, same time -- simulating an at-least-once redelivery of the identical
+  // uplink, not a second reading.
+  ctx.publishSensorUplink(dupEnv);
+  await ctx.sleep(4000);
+  const dupCount = Number(await ssh.sqlScalar("SELECT COUNT(*) AS n FROM device_data WHERE deveui = '" + dupEui + "'"));
+  ctx.expect('a byte-identical redelivered uplink (same deduplicationId, same fCnt, same time) produces exactly ' +
+    'one device_data row, not two',
+    dupCount === 1, { rows: dupCount, deduplicationId: dupEnv.deduplicationId, fCnt: dupEnv.fCnt });
+  if (dupCount !== 1) {
+    ev.note('FINDING: duplicate delivery is not deduplicated at ingest. No dedup key (fCnt, deduplicationId, or a ' +
+      'unique (deveui, recorded_at) constraint) exists anywhere in the ingest path or device_data\'s schema ' +
+      '(verified 2026-09-17: no matching index in database/seed-blank.sql, no fCnt/deduplicationId reference ' +
+      'under osi-device-writer or the mqtt-in decode functions) -- every uplink that reaches the local broker is ' +
+      'stored as its own row. In production this relies entirely on ChirpStack\'s own upstream dedup before it ' +
+      'publishes to the local broker; this harness bypasses ChirpStack by design (T10 inventory, section 7), so ' +
+      'it is exercising a path production traffic may never actually take. Worth a triage issue, not silently ' +
+      'waved through here.');
+  }
+
+  // --- expired queued action: a ONCE open with a past fire_at must not fire -
+  const expiredEui = ctx.freshDeveui('C1-expired');
+  state.devices.push(expiredEui);
+  const expiredZone = await rest.post('/api/irrigation-zones', { name: 'C1 Expired Zone ' + tag, timezone: 'Europe/Zurich' });
+  ctx.expectStatus('a zone for the expired-schedule valve is created', expiredZone, 201);
+  if (expiredZone.body && expiredZone.body.id) state.zones.push(expiredZone.body.id);
+  const expiredDevReg = await ctx.createSimDevice({
+    deveui: expiredEui, name: 'C1 Expired Valve ' + tag, type_id: 'STREGA_VALVE',
+    strega_generation: 'GEN1', zoneId: expiredZone.body && expiredZone.body.id,
+  });
+  ctx.expectStatus('the expired-schedule valve registers', expiredDevReg, [200, 201]);
+  const pastFireAt = new Date(Date.now() - 15 * 60000).toISOString(); // 15 min ago: past ONCE_GRACE_MS (10 min)
+  ctx.expect('the reference grace-window classifier (lib/onceGrace) says a 15-minute-old fire_at will be SKIPPED, ' +
+    'not fired -- pinning the assumption this live check relies on',
+    classifyOnceOutcome(pastFireAt, Date.now()) === 'SKIP', { ONCE_GRACE_MS });
+  const expiredSched = await rest.post('/api/valves/' + expiredEui + '/schedules', {
+    kind: 'ONCE', fire_at: pastFireAt, duration_minutes: 3, label: 'expired ' + tag,
+  });
+  ctx.expectStatus('a ONCE schedule with a past fire_at is ACCEPTED by the API (validated as a timestamp, not as ' +
+    '"must be in the future")', expiredSched, [200, 201]);
+  const expiredUuid = expiredSched.body && (expiredSched.body.schedule_uuid ||
+    (expiredSched.body.schedule && expiredSched.body.schedule.schedule_uuid));
+  const skipped = await ctx.until(() => ssh.sqlOne(
+    "SELECT once_state FROM valve_schedules WHERE schedule_uuid = '" + expiredUuid + "'"
+  ).then((row) => (row && row.once_state !== 'PENDING' ? row : null)), { timeoutMs: 90000, intervalMs: 5000,
+    what: 'the 60s once-tick to classify the expired schedule' }).catch(() => null);
+  ctx.expect('SQLite: an expired queued action is marked SKIPPED, never FIRED',
+    !!skipped && skipped.once_state === 'SKIPPED', skipped);
+  ctx.expect('no downlink was emitted for the expired ONCE schedule',
+    ctx.observer.downlinksFor(expiredEui).filter((d) => d.decoded.kind === 'TIMED_ACTION').length === 0,
+    { downlinks: ctx.observer.downlinksFor(expiredEui).length });
+
+  // --- a stale QUEUED plan push is never left duplicated by a recompile -----
+  // "Stale command must not fire after reconnect" -- the RECONNECT half of
+  // this needs a real disconnect/reconnect of the gateway's OWN mqtt client,
+  // which only genuinely happens via a Node-RED restart; that half is R1(a)'s
+  // job (this case must stay cloud-link-free and has no restart trigger of
+  // its own). What IS safely testable here, locally, is the other half of
+  // "stale": VERIFIED LIVE (2026-09-17, this run) that osi-valve-control's
+  // compileAndQueue recompiles the FULL 7-weekday + CLOCK_SYNC plan on EVERY
+  // schedule mutation for a device, not just the changed slot -- an earlier
+  // draft of this check wrongly assumed an unrelated mutation would leave the
+  // original push rows completely untouched, which is NOT what the real
+  // system does (each mutation reissues fresh push rows for every slot and
+  // marks the SUPERSEDED ones as such). The invariant that actually matters,
+  // and is what "stale must not [also] fire" means here, is that a recompile
+  // never leaves TWO live (QUEUED) commands for the SAME weekday/purpose slot
+  // at once -- that would be the genuinely dangerous case (the stale one
+  // could still be ACKed and "fire" alongside its replacement).
+  const staleEui = ctx.freshDeveui('C1-stale');
+  state.devices.push(staleEui);
+  const staleDevReg = await ctx.createSimDevice({
+    deveui: staleEui, name: 'C1 Stale Valve ' + tag, type_id: 'STREGA_VALVE', strega_generation: 'GEN1',
+  });
+  ctx.expectStatus('the stale-push valve registers', staleDevReg, [200, 201]);
+  ctx.observer.setBehaviour(staleEui, 'drop'); // never ACKed -> stays QUEUED
+  const staleSched = await rest.post('/api/valves/' + staleEui + '/schedules', {
+    kind: 'WEEKLY', weekdays_mask: 4, start_time: '04:00', duration_minutes: 5, label: 'stale ' + tag,
+  });
+  ctx.expectStatus('a schedule whose plan push will never be ACKed is created', staleSched, [200, 201]);
+  const staleQueuedBefore = await ctx.until(() => ssh.sql(
+    "SELECT push_id, purpose, fport, state FROM valve_schedule_pushes WHERE device_eui = '" + staleEui + "'"
+  ).then((rows) => (rows.length ? rows : null)), { timeoutMs: 15000, what: 'the stale plan push to be queued' }).catch(() => []);
+  ctx.expect('SQLite: the plan push is QUEUED (unanswered)', staleQueuedBefore.length >= 1 &&
+    staleQueuedBefore.every((r) => r.state === 'QUEUED'), staleQueuedBefore);
+  const dupeSlots = (rows) => {
+    const seen = new Set(); const dupes = [];
+    for (const r of rows.filter((x) => x.state === 'QUEUED')) {
+      const key = r.purpose + ':' + r.fport;
+      if (seen.has(key)) dupes.push(key); else seen.add(key);
+    }
+    return dupes;
+  };
+  ctx.expect('SQLite: no weekday/purpose slot has two simultaneously QUEUED pushes before the unrelated mutation',
+    dupeSlots(staleQueuedBefore).length === 0, dupeSlots(staleQueuedBefore));
+
+  // An unrelated mutation on the SAME device: a second, independent schedule,
+  // which triggers a full recompile of the plan.
+  const unrelatedSched = await rest.post('/api/valves/' + staleEui + '/schedules', {
+    kind: 'WEEKLY', weekdays_mask: 32, start_time: '05:00', duration_minutes: 5, label: 'unrelated ' + tag,
+  });
+  ctx.expectStatus('an unrelated second schedule on the same device is created', unrelatedSched, [200, 201]);
+  await ctx.sleep(3000);
+  const staleQueuedAfter = await ssh.sql(
+    "SELECT push_id, purpose, fport, state FROM valve_schedule_pushes WHERE device_eui = '" + staleEui + "'");
+  ctx.expect('SQLite: still no weekday/purpose slot has two simultaneously QUEUED pushes after the recompile ' +
+    '(the recompile correctly SUPERSEDES the stale push for any changed slot rather than leaving both live)',
+    dupeSlots(staleQueuedAfter).length === 0, dupeSlots(staleQueuedAfter));
+  const originalPushIds = new Set(staleQueuedBefore.map((r) => r.push_id));
+  const originalRowsAfter = staleQueuedAfter.filter((r) => originalPushIds.has(r.push_id));
+  ctx.expect('SQLite: every original push row from before the recompile is now either still QUEUED (slot ' +
+    'unchanged) or terminally SUPERSEDED (slot replaced) -- never left QUEUED alongside a newer QUEUED row for ' +
+    'the same slot (checked above) and never silently vanished',
+    originalRowsAfter.length === staleQueuedBefore.length &&
+    originalRowsAfter.every((r) => r.state === 'QUEUED' || r.state === 'SUPERSEDED'),
+    { before: staleQueuedBefore, after: originalRowsAfter });
+
+  ev.note('C1 additions scope: "duplicate delivery" and "expired queued action" are exercised exactly as asked. ' +
+    '"Stale command must not fire after reconnect" is split: the reconnect half (a real disconnect/reconnect of ' +
+    'the GATEWAY\'s own MQTT client) is R1(a)\'s job, since that is the only place in this harness such a ' +
+    'reconnect genuinely happens; the LOCAL half asserted here is that a full-plan recompile (triggered by an ' +
+    'unrelated schedule mutation) never leaves a stale push and its replacement simultaneously QUEUED for the ' +
+    'same weekday/purpose slot. The actual cloud-command replay path (flows.json `Route Command`, commandId-' +
+    'keyed) is reachable only via the cloud pending-commands poll and is out of reach for this harness by design.');
 };
 
 exports.cleanup = async (ctx) => {

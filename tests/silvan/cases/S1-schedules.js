@@ -223,6 +223,20 @@ exports.run = async (ctx) => {
   ctx.expect('SQLite: the deleted schedule is tombstoned (deleted_at set), per the sync contract',
     !!deleted && deleted.deleted_at !== null, deleted);
   if (deleted && deleted.deleted_at !== null) state.schedules = state.schedules.filter((s) => s !== uuid);
+  // Observation only (coordinator finding F81, 2026-09-17), never a pass/fail
+  // assertion here: the interim cloud bootstrap endpoint rejects a deleted_at
+  // that is SQLite datetime format ('YYYY-MM-DD HH:MM:SS') rather than
+  // ISO-8601-with-Z, which is the suspected root cause of a restart-triggered
+  // bootstrap failure exercised in R1(a). An osi-os PR (T13i) is expected to
+  // switch deleted_at to ISO-with-Z; until it lands, recording the CURRENT
+  // format here is the evidence a later run can diff against.
+  if (deleted && deleted.deleted_at !== null) {
+    const isIsoWithZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(String(deleted.deleted_at));
+    ev.note('deleted_at format observation (F81): "' + deleted.deleted_at + '" is ' +
+      (isIsoWithZ ? 'ISO-8601 with Z (the format the cloud bootstrap endpoint expects)' :
+        'NOT ISO-8601-with-Z (this is the format believed to trip the interim cloud bootstrap endpoint into a 500)') +
+      '. Not asserted as pass/fail here; T13i is expected to convert this to ISO-with-Z.');
+  }
 
   const delAgain = await rest.del('/api/valves/' + eui + '/schedules/' + uuid);
   ctx.expectStatus('deleting the same schedule twice returns 404 the second time', delAgain, 404);

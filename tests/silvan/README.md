@@ -29,6 +29,8 @@ anything under `lib/`.
 | Simulated devices only | `lib/config.js` `assertSimulatedDevice` | Every DevEUI the harness registers, actuates or answers for must start with `70B3D57ED00`. Commanding anything else throws. |
 | Read-only SQL | `lib/ssh.js` `Ssh.sql` | Opens the database `file:...?mode=ro` with `sqlite3 -readonly` and refuses any statement matching INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/REPLACE/VACUUM/ATTACH. The harness can never reseed or repair `farming.db`. |
 | No cloud link changes | case `C1` | Observes the outbox only. It never links, unlinks, cuts the network, or pushes this gateway's data anywhere. |
+| Bounded, self-removing route change | case `R1` (`cloudDisconnectCase`) | Before adding an `ip route add blackhole <ip>`, arms a `nohup sh -c 'sleep 180; ip route del blackhole <ip>' &` guard, cross-checks the target against `FORBIDDEN_HOSTS` and against this harness's own SSH/API/MQTT endpoints (refusing if they'd ever coincide), removes the route itself in a `finally`, and reads the route table back to confirm it is gone — never trusting the timer alone. |
+| Bounded disk pressure | case `R1` (`diskPressureCase`) | Refuses to create its 200 MB temp file under `/data` at all unless free space would stay ≥ 500 MB afterwards, and always attempts to remove the file in a `finally`. |
 
 Both EUI guards run **before the first mutation**. The API guard needs a bearer
 token, so the runner mints a 60-second read-only one on the Pi for that check
@@ -103,14 +105,18 @@ the smoke tests the bundle the gateway is actually serving.
 | ID | Covers |
 |---|---|
 | `A1` | Register, login, session, duplicate/short/blank credentials, malformed, tampered, forged and expired tokens, and what "logout" actually does. |
+| `A2` | Role/permission gates in Silvan's default (unscoped) state: the admin accounts/grants router 404s for everyone regardless of role, reboot/fan/settings have no role gate at all while unscoped (proven by reading the deployed source, never by calling reboot), and cross-user isolation on zones/devices/valve schedules (404 for zone/device rows outside your `user_id`, 403 "forbidden" for a valve `ownedValve()` claims belongs to someone else). Deliberately partial — see below. |
 | `Z1` | Zones and devices: empty install, create, assign, move, unassign, delete, and the SQLite state behind each. |
 | `Z2` | Invalid input, duplicate zone names, operations on missing dependencies, deleting a zone that still owns a device, deleting things that were never there. |
 | `V1` | Valve actuation on a simulated valve: byte-exact downlinks, actuation expectations, actuator log, repeated clicks, cancel, and every rejected input. |
 | `V2` | The on-valve plan ACK ledger under a refused, duplicated, stray, dropped and very late ACK, plus reconciliation to `OBSERVED_RUNNING`. |
 | `S1` | Schedule CRUD, invalid durations and times, overlap detection, midnight, day rollover, one-time opens, and deletes. |
+| `S2` | Schedules at day boundaries: an offline pure-math pass over the real `plan.js` across the actual 2026 Europe/Zurich DST transitions, plus a live pass at two fixed-offset, no-DST extremes (Pacific/Kiritimati +14, Pacific/Pago_Pago -11) cross-checking `GET /api/valves`' `next_run` against the same compiler run directly, and proving the on-valve weekday/fPort encoding does not shift with the zone offset. |
+| `P1` | Control precedence on a simulated valve: a manual open alongside a pending (not-yet-due) schedule, cancel invalidating an active action (including a late post-cancel uplink race), a schedule deleted before it fires, and the one local, always-reachable retry-safety surface (a repeated cancel is idempotent). |
 | `D1` | Ingest with no data / one sample / many samples, out-of-range clamping, NULL-not-zero for absent fields, stale and future-dated samples, and the cumulative-rain delta state machine. |
 | `ST1` | Settings read/write/validate/persist/restore, per-zone timezone, feature flags, system stats. |
-| `C1` | Local writes and outbox growth while the cloud is unreachable, observed through `/api/sync/state` and `sync_outbox`. Deliberately partial — see below. |
+| `C1` | Local writes and outbox growth while the cloud is unreachable, observed through `/api/sync/state` and `sync_outbox`; plus duplicate uplink delivery, an expired (past-grace) queued one-time open, and a stale plan push's isolation from an unrelated recompile. Deliberately partial — see below. |
+| `R1` | Bounded runtime/recovery, Silvan only: a Node-RED restart with an uplink burst and a queued valve action in flight (plus the restart-triggered cloud bootstrap check, F81), a self-removing blackholed route toward whatever host this gateway is actually linked to, and a 200 MB `/data` disk-pressure probe. Every risky action is guarded, bounded, and self-cleaning — see below. |
 | `U1` | Browser smoke: real login form, screenshots at 1366×768 and 390×844 for every route, and a French hardcoded-English scan. |
 
 `selftest.js` is separate from the matrix: it tests the harness, not the
@@ -203,18 +209,32 @@ runs against a linked gateway do add rows the outbox never drains.
 
 ## Known limitations
 
-- **`C1` is partial.** Link/unlink, network cut and restore, duplicate delivery,
-  conflicting cloud edits and expiry of queued cloud commands all need a
-  controlled cloud endpoint and an account link this harness must not create.
+- **`C1` is still partial.** Link/unlink, a real network cut, conflicting cloud
+  edits, and expiry of queued *cloud* commands all need a controlled cloud
+  endpoint and an account link this harness must not create. Duplicate LOCAL
+  uplink delivery, an expired LOCAL (ONCE) queued action, and a stale LOCAL
+  plan push's isolation from an unrelated recompile are now covered (T16f); a
+  bounded, real cloud-reachability outage is `R1`'s job, not `C1`'s.
 - **Long timers are out of reach.** `STALE_OPEN_OBSERVED` needs 1800 s past
   `expected_close_at` (`RECONCILIATION_GRACE_SEC`), the schedule tick is a
   06:00 cron, and outbox retention runs at 02:00. These need a soak run or an
   injectable clock.
-- **No DST or clock manipulation.** The `S2` matrix row (DST gap/repeat, missed
-  start and restart recovery) needs control of the gateway clock.
-- **No multi-tenant coverage.** Silvan runs `OSI_SCOPED_ACCESS=0`, so the
-  role/permission and tenant-isolation rows (`A2`, `A3`) cannot be exercised
-  here; the scoped code paths in the flows are all behind that flag.
+- **DST/day-boundary math is covered; ON-VALVE firing across a live transition
+  is not.** `S2` (T16f) exercises the real `plan.js` next_run/nextLocalOccurrence
+  computation offline across the actual 2026 Europe/Zurich DST dates, and live
+  against two fixed-offset (+14/-11) zones. What's still out of reach: the
+  on-valve firmware actually FIRING across a live transition, and the FPort
+  12/13 clock-sync push crossing one — both still need a soak run or an
+  injectable gateway clock.
+- **`A2` covers the DEFAULT (unscoped) state only, by design.** Silvan runs
+  `OSI_SCOPED_ACCESS=0`, and that flag is set once at `node-red.init` startup
+  from a UCI value — there is no settings-API toggle, only a UCI write plus a
+  Node-RED restart, and this harness does not perform that flip. `A2` proves
+  what "role/permission denial" and tenant isolation actually mean in the
+  state every current gateway runs in (per-`user_id` isolation on zone/device
+  reads and writes, 403 on a claimed valve, and the admin-router/reboot/fan
+  role gates all being scoped-only); the scoped-ON code paths, and true
+  multi-tenant coverage (`A3`), remain untested here.
 - **The `U1` English scan is a heuristic.** It reliably catches i18next error
   text, raw keys, and English that has a French translation. The
   never-translated-at-all check is a marker-word heuristic and can produce a
@@ -223,3 +243,14 @@ runs against a linked gateway do add rows the outbox never drains.
   records the gateway's `flows.json` path and md5 in `summary.json`. A gateway
   running an older payload than `origin/main` will disagree with the repo, and
   that is a finding, not a harness failure.
+- **`R1` shares this gateway with every other harness run.** Silvan
+  accumulates a persistent backlog of `ownership_denied` outbox rejections
+  from every prior run's simulated devices/zones (see `C1`), and
+  `lastOutboxDeliverySuccessAt` was found (2026-09-17, live) to be permanently
+  null here as a result — it appears to only be set on a zero-rejection batch,
+  which never happens on a gateway with hundreds of accumulated rejections.
+  `R1`'s cloud-disconnect recovery check uses `lastPendingCommandPollSuccessAt`
+  instead (a plain GET, unconfounded by per-event business-logic rejections),
+  not `lastError`'s mere presence/absence and not `lastOutboxDeliverySuccessAt`.
+  If you add a new reachability check anywhere in this harness, reuse that
+  field rather than re-discovering this the hard way.

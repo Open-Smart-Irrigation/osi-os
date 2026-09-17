@@ -20,14 +20,18 @@ const { CaseEvidence, writeRunSummary } = require('./lib/evidence');
 
 const CASES = [
   { id: 'A1', file: './cases/A1-accounts.js' },
+  { id: 'A2', file: './cases/A2-roles.js' },
   { id: 'Z1', file: './cases/Z1-zones-devices.js' },
   { id: 'Z2', file: './cases/Z2-zones-invalid.js' },
   { id: 'V1', file: './cases/V1-valve-actions.js' },
   { id: 'V2', file: './cases/V2-valve-acks.js' },
   { id: 'S1', file: './cases/S1-schedules.js' },
+  { id: 'S2', file: './cases/S2-schedule-boundaries.js' },
+  { id: 'P1', file: './cases/P1-precedence.js' },
   { id: 'D1', file: './cases/D1-sensor-data.js' },
   { id: 'ST1', file: './cases/ST1-settings.js' },
   { id: 'C1', file: './cases/C1-sync-outbox.js' },
+  { id: 'R1', file: './cases/R1-runtime-recovery.js' },
   { id: 'U1', file: './ui/smoke.js' },
 ];
 
