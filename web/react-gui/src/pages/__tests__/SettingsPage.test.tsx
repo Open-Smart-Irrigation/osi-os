@@ -112,6 +112,11 @@ vi.mock('react-i18next', () => ({
         environmentCard: 'Environment & weather forecast',
         irrigationSchedule: 'Irrigation schedule',
         valveControl: 'Valve control',
+        dataModule: 'Data view',
+        networkModule: 'Network',
+        gatewayHub: 'Gateway',
+        journalModule: 'Field journal',
+        journalModuleSaveError: 'Could not change the journal module',
         schedulerDisableConfirm: 'Disable all active irrigation schedules before hiding this module?',
         schedulerDisableSuccess_one: 'Disabled {{count}} active schedule.',
         schedulerDisableSuccess_other: 'Disabled {{count}} active schedules.',
@@ -186,7 +191,7 @@ beforeEach(() => {
   apiMocks.createSupportRequest.mockReset();
   apiMocks.createSupportRequest.mockResolvedValue({ request_id: 'local-1', local_status: 'QUEUED' });
   apiMocks.getSystemSettings.mockReset();
-  apiMocks.getSystemSettings.mockResolvedValue({ gatewayTimezone: 'UTC' });
+  apiMocks.getSystemSettings.mockResolvedValue({ gatewayTimezone: 'UTC', journalModuleEnabled: true });
   apiMocks.updateSystemSettings.mockReset();
   // Reset the shared useScope() mock to this suite's original default
   // (writable, non-scoped, role admin but isAdmin false — see the comment
@@ -318,19 +323,28 @@ describe('SettingsPage', () => {
     expect(within(modules).getByText('Prediction advisory')).toBeInTheDocument();
     expect(within(modules).getByText('Experimental, do not use for production!')).toBeInTheDocument();
     const moduleRows = within(modules).getAllByRole('group');
-    expect(moduleRows).toHaveLength(5);
+    expect(moduleRows).toHaveLength(9);
     expect(moduleRows.map((row) => row.textContent)).toEqual([
       expect.stringContaining('Prediction advisory'),
       expect.stringContaining('Water balance'),
       expect.stringContaining('Irrigation schedule'),
       expect.stringContaining('Valve control'),
       expect.stringContaining('Environment & weather forecast'),
+      expect.stringContaining('Data view'),
+      expect.stringContaining('Network'),
+      expect.stringContaining('Gateway'),
+      expect.stringContaining('Field journal'),
     ]);
     expect(within(moduleRows[0]).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[1]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[2]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[3]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[4]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+    // Defaults on main: everything visible. Customer branches flip these.
+    expect(within(moduleRows[5]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(moduleRows[6]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(moduleRows[7]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(moduleRows[8]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('persists display-only module toggles locally', () => {
@@ -348,8 +362,51 @@ describe('SettingsPage', () => {
       environment: false,
       schedulerUi: true,
       valveControl: true,
+      data: true,
+      network: true,
+      gatewayHub: true,
     });
     expect(irrigationZonesAPI.disableAllSchedules).not.toHaveBeenCalled();
+  });
+
+  it('persists the Data view, Network and Gateway module toggles locally', () => {
+    renderSettings();
+
+    const modules = screen.getByRole('region', { name: 'Modules' });
+    const moduleRows = within(modules).getAllByRole('group');
+    fireEvent.click(within(moduleRows[5]).getByRole('button', { name: 'Off' }));
+    fireEvent.click(within(moduleRows[6]).getByRole('button', { name: 'Off' }));
+    fireEvent.click(within(moduleRows[7]).getByRole('button', { name: 'Off' }));
+
+    expect(window.localStorage.getItem('osi.modules.data')).toBe('false');
+    expect(window.localStorage.getItem('osi.modules.network')).toBe('false');
+    expect(window.localStorage.getItem('osi.modules.gatewayHub')).toBe('false');
+    expect(readDisplayPreferences().modules).toEqual({
+      predictionAdvisory: false,
+      waterCard: true,
+      environment: true,
+      schedulerUi: true,
+      valveControl: true,
+      data: false,
+      network: false,
+      gatewayHub: false,
+    });
+    // These three are display-only: hiding a view never mutates gateway state,
+    // unlike the irrigation-schedule row above.
+    expect(irrigationZonesAPI.disableAllSchedules).not.toHaveBeenCalled();
+  });
+
+  it('reflects stored off values for the new modules on load', () => {
+    window.localStorage.setItem('osi.modules.data', 'false');
+    window.localStorage.setItem('osi.modules.network', 'false');
+    window.localStorage.setItem('osi.modules.gatewayHub', 'false');
+    renderSettings();
+
+    const modules = screen.getByRole('region', { name: 'Modules' });
+    const moduleRows = within(modules).getAllByRole('group');
+    expect(within(moduleRows[5]).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(moduleRows[6]).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(moduleRows[7]).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('does not hide irrigation schedules when the disable confirmation is cancelled', () => {
@@ -405,6 +462,67 @@ describe('SettingsPage', () => {
     expect(irrigationZonesAPI.disableAllSchedules).not.toHaveBeenCalled();
     expect(readDisplayPreferences().modules.schedulerUi).toBe(true);
     expect(within(schedulerRow).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  // The Field Journal module is gateway-level, not a per-browser display
+  // preference: switching it off also stops the journal-v2 replication worker
+  // talking to the cloud, which localStorage cannot do. It therefore writes
+  // through the same PUT /api/system/settings the gateway time zone uses.
+  it('writes the journal module switch through the gateway settings API, not localStorage', async () => {
+    apiMocks.updateSystemSettings.mockResolvedValueOnce({
+      gatewayTimezone: 'UTC',
+      zonesUpdated: 0,
+      journalModuleEnabled: false,
+    });
+    renderSettings();
+
+    const modules = screen.getByRole('region', { name: 'Modules' });
+    const journalRow = within(modules).getAllByRole('group')[8];
+    fireEvent.click(within(journalRow).getByRole('button', { name: 'Off' }));
+
+    await waitFor(() => expect(apiMocks.updateSystemSettings).toHaveBeenCalledWith({ journalModuleEnabled: false }));
+    await waitFor(() => expect(
+      within(screen.getByRole('region', { name: 'Modules' })).getAllByRole('group')[8],
+    ).toHaveTextContent('Field journal'));
+    expect(window.localStorage.getItem('osi.modules.journal')).toBeNull();
+    // A gateway-level write must not disturb the per-browser module prefs.
+    expect(readDisplayPreferences().modules.data).toBe(true);
+  });
+
+  it('reflects a journal module already switched off on the gateway', async () => {
+    apiMocks.getSystemSettings.mockResolvedValue({ gatewayTimezone: 'UTC', journalModuleEnabled: false });
+    renderSettings();
+
+    await waitFor(() => {
+      const journalRow = within(screen.getByRole('region', { name: 'Modules' })).getAllByRole('group')[8];
+      expect(within(journalRow).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
+    });
+  });
+
+  it('keeps the journal module on and surfaces the error when the gateway write fails', async () => {
+    apiMocks.updateSystemSettings.mockRejectedValueOnce(new Error('gateway offline'));
+    renderSettings();
+
+    const modules = screen.getByRole('region', { name: 'Modules' });
+    const journalRow = within(modules).getAllByRole('group')[8];
+    fireEvent.click(within(journalRow).getByRole('button', { name: 'Off' }));
+
+    expect(await screen.findByText('gateway offline')).toBeInTheDocument();
+    const stillThere = within(screen.getByRole('region', { name: 'Modules' })).getAllByRole('group')[8];
+    expect(within(stillThere).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  // Same F20/F51 rule the gateway time zone follows: on a scoped install only
+  // an admin may change a gateway-wide setting, and the gate fails closed while
+  // the scope profile is still resolving.
+  it('blocks the journal module switch for a non-admin on a scoped install', () => {
+    Object.assign(scopeMocks.scopeState, { isScoped: true, isAdmin: false, canWrite: true });
+    renderSettings();
+
+    const journalRow = within(screen.getByRole('region', { name: 'Modules' })).getAllByRole('group')[8];
+    fireEvent.click(within(journalRow).getByRole('button', { name: 'Off' }));
+
+    expect(apiMocks.updateSystemSettings).not.toHaveBeenCalled();
   });
 
   it('submits user requests through the improvement request API with all required fields', async () => {

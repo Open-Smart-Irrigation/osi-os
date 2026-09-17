@@ -15,7 +15,9 @@ vi.mock('react-i18next', () => ({
         title: 'Open Smart Irrigation Dashboard',
         'addMenu.zone': 'Zone',
         'addMenu.device': 'Device',
+        'addMenu.activity': 'Activity',
         data: 'Data',
+        'dashboard:network': 'Network',
         'settings:entryPoint': 'Settings',
         account: 'Account',
         'accountMenu.osiServer': 'OSI Server',
@@ -36,6 +38,12 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => true),
 }));
 
+const gatewayModules = vi.hoisted(() => ({ journalEnabled: true }));
+
+vi.mock('../../hooks/useGatewayModules', () => ({
+  useJournalModuleEnabled: () => gatewayModules.journalEnabled,
+}));
+
 function renderHeader(overrides: Partial<ComponentProps<typeof DashboardHeader>> = {}) {
   const props: ComponentProps<typeof DashboardHeader> = {
     username: 'farmer',
@@ -49,6 +57,10 @@ function renderHeader(overrides: Partial<ComponentProps<typeof DashboardHeader>>
 }
 
 beforeEach(() => {
+  // The Data/Network header entries are gated on osi.modules.*; a leftover
+  // key from a sibling test would silently change what this suite renders.
+  window.localStorage.clear();
+  gatewayModules.journalEnabled = true;
   vi.mocked(isDesktopBrowser).mockReturnValue(true);
 });
 
@@ -108,6 +120,47 @@ describe('DashboardHeader (osi-os)', () => {
     vi.mocked(isDesktopBrowser).mockReturnValue(false);
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+  });
+
+  // Module visibility (2026-09-17): Data view / Network are switchable in
+  // Settings. Defaults on main are ON; hiding is UI-only, the routes stay
+  // reachable by URL.
+  it('shows both the Data and Network links when their modules are on by default', () => {
+    renderHeader();
+    expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/analysis');
+    expect(screen.getByRole('link', { name: 'Network' })).toHaveAttribute('href', '/network');
+  });
+
+  it('hides the Data link when the data module is off, leaving Network alone', () => {
+    window.localStorage.setItem('osi.modules.data', 'false');
+    renderHeader();
+    expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Network' })).toBeInTheDocument();
+  });
+
+  it('hides the Network link when the network module is off, leaving Data alone', () => {
+    window.localStorage.setItem('osi.modules.network', 'false');
+    renderHeader();
+    expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument();
+  });
+
+  // The journal module is gateway-level; with it off, the Add menu must not
+  // offer the one entry point that lands on /journal.
+  it('offers the journal capture entry in the Add menu when the journal module is on', () => {
+    renderHeader();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: 'Activity' })).toBeInTheDocument();
+  });
+
+  it('hides the journal capture entry from the Add menu when the journal module is off', () => {
+    gatewayModules.journalEnabled = false;
+    renderHeader();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.queryByRole('menuitem', { name: 'Activity' })).not.toBeInTheDocument();
+    // The other Add entries are untouched.
+    expect(screen.getByRole('menuitem', { name: 'Zone' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Device' })).toBeInTheDocument();
   });
 
   it('keeps the Account menu scoped to account linking and logout', () => {

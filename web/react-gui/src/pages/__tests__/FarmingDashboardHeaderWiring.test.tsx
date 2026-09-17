@@ -151,6 +151,9 @@ function renderDashboard() {
 }
 
 beforeEach(() => {
+  // The gateway hub panel is gated on osi.modules.gatewayHub; clear so a
+  // sibling test's stored value cannot change what this suite renders.
+  window.localStorage.clear();
   headerProps.length = 0;
   getDevices.mockResolvedValue([]);
   getZones.mockResolvedValue([]);
@@ -165,6 +168,27 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+describe('FarmingDashboard gateway hub module', () => {
+  // Module visibility (2026-09-17): the gateway hub ("Gateway" / "Passerelle")
+  // is the SystemPanel card at the bottom of the dashboard. Default on main is
+  // ON; customer branches flip it later.
+  it('renders the gateway hub panel when the gatewayHub module is on by default', async () => {
+    renderDashboard();
+
+    expect(await screen.findByTestId('system-panel')).toBeInTheDocument();
+  });
+
+  it('hides the gateway hub panel when the gatewayHub module is off', async () => {
+    window.localStorage.setItem('osi.modules.gatewayHub', 'false');
+    renderDashboard();
+
+    // Wait for the dashboard to finish loading before asserting the absence,
+    // so this cannot pass merely because nothing had rendered yet.
+    expect(await screen.findByTestId('irrigation-outcomes-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('system-panel')).not.toBeInTheDocument();
+  });
 });
 
 describe('FarmingDashboard header wiring', () => {

@@ -1196,16 +1196,26 @@ export const systemAPI = {
 
 export interface SystemSettings {
   gatewayTimezone: string;
+  /**
+   * Gateway-level Field Journal module switch. Absent on a gateway that
+   * predates the setting, which means enabled.
+   */
+  journalModuleEnabled?: boolean;
 }
 
-export interface UpdateSystemSettingsRequest {
-  gatewayTimezone: string;
-  applyToAllZones?: boolean;
-}
+/**
+ * A PUT either carries a time zone, or the journal module switch, or both. The
+ * time zone stays required for a plain time-zone write -- the gateway rejects a
+ * PUT with neither field.
+ */
+export type UpdateSystemSettingsRequest =
+  | { gatewayTimezone: string; applyToAllZones?: boolean; journalModuleEnabled?: boolean }
+  | { journalModuleEnabled: boolean };
 
 export interface UpdateSystemSettingsResult {
   gatewayTimezone: string;
   zonesUpdated: number;
+  journalModuleEnabled?: boolean;
 }
 
 export const systemSettingsAPI = {

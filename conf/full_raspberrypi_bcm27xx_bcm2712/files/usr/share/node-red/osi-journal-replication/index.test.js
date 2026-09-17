@@ -227,3 +227,112 @@ test('barrier-recorded correction preserves a cloud-origin entry origin in V2', 
   assert.equal(payload.origin, 'cloud-ui');
   assert.equal(payload.candidate.entry.origin, 'cloud-ui');
 });
+
+// ---------------------------------------------------------------------------
+// Journal module gate (owner decision 2026-09-17)
+// ---------------------------------------------------------------------------
+// Switching the Field Journal module off must stop this worker dead: no HTTP to
+// the cloud, no retries, and none of the "Journal cloud request returned HTTP
+// 403" noise every 30 s. The gate reads the same gateway-level app_settings row
+// the GUI writes through PUT /api/system/settings, and sits ahead of every
+// network call -- ahead of config validation too, so a gateway with the module
+// off never even has to have a valid worker config.
+
+function countingHttpApi() {
+  const calls = [];
+  return {
+    calls,
+    requestJsonIpv4(request) {
+      calls.push(request);
+      return Promise.resolve({ statusCode: 200, body: {} });
+    },
+  };
+}
+
+// resolveMediaRoot insists on a real, canonical, non-symlink directory, so the
+// config a "module on" control test needs has to point at one that exists.
+function workerConfig(t) {
+  const mediaRoot = fs.realpathSync(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-journal-media-')));
+  t.after(() => fs.rmSync(mediaRoot, { recursive: true, force: true }));
+  return {
+    gateway_device_eui: '0016C001F11715E2',
+    server_url: 'https://cloud.example.org',
+    sync_token: 'token-abc',
+    release_id: '0.7.0',
+    schema_fingerprint: 'a'.repeat(64),
+    photo_cache_bytes: 1024 * 1024,
+    min_free_bytes: 1024 * 1024,
+    media_root: mediaRoot,
+  };
+}
+
+async function setJournalModule(db, value) {
+  await db.run(
+    "INSERT INTO app_settings(key,value,updated_at) VALUES('journal_module_enabled',?,?) " +
+      'ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',
+    [value, '2026-09-17T00:00:00.000Z'],
+  );
+}
+
+test('journalModuleEnabled defaults to true when the setting has never been written', async (t) => {
+  const { db } = fixture(t);
+  assert.equal(await helper.journalModuleEnabled(db), true);
+});
+
+test('journalModuleEnabled reads the gateway-level app_settings row', async (t) => {
+  const { db } = fixture(t);
+  for (const [stored, expected] of [['0', false], ['1', true], ['false', false], ['true', true]]) {
+    await setJournalModule(db, stored);
+    assert.equal(await helper.journalModuleEnabled(db), expected, 'stored ' + stored);
+  }
+});
+
+// Fail open: a gateway whose DB predates the app_settings table (deploys are
+// staged) must keep replicating exactly as it does today, not silently stop.
+test('journalModuleEnabled fails open when app_settings cannot be read', async () => {
+  const brokenDb = {
+    get() { return Promise.reject(new Error('SQLITE_ERROR: no such table: app_settings')); },
+  };
+  assert.equal(await helper.journalModuleEnabled(brokenDb), true);
+});
+
+test('runReplicationTick makes zero cloud requests while the journal module is off', async (t) => {
+  const { db } = fixture(t);
+  await setJournalModule(db, '0');
+  const httpApi = countingHttpApi();
+
+  const result = await helper.runReplicationTick(db, httpApi, fs, workerConfig(t));
+
+  assert.deepEqual(httpApi.calls, [], 'the worker must not touch the cloud while the module is off');
+  assert.equal(result.capability_state, 'disabled');
+  assert.equal(result.sent_mutations, 0);
+  assert.equal(result.applied_envelopes, 0);
+});
+
+// The gate must sit ahead of validateWorkerConfig: a gateway with the module
+// off should go quiet rather than throw an invalid-config error every tick.
+test('runReplicationTick with the module off skips config validation instead of throwing', async (t) => {
+  const { db } = fixture(t);
+  await setJournalModule(db, '0');
+  const httpApi = countingHttpApi();
+
+  const result = await helper.runReplicationTick(db, httpApi, fs, { gateway_device_eui: 'nonsense' });
+
+  assert.equal(result.capability_state, 'disabled');
+  assert.deepEqual(httpApi.calls, []);
+});
+
+// Control: with the module on, the worker still reaches the cloud. Without
+// this, the test above would pass just as well against a worker that never
+// runs at all.
+test('runReplicationTick still probes the cloud while the journal module is on', async (t) => {
+  const { db } = fixture(t);
+  await setJournalModule(db, '1');
+  const httpApi = countingHttpApi();
+
+  helper._resetJournalV2BackoffForTests();
+  await helper.runReplicationTick(db, httpApi, fs, workerConfig(t)).catch(() => {});
+
+  assert.ok(httpApi.calls.length > 0, 'the capabilities probe must still be attempted');
+  assert.match(String(httpApi.calls[0].url), /\/capabilities$/);
+});

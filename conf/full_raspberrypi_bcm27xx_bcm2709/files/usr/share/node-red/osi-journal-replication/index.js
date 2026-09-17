@@ -842,6 +842,44 @@ function replicationDisabledByRuntime() {
   return String(process.env.JOURNAL_REPLICATION_DISABLE || '') === '1';
 }
 
+// Owner decision 2026-09-17: the Field Journal is a switchable module, and
+// switching it off has to silence this worker entirely -- no cloud requests, no
+// retries, no per-tick warn lines. A per-browser display preference cannot do
+// that, so the switch is a gateway-level row in the existing app_settings
+// key/value store (migration 0023), written by PUT /api/system/settings and
+// read here.
+//
+// Fails OPEN on every read problem. Deploys are staged, so a gateway whose DB
+// predates app_settings must keep replicating exactly as it does today rather
+// than go quiet because a table is missing.
+const JOURNAL_MODULE_SETTING_KEY = 'journal_module_enabled';
+const JOURNAL_MODULE_OFF_VALUES = new Set(['0', 'false', 'off', 'no']);
+
+async function journalModuleEnabled(db) {
+  let row;
+  try {
+    row = await db.get(
+      'SELECT value FROM app_settings WHERE key=?',
+      [JOURNAL_MODULE_SETTING_KEY],
+    );
+  } catch (cause) {
+    return true;
+  }
+  if (!row || row.value === null || row.value === undefined) return true;
+  return !JOURNAL_MODULE_OFF_VALUES.has(String(row.value).trim().toLowerCase());
+}
+
+function disabledTickResult() {
+  return {
+    capability_state: 'disabled',
+    sent_mutations: 0,
+    applied_envelopes: 0,
+    committed_sequence: null,
+    photo_transfers: 0,
+    evicted_media: 0,
+  };
+}
+
 async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
   // node-red.init sets JOURNAL_REPLICATION_DISABLE=1 whenever it could not
   // validate/create the configured journal media root (e.g. a leftover
@@ -851,14 +889,13 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
   // validateWorkerConfig() touches media_root or the byte limits, so this
   // quietly skips the tick every time instead of throwing every tick.
   if (replicationDisabledByRuntime()) {
-    return {
-      capability_state: 'disabled',
-      sent_mutations: 0,
-      applied_envelopes: 0,
-      committed_sequence: null,
-      photo_transfers: 0,
-      evicted_media: 0,
-    };
+    return disabledTickResult();
+  }
+  // Ahead of validateWorkerConfig on purpose: a gateway with the journal module
+  // switched off should go quiet, not throw an invalid-config error every tick
+  // because of a media root or a token it no longer needs.
+  if (!(await journalModuleEnabled(db))) {
+    return disabledTickResult();
   }
   const config = validateWorkerConfig(inputConfig, fsApi);
   const journalLinkKey = journalV2LinkKey(config);
@@ -1129,6 +1166,7 @@ module.exports = {
   bindPendingAttachments,
   enforcePhotoCache,
   enqueueMutation,
+  journalModuleEnabled,
   mediaPaths,
   nextMutations,
   publishDownloadedMedia,

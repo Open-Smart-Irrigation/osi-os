@@ -232,6 +232,7 @@ export function SettingsPage() {
   const [moduleNotice, setModuleNotice] = useState<string | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
+  const [journalModuleBusy, setJournalModuleBusy] = useState(false);
 
   const { data: systemSettings, mutate: mutateSystemSettings, error: systemSettingsError } = useSWR(
     '/api/system/settings',
@@ -344,6 +345,39 @@ export function SettingsPage() {
       setModuleError(getApiErrorMessage(error, t('schedulerDisableError')));
     } finally {
       setSchedulerBusy(false);
+    }
+  };
+
+  // The Field Journal module is a GATEWAY-level setting, not a per-browser
+  // display preference: switching it off also stops the journal-v2 replication
+  // worker contacting the cloud, which localStorage cannot do. It therefore
+  // rides the same PUT /api/system/settings -- and the same F20/F51 role gate --
+  // as the gateway time zone. A gateway that predates the setting reports it
+  // absent, which means enabled.
+  const journalModuleEnabled = systemSettings?.journalModuleEnabled ?? true;
+  const updateJournalModule = async (enabled: boolean) => {
+    // Authorization gate: the control's disabled attribute is an affordance,
+    // not authorization. This check sits in the same function that performs the
+    // mutating call (maintainer decision 4 / D5), and fails closed while scope
+    // is still resolving.
+    if (!systemSettingsWritable) return;
+    if (enabled === journalModuleEnabled) return;
+    setModuleNotice(null);
+    setModuleError(null);
+    setJournalModuleBusy(true);
+    try {
+      const result = await systemSettingsAPI.update({ journalModuleEnabled: enabled });
+      await mutateSystemSettings(
+        (current) => ({
+          gatewayTimezone: result.gatewayTimezone ?? current?.gatewayTimezone ?? '',
+          journalModuleEnabled: result.journalModuleEnabled ?? enabled,
+        }),
+        { revalidate: false },
+      );
+    } catch (error) {
+      setModuleError(getApiErrorMessage(error, t('journalModuleSaveError')));
+    } finally {
+      setJournalModuleBusy(false);
     }
   };
 
@@ -589,6 +623,55 @@ export function SettingsPage() {
               label={t('environmentCard')}
               enabled={preferences.modules.environment}
               onChange={(enabled) => updateModule('environment', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
+            {/*
+              Module visibility (owner decision 2026-09-17): the Data view, the
+              Network view and the gateway hub can be switched off here. These
+              are display-only, per-browser preferences like the rows above --
+              they hide the entry points, they do not unregister the routes, so
+              a bookmark or a deep link still works. Defaults on main are ON;
+              customer branches flip the defaults.
+
+              Appended after the existing rows on purpose: several tests index
+              the module rows positionally, and the established order is part of
+              what those tests pin.
+            */}
+            <ModuleRow
+              label={t('dataModule')}
+              enabled={preferences.modules.data}
+              onChange={(enabled) => updateModule('data', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
+            <ModuleRow
+              label={t('networkModule')}
+              enabled={preferences.modules.network}
+              onChange={(enabled) => updateModule('network', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
+            <ModuleRow
+              label={t('gatewayHub')}
+              enabled={preferences.modules.gatewayHub}
+              onChange={(enabled) => updateModule('gatewayHub', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
+            {/*
+              Unlike every row above, this one is gateway-wide: switching the
+              Field Journal off also stops the journal-v2 replication worker
+              from talking to the cloud, so the switch has to be readable by
+              Node-RED rather than living in this browser's localStorage.
+            */}
+            <ModuleRow
+              label={t('journalModule')}
+              enabled={journalModuleEnabled}
+              disabled={journalModuleBusy || !systemSettingsWritable}
+              onChange={(enabled) => {
+                void updateJournalModule(enabled);
+              }}
               onLabel={t('on')}
               offLabel={t('off')}
             />

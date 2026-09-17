@@ -128,6 +128,42 @@ async function readGatewayTimezone(db, warn) {
   }
 }
 
+// Owner decision 2026-09-17: the Field Journal is a switchable module. Unlike
+// the display-only module toggles (which live in the browser's localStorage),
+// this one has to be readable by the Node-RED journal-v2 replication worker so
+// switching it off actually stops the worker talking to the cloud. It therefore
+// rides the same gateway-level app_settings store as gateway_timezone -- no new
+// route, no schema migration.
+const JOURNAL_MODULE_KEY = 'journal_module_enabled';
+const JOURNAL_MODULE_OFF_VALUES = new Set(['0', 'false', 'off', 'no']);
+
+// Table-missing-safe, same contract as readGatewayTimezone: a pre-migration DB
+// and an absent key both resolve to the shipped default, which is ENABLED --
+// failing open keeps a staged deploy replicating exactly as it does today.
+async function readJournalModuleEnabled(db, warn) {
+  try {
+    const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [JOURNAL_MODULE_KEY]);
+    if (!row || row.value === null || row.value === undefined) return true;
+    return !JOURNAL_MODULE_OFF_VALUES.has(String(row.value).trim().toLowerCase());
+  } catch (error) {
+    const detail = String(error && error.message ? error.message : error);
+    if (!/no such table:\s*app_settings\b/i.test(detail)) {
+      warn('[sys-settings] journal_module_enabled read failed: ' + detail);
+    }
+    return true;
+  }
+}
+
+// Strict boolean only. Accepting 'false'/0 would make a typo in a caller read
+// as "on" (every non-empty string is truthy), which is exactly the failure this
+// switch exists to prevent.
+function validateJournalModuleEnabled(rawValue) {
+  if (rawValue !== true && rawValue !== false) {
+    throw apiError(422, 'invalid_request', 'journalModuleEnabled must be a boolean');
+  }
+  return rawValue;
+}
+
 async function handleHttpRequest(options) {
   const { msg, Database } = options;
   const environment = options.environment || {};
@@ -162,19 +198,42 @@ async function handleHttpRequest(options) {
 
     if (method === 'GET') {
       const gatewayTimezone = await readGatewayTimezone(db, warn);
-      return respond(200, { gatewayTimezone });
+      const journalModuleEnabled = await readJournalModuleEnabled(db, warn);
+      return respond(200, { gatewayTimezone, journalModuleEnabled });
     }
 
     if (method === 'PUT') {
       const body = requestBody(msg);
-      const gatewayTimezone = validateTimezone(body.gatewayTimezone, 'gatewayTimezone');
+      const hasJournalModule = body !== null && typeof body === 'object' &&
+        Object.prototype.hasOwnProperty.call(body, 'journalModuleEnabled');
+      const hasTimezone = body !== null && typeof body === 'object' &&
+        Object.prototype.hasOwnProperty.call(body, 'gatewayTimezone');
+      // The timezone contract is unchanged: a PUT that is not a journal-module
+      // PUT still requires a valid gatewayTimezone, and a timezone sent
+      // alongside the journal flag is still validated. Only a journal-module-
+      // only PUT is allowed to omit it.
+      const journalModuleEnabled = hasJournalModule
+        ? validateJournalModuleEnabled(body.journalModuleEnabled)
+        : null;
+      const gatewayTimezone = (hasJournalModule && !hasTimezone)
+        ? await readGatewayTimezone(db, warn)
+        : validateTimezone(body.gatewayTimezone, 'gatewayTimezone');
+      const writeTimezone = hasTimezone || !hasJournalModule;
       const applyToAllZones = body.applyToAllZones === true;
       const now = new Date().toISOString();
       try {
-        await db.run(
-          "INSERT INTO app_settings(key, value, updated_at) VALUES ('gateway_timezone', ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-          [gatewayTimezone, now]
-        );
+        if (writeTimezone) {
+          await db.run(
+            "INSERT INTO app_settings(key, value, updated_at) VALUES ('gateway_timezone', ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            [gatewayTimezone, now]
+          );
+        }
+        if (journalModuleEnabled !== null) {
+          await db.run(
+            'INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at',
+            [JOURNAL_MODULE_KEY, journalModuleEnabled ? '1' : '0', now]
+          );
+        }
       } catch (error) {
         const detail = String(error && error.message ? error.message : error);
         if (/no such table:\s*app_settings\b/i.test(detail)) {
@@ -210,7 +269,13 @@ async function handleHttpRequest(options) {
           return count;
         });
       }
-      return respond(200, { gatewayTimezone, zonesUpdated });
+      return respond(200, {
+        gatewayTimezone,
+        zonesUpdated,
+        journalModuleEnabled: journalModuleEnabled === null
+          ? await readJournalModuleEnabled(db, warn)
+          : journalModuleEnabled,
+      });
     }
 
     return respond(404, { error: 'not_found', message: 'Unknown system-settings route' });
@@ -223,4 +288,4 @@ async function handleHttpRequest(options) {
   }
 }
 
-module.exports = { handleHttpRequest, validateTimezone };
+module.exports = { handleHttpRequest, validateTimezone, validateJournalModuleEnabled };

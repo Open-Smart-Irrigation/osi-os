@@ -18,7 +18,10 @@ const SCHEMA_FINGERPRINT = crypto.createHash('sha256').update(fs.readFileSync(pa
   ROOT,
   'docs/contracts/sync-schema/journal-v2.schema.json',
 ))).digest('hex');
-const PRIOR_WORKER_SHA256 = '7998f113a0a3ade1cd569ccc814f013932bc719d3e310a2d29a9d48a7cf77bb1';
+// The worker source shipped before the journal-module gate (2026-09-17). The
+// migration only ever rewrites a worker whose func hashes to exactly this, so a
+// gateway or branch carrying any other drift is refused rather than clobbered.
+const PRIOR_WORKER_SHA256 = '3073defc99cc70a06d7f14c75dd54a7dd29b5795a62863824abe14df744fa2a9';
 
 function serialize(flows) {
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
@@ -32,6 +35,19 @@ function parseExact(buffer, label) {
   return parsed;
 }
 
+// Journal module gate (owner decision 2026-09-17). The Field Journal became a
+// switchable module, and switching it off has to stop this worker talking to the
+// cloud -- "Journal cloud request returned HTTP 403" every 30 s is the noise it
+// exists to remove. A per-browser display preference cannot do that, so the
+// switch is a gateway-level row in the existing app_settings store, written by
+// PUT /api/system/settings and read here through the journal-replication helper.
+//
+// Placement matters as much as presence: the gate sits inside the try, ahead of
+// the linked-account lookup (which warns on every tick of an unlinked gateway)
+// and ahead of runReplicationTick, so a gateway with the module off produces no
+// request, no retry and no log line -- just an idle node status. The helper's
+// own read fails OPEN, so a DB that predates the setting keeps replicating
+// exactly as it does today.
 const WORKER_SOURCE = `return (async () => {
 const helperLoad = osiLib.require('journal-replication');
 if (!helperLoad.ok) {
@@ -66,6 +82,12 @@ const close = () => new Promise((resolve) => db.close((cause) => {
   resolve();
 }));
 try {
+  // Journal module off => this worker does nothing at all. See the migration
+  // script for why the gate sits here and why it fails open.
+  if (!(await replication.journalModuleEnabled(db))) {
+    node.status({fill:'grey',shape:'ring',text:'journal module off'});
+    return null;
+  }
   const gatewayDeviceEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();
   const linked = await q("SELECT server_url,server_sync_token FROM users WHERE auth_mode='server' AND server_url IS NOT NULL AND server_sync_token IS NOT NULL ORDER BY server_linked_at DESC,id DESC LIMIT 1", []);
   if (linked.length !== 1 || !gatewayDeviceEui) {

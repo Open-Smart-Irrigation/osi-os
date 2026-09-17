@@ -23,6 +23,9 @@ describe('display preferences', () => {
       waterCard: true,
       schedulerUi: true,
       valveControl: true,
+      data: true,
+      network: true,
+      gatewayHub: true,
     },
   };
 
@@ -55,6 +58,9 @@ describe('display preferences', () => {
         waterCard: false,
         schedulerUi: false,
         valveControl: false,
+        data: false,
+        network: false,
+        gatewayHub: false,
       },
     });
 
@@ -65,8 +71,28 @@ describe('display preferences', () => {
       waterCard: false,
       schedulerUi: false,
       valveControl: false,
+      data: false,
+      network: false,
+      gatewayHub: false,
     });
   });
+
+  // The Data view, Network and Gateway modules ship ON on main; a customer
+  // branch flips these defaults, so the storage layer must keep "absent" ==
+  // visible rather than treating a missing key as off.
+  it.each(['data', 'network', 'gatewayHub'] as const)(
+    'defaults the %s module to on and round-trips an explicit off',
+    (moduleKey) => {
+      expect(readDisplayPreferences().modules[moduleKey]).toBe(true);
+
+      writeDisplayPreferences({
+        modules: { ...readDisplayPreferences().modules, [moduleKey]: false },
+      });
+
+      expect(window.localStorage.getItem(`osi.modules.${moduleKey}`)).toBe('false');
+      expect(readDisplayPreferences().modules[moduleKey]).toBe(false);
+    },
+  );
 
   it('treats unknown stored values as kPa', () => {
     window.localStorage.setItem('osi.display.swtUnit', 'bars');
