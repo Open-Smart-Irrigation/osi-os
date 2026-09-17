@@ -135,7 +135,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
               onClick={onOpenSettings}
               aria-label="Device settings"
               title="Device settings"
-              className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)] transition-colors"
+              className="touch-target p-1.5 rounded-md text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)] transition-colors"
             >
               ⚙
             </button>
@@ -145,7 +145,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
               type="button"
               onClick={removal.openConfirm}
               disabled={removal.isRemoving}
-              className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              className="touch-target p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
               title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
             >

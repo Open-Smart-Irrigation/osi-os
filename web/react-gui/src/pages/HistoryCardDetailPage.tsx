@@ -684,20 +684,6 @@ export const HistoryCardDetailPage: React.FC = () => {
     timeViewport.viewport.range.to,
   ]);
 
-  useEffect(() => {
-    const meta = document.querySelector('meta[name="viewport"]');
-    const previousContent = meta?.getAttribute('content') ?? null;
-    meta?.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
-    return () => {
-      if (!meta) return;
-      if (previousContent === null) {
-        meta.removeAttribute('content');
-        return;
-      }
-      meta.setAttribute('content', previousContent);
-    };
-  }, []);
-
   if (!validRoute) {
     return (
       <HistoryDetailError

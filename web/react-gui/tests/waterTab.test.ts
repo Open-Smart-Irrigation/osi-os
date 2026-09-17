@@ -27,6 +27,12 @@ test('WaterTab labels measured and estimated irrigation separately', async () =>
       I18nextProvider,
       { i18n },
       React.createElement(WaterTab, {
+        // Each tile is gated on a source the zone actually has, so the fixture
+        // declares the flow meter and the valve the two tiles report on.
+        devices: [
+          { deveui: 'A1', type_id: 'DRAGINO_LSN50', flow_meter_enabled: 1 },
+          { deveui: 'A2', type_id: 'STREGA_VALVE' },
+        ] as any,
         water: {
           available: true,
           observedAt: '2026-05-29T10:00:00.000Z',
@@ -70,6 +76,7 @@ test('WaterTab does not relabel legacy irrigation fields as measured flow-meter 
       I18nextProvider,
       { i18n },
       React.createElement(WaterTab, {
+        devices: [{ deveui: 'A1', type_id: 'DRAGINO_LSN50', flow_meter_enabled: 1 }] as any,
         water: {
           available: true,
           observedAt: '2026-05-29T10:00:00.000Z',
@@ -105,4 +112,146 @@ test('WaterTab does not relabel legacy irrigation fields as measured flow-meter 
   assert.match(html, /Measured \(flow meter\)/);
   assert.doesNotMatch(html, /123 L/);
   assert.doesNotMatch(html, /0\.98 mm effective/);
+});
+
+const BASE_WATER = {
+  available: true,
+  observedAt: '2026-05-29T10:00:00.000Z',
+  areaM2: 100,
+  irrigationEfficiencyPct: 80,
+  rainTodayMm: 0,
+  irrigationTodayLiters: 0,
+  irrigationTodayNetMm: 0,
+  irrigationTodayMeasuredLiters: 0,
+  irrigationTodayEstimatedLiters: 0,
+  measuredIrrigationNetMm: 0,
+  estimatedIrrigationNetMm: 0,
+  waterNeededTodayMm: null,
+  balanceTodayMm: null,
+  next24hRainMm: null,
+  action: null,
+  daily: [{ date: '2026-05-29', rainMm: 0, irrigationLiters: 0, irrigationNetMm: 0, totalWaterMm: 0 }],
+  sensorHealth: {
+    sensorCount: 0,
+    freshSensorCount: 0,
+    staleSensorCount: 0,
+    rainGaugePresent: false,
+    flowMeterPresent: false,
+    warnings: [],
+  },
+};
+
+async function renderWaterTab(props: Record<string, unknown>) {
+  const i18n = await buildI18n();
+  return renderToStaticMarkup(
+    React.createElement(
+      I18nextProvider,
+      { i18n },
+      React.createElement(WaterTab, props as any),
+    ),
+  );
+}
+
+test('WaterTab prints no tile for a source the zone does not have', async () => {
+  // The empty zone: no devices at all, and the aggregation writes 0 for every
+  // day with no sample. Every number on this tab was invented.
+  const html = await renderWaterTab({ water: BASE_WATER, devices: [] });
+
+  assert.doesNotMatch(html, /Rain today/);
+  assert.doesNotMatch(html, /Measured \(flow meter\)/);
+  assert.doesNotMatch(html, /Estimated \(valve time/);
+  assert.doesNotMatch(html, /0 L/);
+  assert.doesNotMatch(html, /0\.0 mm/);
+});
+
+test('WaterTab keeps a measured zero when the zone has the sensor behind it', async () => {
+  const html = await renderWaterTab({
+    water: {
+      ...BASE_WATER,
+      sensorHealth: { ...BASE_WATER.sensorHealth, rainGaugePresent: true },
+    },
+    devices: [{ deveui: 'A1', type_id: 'DRAGINO_LSN50', flow_meter_enabled: 1 }],
+  });
+
+  assert.match(html, /Rain today/);
+  assert.match(html, /0\.0 mm/);
+  assert.match(html, /Measured \(flow meter\)/);
+});
+
+test('WaterTab hides the seven-day chart when no source feeds it', async () => {
+  const html = await renderWaterTab({ water: BASE_WATER, devices: [] });
+
+  assert.doesNotMatch(html, /7-day water trend/);
+});
+
+test('WaterTab hides the demand and balance tiles until they can be computed', async () => {
+  const html = await renderWaterTab({
+    water: { ...BASE_WATER, sensorHealth: { ...BASE_WATER.sensorHealth, rainGaugePresent: true } },
+    devices: [],
+  });
+
+  assert.doesNotMatch(html, /Setup required/);
+  assert.doesNotMatch(html, /Water needed today/);
+  assert.doesNotMatch(html, /Balance/);
+});
+
+async function buildSentinelI18n() {
+  const i18n = i18next.createInstance();
+  await i18n.use(initReactI18next).init({
+    lng: 'xx',
+    fallbackLng: 'xx',
+    ns: ['devices'],
+    defaultNS: 'devices',
+    resources: {
+      xx: {
+        devices: {
+          environment: {
+            water: {
+              rainToday: 'XX_RAIN_TODAY',
+              measuredIrrigationToday: 'XX_MEASURED',
+              estimatedIrrigationToday: 'XX_ESTIMATED',
+              effective: 'XX_EFFECTIVE {{value}}',
+              rainGaugeReporting: 'XX_GAUGE_OK',
+              flowMeterReporting: 'XX_METER_OK',
+              tooltipRain: 'XX_TIP_RAIN',
+              tooltipMeasuredEffective: 'XX_TIP_MEASURED_EFF',
+              tooltipEstimatedEffective: 'XX_TIP_ESTIMATED_EFF',
+            },
+          },
+          zone: { water: { action: { delay_irrigation: 'XX_DELAY' } } },
+        },
+      },
+    },
+  });
+  return i18n;
+}
+
+test('WaterTab renders no English literal of its own', async () => {
+  const i18n = await buildSentinelI18n();
+  const html = renderToStaticMarkup(
+    React.createElement(
+      I18nextProvider,
+      { i18n },
+      React.createElement(WaterTab, {
+        water: {
+          ...BASE_WATER,
+          balanceTodayMm: -2,
+          action: { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'rain_covers_demand', recommendationDate: null },
+          sensorHealth: { ...BASE_WATER.sensorHealth, rainGaugePresent: true, flowMeterPresent: true },
+        },
+        devices: [{ deveui: 'A1', type_id: 'DRAGINO_LSN50', flow_meter_enabled: 1 }],
+      } as any),
+    ),
+  );
+
+  assert.match(html, /XX_RAIN_TODAY/);
+  assert.match(html, /XX_EFFECTIVE/);
+  assert.match(html, /XX_GAUGE_OK/);
+  assert.match(html, /XX_METER_OK/);
+  assert.match(html, /XX_DELAY/);
+  // The labels the tab used to hardcode, in the language it was serving.
+  assert.doesNotMatch(html, /Rain gauge reporting/);
+  assert.doesNotMatch(html, /Flow meter reporting/);
+  assert.doesNotMatch(html, /Delay irrigation/);
+  assert.doesNotMatch(html, /effective</);
 });

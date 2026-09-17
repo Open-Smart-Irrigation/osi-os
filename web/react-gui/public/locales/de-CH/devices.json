@@ -51,6 +51,16 @@
     "failed": "Zone konnte nicht erstellt werden"
   },
   "kiwiSensor": {
+    "invalidDepth": "Geben Sie 0 oder eine ganze Zahl in Zentimetern zwischen 1 und {{max}} ein.",
+    "depthSaved": "Tiefen der Bodenfeuchtekanäle gespeichert. Leer lassen oder 0 eingeben, wenn ein Kanal nicht angeschlossen ist.",
+    "failedToSaveDepth": "Die Sensortiefen konnten nicht gespeichert werden.",
+    "depthTitle": "TIEFEN DER BODENFEUCHTESENSOREN",
+    "depthNote": "Installierte Tiefen in cm eingeben. Leer lassen oder 0 eingeben, wenn eine Sonde nicht angeschlossen ist.",
+    "depth1Label": "SWT-1-Tiefe (cm)",
+    "depth2Label": "SWT-2-Tiefe (cm)",
+    "depthPlaceholder": "0 = aus",
+    "savingDepths": "Tiefen werden gespeichert...",
+    "saveDepths": "Sensortiefen speichern",
     "badge": "KIWI SENSOR",
     "tooDry": "ZU TROCKEN!",
     "soilNeedsWater": "Boden benötigt Bewässerung",
@@ -222,6 +232,16 @@
       "awaitingRecommendation": "Empfehlung ausstehend",
       "confidence": "{{percent}}% Konfidenz",
       "confidencePending": "Die Konfidenz wird beim nächsten Dendro-Lauf aktualisiert",
+      "insufficientData": "Zu wenig Daten für eine Empfehlung",
+      "reason": {
+        "balance_unknown": "Fläche und Bewässerungseffizienz eintragen",
+        "forecast_unknown": "Keine Regenprognose verfügbar",
+        "supply_covers_demand": "Regen und Bewässerung decken den heutigen Bedarf",
+        "forecast_rain_covers_demand": "Der erwartete Regen deckt das heutige Defizit",
+        "demand_exceeds_supply": "Der Bedarf übersteigt Regen und Bewässerung von heute",
+        "balance_neutral": "Die Wasserbilanz ist nahezu ausgeglichen",
+        "default": "Warten auf weitere Daten"
+      },
       "action": {
         "delay_irrigation": "Bewässerung verschieben",
         "irrigate_today": "Heute bewässern",
@@ -243,6 +263,11 @@
         "default": "Quelle der Empfehlung"
       },
       "soil": {
+        "titleAtDepth": "Boden aktuell · {{depth}} cm",
+        "titleChannel": "Boden aktuell · {{channel}}",
+        "atTrigger": "Auf oder über dem Auslösewert",
+        "nearTrigger": "Nahe am Auslösewert",
+        "belowTrigger": "Unter dem Auslösewert",
         "title": "Boden aktuell",
         "wet": "Feucht",
         "moderate": "Mittel",
@@ -287,6 +312,33 @@
   },
   "schedule": {
     "irrigationSchedule": "Sensorgesteuerte Bewässerung",
+    "triggerMethod": "Auslösemethode",
+    "methodSwt": "Bodenfeuchte (SWT)",
+    "methodDendro": "Dendrometer",
+    "sensor": "Sensor",
+    "irrigateWhen": "Bewässern, wenn {{sensor}} {{value}} kPa überschreitet",
+    "durationMin": "Dauer (Min.)",
+    "triggerSensitivity": "Auslöse-Empfindlichkeit",
+    "baseDurationMin": "Basisdauer (Min.)",
+    "responseMode": "Reaktionsmodus",
+    "advancedSettings": "Erweiterte Einstellungen →",
+    "metric": {
+      "SWT_1": "Sensor 1",
+      "SWT_2": "Sensor 2",
+      "SWT_3": "Sensor 3",
+      "SWT_AVG": "Mittelwert (alle Sensoren)"
+    },
+    "stress": {
+      "mild": "Geringe Empfindlichkeit — bei ersten Stressanzeichen bewässern",
+      "moderate": "Mittlere Empfindlichkeit — bei mässigem Stress bewässern (empfohlen)",
+      "significant": "Hohe Empfindlichkeit — nur bei deutlichem Stress bewässern",
+      "severe": "Zurückhaltend — nur bei starkem Stress bewässern"
+    },
+    "mode": {
+      "proportional": "Proportional — Dauer am Stressniveau ausrichten",
+      "fixed": "Fest — immer die Basisdauer bewässern",
+      "aggressive": "Aggressiv — Dauer bei hohem Stress stark verlängern"
+    },
     "triggerMetric": "Auslösemessgrösse",
     "soilWaterTension1": "Bodenwasserspannung 1",
     "soilWaterTension2": "Bodenwasserspannung 2",
@@ -309,6 +361,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Bodenfeuchte (SWT & VWC)",
+      "temperature": "Bodentemperatur",
       "moistureSwt": "Bodenfeuchte (SWT)",
       "moistureVwc": "Bodenfeuchte (VWC)",
       "moisture": "Bodenfeuchte"
@@ -323,11 +376,23 @@
       "setupRequired": "Erfassen Sie Zonenfläche und Bewässerungseffizienz in den Zoneneinstellungen, um die effektive Bewässerung und die Wasserbilanz zu berechnen.",
       "weeklyTrend": "Wassertrend über 7 Tage",
       "trendNote": "Vergleicht den Regen mit der gemessenen und der geschätzten effektiven Bewässerung der letzten Woche.",
-      "nextRain": "Regen nächste 24 h"
+      "nextRain": "Regen nächste 24 h",
+      "effective": "{{value}} effektiv",
+      "rainGaugeReporting": "Regenmesser meldet",
+      "flowMeterReporting": "Durchflussmesser meldet",
+      "tooltipRain": "Regen",
+      "tooltipMeasuredEffective": "Gemessen effektiv",
+      "tooltipEstimatedEffective": "Geschätzt effektiv"
     },
     "generatedAt": "Erstellt {{time}}",
     "sectionTitle": "Umgebung & Wettervorhersage",
+    "loading": "Umweltdaten werden geladen…",
+    "loadFailed": "Umweltdaten konnten nicht geladen werden",
     "tabs": {
+      "water": "Wasser",
+      "soil": "Boden",
+      "weather": "Wetter",
+      "sensors": "Sensoren",
       "local": "Lokal",
       "online": "Online",
       "agronomic": "Agronomisch",
@@ -404,6 +469,90 @@
       "soil_moisture_pct": "Bodenfeuchte"
     }
   },
+  "zoneConfig": {
+    "title": "Zone konfigurieren — {{zone}}",
+    "crop": "Kultur",
+    "selectCrop": "— Kultur für die Prognose wählen —",
+    "variety": "Sorte",
+    "varietyPlaceholder": "Sorte (optional)",
+    "soilType": "Bodenart",
+    "irrigationMethod": "Bewässerungsmethode",
+    "area": "Fläche (m²)",
+    "irrigationEfficiency": "Bewässerungseffizienz (%)",
+    "calibrationTitle": "Bewässerungskalibrierung",
+    "flowRate": "Durchfluss (l/min)",
+    "measurementMethod": "Messmethode",
+    "measurementMethodPlaceholder": "Eimertest, Zählerablesung oder andere Methode",
+    "dendroCalibration": "Dendro-Kalibrierung",
+    "phenologicalStage": "Phänologisches Stadium",
+    "timezone": "Zeitzone",
+    "zoneLocation": "Standort der Zone",
+    "latitude": "Breitengrad",
+    "longitude": "Längengrad",
+    "deviceGps": "GPS des Geräts",
+    "useDeviceLocation": "Standort des Geräts verwenden",
+    "locating": "Ortung…",
+    "permissionState": "Berechtigung {{state}}",
+    "checkingGps": "Es wird geprüft, ob das GPS des Geräts verfügbar ist…",
+    "locationCaptured": "Standort des Geräts erfasst.",
+    "captured": "Erfasst {{time}}",
+    "capturedAccuracy": ", Genauigkeit ~{{meters}} m",
+    "capturedViaApp": ", über die mobile App",
+    "capturedViaBrowser": ", über den Browser",
+    "openAppSettings": "App-Einstellungen öffnen",
+    "openSettingsHint": "Öffnen Sie die App-Einstellungen, aktivieren Sie die Standortberechtigung und versuchen Sie es erneut.",
+    "notes": "Notizen",
+    "notesPlaceholder": "Weitere Informationen zu dieser Zone…",
+    "save": "Speichern",
+    "saving": "Speichern…",
+    "soil": {
+      "select": "— Bodenart wählen —",
+      "sandy": "Sandig",
+      "sandy_loam": "Sandiger Lehm",
+      "loam": "Lehm",
+      "clay_loam": "Toniger Lehm",
+      "clay": "Ton",
+      "silt_loam": "Schluffiger Lehm",
+      "other": "Andere"
+    },
+    "method": {
+      "select": "— Methode wählen —",
+      "drip": "Tropf / Mikrotropf",
+      "sprinkler": "Beregnung",
+      "furrow": "Furchen",
+      "flood": "Überstauung / Becken",
+      "subsurface": "Unterirdische Tropfbewässerung",
+      "other": "Andere"
+    },
+    "calibration": {
+      "default": "Standard (generische Schwellen)",
+      "apple": "Apfel",
+      "grapevine": "Rebe",
+      "olive": "Olive"
+    },
+    "stage": {
+      "default": "Standard",
+      "dormancy": "Ruhephase",
+      "budbreak": "Austrieb / Blüte",
+      "fruitset": "Fruchtansatz",
+      "veraison": "Reifebeginn / Reifung",
+      "harvest": "Ernte / Nachernte"
+    },
+    "gps": {
+      "available": "Verfügbar",
+      "permissionNeeded": "Berechtigung erforderlich",
+      "checking": "Prüfung…",
+      "unavailable": "Nicht verfügbar"
+    },
+    "errors": {
+      "bothCoordinates": "Geben Sie Breiten- und Längengrad ein oder lassen Sie beide leer.",
+      "latitudeRange": "Der Breitengrad muss zwischen -90 und 90 liegen.",
+      "longitudeRange": "Der Längengrad muss zwischen -180 und 180 liegen.",
+      "flowRateRequired": "Für die Bewässerungskalibrierung ist der Durchfluss (l/min) erforderlich.",
+      "flowRatePositive": "Der Durchfluss (l/min) muss grösser als 0 sein.",
+      "saveFailed": "Speichern fehlgeschlagen"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Letzte Bewässerungen",
     "updated": "aktualisiert",
@@ -473,7 +622,8 @@
     "buttonFarm": "Gerät entfernen"
   },
   "common": {
-    "viewHistory": "Verlauf anzeigen"
+    "viewHistory": "Verlauf anzeigen",
+    "batteryEstimated": "Aus der Batteriespannung geschätzt"
   },
   "systemPanel": {
     "title": "Gateway",

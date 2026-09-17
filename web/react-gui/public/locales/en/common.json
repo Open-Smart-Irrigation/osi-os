@@ -1,4 +1,7 @@
 {
+  "languageSwitcher": {
+    "change": "Change language"
+  },
   "cancel": "Cancel",
   "close": "Close",
   "loading": "Loading...",

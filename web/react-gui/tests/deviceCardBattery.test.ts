@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildDeviceFooterMeta,
+  isDerivedBatteryPercent,
   getBatteryPercentFromVoltage,
   getValidBatteryPercent,
 } from '../src/components/farming/shared/deviceCardBattery.ts';
@@ -56,5 +57,11 @@ test('clamps and rejects invalid LSN50 voltage-derived battery percent', () => {
 
 test('uses explicit battery percent before voltage-derived LSN50 percent', () => {
   assert.equal(buildDeviceFooterMeta({ batPct: 55, batV: 3.6, lastSeenLabel: '5 min ago' }), '🔋 55% · 5 min ago');
-  assert.equal(buildDeviceFooterMeta({ batPct: null, batV: 3.5, lastSeenLabel: '5 min ago' }), '🔋 93% · 5 min ago');
+  // Derived from voltage, so it is marked as an estimate: an LSN50's LiSOCl2
+  // cell holds ~3.6 V across most of its life and then falls off a cliff, so a
+  // flat "100%" beside a real bat_pct two rows below reads as a measurement.
+  assert.equal(buildDeviceFooterMeta({ batPct: null, batV: 3.5, lastSeenLabel: '5 min ago' }), '🔋 ≈ 93% · 5 min ago');
+  assert.equal(isDerivedBatteryPercent({ batPct: null, batV: 3.5 }), true);
+  assert.equal(isDerivedBatteryPercent({ batPct: 55, batV: 3.6 }), false);
+  assert.equal(isDerivedBatteryPercent({ batPct: null, batV: null }), false);
 });

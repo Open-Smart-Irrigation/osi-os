@@ -51,6 +51,16 @@
     "failed": "Failed to create zone"
   },
   "kiwiSensor": {
+    "invalidDepth": "Enter 0 or a whole number of centimeters between 1 and {{max}}.",
+    "depthSaved": "Soil moisture channel depths saved. Leave blank or enter 0 to mark a channel as not connected.",
+    "failedToSaveDepth": "Failed to save soil moisture sensor depths.",
+    "depthTitle": "SOIL MOISTURE SENSOR DEPTHS",
+    "depthNote": "Enter installed depths in cm. Leave blank or enter 0 when a probe is not connected.",
+    "depth1Label": "SWT 1 depth (cm)",
+    "depth2Label": "SWT 2 depth (cm)",
+    "depthPlaceholder": "0 = off",
+    "savingDepths": "Saving depths...",
+    "saveDepths": "Save sensor depths",
     "badge": "KIWI SENSOR",
     "tooDry": "TOO DRY!",
     "soilNeedsWater": "Soil needs watering",
@@ -219,6 +229,16 @@
       "awaitingRecommendation": "Awaiting recommendation",
       "confidence": "{{percent}}% confidence",
       "confidencePending": "Confidence updates with the latest dendro run",
+      "insufficientData": "Not enough data to advise",
+      "reason": {
+        "balance_unknown": "Set zone area and irrigation efficiency",
+        "forecast_unknown": "No rain forecast available",
+        "supply_covers_demand": "Rain and irrigation cover today's demand",
+        "forecast_rain_covers_demand": "Forecast rain covers today's shortfall",
+        "demand_exceeds_supply": "Demand exceeds today's rain and irrigation",
+        "balance_neutral": "Water balance is close to neutral",
+        "default": "Waiting for more data"
+      },
       "action": {
         "delay_irrigation": "Delay irrigation",
         "irrigate_today": "Irrigate today",
@@ -240,6 +260,11 @@
         "default": "Recommendation source"
       },
       "soil": {
+        "titleAtDepth": "Soil now · {{depth}} cm",
+        "titleChannel": "Soil now · {{channel}}",
+        "atTrigger": "At or past the trigger",
+        "nearTrigger": "Approaching the trigger",
+        "belowTrigger": "Below the trigger",
         "title": "Soil now",
         "wet": "Wet",
         "moderate": "Moderate",
@@ -284,6 +309,33 @@
   },
   "schedule": {
     "irrigationSchedule": "Trigger-based irrigation",
+    "triggerMethod": "Trigger method",
+    "methodSwt": "Soil moisture SWT",
+    "methodDendro": "Dendrometer",
+    "sensor": "Sensor",
+    "irrigateWhen": "Irrigate when {{sensor}} exceeds {{value}} kPa",
+    "durationMin": "Duration (min)",
+    "triggerSensitivity": "Trigger sensitivity",
+    "baseDurationMin": "Base duration (min)",
+    "responseMode": "Response mode",
+    "advancedSettings": "Advanced settings →",
+    "metric": {
+      "SWT_1": "Sensor 1",
+      "SWT_2": "Sensor 2",
+      "SWT_3": "Sensor 3",
+      "SWT_AVG": "Mean (all sensors)"
+    },
+    "stress": {
+      "mild": "Low sensitivity — irrigate at first signs of stress",
+      "moderate": "Medium sensitivity — irrigate at moderate stress (recommended)",
+      "significant": "High sensitivity — irrigate only under significant stress",
+      "severe": "Conservative — irrigate only at severe stress"
+    },
+    "mode": {
+      "proportional": "Proportional — scale duration with stress level",
+      "fixed": "Fixed — always irrigate for base duration",
+      "aggressive": "Aggressive — extend duration strongly at high stress"
+    },
     "triggerMetric": "Trigger Metric",
     "soilWaterTension1": "Soil Water Tension 1",
     "soilWaterTension2": "Soil Water Tension 2",
@@ -306,6 +358,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Soil Moisture (SWT & VWC)",
+      "temperature": "Soil temperature",
       "moistureSwt": "Soil Moisture (SWT)",
       "moistureVwc": "Soil Moisture (VWC)",
       "moisture": "Soil Moisture"
@@ -320,11 +373,23 @@
       "setupRequired": "Add zone area and irrigation efficiency in zone settings to calculate effective irrigation and water balance.",
       "weeklyTrend": "7-day water trend",
       "trendNote": "Compare rainfall against measured and estimated effective irrigation over the last week.",
-      "nextRain": "Next 24 h rain"
+      "nextRain": "Next 24 h rain",
+      "effective": "{{value}} effective",
+      "rainGaugeReporting": "Rain gauge reporting",
+      "flowMeterReporting": "Flow meter reporting",
+      "tooltipRain": "Rain",
+      "tooltipMeasuredEffective": "Measured effective",
+      "tooltipEstimatedEffective": "Estimated effective"
     },
     "generatedAt": "Generated {{time}}",
     "sectionTitle": "Environment & weather forecast",
+    "loading": "Loading environment data…",
+    "loadFailed": "Failed to load environment data",
     "tabs": {
+      "water": "Water",
+      "soil": "Soil",
+      "weather": "Weather",
+      "sensors": "Sensors",
       "local": "Local",
       "online": "Online",
       "agronomic": "Agronomic",
@@ -401,6 +466,90 @@
       "soil_moisture_pct": "Soil Moisture"
     }
   },
+  "zoneConfig": {
+    "title": "Configure zone — {{zone}}",
+    "crop": "Crop",
+    "selectCrop": "— Select prediction crop —",
+    "variety": "Variety",
+    "varietyPlaceholder": "Variety (optional)",
+    "soilType": "Soil type",
+    "irrigationMethod": "Irrigation method",
+    "area": "Area (m²)",
+    "irrigationEfficiency": "Irrigation efficiency (%)",
+    "calibrationTitle": "Irrigation calibration",
+    "flowRate": "Flow rate (L/min)",
+    "measurementMethod": "Measurement method",
+    "measurementMethodPlaceholder": "Bucket test, meter read, or other method",
+    "dendroCalibration": "Dendro calibration",
+    "phenologicalStage": "Phenological stage",
+    "timezone": "Timezone",
+    "zoneLocation": "Zone location",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "deviceGps": "Device GPS",
+    "useDeviceLocation": "Use device location",
+    "locating": "Locating…",
+    "permissionState": "Permission {{state}}",
+    "checkingGps": "Checking whether device GPS is available…",
+    "locationCaptured": "Device location captured.",
+    "captured": "Captured {{time}}",
+    "capturedAccuracy": ", accuracy ~{{meters}} m",
+    "capturedViaApp": ", via mobile app",
+    "capturedViaBrowser": ", via browser",
+    "openAppSettings": "Open app settings",
+    "openSettingsHint": "Open the app settings and enable location permission, then try again.",
+    "notes": "Notes",
+    "notesPlaceholder": "Any additional info about this zone…",
+    "save": "Save",
+    "saving": "Saving…",
+    "soil": {
+      "select": "— Select soil type —",
+      "sandy": "Sandy",
+      "sandy_loam": "Sandy loam",
+      "loam": "Loam",
+      "clay_loam": "Clay loam",
+      "clay": "Clay",
+      "silt_loam": "Silt loam",
+      "other": "Other"
+    },
+    "method": {
+      "select": "— Select method —",
+      "drip": "Drip / micro-drip",
+      "sprinkler": "Sprinkler",
+      "furrow": "Furrow",
+      "flood": "Flood / basin",
+      "subsurface": "Subsurface drip",
+      "other": "Other"
+    },
+    "calibration": {
+      "default": "Default (generic thresholds)",
+      "apple": "Apple",
+      "grapevine": "Grapevine",
+      "olive": "Olive"
+    },
+    "stage": {
+      "default": "Default",
+      "dormancy": "Dormancy",
+      "budbreak": "Bud break / flowering",
+      "fruitset": "Fruit set",
+      "veraison": "Veraison / ripening",
+      "harvest": "Harvest / post-harvest"
+    },
+    "gps": {
+      "available": "Available",
+      "permissionNeeded": "Permission needed",
+      "checking": "Checking…",
+      "unavailable": "Unavailable"
+    },
+    "errors": {
+      "bothCoordinates": "Enter both latitude and longitude or leave both blank.",
+      "latitudeRange": "Latitude must be between -90 and 90.",
+      "longitudeRange": "Longitude must be between -180 and 180.",
+      "flowRateRequired": "Flow rate (L/min) is required to save irrigation calibration.",
+      "flowRatePositive": "Flow rate (L/min) must be greater than 0.",
+      "saveFailed": "Failed to save"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Recent irrigations",
     "updated": "updated",
@@ -470,7 +619,8 @@
     "buttonFarm": "Remove device"
   },
   "common": {
-    "viewHistory": "View history"
+    "viewHistory": "View history",
+    "batteryEstimated": "Estimated from battery voltage"
   },
   "systemPanel": {
     "title": "Gateway",

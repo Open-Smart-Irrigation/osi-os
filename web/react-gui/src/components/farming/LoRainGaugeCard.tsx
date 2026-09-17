@@ -115,7 +115,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
             disabled={removal.isRemoving}
             aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
             title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
-            className={`rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_VISIBLE_RING}`}
+            className={`touch-target rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_VISIBLE_RING}`}
           >
             ✕
           </button>}

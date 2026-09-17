@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { irrigationZonesAPI } from '../../services/api';
 import type { IrrigationZone, SchedulerType, DendroStressThreshold, TriggerMetric } from '../../types/farming';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,20 @@ const RESPONSE_MODE_LABELS: Record<string, string> = {
   fixed:        'Fixed — always irrigate for base duration',
   aggressive:   'Aggressive — extend duration strongly at high stress',
 };
+
+const SWT_METRIC_LABELS: Record<string, string> = {
+  SWT_1: 'Sensor 1',
+  SWT_2: 'Sensor 2',
+  SWT_3: 'Sensor 3',
+  SWT_AVG: 'Mean (all sensors)',
+};
+
+type Translate = TFunction<'devices'>;
+
+function swtMetricLabel(t: Translate, metric: string): string {
+  const fallback = SWT_METRIC_LABELS[metric] ?? SWT_METRIC_LABELS.SWT_AVG;
+  return t(`schedule.metric.${metric in SWT_METRIC_LABELS ? metric : 'SWT_AVG'}`, { defaultValue: fallback });
+}
 
 export const EDGE_TRIGGER_METRICS = ['SWT_1', 'SWT_2', 'SWT_3', 'SWT_AVG', 'DENDRO'] as const;
 
@@ -81,33 +96,43 @@ interface SwtFormProps {
   metric: TriggerMetric;
   threshold: number;
   duration: number;
+  zoneId: number;
   onMetric: (v: TriggerMetric) => void;
   onThreshold: (v: number) => void;
   onDuration: (v: number) => void;
 }
-const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, onMetric, onThreshold, onDuration }) => {
-  const metricLabel =
-    metric === 'SWT_1' ? 'Sensor 1' :
-    metric === 'SWT_2' ? 'Sensor 2' :
-    metric === 'SWT_3' ? 'Sensor 3' : 'Mean of all sensors';
+const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, zoneId, onMetric, onThreshold, onDuration }) => {
+  // Its own `useTranslation`: this is a separate function component, and the
+  // parent's `t` never reached it.
+  const { t } = useTranslation('devices');
+  const ids = {
+    sensor: `swt-sensor-${zoneId}`,
+    threshold: `swt-threshold-${zoneId}`,
+    duration: `swt-duration-${zoneId}`,
+  };
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div>
-        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Sensor</label>
+        <label htmlFor={ids.sensor} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
+          {t('schedule.sensor', { defaultValue: 'Sensor' })}
+        </label>
         <select
+          id={ids.sensor}
           value={metric}
           onChange={e => onMetric(e.target.value as TriggerMetric)}
           className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
         >
-          <option value="SWT_1">Sensor 1</option>
-          <option value="SWT_2">Sensor 2</option>
-          <option value="SWT_3">Sensor 3</option>
-          <option value="SWT_AVG">Mean (all sensors)</option>
+          {(Object.keys(SWT_METRIC_LABELS) as Array<keyof typeof SWT_METRIC_LABELS>).map(key => (
+            <option key={key} value={key}>{swtMetricLabel(t, key)}</option>
+          ))}
         </select>
       </div>
       <div>
-        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Threshold (kPa)</label>
+        <label htmlFor={ids.threshold} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
+          {t('schedule.thresholdKpa', { defaultValue: 'Threshold (kPa)' })}
+        </label>
         <input
+          id={ids.threshold}
           type="number"
           value={threshold}
           onChange={e => onThreshold(Number(e.target.value))}
@@ -115,12 +140,19 @@ const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, onMetric
           className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
         />
         <p className="mt-1 text-[var(--text-tertiary)] text-xs">
-          Irrigate when {metricLabel} exceeds {threshold} kPa
+          {t('schedule.irrigateWhen', {
+            sensor: swtMetricLabel(t, metric),
+            value: threshold,
+            defaultValue: 'Irrigate when {{sensor}} exceeds {{value}} kPa',
+          })}
         </p>
       </div>
       <div>
-        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Duration (min)</label>
+        <label htmlFor={ids.duration} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
+          {t('schedule.durationMin', { defaultValue: 'Duration (min)' })}
+        </label>
         <input
+          id={ids.duration}
           type="number"
           value={duration}
           onChange={e => onDuration(Number(e.target.value))}
@@ -136,63 +168,81 @@ interface DendroFormProps {
   stressThreshold: DendroStressThreshold;
   duration: number;
   responseMode: string;
+  zoneId: number;
   onStress: (v: DendroStressThreshold) => void;
   onDuration: (v: number) => void;
   onResponseMode: (v: string) => void;
   onAdvanced: () => void;
 }
 const DendroForm: React.FC<DendroFormProps> = ({
-  stressThreshold, duration, responseMode,
+  stressThreshold, duration, responseMode, zoneId,
   onStress, onDuration, onResponseMode, onAdvanced,
-}) => (
-  <div className="flex flex-col gap-4">
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <div className="sm:col-span-1">
-        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Trigger sensitivity</label>
-        <select
-          value={stressThreshold}
-          onChange={e => onStress(e.target.value as DendroStressThreshold)}
-          className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)] text-sm"
-        >
-          {(Object.keys(DENDRO_STRESS_LABELS) as DendroStressThreshold[]).map(k => (
-            <option key={k} value={k}>{DENDRO_STRESS_LABELS[k]}</option>
-          ))}
-        </select>
+}) => {
+  const { t } = useTranslation('devices');
+  const ids = {
+    sensitivity: `dendro-sensitivity-${zoneId}`,
+    duration: `dendro-duration-${zoneId}`,
+    mode: `dendro-mode-${zoneId}`,
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="sm:col-span-1">
+          <label htmlFor={ids.sensitivity} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
+            {t('schedule.triggerSensitivity', { defaultValue: 'Trigger sensitivity' })}
+          </label>
+          <select
+            id={ids.sensitivity}
+            value={stressThreshold}
+            onChange={e => onStress(e.target.value as DendroStressThreshold)}
+            className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)] text-sm"
+          >
+            {(Object.keys(DENDRO_STRESS_LABELS) as DendroStressThreshold[]).map(k => (
+              <option key={k} value={k}>{t(`schedule.stress.${k}`, { defaultValue: DENDRO_STRESS_LABELS[k] })}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor={ids.duration} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
+            {t('schedule.baseDurationMin', { defaultValue: 'Base duration (min)' })}
+          </label>
+          <input
+            id={ids.duration}
+            type="number"
+            value={duration}
+            onChange={e => onDuration(Number(e.target.value))}
+            min="1" max="240" step="1"
+            className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+          />
+        </div>
+        <div>
+          <label htmlFor={ids.mode} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
+            {t('schedule.responseMode', { defaultValue: 'Response mode' })}
+          </label>
+          <select
+            id={ids.mode}
+            value={responseMode}
+            onChange={e => onResponseMode(e.target.value)}
+            className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)] text-sm"
+          >
+            {Object.entries(RESPONSE_MODE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{t(`schedule.mode.${value}`, { defaultValue: label })}</option>
+            ))}
+          </select>
+        </div>
       </div>
-      <div>
-        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Base duration (min)</label>
-        <input
-          type="number"
-          value={duration}
-          onChange={e => onDuration(Number(e.target.value))}
-          min="1" max="240" step="1"
-          className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-        />
-      </div>
-      <div>
-        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Response mode</label>
-        <select
-          value={responseMode}
-          onChange={e => onResponseMode(e.target.value)}
-          className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)] text-sm"
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onAdvanced}
+          className="text-xs text-[var(--primary)] hover:underline"
         >
-          {Object.entries(RESPONSE_MODE_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
-          ))}
-        </select>
+          {t('schedule.advancedSettings', { defaultValue: 'Advanced settings →' })}
+        </button>
       </div>
     </div>
-    <div className="flex justify-end">
-      <button
-        type="button"
-        onClick={onAdvanced}
-        className="text-xs text-[var(--primary)] hover:underline"
-      >
-        Advanced settings →
-      </button>
-    </div>
-  </div>
-);
+  );
+};
 
 // ── Main component ────────────────────────────────────────────────────────────
 interface ScheduleSectionProps {
@@ -311,6 +361,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     <div className="mt-6 border-t border-[var(--border)] pt-5">
       <button
         className="w-full flex items-center justify-between text-left group"
+        aria-expanded={!collapsed}
         onClick={() => setCollapsed(c => !c)}
       >
         <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text)] transition-colors">
@@ -353,14 +404,14 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
               {/* Scheduler type selector */}
               <div className="mb-4">
                 <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
-                  Trigger method
+                  {t('schedule.triggerMethod', { defaultValue: 'Trigger method' })}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <TypeTab active={schedulerType === 'SWT'} onClick={() => handleTypeChange('SWT')}>
-                    Soil moisture SWT
+                    {t('schedule.methodSwt', { defaultValue: 'Soil moisture SWT' })}
                   </TypeTab>
                   <TypeTab active={schedulerType === 'DENDRO'} onClick={() => handleTypeChange('DENDRO')}>
-                    Dendrometer
+                    {t('schedule.methodDendro', { defaultValue: 'Dendrometer' })}
                   </TypeTab>
                 </div>
               </div>
@@ -371,6 +422,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   metric={triggerMetric}
                   threshold={threshold}
                   duration={duration}
+                  zoneId={zoneId}
                   onMetric={setTriggerMetric}
                   onThreshold={setThreshold}
                   onDuration={setDuration}
@@ -381,6 +433,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   stressThreshold={stressThreshold}
                   duration={duration}
                   responseMode={responseMode}
+                  zoneId={zoneId}
                   onStress={setStressThreshold}
                   onDuration={setDuration}
                   onResponseMode={setResponseMode}

@@ -5,6 +5,7 @@ import { devicesAPI, stregaAPI, valveAPI, type IrrigationActuation } from '../..
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { formatTime } from '../../utils/datetime';
 import ValveCancelButton from './ValveCancelButton';
 
 interface StregaValveCardProps {
@@ -169,16 +170,19 @@ function normalizeDeviceEui(value: string | null | undefined): string {
   return String(value ?? '').trim().toUpperCase();
 }
 
-function formatTimeOnly(iso: string | null | undefined, timeZone?: string | null): string | null {
+/**
+ * `utils/datetime` takes the app language explicitly. This used to pass
+ * `undefined` to `Intl`, which is the operating system's locale, so the
+ * actuation line read "closes at 03:26 AM" on a French screen served to a
+ * farmer whose phone is set to English.
+ */
+function formatTimeOnly(
+  iso: string | null | undefined,
+  timeZone?: string | null,
+  language?: string | null,
+): string | null {
   if (!iso) return null;
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return null;
-  const options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
-  try {
-    return new Intl.DateTimeFormat(undefined, timeZone ? { ...options, timeZone } : options).format(date);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
-  }
+  return formatTime(iso, language, timeZone ? { timeZone } : undefined);
 }
 
 function latestActuationForDevice(deviceEui: string, rows: IrrigationActuation[]): IrrigationActuation | null {
@@ -206,12 +210,13 @@ export function getStregaActuationFeedback(
   rows: IrrigationActuation[] = [],
   timeZone?: string | null,
   t: Translate = defaultTranslate,
+  language?: string | null,
 ): ValveActuationFeedback | null {
   const row = latestActuationForDevice(deviceEui, rows);
   if (!row) return null;
 
   if (row.observedCloseAt || row.status === 'COMPLETED') {
-    const closedAt = formatTimeOnly(row.observedCloseAt, timeZone);
+    const closedAt = formatTimeOnly(row.observedCloseAt, timeZone, language);
     return {
       tone: 'closed',
       label: t('stregaValve.actuationFeedback.closed', { defaultValue: 'Closed' }),
@@ -222,7 +227,7 @@ export function getStregaActuationFeedback(
   }
 
   if (row.observedOpenAt || row.status === 'RUNNING') {
-    const closeAt = formatTimeOnly(row.expectedCloseAt, timeZone);
+    const closeAt = formatTimeOnly(row.expectedCloseAt, timeZone, language);
     return {
       tone: 'running',
       label: closeAt
@@ -728,7 +733,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   valve,
   readOnly = false,
 }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const { t: tv } = useTranslation('valves');
   const [loading, setLoading] = useState<'OPEN' | null>(null);
@@ -767,7 +772,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   const displayedState = getDisplayedStregaState(device);
   const isOpen = displayedState === 'OPEN';
   const isUnknown = displayedState === 'UNKNOWN';
-  const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t as Translate);
+  const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t as Translate, i18n?.language);
   const hasActiveActuation = hasActiveValveActuation(device);
   // The intent line only makes sense while there is a commanded target to explain; once it's
   // shown, classify it with the same ACK-path vocabulary as the actuation badge below it.
@@ -841,7 +846,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           </span>
           {!readOnly && <button
             onClick={() => setShowConfig(v => !v)}
-            className={`p-1.5 rounded-md transition-colors ${
+            className={`touch-target p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
@@ -860,7 +865,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           {!readOnly && <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving || loading !== null}
-            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="touch-target p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             title={t('stregaValve.removeDeviceTitle')}
           >
             ✕

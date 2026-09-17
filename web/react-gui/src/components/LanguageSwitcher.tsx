@@ -10,7 +10,7 @@ interface LanguageSwitcherProps {
 const DEFAULT_TRIGGER_CLASS = 'px-3 py-2 text-sm';
 
 export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ triggerClassName, menuAlign = 'right' }) => {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation('common');
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -41,7 +41,9 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ triggerClass
         type="button"
         onClick={() => setOpen((value) => !value)}
         className={`flex items-center gap-1.5 rounded-lg bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-semibold transition-colors ${triggerClassName ?? DEFAULT_TRIGGER_CLASS}`}
-        title="Change language"
+        title={t('languageSwitcher.change', { defaultValue: 'Change language' })}
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
         {current.label}
         <span aria-hidden="true" className="text-xs opacity-60">{open ? '^' : 'v'}</span>

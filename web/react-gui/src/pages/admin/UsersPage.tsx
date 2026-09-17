@@ -106,7 +106,12 @@ export function UsersPage() {
           </form>
         </section>
 
-        <section className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+        {/* A scroll container that keyboard focus can never enter cannot be
+            scrolled without a pointer (2.1.1). */}
+        <section
+          tabIndex={0}
+          className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm"
+        >
           {loading ? <p className="p-5">Loading users…</p> : (
             <table className="w-full text-left">
               <thead className="border-b border-[var(--border)] text-sm text-[var(--text-secondary)]">

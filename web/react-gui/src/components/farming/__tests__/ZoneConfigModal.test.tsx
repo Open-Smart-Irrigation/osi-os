@@ -31,12 +31,18 @@ vi.mock('../../../services/api', () => ({
   },
 }));
 
+// Resolves `defaultValue` the way i18next does, so the assertions below read
+// the English the modal renders now that its copy goes through t().
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, params?: Record<string, string>) => {
+    i18n: { language: 'en' },
+    t: (key: string, options?: unknown) => {
       if (key === 'zone.export.title') return 'Data export';
-      if (key === 'zone.export.rangeSummary') return `${params?.from ?? ''} to ${params?.to ?? ''}`;
-      return key;
+      if (typeof options === 'string') return options;
+      const values = (options ?? {}) as Record<string, unknown>;
+      if (key === 'zone.export.rangeSummary') return `${values.from ?? ''} to ${values.to ?? ''}`;
+      const template = typeof values.defaultValue === 'string' ? values.defaultValue : key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(values[name] ?? ''));
     },
   }),
 }));

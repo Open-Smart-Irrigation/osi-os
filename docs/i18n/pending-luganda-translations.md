@@ -29,7 +29,7 @@ from that set once corrected.
 
 | Keys | Reason |
 |---|---|
-| `zone.configure`, `zone.chips.*`, `zone.groups.*`, `zone.water.*` (title, tiles, action codes, source modes, soil status), `common.viewHistory`, `environment.soil.moisture*`, `environment.forecast.dayToday`/`dayTomorrow`/`etaToday`/`etaTomorrow`, `environment.generatedAt` (67 keys in `devices.json`); `network.loadingDevices`, `network.noDevices`, `network.loadingObservations` (3 keys in `network.json`) | New keys added when the irrigation zone card's water card, the zone chips and the date/time helpers were routed through `t()`. The English text is the source text; no Luganda has been authored for any of them yet, and the shipped `lg` value is the English fallback rather than a machine translation. |
+| `zone.configure`, `zone.chips.*`, `zone.groups.*`, `zone.water.*` (title, tiles, action codes, insufficient-data and water-balance reasons, source modes, soil status with its channel and depth), `common.viewHistory`, `common.batteryEstimated`, `environment.soil.moisture*`, `environment.soil.temperature`, `environment.forecast.dayToday`/`dayTomorrow`/`etaToday`/`etaTomorrow`, `environment.generatedAt`, `environment.loading`/`loadFailed`, `environment.tabs.*`, the `kiwiSensor` depth editor (98 keys in `devices.json`); `network.loadingDevices`, `network.noDevices`, `network.loadingObservations` (3 keys in `network.json`) | New keys added when the irrigation zone card's water card, the zone chips and the date/time helpers were routed through `t()`. The English text is the source text; no Luganda has been authored for any of them yet, and the shipped `lg` value is the English fallback rather than a machine translation. |
 | `environment.water.*` (10 keys in `devices.json`: `noData`, `rainToday`, `measuredIrrigationToday`, `estimatedIrrigationToday`, `waterNeededToday`, `balance`, `setupRequired`, `weeklyTrend`, `trendNote`, `nextRain`) | The zone environment card's Water tab called `t()` for these ten keys with a `defaultValue` but they existed in no locale file, so the tab shipped English in all seven languages (F59 sibling finding F35, overnight 2026-09-17). The five European locales were translated when the keys were added; no Luganda has been authored, so `lg` ships the English source text. |
 
 Tracked in code at `web/react-gui/tests/waterCardLocales.test.ts`
@@ -63,6 +63,18 @@ byte-identical to `en`, the same mechanism `waterCardLocales.test.ts` uses
 above. A human Luganda pass must drop the key from that set and from the
 table above in the same change; the test fails otherwise, so the two cannot
 drift apart.
+
+## `devices.json` — the two irrigation forms, and the Water tab's own keys
+
+| Keys | Reason |
+|---|---|
+| `schedule.*` (trigger method, sensor, threshold helper, sensitivity, response mode, advanced settings — 21 keys); `zoneConfig.*` (title, crop, soil, irrigation method, area, efficiency, calibration, phenological stage, timezone, location, device GPS, notes, validation messages — 70 keys); `environment.water.effective`, `rainGaugeReporting`, `flowMeterReporting`, `tooltipRain`, `tooltipMeasuredEffective`, `tooltipEstimatedEffective` (6 keys) | New keys added when `ScheduleSection`'s two sub-forms and `ZoneConfigModal` were routed through `t()` — until then the only screen where a farmer sets the number that opens a valve, and the screen that sets every input to the water balance, rendered wholly in English inside every non-English screen — and when the Water tab's remaining hardcoded strings were keyed (E-21, E-22, F69, T13h, 2026-09-17). No native Luganda speaker has translated these yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received natural human-quality translations in the same change. |
+
+Tracked in code at `web/react-gui/tests/zoneFormLocales.test.ts`, which asserts
+each key's `lg` value is still byte-identical to `en`, the same mechanism
+`waterCardLocales.test.ts` uses above. A human Luganda pass must drop the key
+from that list and from the table above in the same change; the test fails
+otherwise, so the two cannot drift apart.
 
 ## Related keys not listed here
 

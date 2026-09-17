@@ -29,6 +29,7 @@ const { translateForTest } = vi.hoisted(() => {
     'state.closing': 'Closing',
     'state.failed': 'Failed',
     planIncomplete: 'Not yet confirmed on the valve for {{count}} day(s) — resend the plan',
+    enclosure: 'Valve enclosure',
     'format.temperature': '{{value}} °C',
     'format.humidity': '{{value}} % RH',
     pendingHint: "Waiting for the valve's next contact",
@@ -153,7 +154,9 @@ describe('ValveTile enclosure climate reading', () => {
 
   it('renders a measured zero rather than treating it as missing', () => {
     renderTile({ stregaGeneration: 'GEN1', enclosureTemperatureC: 0, enclosureHumidityPct: 0 });
-    expect(screen.getByText('0 °C · 0 % RH')).toBeInTheDocument();
+    // The pair is prefixed with what it measures — the valve's own housing,
+    // not the field — so the match is on the reading inside that line.
+    expect(screen.getByText(/0 °C · 0 % RH/)).toBeInTheDocument();
   });
 
   it('shows nothing at all when a Gen1 valve has not reported a reading', () => {

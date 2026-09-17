@@ -36,32 +36,44 @@ function LocationSourceBadge({ source }: { source: string }) {
   );
 }
 
+const CACHE_BADGE = {
+  live: { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', fallback: 'Live' },
+  stale: { cls: 'bg-amber-100 text-amber-700 border-amber-200', dot: 'bg-amber-500', fallback: 'Stale' },
+  miss: { cls: 'bg-red-100 text-red-600 border-red-200', dot: 'bg-red-400', fallback: 'No data' },
+} as const;
+
 function OnlineCacheBadge({ data }: { data: ZoneEnvironmentSummary }) {
+  const { t } = useTranslation('devices');
   if (!data.online.available) return null;
-  const cfg = {
-    live: { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', label: 'Live' },
-    stale: { cls: 'bg-amber-100 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Stale' },
-    miss: { cls: 'bg-red-100 text-red-600 border-red-200', dot: 'bg-red-400', label: 'No data' },
-  }[data.online.cacheStatus];
+  const cfg = CACHE_BADGE[data.online.cacheStatus];
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${cfg.cls}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
-      {cfg.label}
+      {t(`environment.cache.${data.online.cacheStatus}`, { defaultValue: cfg.fallback })}
     </span>
   );
 }
 
+// Same four display modes as the water card's own badge, which has been going
+// through these keys all along: the two badges sat three lines apart on the
+// zone card reading "Local uniquement" and "Local only".
+const DISPLAY_MODE_LABELS: Record<string, string> = {
+  shared_server: 'OSI Server',
+  shared_server_stale: 'OSI Server stale',
+  local_fallback: 'Local fallback',
+  unlinked_local: 'Local only',
+};
+
 function DisplayBadge({ data }: { data: ZoneEnvironmentSummary }) {
+  const { t } = useTranslation('devices');
   if (!data.display) return null;
-  const label =
-    data.display.mode === 'shared_server' ? 'OSI Server' :
-    data.display.mode === 'shared_server_stale' ? 'OSI Server stale' :
-    data.display.mode === 'local_fallback' ? 'Local fallback' :
-    data.display.mode === 'unlinked_local' ? 'Local only' :
-    data.display.sourceLabel;
+  const mode = data.display.mode;
+  const fallback = DISPLAY_MODE_LABELS[mode];
   return (
     <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
-      {label}
+      {fallback
+        ? t(`zone.water.source.${mode}`, { defaultValue: fallback })
+        : t('zone.water.source.default', { defaultValue: 'Water source' })}
     </span>
   );
 }
@@ -87,7 +99,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
         setData(summary);
         setActiveTab((previous) => previous || 'water');
       } catch (e: any) {
-        if (!cancelled) setError(e?.response?.data?.message ?? e?.message ?? 'Failed to load environment data');
+        if (!cancelled) setError(e?.response?.data?.message ?? e?.message ?? t('environment.loadFailed', { defaultValue: 'Failed to load environment data' }));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -114,7 +126,11 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
 
   return (
     <div className="mt-6 border-t border-[var(--border)] pt-5">
-      <button className="group flex w-full items-center justify-between text-left" onClick={() => setCollapsed((value) => !value)}>
+      <button
+        className="group flex w-full items-center justify-between text-left"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((value) => !value)}
+      >
         <div className="flex items-center gap-2">
           <CloudIcon className="text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text)]" />
           <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text)]">
@@ -138,7 +154,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
           {loading && !data && (
             <div className="flex items-center gap-2 py-2 text-sm text-[var(--text-tertiary)]">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" />
-              Loading environment data…
+              {t('environment.loading', { defaultValue: 'Loading environment data…' })}
             </div>
           )}
 
@@ -178,7 +194,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
               </div>
 
               <div className="pt-1">
-                {activeTab === 'water' && <WaterTab water={data.water} />}
+                {activeTab === 'water' && <WaterTab water={data.water} devices={devices} />}
                 {activeTab === 'soil' && <SoilTab local={data.local} devices={devices} />}
                 {activeTab === 'weather' && <WeatherTab online={data.online} forecast={data.forecast} location={data.location} />}
                 {activeTab === 'agronomic' && (

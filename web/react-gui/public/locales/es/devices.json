@@ -51,6 +51,16 @@
     "failed": "Error al crear la zona"
   },
   "kiwiSensor": {
+    "invalidDepth": "Introduzca 0 o un número entero de centímetros entre 1 y {{max}}.",
+    "depthSaved": "Profundidades de los canales de humedad del suelo guardadas. Deje en blanco o introduzca 0 para un canal no conectado.",
+    "failedToSaveDepth": "No se pudieron guardar las profundidades de los sensores.",
+    "depthTitle": "PROFUNDIDADES DE LOS SENSORES DE HUMEDAD",
+    "depthNote": "Introduzca las profundidades instaladas en cm. Deje en blanco o introduzca 0 si una sonda no está conectada.",
+    "depth1Label": "Profundidad SWT 1 (cm)",
+    "depth2Label": "Profundidad SWT 2 (cm)",
+    "depthPlaceholder": "0 = apagado",
+    "savingDepths": "Guardando profundidades...",
+    "saveDepths": "Guardar profundidades",
     "badge": "SENSOR KIWI",
     "tooDry": "¡DEMASIADO SECO!",
     "soilNeedsWater": "El suelo necesita riego",
@@ -222,6 +232,16 @@
       "awaitingRecommendation": "Recomendación pendiente",
       "confidence": "{{percent}} % de confianza",
       "confidencePending": "La confianza se actualiza con el próximo cálculo dendro",
+      "insufficientData": "Datos insuficientes para recomendar",
+      "reason": {
+        "balance_unknown": "Indique la superficie y la eficiencia de riego",
+        "forecast_unknown": "Sin previsión de lluvia disponible",
+        "supply_covers_demand": "La lluvia y el riego cubren la demanda de hoy",
+        "forecast_rain_covers_demand": "La lluvia prevista cubre el déficit de hoy",
+        "demand_exceeds_supply": "La demanda supera la lluvia y el riego de hoy",
+        "balance_neutral": "El balance hídrico está casi equilibrado",
+        "default": "Esperando más datos"
+      },
       "action": {
         "delay_irrigation": "Retrasar el riego",
         "irrigate_today": "Regar hoy",
@@ -243,6 +263,11 @@
         "default": "Origen de la recomendación"
       },
       "soil": {
+        "titleAtDepth": "Suelo ahora · {{depth}} cm",
+        "titleChannel": "Suelo ahora · {{channel}}",
+        "atTrigger": "En el umbral de activación o por encima",
+        "nearTrigger": "Cerca del umbral de activación",
+        "belowTrigger": "Por debajo del umbral de activación",
         "title": "Suelo ahora",
         "wet": "Húmedo",
         "moderate": "Moderado",
@@ -287,6 +312,33 @@
   },
   "schedule": {
     "irrigationSchedule": "Riego activado por sensor",
+    "triggerMethod": "Método de activación",
+    "methodSwt": "Humedad del suelo (SWT)",
+    "methodDendro": "Dendrómetro",
+    "sensor": "Sensor",
+    "irrigateWhen": "Regar cuando {{sensor}} supere {{value}} kPa",
+    "durationMin": "Duración (min)",
+    "triggerSensitivity": "Sensibilidad de activación",
+    "baseDurationMin": "Duración base (min)",
+    "responseMode": "Modo de respuesta",
+    "advancedSettings": "Ajustes avanzados →",
+    "metric": {
+      "SWT_1": "Sensor 1",
+      "SWT_2": "Sensor 2",
+      "SWT_3": "Sensor 3",
+      "SWT_AVG": "Media (todos los sensores)"
+    },
+    "stress": {
+      "mild": "Sensibilidad baja — regar a los primeros signos de estrés",
+      "moderate": "Sensibilidad media — regar con estrés moderado (recomendado)",
+      "significant": "Sensibilidad alta — regar solo con estrés significativo",
+      "severe": "Conservador — regar solo con estrés severo"
+    },
+    "mode": {
+      "proportional": "Proporcional — duración según el nivel de estrés",
+      "fixed": "Fijo — regar siempre la duración base",
+      "aggressive": "Agresivo — ampliar mucho la duración con estrés alto"
+    },
     "triggerMetric": "Métrica de activación",
     "soilWaterTension1": "Tensión hídrica del suelo 1",
     "soilWaterTension2": "Tensión hídrica del suelo 2",
@@ -309,6 +361,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Humedad del suelo (SWT y VWC)",
+      "temperature": "Temperatura del suelo",
       "moistureSwt": "Humedad del suelo (SWT)",
       "moistureVwc": "Humedad del suelo (VWC)",
       "moisture": "Humedad del suelo"
@@ -323,11 +376,23 @@
       "setupRequired": "Introduzca la superficie de la zona y la eficiencia de riego en los ajustes de la zona para calcular el riego efectivo y el balance hídrico.",
       "weeklyTrend": "Tendencia hídrica de 7 días",
       "trendNote": "Compare la lluvia con el riego efectivo medido y estimado de la última semana.",
-      "nextRain": "Lluvia en 24 h"
+      "nextRain": "Lluvia en 24 h",
+      "effective": "{{value}} efectivo",
+      "rainGaugeReporting": "Pluviómetro activo",
+      "flowMeterReporting": "Caudalímetro activo",
+      "tooltipRain": "Lluvia",
+      "tooltipMeasuredEffective": "Medido efectivo",
+      "tooltipEstimatedEffective": "Estimado efectivo"
     },
     "generatedAt": "Generado {{time}}",
     "sectionTitle": "Entorno y previsión meteorológica",
+    "loading": "Cargando datos ambientales…",
+    "loadFailed": "No se pudieron cargar los datos ambientales",
     "tabs": {
+      "water": "Agua",
+      "soil": "Suelo",
+      "weather": "Clima",
+      "sensors": "Sensores",
       "local": "Local",
       "online": "Online",
       "agronomic": "Agronómico",
@@ -404,6 +469,90 @@
       "soil_moisture_pct": "Humedad suelo"
     }
   },
+  "zoneConfig": {
+    "title": "Configurar la zona — {{zone}}",
+    "crop": "Cultivo",
+    "selectCrop": "— Seleccione el cultivo de predicción —",
+    "variety": "Variedad",
+    "varietyPlaceholder": "Variedad (opcional)",
+    "soilType": "Tipo de suelo",
+    "irrigationMethod": "Método de riego",
+    "area": "Superficie (m²)",
+    "irrigationEfficiency": "Eficiencia de riego (%)",
+    "calibrationTitle": "Calibración del riego",
+    "flowRate": "Caudal (L/min)",
+    "measurementMethod": "Método de medición",
+    "measurementMethodPlaceholder": "Prueba de cubo, lectura del contador u otro método",
+    "dendroCalibration": "Calibración dendro",
+    "phenologicalStage": "Estado fenológico",
+    "timezone": "Zona horaria",
+    "zoneLocation": "Ubicación de la zona",
+    "latitude": "Latitud",
+    "longitude": "Longitud",
+    "deviceGps": "GPS del dispositivo",
+    "useDeviceLocation": "Usar la ubicación del dispositivo",
+    "locating": "Localizando…",
+    "permissionState": "Permiso {{state}}",
+    "checkingGps": "Comprobando si el GPS del dispositivo está disponible…",
+    "locationCaptured": "Ubicación del dispositivo capturada.",
+    "captured": "Capturado {{time}}",
+    "capturedAccuracy": ", precisión ~{{meters}} m",
+    "capturedViaApp": ", a través de la app móvil",
+    "capturedViaBrowser": ", a través del navegador",
+    "openAppSettings": "Abrir los ajustes de la app",
+    "openSettingsHint": "Abra los ajustes de la app, active el permiso de ubicación y vuelva a intentarlo.",
+    "notes": "Notas",
+    "notesPlaceholder": "Información adicional sobre esta zona…",
+    "save": "Guardar",
+    "saving": "Guardando…",
+    "soil": {
+      "select": "— Seleccione el tipo de suelo —",
+      "sandy": "Arenoso",
+      "sandy_loam": "Franco arenoso",
+      "loam": "Franco",
+      "clay_loam": "Franco arcilloso",
+      "clay": "Arcilla",
+      "silt_loam": "Franco limoso",
+      "other": "Otro"
+    },
+    "method": {
+      "select": "— Seleccione el método —",
+      "drip": "Goteo / microgoteo",
+      "sprinkler": "Aspersión",
+      "furrow": "Surcos",
+      "flood": "Inundación / alcorque",
+      "subsurface": "Goteo subterráneo",
+      "other": "Otro"
+    },
+    "calibration": {
+      "default": "Predeterminado (umbrales genéricos)",
+      "apple": "Manzano",
+      "grapevine": "Vid",
+      "olive": "Olivo"
+    },
+    "stage": {
+      "default": "Predeterminado",
+      "dormancy": "Reposo",
+      "budbreak": "Brotación / floración",
+      "fruitset": "Cuajado",
+      "veraison": "Envero / maduración",
+      "harvest": "Cosecha / poscosecha"
+    },
+    "gps": {
+      "available": "Disponible",
+      "permissionNeeded": "Permiso necesario",
+      "checking": "Comprobando…",
+      "unavailable": "No disponible"
+    },
+    "errors": {
+      "bothCoordinates": "Introduzca latitud y longitud o deje ambas en blanco.",
+      "latitudeRange": "La latitud debe estar entre -90 y 90.",
+      "longitudeRange": "La longitud debe estar entre -180 y 180.",
+      "flowRateRequired": "El caudal (L/min) es necesario para guardar la calibración del riego.",
+      "flowRatePositive": "El caudal (L/min) debe ser mayor que 0.",
+      "saveFailed": "No se pudo guardar"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Riegos recientes",
     "updated": "actualizado",
@@ -473,7 +622,8 @@
     "buttonFarm": "Eliminar dispositivo"
   },
   "common": {
-    "viewHistory": "Ver historial"
+    "viewHistory": "Ver historial",
+    "batteryEstimated": "Estimado a partir del voltaje de la batería"
   },
   "systemPanel": {
     "title": "Gateway",

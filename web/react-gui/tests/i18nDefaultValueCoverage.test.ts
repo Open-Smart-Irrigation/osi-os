@@ -24,27 +24,11 @@ const localeRoot = path.join(guiRoot, 'public/locales');
 // whose key is in no locale file; the component renders English everywhere.
 // Removing an entry requires adding the key to all seven bundles. Entries may
 // only be deleted, never added: a new one means a new untranslatable string.
-const KNOWN_MISSING_KEYS = new Set<string>([
-  // src/components/farming/environment/EnvironmentCard.tsx - four of the tab
-  // labels; environment.tabs.{local,online,agronomic,forecast} do exist.
-  'devices:environment.tabs.water',
-  'devices:environment.tabs.soil',
-  'devices:environment.tabs.weather',
-  'devices:environment.tabs.sensors',
-  // src/components/farming/environment/SoilTab.tsx
-  'devices:environment.soil.temperature',
-  // src/components/farming/KiwiSensorCard.tsx - the sensor-depth editor.
-  'devices:kiwiSensor.invalidDepth',
-  'devices:kiwiSensor.depthSaved',
-  'devices:kiwiSensor.failedToSaveDepth',
-  'devices:kiwiSensor.depthTitle',
-  'devices:kiwiSensor.depthNote',
-  'devices:kiwiSensor.depth1Label',
-  'devices:kiwiSensor.depth2Label',
-  'devices:kiwiSensor.depthPlaceholder',
-  'devices:kiwiSensor.savingDepths',
-  'devices:kiwiSensor.saveDepths',
-]);
+// Empty, and it may only ever stay that way: PR #269 opened this inventory with
+// fifteen keys — four environment tab labels, the Soil tab's temperature label
+// and the ten soil-moisture depth-editor strings — and the edge polish round
+// that followed added all fifteen to the seven bundles.
+const KNOWN_MISSING_KEYS = new Set<string>([]);
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

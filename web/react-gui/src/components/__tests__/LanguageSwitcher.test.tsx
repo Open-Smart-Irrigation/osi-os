@@ -9,6 +9,8 @@ const i18nMock = vi.hoisted(() => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    // The trigger's tooltip goes through `t()` now, so the mock has to answer.
+    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
     i18n: {
       language: 'en-US',
       changeLanguage: i18nMock.changeLanguage,

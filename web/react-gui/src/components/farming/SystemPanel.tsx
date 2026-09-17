@@ -120,7 +120,7 @@ export const SystemPanel: React.FC = () => {
           <button
             onClick={fetchStats}
             disabled={loading}
-            className="px-2.5 py-1.5 rounded-md bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] text-sm font-semibold transition-colors disabled:opacity-50"
+            className="touch-target px-2.5 py-1.5 rounded-md bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] text-sm font-semibold transition-colors disabled:opacity-50"
           >
             ↻ {t('systemPanel.refresh')}
           </button>
@@ -211,7 +211,7 @@ export const SystemPanel: React.FC = () => {
                       aria-disabled={fanBusy || !systemWriteAllowed}
                       aria-describedby={systemWriteAllowed ? undefined : 'system-panel-fan-admin-hint'}
                       title={adminOnlyTitle}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
+                      className={`touch-target px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
                         fanSpeed === p.speed
                           ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                           : 'bg-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'

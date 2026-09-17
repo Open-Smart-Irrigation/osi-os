@@ -149,7 +149,8 @@ const ConfigPanel: React.FC<{
     const swtDepth2Cm = parseDepth(swtDepth2Input);
     if (swtDepth1Cm === 'invalid' || swtDepth2Cm === 'invalid') {
       setError(t('kiwiSensor.invalidDepth', {
-        defaultValue: 'Enter 0 or a whole number of centimeters between 1 and 1000.',
+        max: MAX_KIWI_SENSOR_DEPTH_CM,
+        defaultValue: 'Enter 0 or a whole number of centimeters between 1 and {{max}}.',
       }));
       setInfo(null);
       return;
@@ -358,7 +359,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
           </span>
           {!readOnly && <button
             onClick={() => setShowConfig(v => !v)}
-            className={`p-1.5 rounded-md transition-colors ${
+            className={`touch-target p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
@@ -377,7 +378,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
           {!readOnly && <button
             onClick={removal.openConfirm}
             disabled={removal.isRemoving}
-            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="touch-target p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
             title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
           >

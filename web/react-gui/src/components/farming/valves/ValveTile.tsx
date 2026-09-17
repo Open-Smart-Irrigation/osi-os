@@ -6,6 +6,7 @@ import { ValveGlyph, valveGlyphLabel, type Translate } from './ValveGlyph';
 import { describeLastSeen, renderLastSeen } from './valveCardHelpers';
 import { getBatteryPercentFromVoltage, getValidBatteryPercent } from '../shared/deviceCardBattery';
 import { useDismissOnPointerDown } from '../../../hooks/useDismissOnPointerDown';
+import { formatTime } from '../../../utils/datetime';
 
 export interface ValveTileProps {
   valve: ValveSummary;
@@ -36,17 +37,6 @@ export interface ValveTileProps {
   // those helpers: a raw sensor value is never assumed clean.
   batteryPercent?: unknown;
   batteryVoltage?: unknown;
-}
-
-function formatClock(iso: string, timeZone: string): string {
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return '—';
-  const options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
-  try {
-    return new Intl.DateTimeFormat(undefined, { ...options, timeZone }).format(date);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
-  }
 }
 
 function formatRelativePast(iso: string, nowMs: number): string {
@@ -80,7 +70,11 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   batteryPercent,
   batteryVoltage,
 }) => {
-  const { t } = useTranslation('valves');
+  const { t, i18n } = useTranslation('valves');
+  // `utils/datetime` resolves the locale from the app language and already
+  // handles the unsupported-tag fallback for `lg`; the local helper this
+  // replaces passed `undefined`, which is the operating system's locale.
+  const clock = (iso: string) => formatTime(iso, i18n?.language, { timeZone: valve.timezone }) ?? '—';
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -102,13 +96,13 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   const statusDetails: string[] = [];
   if (glyph.state === 'open' && glyph.remainingSeconds !== null) {
     statusDetails.push(t('remaining', { minutes: Math.max(0, Math.ceil(glyph.remainingSeconds / 60)) }));
-    if (glyph.closesAt) statusDetails.push(t('closesAt', { time: formatClock(glyph.closesAt, valve.timezone) }));
+    if (glyph.closesAt) statusDetails.push(t('closesAt', { time: clock(glyph.closesAt) }));
   }
   if (glyph.state === 'pending') {
     // #171 item 3: a commanded-but-unconfirmed open says so, matching the honesty
     // StregaValveCard's actuationFeedback badge already has.
     statusDetails.push(t('pendingHint'));
-    if (glyph.closesAt) statusDetails.push(t('closesAt', { time: formatClock(glyph.closesAt, valve.timezone) }));
+    if (glyph.closesAt) statusDetails.push(t('closesAt', { time: clock(glyph.closesAt) }));
     if (valve.lastUplinkAt) {
       statusDetails.push(t('lastContact', { when: formatRelativePast(valve.lastUplinkAt, nowMs) }));
     }
@@ -122,19 +116,27 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   } else if (!valve.nextRun) {
     nextRunLine = t('noSchedule');
   } else {
-    const when = formatClock(valve.nextRun.at, valve.timezone);
+    const when = clock(valve.nextRun.at);
     nextRunLine = valve.nextRun.kind === 'ONCE'
       ? t('nextRunOnce', { when, minutes: valve.nextRun.minutes })
       : t('nextRun', { when, minutes: valve.nextRun.minutes });
   }
 
+  // `box_temp`/`box_hum` from inside the buried STREGA housing, which land in
+  // the same `device_data.ambient_temperature` column the weather station
+  // writes. Unlabelled on the tile — and the tile is where it is read — it
+  // passes for zone air temperature; rising humidity in that box is water
+  // ingress, a maintenance signal, not a growing condition.
   const climatePair =
     valve.stregaGeneration === 'GEN2' ? null
     : valve.enclosureTemperatureC == null && valve.enclosureHumidityPct == null ? null
     : [
-        valve.enclosureTemperatureC != null ? t('format.temperature', { value: valve.enclosureTemperatureC }) : null,
-        valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
-      ].filter(Boolean).join(' · ');
+        t('enclosure', { defaultValue: 'Valve enclosure' }),
+        [
+          valve.enclosureTemperatureC != null ? t('format.temperature', { value: valve.enclosureTemperatureC }) : null,
+          valve.enclosureHumidityPct != null ? t('format.humidity', { value: valve.enclosureHumidityPct }) : null,
+        ].filter(Boolean).join(' · '),
+      ].join(' ');
 
   // Shown only when part of the plan genuinely did not reach the valve, and phrased as the
   // consequence the farmer can act on rather than as transport bookkeeping. Deliberately not

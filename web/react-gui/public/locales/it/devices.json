@@ -51,6 +51,16 @@
     "failed": "Impossibile creare la zona"
   },
   "kiwiSensor": {
+    "invalidDepth": "Inserisci 0 o un numero intero di centimetri tra 1 e {{max}}.",
+    "depthSaved": "Profondità dei canali di umidità del suolo salvate. Lascia vuoto o inserisci 0 per un canale non collegato.",
+    "failedToSaveDepth": "Impossibile salvare le profondità dei sensori.",
+    "depthTitle": "PROFONDITÀ DEI SENSORI DI UMIDITÀ",
+    "depthNote": "Inserisci le profondità di installazione in cm. Lascia vuoto o inserisci 0 se una sonda non è collegata.",
+    "depth1Label": "Profondità SWT 1 (cm)",
+    "depth2Label": "Profondità SWT 2 (cm)",
+    "depthPlaceholder": "0 = spento",
+    "savingDepths": "Salvataggio delle profondità...",
+    "saveDepths": "Salva le profondità",
     "badge": "SENSORE KIWI",
     "tooDry": "TROPPO SECCO!",
     "soilNeedsWater": "Il suolo ha bisogno di irrigazione",
@@ -222,6 +232,16 @@
       "awaitingRecommendation": "Raccomandazione in attesa",
       "confidence": "{{percent}}% di affidabilità",
       "confidencePending": "L'affidabilità si aggiorna al prossimo calcolo dendro",
+      "insufficientData": "Dati insufficienti per un consiglio",
+      "reason": {
+        "balance_unknown": "Inserisci superficie ed efficienza d'irrigazione",
+        "forecast_unknown": "Nessuna previsione di pioggia disponibile",
+        "supply_covers_demand": "Pioggia e irrigazione coprono la domanda di oggi",
+        "forecast_rain_covers_demand": "La pioggia prevista copre il deficit di oggi",
+        "demand_exceeds_supply": "La domanda supera pioggia e irrigazione di oggi",
+        "balance_neutral": "Il bilancio idrico è quasi in pareggio",
+        "default": "In attesa di altri dati"
+      },
       "action": {
         "delay_irrigation": "Rinviare l'irrigazione",
         "irrigate_today": "Irrigare oggi",
@@ -243,6 +263,11 @@
         "default": "Origine della raccomandazione"
       },
       "soil": {
+        "titleAtDepth": "Suolo adesso · {{depth}} cm",
+        "titleChannel": "Suolo adesso · {{channel}}",
+        "atTrigger": "Alla soglia di attivazione o oltre",
+        "nearTrigger": "Vicino alla soglia di attivazione",
+        "belowTrigger": "Sotto la soglia di attivazione",
         "title": "Suolo adesso",
         "wet": "Umido",
         "moderate": "Moderato",
@@ -287,6 +312,33 @@
   },
   "schedule": {
     "irrigationSchedule": "Irrigazione attivata da sensore",
+    "triggerMethod": "Metodo di attivazione",
+    "methodSwt": "Umidità del suolo (SWT)",
+    "methodDendro": "Dendrometro",
+    "sensor": "Sensore",
+    "irrigateWhen": "Irriga quando {{sensor}} supera {{value}} kPa",
+    "durationMin": "Durata (min)",
+    "triggerSensitivity": "Sensibilità di attivazione",
+    "baseDurationMin": "Durata di base (min)",
+    "responseMode": "Modalità di risposta",
+    "advancedSettings": "Impostazioni avanzate →",
+    "metric": {
+      "SWT_1": "Sensore 1",
+      "SWT_2": "Sensore 2",
+      "SWT_3": "Sensore 3",
+      "SWT_AVG": "Media (tutti i sensori)"
+    },
+    "stress": {
+      "mild": "Sensibilità bassa — irrigare ai primi segni di stress",
+      "moderate": "Sensibilità media — irrigare con stress moderato (consigliato)",
+      "significant": "Sensibilità alta — irrigare solo con stress significativo",
+      "severe": "Prudente — irrigare solo con stress severo"
+    },
+    "mode": {
+      "proportional": "Proporzionale — durata in base al livello di stress",
+      "fixed": "Fisso — irrigare sempre per la durata di base",
+      "aggressive": "Aggressivo — estendere molto la durata con stress elevato"
+    },
     "triggerMetric": "Metrica di attivazione",
     "soilWaterTension1": "Tensione idrica del suolo 1",
     "soilWaterTension2": "Tensione idrica del suolo 2",
@@ -309,6 +361,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Umidità del suolo (SWT e VWC)",
+      "temperature": "Temperatura del suolo",
       "moistureSwt": "Umidità del suolo (SWT)",
       "moistureVwc": "Umidità del suolo (VWC)",
       "moisture": "Umidità del suolo"
@@ -323,11 +376,23 @@
       "setupRequired": "Inserisci la superficie della zona e l'efficienza irrigua nelle impostazioni della zona per calcolare l'irrigazione efficace e il bilancio idrico.",
       "weeklyTrend": "Andamento idrico su 7 giorni",
       "trendNote": "Confronta la pioggia con l'irrigazione efficace misurata e stimata dell'ultima settimana.",
-      "nextRain": "Pioggia nelle 24 h"
+      "nextRain": "Pioggia nelle 24 h",
+      "effective": "{{value}} efficace",
+      "rainGaugeReporting": "Pluviometro attivo",
+      "flowMeterReporting": "Contatore di portata attivo",
+      "tooltipRain": "Pioggia",
+      "tooltipMeasuredEffective": "Misurato efficace",
+      "tooltipEstimatedEffective": "Stimato efficace"
     },
     "generatedAt": "Generato {{time}}",
     "sectionTitle": "Ambiente e previsioni meteo",
+    "loading": "Caricamento dei dati ambientali…",
+    "loadFailed": "Impossibile caricare i dati ambientali",
     "tabs": {
+      "water": "Acqua",
+      "soil": "Suolo",
+      "weather": "Meteo",
+      "sensors": "Sensori",
       "local": "Locale",
       "online": "Online",
       "agronomic": "Agronomico",
@@ -404,6 +469,90 @@
       "soil_moisture_pct": "Umidità suolo"
     }
   },
+  "zoneConfig": {
+    "title": "Configura la zona — {{zone}}",
+    "crop": "Coltura",
+    "selectCrop": "— Seleziona la coltura di previsione —",
+    "variety": "Varietà",
+    "varietyPlaceholder": "Varietà (facoltativo)",
+    "soilType": "Tipo di suolo",
+    "irrigationMethod": "Metodo d'irrigazione",
+    "area": "Superficie (m²)",
+    "irrigationEfficiency": "Efficienza d'irrigazione (%)",
+    "calibrationTitle": "Calibrazione dell'irrigazione",
+    "flowRate": "Portata (L/min)",
+    "measurementMethod": "Metodo di misura",
+    "measurementMethodPlaceholder": "Prova con secchio, lettura del contatore o altro metodo",
+    "dendroCalibration": "Calibrazione dendro",
+    "phenologicalStage": "Stadio fenologico",
+    "timezone": "Fuso orario",
+    "zoneLocation": "Posizione della zona",
+    "latitude": "Latitudine",
+    "longitude": "Longitudine",
+    "deviceGps": "GPS del dispositivo",
+    "useDeviceLocation": "Usa la posizione del dispositivo",
+    "locating": "Localizzazione…",
+    "permissionState": "Autorizzazione {{state}}",
+    "checkingGps": "Verifica della disponibilità del GPS del dispositivo…",
+    "locationCaptured": "Posizione del dispositivo acquisita.",
+    "captured": "Acquisito {{time}}",
+    "capturedAccuracy": ", precisione ~{{meters}} m",
+    "capturedViaApp": ", tramite l'app mobile",
+    "capturedViaBrowser": ", tramite il browser",
+    "openAppSettings": "Apri le impostazioni dell'app",
+    "openSettingsHint": "Apri le impostazioni dell'app, attiva l'autorizzazione alla posizione e riprova.",
+    "notes": "Note",
+    "notesPlaceholder": "Altre informazioni su questa zona…",
+    "save": "Salva",
+    "saving": "Salvataggio…",
+    "soil": {
+      "select": "— Seleziona il tipo di suolo —",
+      "sandy": "Sabbioso",
+      "sandy_loam": "Limo sabbioso",
+      "loam": "Terreno franco",
+      "clay_loam": "Limo argilloso",
+      "clay": "Argilla",
+      "silt_loam": "Limo fine",
+      "other": "Altro"
+    },
+    "method": {
+      "select": "— Seleziona il metodo —",
+      "drip": "Goccia / micro-goccia",
+      "sprinkler": "Aspersione",
+      "furrow": "Solchi",
+      "flood": "Sommersione / bacino",
+      "subsurface": "Goccia interrata",
+      "other": "Altro"
+    },
+    "calibration": {
+      "default": "Predefinito (soglie generiche)",
+      "apple": "Melo",
+      "grapevine": "Vite",
+      "olive": "Olivo"
+    },
+    "stage": {
+      "default": "Predefinito",
+      "dormancy": "Dormienza",
+      "budbreak": "Germogliamento / fioritura",
+      "fruitset": "Allegagione",
+      "veraison": "Invaiatura / maturazione",
+      "harvest": "Raccolta / post-raccolta"
+    },
+    "gps": {
+      "available": "Disponibile",
+      "permissionNeeded": "Autorizzazione necessaria",
+      "checking": "Verifica…",
+      "unavailable": "Non disponibile"
+    },
+    "errors": {
+      "bothCoordinates": "Inserisci latitudine e longitudine oppure lascia entrambe vuote.",
+      "latitudeRange": "La latitudine deve essere compresa tra -90 e 90.",
+      "longitudeRange": "La longitudine deve essere compresa tra -180 e 180.",
+      "flowRateRequired": "La portata (L/min) è necessaria per salvare la calibrazione dell'irrigazione.",
+      "flowRatePositive": "La portata (L/min) deve essere maggiore di 0.",
+      "saveFailed": "Salvataggio non riuscito"
+    }
+  },
   "irrigationOutcomes": {
     "title": "Irrigazioni recenti",
     "updated": "aggiornato",
@@ -473,7 +622,8 @@
     "buttonFarm": "Rimuovi dispositivo"
   },
   "common": {
-    "viewHistory": "Vedi cronologia"
+    "viewHistory": "Vedi cronologia",
+    "batteryEstimated": "Stimato dalla tensione della batteria"
   },
   "systemPanel": {
     "title": "Gateway",
