@@ -12789,7 +12789,8 @@
         "weather-zones-command-apply-fn"
       ],
       [
-        "9d5e3035c3d069c4"
+        "9d5e3035c3d069c4",
+        "sync-outbox-flush-coalesce"
       ]
     ]
   },

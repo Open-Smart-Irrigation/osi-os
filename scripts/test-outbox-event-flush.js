@@ -11,8 +11,9 @@
 // The fix is a link pair from the zone mutation routes into a coalescing gate that
 // drives the existing flush chain. This file pins BOTH halves:
 //   * structure -- the link out/in pair and the gate exist in every shipped profile,
-//     are wired into sync-outbox-build, and every zone create/delete response node
-//     actually taps the link out (otherwise the flush is dead code);
+//     are wired into sync-outbox-build, every zone create/delete response node
+//     actually taps the link out (otherwise the flush is dead code), and the
+//     cloud zone-command applier pings the gate directly from the sync tab;
 //   * behaviour -- the gate is bounded: a burst collapses into ONE flush, it never
 //     fires more often than MIN_GAP_MS, it uses a single timer (no setInterval, no
 //     busy loop), it emits a fresh msg (never the HTTP response msg, which still
@@ -34,6 +35,8 @@ const LINK_OUT_ID = 'sync-outbox-flush-link-out-zone';
 const LINK_IN_ID = 'sync-outbox-flush-link-in';
 const GATE_ID = 'sync-outbox-flush-coalesce';
 const FLUSH_BUILD_ID = 'sync-outbox-build';
+const ZONE_COMMAND_APPLY_ID = 'zone-command-apply-fn';
+const MQTT_ACK_ID = '9d5e3035c3d069c4';
 const SYNC_TAB = '93b1537a596e0e6d';
 const DEVICE_API_TAB = 'device-api-tab';
 
@@ -93,6 +96,22 @@ for (const profile of FLOW_PROFILES) {
         `${nodeId} output ${outputIndex} must wire to ${LINK_OUT_ID} in ${profile}; got ${JSON.stringify(wires)}`,
       );
     }
+  });
+
+  test(`[${profile}] applying a cloud zone command also pings the gate`, () => {
+    // A zone added or removed from the cloud is applied by "Apply Zone Command",
+    // whose UPDATE fires the same sync_outbox trigger as a local edit. Without
+    // this tap the echo that retires the cloud's pending badge still waited for
+    // the 30 s inject: measured 25.018 s and 24.988 s on Silvan 2026-09-17.
+    // The node lives on the sync tab, so it reaches the gate directly -- no link
+    // pair needed, and the link out stays a Device Management tab concern.
+    const node = nodeById(flows, ZONE_COMMAND_APPLY_ID, profile);
+    assert.deepEqual(
+      node.wires,
+      [[ 'weather-zones-command-apply-fn' ], [ MQTT_ACK_ID, GATE_ID ]],
+      `${ZONE_COMMAND_APPLY_ID} must keep its pass-through and ack wiring and add the gate in ${profile}`,
+    );
+    assert.equal(node.outputs, 2, 'the tap must not change the node output count');
   });
 
   test(`[${profile}] the periodic flush inject is kept as the safety net`, () => {
