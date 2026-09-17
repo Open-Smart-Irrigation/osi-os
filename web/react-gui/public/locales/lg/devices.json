@@ -260,6 +260,9 @@
         "shared_server_stale": "OSI Server stale",
         "local_fallback": "Local fallback",
         "unlinked_local": "Local only",
+        "using_last_synced": "Using the last synced OSI Server values.",
+        "bundle_unavailable": "Using local values while the OSI Server data is unavailable.",
+        "fallback_generic": "Showing data from a fallback source.",
         "default": "Recommendation source"
       },
       "soil": {

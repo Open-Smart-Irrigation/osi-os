@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import i18next, { type i18n as I18n } from 'i18next';
@@ -259,5 +259,115 @@ describe('IrrigationZoneCard locale coverage', () => {
     const expected = new Intl.DateTimeFormat('fr', { hour: '2-digit', minute: '2-digit' })
       .format(new Date('2026-07-08T09:55:00.000Z'));
     expect(card).toHaveTextContent(`Mis à jour ${expected}`);
+  });
+});
+
+// F100/X-01: for a linked gateway, the cloud decides the water action and
+// ships an English `reasoning` sentence. #271 already stops the edge's own
+// heuristic from writing prose; these cases pin that a bundle carrying the
+// cloud's own fabricated sentence — with or without a resolved `code`, and
+// regardless of `reasonCode` support — never reaches the screen either.
+describe('IrrigationZoneCard reason-code honesty (F100/X-01/X-16)', () => {
+  // The literal sentence ZoneEnvironmentService.resolveWaterAction ships
+  // today (a0161cad:422), curly apostrophe and all.
+  const CLOUD_FABRICATED_REASONING = 'Available rain and effective irrigation cover today’s estimated demand.';
+
+  it('suppresses the cloud bundle\'s fabricated reasoning prose even when a code is attached', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: { code: 'delay_irrigation', source: 'heuristic', reasoning: CLOUD_FABRICATED_REASONING, recommendationDate: null },
+      },
+    });
+    await renderIn('fr');
+    const card = screen.getByTestId('water-today-card');
+    expect(card).not.toHaveTextContent(CLOUD_FABRICATED_REASONING);
+    // The resolved code still gets its verb — only the raw prose is gone.
+    expect(card).toHaveTextContent(frDevices.zone.water.action.delay_irrigation);
+    expect(card).toHaveTextContent(frDevices.zone.water.reason.default);
+  });
+
+  it('never shows the fabricated reasoning in English, no code at all', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: { code: null, source: 'heuristic', reasoning: CLOUD_FABRICATED_REASONING, recommendationDate: null },
+      },
+    });
+    await renderIn('fr');
+    const text = renderedStrings();
+    expect(occurs(text, CLOUD_FABRICATED_REASONING)).toBe(false);
+    expect(occurs(text, 'Available rain')).toBe(false);
+  });
+
+  it('prefers a reasonCode and translates it over any raw reasoning text', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: {
+          code: 'delay_irrigation',
+          source: 'heuristic',
+          reasonCode: 'demand_exceeds_supply',
+          reasoning: CLOUD_FABRICATED_REASONING,
+          recommendationDate: null,
+        },
+      },
+    });
+    await renderIn('fr');
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent(frDevices.zone.water.reason.demand_exceeds_supply);
+    expect(card).not.toHaveTextContent(CLOUD_FABRICATED_REASONING);
+  });
+
+  it('still shows dendrometer-sourced reasoning verbatim: a stored analytics sentence, not screen prose', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: { code: 'irrigate_today', source: 'dendro', reasoning: 'Tree 4 crossed its stress threshold overnight.', recommendationDate: null },
+      },
+    });
+    await renderIn('fr');
+    expect(screen.getByTestId('water-today-card')).toHaveTextContent('Tree 4 crossed its stress threshold overnight.');
+  });
+
+  it('treats a cloud source of insufficient_data as the neutral state even with a stale code attached', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: { code: 'delay_irrigation', source: 'insufficient_data', reasonCode: 'balance_unknown', reasoning: null, recommendationDate: null },
+      },
+    });
+    await renderIn('fr');
+    const actionTile = screen.getByTestId('water-action-tile');
+    expect(actionTile).toHaveTextContent(frDevices.zone.water.insufficientData);
+    expect(actionTile).not.toHaveTextContent(frDevices.zone.water.action.delay_irrigation);
+    expect(within(actionTile).getByText(frDevices.zone.water.reason.balance_unknown)).toBeInTheDocument();
+  });
+
+  it('maps the flow node\'s known English fallbackReason sentences to translated keys', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      display: { ...summary.display, fallbackReason: 'Using last synced OSI Server values.' },
+    });
+    await renderIn('fr');
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent(frDevices.zone.water.source.using_last_synced);
+    expect(card).not.toHaveTextContent('Using last synced OSI Server values.');
+  });
+
+  it('falls back to the generic source key for an unmapped fallbackReason sentence', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      display: { ...summary.display, fallbackReason: 'A brand new banner the flow node does not emit yet.' },
+    });
+    await renderIn('fr');
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent(frDevices.zone.water.source.fallback_generic);
+    expect(card).not.toHaveTextContent('A brand new banner the flow node does not emit yet.');
   });
 });
