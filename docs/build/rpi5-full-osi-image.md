@@ -293,7 +293,10 @@ Expected:
 - Missing pure Node dependencies make `osi-bootstrap` fail even when Node-RED
   itself starts. Verify module resolution from `/srv/node-red`.
 - Do not bundle native npm `sqlite3`; use OpenWrt `node-red-node-sqlite` and
-  link its native module into `/srv/node-red/node_modules/sqlite3`.
+  copy its native module into `/srv/node-red/node_modules/sqlite3`. It has to
+  be a real directory, not a symlink: the shipped `package-lock.json` declares
+  `sqlite3` as a registry package, and npm retires a symlink at that path and
+  tries to rebuild the module from source on the gateway.
 - Do not rely on `/var/lib/node-red/.node-red`; it is not durable in this image.
 - HTTPS `/gui/` needs nginx proxy locations, not only Node-RED on port `1880`.
 - A solid red LED / disappearing LAN can be power-related. The live Pi logged
