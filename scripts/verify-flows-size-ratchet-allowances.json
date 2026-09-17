@@ -2,12 +2,12 @@
   "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
   "node_allowances": {
     "system-stats-admin-read-guard": {
-      "delta": 4980,
-      "reason": "fix(auth): GET /api/system/stats was unauthenticated whenever OSI_SCOPED_ACCESS is off (the default on every gateway) -- the guard's flag-off branch was a bare `return [msg, null]` pass-through with no auth check at all, exposing CPU temp, memory, load, fan mode/speed, and restartPending to anyone reaching port 1880. Measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1145 -> HEAD 6125 = +4980. Fix inlines the getAuthSecret/toBase64Url/fromBase64Url/verifyBearer block copied verbatim from api-me-auth's Decode Token node (per osi-flows-json-editing: copy the auth block, don't retype HMAC/expiry/token-parsing logic) so the flag-off branch now requires a valid bearer token before returning [msg, null], while never touching osiLib's scope helper on that path (verify-auth-flag-off-hermetic.js's contract). The scoped-mode branch (dbLoad/scopeLoad + authorizeAdminRead call) is untouched, byte-identical to the pre-fix node."
+      "delta": 647,
+      "reason": "2026-09-17 overnight stabilization T13d (F49). Supersedes the prior 4980 entry, which is fully consumed: PR #261's flag-off verifyBearer port is merged, so origin/main already measures this node at 6125 and the old allowance was pure unearned headroom (the F16 hygiene defect). Re-measured fresh with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles: origin/main 6125 -> HEAD 6772 = +647. The delta is api-me-auth's _osiAuthFailure tagging, which the #261 port dropped: verifyBearer now opens with 'delete msg._osiAuthFailure;' and stamps { format: 1, code, sourceId: 'system-stats-admin-read-guard' } on each of its six 401 paths. The block is spliced from api-me-auth's own verifyBearer with only the sourceId substituted, and was byte-identical to it modulo the tags beforehand."
     },
     "fieldtest-download-admin-read-guard": {
-      "delta": 5013,
-      "reason": "fix(auth): GET /download-fieldtest (raw field-test radio telemetry export -- dev_eui, gateway location, RF params) was unauthenticated whenever OSI_SCOPED_ACCESS is off (the default on every gateway), sharing the exact same bare `return [msg, null]` pass-through defect as system-stats-admin-read-guard, found during the sweep that fix triggered. Measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1145 -> HEAD 6158 = +5013. Same fix shape as system-stats-admin-read-guard: the verbatim api-me-auth verifyBearer/getAuthSecret block gates the flag-off branch; the scoped-mode authorizeAdminRead branch is untouched."
+      "delta": 683,
+      "reason": "2026-09-17 overnight stabilization T13d (F49). Supersedes the prior 5013 entry, fully consumed by origin/main for the same reason as system-stats-admin-read-guard above. Re-measured fresh with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles: origin/main 6158 -> HEAD 6841 = +683. Same change: api-me-auth's _osiAuthFailure tagging spliced back in with sourceId 'fieldtest-download-admin-read-guard'."
     },
     "6b28e0d879808dd9": {
       "delta": 228,

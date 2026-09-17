@@ -1401,6 +1401,41 @@ for (const node of flows) {
     }
 }
 
+// === Admin read guards: auth-failure telemetry and gate-before-read ===
+//
+// F49: the stats and field-test guards inline the same verifyBearer block as
+// api-me-auth's Decode Token node, but were ported without its
+// `msg._osiAuthFailure` tagging. That tag is what lets the catch/error path
+// tell a genuine 401 apart from a handler crash, so a guard that omits it
+// reports its own auth rejections as untyped failures.
+const authTagFailuresBefore = failures.length;
+for (const guardId of ['system-stats-admin-read-guard', 'fieldtest-download-admin-read-guard']) {
+    const guard = byId[guardId];
+    if (!guard || typeof guard.func !== 'string') {
+        failures.push(guardId + ' is missing from flows.json');
+        continue;
+    }
+    const label = (guard.name || '(unnamed)') + ' [' + guardId + ']';
+    if (!/function verifyBearer\(authHeader\) \{ delete msg\._osiAuthFailure;/.test(guard.func)) {
+        failures.push(label + ' does not clear msg._osiAuthFailure when verifyBearer starts');
+    }
+    for (const code of ['MISSING_BEARER', 'INVALID_TOKEN', 'TOKEN_EXPIRED']) {
+        const tag = "msg._osiAuthFailure = { format: 1, code: '" + code + "', sourceId: '" + guardId + "' }; throw err;";
+        if (!guard.func.includes(tag)) {
+            failures.push(label + " does not tag its " + code + " rejection with _osiAuthFailure (see api-me-auth)");
+        }
+    }
+    const invalidTokenTags = guard.func.split(
+        "msg._osiAuthFailure = { format: 1, code: 'INVALID_TOKEN', sourceId: '" + guardId + "' };"
+    ).length - 1;
+    if (invalidTokenTags !== 4) {
+        failures.push(label + ' tags ' + invalidTokenTags + ' of the 4 INVALID_TOKEN rejection paths');
+    }
+}
+if (failures.length === authTagFailuresBefore) {
+    console.log('OK  admin read guards tag every verifyBearer rejection with _osiAuthFailure');
+}
+
 // === Global Settings module gates ===
 
 const disableAllSchedulesHttp = flows.find((node) => (
