@@ -122,6 +122,12 @@ const KEYS = [
   'zoneConfig.errors.flowRateRequired',
   'zoneConfig.errors.flowRatePositive',
   'zoneConfig.errors.saveFailed',
+  'environment.water.effective',
+  'environment.water.rainGaugeReporting',
+  'environment.water.flowMeterReporting',
+  'environment.water.tooltipRain',
+  'environment.water.tooltipMeasuredEffective',
+  'environment.water.tooltipEstimatedEffective',
 ];
 
 /** `locale:key` pairs where matching English is the correct translation. */

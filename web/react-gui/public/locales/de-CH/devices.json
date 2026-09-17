@@ -359,6 +359,14 @@
     "triggerHint": "Auslösen, wenn {{metric}} ≥ {{threshold}} kPa (Prüfung einmal täglich um 06:00)."
   },
   "environment": {
+    "water": {
+      "effective": "{{value}} effektiv",
+      "rainGaugeReporting": "Regenmesser meldet",
+      "flowMeterReporting": "Durchflussmesser meldet",
+      "tooltipRain": "Regen",
+      "tooltipMeasuredEffective": "Gemessen effektiv",
+      "tooltipEstimatedEffective": "Geschätzt effektiv"
+    },
     "soil": {
       "moistureSwtVwc": "Bodenfeuchte (SWT & VWC)",
       "temperature": "Bodentemperatur",

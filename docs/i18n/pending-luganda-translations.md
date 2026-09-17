@@ -42,6 +42,7 @@ two cannot drift apart.
 | Keys | Reason |
 |---|---|
 | `systemPanel.*` (27 keys in `devices.json`); `adminOnly` (1 key in `common.json`) | New keys added for the Gateway system-status card (SystemPanel.tsx) and the shared "Admin only" role-gating tooltip/hint (SystemPanel.tsx and SettingsPage.tsx), previously fully hardcoded English with no i18n at all (F32/F20, T13e, 2026-09-17). No native Luganda speaker has translated these yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. es/it/fr/de-CH/pt received natural human-quality translations in the same change. |
+| `schedule.*` (trigger method, sensor, threshold helper, sensitivity, response mode, advanced settings — 21 keys), the Water tab's own `environment.water.*` additions, and `zoneConfig.*` (crop, soil, irrigation method, area, efficiency, calibration, phenological stage, location, notes, validation messages) | New keys added when `ScheduleSection`'s two sub-forms and `ZoneConfigModal` were routed through `t()` — until then both rendered wholly in English inside every non-English screen. The English text is the source text; no Luganda has been authored for any of them, and the shipped `lg` value is the English fallback rather than a machine translation. |
 Tracked in code at `web/react-gui/tests/zoneFormLocales.test.ts`, which asserts
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
 byte-identical to `en`, the same mechanism `waterCardLocales.test.ts` uses

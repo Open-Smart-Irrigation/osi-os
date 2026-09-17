@@ -359,6 +359,14 @@
     "triggerHint": "Se déclenche si {{metric}} ≥ {{threshold}} kPa (vérifié une fois par jour à 06:00)."
   },
   "environment": {
+    "water": {
+      "effective": "{{value}} efficace",
+      "rainGaugeReporting": "Pluviomètre actif",
+      "flowMeterReporting": "Débitmètre actif",
+      "tooltipRain": "Pluie",
+      "tooltipMeasuredEffective": "Mesuré efficace",
+      "tooltipEstimatedEffective": "Estimé efficace"
+    },
     "soil": {
       "moistureSwtVwc": "Humidité du sol (SWT et VWC)",
       "temperature": "Température du sol",

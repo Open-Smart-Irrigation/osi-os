@@ -356,6 +356,14 @@
     "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (checked once a day at 06:00)."
   },
   "environment": {
+    "water": {
+      "effective": "{{value}} effective",
+      "rainGaugeReporting": "Rain gauge reporting",
+      "flowMeterReporting": "Flow meter reporting",
+      "tooltipRain": "Rain",
+      "tooltipMeasuredEffective": "Measured effective",
+      "tooltipEstimatedEffective": "Estimated effective"
+    },
     "soil": {
       "moistureSwtVwc": "Soil Moisture (SWT & VWC)",
       "temperature": "Soil temperature",

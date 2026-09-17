@@ -194,3 +194,64 @@ test('WaterTab hides the demand and balance tiles until they can be computed', a
   assert.doesNotMatch(html, /Water needed today/);
   assert.doesNotMatch(html, /Balance/);
 });
+
+async function buildSentinelI18n() {
+  const i18n = i18next.createInstance();
+  await i18n.use(initReactI18next).init({
+    lng: 'xx',
+    fallbackLng: 'xx',
+    ns: ['devices'],
+    defaultNS: 'devices',
+    resources: {
+      xx: {
+        devices: {
+          environment: {
+            water: {
+              rainToday: 'XX_RAIN_TODAY',
+              measuredIrrigationToday: 'XX_MEASURED',
+              estimatedIrrigationToday: 'XX_ESTIMATED',
+              effective: 'XX_EFFECTIVE {{value}}',
+              rainGaugeReporting: 'XX_GAUGE_OK',
+              flowMeterReporting: 'XX_METER_OK',
+              tooltipRain: 'XX_TIP_RAIN',
+              tooltipMeasuredEffective: 'XX_TIP_MEASURED_EFF',
+              tooltipEstimatedEffective: 'XX_TIP_ESTIMATED_EFF',
+            },
+          },
+          zone: { water: { action: { delay_irrigation: 'XX_DELAY' } } },
+        },
+      },
+    },
+  });
+  return i18n;
+}
+
+test('WaterTab renders no English literal of its own', async () => {
+  const i18n = await buildSentinelI18n();
+  const html = renderToStaticMarkup(
+    React.createElement(
+      I18nextProvider,
+      { i18n },
+      React.createElement(WaterTab, {
+        water: {
+          ...BASE_WATER,
+          balanceTodayMm: -2,
+          action: { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'rain_covers_demand', recommendationDate: null },
+          sensorHealth: { ...BASE_WATER.sensorHealth, rainGaugePresent: true, flowMeterPresent: true },
+        },
+        devices: [{ deveui: 'A1', type_id: 'DRAGINO_LSN50', flow_meter_enabled: 1 }],
+      } as any),
+    ),
+  );
+
+  assert.match(html, /XX_RAIN_TODAY/);
+  assert.match(html, /XX_EFFECTIVE/);
+  assert.match(html, /XX_GAUGE_OK/);
+  assert.match(html, /XX_METER_OK/);
+  assert.match(html, /XX_DELAY/);
+  // The labels the tab used to hardcode, in the language it was serving.
+  assert.doesNotMatch(html, /Rain gauge reporting/);
+  assert.doesNotMatch(html, /Flow meter reporting/);
+  assert.doesNotMatch(html, /Delay irrigation/);
+  assert.doesNotMatch(html, /effective</);
+});
