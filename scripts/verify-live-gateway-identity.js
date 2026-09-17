@@ -1100,7 +1100,12 @@ if (sizeAllowances) {
     // normalizeOutboxPayload VALVE_SCHEDULE fix) is already fully baked into origin/main's
     // own measured size for this node. Re-measured fresh: origin/main 19941 -> HEAD 21367
     // = +1426.
-    'sync-outbox-build': 1426,
+    // 2026-09-17 wave 2 W3 (F134 + V-294): re-pinned from 1426 to +1995. The 1426 is now
+    // itself baked into origin/main, and this node gained the outbox flush lease -- read
+    // and claimed in one synchronous turn so the 30 s inject and the event-driven gate
+    // cannot both POST the same rows, released again on every path that decides not to
+    // POST. Re-measured fresh: origin/main 21367 -> HEAD 23362 = +1995.
+    'sync-outbox-build': 1995,
     'sync-pending-build': 1344,
     // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 5786 to +1466 for the
     // same capFreeTextFields() addition (this node carries both sanitizeSyncRow and
