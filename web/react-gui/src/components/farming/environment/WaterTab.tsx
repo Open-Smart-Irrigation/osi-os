@@ -10,10 +10,13 @@ import {
 } from 'recharts';
 import { useTranslation } from 'react-i18next';
 import { parseCalendarDay, useDateFormat } from '../../../utils/datetime';
-import type { WaterEnvironment } from '../../../types/farming';
+import { zoneHasFlowMeter, zoneHasRainGauge, zoneHasValve } from '../../../utils/zoneSoil';
+import type { Device, WaterEnvironment } from '../../../types/farming';
 
 interface Props {
   water: WaterEnvironment;
+  /** The zone's devices, so each tile can be gated on a source that exists. */
+  devices?: Device[];
 }
 
 function formatValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -22,6 +25,23 @@ function formatValue(value: number | null | undefined, unit: string, digits = 1)
   }
   return `${value.toFixed(digits)} ${unit}`;
 }
+
+interface WaterTile {
+  key: string;
+  label: string;
+  value: string;
+  detail?: string | null;
+  tone: string;
+}
+
+/** Tailwind needs the column count as a literal class, not a template. */
+const TILE_GRID: Record<number, string> = {
+  1: 'lg:grid-cols-1',
+  2: 'lg:grid-cols-2',
+  3: 'lg:grid-cols-3',
+  4: 'lg:grid-cols-4',
+  5: 'lg:grid-cols-5',
+};
 
 function formatAction(code: string | null | undefined): string {
   switch (code) {
@@ -52,10 +72,18 @@ function formatAction(code: string | null | undefined): string {
   }
 }
 
-export const WaterTab: React.FC<Props> = ({ water }) => {
+export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
   const { t } = useTranslation('devices');
   const fmt = useDateFormat();
   const hasSetup = water.areaM2 != null && water.irrigationEfficiencyPct != null;
+  // Each tile needs something that measures or computes it. The daily
+  // aggregation writes 0 for a day with no sample, so an ungated tile reports
+  // an invented dry day as a measurement — the zone card two rows above
+  // already gates its own tiles this way.
+  const hasRainGauge = zoneHasRainGauge(devices) || water.sensorHealth.rainGaugePresent;
+  const hasFlowMeter = zoneHasFlowMeter(devices) || water.sensorHealth.flowMeterPresent;
+  const hasValve = zoneHasValve(devices);
+  const hasWaterSource = hasRainGauge || hasFlowMeter || hasValve;
   const measuredLiters = water.irrigationTodayMeasuredLiters ?? null;
   const estimatedLiters = water.irrigationTodayEstimatedLiters ?? null;
   const measuredNetMm = water.measuredIrrigationNetMm ?? null;
@@ -79,53 +107,68 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
     );
   }
 
+  const tiles: WaterTile[] = [];
+  if (hasRainGauge) {
+    tiles.push({
+      key: 'rain',
+      label: t('environment.water.rainToday', { defaultValue: 'Rain today' }),
+      value: formatValue(water.rainTodayMm, 'mm', 1),
+      tone: 'text-sky-700',
+    });
+  }
+  if (hasFlowMeter) {
+    tiles.push({
+      key: 'measured-irrigation',
+      label: t('environment.water.measuredIrrigationToday', { defaultValue: 'Measured (flow meter)' }),
+      value: formatValue(measuredLiters, 'L', 0),
+      detail: hasSetup ? `${formatValue(measuredNetMm, 'mm', 1)} effective` : null,
+      tone: 'text-teal-700',
+    });
+  }
+  if (hasValve) {
+    tiles.push({
+      key: 'estimated-irrigation',
+      label: t('environment.water.estimatedIrrigationToday', { defaultValue: 'Estimated (valve time × calibration)' }),
+      value: formatValue(estimatedLiters, 'L', 0),
+      detail: hasSetup ? `${formatValue(estimatedNetMm, 'mm', 1)} effective` : null,
+      tone: 'text-emerald-700',
+    });
+  }
+  // Crop demand and the balance are computed, not measured: an absent one is
+  // an empty tile, and the amber banner below says what to fill in.
+  if (water.waterNeededTodayMm != null) {
+    tiles.push({
+      key: 'needed',
+      label: t('environment.water.waterNeededToday', { defaultValue: 'Water needed today' }),
+      value: formatValue(water.waterNeededTodayMm, 'mm', 1),
+      tone: 'text-amber-700',
+    });
+  }
+  if (water.balanceTodayMm != null) {
+    tiles.push({
+      key: 'balance',
+      label: t('environment.water.balance', { defaultValue: 'Balance' }),
+      value: formatValue(water.balanceTodayMm, 'mm', 1),
+      detail: water.action?.code ? formatAction(water.action.code) : null,
+      tone: water.balanceTodayMm >= 0 ? 'text-emerald-700' : 'text-orange-700',
+    });
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
-        {[
-          {
-            key: 'rain',
-            label: t('environment.water.rainToday', { defaultValue: 'Rain today' }),
-            value: formatValue(water.rainTodayMm, 'mm', 1),
-            tone: 'text-sky-700',
-          },
-          {
-            key: 'measured-irrigation',
-            label: t('environment.water.measuredIrrigationToday', { defaultValue: 'Measured (flow meter)' }),
-            value: formatValue(measuredLiters, 'L', 0),
-            detail: hasSetup ? `${formatValue(measuredNetMm, 'mm', 1)} effective` : 'Needs area + efficiency',
-            tone: 'text-teal-700',
-          },
-          {
-            key: 'estimated-irrigation',
-            label: t('environment.water.estimatedIrrigationToday', { defaultValue: 'Estimated (valve time × calibration)' }),
-            value: formatValue(estimatedLiters, 'L', 0),
-            detail: hasSetup ? `${formatValue(estimatedNetMm, 'mm', 1)} effective` : 'Needs area + efficiency',
-            tone: 'text-emerald-700',
-          },
-          {
-            key: 'needed',
-            label: t('environment.water.waterNeededToday', { defaultValue: 'Water needed today' }),
-            value: hasSetup ? formatValue(water.waterNeededTodayMm, 'mm', 1) : 'Setup required',
-            tone: 'text-amber-700',
-          },
-          {
-            key: 'balance',
-            label: t('environment.water.balance', { defaultValue: 'Balance' }),
-            value: hasSetup ? formatValue(water.balanceTodayMm, 'mm', 1) : 'Setup required',
-            detail: water.action ? formatAction(water.action.code) : null,
-            tone: water.balanceTodayMm != null && water.balanceTodayMm >= 0 ? 'text-emerald-700' : 'text-orange-700',
-          },
-        ].map((item) => (
-          <div key={item.key} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{item.label}</p>
-            <p className={`mt-2 text-2xl font-bold ${item.tone}`}>{item.value}</p>
-            {item.detail && (
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">{item.detail}</p>
-            )}
-          </div>
-        ))}
-      </div>
+      {tiles.length > 0 && (
+        <div className={`grid grid-cols-2 gap-2 ${TILE_GRID[tiles.length]}`}>
+          {tiles.map((item) => (
+            <div key={item.key} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{item.label}</p>
+              <p className={`mt-2 text-2xl font-bold ${item.tone}`}>{item.value}</p>
+              {item.detail && (
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">{item.detail}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {!hasSetup && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -135,6 +178,9 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
         </div>
       )}
 
+      {/* A week of zeros on a zone that has never had a sensor is a chart of
+          nothing; it needs a source before it means anything. */}
+      {hasWaterSource && (
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
@@ -192,6 +238,7 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
           </ResponsiveContainer>
         </div>
       </div>
+      )}
 
       <div className="flex flex-wrap gap-2 text-xs text-[var(--text-secondary)]">
         {water.sensorHealth.rainGaugePresent && (

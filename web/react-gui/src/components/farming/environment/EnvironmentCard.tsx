@@ -178,7 +178,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
               </div>
 
               <div className="pt-1">
-                {activeTab === 'water' && <WaterTab water={data.water} />}
+                {activeTab === 'water' && <WaterTab water={data.water} devices={devices} />}
                 {activeTab === 'soil' && <SoilTab local={data.local} devices={devices} />}
                 {activeTab === 'weather' && <WeatherTab online={data.online} forecast={data.forecast} location={data.location} />}
                 {activeTab === 'agronomic' && (

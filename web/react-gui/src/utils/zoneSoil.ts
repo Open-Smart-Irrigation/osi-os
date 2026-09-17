@@ -171,3 +171,36 @@ export function summarizeZoneSoil(devices: Device[], nowMs: number = Date.now())
 export function zoneHasFlowMeter(devices: Device[]): boolean {
   return devices.some((device) => device.flow_meter_enabled === 1);
 }
+
+/**
+ * Device types that measure rain without the opt-in LSN50 MOD9 input: the
+ * S2120's cumulative gauge and the LoRain's interval tips.
+ */
+const RAIN_SOURCE_TYPE_IDS: ReadonlySet<string> = new Set(['SENSECAP_S2120', 'AQUASCOPE_LORAIN']);
+
+/**
+ * Whether anything in the zone measures rain.
+ *
+ * `zone_daily_environment.rainfall_mm` is written as 0 for a day with no
+ * sample, so "0.0 mm" on a zone with no gauge is an invented dry day, not a
+ * measurement (engineering playbook, prime directive 3). The same predicate
+ * runs on the edge as `water.sensorHealth.rainGaugePresent`; the card checks
+ * both, because a shared weather station reaches a zone through
+ * `weather_station_zones` and never appears in that zone's device list.
+ */
+export function zoneHasRainGauge(devices: Device[]): boolean {
+  return devices.some((device) => (
+    device.rain_gauge_enabled === 1 || RAIN_SOURCE_TYPE_IDS.has(String(device.type_id))
+  ));
+}
+
+const VALVE_TYPE_IDS: ReadonlySet<string> = new Set(['STREGA_VALVE', 'MILESIGHT_UC512']);
+
+/**
+ * Whether the zone has a valve, which is what makes an *estimated* irrigation
+ * figure (commanded valve time × the zone's flow calibration) mean anything.
+ * Without one the estimate is a zero the zone never had a way to produce.
+ */
+export function zoneHasValve(devices: Device[]): boolean {
+  return devices.some((device) => VALVE_TYPE_IDS.has(String(device.type_id)));
+}

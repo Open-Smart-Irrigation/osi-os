@@ -20,7 +20,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { formatSwtValue } from '../../utils/swt';
-import { summarizeZoneSoil, zoneHasFlowMeter } from '../../utils/zoneSoil';
+import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge } from '../../utils/zoneSoil';
 import { useDateFormat } from '../../utils/datetime';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
@@ -74,6 +74,16 @@ const DISPLAY_MODE_LABELS: Record<string, string> = {
 const WATER_REASON_LABELS: Record<string, string> = {
   balance_unknown: 'Set zone area and irrigation efficiency',
   forecast_unknown: 'No rain forecast available',
+};
+
+// Tailwind needs the class as a literal, so the column count is a lookup
+// rather than a template. Tiles are gated on their source, so the row can be
+// anything from the action tile alone to all four.
+const WATER_TILE_GRID: Record<number, string> = {
+  1: 'lg:grid-cols-1',
+  2: 'lg:grid-cols-2',
+  3: 'lg:grid-cols-3',
+  4: 'lg:grid-cols-4',
 };
 
 const SCHEDULE_METRIC_LABELS: Record<string, string> = {
@@ -195,6 +205,10 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const soilType = zone.soilType;
   const soilNow = summarizeZoneSoil(devices);
   const hasFlowMeter = zoneHasFlowMeter(devices);
+  const hasRainGauge = zoneHasRainGauge(devices) || (environmentSummary?.water.sensorHealth.rainGaugePresent ?? false);
+  const hasForecastRain = environmentSummary?.water.next24hRainMm != null;
+  // The action tile always renders; it has its own insufficient-data state.
+  const waterTileCount = 1 + (hasRainGauge ? 1 : 0) + (hasFlowMeter ? 1 : 0) + (hasForecastRain ? 1 : 0);
   const showZoneDataLink = !isDesktopBrowser();
 
   const soilValue = soilNow.mean === null
@@ -361,7 +375,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       {!zoneCollapsed && (
       <>
 
-      {modules.waterCard && environmentSummary?.water && (
+      {/* `available` is true for a zone that has never seen a sample, so the
+          empty zone used to render a full card of zeros — rain, irrigation, a
+          seven-day chart and an action. A zone with nothing observed gets no
+          water card. */}
+      {modules.waterCard && environmentSummary?.water && environmentSummary.water.observedAt != null && (
         <div data-testid="water-today-card" className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -390,13 +408,18 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {environmentSummary.display.fallbackReason}
             </div>
           )}
-          <div className={`mt-4 grid grid-cols-2 gap-2 ${hasFlowMeter ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                {t('zone.water.rainToday', { defaultValue: 'Rain today' })}
-              </p>
-              <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
-            </div>
+          <div className={`mt-4 grid grid-cols-2 gap-2 ${WATER_TILE_GRID[waterTileCount]}`}>
+            {/* The daily aggregation writes 0 mm for a day with no sample, so
+                this tile needs a gauge behind it before it can call anything a
+                measurement. */}
+            {hasRainGauge && (
+              <div data-testid="water-rain-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {t('zone.water.rainToday', { defaultValue: 'Rain today' })}
+                </p>
+                <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
+              </div>
+            )}
             {/* A measured litre count needs a flow meter; without one the tile
                 would show the same em dash as a zone whose meter has not
                 reported yet. */}
@@ -416,15 +439,19 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 </p>
               </div>
             )}
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                {t('zone.water.nextRain', { defaultValue: 'Next rain' })}
-              </p>
-              <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.next24hRainMm, 'mm', 1)}</p>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                {t('zone.water.forecastNext24h', { defaultValue: 'Forecast next 24 h' })}
-              </p>
-            </div>
+            {/* An offline or unlocated gateway has no forecast at all; the
+                tile said "— mm" for it, which reads as a failed reading. */}
+            {hasForecastRain && (
+              <div data-testid="water-forecast-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {t('zone.water.nextRain', { defaultValue: 'Next rain' })}
+                </p>
+                <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.next24hRainMm, 'mm', 1)}</p>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  {t('zone.water.forecastNext24h', { defaultValue: 'Forecast next 24 h' })}
+                </p>
+              </div>
+            )}
             {/* An absent action code is the edge saying it could not compute
                 one. It gets a neutral state and the reason, never an
                 irrigation verb: "Delay irrigation" on an unknown balance is

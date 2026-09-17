@@ -600,6 +600,19 @@ function addCounterWarning(warnings, rawStatus, label) {
   }
 }
 
+/**
+ * Device types that measure rain without the opt-in LSN50 MOD9 rain input:
+ * the SenseCAP S2120's cumulative gauge and the Aqua-Scope LoRain's interval
+ * tips both feed `zone_daily_environment.rainfall_mm`.
+ */
+const RAIN_SOURCE_TYPE_IDS = ['SENSECAP_S2120', 'AQUASCOPE_LORAIN'];
+
+function hasRainSource(row) {
+  if (!row) return false;
+  if (Number(row.rain_gauge_enabled) === 1) return true;
+  return RAIN_SOURCE_TYPE_IDS.indexOf(trimToNull(row.type_id)) >= 0;
+}
+
 function buildSensorHealth(deviceRows, local) {
   const warnings = [];
   if ((local && local.staleSensorCount) > 0) {
@@ -613,7 +626,7 @@ function buildSensorHealth(deviceRows, local) {
     sensorCount: local && Number.isFinite(local.sensorCount) ? local.sensorCount : 0,
     freshSensorCount: local && Number.isFinite(local.freshSensorCount) ? local.freshSensorCount : 0,
     staleSensorCount: local && Number.isFinite(local.staleSensorCount) ? local.staleSensorCount : 0,
-    rainGaugePresent: (deviceRows || []).some(row => Number(row && row.rain_gauge_enabled) === 1),
+    rainGaugePresent: (deviceRows || []).some(hasRainSource),
     flowMeterPresent: (deviceRows || []).some(row => Number(row && row.flow_meter_enabled) === 1),
     warnings: Array.from(new Set(warnings))
   };

@@ -312,3 +312,16 @@ test('known balances keep their shipped verdicts and carry a reason code, not pr
     },
   );
 });
+
+test('a weather station and a LoRain gauge count as rain sources', () => {
+  // rain_gauge_enabled is the opt-in LSN50 MOD9 input. A SenseCAP S2120 and an
+  // Aqua-Scope LoRain measure rain without it, and the zone summary reported
+  // rainGaugePresent: false for a station that had just delivered a 1.6 mm
+  // delta — so any GUI gate built on the flag would hide a real measurement.
+  const health = (rows) => ZE.buildSensorHealth(rows, { sensorCount: 1, freshSensorCount: 1, staleSensorCount: 0 });
+  assert.equal(health([{ type_id: 'SENSECAP_S2120', rain_gauge_enabled: 0 }]).rainGaugePresent, true);
+  assert.equal(health([{ type_id: 'AQUASCOPE_LORAIN', rain_gauge_enabled: 0 }]).rainGaugePresent, true);
+  assert.equal(health([{ type_id: 'DRAGINO_LSN50', rain_gauge_enabled: 1 }]).rainGaugePresent, true);
+  assert.equal(health([{ type_id: 'DRAGINO_LSN50', rain_gauge_enabled: 0 }]).rainGaugePresent, false);
+  assert.equal(health([{ type_id: 'KIWI_SENSOR' }]).rainGaugePresent, false);
+});

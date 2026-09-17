@@ -179,7 +179,7 @@ describe('water card sensor gating', () => {
     expect(screen.queryByTestId('water-flow-meter-tile')).not.toBeInTheDocument();
     expect(screen.queryByText('Measured (flow meter)')).not.toBeInTheDocument();
     // The tiles that do not depend on a meter stay put.
-    expect(screen.getByText('Rain today')).toBeInTheDocument();
+    expect(screen.getByTestId('water-action-tile')).toBeInTheDocument();
   });
 
   it('shows the flow-meter tile once one is enabled in the zone', async () => {
@@ -263,5 +263,74 @@ describe('water action tile', () => {
     const tile = screen.getByTestId('water-action-tile');
     expect(tile).toHaveTextContent('Waiting for more data');
     expect(tile).not.toHaveTextContent('cloud_only_code');
+  });
+});
+
+describe('water card source gating', () => {
+  it('hides the rain tile when nothing in the zone measures rain', async () => {
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    // The summary reports 4.2 mm for a zone with no gauge behind it: the
+    // aggregation writes 0 for a day with no sample and the card used to
+    // print it as a measurement.
+    expect(screen.queryByTestId('water-rain-tile')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rain today')).not.toBeInTheDocument();
+  });
+
+  it('shows the rain tile for a weather station in the zone', async () => {
+    await openCard([sensor({ type_id: 'SENSECAP_S2120', name: 'Station', last_seen: FRESH })]);
+
+    expect(screen.getByTestId('water-rain-tile')).toHaveTextContent('4.2 mm');
+  });
+
+  it('shows the rain tile for a gauge the zone device list does not carry', async () => {
+    // A shared S2120 reaches the zone through weather_station_zones, so the
+    // edge knows about a rain source the card's own device list does not.
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        sensorHealth: { ...summary.water.sensorHealth, rainGaugePresent: true },
+      },
+    });
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    expect(screen.getByTestId('water-rain-tile')).toHaveTextContent('4.2 mm');
+  });
+
+  it('hides the forecast tile when there is no forecast', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: { ...summary.water, next24hRainMm: null },
+    });
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    expect(screen.queryByText('Next rain')).not.toBeInTheDocument();
+  });
+
+  it('renders no water card at all when the zone has never observed anything', async () => {
+    // The empty-zone screen: no devices, no coordinates, no data, and a full
+    // water card of zeros with a seven-day chart of zeros underneath it.
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        observedAt: null,
+        rainTodayMm: 0,
+        irrigationTodayMeasuredLiters: 0,
+        balanceTodayMm: null,
+        action: { code: null, source: 'insufficient_data', reasonCode: 'balance_unknown', recommendationDate: null },
+      },
+    });
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={zone} devices={[]} unassignedDevices={[]} onUpdate={vi.fn()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+
+    expect(screen.queryByTestId('water-today-card')).not.toBeInTheDocument();
+    expect(screen.queryByText('0.0 mm')).not.toBeInTheDocument();
   });
 });
