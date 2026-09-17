@@ -86,15 +86,15 @@ test('GEN2 per-weekday hash diffing: regroup then revert re-pushes the original 
   const originalPayload = gen2_1[0].payload_hex;
 
   // Move Monday (bit1) to its own 09:00 window -> regroups into {Mon} + {rest}.
-  await store.updateSchedule(db, 'g1', { weekdays_mask: 127 & ~0x02 });
+  await store.updateSchedule(db, 'g1', { weekdays_mask: 127 & ~0x02 }, '0016C001F1000001');
   await store.insertSchedule(db, { schedule_uuid: 'g2', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 0x02, start_time: '09:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
   const r2 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
   const gen2_2 = r2.rows.filter((r) => r.purpose === 'DAYMASK_PLAN');
   assert.equal(gen2_2.length, 1, 'only the Monday group actually changed');
 
   // Revert Monday back into the original all-days window.
-  await store.updateSchedule(db, 'g1', { weekdays_mask: 127 });
-  await store.softDeleteSchedule(db, 'g2');
+  await store.updateSchedule(db, 'g1', { weekdays_mask: 127 }, '0016C001F1000001');
+  await store.softDeleteSchedule(db, 'g2', '0016C001F1000001');
   const r3 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
   const gen2_3 = r3.rows.filter((r) => r.purpose === 'DAYMASK_PLAN');
   assert.equal(gen2_3.length, 1, 'revert must re-push the all-days group, not nothing (stale per-group hash bug)');

@@ -220,7 +220,10 @@ async function handleHttpRequest(options) {
       const current = existing.find((s) => s.schedule_uuid === uuid);
       if (!current) return respond(404, { error: 'not_found', message: 'Schedule not found' });
       if (method === 'DELETE') {
-        await store.softDeleteSchedule(db, uuid);
+        // (F144) The EUI from the path is passed through to the store as the write's scope:
+        // the lookup above already proved this uuid belongs to that valve, and the store-level
+        // (schedule_uuid, device_eui) match keeps that true at the SQL statement itself.
+        await store.softDeleteSchedule(db, uuid, eui);
       } else {
         const body = requestBody(msg);
         const v = P.validateScheduleInput(Object.assign({}, current, body, { kind: current.kind }));
@@ -228,7 +231,7 @@ async function handleHttpRequest(options) {
         const trialSchedules = existing.map((s) => (s.schedule_uuid === uuid ? Object.assign({}, s, v.value) : s));
         const trial = P.compileWindows(trialSchedules);
         if (trial.errors.length) return respond(422, { error: 'plan_conflict', details: labelizeDetails(trial.errors, trialSchedules) });
-        await store.updateSchedule(db, uuid, v.value);
+        await store.updateSchedule(db, uuid, v.value, eui); // (F144) scoped to the path's valve, see the DELETE branch
       }
       // Only a WEEKLY schedule feeds compileWindows()/the on-valve plan; compiling and pushing
       // after a ONCE mutation would otherwise send an empty all-FF weekday plan (silently

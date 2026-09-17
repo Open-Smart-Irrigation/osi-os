@@ -69,7 +69,7 @@ test('DELETE_VALVE_SCHEDULE soft-deletes a WEEKLY schedule and recompiles the pl
   const { db } = await tempDb();
   const uuid = 'a1111111-0000-0000-0000-000000000007';
   await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
-  const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', schedule_uuid: uuid });
+  const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
   assert.equal(out.ok, true);
   const row = await db.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
   assert.ok(row.deleted_at);
@@ -77,7 +77,7 @@ test('DELETE_VALVE_SCHEDULE soft-deletes a WEEKLY schedule and recompiles the pl
 
 test('DELETE_VALVE_SCHEDULE on an unknown schedule_uuid returns not_found', async () => {
   const { db } = await tempDb();
-  const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', schedule_uuid: 'does-not-exist' });
+  const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: 'does-not-exist' });
   assert.equal(out.ok, false);
   assert.equal(out.error, 'not_found');
 });
@@ -307,4 +307,122 @@ test('CANCEL_VALVE_ACTUATION fails closed with chirpstack_unavailable when the b
   assert.equal(row.cancel_reason, null);
   const device = await db.get('SELECT target_state FROM devices WHERE UPPER(deveui)=?', [EUI]);
   assert.notEqual(device.target_state, 'CLOSED');
+});
+
+// --- F144: every cloud-originated schedule mutation is scoped to (schedule_uuid, device_eui) ---
+// valve_schedules is one table per gateway and schedule_uuid is globally UNIQUE in it, so an
+// applier that locates the row by uuid alone lets a command addressed to valve X rewrite or
+// soft-delete valve Y's schedule. The device_eui in the command is the addressed valve, not a
+// hint: a uuid that belongs to another valve is a terminal rejection (schedule_device_mismatch),
+// never a silent re-home of the schedule to the addressed valve.
+const OTHER_EUI = '0016C001F1000002';
+
+async function addValve(db, eui) {
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES (?,'Valve B','STREGA_VALVE',1,datetime('now'),datetime('now'))", [eui || OTHER_EUI]);
+}
+
+test('F144: UPSERT_VALVE_SCHEDULE addressed to valve B with valve A\'s schedule_uuid is rejected and leaves A\'s row byte-for-byte untouched', async () => {
+  const { db } = await tempDb();
+  await addValve(db);
+  const uuid = 'f1440000-0000-0000-0000-000000000001';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  const before = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: OTHER_EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 64, start_time: '23:00', duration_minutes: 90, enabled: true });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'schedule_device_mismatch');
+  const after = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.deepEqual(after, before, "valve A's schedule must not be edited, re-homed or version-bumped by a command addressed to valve B");
+});
+
+test('F144: UPSERT_VALVE_SCHEDULE with deleted_at addressed to valve B cannot soft-delete valve A\'s schedule', async () => {
+  const { db } = await tempDb();
+  await addValve(db);
+  const uuid = 'f1440000-0000-0000-0000-000000000002';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: OTHER_EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'schedule_device_mismatch');
+  const row = await db.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.deleted_at, null, "valve A's schedule must still be live");
+});
+
+test('F144: UPSERT_VALVE_SCHEDULE on the owning valve still applies (the scope check only rejects a foreign uuid)', async () => {
+  const { db } = await tempDb();
+  await addValve(db);
+  const uuid = 'f1440000-0000-0000-0000-000000000003';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '08:45', duration_minutes: 25, enabled: true });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT device_eui, start_time, duration_minutes FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.device_eui, EUI);
+  assert.equal(row.start_time, '08:45');
+  assert.equal(row.duration_minutes, 25);
+});
+
+test('F144: UPSERT_VALVE_SCHEDULE with a uuid no valve owns still creates the row under the addressed valve', async () => {
+  const { db } = await tempDb();
+  await addValve(db);
+  const uuid = 'f1440000-0000-0000-0000-000000000004';
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: OTHER_EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 2, start_time: '05:30', duration_minutes: 12, enabled: true });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT device_eui FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.device_eui, OTHER_EUI);
+});
+
+test('F144: a soft-deleted schedule_uuid stays owned by its valve: valve B cannot reuse it', async () => {
+  const { db } = await tempDb();
+  await addValve(db);
+  const uuid = 'f1440000-0000-0000-0000-000000000005';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: OTHER_EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 4, start_time: '07:00', duration_minutes: 20, enabled: true });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'schedule_device_mismatch', 'schedule_uuid is globally UNIQUE, so an insert under B would fail anyway - it must fail as an explicit rejection, not as a raw SQLite constraint error');
+  const row = await db.get('SELECT device_eui FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.device_eui, EUI);
+});
+
+test('F144: DELETE_VALVE_SCHEDULE addressed to valve B cannot soft-delete valve A\'s schedule', async () => {
+  const { db } = await tempDb();
+  await addValve(db);
+  const uuid = 'f1440000-0000-0000-0000-000000000006';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  const before = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: OTHER_EUI, schedule_uuid: uuid });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'schedule_device_mismatch');
+  assert.deepEqual(out.downlinks || [], [], 'a rejected delete must not push a recompiled plan to either valve');
+  const after = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.deepEqual(after, before);
+});
+
+// commands.schema.json's generic rule ("else": {"required": ["device_eui"]}) already requires
+// device_eui for DELETE_VALVE_SCHEDULE - every command type outside the journal/scoped-user
+// exemption list carries one. Enforcing it here matches the contract; it does not change it.
+test('F144: DELETE_VALVE_SCHEDULE without device_eui is rejected (the contract requires one)', async () => {
+  const { db } = await tempDb();
+  const uuid = 'f1440000-0000-0000-0000-000000000007';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', schedule_uuid: uuid });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'device_eui and schedule_uuid are required');
+  const row = await db.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.deleted_at, null, 'an unscoped delete must not fall back to uuid-only matching');
+});
+
+test('F144: every schedule-mutating rejection stays well inside the cloud mirror\'s 255-char free-text cap (#278/#280)', async () => {
+  const { db } = await tempDb();
+  await addValve(db);
+  const uuid = 'f1440000-0000-0000-0000-000000000008';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  const rejections = [
+    await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: OTHER_EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true }),
+    await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: OTHER_EUI, schedule_uuid: uuid }),
+    await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', schedule_uuid: uuid }),
+  ];
+  for (const r of rejections) {
+    assert.equal(r.ok, false);
+    assert.equal(typeof r.error, 'string');
+    assert.ok(r.error.length > 0 && r.error.length <= 255, 'the bridge ships out.error verbatim as the command_ack error field: ' + r.error.length + ' chars');
+  }
 });

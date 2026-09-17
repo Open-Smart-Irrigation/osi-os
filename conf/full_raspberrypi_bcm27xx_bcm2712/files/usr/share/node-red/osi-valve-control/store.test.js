@@ -60,9 +60,9 @@ test('supersedeQueued(DAYMASK_PLAN) supersedes only rows whose mask intersects t
 test('updateSchedule and softDeleteSchedule resolve with no return value (MINOR 6)', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 's1', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
-  const u = await store.updateSchedule(db, 's1', { label: 'x' });
+  const u = await store.updateSchedule(db, 's1', { label: 'x' }, '0016C001F1000001');
   assert.equal(u, undefined);
-  const d = await store.softDeleteSchedule(db, 's1');
+  const d = await store.softDeleteSchedule(db, 's1', '0016C001F1000001');
   assert.equal(d, undefined);
   db.close();
 });
@@ -396,5 +396,57 @@ test('weekdayPushStates (F135): the same tie must not hand a slot to the older r
   assert.equal(firstByWeekday.get(1), 'QUEUED');
   assert.equal(firstByWeekday.get(2), 'QUEUED');
   assert.equal(firstByWeekday.get(6), 'ACKED');
+  db.close();
+});
+
+// --- F144: updateSchedule/softDeleteSchedule are scoped to the owning valve ---
+// One gateway, one valve_schedules table: every writer must name the valve it means, so a
+// caller that passes the wrong (or no) EUI writes nothing instead of hitting another valve's
+// row through the globally UNIQUE schedule_uuid.
+const F144_A = '0016C001F1000001';
+const F144_B = '0016C001F1000002';
+
+async function seedTwoValves(db) {
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES (?,'Valve B','STREGA_VALVE',1,datetime('now'),datetime('now'))", [F144_B]);
+  await store.insertSchedule(db, { schedule_uuid: 'f144-a', device_eui: F144_A, kind: 'WEEKLY', label: 'A', weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+}
+
+test('F144: updateSchedule writes nothing when the EUI scope names a different valve', async () => {
+  const { db } = await tempDb();
+  await seedTwoValves(db);
+  const before = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', ['f144-a']);
+  await store.updateSchedule(db, 'f144-a', { label: 'stolen' }, F144_B);
+  const after = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', ['f144-a']);
+  assert.deepEqual(after, before, 'not even sync_version/updated_at may move');
+  db.close();
+});
+
+test('F144: softDeleteSchedule deletes nothing when the EUI scope names a different valve', async () => {
+  const { db } = await tempDb();
+  await seedTwoValves(db);
+  await store.softDeleteSchedule(db, 'f144-a', F144_B);
+  const row = await db.get('SELECT deleted_at, sync_version FROM valve_schedules WHERE schedule_uuid=?', ['f144-a']);
+  assert.equal(row.deleted_at, null);
+  db.close();
+});
+
+test('F144: the owning EUI (in either case) still updates and soft-deletes', async () => {
+  const { db } = await tempDb();
+  await seedTwoValves(db);
+  await store.updateSchedule(db, 'f144-a', { label: 'mine' }, F144_A.toLowerCase());
+  assert.equal((await db.get('SELECT label FROM valve_schedules WHERE schedule_uuid=?', ['f144-a'])).label, 'mine');
+  await store.softDeleteSchedule(db, 'f144-a', F144_A);
+  assert.ok((await db.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=?', ['f144-a'])).deleted_at);
+  db.close();
+});
+
+test('F144: a schedule write with no EUI scope throws instead of falling back to uuid-only matching', async () => {
+  const { db } = await tempDb();
+  await seedTwoValves(db);
+  await assert.rejects(() => store.updateSchedule(db, 'f144-a', { label: 'x' }), /deviceEui/);
+  await assert.rejects(() => store.softDeleteSchedule(db, 'f144-a'), /deviceEui/);
+  const row = await db.get('SELECT label, deleted_at FROM valve_schedules WHERE schedule_uuid=?', ['f144-a']);
+  assert.equal(row.label, 'A');
+  assert.equal(row.deleted_at, null);
   db.close();
 });

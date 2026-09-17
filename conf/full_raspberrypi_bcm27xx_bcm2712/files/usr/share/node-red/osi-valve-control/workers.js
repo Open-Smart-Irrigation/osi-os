@@ -72,7 +72,7 @@ async function runOnceTick({ db, now, warn }) {
     const canLog = r.user_id != null && r.irrigation_zone_id != null;
     if (nowMs - fireMs > ONCE_GRACE_MS) {
       await db.transaction(async (tx) => {
-        await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'SKIPPED' });
+        await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'SKIPPED' }, r.device_eui); // (F144) scoped to the row's own valve
         if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'SKIP', 'one_time_missed', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, fire_at: r.fire_at })]);
       });
       if (!canLog) warn && warn('[valve-control] one_time_missed not logged for ' + r.device_eui + ' (no zone/user)');
@@ -81,7 +81,7 @@ async function runOnceTick({ db, now, warn }) {
     }
     const commandId = crypto.randomUUID();
     await db.transaction(async (tx) => {
-      await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'FIRED', once_fired_at: nowIso });
+      await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'FIRED', once_fired_at: nowIso }, r.device_eui); // (F144) scoped to the row's own valve
       if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'IRRIGATE', 'one_time_open', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, command_id: commandId })]);
     });
     if (!canLog) warn && warn('[valve-control] one_time_open not logged for ' + r.device_eui + ' (no zone/user)');
