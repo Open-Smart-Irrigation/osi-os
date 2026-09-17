@@ -23,6 +23,7 @@ const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
     'agroscope-uplink-transform',
+    'chirpstack',
     'dendro-analytics',
     'device-commands',
     'device-writer',
@@ -50,6 +51,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'zone-env',
   ]);
   assert.equal(osiLib.NAME_TO_PATH['history-sync'], 'osi-history-sync-helper');
+  assert.equal(osiLib.NAME_TO_PATH['chirpstack'], 'osi-chirpstack-helper');
   assert.equal(osiLib.NAME_TO_PATH['dendro-analytics'], 'osi-dendro-analytics');
   assert.equal(osiLib.NAME_TO_PATH['zone-env'], 'osi-zone-env');
   assert.equal(osiLib.NAME_TO_PATH['device-writer'], 'osi-device-writer');
