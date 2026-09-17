@@ -38,7 +38,7 @@ exports.run = async (ctx) => {
   if (zone.id) state.zones.push(zone.id);
   ctx.expect('created zone carries a zone_uuid', typeof zone.zone_uuid === 'string' && zone.zone_uuid.length >= 32, zone.zone_uuid);
   ctx.expect('created zone is stamped with this gateway EUI',
-    zone.gateway_device_eui === '0016C001F11715E2', zone.gateway_device_eui);
+    zone.gateway_device_eui === ctx.cfg.expectedEui, zone.gateway_device_eui);
   ctx.expect('created zone starts at sync_version 1', Number(zone.sync_version) === 1, zone.sync_version);
 
   const zoneRow = await ssh.sqlOne(

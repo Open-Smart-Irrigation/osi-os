@@ -4,7 +4,7 @@
 // so the safety guards (EUI check, simulated-device check, read-only SQL) cannot
 // be bypassed by accident.
 
-const { config, assertSilvanViaSsh, assertSilvanViaApi, assertSimulatedDevice, simDeveui } = require('./config');
+const { config, assertGatewayViaSsh, assertGatewayViaApi, assertSimulatedDevice, simDeveui } = require('./config');
 const { Ssh } = require('./ssh');
 const { Rest } = require('./rest');
 const { DownlinkObserver } = require('./observer');
@@ -206,4 +206,4 @@ async function readDeployedFlows(ssh) {
   }
 }
 
-module.exports = { Ctx, config, assertSilvanViaSsh, assertSilvanViaApi, Ssh, Rest, DownlinkObserver, readGatewayEnv, readDeployedFlows, sleep, until, simDeveui };
+module.exports = { Ctx, config, assertGatewayViaSsh, assertGatewayViaApi, Ssh, Rest, DownlinkObserver, readGatewayEnv, readDeployedFlows, sleep, until, simDeveui };

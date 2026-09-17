@@ -1,8 +1,8 @@
 'use strict';
-// R1 -- bounded runtime/recovery cases, Silvan only. Three independent,
-// individually-guarded sub-cases; a failure or skip in one does not block the
-// others. NONE of them reboot the Pi (reboot was tested at install, per the
-// brief) and none touch /data/db directly.
+// R1 -- bounded runtime/recovery cases, allow-listed test gateways only. Three
+// independent, individually-guarded sub-cases; a failure or skip in one does
+// not block the others. NONE of them reboot the Pi (reboot was tested at
+// install, per the brief) and none touch /data/db directly.
 //
 //   (a) Node-RED restart while an uplink burst is in flight and a valve action
 //       is queued: `/etc/init.d/node-red restart`, then poll for recovery.
