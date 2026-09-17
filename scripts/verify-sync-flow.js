@@ -2577,21 +2577,31 @@ expectFileExcludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionS
 expectFileExcludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Restore workbook defaults', 'retired the workbook-default restore UI');
 expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_1) ?? toFiniteSwtValue(data?.swt_wm1)', 'uses canonical SWT1 with legacy Kiwi fallback in shared GUI SWT utilities');
 expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_2) ?? toFiniteSwtValue(data?.swt_wm2)', 'uses canonical SWT2 with legacy Kiwi fallback in shared GUI SWT utilities');
-expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'summarizeZoneSoil(devices)', 'computes Soil now from canonical SWT values across sensor families');
+// The helper takes the clock and the zone's trigger channel as well, so the
+// pin is on the call, not on its exact arity.
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'summarizeZoneSoil(devices,', 'computes Soil now from canonical SWT values across sensor families');
 expectFileExcludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '[data?.swt_wm1, data?.swt_wm2]', 'prevents Soil now from reading only legacy Kiwi SWT values');
 // Soil now renders only for a zone that actually carries a soil sensor, and a
 // configured-but-silent sensor keeps the tile with a status line: hiding a
 // failure and showing no sensor must stay distinguishable.
 expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '{soilNow.hasSensor && (', 'gates the Soil now tile on a configured soil sensor');
 expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '{hasFlowMeter && (', 'gates the measured-irrigation tile on a flow meter existing in the zone');
-expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, 'row?.swt_1 ?? row?.swt_wm1', 'uses canonical SWT1 with legacy Kiwi fallback when summarizing zone soil');
-expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, 'row?.swt_2 ?? row?.swt_wm2', 'uses canonical SWT2 with legacy Kiwi fallback when summarizing zone soil');
+// The summariser reads one channel at a time (a cross-depth mean names no
+// depth), so the canonical-then-legacy coalescing is a declared alias map plus
+// the read that applies it. Both are pinned: the map alone could go
+// decorative, and the read alone would not say which aliases exist.
+expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, "swt_1: 'swt_wm1'", 'declares the legacy Kiwi alias for canonical SWT1 when summarizing zone soil');
+expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, "swt_2: 'swt_wm2'", 'declares the legacy Kiwi alias for canonical SWT2 when summarizing zone soil');
+expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, 'row?.[channel] ?? (legacy ? row?.[legacy] : undefined)', 'reads canonical SWT with the legacy Kiwi fallback when summarizing zone soil');
 expectFileIncludes('zoneSoil.ts', zoneSoilUtilsSource, 'SENSOR_FRESHNESS_WINDOW_MS = 3 * 60 * 60 * 1000', 'keeps the GUI soil freshness window aligned with osi-zone-env buildLocalEnvironment');
 expectFileIncludes('SoilTab.tsx', soilTabSource, 'const swtReadings = collectDeviceSwtValues(devices);', 'computes soil environment SWT from canonical sensor-family-neutral values');
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_1'", 'uses canonical SWT1 for Kiwi live display and history');
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_2'", 'uses canonical SWT2 for Kiwi live display and history');
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "soilMoistureProbeDepths.swt_1", 'stores Kiwi SWT1 depth metadata under the canonical key');
-expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, '<option value="SWT_1">Sensor 1</option>', 'saves new SWT schedules with canonical metric names');
+// The sensor options are rendered from the label map so they can be
+// translated; the canonical metric name is the option's value either way.
+expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, "SWT_1: 'Sensor 1'", 'saves new SWT schedules with canonical metric names');
+expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, '<option key={key} value={key}>', 'keeps the canonical metric name as the saved option value');
 expectFileExcludes('Dragino settings components', draginoSettingsSource, 'Invert direction', 'removes the ratio inversion toggle from the advanced settings');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'WindMonitor', 'opens a dedicated wind monitor from the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'rain_mm_per_10min', 'shows normalized rain history options on the S2120 card');
