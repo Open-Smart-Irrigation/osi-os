@@ -27,6 +27,7 @@ const apiMocks = vi.hoisted(() => ({
 const scopeMocks = vi.hoisted(() => ({
   scopeState: {
     loading: false,
+    resolved: true,
     isScoped: false,
     role: 'admin' as const,
     canWrite: true,
@@ -193,6 +194,7 @@ beforeEach(() => {
   // matrix below don't leak state into unrelated tests.
   Object.assign(scopeMocks.scopeState, {
     loading: false,
+    resolved: true,
     isScoped: false,
     role: 'admin',
     canWrite: true,
@@ -581,5 +583,49 @@ describe('SettingsPage time zone role gating (F20)', () => {
     fireEvent.click(within(timeZone).getByRole('button', { name: 'Save' }));
 
     expect(apiMocks.updateSystemSettings).not.toHaveBeenCalled();
+  });
+
+  // F51: ScopeContext derives `isScoped` from `profile?.features`, and
+  // `profile` starts null -- so `isScoped` reads `false` for the entire
+  // window before the scope profile resolves, on BOTH scoped and non-scoped
+  // installs. Gating only on `isScoped` (without also requiring `resolved`)
+  // therefore failed OPEN on a scoped install for that whole window.
+  it.each([
+    ['scoped install, still resolving', true],
+    ['non-scoped install, still resolving', false],
+  ] as const)('fails closed while loading (%s)', async (_label, isScoped) => {
+    Object.assign(scopeMocks.scopeState, {
+      role: 'admin',
+      isScoped,
+      canWrite: true,
+      isAdmin: true,
+      loading: true,
+      resolved: false,
+    });
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    const input = within(timeZone).getByLabelText('Gateway time zone') as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    expect(within(timeZone).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
+    expect(within(timeZone).getByRole('button', { name: 'Apply to all zones' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('exposes admin-only gating to assistive tech via aria-disabled and a visible, describedby-linked hint', async () => {
+    Object.assign(scopeMocks.scopeState, { role: 'researcher', isScoped: true, canWrite: true, isAdmin: false });
+    renderSettings();
+
+    const timeZone = screen.getByRole('region', { name: 'Time zone' });
+    await within(timeZone).findByLabelText('Gateway time zone');
+    const saveButton = within(timeZone).getByRole('button', { name: 'Save' });
+    const applyAllButton = within(timeZone).getByRole('button', { name: 'Apply to all zones' });
+
+    expect(saveButton).toHaveAttribute('aria-disabled', 'true');
+    expect(applyAllButton).toHaveAttribute('aria-disabled', 'true');
+
+    const hintId = saveButton.getAttribute('aria-describedby');
+    expect(hintId).toBeTruthy();
+    expect(applyAllButton).toHaveAttribute('aria-describedby', hintId as string);
+    expect(document.getElementById(hintId as string)?.textContent).toBe('Admin only');
   });
 });

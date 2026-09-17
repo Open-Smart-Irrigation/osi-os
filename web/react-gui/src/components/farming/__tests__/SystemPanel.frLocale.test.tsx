@@ -19,10 +19,13 @@ import { SystemPanel } from '../SystemPanel';
 // actual shipped en/fr resources and renders the card entirely in French, so
 // it fails if any of those strings regress to hardcoded English.
 //
-// "Max" (a fan-speed preset) and "MB"/"CPU" (technical abbreviations kept
-// as-is in French, like "kPa") are intentionally not in this list -- the
-// project's own i18n scan didn't flag them as leaks either, and unit/
-// acronym cognates are expected to be identical across locales.
+// "Max" (a fan-speed preset) and "CPU" (a universal acronym kept as-is in
+// French, like "kPa") are intentionally not in this list -- the project's
+// own i18n scan didn't flag them as leaks either, and acronym cognates are
+// expected to be identical across locales. "MB used" IS checked below: the
+// French translation is "Mo utilisés" (the correct French unit, "mégaoctet"),
+// so the English phrase genuinely does not appear -- unlike "Max"/"CPU",
+// this is a real translation, not a cognate.
 const ENGLISH_LEAKS = [
   'Gateway',
   'System status',
@@ -50,6 +53,7 @@ const ENGLISH_LEAKS = [
 vi.mock('../../../contexts/ScopeContext', () => ({
   useScope: () => ({
     loading: false,
+    resolved: true,
     isScoped: false,
     role: 'admin',
     canWrite: true,

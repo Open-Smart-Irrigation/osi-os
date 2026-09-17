@@ -29,6 +29,7 @@ vi.mock('../../../services/api', () => ({
 const scopeMocks = vi.hoisted(() => ({
   scopeState: {
     loading: false,
+    resolved: true,
     isScoped: false,
     role: 'admin' as 'admin' | 'researcher' | 'viewer',
     canWrite: true,
@@ -67,6 +68,7 @@ beforeEach(() => {
   apiMocks.reboot.mockResolvedValue(undefined);
   Object.assign(scopeMocks.scopeState, {
     loading: false,
+    resolved: true,
     isScoped: false,
     role: 'admin',
     canWrite: true,
@@ -149,5 +151,57 @@ describe('SystemPanel role gating (F20)', () => {
     await renderPanel();
 
     expect(screen.getByRole('button', { name: /systemPanel\.rebootButton/ }).hasAttribute('disabled')).toBe(false);
+  });
+
+  // F51: ScopeContext derives `isScoped` from `profile?.features`, and
+  // `profile` starts null -- so `isScoped` reads `false` for the entire
+  // window before the scope profile resolves, on BOTH scoped and non-scoped
+  // installs. Gating only on `isScoped` (without `resolved`) therefore
+  // failed OPEN on a scoped install for that whole window. These two cases
+  // are the regression: the admin field itself (`isAdmin`) is irrelevant
+  // here on purpose -- disabled must hold regardless of what it happens to
+  // be, because the profile hasn't loaded and the caller cannot know yet.
+  it.each([
+    ['scoped install, still resolving', true],
+    ['non-scoped install, still resolving', false],
+  ] as const)('fails closed while loading (%s)', async (_label, isScoped) => {
+    Object.assign(scopeMocks.scopeState, {
+      role: 'admin',
+      isScoped,
+      canWrite: true,
+      isAdmin: true,
+      loading: true,
+      resolved: false,
+    });
+    await renderPanel();
+
+    expect(screen.getByRole('button', { name: /systemPanel\.rebootButton/ }).hasAttribute('disabled')).toBe(true);
+    const fanButtons = screen.getAllByRole('button', {
+      name: /systemPanel\.fan(Off|Low|Medium|High|Max)/,
+    });
+    for (const button of fanButtons) {
+      expect(button.hasAttribute('disabled')).toBe(true);
+    }
+  });
+
+  it('exposes admin-only gating to assistive tech via aria-disabled and a visible, describedby-linked hint', async () => {
+    Object.assign(scopeMocks.scopeState, { role: 'researcher', isScoped: true, canWrite: true, isAdmin: false });
+    await renderPanel();
+
+    const rebootButton = screen.getByRole('button', { name: /systemPanel\.rebootButton/ });
+    expect(rebootButton).toHaveAttribute('aria-disabled', 'true');
+    const rebootHintId = rebootButton.getAttribute('aria-describedby');
+    expect(rebootHintId).toBeTruthy();
+    expect(document.getElementById(rebootHintId as string)?.textContent).toBe('adminOnly');
+
+    const fanButtons = screen.getAllByRole('button', {
+      name: /systemPanel\.fan(Off|Low|Medium|High|Max)/,
+    });
+    for (const button of fanButtons) {
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+      const fanHintId = button.getAttribute('aria-describedby');
+      expect(fanHintId).toBeTruthy();
+      expect(document.getElementById(fanHintId as string)?.textContent).toBe('adminOnly');
+    }
   });
 });

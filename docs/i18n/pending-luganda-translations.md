@@ -36,24 +36,18 @@ byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change; the test fails otherwise, so the
 two cannot drift apart.
 
-## `devices.json` — SystemPanel gateway card
+## `devices.json` — SystemPanel gateway card, and `common.json`
 
-| Key | Reason |
+| Keys | Reason |
 |---|---|
-| `systemPanel.*` (27 keys) | New keys added for the Gateway system-status card (SystemPanel.tsx), previously fully hardcoded English with no i18n at all (F32, T13e, 2026-09-17). No native Luganda speaker has translated this card yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. es/it/fr/de-CH/pt received natural human-quality translations in the same change. |
+| `systemPanel.*` (27 keys in `devices.json`); `adminOnly` (1 key in `common.json`) | New keys added for the Gateway system-status card (SystemPanel.tsx) and the shared "Admin only" role-gating tooltip/hint (SystemPanel.tsx and SettingsPage.tsx), previously fully hardcoded English with no i18n at all (F32/F20, T13e, 2026-09-17). No native Luganda speaker has translated these yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. es/it/fr/de-CH/pt received natural human-quality translations in the same change. |
 
-## `common.json`
-
-| Key | Reason |
-|---|---|
-| `adminOnly` | New shared tooltip/label ("Admin only") added alongside the SystemPanel and Settings role-gating fix (F20, T13e, 2026-09-17). Same reasoning as `systemPanel.*` above: no human Luganda translation exists yet, so `lg` ships the English source text. |
-
-Neither of the above has a corresponding test-code allowlist entry: `devices.json`
-and `common.json` do not currently have a locale-value-parity test (unlike
-`accountLink.json`'s `accountLinkLocaleValues.test.ts`), so no test currently
-asserts these keys differ from `en` in `lg`. If such a test is added for
-these namespaces later, these keys need an allowlist entry until a human
-Luganda pass supplies real text.
+Tracked in code at `web/react-gui/tests/systemPanelLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism `waterCardLocales.test.ts` uses
+above. A human Luganda pass must drop the key from that set and from the
+table above in the same change; the test fails otherwise, so the two cannot
+drift apart.
 
 ## Related keys not listed here
 

@@ -27,12 +27,19 @@ function loadColor(load: number, cores: number): string {
 export const SystemPanel: React.FC = () => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
-  const { isAdmin, isScoped, loading: scopeLoading } = useScope();
+  const { isAdmin, isScoped, resolved: scopeResolved, loading: scopeLoading } = useScope();
   // F20: the backend (#244) allows reboot/fan writes from admins only once
   // OSI_SCOPED_ACCESS is on; non-scoped installs keep today's behavior
   // unchanged (no role gate at all). Fail closed while scope is still
   // resolving, same D5 pattern used elsewhere in the GUI.
-  const systemWriteAllowed = isScoped ? isAdmin && !scopeLoading : true;
+  //
+  // F51: `isScoped` reads `false` while the profile hasn't loaded yet
+  // (ScopeContext derives it from `profile?.features`, and `profile` starts
+  // null), which is indistinguishable from a genuinely non-scoped install --
+  // so gating only on `isScoped` failed OPEN during that window on a scoped
+  // gateway. `scopeResolved` (profile loaded, no error) is required before
+  // trusting `isScoped` at all.
+  const systemWriteAllowed = scopeLoading || !scopeResolved ? false : (isScoped ? isAdmin : true);
   const adminOnlyTitle = systemWriteAllowed ? undefined : tc('adminOnly');
 
   const [stats, setStats] = useState<SystemStats | null>(null);
@@ -201,6 +208,8 @@ export const SystemPanel: React.FC = () => {
                       key={p.speed}
                       onClick={() => handleFan(p.speed)}
                       disabled={fanBusy || !systemWriteAllowed}
+                      aria-disabled={fanBusy || !systemWriteAllowed}
+                      aria-describedby={systemWriteAllowed ? undefined : 'system-panel-fan-admin-hint'}
                       title={adminOnlyTitle}
                       className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
                         fanSpeed === p.speed
@@ -212,6 +221,11 @@ export const SystemPanel: React.FC = () => {
                     </button>
                   ))}
                 </div>
+                {!systemWriteAllowed && (
+                  <p id="system-panel-fan-admin-hint" className="text-[var(--text-tertiary)] text-xs mt-2">
+                    {tc('adminOnly')}
+                  </p>
+                )}
                 {fanError && (
                   <p className="text-[var(--error-text)] text-xs mt-2">{fanError}</p>
                 )}
@@ -224,37 +238,48 @@ export const SystemPanel: React.FC = () => {
       )}
 
       {/* Reboot */}
-      <div className="mt-4 pt-3 border-t border-[var(--border)] flex items-center gap-3 flex-wrap">
-        {rebootMsg ? (
-          <p className="text-[var(--warn-text)] text-sm font-semibold">{rebootMsg}</p>
-        ) : showRebootConfirm ? (
-          <>
-            <p className="text-[var(--text)] text-sm font-semibold">{t('systemPanel.rebootConfirmTitle')}</p>
+      <div className="mt-4 pt-3 border-t border-[var(--border)] flex flex-col gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          {rebootMsg ? (
+            <p className="text-[var(--warn-text)] text-sm font-semibold">{rebootMsg}</p>
+          ) : showRebootConfirm ? (
+            <>
+              <p className="text-[var(--text)] text-sm font-semibold">{t('systemPanel.rebootConfirmTitle')}</p>
+              <button
+                onClick={handleReboot}
+                disabled={rebooting || !systemWriteAllowed}
+                aria-disabled={rebooting || !systemWriteAllowed}
+                aria-describedby={systemWriteAllowed ? undefined : 'system-panel-reboot-admin-hint'}
+                title={adminOnlyTitle}
+                className="bg-[var(--error-bg)] hover:opacity-90 text-[var(--error-text)] font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {rebooting && <span className="animate-spin h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full" />}
+                {t('systemPanel.rebootConfirmYes')}
+              </button>
+              <button
+                onClick={() => setShowRebootConfirm(false)}
+                className="bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg text-sm"
+              >
+                {tc('cancel')}
+              </button>
+            </>
+          ) : (
             <button
-              onClick={handleReboot}
-              disabled={rebooting || !systemWriteAllowed}
+              onClick={() => setShowRebootConfirm(true)}
+              disabled={!systemWriteAllowed}
+              aria-disabled={!systemWriteAllowed}
+              aria-describedby={systemWriteAllowed ? undefined : 'system-panel-reboot-admin-hint'}
               title={adminOnlyTitle}
-              className="bg-[var(--error-bg)] hover:opacity-90 text-[var(--error-text)] font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
+              className="bg-[var(--card)] hover:bg-[var(--error-bg)] text-[var(--danger-fg)] hover:text-[var(--error-text)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
             >
-              {rebooting && <span className="animate-spin h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full" />}
-              {t('systemPanel.rebootConfirmYes')}
+              ⟳ {t('systemPanel.rebootButton')}
             </button>
-            <button
-              onClick={() => setShowRebootConfirm(false)}
-              className="bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg text-sm"
-            >
-              {tc('cancel')}
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={() => setShowRebootConfirm(true)}
-            disabled={!systemWriteAllowed}
-            title={adminOnlyTitle}
-            className="bg-[var(--card)] hover:bg-[var(--error-bg)] text-[var(--danger-fg)] hover:text-[var(--error-text)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
-          >
-            ⟳ {t('systemPanel.rebootButton')}
-          </button>
+          )}
+        </div>
+        {!systemWriteAllowed && (
+          <p id="system-panel-reboot-admin-hint" className="text-[var(--text-tertiary)] text-xs">
+            {tc('adminOnly')}
+          </p>
         )}
       </div>
     </div>
