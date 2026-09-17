@@ -1593,12 +1593,15 @@
     "z": "device-api-tab",
     "name": "Assign Device",
     "func": "\nif (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 404;\n  msg.payload = { message: 'Device not found or access denied' };\n  return [null, msg];\n}\n\nconst device = msg.payload[0];\nconst zoneId = Number(flow.get('assign_zone_id'));\nconst deveui = String(flow.get('assign_deveui') || '').trim().toUpperCase();\nconst userId = Number(flow.get('assign_user_id'));\nconst now = new Date().toISOString();\nconst nextDeviceSyncVersion = Number(device.sync_version || 0) + 1;\nconst gateway = String(flow.get('assign_zone_gateway_device_eui') || device.gateway_device_eui || env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();\n\nflow.set('assign_device_next_sync_version', nextDeviceSyncVersion);\nflow.set('assign_device_gateway_device_eui', gateway);\n\nmsg.topic = `UPDATE devices\nSET irrigation_zone_id = ${zoneId},\n    gateway_device_eui = '${gateway.replace(/'/g, \"''\")}',\n    updated_at = '${now}',\n    sync_version = ${nextDeviceSyncVersion}\nWHERE deveui = '${deveui.replace(/'/g, \"''\")}'\n  AND user_id = ${userId}`;\nreturn msg;\n",
-    "outputs": 1,
+    "outputs": 2,
     "x": 1820,
     "y": 1180,
     "wires": [
       [
         "assign-device-update-db"
+      ],
+      [
+        "device-response"
       ]
     ]
   },
