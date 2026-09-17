@@ -19,7 +19,6 @@
   "deleteConfirmButton": "Ja, entfernen",
   "neverSeen": "Nie gesehen",
   "enclosure": "Ventilgehäuse",
-  "enclosure": "Ventilgehäuse",
   "state": { "closed": "Geschlossen", "pending": "Wartet auf Ventil", "open": "Offen", "closing": "Schliesst", "failed": "Achtung" },
   "pendingHint": "Wartet auf den nächsten Kontakt des Ventils",
   "closesAt": "schliesst ≈ {{time}}",

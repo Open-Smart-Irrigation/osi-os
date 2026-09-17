@@ -17,7 +17,31 @@ import test from 'node:test';
  * `src/ui-core/Modal.tsx` carries the same pattern and is deliberately out of
  * scope: ui-core is byte-mirrored to osi-server and `verify-ui-core-vendor.sh`
  * gates it, so its close button has to move in both repos at once.
+ *
+ * The gateway panel's own controls are covered by name rather than by glyph:
+ * the five fan presets (38–65 × 24 px, and they drive real hardware) and the
+ * refresh button (85 × 32) carry a label, so the scan above does not see them.
  */
+const NAMED_CONTROLS: Array<[string, string[]]> = [
+  ['SystemPanel.tsx', ['systemPanel.refresh', 'p.labelKey']],
+];
+
+test('the gateway panel fan and refresh controls carry a touch target', () => {
+  for (const [file, markers] of NAMED_CONTROLS) {
+    const source = fs.readFileSync(path.join(farmingRoot, file), 'utf8');
+    for (const marker of markers) {
+      const at = source.indexOf(marker);
+      assert.ok(at >= 0, `${file} no longer contains ${marker}`);
+      const opening = source.lastIndexOf('<button', at);
+      assert.ok(opening >= 0, `${marker} is not inside a button`);
+      assert.ok(
+        source.slice(opening, at).includes('touch-target'),
+        `${file} control at ${marker} is below the 48 px target`,
+      );
+    }
+  }
+});
+
 
 const farmingRoot = path.resolve(import.meta.dirname, '../src/components/farming');
 

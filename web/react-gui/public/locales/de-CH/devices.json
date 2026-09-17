@@ -359,14 +359,6 @@
     "triggerHint": "Auslösen, wenn {{metric}} ≥ {{threshold}} kPa (Prüfung einmal täglich um 06:00)."
   },
   "environment": {
-    "water": {
-      "effective": "{{value}} effektiv",
-      "rainGaugeReporting": "Regenmesser meldet",
-      "flowMeterReporting": "Durchflussmesser meldet",
-      "tooltipRain": "Regen",
-      "tooltipMeasuredEffective": "Gemessen effektiv",
-      "tooltipEstimatedEffective": "Geschätzt effektiv"
-    },
     "soil": {
       "moistureSwtVwc": "Bodenfeuchte (SWT & VWC)",
       "temperature": "Bodentemperatur",
@@ -384,7 +376,13 @@
       "setupRequired": "Erfassen Sie Zonenfläche und Bewässerungseffizienz in den Zoneneinstellungen, um die effektive Bewässerung und die Wasserbilanz zu berechnen.",
       "weeklyTrend": "Wassertrend über 7 Tage",
       "trendNote": "Vergleicht den Regen mit der gemessenen und der geschätzten effektiven Bewässerung der letzten Woche.",
-      "nextRain": "Regen nächste 24 h"
+      "nextRain": "Regen nächste 24 h",
+      "effective": "{{value}} effektiv",
+      "rainGaugeReporting": "Regenmesser meldet",
+      "flowMeterReporting": "Durchflussmesser meldet",
+      "tooltipRain": "Regen",
+      "tooltipMeasuredEffective": "Gemessen effektiv",
+      "tooltipEstimatedEffective": "Geschätzt effektiv"
     },
     "generatedAt": "Erstellt {{time}}",
     "sectionTitle": "Umgebung & Wettervorhersage",

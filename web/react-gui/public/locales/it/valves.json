@@ -19,7 +19,6 @@
   "deleteConfirmButton": "Sì, elimina",
   "neverSeen": "Mai rilevata",
   "enclosure": "Custodia della valvola",
-  "enclosure": "Custodia della valvola",
   "state": { "closed": "Closed", "pending": "Waiting for valve", "open": "Open", "closing": "Closing", "failed": "Attention" },
   "pendingHint": "Waiting for the valve's next contact",
   "closesAt": "closes ≈ {{time}}",

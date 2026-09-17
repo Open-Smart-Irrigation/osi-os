@@ -359,14 +359,6 @@
     "triggerHint": "Se déclenche si {{metric}} ≥ {{threshold}} kPa (vérifié une fois par jour à 06:00)."
   },
   "environment": {
-    "water": {
-      "effective": "{{value}} efficace",
-      "rainGaugeReporting": "Pluviomètre actif",
-      "flowMeterReporting": "Débitmètre actif",
-      "tooltipRain": "Pluie",
-      "tooltipMeasuredEffective": "Mesuré efficace",
-      "tooltipEstimatedEffective": "Estimé efficace"
-    },
     "soil": {
       "moistureSwtVwc": "Humidité du sol (SWT et VWC)",
       "temperature": "Température du sol",
@@ -384,7 +376,13 @@
       "setupRequired": "Renseignez la surface de la zone et l'efficience d'irrigation dans les réglages de la zone pour calculer l'irrigation efficace et le bilan hydrique.",
       "weeklyTrend": "Tendance hydrique sur 7 jours",
       "trendNote": "Comparez la pluie à l'irrigation efficace mesurée et estimée sur la dernière semaine.",
-      "nextRain": "Pluie sur 24 h"
+      "nextRain": "Pluie sur 24 h",
+      "effective": "{{value}} efficace",
+      "rainGaugeReporting": "Pluviomètre actif",
+      "flowMeterReporting": "Débitmètre actif",
+      "tooltipRain": "Pluie",
+      "tooltipMeasuredEffective": "Mesuré efficace",
+      "tooltipEstimatedEffective": "Estimé efficace"
     },
     "generatedAt": "Généré {{time}}",
     "sectionTitle": "Environnement et prévisions météo",

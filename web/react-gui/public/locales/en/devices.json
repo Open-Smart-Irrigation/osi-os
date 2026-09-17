@@ -356,14 +356,6 @@
     "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (checked once a day at 06:00)."
   },
   "environment": {
-    "water": {
-      "effective": "{{value}} effective",
-      "rainGaugeReporting": "Rain gauge reporting",
-      "flowMeterReporting": "Flow meter reporting",
-      "tooltipRain": "Rain",
-      "tooltipMeasuredEffective": "Measured effective",
-      "tooltipEstimatedEffective": "Estimated effective"
-    },
     "soil": {
       "moistureSwtVwc": "Soil Moisture (SWT & VWC)",
       "temperature": "Soil temperature",
@@ -381,7 +373,13 @@
       "setupRequired": "Add zone area and irrigation efficiency in zone settings to calculate effective irrigation and water balance.",
       "weeklyTrend": "7-day water trend",
       "trendNote": "Compare rainfall against measured and estimated effective irrigation over the last week.",
-      "nextRain": "Next 24 h rain"
+      "nextRain": "Next 24 h rain",
+      "effective": "{{value}} effective",
+      "rainGaugeReporting": "Rain gauge reporting",
+      "flowMeterReporting": "Flow meter reporting",
+      "tooltipRain": "Rain",
+      "tooltipMeasuredEffective": "Measured effective",
+      "tooltipEstimatedEffective": "Estimated effective"
     },
     "generatedAt": "Generated {{time}}",
     "sectionTitle": "Environment & weather forecast",

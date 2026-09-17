@@ -359,14 +359,6 @@
     "triggerHint": "Aciona se {{metric}} ≥ {{threshold}} kPa (verificado uma vez por dia às 06:00)."
   },
   "environment": {
-    "water": {
-      "effective": "{{value}} efetivo",
-      "rainGaugeReporting": "Pluviómetro ativo",
-      "flowMeterReporting": "Medidor de caudal ativo",
-      "tooltipRain": "Chuva",
-      "tooltipMeasuredEffective": "Medido efetivo",
-      "tooltipEstimatedEffective": "Estimado efetivo"
-    },
     "soil": {
       "moistureSwtVwc": "Humidade do solo (SWT e VWC)",
       "temperature": "Temperatura do solo",
@@ -384,7 +376,13 @@
       "setupRequired": "Indique a área da zona e a eficiência de rega nas definições da zona para calcular a rega efetiva e o balanço hídrico.",
       "weeklyTrend": "Tendência hídrica de 7 dias",
       "trendNote": "Compare a chuva com a rega efetiva medida e estimada da última semana.",
-      "nextRain": "Chuva nas 24 h"
+      "nextRain": "Chuva nas 24 h",
+      "effective": "{{value}} efetivo",
+      "rainGaugeReporting": "Pluviómetro ativo",
+      "flowMeterReporting": "Medidor de caudal ativo",
+      "tooltipRain": "Chuva",
+      "tooltipMeasuredEffective": "Medido efetivo",
+      "tooltipEstimatedEffective": "Estimado efetivo"
     },
     "generatedAt": "Gerado {{time}}",
     "sectionTitle": "Ambiente e previsão do tempo",
