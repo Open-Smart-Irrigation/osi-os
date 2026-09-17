@@ -175,17 +175,21 @@ exports.run = async (ctx) => {
   ctx.expect('SQLite: the device itself survives the zone delete', !!orphan && orphan.deleted_at === null, orphan);
 
   // --- delete a device that does not exist ---------------------------------
-  const delGhostDev = await rest.del('/api/devices/' + ctx.freshDeveui('Z2-ghost-8'));
-  // Pinned ACTUAL behaviour: delete-device-unlink runs an UPDATE with no
-  // row-count check and the response node always sets 200, so deleting a device
-  // that was never registered reports success.
-  ctx.expect('deleting a device that was never registered still reports 200 (no row-count check)',
-    delGhostDev.status === 200, { status: delGhostDev.status, body: delGhostDev.body });
-  if (delGhostDev.status === 200) {
-    ev.note('DELETE /api/devices/:deveui answers 200 for a DevEUI that does not exist: the handler runs an ' +
-      'UPDATE and never inspects this.changes. A GUI or script cannot distinguish "removed" from "never there", ' +
-      'and a typo in a DevEUI looks like a successful delete.');
-  }
+  // F33 / #264 (merged, main 77de1971c): delete-device-unlink's UPDATE now
+  // returns its RETURNING result set; delete-device-response reports 404 when
+  // that set is empty (deveui never registered, already unclaimed, or not
+  // owned by this caller) instead of a fabricated 200.
+  const ghostDeviceEui = ctx.freshDeveui('Z2-ghost-8');
+  const delGhostDev = await rest.del('/api/devices/' + ghostDeviceEui);
+  ctx.expectStatus('deleting a device that was never registered returns 404, not a fabricated success',
+    delGhostDev, 404);
+  ctx.expect('the 404 body does not claim the delete succeeded',
+    !!delGhostDev.body && !/removed|success/i.test(JSON.stringify(delGhostDev.body)),
+    { status: delGhostDev.status, body: delGhostDev.body });
+  const ghostDeviceRows = await ssh.sqlScalar(
+    "SELECT COUNT(*) AS n FROM devices WHERE deveui = '" + ghostDeviceEui + "'");
+  ctx.expect('SQLite: deleting a device that was never registered does not create anything',
+    Number(ghostDeviceRows) === 0, { rows: ghostDeviceRows });
 };
 
 exports.cleanup = async (ctx) => {

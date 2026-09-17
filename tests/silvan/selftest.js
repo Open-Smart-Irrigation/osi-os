@@ -20,6 +20,7 @@ const {
 const { Rest, redact, redactHeaders, isSecretKey, REDACTED } = require('./lib/rest');
 const { Ssh } = require('./lib/ssh');
 const { DownlinkObserver } = require('./lib/observer');
+const { hasRejectedOutboxShape, isKnownTerminalReason } = require('./lib/rejections');
 
 const failures = [];
 let passed = 0;
@@ -192,6 +193,63 @@ async function main() {
     const original = { password: 'hunter2' };
     redact(original);
     assert.strictEqual(original.password, 'hunter2');
+  });
+
+  console.log('\n-- rejected-outbox shape (F30 / osi-os#262), against fixture JSON');
+  // These fixtures stand in for GET /api/sync/state bodies so this logic is
+  // checked offline, without a gateway, both before and after #262 lands.
+  const FIXTURE_WITH_262 = {
+    pendingOutboxCount: 3,
+    gatewayIdentity: { currentEui: '0016C001F11715E2' },
+    rejectedOutboxCount: 205,
+    rejectedLast24h: 205,
+    lastRejection: { at: '2026-09-17T00:43:00.350Z', op: 'DEVICE_DATA_APPENDED', reason: 'ownership_denied' },
+  };
+  const FIXTURE_WITH_262_NO_REJECTIONS = {
+    pendingOutboxCount: 0,
+    rejectedOutboxCount: 0,
+    rejectedLast24h: 0,
+    lastRejection: null,
+  };
+  // The actual pre-#262 shape observed on Silvan (TRIAGE.md F30 detail):
+  // `rejectedMigrationCandidates` is an unrelated gateway-recovery/migration
+  // field that a /reject/i name-regex would have matched, producing the old
+  // harness's false PASS.
+  const FIXTURE_WITHOUT_262 = {
+    pendingOutboxCount: 3,
+    lastError: null,
+    lastBootstrapSuccessAt: '2026-09-17T00:37:23.187Z',
+    gatewayIdentity: { currentEui: '0016C001F11715E2' },
+    rejectedMigrationCandidates: 2,
+  };
+
+  await check('a post-#262 /api/sync/state body with an active rejection has the #262 shape', () => {
+    assert.strictEqual(hasRejectedOutboxShape(FIXTURE_WITH_262), true);
+  });
+  await check('a post-#262 body with no rejections yet (lastRejection: null) still has the #262 shape', () => {
+    assert.strictEqual(hasRejectedOutboxShape(FIXTURE_WITH_262_NO_REJECTIONS), true);
+  });
+  await check('a pre-#262 body does NOT have the #262 shape, even though it name-regex-matches /reject/i', () => {
+    assert.strictEqual(hasRejectedOutboxShape(FIXTURE_WITHOUT_262), false);
+    assert.ok(Object.keys(FIXTURE_WITHOUT_262).some((k) => /reject/i.test(k)),
+      'fixture should still contain a /reject/i-matching key, or this is not testing the false-positive it claims to');
+  });
+  await check('an empty body does not have the #262 shape', () => {
+    assert.strictEqual(hasRejectedOutboxShape({}), false);
+    assert.strictEqual(hasRejectedOutboxShape(null), false);
+  });
+  await check('a body with rejectedOutboxCount but no lastRejection key does not have the #262 shape', () => {
+    assert.strictEqual(hasRejectedOutboxShape({ rejectedOutboxCount: 1, rejectedLast24h: 1 }), false);
+  });
+  await check('ownership_denied and its sub-reasons are a known terminal reason', () => {
+    assert.strictEqual(isKnownTerminalReason('ownership_denied'), true);
+    assert.strictEqual(isKnownTerminalReason('ownership_denied: zone never seen'), true);
+  });
+  await check('an unrelated rejection reason is NOT a known terminal reason', () => {
+    assert.strictEqual(isKnownTerminalReason('version_conflict'), false);
+    assert.strictEqual(isKnownTerminalReason(''), false);
+    assert.strictEqual(isKnownTerminalReason(null), false);
+    assert.strictEqual(isKnownTerminalReason(undefined), false);
   });
 
   // End to end through the real Rest client against a loopback stub, which is

@@ -15,6 +15,10 @@
 
 exports.title = 'Cloud-edge (partial): local writes while the cloud is unreachable, outbox growth';
 
+const {
+  PR_262_URL, REJECTED_RETENTION_DAYS, isKnownTerminalReason, hasRejectedOutboxShape,
+} = require('../lib/rejections');
+
 const state = { zones: [], devices: [] };
 
 async function syncState(rest) {
@@ -38,6 +42,7 @@ async function rejectedOutbox(ssh) {
 exports.run = async (ctx) => {
   const { rest, ssh, ev } = ctx;
   const tag = 'c1-' + Date.now().toString(36);
+  const runStartedAt = new Date().toISOString();
 
   const s0 = await syncState(rest);
   ctx.expect('GET /api/sync/state reports this gateway identity',
@@ -64,10 +69,10 @@ exports.run = async (ctx) => {
     Math.abs(Number(s0.pendingOutboxCount) - outboxBefore) <= 2,
     { api: s0.pendingOutboxCount, sqlite: outboxBefore });
 
-  // Terminally rejected rows are invisible to every operator surface: the API
+  // Terminally rejected rows are invisible to the pending-outbox count: the API
   // counts only delivered_at IS NULL AND rejected_at IS NULL, so a gateway whose
   // cloud sync has been failing for months still reports a small, healthy-looking
-  // pending count while the table grows without bound.
+  // pending count while the table grows without bound. F30 / osi-os#262.
   const rejectedBefore = await rejectedOutbox(ssh);
   const rejectionBreakdown = await ssh.sql(
     'SELECT rejection_reason, aggregate_type, COUNT(*) AS n FROM sync_outbox ' +
@@ -76,17 +81,58 @@ exports.run = async (ctx) => {
   const rejectedSpan = await ssh.sqlOne(
     'SELECT MIN(rejected_at) AS oldest, MAX(rejected_at) AS newest FROM sync_outbox WHERE rejected_at IS NOT NULL'
   );
-  ctx.expect('the permanently rejected outbox backlog is bounded (retention prunes it)',
-    rejectedBefore < 1000, { rejectedRows: rejectedBefore, span: rejectedSpan, topReasons: rejectionBreakdown });
-  ctx.expect('GET /api/sync/state tells the operator about terminally rejected events, not just pending ones',
-    rejectedBefore === 0 || Object.keys(s0).some((k) => /reject/i.test(k)),
-    { rejectedRows: rejectedBefore, syncStateKeys: Object.keys(s0) });
   if (rejectedBefore > 0) {
     ev.note('sync_outbox holds ' + rejectedBefore + ' terminally rejected rows (' +
-      (rejectedSpan && rejectedSpan.oldest) + ' .. ' + (rejectedSpan && rejectedSpan.newest) + '). ' +
-      'GET /api/sync/state counts only rows that are neither delivered nor rejected, so it reports ' +
-      s0.pendingOutboxCount + ' and no operator surface mentions the rejected pile. Top reasons: ' +
+      (rejectedSpan && rejectedSpan.oldest) + ' .. ' + (rejectedSpan && rejectedSpan.newest) + '). Top reasons: ' +
       JSON.stringify(rejectionBreakdown) + '.');
+  }
+
+  // (b) Operator surface: assert on the EXACT fields osi-os#262 adds to
+  // GET /api/sync/state (rejectedOutboxCount, rejectedLast24h, lastRejection),
+  // never on a substring match over key names -- a /reject/i name-regex
+  // false-positives on the unrelated `rejectedMigrationCandidates` field (a
+  // gateway-recovery/migration counter, not a sync_outbox counter).
+  const has262Shape = hasRejectedOutboxShape(s0);
+  ctx.expect(
+    has262Shape
+      ? 'GET /api/sync/state reports rejectedOutboxCount / rejectedLast24h / lastRejection{at,op,reason} (#262)'
+      : 'expected-after-#262: GET /api/sync/state does not report rejectedOutboxCount / rejectedLast24h / ' +
+        'lastRejection -- ' + PR_262_URL + ' is not merged into this payload',
+    has262Shape,
+    {
+      syncStateKeys: Object.keys(s0),
+      rejectedOutboxCount: s0.rejectedOutboxCount,
+      rejectedLast24h: s0.rejectedLast24h,
+      lastRejection: s0.lastRejection,
+      pr: PR_262_URL,
+    }
+  );
+  if (has262Shape) {
+    ctx.expect('rejectedOutboxCount from /api/sync/state matches sync_outbox (+/- 2 for events rejected mid-read)',
+      Math.abs(Number(s0.rejectedOutboxCount) - rejectedBefore) <= 2,
+      { api: s0.rejectedOutboxCount, sqlite: rejectedBefore });
+  }
+
+  // (c) Absolute growth guard: explicit and documented instead of an arbitrary
+  // "< 1000" threshold that is trivially true on any fresh install regardless
+  // of whether retention exists. #262's prune-sync-outbox job deletes rejected
+  // rows once they are older than a fixed REJECTED_RETENTION_DAYS window; until
+  // #262 lands nothing prunes this table, so the count is REPORTED here, not
+  // failed on.
+  // Cutoff computed in JS (ISO string), not sqlite's datetime('now', ...): the
+  // column is written as an ISO-8601 'T...Z' string, and datetime()'s
+  // 'YYYY-MM-DD HH:MM:SS' output does not compare correctly against it.
+  const staleCutoff = new Date(Date.now() - REJECTED_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const staleRejectedCount = Number(await ssh.sqlScalar(
+    "SELECT COUNT(*) AS n FROM sync_outbox WHERE rejected_at IS NOT NULL AND rejected_at < '" + staleCutoff + "'"
+  ));
+  if (has262Shape) {
+    ctx.expect('rejected outbox rows older than the ' + REJECTED_RETENTION_DAYS + '-day retention window are pruned (#262)',
+      staleRejectedCount === 0, { staleRejectedCount, retentionDays: REJECTED_RETENTION_DAYS, pr: PR_262_URL });
+  } else {
+    ev.note('expected-after-#262: ' + staleRejectedCount + ' rejected outbox row(s) are already older than the ' +
+      REJECTED_RETENTION_DAYS + '-day window ' + PR_262_URL + ' will prune. No pruning runs until #262 lands, so ' +
+      'this is an observation, not a failure. Total rejected backlog right now: ' + rejectedBefore + ' row(s).');
   }
 
   // --- local writes keep working -------------------------------------------
@@ -147,6 +193,32 @@ exports.run = async (ctx) => {
     ctx.expect('GET /api/sync/state surfaces the growing backlog to the operator',
       Number(s1.pendingOutboxCount) > Number(s0.pendingOutboxCount),
       { before: s0.pendingOutboxCount, after: s1.pendingOutboxCount });
+  }
+
+  // (a) DELTA: what did THIS run's own traffic (the writes above) add to the
+  // rejected pile since this case started, and is every new rejection
+  // classified with a known terminal reason? ownership_denied is the
+  // documented never-seen-resource rule for a simulated device/zone the
+  // interim cloud has never seen -- EXPECTED here, and reported as an
+  // observation below, never as a failure.
+  const rejectedAfter = await rejectedOutbox(ssh);
+  const rejectedDelta = await ssh.sql(
+    'SELECT rejection_reason, aggregate_type, COUNT(*) AS n FROM sync_outbox ' +
+    "WHERE rejected_at IS NOT NULL AND rejected_at >= '" + runStartedAt +
+    "' GROUP BY rejection_reason, aggregate_type ORDER BY n DESC"
+  );
+  const unexplainedDelta = rejectedDelta.filter((r) => !isKnownTerminalReason(r.rejection_reason));
+  ctx.expect("this run's own rejected-outbox rows (" + rejectedBefore + ' -> ' + rejectedAfter +
+    ') are all classified with a known terminal reason',
+    unexplainedDelta.length === 0,
+    { rejectedBefore, rejectedAfter, rows: rejectedDelta, unexplained: unexplainedDelta });
+  const expectedDelta = rejectedDelta
+    .filter((r) => isKnownTerminalReason(r.rejection_reason))
+    .reduce((sum, r) => sum + Number(r.n), 0);
+  if (expectedDelta > 0) {
+    ev.note('OBSERVATION, not a failure: this run added ' + expectedDelta + ' ownership_denied rejection(s) since ' +
+      runStartedAt + ' (' + JSON.stringify(rejectedDelta) + '). Expected: the interim cloud denies first-seen ' +
+      'resources, and this run\'s simulated devices/zones are not pre-registered there.');
   }
 
   // Simulated devices are unknown to the cloud, so VALVE_*/DEVICE events for them
