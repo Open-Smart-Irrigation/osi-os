@@ -75,5 +75,29 @@
   "impact_cant_work": "Não é possível trabalhar",
   "impact_workaround": "Há alternativa",
   "impact_annoying": "Incómodo",
-  "impact_idea": "Ideia"
+  "impact_idea": "Ideia",
+  "grants": {
+    "eyebrow": "Administração",
+    "title": "Permissões de acesso",
+    "navUsers": "Utilizadores",
+    "navDashboard": "Painel",
+    "loadError": "Não foi possível carregar os recursos de permissões.",
+    "userSectionTitle": "Utilizador",
+    "userSelectLabel": "Utilizador",
+    "grantSectionTitle": "Conceder acesso",
+    "grantSectionHint": "As novas permissões aparecem abaixo. As permissões existentes não podem ser listadas pela API edge atual.",
+    "zoneSelectLabel": "Zona",
+    "grantZoneButton": "Conceder zona",
+    "zoneGrantError": "Não foi possível criar a permissão de zona.",
+    "plotUuidLabel": "UUID da parcela",
+    "grantPlotButton": "Conceder parcela",
+    "plotGrantError": "Não foi possível criar a permissão de parcela.",
+    "sessionGrantsTitle": "Permissões criadas nesta sessão",
+    "sessionGrantsEmpty": "Nenhuma nova permissão criada.",
+    "revokeButton": "Revogar",
+    "revokeConfirm": "Revogar esta permissão? O utilizador perderá o acesso assim que os privilégios forem atualizados.",
+    "revokeError": "Não foi possível revogar a permissão.",
+    "kindZone": "zona",
+    "kindPlot": "parcela"
+  }
 }

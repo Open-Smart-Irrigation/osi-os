@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { IrrigationZone, ZoneRecommendation } from '../../types/farming';
 import { dendroAnalyticsAPI, irrigationZonesAPI } from '../../services/api';
 
@@ -79,6 +80,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 // ── Scheduling tab ─────────────────────────────────────────────────────────────
 
 const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = ({ zone, onSaved }) => {
+  const { t } = useTranslation('devices');
   const sched = zone.schedule;
   const isDendro = (sched?.triggerMetric ?? sched?.trigger_metric) === 'DENDRO';
 
@@ -146,7 +148,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
   return (
     <div>
       {/* ── Phenology ── */}
-      <Section title="Phenology">
+      <Section title={t('advancedSchedule.sectionPhenology', 'Phenology')}>
         <div className="py-2 space-y-2">
           <div>
             <p className="text-xs text-[var(--text-secondary)] mb-1">Phenological stage</p>
@@ -178,7 +180,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
       </Section>
 
       {/* ── Schedule parameters ── */}
-      <Section title="Schedule parameters">
+      <Section title={t('advancedSchedule.sectionScheduleParameters', 'Schedule parameters')}>
         {stressLabel && <Field label="Stress trigger level" value={stressLabel} />}
 
         {/* Duration — editable */}
@@ -228,7 +230,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
       </Section>
 
       {/* ── Rain suppression ── */}
-      <Section title="Rain suppression">
+      <Section title={t('advancedSchedule.sectionRainSuppression', 'Rain suppression')}>
         <Field label="Status" value={zone.schedule ? 'Controlled by weather integration' : 'No schedule set'} />
         <p className="text-xs text-[var(--text-tertiary)] py-2">
           Suppression lifts once the rain event is cleared from the rolling weather window.
@@ -237,7 +239,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
       </Section>
 
       {/* ── Recovery verification ── */}
-      <Section title="Recovery verification">
+      <Section title={t('advancedSchedule.sectionRecoveryVerification', 'Recovery verification')}>
         <p className="text-xs text-[var(--text-tertiary)] py-2">
           After an irrigation event, a 24 h recovery hold checks whether the pre-dawn tree
           water deficit (TWD-night) has decreased before issuing the next irrigation increase.
@@ -246,7 +248,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
       </Section>
 
       {/* ── Zone aggregation ── */}
-      <Section title="Zone aggregation">
+      <Section title={t('advancedSchedule.sectionZoneAggregation', 'Zone aggregation')}>
         <p className="text-xs text-[var(--text-tertiary)] py-2">
           Zone stress is computed as the median (MAD-cleaned) across all monitored trees.
           Outlier trees (IQR × 1.5) are excluded from the recommendation but remain visible
@@ -266,6 +268,7 @@ const AnalysisTab: React.FC<{
   loading: boolean;
   onSaved?: () => void;
 }> = ({ zone, recommendations, loading, onSaved }) => {
+  const { t } = useTranslation('devices');
   const latest = recommendations[0];
   const diagnostics = latest?.diagnostics ?? null;
   const sdVpdSummary = diagnostics?.sdVpdSummary ?? null;
@@ -298,7 +301,7 @@ const AnalysisTab: React.FC<{
   return (
     <div>
       {/* ── Extraction windows ── */}
-      <Section title="Extraction windows">
+      <Section title={t('advancedSchedule.sectionExtractionWindows', 'Extraction windows')}>
         {/* Timezone — inline editable */}
         <div className="py-1.5 border-b border-[var(--border)]">
           <p className="text-xs text-[var(--text-secondary)] mb-1">Timezone</p>
@@ -327,7 +330,7 @@ const AnalysisTab: React.FC<{
       </Section>
 
       {/* ── TWD method ── */}
-      <Section title="TWD method">
+      <Section title={t('advancedSchedule.sectionTwdMethod', 'TWD method')}>
         <Field label="Method" value="Stepwise envelope (Peters et al. 2025)" />
         <p className="text-xs text-[var(--text-tertiary)] py-2">
           The rolling-window envelope tracks the maximum pre-dawn stem diameter within the
@@ -338,7 +341,7 @@ const AnalysisTab: React.FC<{
       </Section>
 
       {/* ── SD-VPD correlation ── */}
-      <Section title="SD-VPD correlation">
+      <Section title={t('advancedSchedule.sectionSdVpdCorrelation', 'SD-VPD correlation')}>
         <Field
           label="Baseline R²"
           value={sdVpdSummary ? formatR2(sdVpdSummary.baselineR2) : 'Unavailable in recommendation diagnostics'}
@@ -372,7 +375,7 @@ const AnalysisTab: React.FC<{
       )}
 
       {!loading && latest && (
-        <Section title="Latest reasoning trace">
+        <Section title={t('advancedSchedule.sectionLatestReasoningTrace', 'Latest reasoning trace')}>
           <p className="text-xs text-[var(--text)] py-2 leading-relaxed font-mono whitespace-pre-wrap break-words">
             {latest.action_reasoning}
           </p>

@@ -75,5 +75,29 @@
   "impact_cant_work": "Impossible de travailler",
   "impact_workaround": "Solution de contournement disponible",
   "impact_annoying": "Gênant",
-  "impact_idea": "Idée"
+  "impact_idea": "Idée",
+  "grants": {
+    "eyebrow": "Administration",
+    "title": "Autorisations d'accès",
+    "navUsers": "Utilisateurs",
+    "navDashboard": "Tableau de bord",
+    "loadError": "Impossible de charger les ressources d'autorisation.",
+    "userSectionTitle": "Utilisateur",
+    "userSelectLabel": "Utilisateur",
+    "grantSectionTitle": "Accorder un accès",
+    "grantSectionHint": "Les nouvelles autorisations apparaissent ci-dessous. Les autorisations existantes ne peuvent pas être listées par l'API edge actuelle.",
+    "zoneSelectLabel": "Zone",
+    "grantZoneButton": "Autoriser la zone",
+    "zoneGrantError": "L'autorisation de zone n'a pas pu être créée.",
+    "plotUuidLabel": "UUID de la parcelle",
+    "grantPlotButton": "Autoriser la parcelle",
+    "plotGrantError": "L'autorisation de parcelle n'a pas pu être créée.",
+    "sessionGrantsTitle": "Autorisations créées pendant cette session",
+    "sessionGrantsEmpty": "Aucune nouvelle autorisation créée.",
+    "revokeButton": "Révoquer",
+    "revokeConfirm": "Révoquer cette autorisation ? L'utilisateur perdra l'accès une fois ses droits actualisés.",
+    "revokeError": "L'autorisation n'a pas pu être révoquée.",
+    "kindZone": "zone",
+    "kindPlot": "parcelle"
+  }
 }

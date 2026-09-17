@@ -51,6 +51,19 @@ above. A human Luganda pass must drop the key from that set and from the
 table above in the same change; the test fails otherwise, so the two cannot
 drift apart.
 
+## `settings.json` — access grants, and `devices.json` — dendrometer calibration, advanced schedule titles, LSN50 mode gating
+
+| Keys | Reason |
+|---|---|
+| `grants.*` (22 keys in `settings.json`); `dendroCalibration.*` (58 keys), `advancedSchedule.section*` (9 keys), `lsn50Mode.*` (6 keys) in `devices.json` | New keys added for GrantsPage.tsx, DraginoDendroCalibrationSection.tsx, the 9 Section titles in AdvancedScheduleDrawer.tsx, and the MOD9/MOD3 sensor-gating captions in DraginoSettingsModal.tsx — all previously fully hardcoded English with no i18n at all (F37, T13f, 2026-09-17). No native Luganda speaker has translated these yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received natural human-quality translations in the same change. |
+
+Tracked in code at `web/react-gui/tests/f37Locales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism `waterCardLocales.test.ts` uses
+above. A human Luganda pass must drop the key from that set and from the
+table above in the same change; the test fails otherwise, so the two cannot
+drift apart.
+
 ## Related keys not listed here
 
 Two other `accountLink.json` keys recovered from PR #150 in the same

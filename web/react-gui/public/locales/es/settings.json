@@ -75,5 +75,29 @@
   "impact_cant_work": "No se puede trabajar",
   "impact_workaround": "Hay solución temporal",
   "impact_annoying": "Molesto",
-  "impact_idea": "Idea"
+  "impact_idea": "Idea",
+  "grants": {
+    "eyebrow": "Administración",
+    "title": "Permisos de acceso",
+    "navUsers": "Usuarios",
+    "navDashboard": "Panel",
+    "loadError": "No se pudieron cargar los recursos de permisos.",
+    "userSectionTitle": "Usuario",
+    "userSelectLabel": "Usuario",
+    "grantSectionTitle": "Conceder acceso",
+    "grantSectionHint": "Los nuevos permisos aparecen abajo. La API edge actual no puede listar los permisos existentes.",
+    "zoneSelectLabel": "Zona",
+    "grantZoneButton": "Conceder zona",
+    "zoneGrantError": "No se pudo crear el permiso de zona.",
+    "plotUuidLabel": "UUID de la parcela",
+    "grantPlotButton": "Conceder parcela",
+    "plotGrantError": "No se pudo crear el permiso de parcela.",
+    "sessionGrantsTitle": "Permisos creados en esta sesión",
+    "sessionGrantsEmpty": "No se han creado nuevos permisos.",
+    "revokeButton": "Revocar",
+    "revokeConfirm": "¿Revocar este permiso? El usuario perderá el acceso cuando se actualicen sus privilegios.",
+    "revokeError": "No se pudo revocar el permiso.",
+    "kindZone": "zona",
+    "kindPlot": "parcela"
+  }
 }
