@@ -151,6 +151,24 @@ with a canonical form beyond the general rules above:
   (`YYYY-MM-DDTHH:MM:SS.sssZ`) per the Timestamps rule above.
 - `timezone` — IANA timezone name (`Europe/Zurich`), never a fixed UTC
   offset.
+- `deleted_at` — UTC instant, canonical millisecond-precision ISO
+  (`YYYY-MM-DDTHH:MM:SS.sssZ`) per the Timestamps rule above, or `null`. The
+  edge column itself stores `datetime('now')`'s space-separated form
+  (`osi-valve-control/store.js` — `insertSchedule`/`updateSchedule`/
+  `softDeleteSchedule` all use it for `created_at`/`updated_at`/`deleted_at`
+  alike), and — unlike `ValveSettings.updated_at` below — the
+  `trg_sync_valve_schedules_outbox_ai`/`_au` trigger pair (migration 0024)
+  ships `deleted_at` into the event payload UNCONVERTED. Reformatting happens
+  one step later, at the payload boundary: `normalizeIsoTimestamp()` in the
+  "Build Cloud Bootstrap"/"Run Force Sync" bootstrap queries and
+  `normalizeOutboxPayload()` in the "Build Edge Event Batch"/"Run Force Sync"
+  outbox-delivery mapping (flows.json) both reformat it to
+  `YYYY-MM-DDTHH:MM:SS.000Z` immediately before it goes on the wire, for
+  every VALVE_SCHEDULE bootstrap row and outbox event — including rows a
+  trigger already wrote with the unconverted form before this fix landed.
+  `created_at`/`updated_at` are not part of the synced `ValveSchedule` shape
+  and are never emitted at all (see `resources.schema.json`'s `ValveSchedule`
+  field list).
 
 The edge GUI renders Monday-first (Swiss convention) purely as a display
 ordering over the same 0=Sunday indices — see `WEEKDAY_DISPLAY_ORDER` in

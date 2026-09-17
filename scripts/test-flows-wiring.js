@@ -582,7 +582,12 @@ for (const nodeId of ['sync-bootstrap-build', 'sync-outbox-build', 'sync-force-b
 }
 for (const nodeId of ['sync-outbox-build', 'sync-force-build']) {
     const syncNode = byId[nodeId];
-    if (!syncNode || !/payload:\s*parseJsonValue\(r\.payload_json, r\.event_uuid\)/.test(syncNode.func || '') ||
+    // F81: the delivery mapping now routes the strictly-parsed payload through
+    // normalizeOutboxPayload() (ISO-8601 Z wire format for VALVE_SCHEDULE.deleted_at,
+    // which osi-valve-control/store.js writes as SQLite's space-separated
+    // datetime('now')) before it ships -- still calling the strict parser, never
+    // substituting a permissive '{}' default.
+    if (!syncNode || !/payload:\s*normalizeOutboxPayload\(r\.aggregate_type,\s*parseJsonValue\(r\.payload_json, r\.event_uuid\)\)/.test(syncNode.func || '') ||
         /JSON\.parse\(r\.payload_json\s*\|\|\s*'\{\}'\)/.test(syncNode.func || '')) {
         failures.push(`sync outbox: ${nodeId} must fail closed before event delivery`);
     }

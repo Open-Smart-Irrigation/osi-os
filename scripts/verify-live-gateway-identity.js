@@ -1085,7 +1085,14 @@ if (sizeAllowances) {
     // into origin/main's own measured size for that node once its port merged, so this
     // slice's own measured content delta simply replaces it rather than stacking on top.
     'sync-bootstrap-build': 2483,
-    'sync-outbox-build': 0,
+    // 2026-09-17 overnight stabilization T13i (F81): re-pinned from 0 (this node was
+    // byte-identical to origin/main until now) to +1885 for a normalizeIsoTimestamp()
+    // + normalizeOutboxPayload() wrapper on VALVE_SCHEDULE outbox event delivery, fixing
+    // deleted_at's SQLite space-separated datetime('now') format reaching the cloud
+    // unconverted (osi-valve-control/store.js writes it; the 0024 trigger ships it as-is);
+    // reformatted to exactly millisecond precision ('.000Z') per the NullableCanonicalUtcTimestamp
+    // pattern in docs/contracts/sync-schema/resources.schema.json.
+    'sync-outbox-build': 1885,
     'sync-pending-build': 1344,
     'sync-force-build': 5786,
     'command-ack-build-batch': 975,

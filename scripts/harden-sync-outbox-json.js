@@ -11,24 +11,34 @@ const flowPaths = [
   path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'),
 ];
 
+// postimageHash re-pinned 2026-09-17 (F81) for sync-bootstrap-build,
+// sync-outbox-build and sync-force-build: normalizeIsoTimestamp gained a branch
+// for SQLite's space-separated datetime('now') format (valve_schedules'
+// created_at/updated_at/deleted_at), reformatted to exactly millisecond
+// precision ('.000Z') per docs/contracts/sync-schema/resources.schema.json's
+// NullableCanonicalUtcTimestamp pattern, and sync-outbox-build/sync-force-build
+// gained a normalizeOutboxPayload() wrapper on the VALVE_SCHEDULE outbox event
+// delivery mapping so an already-queued unconverted deleted_at is fixed at
+// flush time too. Purely additive on top of the already-hardened source; no
+// replaceOnce anchor in this file was touched.
 const nodeContracts = {
   'sync-bootstrap-build': {
     name: 'Build Cloud Bootstrap',
     type: 'function',
     preimageHash: '30fd59f6f57519113752b7fb9728d086e10d51eabd9dbcc740cd1222d27bad49',
-    postimageHash: 'c1bfd92a13a8021757c390d15b764277522eae604a21e2985f2f1c9378985663',
+    postimageHash: '4b69bf8917c57135d9c3da05e5eeb026d2105d398351a7a76b5d743356fc31ce',
   },
   'sync-outbox-build': {
     name: 'Build Edge Event Batch',
     type: 'function',
     preimageHash: 'd655dda7815505cae6670607d901321938f13f0aed40ef277f931ebd9dd66f16',
-    postimageHash: 'fdc984c160e9aa62c46a131361c0bde25c2f3cb399e05ee0776b7ac250a2fdf1',
+    postimageHash: 'd50e5cfa41faf70c6a8bfb779d5e7d34154b712e85933f99406f153c34723374',
   },
   'sync-force-build': {
     name: 'Run Force Sync',
     type: 'function',
     preimageHash: 'b17b2801f706adebd6832f053133c12e4535e6e4a51240c7e641e98c60811a45',
-    postimageHash: 'fb682aaef9ebf3f851f0f8c7ef6ee1602e2e7fe5281eaa2f7bf51576c919ec0c',
+    postimageHash: 'a0bffd7ccb8c0357ea06f9a852b02335b61be628d535e137652bdcbd34a540d8',
   },
   'write-strega-expectation': {
     name: 'Write STREGA Expectation',

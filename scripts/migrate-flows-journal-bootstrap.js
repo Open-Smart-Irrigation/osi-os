@@ -18,6 +18,14 @@ const flowPaths = [
 // untouched). Every replaceOnce anchor was verified to still occur exactly
 // once before re-pinning; interim/installed/corrected hashes were recomputed
 // by running this script's own staged verification.
+// hardenedHash re-pinned again 2026-09-17 (F81): normalizeIsoTimestamp in both
+// nodes gained a branch for SQLite's space-separated datetime('now') format
+// (valve_schedules.deleted_at), which is what the cloud's Instant.parse choked
+// on -- reformatted to exactly millisecond precision ('.000Z') per
+// docs/contracts/sync-schema/resources.schema.json's NullableCanonicalUtcTimestamp
+// pattern, not a bare 'Z'. Purely additive -- no replaceOnce anchor here was
+// touched -- so only hardenedHash moves; the migration's own
+// preimage/interim/installed/corrected staged states and anchors are unaffected.
 const nodeContracts = {
   'sync-bootstrap-build': {
     name: 'Build Cloud Bootstrap',
@@ -26,7 +34,7 @@ const nodeContracts = {
     interimHash: '15167b53b7103c4f99c5ab0a2de7912a4917ec799e07b1e5fb9ad67268da7649',
     installedHash: '55d7ea47694d8f6f0863e793c6a40bbfcf7a442e79b6a25d6d7be4fcd842b6c0',
     correctedHash: '30fd59f6f57519113752b7fb9728d086e10d51eabd9dbcc740cd1222d27bad49',
-    hardenedHash: 'c1bfd92a13a8021757c390d15b764277522eae604a21e2985f2f1c9378985663',
+    hardenedHash: '4b69bf8917c57135d9c3da05e5eeb026d2105d398351a7a76b5d743356fc31ce',
   },
   'sync-force-build': {
     name: 'Run Force Sync',
@@ -35,7 +43,7 @@ const nodeContracts = {
     interimHash: '54424af7aac4515582c7c9312c419580ea151a2fd48bdbf0be51eff78a241bcd',
     installedHash: 'e240ff936f17899b1414f8b1dd473462d53bceb842e4ca942ff7946f53b3482a',
     correctedHash: 'b17b2801f706adebd6832f053133c12e4535e6e4a51240c7e641e98c60811a45',
-    hardenedHash: 'fb682aaef9ebf3f851f0f8c7ef6ee1602e2e7fe5281eaa2f7bf51576c919ec0c',
+    hardenedHash: 'a0bffd7ccb8c0357ea06f9a852b02335b61be628d535e137652bdcbd34a540d8',
   },
   'history-api-router-fn': {
     name: 'History API Router',
