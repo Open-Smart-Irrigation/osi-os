@@ -484,6 +484,15 @@ run_schema_migration() {
     if ! checkpoint_live_db; then
         return 1
     fi
+    # Everything from here to the matching "# schema decision end" marker is
+    # the schema decision itself: which ledger path this database takes, and
+    # the apply/verify that follows. scripts/test-deploy-fresh-install.js
+    # extracts this exact fragment and runs it with real sqlite3 and real
+    # node against a temp DB_DIR, the same way
+    # scripts/test-deploy-reconcile-probe.js runs the nested probe fragment,
+    # so the fresh-install path is covered by the shipped shell text rather
+    # than a JS re-implementation of it. Keep the markers on their own lines.
+    # schema decision begin
     if ! ledger_present="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;")"; then
         echo "ERROR: failed to inspect schema_migrations ledger before migration" >&2
         return 1
@@ -590,6 +599,7 @@ run_schema_migration() {
     else
         migration_rc=$?
     fi
+    # schema decision end
 
     if [ "$migration_rc" = "3" ]; then
         node_red_restart_needed=0
