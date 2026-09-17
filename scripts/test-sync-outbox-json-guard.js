@@ -103,9 +103,13 @@ function assertGatewayRewriteRollsBack(source, nodeId) {
 }
 
 function assertDeliveryMapping(source, nodeId) {
+  // F81: the delivery mapping now wraps the strictly-parsed payload in
+  // normalizeOutboxPayload() (ISO-8601 Z wire format for VALVE_SCHEDULE.deleted_at)
+  // before it ships -- still calling the strict parser underneath, just no longer
+  // as the bare `payload:` value.
   assert.match(
     source,
-    /payload:\s*parseJsonValue\(r\.payload_json, r\.event_uuid\)/,
+    /payload:\s*normalizeOutboxPayload\(r\.aggregate_type,\s*parseJsonValue\(r\.payload_json, r\.event_uuid\)\)/,
     nodeId + ' delivery mapping must call the strict parser'
   );
   assert.doesNotMatch(
