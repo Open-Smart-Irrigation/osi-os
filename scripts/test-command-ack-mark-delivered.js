@@ -192,7 +192,7 @@ async function testMixedResultsPerEntry() {
   seedAck(db, 104, 'cmd-104');
   seedAck(db, 105, 'cmd-105'); // present locally, absent from the cloud response
   const node = nodeById('command-ack-mark-delivered');
-  const { resultPromise, warnings } = execute(node, {
+  const { resultPromise, warnings, flowState } = execute(node, {
     statusCode: 200,
     _commandAckIds: [101, 102, 103, 104, 105],
     _localAckCorrelation: { 'cmd-101': [101], 'cmd-102': [102], 'cmd-103': [103], 'cmd-104': [104] },
@@ -204,9 +204,15 @@ async function testMixedResultsPerEntry() {
         { commandId: 'cmd-104', status: 'CORRELATION_MISMATCH', terminal: false, error: 'edge/cloud commandId mismatch' },
       ],
     },
-  }, db);
+  }, db, { flowState: {} });
   await resultPromise;
-  assert.deepEqual(warnings, [], 'no warnings expected on the happy mixed-result path');
+  // F93 fix item 3: a per-entry dead-letter (104, CORRELATION_MISMATCH) is now
+  // surfaced -- exactly one rate-limited node.warn, and sync_state.lastError
+  // (the #262 GET /api/sync/state surface) reports it with source 'commandAck'.
+  assert.equal(warnings.length, 1, 'exactly one dead-letter warning expected for the single CORRELATION_MISMATCH entry');
+  assert.match(warnings[0], /dead-letter/i);
+  assert.ok(flowState.sync_state && flowState.sync_state.lastError, 'a dead-letter must be surfaced on sync_state.lastError');
+  assert.equal(flowState.sync_state.lastError.source, 'commandAck');
   const rows = rowsById(db);
 
   assert.ok(rows[101].delivered_at, '101 ACKED must be delivered');
@@ -274,6 +280,132 @@ async function testHttp500RetriesAll() {
   const rows = rowsById(db);
   assert.equal(rows[301].delivered_at, null);
   assert.equal(rows[301].retry_count, 0, 'an HTTP 5xx response must never advance the RETRY_CAP counter');
+  db.close();
+}
+
+// ===========================================================================
+// F93 (2026-09-17 overnight, T13k): Silvan command_ack_outbox row 1 answered
+// HTTP 400 (HttpMessageNotReadableException -- the cloud's CommandAckEntry
+// commandId is a Long and cannot deserialize a UUID) and was bucketed as a
+// transport failure, so it retried the SAME malformed batch every 30s
+// forever, blocking every later ack behind it. A 4xx that names a permanent
+// client-side rejection (400/404/409/413/415/422) must dead-letter the whole
+// batch after ONE attempt; 401/403/429/5xx/0 must stay transport retries
+// (401/403 need to survive long enough for a token refresh to fix them).
+// RED on pre-fix code: every non-2xx response (including 400) falls into the
+// single `transportReasons` bucket, which is never dead-lettered.
+// ===========================================================================
+async function testHttp400DeadLettersAfterOneAttempt() {
+  const db = freshDb();
+  seedAck(db, 901, 'cmd-901-uuid-not-long');
+  const node = nodeById('command-ack-mark-delivered');
+  const { resultPromise, warnings, flowState } = execute(node, {
+    statusCode: 400,
+    _commandAckIds: [901],
+    _localAckCorrelation: { 'cmd-901-uuid-not-long': [901] },
+    payload: { message: "Cannot deserialize value of type `java.lang.Long` from String \"cmd-901-uuid-not-long\"" },
+  }, db, { flowState: {} });
+  await resultPromise;
+  const rows = rowsById(db);
+  assert.ok(rows[901].delivered_at, 'a permanent 4xx client error must dead-letter the batch after one attempt, not retry it forever (F93)');
+  assert.equal(rows[901].retry_count, 0, 'a batch-level permanent dead-letter is not a "retry" and must not consume the RETRY_CAP budget');
+  assert.match(rows[901].last_error || '', /^dead_letter: http 400/, 'the dead-letter reason must name the permanent 4xx status');
+  assert.ok(warnings.length >= 1, 'a permanent-4xx dead-letter must produce at least one node.warn');
+  assert.ok(flowState.sync_state && flowState.sync_state.lastError, 'sync_state.lastError (the #262 surface) must report the dead-letter');
+  assert.equal(flowState.sync_state.lastError.source, 'commandAck');
+  assert.match(flowState.sync_state.lastError.message, /dead.letter/i);
+  db.close();
+}
+
+async function testHttp503LeavesPendingForRetry() {
+  const db = freshDb();
+  seedAck(db, 902, 'cmd-902');
+  const node = nodeById('command-ack-mark-delivered');
+  const { resultPromise } = execute(node, {
+    statusCode: 503,
+    _commandAckIds: [902],
+    _localAckCorrelation: { 'cmd-902': [902] },
+    payload: { error: 'Service Unavailable' },
+  }, db, { flowState: {} });
+  await resultPromise;
+  const rows = rowsById(db);
+  assert.equal(rows[902].delivered_at, null, 'a transport 5xx must stay pending for redelivery, never dead-letter');
+  assert.equal(rows[902].retry_count, 0, 'a transport failure must never advance the RETRY_CAP counter');
+  db.close();
+}
+
+async function testPermanentClientErrorStatusesAllDeadLetter() {
+  const statuses = [404, 409, 413, 415, 422];
+  for (const statusCode of statuses) {
+    const db = freshDb();
+    const rowId = 910 + statusCode;
+    seedAck(db, rowId, 'cmd-' + rowId);
+    const node = nodeById('command-ack-mark-delivered');
+    const { resultPromise } = execute(node, {
+      statusCode,
+      _commandAckIds: [rowId],
+      _localAckCorrelation: { ['cmd-' + rowId]: [rowId] },
+      payload: { message: 'rejected' },
+    }, db, { flowState: {} });
+    await resultPromise;
+    const rows = rowsById(db);
+    assert.ok(rows[rowId].delivered_at, 'HTTP ' + statusCode + ' must dead-letter the batch after one attempt (F93)');
+    assert.match(rows[rowId].last_error || '', new RegExp('^dead_letter: http ' + statusCode), 'HTTP ' + statusCode + ' dead-letter reason must name the status');
+    db.close();
+  }
+}
+
+async function testAuthAndRateLimitStatusesStayTransport() {
+  const statuses = [401, 403, 429];
+  for (const statusCode of statuses) {
+    const db = freshDb();
+    const rowId = 920 + statusCode;
+    seedAck(db, rowId, 'cmd-' + rowId);
+    const node = nodeById('command-ack-mark-delivered');
+    const { resultPromise } = execute(node, {
+      statusCode,
+      _commandAckIds: [rowId],
+      _localAckCorrelation: { ['cmd-' + rowId]: [rowId] },
+      payload: { message: statusCode === 429 ? 'rate limited' : 'unauthorized' },
+    }, db, { flowState: {} });
+    await resultPromise;
+    const rows = rowsById(db);
+    assert.equal(rows[rowId].delivered_at, null,
+      'HTTP ' + statusCode + ' must stay a transport retry, never dead-letter (401/403 need the token-refresh path; 429 is inherently transient)');
+    assert.equal(rows[rowId].retry_count, 0, 'HTTP ' + statusCode + ' must never advance the RETRY_CAP counter');
+    db.close();
+  }
+}
+
+// The dead-letter node.warn must be rate-limited: two dead-lettering ticks in
+// quick succession (sharing the same flow context, as two real 30s-apart
+// ticks on the same running Node-RED process would) must not each emit a
+// fresh warning.
+async function testDeadLetterWarnIsRateLimited() {
+  const db = freshDb();
+  seedAck(db, 930, 'cmd-930');
+  seedAck(db, 931, 'cmd-931');
+  const node = nodeById('command-ack-mark-delivered');
+  const sharedFlowState = {};
+  const first = execute(node, {
+    statusCode: 400,
+    _commandAckIds: [930],
+    _localAckCorrelation: { 'cmd-930': [930] },
+    payload: { message: 'rejected' },
+  }, db, { flowState: sharedFlowState });
+  await first.resultPromise;
+  const second = execute(node, {
+    statusCode: 400,
+    _commandAckIds: [931],
+    _localAckCorrelation: { 'cmd-931': [931] },
+    payload: { message: 'rejected' },
+  }, db, { flowState: sharedFlowState });
+  await second.resultPromise;
+  assert.equal(first.warnings.length, 1, 'the first dead-letter tick must warn once');
+  assert.equal(second.warnings.length, 0, 'a second dead-letter tick inside the rate-limit window must not warn again');
+  const rows = rowsById(db);
+  assert.ok(rows[930].delivered_at, 'row 930 must still be dead-lettered even though its warning is rate-limited');
+  assert.ok(rows[931].delivered_at, 'row 931 must still be dead-lettered even though its warning is rate-limited');
   db.close();
 }
 
@@ -439,6 +571,11 @@ function testPendingSplitHttp200StillReplays() {
   await checkAsync('command-ack-mark-delivered: statusCode=0 retries every row', testTransportFailureZeroRetriesAll);
   await checkAsync('command-ack-mark-delivered: HTTP 500 retries every row', testHttp500RetriesAll);
   await checkAsync('command-ack-mark-delivered: retry cap dead-letters instead of retrying forever', testRetryCapDeadLetters);
+  await checkAsync('command-ack-mark-delivered: HTTP 400 dead-letters the batch after one attempt (F93)', testHttp400DeadLettersAfterOneAttempt);
+  await checkAsync('command-ack-mark-delivered: HTTP 503 leaves the row pending for retry (F93)', testHttp503LeavesPendingForRetry);
+  await checkAsync('command-ack-mark-delivered: 404/409/413/415/422 all dead-letter after one attempt (F93)', testPermanentClientErrorStatusesAllDeadLetter);
+  await checkAsync('command-ack-mark-delivered: 401/403/429 stay transport retries (F93)', testAuthAndRateLimitStatusesStayTransport);
+  await checkAsync('command-ack-mark-delivered: the dead-letter node.warn is rate-limited (F93)', testDeadLetterWarnIsRateLimited);
   await checkAsync('command-ack-mark-delivered: 25 consecutive transport failures never dead-letter (Codex P1)', testTransportFailureRepeatedNeverDeadLetters);
   await checkAsync('command-ack-mark-delivered: 25 consecutive HTTP 503 responses never dead-letter (Codex P1)', testHttp503RepeatedNeverDeadLetters);
   await checkAsync('command-ack-mark-delivered: 20 consecutive genuine LEASE_MISMATCH answers still dead-letter at the cap (Codex P1 control)', testRepeatedLeaseMismatchStillDeadLettersAtCap);
