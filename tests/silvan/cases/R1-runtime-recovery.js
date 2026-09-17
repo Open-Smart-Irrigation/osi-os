@@ -25,15 +25,17 @@
 //     for the exact same route, and NEVER trusts that timer alone: the case's
 //     own `finally` also removes the route, and the case then reads the route
 //     table back to prove it is gone. The resolved IP is cross-checked against
-//     FORBIDDEN_HOSTS and against the harness's own SSH/API/MQTT endpoints
-//     before it is ever used in an `ip route` command, so a misresolution
-//     cannot blackhole the tunnel this harness is running over.
+//     FORBIDDEN_HOSTS, against EVERY allow-listed test gateway, and against
+//     the harness's own SSH/API/GUI/MQTT endpoints before it is ever used in
+//     an `ip route` command (lib/config.js blackholeTargetRefusal), so a
+//     misresolution cannot blackhole the tunnel this harness is running over,
+//     nor a gateway another run is using.
 //   - (c) refuses to create the file at all unless free space would stay
 //     >= 500 MB afterwards, and always attempts to remove it in `finally`.
 
 exports.title = 'Runtime/recovery (bounded): Node-RED restart, cloud disconnect, disk pressure';
 
-const { FORBIDDEN_HOSTS, hostOf } = require('../lib/config');
+const { hostOf, blackholeTargetRefusal } = require('../lib/config');
 const { hasBlackholeRoute, parsePingResolvedIp } = require('../lib/routeParse');
 
 const MIN_FREE_MB_AFTER = 500;
@@ -221,15 +223,14 @@ async function resolveLinkedCloudHost(ctx) {
     ev.note('(b) users.server_url ("' + row.server_url + '") did not yield a parseable host. Skipped.');
     return null;
   }
-  const forbidden = new Set(FORBIDDEN_HOSTS.map((h) => h.toLowerCase()));
-  if (forbidden.has(host)) {
-    ev.note('(b) REFUSING: the linked host resolves to "' + host + '", which is on this harness\'s own ' +
-      'FORBIDDEN_HOSTS list. Skipped -- this must never be the target of a route manipulation.');
-    return null;
-  }
-  if (host === hostOf(ctx.cfg.sshHost) || host === hostOf(ctx.cfg.apiBase) || host === hostOf(ctx.cfg.mqttHost)) {
-    ev.note('(b) REFUSING: the linked host resolves to the same host as this harness\'s own SSH/API/MQTT endpoint ' +
-      '(' + host + '). Skipped -- blackholing it would blackhole the tunnel this harness is running over.');
+  // One shared rule for both the name and, below, the address it resolves to:
+  // deny-listed hosts, ANY allow-listed test gateway, and this run's own
+  // endpoints are all refused. Blackholing a gateway would cut the tunnel this
+  // harness runs over, or take out a gateway another run is using.
+  const hostRefusal = blackholeTargetRefusal(host, ctx.cfg);
+  if (hostRefusal) {
+    ev.note('(b) REFUSING: the linked host resolves to "' + host + '" and ' + hostRefusal +
+      '. Skipped -- this must never be the target of a route manipulation.');
     return null;
   }
   // `getent` is not present on this BusyBox/OpenWrt image (verified
@@ -247,8 +248,9 @@ async function resolveLinkedCloudHost(ctx) {
     ev.note('(b) could not resolve "' + host + '" to an IPv4 address from the gateway. Skipped.');
     return null;
   }
-  if (forbidden.has(ip)) {
-    ev.note('(b) REFUSING: "' + host + '" resolved to ' + ip + ', which is itself on FORBIDDEN_HOSTS. Skipped.');
+  const ipRefusal = blackholeTargetRefusal(ip, ctx.cfg);
+  if (ipRefusal) {
+    ev.note('(b) REFUSING: "' + host + '" resolved to ' + ip + ' and ' + ipRefusal + '. Skipped.');
     return null;
   }
   return { host, ip };

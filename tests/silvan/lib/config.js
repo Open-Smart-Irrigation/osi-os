@@ -138,14 +138,54 @@ function defaultsFor(entry) {
 
 const DEFAULTS = defaultsFor(resolveGateway(DEFAULT_GATEWAY));
 
-// Canonical comparable form of a host: lowercased, IPv6 brackets removed, and
-// the trailing root dot stripped, so "OSICLOUD.CH", "osicloud.ch." and
-// "osicloud.ch" are one host and the deny-list cannot be dodged by spelling.
+// Expands an IPv6 literal to its eight 16-bit groups, or null if it is not one.
+// Handles "::" compression and a trailing dotted quad.
+function expandIpv6(addr) {
+  let text = String(addr);
+  const dotted = /^(.*:)((?:\d{1,3}\.){3}\d{1,3})$/.exec(text);
+  if (dotted) {
+    const bytes = dotted[2].split('.').map(Number);
+    if (bytes.some((b) => !Number.isInteger(b) || b < 0 || b > 255)) return null;
+    text = dotted[1] + (((bytes[0] << 8) | bytes[1]).toString(16)) + ':' + (((bytes[2] << 8) | bytes[3]).toString(16));
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
+  const fill = 8 - head.length - tail.length;
+  if (fill < 0) return null;
+  const parts = head.concat(halves.length === 2 ? new Array(fill).fill('0') : [], tail);
+  if (parts.length !== 8) return null;
+  const groups = parts.map((p) => (/^[0-9a-f]{1,4}$/.test(p) ? parseInt(p, 16) : NaN));
+  return groups.some((g) => Number.isNaN(g)) ? null : groups;
+}
+
+// "::ffff:100.99.212.115" and "::ffff:6463:d473" ARE 100.99.212.115: a socket
+// opened on either reaches the same machine. The deny-list therefore has to see
+// the dotted form, or those spellings would only be stopped further down by the
+// endpoint-consistency backstop -- and never named as forbidden.
+function ipv4MappedToDotted(host) {
+  if (!net.isIPv6(host)) return null;
+  const groups = expandIpv6(host);
+  if (!groups || !groups.slice(0, 5).every((g) => g === 0)) return null;
+  const isMapped = groups[5] === 0xffff;
+  // The deprecated IPv4-compatible form, and only when actually written as one:
+  // this must never turn "::1" into 0.0.0.1.
+  const isCompat = groups[5] === 0 && /:(?:\d{1,3}\.){3}\d{1,3}$/.test(host);
+  if (!isMapped && !isCompat) return null;
+  return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.');
+}
+
+// Canonical comparable form of a host: lowercased, IPv6 brackets removed, the
+// trailing root dot stripped, and IPv4-mapped IPv6 literals reduced to their
+// dotted form -- so "OSICLOUD.CH", "osicloud.ch.", "::ffff:100.99.212.115" and
+// "::ffff:6463:d473" are each one host, and the deny-list cannot be dodged by
+// spelling.
 function canonicalHost(value) {
   let host = String(value == null ? '' : value).trim().toLowerCase();
   host = host.replace(/^\[/, '').replace(/\]$/, '');
   while (host.length > 1 && host.endsWith('.')) host = host.slice(0, -1);
-  return host;
+  return ipv4MappedToDotted(host) || host;
 }
 
 // Every host-shaped token in a RAW endpoint value, canonicalised. The deny-list
@@ -331,17 +371,45 @@ function assertConnectableHost(value, who, gatewayName) {
   return host;
 }
 
-// SECOND CHECK, at the HTTP client: same rule, for a base URL.
-function assertConnectableBase(value, who) {
+// SECOND CHECK, at the HTTP client: same rule, for a base URL. With a gateway
+// name the base must be the loopback tunnel or THAT gateway, so a client cannot
+// be pointed at the other allow-listed gateway mid-run.
+function assertConnectableBase(value, who, gatewayName) {
   assertNoForbiddenToken(value, (who || 'the HTTP client'));
   const host = assertHttpBase(value, (who || 'the HTTP client'));
-  if (!isLoopback(host) && !allowListedHosts().includes(host)) {
+  if (isLoopback(host)) return host;
+  const allowed = (gatewayName === undefined || gatewayName === null || gatewayName === '')
+    ? allowListedHosts()
+    : [canonicalHost(resolveGateway(gatewayName).sshHost)];
+  if (!allowed.includes(host)) {
     throw new Error(
       'REFUSING to start ' + (who || 'the HTTP client') + ': base URL "' + value + '" resolves to "' + host +
-      '", which is neither a loopback tunnel endpoint nor an allow-listed test gateway.'
+      '", which is neither a loopback tunnel endpoint nor the gateway this run targets (' + allowed.join(', ') + ').'
     );
   }
   return host;
+}
+
+// R1(b) blackholes a route ON the gateway. The target must be a genuine third
+// party: never a deny-listed host, never ANY allow-listed test gateway (not
+// only the one this run selected -- another run may be talking to the other
+// one), and never a loopback or an endpoint this run is itself using.
+function blackholeTargetRefusal(target, cfg) {
+  const host = canonicalHost(target);
+  if (!host) return 'it did not yield a parseable host';
+  if (isForbiddenHost(host)) return 'it is on this harness\'s FORBIDDEN_HOSTS list';
+  if (allowListedHosts().includes(host)) {
+    return 'it is an allow-listed test gateway (' + GATEWAYS.map((g) => g.name + ' = ' + g.sshHost).join(', ') + ')';
+  }
+  if (isLoopback(host)) return 'it is a loopback address, i.e. this run\'s own tunnel endpoint';
+  const own = [
+    canonicalHost(cfg && cfg.sshHost),
+    hostOf(cfg && cfg.apiBase),
+    hostOf(cfg && cfg.guiBase),
+    canonicalHost(cfg && cfg.mqttHost),
+  ].filter(Boolean);
+  if (own.includes(host)) return 'it is one of this run\'s own SSH/API/GUI/MQTT endpoints';
+  return null;
 }
 
 // Set on a cfg that cleared assertEndpointsAllowed(). A Symbol, so it cannot be
@@ -554,6 +622,8 @@ module.exports = {
   assertAllowListedSshHost,
   assertConnectableHost,
   assertConnectableBase,
+  allowListedHosts,
+  blackholeTargetRefusal,
   ENDPOINT_GUARD_PASSED,
   LOOPBACK_HOSTS,
   resolveGateway,
