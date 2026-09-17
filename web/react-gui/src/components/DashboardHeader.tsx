@@ -26,11 +26,15 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   const navigate = useNavigate();
   // Module visibility (2026-09-17): gateway-level settings. Hiding an entry
   // here is UI-only -- the /analysis, /history, /network and /journal routes
-  // stay registered and reachable by URL. Defaults on main are ON; customer
-  // branches flip them.
+  // stay registered and reachable by URL. The defaults live on the gateway
+  // (osi-module-defaults); main ships all four on, customer branches flip them
+  // there.
+  //
+  // null until the gateway has answered, and the gated entries render nothing
+  // until then: guessing would flash the wrong header on one kind of gateway.
   const modules = useGatewayModules();
-  const showDesktopData = isDesktopBrowser() && modules.data;
-  const showNetwork = isDesktopBrowser() && modules.network;
+  const showDesktopData = isDesktopBrowser() && modules?.data === true;
+  const showNetwork = isDesktopBrowser() && modules?.network === true;
 
   return (
     <header className="bg-[var(--header-bg)] shadow-xl">
@@ -53,7 +57,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 items={[
                   { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
                   { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-                  ...(modules.journal
+                  ...(modules?.journal
                     ? [{
                       key: 'activity',
                       label: t('addMenu.activity'),

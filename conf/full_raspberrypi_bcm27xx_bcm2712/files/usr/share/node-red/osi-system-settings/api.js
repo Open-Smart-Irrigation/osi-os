@@ -1,6 +1,11 @@
 'use strict';
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+// The four switchable modules -- their app_settings keys, the field names this
+// route reports, and the value a gateway ships with -- are declared once in
+// osi-module-defaults and read from there by this route, by the journal
+// replication worker, and (via the moduleDefaults object below) by the GUI.
+const { MODULE_SETTINGS, MODULE_DEFAULTS, interpretStoredValue } = require('../osi-module-defaults');
 
 // --- copied verbatim from osi-valve-control/api.js (apiError, unauthorized, verifyBearer, resolveAuthSecret, requestBody, closeFacade) ---
 
@@ -136,21 +141,14 @@ async function readGatewayTimezone(db, warn) {
 // value could ever be. All four ride the same gateway-level app_settings store
 // as gateway_timezone: no new route, no schema migration.
 //
-// Adding a module here is the only change needed on this route; GET, PUT
-// validation and the response shape are all driven off this table.
-const MODULE_SETTINGS = [
-  { field: 'dataModuleEnabled', key: 'data_module_enabled' },
-  { field: 'networkModuleEnabled', key: 'network_module_enabled' },
-  { field: 'gatewayHubModuleEnabled', key: 'gateway_hub_module_enabled' },
-  { field: 'journalModuleEnabled', key: 'journal_module_enabled' },
-];
-const MODULE_OFF_VALUES = new Set(['0', 'false', 'off', 'no']);
+// The table itself lives in osi-module-defaults (see the require above): adding
+// a module, or changing what a gateway ships with, is an edit there and nothing
+// here. GET, PUT validation and the response shape are all driven off it.
 
 // Table-missing-safe, same contract as readGatewayTimezone: a pre-migration DB
-// and an absent key both resolve to the shipped default, which is ENABLED.
-// Failing open keeps a staged deploy behaving exactly as it does today rather
-// than hiding a view (or stopping journal replication) because a table is
-// missing.
+// and an absent key both resolve to the module's shipped default, so a gateway
+// mid-deploy behaves like a fresh gateway on the same firmware rather than
+// showing a view its own settings page says is off.
 async function readModuleSettings(db, warn) {
   const settings = {};
   for (const module of MODULE_SETTINGS) {
@@ -162,12 +160,10 @@ async function readModuleSettings(db, warn) {
       if (!/no such table:\s*app_settings\b/i.test(detail)) {
         warn('[sys-settings] ' + module.key + ' read failed: ' + detail);
       }
-      settings[module.field] = true;
+      settings[module.field] = interpretStoredValue(module.key, null);
       continue;
     }
-    settings[module.field] = (!row || row.value === null || row.value === undefined)
-      ? true
-      : !MODULE_OFF_VALUES.has(String(row.value).trim().toLowerCase());
+    settings[module.field] = interpretStoredValue(module.key, row ? row.value : null);
   }
   return settings;
 }
@@ -235,7 +231,11 @@ async function handleHttpRequest(options) {
     if (method === 'GET') {
       const gatewayTimezone = await readGatewayTimezone(db, warn);
       const modules = await readModuleSettings(db, warn);
-      return respond(200, Object.assign({ gatewayTimezone }, modules));
+      // moduleDefaults alongside the effective values: the GUI keeps no copy of
+      // them, so this is how a browser learns what THIS gateway ships with --
+      // which is what it falls back to when a later poll fails, and what tells
+      // "switched off here" apart from "shipped off".
+      return respond(200, Object.assign({ gatewayTimezone, moduleDefaults: MODULE_DEFAULTS }, modules));
     }
 
     if (method === 'PUT') {
@@ -303,7 +303,9 @@ async function handleHttpRequest(options) {
       // Read back rather than echo: the response then reflects what is actually
       // stored, including modules this request did not touch.
       const modules = await readModuleSettings(db, warn);
-      return respond(200, Object.assign({ gatewayTimezone, zonesUpdated }, modules));
+      // Same shape as GET, defaults included, so the GUI can fold this response
+      // straight into its settings cache without dropping them.
+      return respond(200, Object.assign({ gatewayTimezone, zonesUpdated, moduleDefaults: MODULE_DEFAULTS }, modules));
     }
 
     return respond(404, { error: 'not_found', message: 'Unknown system-settings route' });
@@ -316,4 +318,6 @@ async function handleHttpRequest(options) {
   }
 }
 
-module.exports = { handleHttpRequest, validateTimezone, validateModuleEnabled, MODULE_SETTINGS };
+// MODULE_SETTINGS is re-exported, not redefined: callers (and the cross-module
+// key test) keep reading it from here while osi-module-defaults owns it.
+module.exports = { handleHttpRequest, validateTimezone, validateModuleEnabled, MODULE_SETTINGS, MODULE_DEFAULTS };

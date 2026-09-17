@@ -38,8 +38,11 @@ vi.mock('../../contexts/ScopeContext', () => ({
   useScope: () => scopeState,
 }));
 
+// `flags` is null until the gateway answers -- the hook's unknown state, which
+// the header has to render as "nothing gated yet" rather than guessing.
 const gatewayModules = vi.hoisted(() => ({
-  flags: { data: true, network: true, gatewayHub: true, journal: true },
+  flags: { data: true, network: true, gatewayHub: true, journal: true } as
+    { data: boolean; network: boolean; gatewayHub: boolean; journal: boolean } | null,
 }));
 
 vi.mock('../../hooks/useGatewayModules', () => ({
@@ -187,8 +190,18 @@ describe('FarmingDashboard gateway hub module', () => {
     expect(await screen.findByTestId('system-panel')).toBeInTheDocument();
   });
 
+  it('renders no gateway hub panel while the gateway has not answered yet', async () => {
+    gatewayModules.flags = null;
+    renderDashboard();
+
+    // Wait for the dashboard to finish loading before asserting the absence, so
+    // this cannot pass merely because nothing had rendered yet.
+    expect(await screen.findByTestId('irrigation-outcomes-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('system-panel')).not.toBeInTheDocument();
+  });
+
   it('hides the gateway hub panel when the gatewayHub module is off', async () => {
-    gatewayModules.flags.gatewayHub = false;
+    gatewayModules.flags!.gatewayHub = false;
     renderDashboard();
 
     // Wait for the dashboard to finish loading before asserting the absence,

@@ -813,6 +813,18 @@ fetch_required "osi-journal commands.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/commands.js" \
     "/srv/node-red/osi-journal/commands.js"
 
+# osi-module-defaults declares the four switchable gateway modules (key, GUI
+# field, shipped default) that both osi-journal-replication and
+# osi-system-settings require. Fetched before them so a half-applied deploy
+# cannot leave a consumer requiring a file that is not there yet.
+fetch_required "osi-module-defaults package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/package.json" \
+    "/srv/node-red/osi-module-defaults/package.json"
+
+fetch_required "osi-module-defaults index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/index.js" \
+    "/srv/node-red/osi-module-defaults/index.js"
+
 fetch_required "osi-journal-replication package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/package.json" \
     "/srv/node-red/osi-journal-replication/package.json"

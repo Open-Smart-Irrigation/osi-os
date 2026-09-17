@@ -438,7 +438,7 @@ export const FarmingDashboard: React.FC = () => {
             {/* Gateway hub ("Gateway" / "Passerelle") -- hidden when the
                 gatewayHub module is switched off in Settings. Display-only:
                 nothing about the gateway itself changes. */}
-            {gatewayModules.gatewayHub && (
+            {gatewayModules?.gatewayHub && (
               <div className="mt-8">
                 <SystemPanel />
               </div>

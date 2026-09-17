@@ -8,6 +8,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = path.resolve(__dirname, '../../../../../../..');
 const helper = require('./index');
+const { MODULE_DEFAULTS, moduleDefaultForField } = require('../osi-module-defaults');
 const lifecycle = require('../osi-journal/lifecycle');
 const golden = JSON.parse(fs.readFileSync(
   path.join(ROOT, 'docs/contracts/sync-schema/journal-v2-golden.json'), 'utf8'
@@ -274,9 +275,14 @@ async function setJournalModule(db, value) {
   );
 }
 
-test('journalModuleEnabled defaults to true when the setting has never been written', async (t) => {
+// The default comes from osi-module-defaults, the one file a customer branch
+// picks to ship the Field Journal hidden -- which must also ship this worker
+// quiet. Asserting against a literal here would make that a two-file pick and
+// would go red on the branch instead of following it.
+test('journalModuleEnabled applies the shipped default when the setting has never been written', async (t) => {
   const { db } = fixture(t);
-  assert.equal(await helper.journalModuleEnabled(db), true);
+  assert.equal(await helper.journalModuleEnabled(db), MODULE_DEFAULTS.journalModuleEnabled);
+  assert.equal(await helper.journalModuleEnabled(db), moduleDefaultForField('journalModuleEnabled'));
 });
 
 test('journalModuleEnabled reads the gateway-level app_settings row', async (t) => {
@@ -287,13 +293,15 @@ test('journalModuleEnabled reads the gateway-level app_settings row', async (t) 
   }
 });
 
-// Fail open: a gateway whose DB predates the app_settings table (deploys are
-// staged) must keep replicating exactly as it does today, not silently stop.
-test('journalModuleEnabled fails open when app_settings cannot be read', async () => {
+// A gateway whose DB predates the app_settings table (deploys are staged) must
+// behave exactly like a fresh gateway on the same firmware: the shipped
+// default, never a hardcoded "on" that would contradict the branch's own
+// settings page.
+test('journalModuleEnabled falls back to the shipped default when app_settings cannot be read', async () => {
   const brokenDb = {
     get() { return Promise.reject(new Error('SQLITE_ERROR: no such table: app_settings')); },
   };
-  assert.equal(await helper.journalModuleEnabled(brokenDb), true);
+  assert.equal(await helper.journalModuleEnabled(brokenDb), MODULE_DEFAULTS.journalModuleEnabled);
 });
 
 test('runReplicationTick makes zero cloud requests while the journal module is off', async (t) => {

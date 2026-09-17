@@ -2,6 +2,10 @@
 
 const crypto = require('node:crypto');
 const canonicalizer = require('./canonicalization');
+// Gateway module switches: the app_settings key for the Field Journal and the
+// value this gateway ships with are declared once in osi-module-defaults, and
+// PUT /api/system/settings writes against the same declaration.
+const { settingForField, interpretStoredValue } = require('../osi-module-defaults');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -849,24 +853,29 @@ function replicationDisabledByRuntime() {
 // key/value store (migration 0023), written by PUT /api/system/settings and
 // read here.
 //
-// Fails OPEN on every read problem. Deploys are staged, so a gateway whose DB
-// predates app_settings must keep replicating exactly as it does today rather
-// than go quiet because a table is missing.
-const JOURNAL_MODULE_SETTING_KEY = 'journal_module_enabled';
-const JOURNAL_MODULE_OFF_VALUES = new Set(['0', 'false', 'off', 'no']);
+// The key, and the value a gateway ships with, come from osi-module-defaults --
+// the same declaration PUT /api/system/settings writes against. This worker
+// cannot import the route module (it runs inside the Node-RED worker and must
+// not depend on an HTTP route), and a second literal here is exactly the drift
+// that would leave a branch's Settings page saying "off" while this kept
+// calling the cloud.
+//
+// Every read problem resolves to that default rather than to a hardcoded "on":
+// deploys are staged, and a gateway whose DB predates app_settings then behaves
+// exactly like a fresh gateway on the same firmware.
+const JOURNAL_MODULE_SETTING = settingForField('journalModuleEnabled');
 
 async function journalModuleEnabled(db) {
   let row;
   try {
     row = await db.get(
       'SELECT value FROM app_settings WHERE key=?',
-      [JOURNAL_MODULE_SETTING_KEY],
+      [JOURNAL_MODULE_SETTING.key],
     );
   } catch (cause) {
-    return true;
+    return interpretStoredValue(JOURNAL_MODULE_SETTING.key, null);
   }
-  if (!row || row.value === null || row.value === undefined) return true;
-  return !JOURNAL_MODULE_OFF_VALUES.has(String(row.value).trim().toLowerCase());
+  return interpretStoredValue(JOURNAL_MODULE_SETTING.key, row ? row.value : null);
 }
 
 function disabledTickResult() {
