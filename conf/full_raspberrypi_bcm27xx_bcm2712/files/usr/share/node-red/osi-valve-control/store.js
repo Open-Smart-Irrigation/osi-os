@@ -119,7 +119,7 @@ function daymaskOf(payloadHex) {
 }
 
 async function lastPushHashes(db, deviceEui) {
-  const rows = await db.all("SELECT purpose, weekday, payload_hex, plan_hash, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED') ORDER BY queued_at DESC", [deviceEui]);
+  const rows = await db.all("SELECT purpose, weekday, payload_hex, plan_hash, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED') ORDER BY queued_at DESC, rowid DESC", [deviceEui]);
   const out = {};
   for (const r of rows) {
     if (r.purpose === 'WEEKDAY_PLAN') {
@@ -184,7 +184,7 @@ async function supersedeQueued(db, deviceEui, purpose, weekdayOrMask) {
 async function ackPush(db, deviceEui, purpose, fport, weekdayOrNull, status, atIso) {
   const where = weekdayOrNull == null ? '' : ' AND weekday=?';
   const selParams = [deviceEui, purpose, fport].concat(weekdayOrNull == null ? [] : [weekdayOrNull]);
-  const row = await db.get("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state='QUEUED'" + where + ' ORDER BY queued_at DESC LIMIT 1', selParams);
+  const row = await db.get("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state='QUEUED'" + where + ' ORDER BY queued_at DESC, rowid DESC LIMIT 1', selParams);
   if (!row) return 0;
   await db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=? WHERE push_id=?", [status, atIso, row.push_id]);
   return 1;
@@ -240,10 +240,19 @@ async function staleQueuedPlanDeviceEuis(db, olderThanIso) {
 // drifts out of a *real* 30-day-ago cutoff as soon as the actual calendar date moves far enough
 // past 2026-08-19. `now` is optional (ISO string or Date, default `new Date()`) so callers with
 // no clock of their own keep exactly the previous (real-wall-clock) behaviour.
+// (F135) Every newest-per-slot collapse below orders by `queued_at DESC, rowid DESC`,
+// not `queued_at DESC` alone. `queued_at` is written only by the column default
+// `datetime('now')`, so it has whole-second resolution: two recompiles inside one
+// second tie, SQLite's sort is not stable, and the first-seen-wins reducers then hand
+// the slot to an arbitrary row. Silvan run 5 hit exactly that -- a NACKed recompile
+// and a dropped-ACK recompile 0.4 s apart, and GET /api/valves reported queued 0 /
+// acked 7 while three plan pushes sat QUEUED. `rowid DESC` breaks the tie by insertion
+// order, which is what "latest" already means here; listQueued has carried the same
+// tiebreaker since it was written.
 async function pushSummary(db, deviceEui, now) {
   const nowIso = now instanceof Date ? now.toISOString() : (now || new Date().toISOString());
   const rows = await db.all(
-    "SELECT purpose, weekday, payload_hex, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') AND queued_at > datetime(?,'-30 day') ORDER BY queued_at DESC",
+    "SELECT purpose, weekday, payload_hex, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') AND queued_at > datetime(?,'-30 day') ORDER BY queued_at DESC, rowid DESC",
     [deviceEui, nowIso]
   );
   const latestStateBySlot = {};
@@ -322,7 +331,7 @@ async function hasPendingObservation(db, deviceEui) {
 }
 
 async function weekdayPushStates(db, deviceEui) {
-  return db.all("SELECT purpose, weekday, payload_hex, state, queued_at, acked_at, error FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') ORDER BY queued_at DESC", [deviceEui]);
+  return db.all("SELECT purpose, weekday, payload_hex, state, queued_at, acked_at, error FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') ORDER BY queued_at DESC, rowid DESC", [deviceEui]);
 }
 
 // Gateway-level default timezone (FW-T5), read from app_settings(key='gateway_timezone').
