@@ -282,9 +282,15 @@ function requireSqlite3(proj) {
 function shellHarness(gw, body, opts = {}) {
   const tmp = path.join(gw.root, 'deploy-tmp');
   fs.mkdirSync(tmp, { recursive: true });
+  // `firmware: false` stands for a gateway whose opkg module is gone, so the
+  // canonical path deploy.sh would restore from does not exist.
+  const firmwareDir = opts.firmware === false
+    ? path.join(gw.root, 'firmware-that-was-removed', 'sqlite3')
+    : gw.fwSqlite;
   const preamble = [
     'set -eu',
     `NODE_RED_ROOT=${JSON.stringify(gw.proj)}`,
+    `NATIVE_SQLITE3_FIRMWARE_DIR=${JSON.stringify(firmwareDir)}`,
     `TMP_DIR=${JSON.stringify(tmp)}`,
     `NATIVE_ARCH=${JSON.stringify(opts.arch || 'armv7l')}`,
     `MUSL_LOADER_GLOB=${JSON.stringify(opts.muslGlob || path.join(gw.root, 'fake-libc', 'ld-musl-*.so.1'))}`,
@@ -431,23 +437,108 @@ function requireSqlite3Through(gw) {
   ].join('\n'), target], { cwd: gw.proj, encoding: 'utf8' }).status;
 }
 
-test('materialize_native_sqlite3 clears a dangling symlink and leaves the install to npm', () => {
+test('materialize_native_sqlite3 clears a dangling symlink and restores from the firmware module', () => {
   const gw = makeGateway('dangling-symlink');
   const sqlitePath = path.join(gw.proj, 'node_modules', 'sqlite3');
 
   const r = shellHarness(gw, 'materialize_native_sqlite3');
   assert.equal(r.status, 0, `materialise should not fail on a dangling symlink: ${r.stderr}`);
+  assert.match(r.stderr, /dangling symlink/);
+  assert.equal(isSymlink(sqlitePath), false, 'the dangling symlink should be gone');
+  assert.ok(hasBinding(sqlitePath), 'the firmware module should have been restored in its place');
+  assert.equal(requireSqlite3(gw.proj).status, 0, "require('sqlite3') should work again");
+});
+
+test('materialize_native_sqlite3 clears a dangling symlink and leaves the install to npm when the firmware module is gone', () => {
+  const gw = makeGateway('dangling-symlink');
+  const sqlitePath = path.join(gw.proj, 'node_modules', 'sqlite3');
+
+  const r = shellHarness(gw, 'materialize_native_sqlite3', { firmware: false });
+  assert.equal(r.status, 0, `materialise should not fail on a dangling symlink: ${r.stderr}`);
   assert.equal(fs.existsSync(sqlitePath) || isSymlink(sqlitePath), false,
     'the dangling symlink should be gone so npm can install sqlite3 itself');
   assert.match(r.stderr, /dangling symlink/);
+  assert.match(r.stdout, /SKIP/);
 });
 
-test('materialize_native_sqlite3 does nothing when there is no sqlite3 module at all', () => {
+test('materialize_native_sqlite3 does nothing when neither the module nor the firmware is there', () => {
   const gw = makeGateway('absent');
-  const r = shellHarness(gw, 'materialize_native_sqlite3');
+  const r = shellHarness(gw, 'materialize_native_sqlite3', { firmware: false });
   assert.equal(r.status, 0, `materialise should not fail on a fresh tree: ${r.stderr}`);
   assert.match(r.stdout, /SKIP/);
 });
+
+// --- self-healing after a deploy killed mid-swap ----------------------------
+//
+// rename(2) cannot replace a symlink with a directory, so materialise has to
+// unlink before it moves. A deploy killed in that instant (SSH drop, power
+// loss, OOM) leaves nothing at node_modules/sqlite3 -- Node-RED's sqlite nodes
+// then fail on the next boot, and the next deploy is the repair path.
+
+test('materialize_native_sqlite3 restores the module when a killed deploy left the path empty', () => {
+  const gw = makeGateway('absent');
+  const sqlitePath = path.join(gw.proj, 'node_modules', 'sqlite3');
+
+  const r = shellHarness(gw, 'materialize_native_sqlite3');
+  assert.equal(r.status, 0, `materialise should restore from the firmware: ${r.stdout}${r.stderr}`);
+  assert.equal(isSymlink(sqlitePath), false, 'the restored module must be a real directory');
+  assert.ok(hasBinding(sqlitePath), 'the restored module must carry the firmware binary');
+  assert.equal(requireSqlite3(gw.proj).status, 0, "require('sqlite3') should work again");
+
+  const install = npmInstallLikeDeploy(gw.proj);
+  assert.equal(install.status, 0, `npm install failed after restoring: ${install.stderr}`);
+  assert.ok(hasBinding(sqlitePath), 'npm must leave the restored native module alone');
+  assert.equal(shellHarness(gw, 'verify_native_sqlite3_after_npm').status, 0);
+});
+
+test('materialize_native_sqlite3 leaves an empty path empty when the staged copy cannot load', () => {
+  const gw = makeGateway('absent');
+  const sqlitePath = path.join(gw.proj, 'node_modules', 'sqlite3');
+  fs.rmSync(path.join(gw.proj, 'node_modules', 'fixture-peer'), { recursive: true, force: true });
+
+  const r = shellHarness(gw, 'materialize_native_sqlite3');
+  assert.equal(r.status, 0, 'a copy that does not load must not fail the deploy outright');
+  assert.equal(fs.existsSync(sqlitePath), false,
+    'nothing that cannot load may be swapped in; npm decides instead');
+  assert.match(r.stderr, /staged copy/);
+  assert.deepEqual(stagingLeftovers(gw), []);
+});
+
+test('materialize_native_sqlite3 clears a staging directory left by a deploy killed mid-swap', () => {
+  const gw = makeGateway('absent');
+  const sqlitePath = path.join(gw.proj, 'node_modules', 'sqlite3');
+
+  // exactly what a kill between the unlink and the move leaves behind: a full
+  // staged copy under the staging name, and nothing at node_modules/sqlite3.
+  const stale = path.join(gw.proj, 'node_modules', '.osi-sqlite3-stage.kIlLeD');
+  copyDir(gw.fwSqlite, stale);
+  assert.ok(hasBinding(stale));
+
+  const r = shellHarness(gw, 'materialize_native_sqlite3');
+  assert.equal(r.status, 0, `materialise should clean up and restore: ${r.stdout}${r.stderr}`);
+  assert.equal(fs.existsSync(stale), false, 'the leftover staging directory must be removed');
+  assert.match(r.stderr, /interrupted deploy/);
+  assert.ok(hasBinding(sqlitePath), 'and the module must be restored');
+  assert.deepEqual(stagingLeftovers(gw), []);
+});
+
+test('materialize_native_sqlite3 only removes its own staging directories', () => {
+  const gw = makeGateway('firmware-symlink');
+  const modules = path.join(gw.proj, 'node_modules');
+  // a dot-entry that shares the prefix but is not a staging directory, plus
+  // everything npm already put there
+  fs.mkdirSync(path.join(modules, '.osi-sqlite3-keepme'), { recursive: true });
+  const before = fs.readdirSync(modules).sort();
+
+  assert.equal(shellHarness(gw, 'materialize_native_sqlite3').status, 0);
+
+  assert.deepEqual(fs.readdirSync(modules).sort(), before,
+    'materialise must not remove anything but its own staging directories');
+});
+
+function stagingLeftovers(gw) {
+  return fs.readdirSync(path.join(gw.proj, 'node_modules')).filter((n) => n.startsWith('.osi-sqlite3-stage.'));
+}
 
 test('materialize_native_sqlite3 does not touch a real directory that has no binary', () => {
   // npm will leave it alone too (the version matches the lock), so the
@@ -539,16 +630,44 @@ test('run_native_sqlite3_preflight only warns when a build toolchain is present'
   assert.match(r.stdout, /WARN/);
 });
 
-test('run_native_sqlite3_preflight skips a gateway with no sqlite3 module yet', () => {
+test('run_native_sqlite3_preflight skips a gateway with no sqlite3 module and no firmware module', () => {
   const gw = makeGateway('absent');
   const r = shellHarness(gw, 'run_native_sqlite3_preflight', {
     lockFixture: writeLockFixture(gw, '5.1.8'),
     arch: 'armv7l',
     muslGlob: muslPresent(gw),
     toolchain: false,
+    firmware: false,
   });
   assert.equal(r.status, 0, 'a fresh gateway has nothing to compare');
   assert.match(r.stdout, /SKIP/);
+});
+
+test('run_native_sqlite3_preflight compares the firmware version when the path is empty', () => {
+  // The killed-mid-swap state: the version that will land at
+  // node_modules/sqlite3 is the firmware module's, so that is the one that
+  // has to match the lockfile -- and on armv7l + musl a mismatch is still
+  // unwinnable, so it must be refused before any side effect.
+  const gw = makeGateway('absent');
+  const bad = shellHarness(gw, 'run_native_sqlite3_preflight', {
+    lockFixture: writeLockFixture(gw, '5.1.8'),
+    arch: 'armv7l',
+    muslGlob: muslPresent(gw),
+    toolchain: false,
+  });
+  assert.notEqual(bad.status, 0, 'the preflight must refuse the mismatch it can already see');
+  assert.match(bad.stderr, /5\.1\.8/);
+  assert.match(bad.stderr, /5\.1\.7/);
+  assert.match(bad.stderr, /firmware/);
+
+  const good = shellHarness(gw, 'run_native_sqlite3_preflight', {
+    lockFixture: writeLockFixture(gw, LOCKED_VERSION),
+    arch: 'armv7l',
+    muslGlob: muslPresent(gw),
+    toolchain: false,
+  });
+  assert.equal(good.status, 0, `matching versions must pass: ${good.stdout}${good.stderr}`);
+  assert.match(good.stdout, /matches the shipped lockfile/);
 });
 
 // --- wiring -----------------------------------------------------------------
@@ -595,4 +714,20 @@ test('the firmware seed scripts hand npm a real sqlite3 directory, identically o
   // deploy.sh has to keep handling it either way because field images ship it.
   assert.match(seed, /ln -s "\$SQLITE_SRC" "\$DST\/node_modules\/sqlite3"/);
   assert.match(DEPLOY, /materialize_native_sqlite3\(\) \{/);
+});
+
+test('materialize_native_sqlite3 does not abort a gateway that has no node_modules at all', () => {
+  // A brand-new gateway: deploy.sh creates /srv/node-red but not
+  // node_modules, so mktemp -d would fail inside a missing directory. Nothing
+  // can be verified there either (no peer packages yet), so the outcome is
+  // the documented "leave it to npm" fallback -- but it must never be a hard
+  // failure that stops the deploy.
+  const gw = makeGateway('absent');
+  fs.rmSync(path.join(gw.proj, 'node_modules'), { recursive: true, force: true });
+
+  const r = shellHarness(gw, 'materialize_native_sqlite3');
+  assert.equal(r.status, 0, `materialise must not fail on a gateway with no node_modules: ${r.stdout}${r.stderr}`);
+  assert.equal(fs.existsSync(path.join(gw.proj, 'node_modules', 'sqlite3')), false,
+    'nothing unverified may be swapped in');
+  assert.deepEqual(stagingLeftovers(gw), [], 'and no staging directory may be left behind');
 });
