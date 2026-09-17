@@ -3,8 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
-import { useDisplayPreferences } from '../utils/displayPreferences';
-import { useJournalModuleEnabled } from '../hooks/useGatewayModules';
+import { useGatewayModules } from '../hooks/useGatewayModules';
 
 interface DashboardHeaderProps {
   username: string | null;
@@ -25,14 +24,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const navigate = useNavigate();
-  // Module visibility (2026-09-17): hiding an entry here is UI-only -- the
-  // /analysis, /history and /network routes stay registered and reachable by
-  // URL. Defaults on main are ON; customer branches flip them.
-  const { modules } = useDisplayPreferences();
+  // Module visibility (2026-09-17): gateway-level settings. Hiding an entry
+  // here is UI-only -- the /analysis, /history, /network and /journal routes
+  // stay registered and reachable by URL. Defaults on main are ON; customer
+  // branches flip them.
+  const modules = useGatewayModules();
   const showDesktopData = isDesktopBrowser() && modules.data;
   const showNetwork = isDesktopBrowser() && modules.network;
-  // Gateway-level, not a browser preference -- see useGatewayModules.
-  const journalEnabled = useJournalModuleEnabled();
 
   return (
     <header className="bg-[var(--header-bg)] shadow-xl">
@@ -55,7 +53,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 items={[
                   { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
                   { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-                  ...(journalEnabled
+                  ...(modules.journal
                     ? [{
                       key: 'activity',
                       label: t('addMenu.activity'),

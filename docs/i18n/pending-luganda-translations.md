@@ -90,7 +90,7 @@ here.
 
 | Keys | Reason |
 |---|---|
-| `dataModule`, `networkModule`, `gatewayHub`, `journalModule`, `journalModuleSaveError` (5 keys in `settings.json`) | New Settings rows for the Data view, Network, Gateway and Field Journal modules, added when those four became switchable (owner decision, 2026-09-17). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; `gatewayHub` deliberately stays "Gateway" in de-CH/it/es/pt, matching the loanword `devices.json` `systemPanel.title` already ships for those locales, and is "Passerelle" in fr. |
+| `dataModule`, `networkModule`, `gatewayHub`, `journalModule`, `moduleSaveError`, `experimentalOnly` (6 keys in `settings.json`) | New Settings rows for the Data view, Network, Gateway and Field Journal modules, added when those four became switchable and then promoted to gateway-level settings carrying an "experimental only" marker (owner decisions, 2026-09-17). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; `gatewayHub` deliberately stays "Gateway" in de-CH/it/es/pt, matching the loanword `devices.json` `systemPanel.title` already ships for those locales, and is "Passerelle" in fr. |
 
 Tracked in code at `web/react-gui/tests/moduleVisibilityLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still

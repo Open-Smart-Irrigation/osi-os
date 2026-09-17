@@ -23,6 +23,7 @@ import {
   type IrrigationOutcomeZoneContext,
 } from '../components/farming/IrrigationOutcomesPanel';
 import { useDisplayPreferences } from '../utils/displayPreferences';
+import { useGatewayModules } from '../hooks/useGatewayModules';
 import type { Device, IrrigationZone, ValveSummary } from '../types/farming';
 import { Button, EmptyState } from '../ui-core';
 import type { IrrigationActuationsResponse } from '../services/api';
@@ -38,6 +39,9 @@ export const FarmingDashboard: React.FC = () => {
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const { modules } = useDisplayPreferences();
+  // Gateway-level module switches (the hub card), separate from the per-browser
+  // display preferences above.
+  const gatewayModules = useGatewayModules();
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
   const [sdi12SettingsDevice, setSdi12SettingsDevice] = useState<Device | null>(null);
@@ -434,7 +438,7 @@ export const FarmingDashboard: React.FC = () => {
             {/* Gateway hub ("Gateway" / "Passerelle") -- hidden when the
                 gatewayHub module is switched off in Settings. Display-only:
                 nothing about the gateway itself changes. */}
-            {modules.gatewayHub && (
+            {gatewayModules.gatewayHub && (
               <div className="mt-8">
                 <SystemPanel />
               </div>

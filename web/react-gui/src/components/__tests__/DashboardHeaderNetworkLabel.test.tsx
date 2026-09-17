@@ -21,6 +21,14 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => true),
 }));
 
+const gatewayModules = vi.hoisted(() => ({
+  flags: { data: true, network: true, gatewayHub: true, journal: true },
+}));
+
+vi.mock('../../hooks/useGatewayModules', () => ({
+  useGatewayModules: () => gatewayModules.flags,
+}));
+
 vi.mock('../LanguageSwitcher', () => ({
   LanguageSwitcher: () => <button title="Change language">Lang EN</button>,
 }));
@@ -42,6 +50,7 @@ testI18n.use(initReactI18next).init({
 
 beforeEach(() => {
   window.localStorage.clear();
+  gatewayModules.flags = { data: true, network: true, gatewayHub: true, journal: true };
 });
 
 afterEach(() => {
@@ -75,7 +84,7 @@ describe('DashboardHeader network nav label (real i18n resources)', () => {
   // entry to label at all. Asserting the absence here keeps this file honest
   // about which state it is checking.
   it('renders no Network nav entry at all when the network module is off', () => {
-    window.localStorage.setItem('osi.modules.network', 'false');
+    gatewayModules.flags.network = false;
     renderHeader();
 
     expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();

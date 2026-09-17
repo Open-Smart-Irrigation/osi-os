@@ -36,14 +36,15 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => true),
 }));
 
-// The Field Journal module is a GATEWAY-level setting, not a per-browser
-// preference: switching it off also has to stop the journal-v2 replication
-// worker talking to the cloud, which localStorage cannot do. The header reads
-// it through this hook.
-const gatewayModules = vi.hoisted(() => ({ journalEnabled: true }));
+// All four visibility modules are GATEWAY-level settings (Phil, 2026-09-17):
+// every user of a gateway sees the same surface, and the choice survives a
+// browser change. The header reads them through this hook.
+const gatewayModules = vi.hoisted(() => ({
+  flags: { data: true, network: true, gatewayHub: true, journal: true },
+}));
 
 vi.mock('../../hooks/useGatewayModules', () => ({
-  useJournalModuleEnabled: () => gatewayModules.journalEnabled,
+  useGatewayModules: () => gatewayModules.flags,
 }));
 
 function renderAppHeader() {
@@ -56,7 +57,7 @@ function renderAppHeader() {
 
 beforeEach(() => {
   window.localStorage.clear();
-  gatewayModules.journalEnabled = true;
+  gatewayModules.flags = { data: true, network: true, gatewayHub: true, journal: true };
 });
 
 afterEach(() => {
@@ -73,7 +74,7 @@ describe('AppHeader module visibility', () => {
   });
 
   it('hides the Data tab when the data module is off and keeps the others', () => {
-    window.localStorage.setItem('osi.modules.data', 'false');
+    gatewayModules.flags.data = false;
     renderAppHeader();
 
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
@@ -82,7 +83,7 @@ describe('AppHeader module visibility', () => {
   });
 
   it('hides the Journal tab when the journal module is off and keeps the others', () => {
-    gatewayModules.journalEnabled = false;
+    gatewayModules.flags.journal = false;
     renderAppHeader();
 
     expect(screen.queryByRole('link', { name: 'Journal' })).not.toBeInTheDocument();
@@ -91,8 +92,8 @@ describe('AppHeader module visibility', () => {
   });
 
   it('hides both the Data and Journal tabs when both modules are off', () => {
-    gatewayModules.journalEnabled = false;
-    window.localStorage.setItem('osi.modules.data', 'false');
+    gatewayModules.flags.journal = false;
+    gatewayModules.flags.data = false;
     renderAppHeader();
 
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
@@ -101,7 +102,7 @@ describe('AppHeader module visibility', () => {
   });
 
   it('keeps Settings and Account reachable with the data module off', () => {
-    window.localStorage.setItem('osi.modules.data', 'false');
+    gatewayModules.flags.data = false;
     renderAppHeader();
 
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');

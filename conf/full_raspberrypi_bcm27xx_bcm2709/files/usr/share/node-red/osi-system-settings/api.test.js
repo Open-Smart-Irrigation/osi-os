@@ -30,6 +30,14 @@ async function tempDb() {
   return dbPath;
 }
 
+// The other three module flags, all default-on, so the existing payload
+// assertions stay exhaustive as the contract grows.
+const ALL_MODULES_ON = {
+  dataModuleEnabled: true,
+  networkModuleEnabled: true,
+  gatewayHubModuleEnabled: true,
+};
+
 const SECRET = 'test-secret';
 function token(userId) {
   const payload = Buffer.from(JSON.stringify({ userId, username: 'u', exp: Date.now() + 60000 })).toString('base64url');
@@ -70,7 +78,7 @@ test('GET /api/system/settings defaults to UTC when no gateway_timezone row exis
   const dbPath = await tempDb();
   const out = await call(dbPath, req('GET'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC', journalModuleEnabled: true });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC', journalModuleEnabled: true, ...ALL_MODULES_ON });
 });
 
 test('GET /api/system/settings returns the stored gateway_timezone', async () => {
@@ -80,7 +88,7 @@ test('GET /api/system/settings returns the stored gateway_timezone', async () =>
   raw.close();
   const out = await call(dbPath, req('GET'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', journalModuleEnabled: true });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', journalModuleEnabled: true, ...ALL_MODULES_ON });
 });
 
 test('GET /api/system/settings: no token -> 401', async () => {
@@ -96,7 +104,7 @@ test('GET /api/system/settings: table-missing-safe, does not 500 on a pre-migrat
   raw.close();
   const out = await call(dbPath, req('GET'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC', journalModuleEnabled: true });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'UTC', journalModuleEnabled: true, ...ALL_MODULES_ON });
 });
 
 test('PUT /api/system/settings validates the timezone with Intl and rejects garbage with 422', async () => {
@@ -116,9 +124,9 @@ test('PUT /api/system/settings upserts the value and a subsequent GET reflects i
   const dbPath = await tempDb();
   const put = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich' }));
   assert.equal(put.statusCode, 200);
-  assert.deepEqual(put.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0, journalModuleEnabled: true });
+  assert.deepEqual(put.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0, journalModuleEnabled: true, ...ALL_MODULES_ON });
   const get = await call(dbPath, req('GET'));
-  assert.deepEqual(get.payload, { gatewayTimezone: 'Europe/Zurich', journalModuleEnabled: true });
+  assert.deepEqual(get.payload, { gatewayTimezone: 'Europe/Zurich', journalModuleEnabled: true, ...ALL_MODULES_ON });
   // Second PUT (UPDATE branch of the UPSERT), still one row.
   const put2 = await call(dbPath, req('PUT', { gatewayTimezone: 'America/New_York' }));
   assert.equal(put2.statusCode, 200);
@@ -138,7 +146,7 @@ test('PUT applyToAllZones updates only the caller\'s zones whose timezone differ
   raw.close();
   const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true, ...ALL_MODULES_ON });
   const raw2 = new DatabaseSync(dbPath);
   const rows = raw2.prepare('SELECT name, timezone FROM irrigation_zones ORDER BY name').all();
   raw2.close();
@@ -156,7 +164,7 @@ test('PUT applyToAllZones (FW-T5 review R1, M1) never touches another user\'s zo
   // token(1) (the default auth() helper below) authenticates as user 1.
   const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true }, 'must count only the caller\'s own zone');
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true, ...ALL_MODULES_ON }, 'must count only the caller\'s own zone');
   const raw2 = new DatabaseSync(dbPath);
   const rows = raw2.prepare('SELECT name, user_id, timezone FROM irrigation_zones ORDER BY name').all();
   raw2.close();
@@ -175,7 +183,7 @@ test('PUT applyToAllZones (FW-T5 review R1, M2) excludes soft-deleted zones from
   raw.close();
   const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Europe/Zurich', applyToAllZones: true }));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true }, 'the soft-deleted zone must not be counted');
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 1, journalModuleEnabled: true, ...ALL_MODULES_ON }, 'the soft-deleted zone must not be counted');
   const raw2 = new DatabaseSync(dbPath);
   const rows = raw2.prepare('SELECT name, timezone FROM irrigation_zones ORDER BY name').all();
   raw2.close();
@@ -257,7 +265,7 @@ test('PUT /api/system/settings (scoped mode): an admin is allowed and the write 
   insertUser(dbPath, { id: 1, username: 'admin1', role: 'admin' });
   const out = await callScoped(dbPath, reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'admin1'));
   assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0, journalModuleEnabled: true });
+  assert.deepEqual(out.payload, { gatewayTimezone: 'Europe/Zurich', zonesUpdated: 0, journalModuleEnabled: true, ...ALL_MODULES_ON });
 });
 
 test('GET /api/system/settings (scoped mode): reads stay open for a non-admin', async () => {
@@ -413,4 +421,150 @@ test('PUT /api/system/settings writes both fields when both are sent', async () 
   const get = await call(dbPath, req('GET'));
   assert.equal(get.payload.gatewayTimezone, 'Africa/Kampala');
   assert.equal(get.payload.journalModuleEnabled, false);
+});
+
+// ---------------------------------------------------------------------------
+// Data view / Network / Gateway modules promoted to gateway level (Phil, 2026-09-17)
+// ---------------------------------------------------------------------------
+// These three started as per-browser display preferences. They are now gateway
+// settings alongside journal_module_enabled, so every user of a gateway sees
+// the same surface and the choice survives a browser change.
+
+const GATEWAY_MODULE_FIELDS = [
+  ['dataModuleEnabled', 'data_module_enabled'],
+  ['networkModuleEnabled', 'network_module_enabled'],
+  ['gatewayHubModuleEnabled', 'gateway_hub_module_enabled'],
+];
+
+test('GET /api/system/settings reports every module enabled by default', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('GET'));
+  assert.equal(out.statusCode, 200);
+  for (const [field] of GATEWAY_MODULE_FIELDS) {
+    assert.equal(out.payload[field], true, field);
+  }
+});
+
+test('PUT /api/system/settings persists each module switch under its own app_settings key', async () => {
+  for (const [field, key] of GATEWAY_MODULE_FIELDS) {
+    const dbPath = await tempDb();
+    const put = await call(dbPath, req('PUT', { [field]: false }));
+    assert.equal(put.statusCode, 200, field);
+    assert.equal(put.payload[field], false, field);
+
+    const raw = new DatabaseSync(dbPath);
+    const row = raw.prepare('SELECT value FROM app_settings WHERE key=?').get(key);
+    raw.close();
+    assert.equal(row.value, '0', key);
+
+    const get = await call(dbPath, req('GET'));
+    assert.equal(get.payload[field], false, field);
+    // Switching one module must not disturb its neighbours.
+    for (const [other] of GATEWAY_MODULE_FIELDS) {
+      if (other !== field) assert.equal(get.payload[other], true, other + ' after ' + field);
+    }
+    assert.equal(get.payload.journalModuleEnabled, true, 'journal after ' + field);
+  }
+});
+
+test('PUT /api/system/settings switches a module back on', async () => {
+  const dbPath = await tempDb();
+  await call(dbPath, req('PUT', { dataModuleEnabled: false }));
+  const put = await call(dbPath, req('PUT', { dataModuleEnabled: true }));
+  assert.equal(put.payload.dataModuleEnabled, true);
+  assert.equal((await call(dbPath, req('GET'))).payload.dataModuleEnabled, true);
+});
+
+test('PUT /api/system/settings rejects a non-boolean value for every module field', async () => {
+  const dbPath = await tempDb();
+  for (const [field] of GATEWAY_MODULE_FIELDS) {
+    for (const value of ['false', 0, null, 'off']) {
+      const out = await call(dbPath, req('PUT', { [field]: value }));
+      assert.equal(out.statusCode, 422, field + ' = ' + JSON.stringify(value));
+      assert.equal(out.payload.error, 'invalid_request');
+    }
+    assert.equal((await call(dbPath, req('GET'))).payload[field], true, field + ' unchanged');
+  }
+});
+
+test('PUT /api/system/settings writes several module switches in one request', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('PUT', {
+    dataModuleEnabled: false,
+    networkModuleEnabled: false,
+    journalModuleEnabled: false,
+  }));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.dataModuleEnabled, false);
+  assert.equal(out.payload.networkModuleEnabled, false);
+  assert.equal(out.payload.journalModuleEnabled, false);
+  assert.equal(out.payload.gatewayHubModuleEnabled, true, 'an unsent module keeps its value');
+
+  const get = await call(dbPath, req('GET'));
+  assert.equal(get.payload.dataModuleEnabled, false);
+  assert.equal(get.payload.networkModuleEnabled, false);
+  assert.equal(get.payload.journalModuleEnabled, false);
+  assert.equal(get.payload.gatewayHubModuleEnabled, true);
+});
+
+// One bad field rejects the whole request: a partial write would leave the
+// gateway in a state the caller never asked for.
+test('PUT /api/system/settings rejects the whole request when one module value is invalid', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('PUT', { dataModuleEnabled: false, networkModuleEnabled: 'nope' }));
+  assert.equal(out.statusCode, 422);
+  const get = await call(dbPath, req('GET'));
+  assert.equal(get.payload.dataModuleEnabled, true, 'nothing may be persisted from a rejected request');
+  assert.equal(get.payload.networkModuleEnabled, true);
+});
+
+test('PUT /api/system/settings still requires a valid timezone when no module flag is sent', async () => {
+  const dbPath = await tempDb();
+  const missing = await call(dbPath, req('PUT', {}));
+  assert.equal(missing.statusCode, 422);
+  assert.equal(missing.payload.error, 'invalid_timezone');
+});
+
+test('PUT /api/system/settings still validates a timezone sent alongside a module flag', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('PUT', { gatewayTimezone: 'Not/AZone', dataModuleEnabled: false }));
+  assert.equal(out.statusCode, 422);
+  assert.equal(out.payload.error, 'invalid_timezone');
+  assert.equal((await call(dbPath, req('GET'))).payload.dataModuleEnabled, true);
+});
+
+test('GET /api/system/settings module reads are table-missing-safe and fail open', async () => {
+  const dbPath = await tempDb();
+  const raw = new DatabaseSync(dbPath);
+  raw.exec('DROP TABLE app_settings');
+  raw.close();
+  const out = await call(dbPath, req('GET'));
+  assert.equal(out.statusCode, 200);
+  for (const [field] of GATEWAY_MODULE_FIELDS) {
+    assert.equal(out.payload[field], true, field + ' must fail open on a pre-migration DB');
+  }
+  assert.equal(out.payload.journalModuleEnabled, true);
+});
+
+// The journal module's app_settings key is written here and read independently
+// by osi-journal-replication (which cannot import this module -- it runs inside
+// the Node-RED worker). Two string literals for one key is a real drift risk: a
+// rename on one side would silently stop the switch gating the worker, with no
+// failing test and no visible symptom beyond the cloud noise it was meant to
+// stop. This pins them together.
+test('the journal module key matches the one the replication worker reads', async () => {
+  const { MODULE_SETTINGS } = require('./api');
+  const journal = MODULE_SETTINGS.find((module) => module.field === 'journalModuleEnabled');
+  assert.ok(journal, 'journalModuleEnabled must be a known module setting');
+
+  const dbPath = await tempDb();
+  await call(dbPath, req('PUT', { journalModuleEnabled: false }));
+
+  const replication = require('../osi-journal-replication');
+  const raw = new DatabaseSync(dbPath);
+  const db = { get: (sql, params) => Promise.resolve(raw.prepare(sql).get(...(params || []))) };
+  const enabled = await replication.journalModuleEnabled(db);
+  raw.close();
+
+  assert.equal(enabled, false, 'the worker must observe the switch this route wrote');
 });
