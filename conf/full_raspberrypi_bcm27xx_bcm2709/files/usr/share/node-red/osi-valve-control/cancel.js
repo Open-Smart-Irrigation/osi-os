@@ -19,6 +19,22 @@ const runtime = require('./runtime');
 
 const ACTIVE_STATES = "('PENDING_OBSERVATION','OBSERVED_RUNNING')";
 
+// F96: valve_actuation_expectations.cancel_reason (SQLite TEXT, unbounded) is shipped
+// VERBATIM as ValveActuation.cancel_reason by sync-bootstrap-build/sync-force-build's
+// `vae.cancel_reason` column read, and the cloud's mirror column is varchar(255) -- an
+// oversized reason (e.g. a cloud CANCEL_VALVE_ACTUATION command forwarding free text
+// from a user-facing field) would 500 the whole cloud bootstrap the same way F96's
+// result_detail overflow did. Capped here at the writer (defense in depth alongside the
+// sync-bootstrap-build/sync-force-build payload boundary, which also caps this field).
+const CANCEL_REASON_MAX_LENGTH = 255;
+const TRUNCATION_MARKER = '…[truncated]';
+
+function truncateWithMarker(value, maxLength) {
+  if (typeof value !== 'string' || value.length <= maxLength) return value;
+  if (maxLength <= TRUNCATION_MARKER.length) return TRUNCATION_MARKER.slice(0, maxLength);
+  return value.slice(0, maxLength - TRUNCATION_MARKER.length) + TRUNCATION_MARKER;
+}
+
 function normalizeReason(reason) {
   // Contract types `reason` as ["string","null"] - an explicit null must be treated the
   // same as absence, not as the literal string "null".
@@ -59,7 +75,14 @@ async function cancelActuation({ db, deviceEui, reason, flushQueue, now, warn })
   );
   if (!active) return { ok: false, error: 'no_active_actuation', downlinks: [] };
 
-  const cancelReason = normalizeReason(reason);
+  const normalizedReason = normalizeReason(reason);
+  const cancelReason = truncateWithMarker(normalizedReason, CANCEL_REASON_MAX_LENGTH);
+  if (cancelReason !== normalizedReason && typeof warn === 'function') {
+    warn(
+      '[valve-control] cancelActuation: cancel_reason truncated to ' + CANCEL_REASON_MAX_LENGTH +
+      ' chars for ' + eui + ' (full text): ' + normalizedReason
+    );
+  }
   const nowIso = (now || new Date()).toISOString();
 
   // Flush BEFORE the write, and let a flush failure propagate uncaught: if the queue
