@@ -90,6 +90,29 @@ async function closeFacade(db, warn) {
 
 const HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,Authorization' };
 
+// F31 (2026-09-17 Silvan harness, run-full2/ST1.md checks #17-18): shared
+// timezone validator, extracted so every route that accepts a timezone
+// string enforces the same rule PUT /api/system/settings always has --
+// PUT /api/irrigation-zones/:id/timezone (osi-system-settings-consumer:
+// dendro-tz-fn in flows.json) used to persist ANY string unvalidated
+// ("Not/AZone" -> 200, stored verbatim), so everything downstream that does
+// wall-clock math for that zone (valve plan compiler, daily rollups,
+// schedule next_run) then worked from an unresolvable zone. Throws an
+// apiError(422, 'invalid_timezone', <message>) exactly like the inline
+// check this replaced; callers that need a different statusCode/response
+// shape still just inspect error.statusCode/error.code/error.message.
+function validateTimezone(rawValue, fieldName) {
+  const label = fieldName || 'timezone';
+  const value = String(rawValue || '').trim();
+  if (!value) throw apiError(422, 'invalid_timezone', label + ' is required');
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: value });
+  } catch (error) {
+    throw apiError(422, 'invalid_timezone', label + ' must be a valid IANA time zone');
+  }
+  return value;
+}
+
 // Table-missing-safe: a pre-migration DB (deploys are staged) has no app_settings table yet.
 // Never throws; an absent key or absent table both resolve to the 'UTC' floor.
 async function readGatewayTimezone(db, warn) {
@@ -144,13 +167,7 @@ async function handleHttpRequest(options) {
 
     if (method === 'PUT') {
       const body = requestBody(msg);
-      const gatewayTimezone = String(body.gatewayTimezone || '').trim();
-      if (!gatewayTimezone) throw apiError(422, 'invalid_timezone', 'gatewayTimezone is required');
-      try {
-        Intl.DateTimeFormat(undefined, { timeZone: gatewayTimezone });
-      } catch (error) {
-        throw apiError(422, 'invalid_timezone', 'gatewayTimezone must be a valid IANA time zone');
-      }
+      const gatewayTimezone = validateTimezone(body.gatewayTimezone, 'gatewayTimezone');
       const applyToAllZones = body.applyToAllZones === true;
       const now = new Date().toISOString();
       try {
@@ -206,4 +223,4 @@ async function handleHttpRequest(options) {
   }
 }
 
-module.exports = { handleHttpRequest };
+module.exports = { handleHttpRequest, validateTimezone };

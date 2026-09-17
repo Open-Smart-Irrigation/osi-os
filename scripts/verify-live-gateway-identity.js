@@ -1061,9 +1061,13 @@ if (silentCatchBaseline) {
   // and its raw-PWM setup path (period read, pre-period-write disable) had five
   // catch(e){} blocks left empty by the role-gate port; all five now log via
   // node.warn: 94 -> 89.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 89 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 89,
-    'silent-catch baseline records 89 for both maintained profiles',
-    'silent-catch baseline must be 89 for both maintained profiles');
+  // 88: 2026-09-17 overnight stabilization T16b (F31, Silvan harness
+  // run-full2/ST1.md) -- dendro-tz-fn's close() catch(_){} converted to a
+  // visible node.warn while adding real verifyBearer + shared timezone
+  // validation to the same node: 89 -> 88.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 88 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 88,
+    'silent-catch baseline records 88 for both maintained profiles',
+    'silent-catch baseline must be 88 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
@@ -1148,9 +1152,14 @@ if (sizeAllowances) {
   // expected, permanent state for most of the fleet), skipping the ChirpStack round trip
   // and logging at info level at most once per device-count transition or 30-minute
   // recheck window. No other node changed in this commit.
-  expectCondition(sizeAllowances.total_allowance?.delta === 28562,
-    'size total allowance: exact cumulative delta 28562',
-    'size total allowance: expected exact cumulative delta 28562');
+  // 34139: 2026-09-17 overnight stabilization T16b (osi-os fix/edge-api-hang-timezone-404)
+  // raises 28562 by the 5577 chars measured across three touched nodes (verify-flows-size-ratchet
+  // nodeSizes over both byte-identical profiles): delete-device-unlink 712 -> 1093 (+381),
+  // delete-device-response 277 -> 875 (+598), dendro-tz-fn 1249 -> 5847 (+4598). No other
+  // node changed in this fix.
+  expectCondition(sizeAllowances.total_allowance?.delta === 34139,
+    'size total allowance: exact cumulative delta 34139',
+    'size total allowance: expected exact cumulative delta 34139');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,

@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const { handleHttpRequest } = require('./api');
+const { handleHttpRequest, validateTimezone } = require('./api');
 
 function facade(raw) {
   return {
@@ -297,4 +297,36 @@ test('PUT /api/system/settings: flag-off never touches the scope helper (hermeti
     warn: () => {},
   });
   assert.equal(out.statusCode, 200);
+});
+
+// F31 (2026-09-17 Silvan harness, run-full2/ST1.md checks #17-18): this
+// validator is now the single source of truth both PUT /api/system/settings
+// (above) and PUT /api/irrigation-zones/:id/timezone (dendro-tz-fn in
+// flows.json, via osiLib.require('osi-system-settings').validateTimezone)
+// enforce. Exercised directly here so the exported contract itself is
+// pinned, independent of either HTTP route's wiring.
+test('validateTimezone: rejects an empty/missing value with a labeled 422-shaped error', () => {
+  assert.throws(
+    () => validateTimezone('', 'timezone'),
+    (error) => error.statusCode === 422 && error.code === 'invalid_timezone' && error.message === 'timezone is required'
+  );
+  assert.throws(
+    () => validateTimezone(undefined, 'timezone'),
+    (error) => error.statusCode === 422 && error.code === 'invalid_timezone'
+  );
+});
+
+test('validateTimezone: rejects a non-IANA string with a labeled 422-shaped error', () => {
+  assert.throws(
+    () => validateTimezone('Not/AZone', 'timezone'),
+    (error) =>
+      error.statusCode === 422 &&
+      error.code === 'invalid_timezone' &&
+      error.message === 'timezone must be a valid IANA time zone'
+  );
+});
+
+test('validateTimezone: trims and returns a valid IANA timezone unchanged', () => {
+  assert.equal(validateTimezone('  Africa/Kampala  ', 'timezone'), 'Africa/Kampala');
+  assert.equal(validateTimezone('UTC', 'gatewayTimezone'), 'UTC');
 });
