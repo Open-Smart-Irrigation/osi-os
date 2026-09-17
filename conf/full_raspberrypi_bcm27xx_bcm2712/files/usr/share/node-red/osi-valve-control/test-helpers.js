@@ -18,15 +18,55 @@ function facade(raw) {
   };
 }
 
+// (F142) tempDb() used to mkdtemp a directory per call and never remove it. These suites
+// call it around 155 times, so one full run left that many copies of the bundled
+// farming.db (~1.6 MB each) behind in the system temp dir. On this project's workstation
+// 3 561 had accumulated, about 5.7 GB, which filled a 12 GB tmpfs and made unrelated
+// suites fail with ENOSPC. Cleanup is not opt-in: every directory is tracked here and
+// removed on process exit, so a test that forgets (or throws before) cannot leak. The
+// returned cleanup() lets a test reclaim its own earlier than that.
+const tempDirs = new Set();
+let exitHookInstalled = false;
+
+function removeTempDir(dir) {
+  tempDirs.delete(dir);
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (_) {
+    // Best effort: on the exit path there is nothing left to report to.
+  }
+}
+
+function installExitHook() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  // 'exit' admits synchronous work only, which is exactly what rmSync is.
+  process.on('exit', () => {
+    for (const dir of [...tempDirs]) removeTempDir(dir);
+  });
+}
+
+/** Directories tempDb() is still holding, i.e. what the exit hook would remove. */
+function trackedTempDirs() {
+  return [...tempDirs];
+}
+
 async function tempDb() {
   const src = path.resolve(__dirname, '../../db/farming.db');
-  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vc-')), 'farming.db');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-'));
+  tempDirs.add(dir);
+  installExitHook();
+  const dbPath = path.join(dir, 'farming.db');
   fs.copyFileSync(src, dbPath);
   const raw = new DatabaseSync(dbPath);
   const db = facade(raw);
   await db.run("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))");
   await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000001','Valve A','STREGA_VALVE',1,datetime('now'),datetime('now'))");
-  return { db, path: dbPath, raw };
+  const cleanup = () => {
+    try { raw.close(); } catch (_) { /* already closed by the test */ }
+    removeTempDir(dir);
+  };
+  return { db, path: dbPath, raw, dir, cleanup };
 }
 
 // Seeds a linked sync_link_state('cloud') row -- the predicate every JS/trigger sync emitter in
@@ -42,4 +82,4 @@ async function linkCloud(db, opts) {
   );
 }
 
-module.exports = { tempDb, facade, linkCloud };
+module.exports = { tempDb, facade, linkCloud, trackedTempDirs };
