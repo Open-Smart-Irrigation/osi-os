@@ -339,9 +339,27 @@ function queueCommandId(raw) {
   return { stored: text, ack: text };
 }
 
+// F93 (2026-09-17): the cloud's CommandAckEntry.commandId is a Long -- a
+// command that never came from the cloud (a manual GUI/harness valve action,
+// queued through this same pipeline for its local ledger bookkeeping) mints
+// its commandId as a UUID on the edge (write-strega-expectation's
+// crypto.randomUUID() fallback / the manual-valve command builders), never a
+// cloud-issued integer. queueCommandId() already tells the two apart: `.ack`
+// is a number only when the raw commandId was itself numeric or an all-digit
+// string (i.e. cloud-issued). Silvan's command_ack_outbox row 1 carried a
+// UUID commandId, so the cloud answered every delivery attempt with HTTP 400
+// (Cannot deserialize a String into java.lang.Long) and
+// command-ack-mark-delivered classified every non-2xx as a transport
+// failure, retrying the SAME batch every 30s forever and blocking every
+// later ack behind it.
+function isCloudOriginatedCommandId(queuedCommandId) {
+  return typeof queuedCommandId.ack === 'number';
+}
+
 async function queueCommandAck(db, rawAck, runtime) {
   const ack = object(rawAck, 'Command ACK');
   const commandId = queueCommandId(ack);
+  const cloudOriginated = isCloudOriginatedCommandId(commandId);
   const incomingResult = String(ack.result || ack.status || '').trim().toUpperCase();
   const errorText = ack.error == null ? '' : String(ack.error);
   const result = classifyAckResult(incomingResult, errorText);
@@ -382,7 +400,13 @@ async function queueCommandAck(db, rawAck, runtime) {
         'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
         [commandId.stored]
       );
-      if (existing) return persistReplayAck(tx, existing, commandId.ack, true);
+      if (existing) {
+        // A local commandId never queues a cloud ack (see isCloudOriginatedCommandId
+        // above) -- not even on replay. replayAck() is the pure, DB-write-free half of
+        // persistReplayAck() and reproduces the exact same returned shape.
+        if (!cloudOriginated) return replayAck(existing, commandId.ack, true);
+        return persistReplayAck(tx, existing, commandId.ack, true);
+      }
       await tx.run(
         'INSERT INTO applied_commands (' +
           'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator' +
@@ -397,6 +421,11 @@ async function queueCommandAck(db, rawAck, runtime) {
         await hooks.afterCommandLedger(initial);
       }
     }
+    // A local action keeps its local ledger entry (the applied_commands write
+    // above, when terminal) but must never produce a command_ack_outbox row:
+    // the cloud has no way to accept a delivery whose commandId it cannot
+    // parse as a Long, and queueing it anyway is exactly the F93 poison.
+    if (!cloudOriginated) return initial;
     await tx.run(
       'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
       [commandId.stored]

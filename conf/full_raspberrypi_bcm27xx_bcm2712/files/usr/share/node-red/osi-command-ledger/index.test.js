@@ -657,3 +657,103 @@ test('queueCommandAck stores EXPIRED as a terminal result and replays it exactly
   );
   assert.deepEqual(replay, { handled: true, ack: queued });
 });
+
+// F93: Silvan command_ack_outbox row 1 (commandId a local harness UUID) was
+// queued for cloud delivery by queueCommandAck and 400'd forever against the
+// cloud's Long-typed CommandAckEntry.commandId, blocking every later ack
+// behind it. A LOCAL command (write-strega-expectation's manual-GUI /
+// harness path) never carries a cloud-issued numeric commandId -- only a
+// UUID minted on the edge -- so queueCommandAck must keep the local ledger
+// entry (applied_commands) but never produce a command_ack_outbox row for
+// one. A genuine CLOUD command (numeric commandId, e.g. from Route Command's
+// pending-command dispatch) must be entirely unaffected.
+test('queueCommandAck: a local (non-numeric) commandId writes the ledger but never queues a cloud ack', async () => {
+  const db = new TestDb();
+  const localCommandId = '43526a1e-a3e9-441c-97ea-8dca6f4b6696';
+  let hookFired = null;
+  const queued = await ledger.queueCommandAck(db, {
+    commandId: localCommandId,
+    commandType: 'OPEN_FOR_DURATION',
+    deviceEui: GATEWAY_EUI,
+    result: 'APPLIED',
+  }, {
+    lifecycle_hooks: { afterCommandLedger: async (ack) => { hookFired = ack; } },
+  });
+
+  assert.equal(queued.commandId, localCommandId, 'the returned ack still reports the local id for edge-side use');
+  assert.equal(queued.result, 'APPLIED');
+  assert.ok(hookFired, 'the local ledger hook must still fire -- F93 fix 1 keeps the local ledger entry');
+  assert.equal(
+    (await db.get('SELECT result FROM applied_commands WHERE command_id=?', [localCommandId])).result,
+    'APPLIED',
+    'a local action keeps its local ledger entry (applied_commands)'
+  );
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', [localCommandId])).n,
+    0,
+    'a local (non-cloud-numeric) commandId must never produce a command_ack_outbox row (F93)'
+  );
+});
+
+test('queueCommandAck: a cloud (numeric) commandId still queues a cloud ack, unchanged by the F93 fix', async () => {
+  const db = new TestDb();
+  const queued = await ledger.queueCommandAck(db, {
+    commandId: 900,
+    commandType: 'OPEN_FOR_DURATION',
+    deviceEui: GATEWAY_EUI,
+    result: 'APPLIED',
+  });
+
+  assert.equal(queued.commandId, 900);
+  assert.equal(
+    (await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['900'])).result,
+    'APPLIED'
+  );
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['900'])).n,
+    1,
+    'a genuine cloud-issued numeric commandId must still be queued for delivery'
+  );
+});
+
+test('queueCommandAck: replaying an existing local ledger entry still never queues a cloud ack', async () => {
+  const db = new TestDb();
+  const localCommandId = 'b2c1a0f0-1111-4222-8333-444455556666';
+  const first = await ledger.queueCommandAck(db, {
+    commandId: localCommandId, commandType: 'OPEN_FOR_DURATION', result: 'APPLIED',
+  });
+  const replay = await ledger.queueCommandAck(db, {
+    commandId: localCommandId, commandType: 'OPEN_FOR_DURATION', result: 'APPLIED',
+  });
+
+  assert.deepEqual(replay, first, 'a replay of a local commandId must reproduce the same ack shape');
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', [localCommandId])).n,
+    0,
+    'a replayed local commandId must still never queue a cloud ack (F93)'
+  );
+});
+
+test('queueCommandAck: a rejection for a local commandId (write-strega-expectation scope gates) never queues a cloud ack', async () => {
+  const db = new TestDb();
+  const localCommandId = 'c3d2b1a0-2222-4333-8444-555566667777';
+  const queued = await ledger.queueCommandAck(db, {
+    commandId: localCommandId,
+    commandType: 'OPEN_FOR_DURATION',
+    deviceEui: GATEWAY_EUI,
+    result: 'REJECTED_PERMANENT',
+    reason: 'scope_denied',
+  });
+
+  assert.equal(queued.result, 'REJECTED_PERMANENT');
+  assert.equal(
+    (await db.get('SELECT result FROM applied_commands WHERE command_id=?', [localCommandId])).result,
+    'REJECTED_PERMANENT',
+    'a local rejection still keeps its local ledger entry'
+  );
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', [localCommandId])).n,
+    0,
+    'a local rejection (e.g. write-strega-expectation scope_denied/scope_actor_required) must never queue a cloud ack'
+  );
+});
