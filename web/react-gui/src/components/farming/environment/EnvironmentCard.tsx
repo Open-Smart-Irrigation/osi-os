@@ -126,7 +126,11 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
 
   return (
     <div className="mt-6 border-t border-[var(--border)] pt-5">
-      <button className="group flex w-full items-center justify-between text-left" onClick={() => setCollapsed((value) => !value)}>
+      <button
+        className="group flex w-full items-center justify-between text-left"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((value) => !value)}
+      >
         <div className="flex items-center gap-2">
           <CloudIcon className="text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text)]" />
           <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text)]">

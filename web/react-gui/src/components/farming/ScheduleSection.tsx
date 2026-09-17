@@ -361,6 +361,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     <div className="mt-6 border-t border-[var(--border)] pt-5">
       <button
         className="w-full flex items-center justify-between text-left group"
+        aria-expanded={!collapsed}
         onClick={() => setCollapsed(c => !c)}
       >
         <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text)] transition-colors">

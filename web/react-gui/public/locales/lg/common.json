@@ -1,4 +1,7 @@
 {
+  "languageSwitcher": {
+    "change": "Change language"
+  },
   "cancel": "Lekawo",
   "close": "Ggalawo",
   "loading": "Tikuyitamu...",

@@ -337,6 +337,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-3">
         <button
           className="flex-1 min-w-0 text-left flex items-center gap-2 group"
+          aria-expanded={!zoneCollapsed}
           onClick={() => setZoneCollapsed(c => !c)}
         >
           <h3 className="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text break-words">
@@ -650,6 +651,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       <div className="mt-6 border-t border-[var(--border)] pt-5">
         <button
           className="w-full flex items-center justify-between text-left group"
+          aria-expanded={!devicesCollapsed}
           onClick={() => setDevicesCollapsed(c => !c)}
         >
           <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text)] transition-colors">
