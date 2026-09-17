@@ -68,5 +68,11 @@ jobs:
       # bounded coalescing behaviour against the shipped function-node source.
       - name: Event-driven outbox flush gate
         run: node --test scripts/test-outbox-event-flush.js
+      # F140: the zone timezone and location routes must bump sync_version, or the
+      # outbox trigger emits at a version the cloud already applied and the change is
+      # dead-lettered as equal_version_payload_conflict. Runs the shipped UPDATE against
+      # the bundled farming.db and its real triggers.
+      - name: Zone write routes emit at a new sync version
+        run: node --test scripts/test-zone-update-sync-version.js
       - name: Guard against silent upgrade-leg skip
         run: node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out && grep -q "base seed + history migration" /tmp/schema.out
