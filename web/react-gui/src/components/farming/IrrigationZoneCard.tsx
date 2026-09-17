@@ -89,7 +89,7 @@ function formatDisplayMode(t: Translate, mode: string | null | undefined): strin
   const fallback = mode ? DISPLAY_MODE_LABELS[mode] : undefined;
   return fallback
     ? t(`zone.water.source.${mode}`, { defaultValue: fallback })
-    : t('zone.water.source.default', { defaultValue: 'Water source' });
+    : t('zone.water.source.default', { defaultValue: 'Recommendation source' });
 }
 
 function formatScheduleMetric(t: Translate, metric: string): string {

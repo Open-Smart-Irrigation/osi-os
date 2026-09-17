@@ -240,7 +240,7 @@
         "shared_server_stale": "OSI Server non aggiornato",
         "local_fallback": "Fallback locale",
         "unlinked_local": "Solo locale",
-        "default": "Fonte idrica"
+        "default": "Origine della raccomandazione"
       },
       "soil": {
         "title": "Suolo adesso",

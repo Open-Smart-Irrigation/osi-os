@@ -240,7 +240,7 @@
         "shared_server_stale": "OSI Server stale",
         "local_fallback": "Local fallback",
         "unlinked_local": "Local only",
-        "default": "Water source"
+        "default": "Recommendation source"
       },
       "soil": {
         "title": "Soil now",

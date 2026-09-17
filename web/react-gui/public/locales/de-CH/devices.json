@@ -240,7 +240,7 @@
         "shared_server_stale": "OSI Server veraltet",
         "local_fallback": "Lokaler Rückfall",
         "unlinked_local": "Nur lokal",
-        "default": "Wasserquelle"
+        "default": "Quelle der Empfehlung"
       },
       "soil": {
         "title": "Boden aktuell",
