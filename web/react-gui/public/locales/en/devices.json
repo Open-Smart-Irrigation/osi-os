@@ -471,5 +471,34 @@
   },
   "common": {
     "viewHistory": "View history"
+  },
+  "systemPanel": {
+    "title": "Gateway",
+    "subtitle": "System status",
+    "updated": "Updated {{time}}",
+    "refresh": "Refresh",
+    "loadError": "Failed to load stats",
+    "cpuTemperature": "CPU temperature",
+    "maxTemperature": "max {{max}}°C",
+    "memory": "Memory",
+    "memoryUsed": "{{used}} / {{total}} MB used",
+    "cpuLoad": "CPU load ({{count}} cores)",
+    "load1m": "1m:",
+    "load5m": "5m:",
+    "load15m": "15m:",
+    "fanControl": "Fan control",
+    "fanCurrent": "Current:",
+    "fanOff": "Off",
+    "fanLow": "Low",
+    "fanMedium": "Medium",
+    "fanHigh": "High",
+    "fanMax": "Max",
+    "fanError": "Fan control failed",
+    "noFanDetected": "No fan detected",
+    "rebootButton": "Reboot gateway",
+    "rebootConfirmTitle": "Reboot gateway now?",
+    "rebootConfirmYes": "Yes, reboot",
+    "rebootingMessage": "Rebooting… gateway will be offline for ~30 seconds.",
+    "rebootError": "Reboot failed"
   }
 }

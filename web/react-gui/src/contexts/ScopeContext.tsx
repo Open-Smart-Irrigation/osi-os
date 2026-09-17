@@ -12,6 +12,15 @@ import { useAuth } from './AuthContext';
 
 interface ScopeValue {
   loading: boolean;
+  /**
+   * True once the scope profile has actually loaded (profile !== null, not
+   * loading, no fetch error) -- the same condition `canWrite`/`isAdmin`
+   * already fail closed on internally. Consumers that need to know whether
+   * `isScoped` is trustworthy yet (it reads `false` while `profile` is still
+   * null, which is indistinguishable from "genuinely not scoped" without
+   * this flag -- see F51) should gate on `resolved`, not just `loading`.
+   */
+  resolved: boolean;
   isScoped: boolean;
   role: ScopeProfile['role'];
   canWrite: boolean;
@@ -28,6 +37,7 @@ interface ScopeValue {
 
 const CLOSED_SCOPE: ScopeValue = {
   loading: false,
+  resolved: false,
   isScoped: false,
   role: 'viewer',
   canWrite: false,
@@ -96,6 +106,7 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
 
     return {
       loading,
+      resolved,
       isScoped,
       role,
       canWrite: resolved && role !== 'viewer',

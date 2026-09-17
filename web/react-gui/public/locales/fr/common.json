@@ -5,6 +5,7 @@
   "delete": "Supprimer",
   "na": "N/A",
   "retry": "Réessayer",
+  "adminOnly": "Réservé aux administrateurs",
   "scope": {
     "loadError": "Les autorisations n’ont pas pu être chargées."
   },

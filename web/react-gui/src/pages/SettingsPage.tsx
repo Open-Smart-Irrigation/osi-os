@@ -211,10 +211,23 @@ function isValidTimeZone(value: string): boolean {
 
 export function SettingsPage() {
   const { t } = useTranslation('settings');
-  const { loading: scopeLoading, canWrite } = useScope();
+  const { t: tc } = useTranslation('common');
+  const { loading: scopeLoading, canWrite, isAdmin, isScoped, resolved: scopeResolved } = useScope();
   // Fail closed while scope is loading (D5): a viewer is not assumed writable
   // just because the permission check hasn't resolved yet.
   const writable = canWrite && !scopeLoading;
+  // F20: PUT /api/system/settings (the gateway time zone save/apply-to-all
+  // controls below) is role-gated to admin only once OSI_SCOPED_ACCESS is on
+  // (#244, merged) -- canWrite (admin+researcher) is too permissive there.
+  // Non-scoped installs keep today's behavior unchanged.
+  //
+  // F51: `isScoped` reads `false` until the scope profile has actually
+  // loaded (ScopeContext derives it from `profile?.features`, and `profile`
+  // starts null), so gating only on `isScoped` failed OPEN on a scoped
+  // install during that window. Require `scopeResolved` before trusting
+  // `isScoped` at all, same fix as SystemPanel.tsx.
+  const systemSettingsWritable = scopeLoading || !scopeResolved ? false : (isScoped ? isAdmin : true);
+  const systemSettingsAdminOnlyTitle = systemSettingsWritable ? undefined : tc('adminOnly');
   const preferences = useDisplayPreferences();
   const [moduleNotice, setModuleNotice] = useState<string | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
@@ -339,7 +352,7 @@ export function SettingsPage() {
   const canSaveTimezone = gatewayTimezone.trim().length > 0 && gatewayTimezoneValid && !timezoneSaving && !applyingAllZones;
 
   const saveGatewayTimezone = async () => {
-    if (!canSaveTimezone) return;
+    if (!canSaveTimezone || !systemSettingsWritable) return;
     setTimezoneNotice(null);
     setTimezoneError(null);
     setTimezoneSaving(true);
@@ -356,7 +369,7 @@ export function SettingsPage() {
   };
 
   const applyTimezoneToAllZones = async () => {
-    if (!canSaveTimezone) return;
+    if (!canSaveTimezone || !systemSettingsWritable) return;
     if (!window.confirm(t('timeZoneApplyAllConfirm', { timezone: gatewayTimezone.trim() }))) return;
     setTimezoneNotice(null);
     setTimezoneError(null);
@@ -487,12 +500,15 @@ export function SettingsPage() {
               label={t('timeZoneLabel')}
               value={gatewayTimezone}
               onChange={setGatewayTimezoneInput}
-              disabled={timezoneSaving || applyingAllZones}
+              disabled={timezoneSaving || applyingAllZones || !systemSettingsWritable}
             />
             <button
               type="button"
               onClick={() => { void saveGatewayTimezone(); }}
-              disabled={!canSaveTimezone}
+              disabled={!canSaveTimezone || !systemSettingsWritable}
+              aria-disabled={!canSaveTimezone || !systemSettingsWritable}
+              aria-describedby={systemSettingsWritable ? undefined : 'system-settings-admin-only-hint'}
+              title={systemSettingsAdminOnlyTitle}
               className="min-h-11 rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-bold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {timezoneSaving ? t('timeZoneSaving') : t('timeZoneSave')}
@@ -500,12 +516,18 @@ export function SettingsPage() {
             <button
               type="button"
               onClick={() => { void applyTimezoneToAllZones(); }}
-              disabled={!canSaveTimezone}
+              disabled={!canSaveTimezone || !systemSettingsWritable}
+              aria-disabled={!canSaveTimezone || !systemSettingsWritable}
+              aria-describedby={systemSettingsWritable ? undefined : 'system-settings-admin-only-hint'}
+              title={systemSettingsAdminOnlyTitle}
               className="min-h-11 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-5 py-2 text-sm font-bold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {applyingAllZones ? t('timeZoneApplying') : t('timeZoneApplyAll')}
             </button>
           </div>
+          {!systemSettingsWritable && (
+            <p id="system-settings-admin-only-hint" className="mt-3 text-xs text-[var(--text-tertiary)]">{tc('adminOnly')}</p>
+          )}
           {gatewayTimezone.trim().length > 0 && !gatewayTimezoneValid && (
             <p role="alert" className="mt-3 rounded-lg border border-[var(--error-bg)] bg-[var(--error-bg)] px-4 py-3 text-sm font-semibold text-[var(--error-text)]">
               {t('timeZoneInvalid')}

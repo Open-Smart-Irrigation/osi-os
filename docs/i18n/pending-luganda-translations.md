@@ -38,6 +38,19 @@ byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change; the test fails otherwise, so the
 two cannot drift apart.
 
+## `devices.json` — SystemPanel gateway card, and `common.json`
+
+| Keys | Reason |
+|---|---|
+| `systemPanel.*` (27 keys in `devices.json`); `adminOnly` (1 key in `common.json`) | New keys added for the Gateway system-status card (SystemPanel.tsx) and the shared "Admin only" role-gating tooltip/hint (SystemPanel.tsx and SettingsPage.tsx), previously fully hardcoded English with no i18n at all (F32/F20, T13e, 2026-09-17). No native Luganda speaker has translated these yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. es/it/fr/de-CH/pt received natural human-quality translations in the same change. |
+
+Tracked in code at `web/react-gui/tests/systemPanelLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism `waterCardLocales.test.ts` uses
+above. A human Luganda pass must drop the key from that set and from the
+table above in the same change; the test fails otherwise, so the two cannot
+drift apart.
+
 ## Related keys not listed here
 
 Two other `accountLink.json` keys recovered from PR #150 in the same

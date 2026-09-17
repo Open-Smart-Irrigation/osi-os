@@ -5,6 +5,7 @@
   "delete": "Sazaamu",
   "na": "Tebaawo",
   "retry": "Gezaako nate",
+  "adminOnly": "Admin only",
   "scope": {
     "loadError": "Permissions could not be loaded."
   },
