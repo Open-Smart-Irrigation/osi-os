@@ -264,27 +264,29 @@ rules above:
     outbox events (`osi-valve-control/runtime.js`'s `emitActuationArchived`),
     plus any row already queued with an oversized value baked in.
   - **Writer** — `osi-valve-control/cancel.js`'s `normalizeReason()` caps
-    `cancel_reason` before it is written to `valve_actuation_expectations`;
-    `osi-command-ledger`'s `queueCommandAck()` caps the serialized ack JSON
-    stored as `applied_commands.result_detail`, scoped to the
-    `OPEN_FOR_DURATION` command type (the only command type a
-    `valve_actuation_expectations.command_id` can ever reference — see that
-    module's F96 comment) so journal/zone command families, whose replay
-    dedup parses `result_detail` as JSON, are unaffected. Measured fact: the
-    ack envelope's own structural skeleton already serializes to ~284 chars
-    with `reason`/`detail` both `null` — over the 255-char budget with NO
-    free text at all — so this is a whole-string truncation, not a
-    reason/detail-only trim; a truncated value is no longer valid JSON,
-    which `parsedResultDetail`'s existing `JSON.parse` failure fallback
-    already tolerates (it falls back to the row's own `command_type`/
-    `result`/`applied_at`/`effect_key` columns, never the parsed JSON, for
-    replay).
-  In both places the marker signals truncation happened rather than silently
-  losing data, and the FULL untruncated text is always preserved elsewhere
-  (a log line at the writer; the unmodified DB column itself, since only the
-  value shipped on the wire — or, for the writer, only what is persisted
-  into `applied_commands.result_detail` — is capped, not the source data the
-  cap is derived from).
+    `cancel_reason` before it is written to `valve_actuation_expectations`.
+    `command_result_detail` has NO writer-level cap: `osi-command-ledger`'s
+    `queueCommandAck()` briefly capped the serialized ack JSON stored as
+    `applied_commands.result_detail` for `OPEN_FOR_DURATION` (F96), but this
+    was reverted (F117/F120, 2026-09-17) — the ack envelope's own structural
+    skeleton already serializes to ~284–319 chars with `reason`/`detail`
+    both `null`, over the 255-char budget with NO free text at all, so EVERY
+    `OPEN_FOR_DURATION` ack was truncated into invalid JSON. That broke
+    `applied_commands.result_detail`'s own contract (every command family's
+    replay/dedup, `journalEffectProvenanceMatches`, the zone `payloadHash`
+    lookup, and `OPEN_FOR_DURATION` replay itself, all parse this column as
+    JSON) and failed `scripts/test-scoped-access-writes.js` outright
+    (`SyntaxError: Unterminated string in JSON`). `applied_commands.result_detail`
+    is written as the full, untruncated ack JSON unconditionally now; the
+    payload boundary above is the ONLY place `command_result_detail` is
+    capped before it reaches the cloud.
+  The marker signals truncation happened rather than silently losing data,
+  and for `cancel_reason` the FULL untruncated text is always preserved
+  elsewhere (a log line at the writer; the unmodified `valve_actuation_expectations`
+  row itself, since only the value shipped on the wire — or, for the writer,
+  only what is persisted into `cancel_reason` — is capped, not the source
+  data the cap is derived from). `command_result_detail` is never truncated
+  at the writer at all — only on the wire.
 
 ## Conformance
 
