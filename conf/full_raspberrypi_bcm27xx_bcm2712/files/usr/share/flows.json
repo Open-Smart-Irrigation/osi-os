@@ -1155,9 +1155,23 @@
     "y": 700,
     "wires": [
       [
-        "device-response"
+        "device-response",
+        "sync-outbox-flush-link-out-zone"
       ]
     ]
+  },
+  {
+    "id": "sync-outbox-flush-link-out-zone",
+    "type": "link out",
+    "z": "device-api-tab",
+    "name": "Flush sync outbox now",
+    "mode": "link",
+    "links": [
+      "sync-outbox-flush-link-in"
+    ],
+    "x": 1820,
+    "y": 700,
+    "wires": []
   },
   {
     "id": "get-zones-http",
@@ -1481,7 +1495,8 @@
     "y": 1020,
     "wires": [
       [
-        "device-response"
+        "device-response",
+        "sync-outbox-flush-link-out-zone"
       ]
     ]
   },
@@ -6260,6 +6275,41 @@
     "y": 1000,
     "wires": [
       []
+    ]
+  },
+  {
+    "id": "sync-outbox-flush-link-in",
+    "type": "link in",
+    "z": "93b1537a596e0e6d",
+    "name": "from zone mutation",
+    "links": [
+      "sync-outbox-flush-link-out-zone"
+    ],
+    "x": 155,
+    "y": 1360,
+    "wires": [
+      [
+        "sync-outbox-flush-coalesce"
+      ]
+    ]
+  },
+  {
+    "id": "sync-outbox-flush-coalesce",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Coalesce Outbox Flush",
+    "func": "// F128: event-driven outbox flush. The zone create/delete routes ping this gate\n// over the link pair so a local change reaches the cloud in well under a second\n// instead of waiting up to 30 s for the \"Flush Sync Outbox\" inject (which stays\n// as the safety net). Bounded by construction: at most one scheduled flush at a\n// time -- DEBOUNCE_MS collapses a burst of mutations into one POST -- and never\n// more than one event-driven flush per MIN_GAP_MS. One timer, no polling loop.\nconst DEBOUNCE_MS = 200;\nconst MIN_GAP_MS = 750;\nconst gate = flow.get('outboxEventFlushGate') || { pending: false, lastAt: 0 };\nif (gate.pending === true) return null;\nconst now = Date.now();\nconst wait = Math.max(DEBOUNCE_MS, Number(gate.lastAt || 0) + MIN_GAP_MS - now);\ngate.pending = true;\nflow.set('outboxEventFlushGate', gate);\nconst timer = setTimeout(function () {\n  flow.set('outboxEventFlushTimer', null);\n  flow.set('outboxEventFlushGate', { pending: false, lastAt: Date.now() });\n  // A fresh msg on purpose: the ping arrives as the HTTP response message and\n  // must never carry msg.res (or its status code) into the sync chain.\n  node.send({ payload: Date.now(), _outboxFlushTrigger: 'zone-mutation' });\n}, wait);\nflow.set('outboxEventFlushTimer', timer);\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "const timer = flow.get('outboxEventFlushTimer');\nif (timer) { clearTimeout(timer); }\nflow.set('outboxEventFlushTimer', null);\nflow.set('outboxEventFlushGate', { pending: false, lastAt: 0 });",
+    "libs": [],
+    "x": 430,
+    "y": 1360,
+    "wires": [
+      [
+        "sync-outbox-build"
+      ]
     ]
   },
   {
@@ -13570,7 +13620,8 @@
         "post-zone-auth"
       ],
       [
-        "device-response"
+        "device-response",
+        "sync-outbox-flush-link-out-zone"
       ]
     ]
   },
@@ -13605,7 +13656,8 @@
         "delete-zone-auth"
       ],
       [
-        "device-response"
+        "device-response",
+        "sync-outbox-flush-link-out-zone"
       ]
     ]
   },
