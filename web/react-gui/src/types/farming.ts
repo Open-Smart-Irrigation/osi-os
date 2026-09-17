@@ -528,9 +528,14 @@ export interface WaterEnvironment {
 }
 
 export interface WaterAction {
-  code: string;
+  /** `null` when the edge had no input it could stand a recommendation on. */
+  code: string | null;
+  /** `heuristic`, `dendro`, `insufficient_data`, or whatever the cloud mirror sends. */
   source: string;
-  reasoning: string;
+  /** Why, as a stable identifier the GUI translates. Absent on the cloud mirror. */
+  reasonCode?: string | null;
+  /** Prose from a stored dendrometer recommendation; the heuristic no longer writes one. */
+  reasoning?: string | null;
   recommendationDate: string | null;
 }
 

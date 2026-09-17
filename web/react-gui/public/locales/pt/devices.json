@@ -222,6 +222,12 @@
       "awaitingRecommendation": "Recomendação pendente",
       "confidence": "{{percent}} % de confiança",
       "confidencePending": "A confiança é atualizada no próximo cálculo dendro",
+      "insufficientData": "Dados insuficientes para recomendar",
+      "reason": {
+        "balance_unknown": "Defina a área e a eficiência de rega",
+        "forecast_unknown": "Sem previsão de chuva disponível",
+        "default": "A aguardar mais dados"
+      },
       "action": {
         "delay_irrigation": "Adiar a rega",
         "irrigate_today": "Regar hoje",

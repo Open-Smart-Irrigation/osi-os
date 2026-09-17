@@ -67,6 +67,15 @@ const DISPLAY_MODE_LABELS: Record<string, string> = {
   unlinked_local: 'Local only',
 };
 
+// Why the edge reached its verdict, as codes rather than the English prose it
+// used to send (which no locale bundle could translate). A code this build
+// does not know — an older gateway, or the cloud mirror — falls back to the
+// generic key instead of being printed raw.
+const WATER_REASON_LABELS: Record<string, string> = {
+  balance_unknown: 'Set zone area and irrigation efficiency',
+  forecast_unknown: 'No rain forecast available',
+};
+
 const SCHEDULE_METRIC_LABELS: Record<string, string> = {
   DENDRO: 'Dendro trigger',
   VWC: 'VWC trigger',
@@ -83,6 +92,13 @@ function formatWaterAction(t: Translate, code: string | null | undefined): strin
   return fallback
     ? t(`zone.water.action.${code}`, { defaultValue: fallback })
     : t('zone.water.action.default', { defaultValue: 'Monitor water status' });
+}
+
+function formatWaterReason(t: Translate, reasonCode: string | null | undefined): string {
+  const fallback = reasonCode ? WATER_REASON_LABELS[reasonCode] : undefined;
+  return fallback
+    ? t(`zone.water.reason.${reasonCode}`, { defaultValue: fallback })
+    : t('zone.water.reason.default', { defaultValue: 'Waiting for more data' });
 }
 
 function formatDisplayMode(t: Translate, mode: string | null | undefined): string {
@@ -409,16 +425,33 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 {t('zone.water.forecastNext24h', { defaultValue: 'Forecast next 24 h' })}
               </p>
             </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
+            {/* An absent action code is the edge saying it could not compute
+                one. It gets a neutral state and the reason, never an
+                irrigation verb: "Delay irrigation" on an unknown balance is
+                the recommendation that costs a crop when it is wrong. */}
+            <div data-testid="water-action-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
                 {t('zone.water.actionTitle', { defaultValue: 'Action' })}
               </p>
-              <p className="mt-2 text-2xl font-bold text-[var(--warn-text)]">{formatWaterAction(t, environmentSummary.water.action?.code)}</p>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                {environmentSummary.water.action?.source === 'dendro'
-                  ? t('zone.water.drivenByDendro', { defaultValue: 'Driven by dendrometer recommendation' })
-                  : t('zone.water.drivenByBalance', { defaultValue: 'Driven by water balance' })}
-              </p>
+              {environmentSummary.water.action?.code ? (
+                <>
+                  <p className="mt-2 text-2xl font-bold text-[var(--warn-text)]">{formatWaterAction(t, environmentSummary.water.action.code)}</p>
+                  <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {environmentSummary.water.action.source === 'dendro'
+                      ? t('zone.water.drivenByDendro', { defaultValue: 'Driven by dendrometer recommendation' })
+                      : t('zone.water.drivenByBalance', { defaultValue: 'Driven by water balance' })}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-2 text-2xl font-bold text-[var(--text-secondary)]">
+                    {t('zone.water.insufficientData', { defaultValue: 'Not enough data to advise' })}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {formatWaterReason(t, environmentSummary.water.action?.reasonCode)}
+                  </p>
+                </>
+              )}
             </div>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">

@@ -191,3 +191,77 @@ describe('water card sensor gating', () => {
     expect(tile).toHaveTextContent('Estimated (valve time × calibration): 120 L');
   });
 });
+
+describe('water action tile', () => {
+  it('renders the recommendation when the edge could compute one', async () => {
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    const tile = screen.getByTestId('water-action-tile');
+    expect(tile).toHaveTextContent('Monitor today');
+    expect(tile).toHaveTextContent('Driven by water balance');
+  });
+
+  it('advises nothing when the balance could not be computed', async () => {
+    // Every zone until someone fills in area and irrigation efficiency. The
+    // edge used to read the missing balance as 0 and answer "Delay
+    // irrigation" — the one recommendation that costs a crop when it is wrong.
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        areaM2: null,
+        irrigationEfficiencyPct: null,
+        balanceTodayMm: null,
+        action: {
+          code: null,
+          source: 'insufficient_data',
+          reasonCode: 'balance_unknown',
+          recommendationDate: '2026-07-08',
+        },
+      },
+    });
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    const tile = screen.getByTestId('water-action-tile');
+    expect(tile).toHaveTextContent('Not enough data to advise');
+    expect(tile).toHaveTextContent('Set zone area and irrigation efficiency');
+    expect(tile).not.toHaveTextContent('Delay irrigation');
+    expect(tile).not.toHaveTextContent('Monitor water status');
+    expect(tile).not.toHaveTextContent('Driven by water balance');
+  });
+
+  it('names a missing forecast as the reason it cannot advise', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        balanceTodayMm: -3,
+        next24hRainMm: null,
+        action: {
+          code: null,
+          source: 'insufficient_data',
+          reasonCode: 'forecast_unknown',
+          recommendationDate: '2026-07-08',
+        },
+      },
+    });
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    expect(screen.getByTestId('water-action-tile')).toHaveTextContent('No rain forecast available');
+  });
+
+  it('falls back to a generic reason for a code it does not know', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        action: { code: null, source: 'insufficient_data', reasonCode: 'cloud_only_code', recommendationDate: null },
+      },
+    });
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } })]);
+
+    const tile = screen.getByTestId('water-action-tile');
+    expect(tile).toHaveTextContent('Waiting for more data');
+    expect(tile).not.toHaveTextContent('cloud_only_code');
+  });
+});

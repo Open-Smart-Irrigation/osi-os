@@ -222,6 +222,12 @@
       "awaitingRecommendation": "Empfehlung ausstehend",
       "confidence": "{{percent}}% Konfidenz",
       "confidencePending": "Die Konfidenz wird beim nächsten Dendro-Lauf aktualisiert",
+      "insufficientData": "Zu wenig Daten für eine Empfehlung",
+      "reason": {
+        "balance_unknown": "Fläche und Bewässerungseffizienz eintragen",
+        "forecast_unknown": "Keine Regenprognose verfügbar",
+        "default": "Warten auf weitere Daten"
+      },
       "action": {
         "delay_irrigation": "Bewässerung verschieben",
         "irrigate_today": "Heute bewässern",

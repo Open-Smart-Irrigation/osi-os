@@ -222,6 +222,12 @@
       "awaitingRecommendation": "Awaiting recommendation",
       "confidence": "{{percent}}% confidence",
       "confidencePending": "Confidence updates with the latest dendro run",
+      "insufficientData": "Not enough data to advise",
+      "reason": {
+        "balance_unknown": "Set zone area and irrigation efficiency",
+        "forecast_unknown": "No rain forecast available",
+        "default": "Waiting for more data"
+      },
       "action": {
         "delay_irrigation": "Delay irrigation",
         "irrigate_today": "Irrigate today",

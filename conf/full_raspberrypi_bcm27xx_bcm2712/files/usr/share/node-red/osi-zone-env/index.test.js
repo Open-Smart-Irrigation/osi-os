@@ -191,7 +191,7 @@ test('agronomic and water helpers preserve current assembly behavior', () => {
   assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, -8, 0), {
     code: 'irrigate_today',
     source: 'heuristic',
-    reasoning: 'Estimated demand exceeds effective rain and irrigation for today.',
+    reasonCode: 'demand_exceeds_supply',
     recommendationDate: '2026-07-11',
   });
   assert.deepEqual(
@@ -242,6 +242,73 @@ test('sensor health helper preserves counter warning behavior', () => {
       rainGaugePresent: true,
       flowMeterPresent: false,
       warnings: ['1 sensor is stale'],
+    },
+  );
+});
+
+test('an unknown water balance yields insufficient data, not "delay irrigation"', () => {
+  // The zone a new customer sees first: no area, no irrigation efficiency, so
+  // no balance can be computed, and no forecast because the gateway is not
+  // linked. Coercing both to 0 made `0 >= |min(0, 0)|` true and returned
+  // delay_irrigation unconditionally.
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, null, null), {
+    code: null,
+    source: 'insufficient_data',
+    reasonCode: 'balance_unknown',
+    recommendationDate: '2026-07-11',
+  });
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, null, 4.2), {
+    code: null,
+    source: 'insufficient_data',
+    reasonCode: 'balance_unknown',
+    recommendationDate: '2026-07-11',
+  });
+});
+
+test('a deficit with no forecast cannot be resolved either way', () => {
+  // -3 mm today: whether that deficit needs the valve tonight depends on rain
+  // the gateway has no forecast for. Treating the missing forecast as 0 mm is
+  // an assertion the edge cannot make.
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, -3, null), {
+    code: null,
+    source: 'insufficient_data',
+    reasonCode: 'forecast_unknown',
+    recommendationDate: '2026-07-11',
+  });
+});
+
+test('known balances keep their shipped verdicts and carry a reason code, not prose', () => {
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, 2.5, null), {
+    code: 'delay_irrigation',
+    source: 'heuristic',
+    reasonCode: 'supply_covers_demand',
+    recommendationDate: '2026-07-11',
+  });
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, -8, 10), {
+    code: 'delay_irrigation',
+    source: 'heuristic',
+    reasonCode: 'forecast_rain_covers_demand',
+    recommendationDate: '2026-07-11',
+  });
+  assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, -0.5, 0), {
+    code: 'monitor_today',
+    source: 'heuristic',
+    reasonCode: 'balance_neutral',
+    recommendationDate: '2026-07-11',
+  });
+  // The dendrometer branch keeps the reasoning the analytics run stored.
+  assert.deepEqual(
+    ZE.resolveWaterAction('2026-07-11', {
+      irrigation_action: 'increase_10',
+      action_reasoning: 'Stress rose for three consecutive days.',
+      date: '2026-07-10',
+    }, null, null),
+    {
+      code: 'increase_10',
+      source: 'dendro',
+      reasonCode: null,
+      reasoning: 'Stress rose for three consecutive days.',
+      recommendationDate: '2026-07-10',
     },
   );
 });

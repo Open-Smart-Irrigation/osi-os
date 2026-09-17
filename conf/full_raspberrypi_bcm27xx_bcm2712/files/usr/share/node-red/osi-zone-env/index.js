@@ -619,39 +619,56 @@ function buildSensorHealth(deviceRows, local) {
   };
 }
 
+/**
+ * The zone's water-balance verdict, as an action code plus a reason code.
+ *
+ * Both inputs used to be coerced to 0 (`?? 0`), so a zone with no area and no
+ * irrigation efficiency — every zone until someone fills in the configuration
+ * modal — had `balanceTodayMm === null` read as a balanced 0 and was told to
+ * delay irrigation unconditionally. That is the one recommendation that costs
+ * a crop when it is wrong, and it was emitted precisely where the edge knew
+ * the least. An input the branch actually depends on now has to be known;
+ * otherwise the action is absent and the caller renders an
+ * insufficient-data state.
+ *
+ * The reason travels as a code rather than as an English sentence: the GUI
+ * serves seven languages and cannot translate prose the edge invented.
+ */
 function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24hRainMm) {
   if (recommendationRow) {
     return {
       code: trimToNull(recommendationRow.irrigation_action),
       source: 'dendro',
+      reasonCode: null,
       reasoning: trimToNull(recommendationRow.action_reasoning),
       recommendationDate: trimToNull(recommendationRow.date) || todayIso
     };
   }
-  const effectiveBalance = toFiniteNumber(balanceTodayMm) ?? 0;
-  const forecastRain = toFiniteNumber(next24hRainMm) ?? 0;
-  if (effectiveBalance >= 1 || forecastRain >= Math.abs(Math.min(effectiveBalance, 0))) {
-    return {
-      code: 'delay_irrigation',
-      source: 'heuristic',
-      reasoning: "Available rain and effective irrigation cover today's estimated demand.",
-      recommendationDate: todayIso
-    };
-  }
-  if (effectiveBalance <= -1) {
-    return {
-      code: 'irrigate_today',
-      source: 'heuristic',
-      reasoning: 'Estimated demand exceeds effective rain and irrigation for today.',
-      recommendationDate: todayIso
-    };
-  }
-  return {
-    code: 'monitor_today',
-    source: 'heuristic',
-    reasoning: 'Water balance is close to neutral; monitor soil and tree stress before irrigating.',
+  const insufficient = (reasonCode) => ({
+    code: null,
+    source: 'insufficient_data',
+    reasonCode,
     recommendationDate: todayIso
-  };
+  });
+  const heuristic = (code, reasonCode) => ({
+    code,
+    source: 'heuristic',
+    reasonCode,
+    recommendationDate: todayIso
+  });
+
+  const balance = toFiniteNumber(balanceTodayMm);
+  if (balance == null) return insufficient('balance_unknown');
+  // A non-negative balance settles the verdict on its own; the forecast only
+  // matters when today's supply falls short.
+  if (balance >= 0) return heuristic('delay_irrigation', 'supply_covers_demand');
+
+  const shortfallMm = -balance;
+  const forecastRain = toFiniteNumber(next24hRainMm);
+  if (forecastRain == null) return insufficient('forecast_unknown');
+  if (forecastRain >= shortfallMm) return heuristic('delay_irrigation', 'forecast_rain_covers_demand');
+  if (balance <= -1) return heuristic('irrigate_today', 'demand_exceeds_supply');
+  return heuristic('monitor_today', 'balance_neutral');
 }
 
 function mergeDailyIrrigationSplit(sharedDaily, localDaily) {

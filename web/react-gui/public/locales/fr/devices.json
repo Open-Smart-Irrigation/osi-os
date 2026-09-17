@@ -222,6 +222,12 @@
       "awaitingRecommendation": "Recommandation en attente",
       "confidence": "{{percent}} % de confiance",
       "confidencePending": "La confiance est mise à jour au prochain calcul dendro",
+      "insufficientData": "Données insuffisantes pour un conseil",
+      "reason": {
+        "balance_unknown": "Renseignez la surface et l'efficience d'irrigation",
+        "forecast_unknown": "Aucune prévision de pluie disponible",
+        "default": "En attente de données"
+      },
       "action": {
         "delay_irrigation": "Retarder l'irrigation",
         "irrigate_today": "Irriguer aujourd'hui",
