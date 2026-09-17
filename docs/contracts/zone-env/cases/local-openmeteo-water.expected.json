@@ -26,6 +26,7 @@
     "action": {
       "code": "irrigate_today",
       "source": "dendro",
+      "reasonCode": null,
       "reasoning": "Fixture dendro recommendation",
       "recommendationDate": "2026-07-11"
     },
