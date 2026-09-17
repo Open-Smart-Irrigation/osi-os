@@ -9,7 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { useTranslation } from 'react-i18next';
-import { useDateFormat } from '../../../utils/datetime';
+import { parseCalendarDay, useDateFormat } from '../../../utils/datetime';
 import type { WaterEnvironment } from '../../../types/farming';
 
 interface Props {
@@ -66,7 +66,9 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
     measuredIrrigationNetMm: day.measuredIrrigationNetMm ?? null,
     estimatedIrrigationLiters: day.estimatedIrrigationLiters ?? null,
     estimatedIrrigationNetMm: day.estimatedIrrigationNetMm ?? null,
-    shortDate: fmt.date(day.date) ?? day.date,
+    // `day.date` is a bare YYYY-MM-DD: parse it as a calendar day, not as
+    // UTC midnight, or the label slips to the previous day west of Greenwich.
+    shortDate: fmt.date(parseCalendarDay(day.date)) ?? day.date,
   }));
 
   if (!water.available) {
