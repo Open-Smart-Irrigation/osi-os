@@ -1194,28 +1194,33 @@ export const systemAPI = {
   },
 };
 
-export interface SystemSettings {
-  gatewayTimezone: string;
-  /**
-   * Gateway-level Field Journal module switch. Absent on a gateway that
-   * predates the setting, which means enabled.
-   */
+/**
+ * Gateway-level module switches. Each is absent on a gateway that predates the
+ * setting, which means enabled.
+ */
+export interface GatewayModuleSettings {
+  dataModuleEnabled?: boolean;
+  networkModuleEnabled?: boolean;
+  gatewayHubModuleEnabled?: boolean;
   journalModuleEnabled?: boolean;
 }
 
+export interface SystemSettings extends GatewayModuleSettings {
+  gatewayTimezone: string;
+}
+
 /**
- * A PUT either carries a time zone, or the journal module switch, or both. The
- * time zone stays required for a plain time-zone write -- the gateway rejects a
- * PUT with neither field.
+ * A PUT either carries a time zone, or one or more module switches, or both.
+ * The time zone stays required for a plain time-zone write -- the gateway
+ * rejects a PUT with neither.
  */
 export type UpdateSystemSettingsRequest =
-  | { gatewayTimezone: string; applyToAllZones?: boolean; journalModuleEnabled?: boolean }
-  | { journalModuleEnabled: boolean };
+  | ({ gatewayTimezone: string; applyToAllZones?: boolean } & GatewayModuleSettings)
+  | GatewayModuleSettings;
 
-export interface UpdateSystemSettingsResult {
+export interface UpdateSystemSettingsResult extends GatewayModuleSettings {
   gatewayTimezone: string;
   zonesUpdated: number;
-  journalModuleEnabled?: boolean;
 }
 
 export const systemSettingsAPI = {

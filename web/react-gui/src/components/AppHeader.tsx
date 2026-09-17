@@ -3,8 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
-import { useDisplayPreferences } from '../utils/displayPreferences';
-import { useJournalModuleEnabled } from '../hooks/useGatewayModules';
+import { useGatewayModules } from '../hooks/useGatewayModules';
 
 type TabKey = 'zones' | 'data' | 'journal';
 
@@ -46,13 +45,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const { pathname } = useLocation();
-  // Module visibility (2026-09-17): a tab disappearing here does not
-  // unregister its route -- /analysis and /history stay reachable by URL, and
-  // a page rendered under a hidden tab still renders.
-  const { modules } = useDisplayPreferences();
-  // Gateway-level, not a browser preference: switching the Field Journal off
-  // also stops the journal-v2 replication worker contacting the cloud.
-  const journalEnabled = useJournalModuleEnabled();
+  // Module visibility (2026-09-17): gateway-level settings, so every user of a
+  // gateway sees the same tabs. A tab disappearing here does not unregister its
+  // route -- /analysis, /history and /journal stay reachable by URL, and a page
+  // rendered under a hidden tab still renders.
+  const modules = useGatewayModules();
 
   const dataTarget = isDesktopBrowser() ? '/analysis' : '/history';
   const dataActive =
@@ -70,7 +67,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     ...(modules.data
       ? [{ key: 'data' as const, label: t('tabs.data'), to: dataTarget, active: dataActive }]
       : []),
-    ...(journalEnabled
+    ...(modules.journal
       ? [{
         key: 'journal' as const,
         label: t('tabs.journal'),

@@ -38,10 +38,12 @@ vi.mock('../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => true),
 }));
 
-const gatewayModules = vi.hoisted(() => ({ journalEnabled: true }));
+const gatewayModules = vi.hoisted(() => ({
+  flags: { data: true, network: true, gatewayHub: true, journal: true },
+}));
 
 vi.mock('../../hooks/useGatewayModules', () => ({
-  useJournalModuleEnabled: () => gatewayModules.journalEnabled,
+  useGatewayModules: () => gatewayModules.flags,
 }));
 
 function renderHeader(overrides: Partial<ComponentProps<typeof DashboardHeader>> = {}) {
@@ -60,7 +62,7 @@ beforeEach(() => {
   // The Data/Network header entries are gated on osi.modules.*; a leftover
   // key from a sibling test would silently change what this suite renders.
   window.localStorage.clear();
-  gatewayModules.journalEnabled = true;
+  gatewayModules.flags = { data: true, network: true, gatewayHub: true, journal: true };
   vi.mocked(isDesktopBrowser).mockReturnValue(true);
 });
 
@@ -132,14 +134,14 @@ describe('DashboardHeader (osi-os)', () => {
   });
 
   it('hides the Data link when the data module is off, leaving Network alone', () => {
-    window.localStorage.setItem('osi.modules.data', 'false');
+    gatewayModules.flags.data = false;
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Network' })).toBeInTheDocument();
   });
 
   it('hides the Network link when the network module is off, leaving Data alone', () => {
-    window.localStorage.setItem('osi.modules.network', 'false');
+    gatewayModules.flags.network = false;
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument();
@@ -154,7 +156,7 @@ describe('DashboardHeader (osi-os)', () => {
   });
 
   it('hides the journal capture entry from the Add menu when the journal module is off', () => {
-    gatewayModules.journalEnabled = false;
+    gatewayModules.flags.journal = false;
     renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(screen.queryByRole('menuitem', { name: 'Activity' })).not.toBeInTheDocument();
