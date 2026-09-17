@@ -15,6 +15,16 @@
 // This module is a process-lifetime LRU-ish cache -- it resets on every
 // Node-RED restart, exactly like the rest of in-memory flow state.
 //
+// Two known coverage limits (see also the PR body):
+//   - Process-lifetime only: a Node-RED restart empties the cache, so a
+//     redelivery that happens to straddle a restart is not caught. That is
+//     the same limitation every other in-memory flow cache in this repo has.
+//   - 10-minute TTL (default): a redelivery arriving more than DEFAULT_TTL_MS
+//     after the original is not caught either. Both limits are the reason
+//     this is explicitly NOT a substitute for a durable UNIQUE constraint.
+// The "MQTT IN (Radio Observations)" -> radio-capture-fn ingest path (a
+// separate, non-device_data radio-observations table) is out of scope.
+//
 // Keying:
 //   - Prefer ChirpStack's own `deduplicationId` when present. ChirpStack
 //     mints a fresh one per genuinely distinct uplink event, INCLUDING the
@@ -29,6 +39,18 @@
 //     the cache's own TTL) -- two uplinks sharing a devEui+fCnt but more
 //     than one bucket apart in wall-clock receipt time are never treated as
 //     the same event.
+//   - Every key is namespaced by an optional `source` (e.g. 'kiwi', 'strega',
+//     's2120', 'lorain', 'lsn50', 'uc512', 'sdi12'). All 10 `mqtt in` nodes
+//     in flows.json share the identical wildcard topic
+//     (application/+/device/+/event/up) and ChirpStack profile-name fallback
+//     matching is not exclusive (e.g. a profile literally named
+//     "Dragino SDI-12 Soil Node" matches both the LSN50 and SDI12 name
+//     checks), so two different decoders can legitimately be offered the
+//     SAME physical uplink. Without a source prefix, whichever decoder's
+//     osiLib.require('uplink-dedup') call happened to run first would
+//     "claim" the shared key and silently starve the other decoder's own,
+//     otherwise-legitimate write. Namespacing keeps each decoder's dedup
+//     bookkeeping fully independent (F83-V2).
 //
 // This module is loaded once per Node-RED process via osiLib.require
 // ('uplink-dedup') from every flows.json decode function that writes to
@@ -36,28 +58,72 @@
 // LSN50, UC512, SDI12). Node's own require() cache means every call site
 // shares the SAME underlying guard instance -- exactly one LRU per gateway,
 // not one per node.
+//
+// Fail-open, defense in depth (F83-V1): a dedup check is an optimization, not
+// a correctness requirement for the write path -- an uplink dropped by a
+// broken guard is a WORSE outcome (real telemetry silently lost) than an
+// occasional missed duplicate (the original F83 bug this module fixes). So
+// every public entry point here refuses to throw: hostile/malformed identity
+// fields (e.g. a JSON-constructible object like
+// { toString: 'x', valueOf: 'y' }, which makes String()/Number() throw
+// TypeError per the ToPrimitive spec algorithm) are rejected by typeof
+// checks before any conversion is attempted, AND the whole call is wrapped
+// in try/catch as a second, independent layer -- so a defect this module's
+// author did not anticipate still fails open instead of failing closed.
+// Call sites additionally verify `typeof value.isDuplicateUplink ===
+// 'function'` before calling, in case osi-lib's loader ever hands back a
+// shape-drifted module (e.g. `{ value: {} }`).
 
 const DEFAULT_MAX_ENTRIES = 2000;
 const DEFAULT_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-// Pure function: given uplink identity fields, decide the cache key. Never
-// touches any cache state, so it is trivially unit-testable on its own.
-function buildDedupKey({ deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = {}) {
-  const dedupId = deduplicationId != null ? String(deduplicationId).trim() : '';
-  if (dedupId) return 'D:' + dedupId;
+// Only ever convert values we already know are safe to convert. Never call
+// String()/Number() on an arbitrary value: a JSON-constructible object like
+// { toString: 'x', valueOf: 'y' } has non-callable toString/valueOf
+// properties, so ToPrimitive's OrdinaryToPrimitive algorithm finds no usable
+// conversion and throws "TypeError: Cannot convert object to primitive
+// value" -- a real uplink payload can carry exactly this shape (it is valid
+// JSON), so a malformed or hostile field must never reach String()/Number().
+function safeIdentityString(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
 
-  const eui = devEui != null ? String(devEui).trim().toUpperCase() : '';
-  const fCntNumber = Number(fCnt);
-  if (!eui || fCnt === null || fCnt === undefined || !Number.isFinite(fCntNumber)) {
+function safeFiniteNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const n = Number(value); // Number() on a string never throws, unlike on an object
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+// Pure function: given uplink identity fields, decide the cache key. Never
+// touches any cache state, so it is trivially unit-testable on its own, and
+// never throws regardless of input shape (see the fail-open note above).
+function buildDedupKey({ source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = {}) {
+  const prefix = (typeof source === 'string' && source) ? source + ':' : '';
+
+  const dedupIdRaw = safeIdentityString(deduplicationId);
+  const dedupId = dedupIdRaw != null ? dedupIdRaw.trim() : '';
+  if (dedupId) return prefix + 'D:' + dedupId;
+
+  const euiRaw = safeIdentityString(devEui);
+  const eui = euiRaw != null ? euiRaw.trim().toUpperCase() : '';
+  const fCntNumber = safeFiniteNumber(fCnt);
+  if (!eui || fCntNumber === null) {
     // Not enough identity to dedup safely. Returning null tells the caller
     // to treat this as never-a-duplicate -- an occasional extra row is far
     // safer than silently dropping telemetry we cannot positively identify.
     return null;
   }
-  const bucketSize = (Number.isFinite(bucketMs) && bucketMs > 0) ? bucketMs : DEFAULT_TTL_MS;
-  const now = Number.isFinite(receivedAtMs) ? receivedAtMs : Date.now();
+  const bucketSize = (typeof bucketMs === 'number' && Number.isFinite(bucketMs) && bucketMs > 0)
+    ? bucketMs
+    : DEFAULT_TTL_MS;
+  const now = (typeof receivedAtMs === 'number' && Number.isFinite(receivedAtMs)) ? receivedAtMs : Date.now();
   const bucket = Math.floor(now / bucketSize);
-  return 'F:' + eui + ':' + fCntNumber + ':' + bucket;
+  return prefix + 'F:' + eui + ':' + fCntNumber + ':' + bucket;
 }
 
 // A bounded, TTL-evicting cache of "keys already seen". Insertion order in a
@@ -106,9 +172,23 @@ function createGuard(options) {
     return false;
   }
 
-  function isDuplicateUplink({ deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = {}) {
-    const key = buildDedupKey({ deduplicationId, devEui, fCnt, receivedAtMs, bucketMs });
-    return checkAndRecord(key, receivedAtMs);
+  // Fail-open (F83-V1): identity extraction is already hardened
+  // (buildDedupKey never throws), but this try/catch is a deliberate second,
+  // independent layer -- if a future change to buildDedupKey, checkAndRecord,
+  // or the Map operations above ever introduces a throw this author did not
+  // anticipate, a duplicate uplink must still never be dropped as though it
+  // were a fresh one, but a device_data write must also never be blocked by
+  // this optimization failing. Returning false here means "not a duplicate",
+  // i.e. the write proceeds -- exactly the same safe default as an unkeyable
+  // input.
+  function isDuplicateUplink(identity) {
+    try {
+      const { source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = identity || {};
+      const key = buildDedupKey({ source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs });
+      return checkAndRecord(key, receivedAtMs);
+    } catch (_e) {
+      return false;
+    }
   }
 
   function size() {
@@ -122,6 +202,32 @@ function createGuard(options) {
   return { checkAndRecord, isDuplicateUplink, size, reset, maxEntries, ttlMs };
 }
 
+// F83-V4: a dropped duplicate must be observable at the pinned "info" log
+// level (a bare node.debug() is invisible there), but a redelivery storm
+// must not flood the log either. Rate-limits to at most one node.warn() per
+// `key` per `windowMs`, backed by Node-RED's own per-node `context` store
+// (the same context.get/context.set pattern already used by
+// osi-device-writer's SDI12 dead-letter warning) so the rate limit survives
+// across messages the way the dedup cache itself does. Never throws: an
+// observability helper must never be able to block the write path it is
+// reporting on.
+function warnOncePerWindow(node, context, key, nowMs, windowMs, message) {
+  try {
+    if (!node || typeof node.warn !== 'function' || !context || typeof context.get !== 'function'
+      || typeof context.set !== 'function') {
+      return;
+    }
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    const window = (Number.isFinite(windowMs) && windowMs > 0) ? windowMs : DEFAULT_TTL_MS;
+    const last = Number(context.get(key) || 0);
+    if (Number.isFinite(last) && last > 0 && now - last < window) return;
+    context.set(key, now);
+    node.warn(message);
+  } catch (_e) {
+    // best-effort observability only; never let it throw
+  }
+}
+
 // One shared instance per Node-RED process. Flow function nodes reach it
 // exclusively through osiLib.require('uplink-dedup') -> module.exports below,
 // never by constructing their own guard (that would defeat cross-decoder
@@ -133,6 +239,7 @@ module.exports = {
   buildDedupKey,
   isDuplicateUplink: defaultGuard.isDuplicateUplink,
   size: defaultGuard.size,
+  warnOncePerWindow,
   _defaultGuard: defaultGuard, // test-only escape hatch
   DEFAULT_MAX_ENTRIES,
   DEFAULT_TTL_MS,

@@ -11,9 +11,48 @@
 // a Node-RED restart clears it, same as any other in-memory dedup.
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { createGuard, buildDedupKey, DEFAULT_MAX_ENTRIES, DEFAULT_TTL_MS } = require('./index.js');
+const { createGuard, buildDedupKey, warnOncePerWindow, DEFAULT_MAX_ENTRIES, DEFAULT_TTL_MS } = require('./index.js');
+
+// A JSON-constructible object whose toString/valueOf properties are plain
+// strings, not functions. ToPrimitive's OrdinaryToPrimitive algorithm tries
+// each method name in turn, skips non-callable properties, and throws
+// "TypeError: Cannot convert object to primitive value" once it runs out of
+// candidates -- so String(HOSTILE_IDENTITY) and Number(HOSTILE_IDENTITY) both
+// throw. A real uplink payload can legally carry exactly this shape (valid
+// JSON has no notion of "function"), so this is not a contrived attack --
+// it is a plausible malformed/hostile field (F83-V1).
+const HOSTILE_IDENTITY = { toString: 'x', valueOf: 'y' };
+
+describe('osi-uplink-dedup-guard: hostile-input reproducer sanity check', () => {
+  it('confirms the reproducer: plain String()/Number() on the hostile identity object throws TypeError '
+    + '(so a naive buildDedupKey implementation using them would too)', () => {
+    assert.throws(() => String(HOSTILE_IDENTITY), TypeError);
+    assert.throws(() => Number(HOSTILE_IDENTITY), TypeError);
+  });
+});
 
 describe('osi-uplink-dedup-guard: buildDedupKey', () => {
+  it('never throws on a hostile deduplicationId, devEui, or fCnt (F83-V1) -- treats each as unusable identity', () => {
+    assert.doesNotThrow(() => buildDedupKey({ deduplicationId: HOSTILE_IDENTITY, devEui: 'AA', fCnt: 1 }));
+    assert.doesNotThrow(() => buildDedupKey({ deduplicationId: null, devEui: HOSTILE_IDENTITY, fCnt: 1 }));
+    assert.doesNotThrow(() => buildDedupKey({ deduplicationId: null, devEui: 'AA', fCnt: HOSTILE_IDENTITY }));
+    // A hostile deduplicationId with no usable fallback identity must produce
+    // the same "unkeyable" null a missing field would -- never a duplicate.
+    assert.equal(buildDedupKey({ deduplicationId: HOSTILE_IDENTITY, devEui: 'AA', fCnt: HOSTILE_IDENTITY }), null);
+  });
+
+  it('does not treat a hostile deduplicationId as a real dedup id (falls through to the fCnt fallback instead)', () => {
+    const withHostileDedupId = buildDedupKey({ deduplicationId: HOSTILE_IDENTITY, devEui: 'AA', fCnt: 1, receivedAtMs: 0 });
+    const withNoDedupId = buildDedupKey({ devEui: 'AA', fCnt: 1, receivedAtMs: 0 });
+    assert.equal(withHostileDedupId, withNoDedupId, 'a hostile/unusable deduplicationId must fall back exactly like a missing one');
+  });
+
+  it('an array, a boolean, and a bare object devEui are all treated as unusable identity, never converted', () => {
+    assert.equal(buildDedupKey({ devEui: [1, 2, 3], fCnt: 1 }), null);
+    assert.equal(buildDedupKey({ devEui: true, fCnt: 1 }), null);
+    assert.equal(buildDedupKey({ devEui: {}, fCnt: 1 }), null);
+  });
+
   it('keys on deduplicationId alone when present, ignoring fCnt/time entirely', () => {
     const a = buildDedupKey({ deduplicationId: 'dedup-1', devEui: 'AA', fCnt: 5, receivedAtMs: 0 });
     const b = buildDedupKey({ deduplicationId: 'dedup-1', devEui: 'AA', fCnt: 999, receivedAtMs: 999999999 });
@@ -41,6 +80,39 @@ describe('osi-uplink-dedup-guard: buildDedupKey', () => {
   it('returns null (unkeyable, caller must not drop) when both deduplicationId and fCnt are missing', () => {
     assert.equal(buildDedupKey({ devEui: 'AA' }), null);
   });
+
+  // F83-V2: all 10 mqtt-in nodes in flows.json share the identical wildcard
+  // topic, and ChirpStack profile-name fallback matching is not mutually
+  // exclusive (e.g. a profile literally named "Dragino SDI-12 Soil Node"
+  // matches both the LSN50 and SDI12 name checks), so two different decoders
+  // can legitimately be offered the SAME physical uplink. Without a source
+  // prefix, whichever decoder's dedup check ran first would "claim" the
+  // shared key and silently starve the other, otherwise-legitimate decoder.
+  it('namespaces the key by source: identical deduplicationId under two different sources never collides', () => {
+    const a = buildDedupKey({ source: 'lsn50', deduplicationId: 'evt-1', devEui: 'AA', fCnt: 5 });
+    const b = buildDedupKey({ source: 'sdi12', deduplicationId: 'evt-1', devEui: 'AA', fCnt: 5 });
+    assert.notEqual(a, b);
+  });
+
+  it('namespaces the fallback key by source too: identical devEui/fCnt/bucket under two different sources never collides', () => {
+    const a = buildDedupKey({ source: 'lsn50', devEui: 'AA', fCnt: 5, receivedAtMs: 0, bucketMs: 60000 });
+    const b = buildDedupKey({ source: 'sdi12', devEui: 'AA', fCnt: 5, receivedAtMs: 0, bucketMs: 60000 });
+    assert.notEqual(a, b);
+  });
+
+  it('the same source with the same identity still collides (namespacing narrows, never fully isolates a real redelivery)', () => {
+    const a = buildDedupKey({ source: 'lsn50', deduplicationId: 'evt-1', devEui: 'AA', fCnt: 5 });
+    const b = buildDedupKey({ source: 'lsn50', deduplicationId: 'evt-1', devEui: 'AA', fCnt: 5 });
+    assert.equal(a, b);
+  });
+
+  it('a missing/non-string source behaves exactly like no source given (no accidental prefix leakage)', () => {
+    const noSource = buildDedupKey({ deduplicationId: 'evt-1' });
+    const undefinedSource = buildDedupKey({ source: undefined, deduplicationId: 'evt-1' });
+    const nonStringSource = buildDedupKey({ source: 42, deduplicationId: 'evt-1' });
+    assert.equal(noSource, undefinedSource);
+    assert.equal(noSource, nonStringSource);
+  });
 });
 
 describe('osi-uplink-dedup-guard: createGuard / isDuplicateUplink', () => {
@@ -60,18 +132,40 @@ describe('osi-uplink-dedup-guard: createGuard / isDuplicateUplink', () => {
     assert.equal(guard.isDuplicateUplink(second), false, 'a new reading must always be written');
   });
 
-  it('the SAME fCnt reused after a rejoin (a different deduplicationId, well past the bucket window) is NOT a duplicate', () => {
+  // F83-V6 (load-bearing): the FIRST version of this test put the two events
+  // 5 minutes apart, which is also more than one 60s fallback bucket apart --
+  // so it kept passing even under a hypothetical regression that deleted the
+  // "prefer deduplicationId" branch entirely and always fell back to
+  // (devEui, fCnt, bucket). That mutation would NOT have been caught. This
+  // version places the two events 100ms apart, well INSIDE the same fallback
+  // bucket (ttlMs/bucketMs = 60000ms): if deduplicationId were ever ignored,
+  // both events would collapse onto the identical fallback key
+  // ('F:AA:BB:3:<bucket 0>') and the second call would wrongly return true.
+  it('the SAME fCnt reused after a rejoin (a different deduplicationId, inside the same fallback bucket) is NOT a duplicate', () => {
     const guard = createGuard({ ttlMs: 60000 });
     const beforeRejoin = { deduplicationId: 'session-1-evt', devEui: 'AA:BB', fCnt: 3, receivedAtMs: 0 };
     // A rejoin resets the device's own frame counter, so a post-rejoin uplink
-    // can legitimately carry the SAME fCnt as a pre-rejoin one. ChirpStack
-    // always mints a fresh deduplicationId per delivered event (including
-    // after a rejoin), so the primary key path must never fall through to an
-    // fCnt comparison when deduplicationId is present on both sides.
-    const afterRejoin = { deduplicationId: 'session-2-evt', devEui: 'AA:BB', fCnt: 3, receivedAtMs: 5 * 60000 };
+    // can legitimately carry the SAME fCnt as a pre-rejoin one, arriving only
+    // moments later. ChirpStack always mints a fresh deduplicationId per
+    // delivered event (including after a rejoin), so the primary key path
+    // must never fall through to an fCnt/bucket comparison when
+    // deduplicationId is present on both sides -- regardless of how close in
+    // time the two events are.
+    const afterRejoin = { deduplicationId: 'session-2-evt', devEui: 'AA:BB', fCnt: 3, receivedAtMs: 100 };
     assert.equal(guard.isDuplicateUplink(beforeRejoin), false);
     assert.equal(guard.isDuplicateUplink(afterRejoin), false,
-      'a different deduplicationId must always win over a coincidentally-matching fCnt');
+      'a different deduplicationId must always win over a coincidentally-matching fCnt, even within the same fallback bucket');
+  });
+
+  it('(sanity check on the load-bearing claim above) the same scenario WOULD collide via the fallback path alone '
+    + '-- proving the deduplicationId branch, not the bucket, is what keeps it apart', () => {
+    const guard = createGuard({ ttlMs: 60000 });
+    const beforeRejoin = { devEui: 'AA:BB', fCnt: 3, receivedAtMs: 0 }; // no deduplicationId -> fallback path
+    const afterRejoin = { devEui: 'AA:BB', fCnt: 3, receivedAtMs: 100 };
+    assert.equal(guard.isDuplicateUplink(beforeRejoin), false);
+    assert.equal(guard.isDuplicateUplink(afterRejoin), true,
+      'without a deduplicationId, the same devEui+fCnt 100ms apart IS a duplicate under the fallback path -- ' +
+      'confirming the previous test only passes because deduplicationId is actually consulted');
   });
 
   it('fallback path: the SAME fCnt with NO deduplicationId, more than one bucket apart, is NOT a duplicate '
@@ -135,6 +229,87 @@ describe('osi-uplink-dedup-guard: createGuard / isDuplicateUplink', () => {
     guard.reset();
     assert.equal(guard.size(), 0);
     assert.equal(guard.isDuplicateUplink({ deduplicationId: 'k1', receivedAtMs: 1 }), false);
+  });
+
+  // F83-V1: isDuplicateUplink itself is a second, independent fail-open layer
+  // on top of buildDedupKey's own typeof guards -- even a defect this
+  // author did not anticipate must still resolve to "not a duplicate", never
+  // to a thrown exception that could abort the caller's write path.
+  it('isDuplicateUplink never throws for a hostile identity object, and treats it as never-a-duplicate (F83-V1)', () => {
+    // Each assertion uses its own fresh guard: the hostile deduplicationId
+    // falls back to a real (devEui, fCnt, bucket) key (see the buildDedupKey
+    // test above), so checking the SAME identity twice on one guard would
+    // correctly report a duplicate on the second call -- that would defeat
+    // the point of this test, which is "never throws", not "never repeats".
+    assert.doesNotThrow(() => createGuard().isDuplicateUplink({ deduplicationId: HOSTILE_IDENTITY, devEui: 'AA', fCnt: 1 }));
+    assert.equal(createGuard().isDuplicateUplink({ deduplicationId: HOSTILE_IDENTITY, devEui: 'AA', fCnt: 1 }), false);
+    assert.doesNotThrow(() => createGuard().isDuplicateUplink(null));
+    assert.doesNotThrow(() => createGuard().isDuplicateUplink(undefined));
+    assert.doesNotThrow(() => createGuard().isDuplicateUplink('not-an-object'));
+    assert.equal(createGuard().isDuplicateUplink(null), false);
+    assert.equal(createGuard().isDuplicateUplink(undefined), false);
+  });
+
+  it('isDuplicateUplink survives an identity object engineered to defeat the typeof guards themselves '
+    + '(a Proxy whose property access throws) -- proving the try/catch inside isDuplicateUplink is a real, '
+    + 'independent second layer, not merely redundant with buildDedupKey\'s own typeof checks', () => {
+    const guard = createGuard();
+    const throwingProxy = new Proxy({}, {
+      get() { throw new Error('boom: any property access throws'); },
+    });
+    assert.doesNotThrow(() => guard.isDuplicateUplink(throwingProxy));
+    assert.equal(guard.isDuplicateUplink(throwingProxy), false);
+  });
+});
+
+describe('osi-uplink-dedup-guard: warnOncePerWindow (F83-V4 observability)', () => {
+  function makeContextStub() {
+    const store = new Map();
+    return { get: (k) => store.get(k), set: (k, v) => store.set(k, v) };
+  }
+
+  // Timestamps below start at a realistic epoch-scale value (never 0):
+  // context.get() returning the falsy number 0 is indistinguishable from
+  // "never warned" under the `Number(context.get(key) || 0)` idiom this
+  // helper shares with osi-device-writer's SDI12 dead-letter warning -- a
+  // real Date.now() is never 0, so this only matters for test timestamps.
+  const T0 = 1700000000000;
+
+  it('calls node.warn on the first drop for a key, and suppresses further calls inside the window', () => {
+    const warns = [];
+    const node = { warn: (msg) => warns.push(msg) };
+    const context = makeContextStub();
+    warnOncePerWindow(node, context, 'k1', T0, 10000, 'first drop');
+    warnOncePerWindow(node, context, 'k1', T0 + 5000, 10000, 'second drop (suppressed)');
+    assert.deepEqual(warns, ['first drop']);
+  });
+
+  it('warns again once the window has elapsed', () => {
+    const warns = [];
+    const node = { warn: (msg) => warns.push(msg) };
+    const context = makeContextStub();
+    warnOncePerWindow(node, context, 'k1', T0, 10000, 'first drop');
+    warnOncePerWindow(node, context, 'k1', T0 + 10001, 10000, 'third drop (window elapsed)');
+    assert.deepEqual(warns, ['first drop', 'third drop (window elapsed)']);
+  });
+
+  it('different keys (e.g. different devEuis) are rate-limited independently', () => {
+    const warns = [];
+    const node = { warn: (msg) => warns.push(msg) };
+    const context = makeContextStub();
+    warnOncePerWindow(node, context, 'deviceA', T0, 10000, 'A drop');
+    warnOncePerWindow(node, context, 'deviceB', T0, 10000, 'B drop');
+    assert.deepEqual(warns, ['A drop', 'B drop']);
+  });
+
+  it('never throws, even given a malformed node/context (an observability helper must never block the caller)', () => {
+    assert.doesNotThrow(() => warnOncePerWindow(null, null, 'k1', T0, 10000, 'msg'));
+    assert.doesNotThrow(() => warnOncePerWindow({}, {}, 'k1', T0, 10000, 'msg'));
+    assert.doesNotThrow(() => warnOncePerWindow(
+      { warn: () => { throw new Error('node.warn is broken'); } },
+      makeContextStub(),
+      'k1', T0, 10000, 'msg'
+    ));
   });
 });
 
