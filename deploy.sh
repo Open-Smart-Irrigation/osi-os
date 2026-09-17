@@ -1059,6 +1059,14 @@ fetch_required "osi-valve-control runtime.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/runtime.js" \
     "/srv/node-red/osi-valve-control/runtime.js"
 
+# index.js require()s this at module load as well (the device-unclaim plan clearing, F104)
+# -- same missing-file failure mode again. Without it a gateway keeps the old behaviour of
+# leaving an unclaimed valve's weekly plan running inside the valve, but only after failing
+# to load osi-valve-control at all.
+fetch_required "osi-valve-control unclaim.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/unclaim.js" \
+    "/srv/node-red/osi-valve-control/unclaim.js"
+
 fetch_required "osi-system-settings package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
     "/srv/node-red/osi-system-settings/package.json"
