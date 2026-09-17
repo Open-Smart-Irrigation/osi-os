@@ -43,6 +43,18 @@ vi.mock('../dendrometer/DendrometerSection', () => ({
   ),
 }));
 
+// The gateway's module flags, as `useGatewayModules` reports them: `null` while the settings
+// are still loading, otherwise one boolean per module. Tests set `.value` per case.
+const gatewayModulesMock = vi.hoisted(() => ({
+  value: { data: true, network: true, gatewayHub: true, journal: true } as
+    | { data: boolean; network: boolean; gatewayHub: boolean; journal: boolean }
+    | null,
+}));
+
+vi.mock('../../../hooks/useGatewayModules', () => ({
+  useGatewayModules: () => gatewayModulesMock.value,
+}));
+
 vi.mock('../../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => false),
 }));
@@ -152,6 +164,7 @@ function renderCard(
 
 beforeEach(() => {
   window.localStorage.clear();
+  gatewayModulesMock.value = { data: true, network: true, gatewayHub: true, journal: true };
   vi.mocked(isDesktopBrowser).mockReturnValue(false);
   apiMocks.getZoneRecommendations.mockReset();
   apiMocks.getZoneRecommendations.mockResolvedValue([]);
@@ -323,5 +336,40 @@ describe('IrrigationZoneCard Data entry', () => {
     fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
 
     expect(screen.getByTestId('dendrometer-section')).toHaveTextContent('advisory-on');
+  });
+});
+
+describe('IrrigationZoneCard module-gated entry points', () => {
+  it('offers Log activity when the journal module is on', () => {
+    renderCard();
+
+    expect(screen.getByRole('link', { name: 'Log activity' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/journal?capture=1'),
+    );
+  });
+
+  it('does not offer Log activity when the journal module is off', () => {
+    gatewayModulesMock.value = { data: true, network: true, gatewayHub: true, journal: false };
+    renderCard();
+
+    expect(screen.queryByRole('link', { name: 'Log activity' })).not.toBeInTheDocument();
+    // The zone's other actions are unaffected.
+    expect(screen.getByRole('button', { name: 'Assign Device' })).toBeInTheDocument();
+  });
+
+  it('hides both module entry points while the gateway settings are still loading', () => {
+    gatewayModulesMock.value = null;
+    renderCard();
+
+    expect(screen.queryByRole('link', { name: 'Log activity' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /data/i })).not.toBeInTheDocument();
+  });
+
+  it('does not offer the mobile Data link when the data module is off', () => {
+    gatewayModulesMock.value = { data: false, network: true, gatewayHub: true, journal: true };
+    renderCard();
+
+    expect(screen.queryByRole('link', { name: /data/i })).not.toBeInTheDocument();
   });
 });

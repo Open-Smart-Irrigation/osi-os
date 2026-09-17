@@ -19,6 +19,7 @@ import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { useGatewayModules } from '../../hooks/useGatewayModules';
 import { formatSwtValue } from '../../utils/swt';
 import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge, type SoilChannelSelection } from '../../utils/zoneSoil';
 import { useDateFormat } from '../../utils/datetime';
@@ -293,7 +294,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const hasForecastRain = environmentSummary?.water.next24hRainMm != null;
   // The action tile always renders; it has its own insufficient-data state.
   const waterTileCount = 1 + (hasRainGauge ? 1 : 0) + (hasFlowMeter ? 1 : 0) + (hasForecastRain ? 1 : 0);
-  const showZoneDataLink = !isDesktopBrowser();
+  // Entry points to gateway-level modules follow the gateway's module flags, exactly as the
+  // header does. `null` while the settings load: hidden rather than flashed and withdrawn.
+  const gatewayModules = useGatewayModules();
+  const showZoneDataLink = !isDesktopBrowser() && gatewayModules?.data === true;
+  const showJournalLink = gatewayModules?.journal === true;
   const waterSubtitle = formatWaterSubtitle(
     t,
     environmentSummary?.water.action,
@@ -426,13 +431,15 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               >
                 {t('zone.assignDevice')}
               </button>
-              <Link
-                to={buildJournalHref(zone)}
-                style={{ minHeight: '56px' }}
-                className="touch-target min-h-14 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
-              >
-                {tDashboard('addMenu.activity')}
-              </Link>
+              {showJournalLink && (
+                <Link
+                  to={buildJournalHref(zone)}
+                  style={{ minHeight: '56px' }}
+                  className="touch-target min-h-14 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
+                >
+                  {tDashboard('addMenu.activity')}
+                </Link>
+              )}
             </>
           )}
           {showZoneDataLink && (
