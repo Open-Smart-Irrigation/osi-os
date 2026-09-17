@@ -24,6 +24,8 @@
     "conflict": "Ekikozesebwa kikyuse. Ddamu otikke ogezeeko.",
     "dashboard": "Ekipande",
     "map": "Maapu y’omukutu",
+    "zoomIn": "Gaziya",
+    "zoomOut": "Funza",
     "noKnownLocations": "Tewali bifo bimanyiddwa",
     "mapEvidence": "Ebifo n’enkolagana ebiwandiikiddwa byokka; tebikakasa okubikka ekitundu kyonna.",
     "unknownDevices": "Ebifo ebitamanyiddwa",

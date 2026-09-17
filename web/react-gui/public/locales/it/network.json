@@ -24,6 +24,8 @@
     "conflict": "Il dispositivo è cambiato. Ricarica e riprova.",
     "dashboard": "Pannello",
     "map": "Mappa della rete",
+    "zoomIn": "Ingrandisci",
+    "zoomOut": "Riduci",
     "noKnownLocations": "Nessuna posizione nota",
     "mapEvidence": "Solo posizioni e collegamenti registrati; la copertura dell’area non viene dedotta.",
     "unknownDevices": "Posizioni sconosciute",

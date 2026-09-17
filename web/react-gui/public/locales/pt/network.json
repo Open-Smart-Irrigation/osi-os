@@ -24,6 +24,8 @@
     "conflict": "O dispositivo mudou. Recarregue e tente novamente.",
     "dashboard": "Painel",
     "map": "Mapa da rede",
+    "zoomIn": "Aumentar zoom",
+    "zoomOut": "Reduzir zoom",
     "noKnownLocations": "Nenhuma posição conhecida",
     "mapEvidence": "Apenas posições e ligações registadas; a cobertura da área não é inferida.",
     "unknownDevices": "Posições desconhecidas",

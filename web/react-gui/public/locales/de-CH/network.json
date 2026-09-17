@@ -24,6 +24,8 @@
     "conflict": "Dieses Gerät wurde inzwischen geändert. Neu laden und erneut versuchen.",
     "dashboard": "Übersicht",
     "map": "Netzwerkkarte",
+    "zoomIn": "Hineinzoomen",
+    "zoomOut": "Herauszoomen",
     "noKnownLocations": "Keine bekannten Positionen",
     "mapEvidence": "Nur erfasste Positionen und Verbindungen; keine abgeleitete Flächenabdeckung.",
     "unknownDevices": "Unbekannte Positionen",
