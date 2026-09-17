@@ -396,7 +396,7 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
               onClick={() => setSettingsOpen((open) => !open)}
               aria-label={t('irrigationOutcomes.settings', { defaultValue: 'Recent irrigations settings' })}
               title={t('irrigationOutcomes.settings', { defaultValue: 'Recent irrigations settings' })}
-              className={`p-1.5 rounded-md transition-colors ${
+              className={`touch-target p-1.5 rounded-md transition-colors ${
                 settingsOpen
                   ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'

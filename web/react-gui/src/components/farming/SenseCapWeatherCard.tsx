@@ -197,7 +197,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           </span>
           {!readOnly && <button
             onClick={() => setShowConfig((visible) => !visible)}
-            className={`rounded-md p-1.5 transition-colors ${
+            className={`touch-target rounded-md p-1.5 transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
@@ -217,7 +217,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           {!readOnly && <button
             onClick={removal.openConfirm}
             disabled={removal.isRemoving}
-            className="rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+            className="touch-target rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
             title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
           >

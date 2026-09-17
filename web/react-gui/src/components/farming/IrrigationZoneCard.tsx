@@ -357,7 +357,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             <>
               <button
                 onClick={() => setShowConfigModal(true)}
-                className="p-2 rounded-md text-[var(--text-secondary)] hover:bg-[var(--card)] transition-colors text-xl"
+                className="touch-target p-2 rounded-md text-[var(--text-secondary)] hover:bg-[var(--card)] transition-colors text-xl"
                 title={t('zone.configure', { defaultValue: 'Configure' })}
                 aria-label={t('zone.configure', { defaultValue: 'Configure' })}
               >

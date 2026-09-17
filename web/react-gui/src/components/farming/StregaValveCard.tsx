@@ -841,7 +841,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           </span>
           {!readOnly && <button
             onClick={() => setShowConfig(v => !v)}
-            className={`p-1.5 rounded-md transition-colors ${
+            className={`touch-target p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
@@ -860,7 +860,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           {!readOnly && <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving || loading !== null}
-            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="touch-target p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             title={t('stregaValve.removeDeviceTitle')}
           >
             ✕

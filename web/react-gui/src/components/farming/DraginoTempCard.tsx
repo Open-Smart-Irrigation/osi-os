@@ -166,7 +166,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
             onClick={() => setShowConfig((value) => !value)}
             aria-label={showConfig ? 'Close device settings' : 'Device settings'}
             title={showConfig ? 'Close device settings' : 'Device settings'}
-            className={`p-1.5 rounded-md transition-colors ${
+            className={`touch-target p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
@@ -181,7 +181,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
             disabled={removal.isRemoving}
             aria-label={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
             title={deviceRemoveButtonLabel(removeContext, removal.isRemoving, t)}
-            className={`p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed ${FOCUS_VISIBLE_RING}`}
+            className={`touch-target p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed ${FOCUS_VISIBLE_RING}`}
           >
             ✕
           </button>}
