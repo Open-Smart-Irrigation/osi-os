@@ -388,26 +388,6 @@
     ]
   },
   {
-    "id": "f68c8140f5d6eb39",
-    "type": "file in",
-    "z": "auth-tab",
-    "name": "Read Database File",
-    "filename": "/data//db/farming.db",
-    "filenameType": "str",
-    "format": "",
-    "chunk": false,
-    "sendError": false,
-    "encoding": "none",
-    "allProps": false,
-    "x": 500,
-    "y": 460,
-    "wires": [
-      [
-        "a85523a4041eb6f4"
-      ]
-    ]
-  },
-  {
     "id": "a85523a4041eb6f4",
     "type": "function",
     "z": "auth-tab",
@@ -424,7 +404,7 @@
         "module": "crypto"
       }
     ],
-    "x": 770,
+    "x": 500,
     "y": 460,
     "wires": [
       [
@@ -13361,7 +13341,7 @@
     "y": 460,
     "wires": [
       [
-        "f68c8140f5d6eb39"
+        "a85523a4041eb6f4"
       ],
       [
         "ff201b44f81e458b"

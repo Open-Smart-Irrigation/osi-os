@@ -1436,6 +1436,39 @@ if (failures.length === authTagFailuresBefore) {
     console.log('OK  admin read guards tag every verifyBearer rejection with _osiAuthFailure');
 }
 
+// F42: GET /download/database always answers a hardcoded 403 ("Database
+// download is disabled"), but the route read the whole of /data/db/farming.db
+// into memory first and then threw the buffer away. The guard must reach the
+// 403 responder directly; no flow node may read the live database file.
+{
+    const gateFailuresBefore = failures.length;
+    const guard = byId['database-download-admin-read-guard'];
+    if (!guard) {
+        failures.push('database-download-admin-read-guard is missing from flows.json');
+    } else {
+        const allowed = (guard.wires && guard.wires[0]) || [];
+        const readers = allowed.filter((id) => byId[id] && byId[id].type === 'file in');
+        if (readers.length > 0) {
+            failures.push(
+                'database-download-admin-read-guard still routes an authorized request into a file-in node ('
+                + readers.join(', ') + ') before the hardcoded 403'
+            );
+        }
+    }
+    const dbReaders = flows.filter((node) => (
+        node.type === 'file in' && typeof node.filename === 'string' && /farming\.db/.test(node.filename)
+    ));
+    if (dbReaders.length > 0) {
+        failures.push(
+            'flows.json reads the live SQLite database through a file-in node ('
+            + dbReaders.map((node) => node.id).join(', ') + ')'
+        );
+    }
+    if (failures.length === gateFailuresBefore) {
+        console.log('OK  /download/database answers its 403 without reading farming.db');
+    }
+}
+
 // === Global Settings module gates ===
 
 const disableAllSchedulesHttp = flows.find((node) => (
