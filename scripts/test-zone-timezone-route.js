@@ -23,6 +23,17 @@
 // exact getAuthSecret()/verifyBearer() block this route's tab-mates on the
 // same guard already use (zone-config-fn, dendro-location-fn).
 //
+// F53 (2026-09-17 overnight, T16d, CWE-639/IDOR): even a validly-signed
+// bearer token could retime ANY zone by numeric id -- the UPDATE carried no
+// ownership predicate at all. Every sibling write behind the same
+// scoped-zone-config-guard (zone-config-fn, dendro-location-fn,
+// zone-calibration-fn) already scopes both a pre-flight ownership SELECT and
+// its UPDATE to
+// `user_id = (msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId)`.
+// That ternary IS the legacy (flag-off) contract too: a bearer token's own
+// userId gates it to that user's own zones -- never "any authenticated user
+// may edit any zone". Fixed by applying the identical predicate here.
+//
 // Uses the shared flow-node-harness (scripts/lib/scoped-access-harness.js)
 // already exercising sibling nodes on the same guard in
 // scripts/test-scoped-access-writes.js.
@@ -63,6 +74,15 @@ async function callDendroTz(db, options) {
   return executeFunction(loadNode('dendro-tz-fn'), {
     msg: tzRequest(options),
     env: ENV,
+    db,
+    osiLibModules: OSI_LIB_MODULES,
+  });
+}
+
+async function callDendroTzWithEnv(db, env, options) {
+  return executeFunction(loadNode('dendro-tz-fn'), {
+    msg: tzRequest(options),
+    env,
     db,
     osiLibModules: OSI_LIB_MODULES,
   });
@@ -146,4 +166,102 @@ test('F31: a missing zone timezone is rejected with 422, not silently defaulted 
   }
 });
 
-console.log('zone timezone route (F31/F31b) behavioral tests defined; run with `node --test` to execute.');
+const SCOPED_ENV = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '1' };
+
+function scopedTzRequest(userId, username, zoneId, timezone) {
+  return {
+    req: {
+      method: 'PUT',
+      path: `/api/irrigation-zones/${zoneId}/timezone`,
+      headers: { authorization: makeAuthHeader({ userId, username, secret: AUTH_SECRET }) },
+      params: { zone_id: String(zoneId) },
+      query: {},
+      body: timezone === undefined ? {} : { timezone },
+    },
+  };
+}
+
+test('F53: scoped ON -- a grantee reaches the legacy write as the resource owner, not as themselves (mirrors dendro-location-fn\'s W7 guard contract)', async () => {
+  const db = seedScopedDb();
+  try {
+    // Zone 2 is owned by user 1 (admin1); user 2 (res1) only holds a scoped
+    // grant to it (seedScopedDb's g-3 row). This proves _scopedZoneOwnerId
+    // (the real owner, resolved by the guard) -- not the caller's own
+    // auth.userId -- is what must gate the write.
+    const guarded = await executeFunction(loadNode('scoped-zone-config-guard'), {
+      msg: scopedTzRequest(2, 'res1', 2, 'Africa/Kampala'),
+      env: SCOPED_ENV,
+      db,
+    });
+    assert.equal(guarded.result[0]._scopedZoneOwnerId, 1, 'guard must resolve the real zone owner, not the grantee');
+
+    const written = await executeFunction(loadNode('dendro-tz-fn'), {
+      msg: guarded.result[0],
+      env: SCOPED_ENV,
+      db,
+      osiLibModules: OSI_LIB_MODULES,
+    });
+    assert.equal(written.result.statusCode, 200, JSON.stringify(written.result.payload));
+    assert.equal(written.result.payload.timezone, 'Africa/Kampala');
+    const row = db.prepare('SELECT timezone FROM irrigation_zones WHERE id = 2').get();
+    assert.equal(row.timezone, 'Africa/Kampala');
+  } finally {
+    db.close();
+  }
+});
+
+test('F53: scoped ON -- this node does not trust it was reached through the guard: a bearer token for a non-owner/non-grantee user is rejected 404, not written (red before the fix: this answered 200)', async () => {
+  const db = seedScopedDb();
+  const before = db.prepare('SELECT timezone FROM irrigation_zones WHERE id = 1').get().timezone;
+  try {
+    // Calls dendro-tz-fn directly, bypassing scoped-zone-config-guard
+    // entirely, so msg._scopedZoneWriteAuthorized/_scopedZoneOwnerId are
+    // never set -- exactly the F53 shape (any signed token reaching this
+    // node). admin1 (user 1) owns zone 2, not zone 1, and has no grant to
+    // zone 1 in seedScopedDb.
+    const { result } = await callDendroTzWithEnv(db, SCOPED_ENV, {
+      zoneId: 1,
+      timezone: 'Africa/Kampala',
+      authorization: validToken(1, 'admin1'),
+    });
+    assert.equal(result.statusCode, 404, JSON.stringify(result.payload));
+    assert.equal(result.payload.error, 'Zone not found or access denied');
+    const row = db.prepare('SELECT timezone FROM irrigation_zones WHERE id = 1').get();
+    assert.equal(row.timezone, before, 'a rejected write must leave the previous value intact');
+  } finally {
+    db.close();
+  }
+});
+
+test('F53: flag off -- the legacy contract is "own zone only" via the bearer token\'s userId: the actual owner still succeeds', async () => {
+  const db = seedScopedDb();
+  try {
+    // Zone 1 is owned by user 2 (res1); validToken() defaults to userId 2.
+    const { result } = await callDendroTz(db, { zoneId: 1, timezone: 'Africa/Kampala', authorization: validToken() });
+    assert.equal(result.statusCode, 200, JSON.stringify(result.payload));
+    assert.equal(result.payload.timezone, 'Africa/Kampala');
+    const row = db.prepare('SELECT timezone FROM irrigation_zones WHERE id = 1').get();
+    assert.equal(row.timezone, 'Africa/Kampala');
+  } finally {
+    db.close();
+  }
+});
+
+test('F53: flag off -- a signed token for a different user cannot retime a zone it does not own (this was the exact IDOR: 200 before the fix)', async () => {
+  const db = seedScopedDb();
+  const before = db.prepare('SELECT timezone FROM irrigation_zones WHERE id = 2').get().timezone;
+  try {
+    // Zone 2 is owned by user 1 (admin1); token belongs to user 2 (res1), who
+    // owns zone 1 but not zone 2. Flag-off ignores the scope tables entirely
+    // and gates purely on auth.userId, per the sibling routes.
+    const { result } = await callDendroTz(db, { zoneId: 2, timezone: 'Africa/Kampala', authorization: validToken(2, 'res1') });
+    assert.equal(result.statusCode, 404, JSON.stringify(result.payload));
+    assert.equal(result.payload.error, 'Zone not found or access denied');
+    const row = db.prepare('SELECT timezone FROM irrigation_zones WHERE id = 2').get();
+    assert.equal(row.timezone, before, 'a rejected write must leave the previous value intact');
+  } finally {
+    db.close();
+  }
+});
+
+console.log('zone timezone route (F31/F31b/F53) behavioral tests defined; run with `node --test` to execute.');
