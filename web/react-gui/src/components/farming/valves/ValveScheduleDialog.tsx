@@ -3,6 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
 import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
+import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
 
 export interface ValveScheduleDialogProps {
@@ -24,25 +25,15 @@ function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-function formatClock(iso: string, timeZone: string): string {
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return '—';
-  try {
-    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone }).format(date);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date);
-  }
+// Both used to call `new Intl.DateTimeFormat(undefined, …)`, which formats
+// against the operating system's locale and ignored the app language
+// entirely. `utils/datetime` takes the language explicitly.
+function formatClock(iso: string, timeZone: string, language: string | undefined): string {
+  return formatTime(iso, language, { timeZone }) ?? '—';
 }
 
-function formatDateTime(iso: string, timeZone: string): string {
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return '—';
-  const options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' };
-  try {
-    return new Intl.DateTimeFormat(undefined, { ...options, timeZone }).format(date);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
-  }
+function formatDateTime(iso: string, timeZone: string, language: string | undefined): string {
+  return formatDateTimeIn(iso, language, { timeZone }) ?? '—';
 }
 
 /** Offset (in minutes) of `timeZone` from UTC at the given instant: local = UTC + offset. */
@@ -115,9 +106,9 @@ function latestPush(rows: ValveWeekdayPush[]): ValveWeekdayPush | null {
   return rows.slice().sort((a, b) => Date.parse(b.queuedAt) - Date.parse(a.queuedAt))[0] ?? null;
 }
 
-function pushBadgeLabel(row: ValveWeekdayPush | null, timeZone: string, t: Translate): string | null {
+function pushBadgeLabel(row: ValveWeekdayPush | null, timeZone: string, t: Translate, language: string | undefined): string | null {
   if (!row) return null;
-  if (row.state === 'ACKED') return t('scheduleDialog.push.ACKED', { when: row.ackedAt ? formatClock(row.ackedAt, timeZone) : '' });
+  if (row.state === 'ACKED') return t('scheduleDialog.push.ACKED', { when: row.ackedAt ? formatClock(row.ackedAt, timeZone, language) : '' });
   if (row.state === 'FAILED') return t('scheduleDialog.push.FAILED');
   return t('scheduleDialog.push.QUEUED');
 }
@@ -140,7 +131,7 @@ const EMPTY_WEEKLY: WeeklyFormState = { days: [], startTime: '06:00', duration: 
 const EMPTY_ONCE: OnceFormState = { date: '', time: '06:00', duration: '15', label: '' };
 
 export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve, open, onClose, onChanged }) => {
-  const { t } = useTranslation('valves');
+  const { t, i18n } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
   // i18next's typed `t` only accepts the literal key union derived from valves.json, so any
   // dynamically-built key (weekday index, push-badge lookups) goes through this permissive alias.
@@ -405,7 +396,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                   {WEEKDAYS.map((d) => {
                     const windows = data.compiled.days[d] ?? [];
                     const badge = valve.stregaGeneration === 'GEN1'
-                      ? pushBadgeLabel(latestPush(data.pushState.filter((p) => p.weekday === d)), valve.timezone, td)
+                      ? pushBadgeLabel(latestPush(data.pushState.filter((p) => p.weekday === d)), valve.timezone, td, i18n?.language)
                       : null;
                     const dayLabel = td(`weekdays.${d}`);
                     return (
@@ -440,7 +431,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                   })}
                 </div>
                 {valve.stregaGeneration === 'GEN2' && (() => {
-                  const overall = pushBadgeLabel(latestPush(data.pushState), valve.timezone, td);
+                  const overall = pushBadgeLabel(latestPush(data.pushState), valve.timezone, td, i18n?.language);
                   return overall ? <p className="mt-2 text-xs text-[var(--text-tertiary)]">{overall}</p> : null;
                 })()}
               </section>
@@ -463,7 +454,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           <p className="truncate text-xs text-[var(--text-tertiary)]">
                             {schedule.kind === 'WEEKLY'
                               ? `${sortWeekdaysForDisplay(weekdaysFromMask(schedule.weekdaysMask ?? 0)).map((d) => td(`weekdays.${d}`)).join(', ')} · ${schedule.startTime ? `${schedule.startTime}–${windowEnd(schedule.startTime, schedule.durationMinutes)}` : '—'} · ${schedule.durationMinutes} min`
-                              : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone) : '—'} · ${schedule.durationMinutes} min`}
+                              : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone, i18n?.language) : '—'} · ${schedule.durationMinutes} min`}
                           </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
