@@ -294,6 +294,33 @@
   },
   "schedule": {
     "irrigationSchedule": "Trigger-based irrigation",
+    "triggerMethod": "Trigger method",
+    "methodSwt": "Soil moisture SWT",
+    "methodDendro": "Dendrometer",
+    "sensor": "Sensor",
+    "irrigateWhen": "Irrigate when {{sensor}} exceeds {{value}} kPa",
+    "durationMin": "Duration (min)",
+    "triggerSensitivity": "Trigger sensitivity",
+    "baseDurationMin": "Base duration (min)",
+    "responseMode": "Response mode",
+    "advancedSettings": "Advanced settings →",
+    "metric": {
+      "SWT_1": "Sensor 1",
+      "SWT_2": "Sensor 2",
+      "SWT_3": "Sensor 3",
+      "SWT_AVG": "Mean (all sensors)"
+    },
+    "stress": {
+      "mild": "Low sensitivity — irrigate at first signs of stress",
+      "moderate": "Medium sensitivity — irrigate at moderate stress (recommended)",
+      "significant": "High sensitivity — irrigate only under significant stress",
+      "severe": "Conservative — irrigate only at severe stress"
+    },
+    "mode": {
+      "proportional": "Proportional — scale duration with stress level",
+      "fixed": "Fixed — always irrigate for base duration",
+      "aggressive": "Aggressive — extend duration strongly at high stress"
+    },
     "triggerMetric": "Trigger Metric",
     "soilWaterTension1": "Soil Water Tension 1",
     "soilWaterTension2": "Soil Water Tension 2",

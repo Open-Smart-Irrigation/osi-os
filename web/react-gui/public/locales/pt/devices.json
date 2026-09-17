@@ -297,6 +297,33 @@
   },
   "schedule": {
     "irrigationSchedule": "Irrigação acionada por sensor",
+    "triggerMethod": "Método de ativação",
+    "methodSwt": "Humidade do solo (SWT)",
+    "methodDendro": "Dendrómetro",
+    "sensor": "Sensor",
+    "irrigateWhen": "Regar quando {{sensor}} ultrapassar {{value}} kPa",
+    "durationMin": "Duração (min)",
+    "triggerSensitivity": "Sensibilidade de ativação",
+    "baseDurationMin": "Duração base (min)",
+    "responseMode": "Modo de resposta",
+    "advancedSettings": "Definições avançadas →",
+    "metric": {
+      "SWT_1": "Sensor 1",
+      "SWT_2": "Sensor 2",
+      "SWT_3": "Sensor 3",
+      "SWT_AVG": "Média (todos os sensores)"
+    },
+    "stress": {
+      "mild": "Sensibilidade baixa — regar aos primeiros sinais de stress",
+      "moderate": "Sensibilidade média — regar com stress moderado (recomendado)",
+      "significant": "Sensibilidade alta — regar apenas com stress significativo",
+      "severe": "Conservador — regar apenas com stress severo"
+    },
+    "mode": {
+      "proportional": "Proporcional — duração conforme o nível de stress",
+      "fixed": "Fixo — regar sempre a duração base",
+      "aggressive": "Agressivo — aumentar muito a duração com stress elevado"
+    },
     "triggerMetric": "Métrica de ativação",
     "soilWaterTension1": "Tensão hídrica do solo 1",
     "soilWaterTension2": "Tensão hídrica do solo 2",

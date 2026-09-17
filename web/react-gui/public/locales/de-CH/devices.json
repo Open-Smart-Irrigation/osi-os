@@ -297,6 +297,33 @@
   },
   "schedule": {
     "irrigationSchedule": "Sensorgesteuerte Bewässerung",
+    "triggerMethod": "Auslösemethode",
+    "methodSwt": "Bodenfeuchte (SWT)",
+    "methodDendro": "Dendrometer",
+    "sensor": "Sensor",
+    "irrigateWhen": "Bewässern, wenn {{sensor}} {{value}} kPa überschreitet",
+    "durationMin": "Dauer (Min.)",
+    "triggerSensitivity": "Auslöse-Empfindlichkeit",
+    "baseDurationMin": "Basisdauer (Min.)",
+    "responseMode": "Reaktionsmodus",
+    "advancedSettings": "Erweiterte Einstellungen →",
+    "metric": {
+      "SWT_1": "Sensor 1",
+      "SWT_2": "Sensor 2",
+      "SWT_3": "Sensor 3",
+      "SWT_AVG": "Mittelwert (alle Sensoren)"
+    },
+    "stress": {
+      "mild": "Geringe Empfindlichkeit — bei ersten Stressanzeichen bewässern",
+      "moderate": "Mittlere Empfindlichkeit — bei mässigem Stress bewässern (empfohlen)",
+      "significant": "Hohe Empfindlichkeit — nur bei deutlichem Stress bewässern",
+      "severe": "Zurückhaltend — nur bei starkem Stress bewässern"
+    },
+    "mode": {
+      "proportional": "Proportional — Dauer am Stressniveau ausrichten",
+      "fixed": "Fest — immer die Basisdauer bewässern",
+      "aggressive": "Aggressiv — Dauer bei hohem Stress stark verlängern"
+    },
     "triggerMetric": "Auslösemessgrösse",
     "soilWaterTension1": "Bodenwasserspannung 1",
     "soilWaterTension2": "Bodenwasserspannung 2",
