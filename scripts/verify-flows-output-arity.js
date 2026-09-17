@@ -25,6 +25,16 @@
 // Method (regex/bracket static analysis, not a real JS parser — no parser
 // package is vendored in this repo; see verify-flows-fn-parse.js for the
 // same constraint solved via `new Function` instead):
+//   0. F56 (2026-09-17 overnight, T16d): before step 1's keyword search runs,
+//      mask every string literal, template literal, line/block comment, and
+//      regex literal in the source (`maskNonCode`, same tokenizer the
+//      bracket walk in step 2 already uses) so a `return`/`node.send(`
+//      appearing only as plain text inside a comment or string (e.g.
+//      `// legacy code used to return [msg, null, extra]`, or a string
+//      literal containing the same text) is never mistaken for a real
+//      return-array statement. The masked copy is used only to find keyword
+//      positions; parsing from that point on still uses the original,
+//      unmasked source (see `scanBracketedArrays`).
 //   1. Find every `return [` / `node.send([` occurrence in a function node's
 //      `func` source.
 //   2. Walk forward tracking bracket/paren/brace depth, skipping the
@@ -59,6 +69,13 @@
 //     statements (e.g. `const out = []; out.push(x); node.send(out);`) are
 //     not tracked — only an array literal written directly at the call site
 //     is checked.
+//   - A template literal is masked in its entirety by step 0, `${...}`
+//     interpolations included. A `return [...]` written literally inside a
+//     template's `${}` interpolation (e.g. an inline IIFE embedded in a
+//     template that itself contains a real return-array statement) is
+//     invisible to this scanner. No such construct exists anywhere in the
+//     current flows.json; return-array statements here are always plain
+//     top-level code, never nested inside a template interpolation.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -114,6 +131,116 @@ function looksLikeRegexStart(src, k) {
   return false;
 }
 
+// F56 (2026-09-17 overnight, T16d): mask out every string literal, template
+// literal, line/block comment, and regex literal in `src`, replacing their
+// characters (except newlines, kept so downstream line-based reasoning is
+// unaffected) with spaces -- same length, same positions, just with the
+// keyword-bearing text of a comment or a string blanked out. This reuses the
+// exact same tokenizer walk (quote/backtick/comment/regex detection) that
+// `scanBracketedArrays` already applies *inside* a candidate array's source
+// range; the bug this fixes is that the `return`/`node.send(` keyword SEARCH
+// itself ran directly against the raw, unmasked text below, before any of
+// that context-aware skipping happened -- so a comment like
+// `// legacy code used to return [msg, null, extra]` or a string literal
+// containing the same text was indistinguishable from a real
+// return-array-literal statement, and could false-positive the arity check
+// (or, for a `return`/`node.send(` that's itself commented/quoted out,
+// analyze dead text as if it were live routing code). The masked copy is
+// used ONLY to find real keyword positions; every position found in it is
+// then re-applied against the ORIGINAL `src` for bracket/element parsing
+// (identical indices, since masking never changes string length), so a
+// literal like `['swt_1', 'swt_2']` that legitimately follows a real
+// `return` keyword is still parsed correctly.
+//
+// Known limit: a template literal is masked in its entirety, `${...}`
+// interpolations included. A `return [...]` written literally inside a
+// template's `${}` interpolation (e.g. a template that builds its value via
+// an inline IIFE containing a real return-array statement) would be invisible
+// to this scanner. No such construct exists anywhere in the current
+// flows.json (return-array statements are always plain top-level code, never
+// nested inside a template interpolation), and this is consistent with this
+// script's other documented static-analysis limits above -- it is a
+// heuristic sweep, not a real parser.
+function maskNonCode(src) {
+  const n = src.length;
+  const out = src.split('');
+  const blank = (start, end) => {
+    for (let p = start; p < end && p < n; p += 1) {
+      if (out[p] !== '\n') out[p] = ' ';
+    }
+  };
+  let k = 0;
+  while (k < n) {
+    const c = src[k];
+    if (c === '"' || c === "'") {
+      const quote = c;
+      const start = k;
+      k += 1;
+      while (k < n && src[k] !== quote) {
+        if (src[k] === '\\') k += 1;
+        k += 1;
+      }
+      k += 1;
+      blank(start, k);
+      continue;
+    }
+    if (c === '`') {
+      const start = k;
+      k += 1;
+      let braceDepth = 0;
+      while (k < n) {
+        if (src[k] === '\\') { k += 2; continue; }
+        if (braceDepth === 0 && src[k] === '`') { k += 1; break; }
+        if (src[k] === '$' && src[k + 1] === '{') { braceDepth += 1; k += 2; continue; }
+        if (braceDepth > 0 && src[k] === '{') { braceDepth += 1; k += 1; continue; }
+        if (braceDepth > 0 && src[k] === '}') { braceDepth -= 1; k += 1; continue; }
+        if (braceDepth > 0 && (src[k] === '"' || src[k] === "'")) {
+          const q = src[k];
+          k += 1;
+          while (k < n && src[k] !== q) { if (src[k] === '\\') k += 1; k += 1; }
+          k += 1;
+          continue;
+        }
+        k += 1;
+      }
+      blank(start, k);
+      continue;
+    }
+    if (c === '/' && src[k + 1] === '/') {
+      const start = k;
+      k += 2;
+      while (k < n && src[k] !== '\n') k += 1;
+      blank(start, k);
+      continue;
+    }
+    if (c === '/' && src[k + 1] === '*') {
+      const start = k;
+      k += 2;
+      while (k < n && !(src[k] === '*' && src[k + 1] === '/')) k += 1;
+      k = Math.min(k + 2, n);
+      blank(start, k);
+      continue;
+    }
+    if (c === '/' && looksLikeRegexStart(src, k)) {
+      const start = k;
+      k += 1;
+      let inClass = false;
+      while (k < n) {
+        if (src[k] === '\\') { k += 2; continue; }
+        if (src[k] === '[') { inClass = true; k += 1; continue; }
+        if (src[k] === ']') { inClass = false; k += 1; continue; }
+        if (src[k] === '/' && !inClass) { k += 1; break; }
+        k += 1;
+      }
+      while (k < n && /[a-z]/i.test(src[k])) k += 1;
+      blank(start, k);
+      continue;
+    }
+    k += 1;
+  }
+  return out.join('');
+}
+
 // Classify one top-level array element's raw (trimmed) source text.
 function classifyElement(raw) {
   const t = raw.trim();
@@ -126,13 +253,21 @@ function classifyElement(raw) {
 
 // Scan `src` for every occurrence of `prefixRe` immediately followed (after
 // whitespace/comments) by `[`, and return the parsed array info for each
-// balanced occurrence found.
-function scanBracketedArrays(src, prefixRe) {
+// balanced occurrence found. `maskedSrc` is `maskNonCode(src)` -- same
+// length, same positions -- and is what `prefixRe` actually searches, so a
+// `return`/`node.send(` keyword found only inside a comment, string, or
+// template literal never counts as a real match. Once a real match position
+// is found, everything else below (whitespace/comment skipping, bracket
+// depth walking, nested string/template/comment handling) intentionally
+// keeps operating on the ORIGINAL `src`, because that logic already needs to
+// track real strings/comments/templates found *inside* a genuine array
+// literal (e.g. `['a, b', 'c']`) correctly.
+function scanBracketedArrays(src, maskedSrc, prefixRe) {
   const n = src.length;
   const results = [];
   let m;
   prefixRe.lastIndex = 0;
-  while ((m = prefixRe.exec(src))) {
+  while ((m = prefixRe.exec(maskedSrc))) {
     const afterKeyword = m.index + m[0].length;
     const j = skipWsAndComments(src, afterKeyword);
     if (src[j] !== '[') { prefixRe.lastIndex = afterKeyword; continue; }
@@ -254,6 +389,7 @@ function scanBracketedArrays(src, prefixRe) {
 
 function scanFunctionNode(node) {
   const src = node.func;
+  const maskedSrc = maskNonCode(src);
   const wiresLen = Array.isArray(node.wires) ? node.wires.length : 0;
   const findings = [];
   const arrayGroups = [
@@ -261,7 +397,7 @@ function scanFunctionNode(node) {
     { re: /\bnode\.send\s*\(/g, label: 'node.send(' },
   ];
   for (const group of arrayGroups) {
-    for (const a of scanBracketedArrays(src, group.re)) {
+    for (const a of scanBracketedArrays(src, maskedSrc, group.re)) {
       if (!a.balanced) {
         findings.push({ kind: 'unbalanced', label: group.label, snippet: a.snippet });
         continue;
@@ -342,7 +478,7 @@ function run() {
   console.log('verify-flows-output-arity: OK');
 }
 
-module.exports = { checkFlows, scanBracketedArrays, classifyElement };
+module.exports = { checkFlows, scanBracketedArrays, classifyElement, maskNonCode, scanFunctionNode };
 
 if (require.main === module) {
   try {
