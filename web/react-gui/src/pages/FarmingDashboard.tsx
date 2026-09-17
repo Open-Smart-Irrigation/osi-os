@@ -431,10 +431,14 @@ export const FarmingDashboard: React.FC = () => {
               />
             </div>
 
-            {/* Gateway system panel */}
-            <div className="mt-8">
-              <SystemPanel />
-            </div>
+            {/* Gateway hub ("Gateway" / "Passerelle") -- hidden when the
+                gatewayHub module is switched off in Settings. Display-only:
+                nothing about the gateway itself changes. */}
+            {modules.gatewayHub && (
+              <div className="mt-8">
+                <SystemPanel />
+              </div>
+            )}
 
             {/* Auto-refresh indicator */}
             <div className="mt-8 text-center text-[var(--text-tertiary)] text-sm">

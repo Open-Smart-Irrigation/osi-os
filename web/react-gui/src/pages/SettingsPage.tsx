@@ -592,6 +592,39 @@ export function SettingsPage() {
               onLabel={t('on')}
               offLabel={t('off')}
             />
+            {/*
+              Module visibility (owner decision 2026-09-17): the Data view, the
+              Network view and the gateway hub can be switched off here. These
+              are display-only, per-browser preferences like the rows above --
+              they hide the entry points, they do not unregister the routes, so
+              a bookmark or a deep link still works. Defaults on main are ON;
+              customer branches flip the defaults.
+
+              Appended after the existing rows on purpose: several tests index
+              the module rows positionally, and the established order is part of
+              what those tests pin.
+            */}
+            <ModuleRow
+              label={t('dataModule')}
+              enabled={preferences.modules.data}
+              onChange={(enabled) => updateModule('data', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
+            <ModuleRow
+              label={t('networkModule')}
+              enabled={preferences.modules.network}
+              onChange={(enabled) => updateModule('network', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
+            <ModuleRow
+              label={t('gatewayHub')}
+              enabled={preferences.modules.gatewayHub}
+              onChange={(enabled) => updateModule('gatewayHub', enabled)}
+              onLabel={t('on')}
+              offLabel={t('off')}
+            />
           </div>
           {moduleNotice && (
             <p role="status" className="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-900">

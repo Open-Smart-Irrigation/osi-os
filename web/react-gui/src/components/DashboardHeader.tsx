@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
+import { useDisplayPreferences } from '../utils/displayPreferences';
 
 interface DashboardHeaderProps {
   username: string | null;
@@ -23,7 +24,12 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const navigate = useNavigate();
-  const showDesktopData = isDesktopBrowser();
+  // Module visibility (2026-09-17): hiding an entry here is UI-only -- the
+  // /analysis, /history and /network routes stay registered and reachable by
+  // URL. Defaults on main are ON; customer branches flip them.
+  const { modules } = useDisplayPreferences();
+  const showDesktopData = isDesktopBrowser() && modules.data;
+  const showNetwork = isDesktopBrowser() && modules.network;
 
   return (
     <header className="bg-[var(--header-bg)] shadow-xl">
@@ -64,7 +70,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               </Link>
             )}
 
-            {showDesktopData && (
+            {showNetwork && (
               <Link
                 to="/network"
                 className="w-[calc(50%-4px)] sm:w-auto bg-sky-700 hover:bg-sky-800 text-white font-bold text-lg px-6 py-3 rounded-lg transition-colors shadow-lg text-center"

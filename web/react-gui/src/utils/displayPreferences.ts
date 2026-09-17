@@ -14,6 +14,9 @@ const MODULE_KEYS = {
   waterCard: 'osi.modules.waterCard',
   schedulerUi: 'osi.modules.schedulerUi',
   valveControl: 'osi.modules.valveControl',
+  data: 'osi.modules.data',
+  network: 'osi.modules.network',
+  gatewayHub: 'osi.modules.gatewayHub',
 } as const;
 const PREFERENCES_EVENT = 'osi-display-preferences';
 
@@ -51,6 +54,12 @@ export interface ModulePreferences {
   waterCard: boolean;
   schedulerUi: boolean;
   valveControl: boolean;
+  /** Data view entry points (desktop Data link, the Data tab). */
+  data: boolean;
+  /** Network view entry point. */
+  network: boolean;
+  /** The gateway hub card on the dashboard ("Gateway" / "Passerelle"). */
+  gatewayHub: boolean;
 }
 
 export interface DisplayPreferences {
@@ -63,12 +72,18 @@ export interface DisplayPreferences {
   modules: ModulePreferences;
 }
 
+// Defaults on main: everything except the experimental prediction advisory is
+// visible. A customer branch flips these three to false; nothing else about the
+// mechanism changes, so "absent key" must keep meaning "visible" here.
 const DEFAULT_MODULES: ModulePreferences = {
   predictionAdvisory: false,
   environment: true,
   waterCard: true,
   schedulerUi: true,
   valveControl: true,
+  data: true,
+  network: true,
+  gatewayHub: true,
 };
 
 function readStorage(key: string): string | null {
@@ -140,6 +155,9 @@ export function readDisplayPreferences(): DisplayPreferences {
       waterCard: readBooleanPreference(MODULE_KEYS.waterCard, DEFAULT_MODULES.waterCard),
       schedulerUi: readBooleanPreference(MODULE_KEYS.schedulerUi, DEFAULT_MODULES.schedulerUi),
       valveControl: readBooleanPreference(MODULE_KEYS.valveControl, DEFAULT_MODULES.valveControl),
+      data: readBooleanPreference(MODULE_KEYS.data, DEFAULT_MODULES.data),
+      network: readBooleanPreference(MODULE_KEYS.network, DEFAULT_MODULES.network),
+      gatewayHub: readBooleanPreference(MODULE_KEYS.gatewayHub, DEFAULT_MODULES.gatewayHub),
     },
   };
 }
@@ -165,6 +183,9 @@ export function writeDisplayPreferences(next: Partial<DisplayPreferences>): void
     writeStorage(MODULE_KEYS.waterCard, String(next.modules.waterCard));
     writeStorage(MODULE_KEYS.schedulerUi, String(next.modules.schedulerUi));
     writeStorage(MODULE_KEYS.valveControl, String(next.modules.valveControl));
+    writeStorage(MODULE_KEYS.data, String(next.modules.data));
+    writeStorage(MODULE_KEYS.network, String(next.modules.network));
+    writeStorage(MODULE_KEYS.gatewayHub, String(next.modules.gatewayHub));
   }
   dispatchPreferencesEvent();
 }
