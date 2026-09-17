@@ -409,7 +409,12 @@ if (!zoneCommandApply || !requireOsiLibContract(
     'Zone command helpers unavailable:'
 ) || JSON.stringify(zoneCommandApply.wires) !== JSON.stringify([
     ['weather-zones-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    // F128: the ACK output also pings the outbox flush gate, so the ZONE_UPSERTED /
+    // ZONE_DELETED echo that retires the cloud's pending badge leaves in ~0.3 s
+    // instead of waiting for the 30 s Flush Sync Outbox inject (measured 25.018 s
+    // and 24.988 s on Silvan 2026-09-17). Both nodes are on the sync tab, so this
+    // is a direct wire; the gate is pinned separately by test-outbox-event-flush.js.
+    ['9d5e3035c3d069c4', 'sync-outbox-flush-coalesce'],
 ]) || !/applyZoneCommand/.test(zoneCommandApply.func || '') ||
     !/\.close\s*\(/.test(zoneCommandApply.func || '')) {
     failures.push('versioned zone commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
