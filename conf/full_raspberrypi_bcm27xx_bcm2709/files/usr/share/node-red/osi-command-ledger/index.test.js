@@ -726,22 +726,7 @@ test('queueCommandAck: replaying an existing local ledger entry still never queu
     commandId: localCommandId, commandType: 'OPEN_FOR_DURATION', result: 'APPLIED',
   });
 
-  // F96 interaction: OPEN_FOR_DURATION's applied_commands.result_detail is now capped at
-  // 255 chars (see this file's "caps the persisted result_detail" test) -- and a UUID
-  // commandId pushes even a null-reason/detail ack skeleton over that budget, so this
-  // row's stored result_detail is a truncated, no-longer-valid-JSON string. replayAck's
-  // existing JSON.parse-failure fallback (parsedResultDetail) already handles that: it
-  // reconstructs commandId/commandType/status/result/duplicate from applied_commands' own
-  // DB columns rather than the (now unparseable) JSON, which is why an exact deepEqual
-  // with `first` (the untruncated, freshly-built ack) no longer holds -- the REPLAY-
-  // CORRECTNESS invariant this test actually guards (right id/type/result/status, never a
-  // cloud ack) still does.
-  assert.equal(replay.commandId, localCommandId);
-  assert.equal(replay.commandType, 'OPEN_FOR_DURATION');
-  assert.equal(replay.result, 'APPLIED');
-  assert.equal(replay.status, 'ACKED');
-  assert.equal(replay.duplicate, true, 'a replay must self-report as a duplicate');
-  assert.equal(replay.appliedAt, first.appliedAt, 'the original applied_at must be preserved across the replay');
+  assert.deepEqual(replay, first, 'a replay of a local commandId must reproduce the same ack shape');
   assert.equal(
     (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', [localCommandId])).n,
     0,
@@ -773,22 +758,16 @@ test('queueCommandAck: a rejection for a local commandId (write-strega-expectati
   );
 });
 
-// F96: applied_commands.result_detail is shipped verbatim as
-// ValveActuation.command_result_detail by sync-bootstrap-build/sync-force-build's
-// `ac.result_detail AS command_result_detail` query, and the cloud's mirror column is
-// varchar(255) -- Silvan reproduced a 319-char result_detail for a local
-// OPEN_FOR_DURATION command, which 500s the gateway's entire cloud bootstrap. This is
-// the writer-side half of the fix (defense in depth alongside the sync-bootstrap-build/
-// sync-force-build payload-boundary cap): the OPEN_FOR_DURATION row PERSISTED into
-// applied_commands must never exceed 255 chars, even though the ack returned to the
-// caller (and the command_ack_outbox row delivered back over the wire) keeps the full
-// text. The ack envelope's own structural skeleton (commandId/eventUuid/aggregateType/
-// aggregateKey/commandType/status/result/appliedAt/requestedSyncVersion/
-// appliedSyncVersion/duplicate) already serializes to ~284 chars with reason/detail both
-// null -- over budget with NO free text at all -- so the fixture below uses a SHORT
-// error (35 chars) deliberately: the point is that the pre-existing skeleton alone tips
-// this over 255, not that the error text itself needs to be long.
-test('queueCommandAck caps the persisted result_detail at 255 chars for OPEN_FOR_DURATION (F96)', async () => {
+// F117/F120: OPEN_FOR_DURATION's applied_commands.result_detail was briefly capped at 255
+// chars here (#278/F96) and reverted (F120): the ack envelope's own structural skeleton
+// already serializes to ~284-319 chars with reason/detail both null, so EVERY
+// OPEN_FOR_DURATION ack was truncated into invalid JSON -- corrupting replay (F117) and
+// failing scripts/test-scoped-access-writes.js outright. The cloud's varchar(255) mirror
+// is already protected at the payload boundary (sync-bootstrap-build/sync-outbox-build/
+// sync-force-build's capFreeTextFields(), see scripts/test-valve-actuation-text-caps.js)
+// and by the cloud's own EdgeStrings.fitFreeText (#136); this writer must keep the full,
+// parseable ack JSON regardless of command type or length.
+test('queueCommandAck never truncates result_detail, even for an over-255-char OPEN_FOR_DURATION ack (F117/F120)', async () => {
   const db = new TestDb();
   const shortError = 'downlink send failed: timeout';
 
@@ -802,12 +781,9 @@ test('queueCommandAck caps the persisted result_detail at 255 chars for OPEN_FOR
   const fullSerialized = JSON.stringify(queued);
   assert.ok(
     fullSerialized.length > 255,
-    'fixture must reproduce F96: the ack skeleton alone exceeds 255 chars, got ' + fullSerialized.length
+    'fixture reproduces F96/F120: the ack skeleton alone exceeds 255 chars, got ' + fullSerialized.length
   );
 
-  // The ack returned to the caller (and mirrored into command_ack_outbox for delivery
-  // back to whoever is polling this command) is NEVER truncated -- only the durable
-  // applied_commands row is capped.
   assert.equal(queued.reason, shortError);
   assert.equal(queued.detail, shortError);
 
@@ -815,18 +791,16 @@ test('queueCommandAck caps the persisted result_detail at 255 chars for OPEN_FOR
     'SELECT result_detail FROM applied_commands WHERE command_id=?',
     ['900']
   );
-  assert.ok(
-    durable.result_detail.length <= 255,
-    'applied_commands.result_detail must never exceed the cloud mirror\'s varchar(255) width: got ' +
-      durable.result_detail.length
+  assert.equal(
+    durable.result_detail.length,
+    fullSerialized.length,
+    'applied_commands.result_detail must hold the FULL ack JSON, never truncated (F117/F120)'
   );
-  assert.ok(
-    durable.result_detail.includes('…[truncated]'),
-    'truncation must be marked, never silent'
+  assert.deepEqual(
+    JSON.parse(durable.result_detail),
+    queued,
+    'the persisted result_detail must be valid, complete JSON'
   );
-  // A truncated result_detail is no longer valid JSON by design -- parsedResultDetail's
-  // own JSON.parse fallback (exercised via a real replay below) is what keeps this safe.
-  assert.throws(() => JSON.parse(durable.result_detail), 'a capped row is not valid JSON');
 
   const outbox = await db.get(
     'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
@@ -838,24 +812,17 @@ test('queueCommandAck caps the persisted result_detail at 255 chars for OPEN_FOR
     'the outbox/caller-facing ack must keep the full untruncated text'
   );
 
-  // Replay must still resolve to correct commandType/status/result -- reconstructed from
-  // applied_commands' own DB columns (never from the now-unparseable result_detail JSON).
+  // Replay must reproduce the exact same ack shape now that result_detail is always
+  // valid JSON -- no fallback-to-DB-columns reconstruction needed for this command type.
   const replay = await ledger.deduplicatePendingCommand(
     db,
     { commandId: 900, commandType: 'OPEN_FOR_DURATION', payload: null },
     { gateway_device_eui: GATEWAY_EUI }
   );
   assert.equal(replay.handled, true);
-  assert.equal(replay.ack.commandType, 'OPEN_FOR_DURATION');
-  assert.equal(replay.ack.result, 'REJECTED_PERMANENT');
-  assert.equal(replay.ack.duplicate, true);
+  assert.deepEqual(replay.ack, queued, 'replay must reproduce the exact untruncated ack (F117/F120)');
 });
 
-// The cap is scoped to OPEN_FOR_DURATION (the only command_type a
-// valve_actuation_expectations.command_id can ever reference, per this module's F96
-// comment) so that journal/zone/scoped-access command families -- whose dedup logic
-// parses result_detail's JSON content (journalEffectProvenanceMatches, the zone
-// payloadHash lookup) -- are never put at risk of a truncated, unparseable row.
 test('queueCommandAck never truncates result_detail for a non-valve command type', async () => {
   const db = new TestDb();
   const longError = 'x'.repeat(400);
@@ -873,7 +840,7 @@ test('queueCommandAck never truncates result_detail for a non-valve command type
   );
   assert.ok(
     durable.result_detail.length > 255,
-    'non-valve command types must keep their full result_detail (no F96 exposure via this path)'
+    'non-valve command types must keep their full result_detail'
   );
   assert.equal(JSON.parse(durable.result_detail).reason, longError);
 });

@@ -17,10 +17,20 @@
 // command_result_detail (maxLength 255 per docs/contracts/sync-schema/resources.schema.json,
 // truncated with a trailing "…[truncated]" marker rather than dropped), and the bootstrap's
 // valve_actuations backfill array -- which previously bypassed sanitizeSyncRow entirely --
-// is now routed through it. The writer-side half of the fix (osi-command-ledger's
-// queueCommandAck, osi-valve-control/cancel.js's normalizeReason) is covered by
+// is now routed through it. This boundary cap is the ONLY place `command_result_detail`
+// is ever capped: F117/F120 (2026-09-17) removed a writer-level JSON cap that briefly
+// existed in osi-command-ledger's queueCommandAck (F96) after it truncated the ack
+// envelope into invalid JSON for every OPEN_FOR_DURATION command whose skeleton alone
+// exceeds 255 chars, corrupting `applied_commands.result_detail` and its replay. The
+// writer-layer expectation for `result_detail` is now: the ledger keeps it fully intact
+// (> 255 chars allowed, always parseable JSON) -- see
 // conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.test.js
-// and .../osi-valve-control/cancel.test.js.
+// -- while the WIRE payload `command_result_detail` this file exercises is still capped
+// at 255 by this boundary, which is what actually protects the cloud's varchar(255)
+// column; the end-to-end cases below already prove that boundary cap independent of the
+// writer. `cancel_reason` keeps its own writer-level cap too, in
+// osi-valve-control/cancel.js's normalizeReason(), covered by .../cancel.test.js --
+// F96/F120 never touched that field, only `command_result_detail`.
 //
 // Structure mirrors scripts/test-valve-schedule-timestamp-wire-format.js (F81's own payload-
 // boundary regression test): Layer 1 extracts and unit-tests the truncation helpers verbatim
