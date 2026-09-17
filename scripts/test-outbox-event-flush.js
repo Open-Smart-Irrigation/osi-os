@@ -324,7 +324,7 @@ function fakeDate(nowMs) {
   return FakeDate;
 }
 
-function buildHarness(store, nowMs) {
+function buildHarness(store, nowMs, outboxRows = OUTBOX_ROWS) {
   const warnings = [];
   const queries = [];
   function rowsFor(sql) {
@@ -332,7 +332,7 @@ function buildHarness(store, nowMs) {
     if (/FROM users/.test(sql)) {
       return [{ id: 1, server_url: 'https://cloud.example', server_sync_token: 'tok' }];
     }
-    if (/FROM sync_outbox/.test(sql)) return OUTBOX_ROWS;
+    if (/FROM sync_outbox/.test(sql)) return outboxRows;
     return [];
   }
   class Database {
@@ -362,8 +362,8 @@ function buildHarness(store, nowMs) {
   };
 }
 
-async function runBuild(store, nowMs) {
-  const harness = buildHarness(store, nowMs);
+async function runBuild(store, nowMs, outboxRows) {
+  const harness = buildHarness(store, nowMs, outboxRows);
   harness.sandbox.msg = { payload: nowMs };
   const script = new vm.Script(`(async function () {\n${canonicalBuild.func}\n})()`, {
     filename: `${FLUSH_BUILD_ID}.js`,
@@ -387,6 +387,36 @@ test('two overlapping triggers POST each outbox row once, not twice', async () =
     'the skipped flush must not even re-read the outbox');
   assert.equal(store.get('outboxFlushFollowUp'), true,
     'the skipped trigger must be recorded as a follow-up, not silently dropped');
+});
+
+test('two builds dispatched in the same turn still POST once (V-294)', async () => {
+  // The lease has to be claimed in the same synchronous turn as the check. Claiming it
+  // after the cloud-target lookup and the outbox SELECT leaves a window where the inject
+  // timer and the gate timer, both due in one event-loop turn, each pass the check before
+  // either writes. Both callers here begin their synchronous prefix before either resolves
+  // an await, which is exactly that window.
+  const store = new Map();
+  const first = runBuild(store, 5_000_000);
+  const second = runBuild(store, 5_000_000);
+  const [a, b] = await Promise.all([first, second]);
+
+  const posts = [a.out, b.out].filter(Boolean);
+  assert.equal(posts.length, 1, 'exactly one of two same-turn builds may POST');
+  assert.deepEqual(posts[0]._syncEventIds, ['e1', 'e2']);
+  assert.equal(store.get('outboxFlushFollowUp'), true,
+    'the loser must arm exactly one follow-up rather than be dropped');
+});
+
+test('a flush with nothing to send releases the lease instead of holding it for 120 s', async () => {
+  const store = new Map();
+  const empty = await runBuild(store, 6_000_000, []);
+  assert.equal(empty.out, null, 'an empty outbox produces no POST');
+  assert.ok(!store.get('outboxFlushInFlightAt'),
+    'an early return must not leave the lease held, or the next 120 s of flushes are skipped');
+
+  // ...and the very next trigger can therefore flush normally.
+  const next = await runBuild(store, 6_000_050);
+  assert.ok(next.out, 'the following trigger must not be blocked by the empty flush');
 });
 
 test('the flush lease is released by the chain end, and a stale lease cannot wedge the chain', async () => {
