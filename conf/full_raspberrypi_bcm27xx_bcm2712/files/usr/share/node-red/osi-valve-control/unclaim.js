@@ -68,7 +68,7 @@ async function clearValveOnUnclaim(options) {
   }
 
   const live = await store.listSchedules(db, eui);
-  for (const schedule of live) await store.softDeleteSchedule(db, schedule.schedule_uuid);
+  for (const schedule of live) await store.softDeleteSchedule(db, schedule.schedule_uuid, eui); // (F144) scoped to the valve being unclaimed
 
   // Only WEEKLY rows are compiled into the on-valve plan, so only a WEEKLY tombstone needs
   // a clearing push -- the same gate api.js applies on the explicit schedule delete, for

@@ -97,18 +97,36 @@ async function insertSchedule(db, r) {
 
 const SCHEDULE_COLUMNS = ['label', 'weekdays_mask', 'start_time', 'fire_at', 'duration_minutes', 'timezone', 'enabled', 'once_state', 'once_fired_at'];
 
+// (F144) Every valve on a gateway shares ONE valve_schedules table and schedule_uuid is
+// globally UNIQUE in it, so a write that matches on schedule_uuid alone can land on another
+// valve's row. The owning device_eui is therefore part of the key for every schedule write,
+// not a caller-side convention: a scope that names the wrong valve matches nothing (0 rows,
+// no sync_version bump), and a missing scope is a programming error that throws rather than
+// silently degrading to uuid-only matching. Callers that hold the row already (api.js's
+// routes, workers.js's ONCE tick) pass the EUI they looked it up with; cloud-commands.js
+// passes the EUI the command addressed.
+const EUI_SCOPE_RE = /^[0-9A-F]{16}$/;
+
+function scheduleScope(deviceEui, fnName) {
+  const eui = String(deviceEui == null ? '' : deviceEui).trim().toUpperCase();
+  if (!EUI_SCOPE_RE.test(eui)) throw new Error(fnName + ': a 16-hex deviceEui scope is required');
+  return eui;
+}
+
 // Callers cannot rely on a change count here: the live osi-db-helper facade's run() resolves
 // undefined, so these deliberately return nothing. Whether the row existed/was updated is the
 // caller's job to check (e.g. re-SELECT), not something this function can report.
-async function updateSchedule(db, scheduleUuid, patch) {
+async function updateSchedule(db, scheduleUuid, patch, deviceEui) {
+  const eui = scheduleScope(deviceEui, 'updateSchedule');
   const cols = SCHEDULE_COLUMNS.filter((c) => Object.prototype.hasOwnProperty.call(patch || {}, c));
   if (!cols.length) return;
   // datetime('now'), matching valve_schedules.updated_at/created_at's own DEFAULT (datetime('now')).
-  await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid]));
+  await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid, eui]));
 }
 
-async function softDeleteSchedule(db, scheduleUuid) {
-  await db.run("UPDATE valve_schedules SET deleted_at=datetime('now'), sync_version=COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND deleted_at IS NULL", [scheduleUuid]);
+async function softDeleteSchedule(db, scheduleUuid, deviceEui) {
+  const eui = scheduleScope(deviceEui, 'softDeleteSchedule');
+  await db.run("UPDATE valve_schedules SET deleted_at=datetime('now'), sync_version=COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL", [scheduleUuid, eui]);
 }
 
 // A DAYMASK_PLAN row's mask, decoded from its payload's first hex byte, with the 0x80

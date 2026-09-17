@@ -19,6 +19,19 @@ async function getDevice(db, eui) {
   );
 }
 
+// (F144) The addressed valve is part of a schedule command's key, not a hint about where to
+// send the resulting plan push. Every valve on the gateway shares one valve_schedules table
+// (schedule_uuid is globally UNIQUE there), so an applier that matches on schedule_uuid alone
+// lets a command addressed to valve X rewrite or soft-delete valve Y's schedule. A uuid that
+// already belongs to another valve is a terminal rejection - never a silent re-home of the
+// schedule to the addressed valve, which would move an irrigation window between two physical
+// valves without either side of the sync noticing. A soft-deleted row still owns its uuid
+// (the UNIQUE index does not care about deleted_at), so it is matched here too and rejected
+// with the same explicit code instead of a raw SQLite constraint error.
+function scheduleOwnerMismatch(existing, eui) {
+  return !!existing && String(existing.device_eui || '').trim().toUpperCase() !== eui;
+}
+
 async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now, tzFallback }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   const scheduleUuid = String(cmd.schedule_uuid || cmd.scheduleUuid || '').trim();
@@ -26,7 +39,8 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   const device = await getDevice(db, eui);
   if (!device) return { ok: false, error: 'not_found' };
   if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
-  const existing = await db.get('SELECT schedule_uuid, kind FROM valve_schedules WHERE schedule_uuid=?', [scheduleUuid]);
+  const existing = await db.get('SELECT schedule_uuid, device_eui, kind FROM valve_schedules WHERE schedule_uuid=?', [scheduleUuid]);
+  if (scheduleOwnerMismatch(existing, eui)) return { ok: false, error: 'schedule_device_mismatch' };
 
   // D5: deleted_at carried in the upsert - there is no separate VALVE_SCHEDULE_DELETED op
   // on the edge->cloud side, and the same ValveSchedule shape is reused for this command,
@@ -34,7 +48,7 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   // the normal path; this is defensive, not the expected route.
   if (cmd.deleted_at) {
     if (!existing) return { ok: true, downlinks: [] }; // idempotent: nothing to delete
-    await store.softDeleteSchedule(db, scheduleUuid);
+    await store.softDeleteSchedule(db, scheduleUuid, eui);
     if (existing.kind !== 'WEEKLY') return { ok: true, downlinks: [] };
     const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: false, now, flushQueue, warn, timeZoneFallback: tzFallback });
     return { ok: true, downlinks: q.messages || [] };
@@ -55,7 +69,7 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   }
 
   if (existing) {
-    await store.updateSchedule(db, scheduleUuid, v.value);
+    await store.updateSchedule(db, scheduleUuid, v.value, eui);
   } else {
     await store.insertSchedule(db, Object.assign(
       { schedule_uuid: scheduleUuid, device_eui: eui, timezone: device.zone_timezone || tzFallback },
@@ -67,15 +81,24 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   return { ok: true, downlinks: q.messages || [] };
 }
 
+// (F144) device_eui is required here, not optional: commands.schema.json's generic rule
+// ("else": {"required": ["device_eui"]}, which covers every command type outside the
+// journal/scoped-user exemption list) already puts one on every DELETE_VALVE_SCHEDULE, and
+// without it this applier deletes by uuid alone - a delete addressed to valve X silently
+// removing valve Y's irrigation window. Reading it and matching the pair is contract
+// conformance, not a contract change. An unknown uuid keeps its existing answer (not_found);
+// a uuid owned by another valve is the same explicit rejection the upsert path uses.
 async function applyDeleteValveSchedule({ db, cmd, appId, flushQueue, warn, now, tzFallback }) {
+  const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   const scheduleUuid = String(cmd.schedule_uuid || cmd.scheduleUuid || '').trim();
-  if (!scheduleUuid) return { ok: false, error: 'schedule_uuid is required' };
+  if (!eui || !scheduleUuid) return { ok: false, error: 'device_eui and schedule_uuid are required' };
   const existing = await db.get(
     'SELECT schedule_uuid, device_eui, kind FROM valve_schedules WHERE schedule_uuid=? AND deleted_at IS NULL',
     [scheduleUuid]
   );
   if (!existing) return { ok: false, error: 'not_found' };
-  await store.softDeleteSchedule(db, scheduleUuid);
+  if (scheduleOwnerMismatch(existing, eui)) return { ok: false, error: 'schedule_device_mismatch' };
+  await store.softDeleteSchedule(db, scheduleUuid, eui);
   if (existing.kind !== 'WEEKLY') return { ok: true, downlinks: [] };
   const q = await push.compileAndQueue({ db, deviceEui: existing.device_eui, appId, force: false, now, flushQueue, warn, timeZoneFallback: tzFallback });
   return { ok: true, downlinks: q.messages || [] };

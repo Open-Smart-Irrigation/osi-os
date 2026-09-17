@@ -194,3 +194,39 @@ test('PUT cannot change a schedule\'s kind; it stays pinned to the original', as
   const row = list.payload.schedules.find((s) => s.schedule_uuid === uuid);
   assert.equal(row.kind, 'WEEKLY');
 });
+
+// --- F144 regression pins: the local routes already scope a schedule to the valve in the path ---
+// PUT/DELETE /api/valves/:eui/schedules/:uuid look the row up through listSchedules(eui), so a
+// uuid belonging to another valve is a 404 and never reaches the store. These pin that (the
+// store-level (uuid, device_eui) scope added for F144 is the second line of defence, not the
+// first), including for a second valve the SAME user owns, where ownedValve() cannot help.
+const VALVE_B = '0016C001F1000002';
+
+async function addSecondValve(db) {
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES (?,'Valve B','STREGA_VALVE',1,datetime('now'),datetime('now'))", [VALVE_B]);
+}
+
+test('F144: PUT /api/valves/<B>/schedules/<A-owned uuid> -> 404 and A\'s row is untouched', async () => {
+  const { path, db } = await tempDb();
+  await addSecondValve(db);
+  const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, label: 'A' }));
+  const uuid = created.payload.schedule.schedule_uuid;
+  const before = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  const out = await call(path, req('PUT', `/api/valves/${VALVE_B}/schedules/${uuid}`, { start_time: '23:00', duration_minutes: 90 }));
+  assert.equal(out.statusCode, 404);
+  assert.equal(out.payload.error, 'not_found');
+  const after = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.deepEqual(after, before);
+});
+
+test('F144: DELETE /api/valves/<B>/schedules/<A-owned uuid> -> 404 and A\'s row stays live', async () => {
+  const { path, db } = await tempDb();
+  await addSecondValve(db);
+  const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 30, label: 'A' }));
+  const uuid = created.payload.schedule.schedule_uuid;
+  const out = await call(path, req('DELETE', `/api/valves/${VALVE_B}/schedules/${uuid}`));
+  assert.equal(out.statusCode, 404);
+  assert.equal(out.payload.error, 'not_found');
+  const row = await db.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.deleted_at, null);
+});
