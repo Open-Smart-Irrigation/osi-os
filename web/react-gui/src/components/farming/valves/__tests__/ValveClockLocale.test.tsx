@@ -24,6 +24,10 @@ vi.mock('react-i18next', () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       const table: Record<string, string> = {
         nextRun: 'Next: {{when}} · {{minutes}} min',
+        'openDialog.summary': 'closes at {{time}}',
+        'openDialog.title': 'Open valve',
+        'openDialog.minutes': 'Minutes',
+        'openDialog.confirm': 'Open',
         enclosure: 'Valve enclosure',
         'format.temperature': '{{value}} °C',
         'format.humidity': '{{value}} % RH',
@@ -141,5 +145,75 @@ describe('valve enclosure climate', () => {
     // device_data column the weather station writes. Unlabelled on the tile it
     // read as zone air temperature.
     expect(screen.getByText(/Valve enclosure/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The other two clocks on the valve surface, both still calling
+ * `new Intl.DateTimeFormat(undefined, …)`: the legacy card's actuation
+ * feedback ("closes at 03:26 AM" on a French screen) and the open dialog's
+ * "closes at" summary, which is the line an operator reads before committing
+ * to moving water.
+ */
+describe('valve clocks outside the tile', () => {
+  it('formats the actuation feedback in the app language', async () => {
+    const { getStregaActuationFeedback } = await import('../../StregaValveCard');
+    const rows = [{
+      expectationId: 'exp-1',
+      deviceEui: '0016C001F1000001',
+      deviceName: 'North Valve',
+      zoneId: 1,
+      zoneName: 'North Block',
+      commandId: 'cmd-1',
+      commandedAt: '2026-07-08T03:00:00.000Z',
+      commandedDurationSeconds: 1800,
+      expectedCloseAt: '2026-07-08T03:30:00.000Z',
+      observedOpenAt: '2026-07-08T03:01:00.000Z',
+      observedCloseAt: null,
+      estimatedGrossLiters: null,
+      flowRateLpm: null,
+      reconciliationState: 'OBSERVED_RUNNING',
+      cancelReason: null,
+      trigger: null,
+      commandResult: null,
+      commandResultDetail: null,
+      commandAppliedAt: null,
+      status: 'RUNNING',
+    }] as any;
+    const translate = (key: string, options?: Record<string, unknown>) =>
+      String(options?.defaultValue ?? key).replace(/\{\{(\w+)\}\}/g, (_m, n) => String(options?.[n] ?? ''));
+
+    const french = getStregaActuationFeedback('0016C001F1000001', rows, 'Europe/Zurich', translate as any, 'fr');
+    expect(french?.label).toContain('05:30');
+    expect(french?.label).not.toContain('AM');
+
+    const swissGerman = getStregaActuationFeedback('0016C001F1000001', rows, 'Europe/Zurich', translate as any, 'de-CH');
+    expect(swissGerman?.label).toContain('05:30');
+  });
+
+  it('formats the open dialog closing time in the app language', async () => {
+    language.current = 'fr';
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse('2026-07-08T03:00:00.000Z'));
+    try {
+      const { ValveOpenDialog } = await import('../ValveOpenDialog');
+      render(
+        <ValveOpenDialog
+          valve={{ ...valve(), defaultOpenMinutes: 30 }}
+          open
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+        />,
+      );
+
+      // 03:00 UTC + 30 min is 05:30 in Europe/Zurich.
+      // `textContent` runs the elements together, so the 12-hour marker is
+      // matched against the time it would follow rather than on a word boundary.
+      const text = document.body.textContent ?? '';
+      expect(text).toContain('closes at 05:30');
+      expect(text).not.toMatch(/05:30\s*[AP]M/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

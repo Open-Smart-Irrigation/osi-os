@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ValveSummary } from '../../../types/farming';
 import { estimateLiters } from './valveState';
+import { formatTime } from '../../../utils/datetime';
 
 export interface ValveOpenDialogProps {
   valve: ValveSummary;
@@ -14,18 +15,18 @@ const MIN_MINUTES = 1;
 const MAX_MINUTES = 255;
 const QUICK_CHIPS = [15, 30, 60];
 
-function formatClosesAt(minutes: number, timeZone: string): string {
+/**
+ * The line an operator reads before committing to moving water. It used to
+ * pass `undefined` to `Intl`, which is the operating system's locale, not the
+ * app language.
+ */
+function formatClosesAt(minutes: number, timeZone: string, language: string | undefined): string {
   const at = new Date(Date.now() + minutes * 60_000);
-  const options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
-  try {
-    return new Intl.DateTimeFormat(undefined, { ...options, timeZone }).format(at);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, options).format(at);
-  }
+  return formatTime(at, language, { timeZone }) ?? '—';
 }
 
 export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, onClose, onSubmit }) => {
-  const { t } = useTranslation('valves');
+  const { t, i18n } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
   const [minutesInput, setMinutesInput] = useState(String(valve.defaultOpenMinutes ?? 5));
   const [busy, setBusy] = useState(false);
@@ -58,7 +59,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
   const minutes = Number(minutesInput);
   const isValid = Number.isInteger(minutes) && minutes >= MIN_MINUTES && minutes <= MAX_MINUTES;
   const liters = isValid ? estimateLiters(valve.flowRateLpm, minutes) : null;
-  const closesAtLabel = isValid ? formatClosesAt(minutes, valve.timezone) : null;
+  const closesAtLabel = isValid ? formatClosesAt(minutes, valve.timezone, i18n?.language) : null;
   const titleId = `valve-open-title-${valve.deviceEui}`;
 
   const handleSubmit = async () => {
