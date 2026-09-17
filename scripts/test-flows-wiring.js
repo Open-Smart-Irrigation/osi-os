@@ -1680,6 +1680,43 @@ if (!buildTelemetryFn) {
     }
 }
 
+// F104 / exploratory X-04: "deleting" a device is an unclaim, and an unclaimed STREGA
+// valve keeps executing the weekly plan stored in its own firmware -- invisible, because
+// the GUI no longer lists the device. Both device-delete routes (the legacy chain and the
+// OSI_SCOPED_ACCESS router) must therefore leave through the cleanup node that tombstones
+// the schedules and queues the clearing plan. Pinned as wiring, not as behaviour, because
+// the defect was never a wrong computation: the path simply did not exist.
+const valveUnclaimFn = byId['delete-device-valve-cleanup-fn'];
+if (!valveUnclaimFn) {
+    failures.push('delete-device-valve-cleanup-fn is missing: a valve unclaim would leave its weekly plan running inside the valve (F104)');
+} else {
+    const cleanupFunc = valveUnclaimFn.func || '';
+    if (!/clearValveOnUnclaim\s*\(/.test(cleanupFunc)) {
+        failures.push('delete-device-valve-cleanup-fn must delegate to osi-valve-control clearValveOnUnclaim() rather than restating what clears a valve');
+    }
+    if (/'CLOSE'|"CLOSE"/.test(cleanupFunc)) {
+        failures.push('delete-device-valve-cleanup-fn must never send a bare CLOSE to a STREGA valve');
+    }
+    const legacy = byId['delete-device-response'];
+    if (!legacy || JSON.stringify(legacy.wires) !== JSON.stringify([['delete-device-valve-cleanup-fn']])) {
+        failures.push('delete-device-response must route its formatted 200 through delete-device-valve-cleanup-fn, not straight to device-response');
+    }
+    const scoped = byId['scoped-device-delete-router'];
+    if (!scoped || !Array.isArray(scoped.wires) || JSON.stringify(scoped.wires[1]) !== JSON.stringify(['delete-device-valve-cleanup-fn'])) {
+        failures.push('scoped-device-delete-router\'s response output must route through delete-device-valve-cleanup-fn (the scoped route unclaims devices on its own, without the legacy chain)');
+    }
+    const outs = Array.isArray(valveUnclaimFn.wires) ? valveUnclaimFn.wires : [];
+    if (JSON.stringify(outs[0]) !== JSON.stringify(['device-response'])) {
+        failures.push('delete-device-valve-cleanup-fn must pass every response on to device-response (a delete that answers nothing is a silent hang)');
+    }
+    if (!Array.isArray(outs[1]) || outs[1].length !== 1 || !byId[outs[1][0]] || byId[outs[1][0]].type !== 'mqtt out') {
+        failures.push('delete-device-valve-cleanup-fn must emit its clearing downlinks on a second output wired to an mqtt out node');
+    }
+    if (!failures.some((f) => f.includes('delete-device-valve-cleanup-fn') || f.includes('delete-device-response must route') || f.includes('scoped-device-delete-router'))) {
+        console.log('OK  both device-delete routes clear an unclaimed valve\'s on-valve plan (F104)');
+    }
+}
+
 runJournalHelperFailureMatrix()
     .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {

@@ -919,9 +919,59 @@
     "y": 500,
     "wires": [
       [
-        "device-response"
+        "delete-device-valve-cleanup-fn"
       ]
     ]
+  },
+  {
+    "id": "delete-device-valve-cleanup-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Clear Valve Plan On Unclaim",
+    "func": "// F104 / exploratory X-04: a device \"delete\" is an unclaim, and an unclaimed STREGA valve\n// keeps executing the weekly plan held in its own firmware -- with the device gone from the\n// GUI there is no surface left to remove it from. Clear that plan on the way out, through\n// the same osi-valve-control path the explicit schedule delete uses. Everything else on this\n// wire (both delete routes send their failures down it too) passes through untouched.\nconst eui = String((msg.payload && msg.payload.device_eui) || '').trim().toUpperCase();\nif (Number(msg.statusCode) !== 200 || !/^[0-9A-F]{16}$/.test(eui)) return [msg, null];\nconst dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  node.error('valve unclaim cleanup unavailable, the valve keeps its plan: ' + [dbLoad, vcLoad].filter(function (l) { return !l.ok; }).map(function (l) { return l.error; }).join('; '), msg);\n  return [msg, null];\n}\nconst VC = vcLoad.value;\nconst appId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();\nlet flushQueue = null;\ntry {\n  const client = chirpstack.createProvisioningClientFromEnv(env);\n  flushQueue = function (target) { return client.flushDeviceQueue(target); };\n} catch (e) {\n  node.warn('valve unclaim cleanup: chirpstack client unavailable, the queue will not be flushed: ' + (e && e.message ? e.message : e));\n}\nconst db = new dbLoad.value.Database('/data/db/farming.db');\nconst closeDb = function () { return new Promise(function (resolve) { db.close(function () { resolve(); }); }); };\nreturn VC.clearValveOnUnclaim({\n  db: db, deviceEui: eui, appId: appId, flushQueue: flushQueue,\n  warn: function (m) { node.warn(m); }\n}).then(function (out) {\n  if (out.applicable) {\n    node.log('valve unclaim cleanup ' + eui + ': schedules_cleared=' + out.schedules_cleared + ' pushes_queued=' + out.pushes_queued + ' cancel=' + (out.cancelled && out.cancelled.ok ? 'ok' : ((out.cancelled && out.cancelled.error) || 'none')));\n  }\n  if (!appId && out.messages.length) node.warn('valve unclaim cleanup: CHIRPSTACK_APP_ACTUATORS missing; ' + out.messages.length + ' clearing downlink(s) not sent');\n  const downlinks = appId ? out.messages.map(function (p) { return { topic: p.topic, payload: p.payload }; }) : [];\n  return [msg, downlinks.length ? downlinks : null];\n}).catch(function (e) {\n  // The unclaim itself already succeeded and its response is already formatted: a cleanup\n  // failure must be loud, but it must never swallow the reply (a route that answers nothing\n  // is a silent hang). The pushes that were queued before the failure stay queued.\n  node.error('valve unclaim cleanup failed for ' + eui + ': ' + ((e && e.stack) || e), msg);\n  return [msg, null];\n}).finally(function () { return closeDb(); });",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "chirpstack",
+        "module": "osi-chirpstack-helper"
+      }
+    ],
+    "x": 1240,
+    "y": 580,
+    "wires": [
+      [
+        "device-response"
+      ],
+      [
+        "delete-device-valve-mqtt-out"
+      ]
+    ]
+  },
+  {
+    "id": "delete-device-valve-mqtt-out",
+    "type": "mqtt out",
+    "z": "device-api-tab",
+    "name": "Valve clearing downlinks -> ChirpStack (unclaim)",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "b0b19352dac3fb34",
+    "x": 1600,
+    "y": 580,
+    "wires": []
   },
   {
     "id": "device-options-http",
@@ -13683,7 +13733,7 @@
         "delete-device-auth"
       ],
       [
-        "device-response"
+        "delete-device-valve-cleanup-fn"
       ]
     ]
   },

@@ -7,5 +7,6 @@ const api = require('./api');
 const workers = require('./workers');
 const cloudCommands = require('./cloud-commands');
 const cancel = require('./cancel');
+const unclaim = require('./unclaim');
 const runtime = require('./runtime');
-module.exports = { ...plan, ...ack, ...api, ...workers, ...cloudCommands, ...cancel, ...runtime, store, push };
+module.exports = { ...plan, ...ack, ...api, ...workers, ...cloudCommands, ...cancel, ...unclaim, ...runtime, store, push };

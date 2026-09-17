@@ -1172,9 +1172,16 @@ if (sizeAllowances) {
   // nodeSizes over both byte-identical profiles): delete-device-unlink 712 -> 1093 (+381),
   // delete-device-response 277 -> 875 (+598), dendro-tz-fn 1249 -> 5847 (+4598). No other
   // node changed in this fix.
-  expectCondition(sizeAllowances.total_allowance?.delta === 34139,
-    'size total allowance: exact cumulative delta 34139',
-    'size total allowance: expected exact cumulative delta 34139');
+  // 36938: 2026-09-17 overnight stabilization T13n (osi-os fix/valve-delete-clears-plan,
+  // F104/X-04) raises 34139 by the 2799 chars of one new node (verify-flows-size-ratchet
+  // nodeSizes over both byte-identical profiles): delete-device-valve-cleanup-fn 0 -> 2799.
+  // It routes both device-delete routes through osi-valve-control's clearValveOnUnclaim(),
+  // so an unclaimed STREGA valve stops running the weekly plan held in its own firmware.
+  // No existing node's func changed; the two rewired nodes changed only their wires arrays,
+  // which this ratchet does not measure.
+  expectCondition(sizeAllowances.total_allowance?.delta === 36938,
+    'size total allowance: exact cumulative delta 36938',
+    'size total allowance: expected exact cumulative delta 36938');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
