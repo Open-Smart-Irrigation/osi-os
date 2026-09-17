@@ -13,6 +13,7 @@
 const http = require('node:http');
 const assert = require('node:assert');
 
+const configLib = require('./lib/config');
 const {
   config, assertEndpointsAllowed, assertEndpointGuardPassed, hostOf, isLoopback,
   assertSimulatedDevice, simDeveui, ENDPOINT_GUARD_PASSED, DEFAULTS,
@@ -135,16 +136,271 @@ async function main() {
   console.log('\n-- endpoint guard: port and alt-host gate');
   refuses('a non-numeric MQTT port is refused', { mqttPort: 'eighteen-thirty' });
   refuses('an out-of-range MQTT port is refused', { mqttPort: 70000 });
-  refuses('a non-Silvan SSH host is refused without SILVAN_ALLOW_ALT_HOST',
+  refuses('a host that is on no allow-list entry is refused without SILVAN_ALLOW_ALT_HOST',
     { sshHost: '10.0.0.9', apiBase: 'http://10.0.0.9:1880', guiBase: 'http://10.0.0.9:1880/gui/', mqttHost: '10.0.0.9' },
     { SILVAN_ALLOW_ALT_HOST: undefined });
-  await check('a non-Silvan SSH host is allowed only with SILVAN_ALLOW_ALT_HOST, and only when every endpoint follows it', () => {
-    withEnv(ALT, () => {
-      assertEndpointsAllowed(Object.assign({}, DEFAULTS, {
-        sshHost: '10.0.0.9', apiBase: 'http://10.0.0.9:1880',
-        guiBase: 'http://10.0.0.9:1880/gui/', mqttHost: '10.0.0.9',
-      }));
+  refuses('a host that is on no allow-list entry is refused WITH SILVAN_ALLOW_ALT_HOST too -- the hatch no longer ' +
+    'admits hosts, the allow-list is the only way to name a gateway',
+    { sshHost: '10.0.0.9', apiBase: 'http://10.0.0.9:1880', guiBase: 'http://10.0.0.9:1880/gui/', mqttHost: '10.0.0.9' },
+    ALT);
+
+  console.log('\n-- gateway allow-list: only the known test gateways, selected by name');
+  await check('the default selection is the Silvan gateway, with its own host, EUI and credentials path', () => {
+    const cfg = config();
+    assert.strictEqual(cfg.gateway, 'silvan');
+    assert.strictEqual(cfg.sshHost, '100.81.220.8');
+    assert.strictEqual(cfg.expectedEui, '0016C001F11715E2');
+    assert.strictEqual(cfg.credsFile, '~/osi-tools/.silvan-test-creds');
+  });
+  await check('selecting rpi4-test passes the endpoint checks and switches host, EUI and credentials together', () => {
+    const cfg = config({ gateway: 'rpi4-test' });
+    assert.strictEqual(cfg[ENDPOINT_GUARD_PASSED], true);
+    assert.strictEqual(cfg.sshHost, '100.85.226.64');
+    assert.strictEqual(cfg.expectedEui, '0016C001F11369DE');
+    assert.strictEqual(cfg.credsFile, '~/osi-tools/.rpi4-test-creds');
+  });
+  await check('SILVAN_GATEWAY selects the same entry as the --gateway flag', () => {
+    withEnv({ SILVAN_GATEWAY: 'rpi4-test' }, () => {
+      const cfg = config();
+      assert.strictEqual(cfg.gateway, 'rpi4-test');
+      assert.strictEqual(cfg.expectedEui, '0016C001F11369DE');
     });
+  });
+  await check('endpoints naming the selected gateway host directly are accepted for rpi4-test as well', () => {
+    configLib.assertEndpointsAllowed(Object.assign({}, DEFAULTS, {
+      gateway: 'rpi4-test', sshHost: '100.85.226.64',
+      apiBase: 'http://100.85.226.64:1880', guiBase: 'http://100.85.226.64:1880/gui/',
+      mqttHost: '100.85.226.64', mqttPort: 1883, expectedEui: undefined,
+    }));
+  });
+  await check('an unknown gateway name is refused, from the flag and from the environment', () => {
+    assert.throws(() => config({ gateway: 'bovey' }), /REFUSING/);
+    withEnv({ SILVAN_GATEWAY: 'kaba100' }, () => { assert.throws(() => config(), /REFUSING/); });
+  });
+  await check('a gateway NAME is not a host: SILVAN_GATEWAY cannot introduce an address', () => {
+    for (const value of ['100.85.226.64', '100.99.212.115', 'osicloud.ch']) {
+      withEnv({ SILVAN_GATEWAY: value }, () => {
+        assert.throws(() => config(), /REFUSING/, 'SILVAN_GATEWAY=' + value + ' must not be read as a host');
+      });
+    }
+  });
+  refuses('an API base pointed at the OTHER allow-listed gateway is refused: endpoints still have to ' +
+    'terminate on the one gateway the EUI guards verify',
+    { gateway: 'silvan', apiBase: 'http://100.85.226.64:1880' }, ALT);
+  refuses('an SSH host belonging to a DIFFERENT allow-list entry than the selected one is refused',
+    { gateway: 'silvan', sshHost: '100.85.226.64', apiBase: 'http://100.85.226.64:1880',
+      guiBase: 'http://100.85.226.64:1880/gui/', mqttHost: '100.85.226.64', expectedEui: undefined });
+  refuses('...and is still refused with SILVAN_ALLOW_ALT_HOST set',
+    { gateway: 'silvan', sshHost: '100.85.226.64', apiBase: 'http://100.85.226.64:1880',
+      guiBase: 'http://100.85.226.64:1880/gui/', mqttHost: '100.85.226.64', expectedEui: undefined }, ALT);
+  await check('a configuration whose expectedEui contradicts the selected gateway is refused', () => {
+    assert.throws(() => configLib.assertEndpointsAllowed(Object.assign({}, DEFAULTS, {
+      gateway: 'rpi4-test', sshHost: '100.85.226.64', expectedEui: '0016C001F11715E2',
+    })), /REFUSING/);
+  });
+  await check('every allow-list entry is off the deny-list, uniquely named and addressed, and has a 16-hex EUI', () => {
+    const forbidden = new Set(configLib.FORBIDDEN_HOSTS.map((h) => h.toLowerCase()));
+    const names = new Set(); const hosts = new Set(); const euis = new Set();
+    for (const g of configLib.GATEWAYS) {
+      assert.match(g.expectedEui, /^[0-9A-F]{16}$/, g.name + ' needs a 16-hex uppercase EUI');
+      assert.ok(!forbidden.has(String(g.sshHost).toLowerCase()), g.name + ' must not be a forbidden host');
+      assert.ok(!names.has(g.name), 'duplicate gateway name ' + g.name);
+      assert.ok(!hosts.has(g.sshHost), 'duplicate gateway host ' + g.sshHost);
+      assert.ok(!euis.has(g.expectedEui), 'duplicate gateway EUI ' + g.expectedEui);
+      assert.ok(String(g.credsFile || '').length > 0, g.name + ' needs a credentials file path');
+      names.add(g.name); hosts.add(g.sshHost); euis.add(g.expectedEui);
+    }
+    assert.ok(names.has('silvan') && names.has('rpi4-test'), 'both known test gateways are allow-listed');
+  });
+
+  console.log('\n-- the Bovey demo Pi is refused under every flag/environment combination');
+  await check('no combination of gateway selection, SILVAN_SSH_HOST and SILVAN_ALLOW_ALT_HOST reaches 100.99.212.115', () => {
+    const DEMO = '100.99.212.115';
+    let combos = 0;
+    for (const name of [undefined, 'silvan', 'rpi4-test', 'bovey', 'demo']) {
+      for (const alt of [undefined, '1']) {
+        const where = ' (SILVAN_GATEWAY=' + name + ', SILVAN_ALLOW_ALT_HOST=' + alt + ')';
+        for (const vars of [
+          { SILVAN_SSH_HOST: DEMO },
+          { SILVAN_API_BASE: 'http://' + DEMO + ':1880' },
+          { SILVAN_GUI_BASE: 'http://' + DEMO + ':1880/gui/' },
+          { SILVAN_MQTT_HOST: DEMO },
+        ]) {
+          withEnv(Object.assign({ SILVAN_GATEWAY: name, SILVAN_ALLOW_ALT_HOST: alt }, vars), () => {
+            assert.throws(() => config(), /REFUSING/, Object.keys(vars)[0] + '=' + DEMO + where);
+          });
+          combos += 1;
+        }
+      }
+    }
+    assert.strictEqual(combos, 40, 'every flag/env combination was actually exercised');
+    for (const name of ['silvan', 'rpi4-test']) {
+      assert.throws(() => config({ gateway: name, sshHost: DEMO }), /REFUSING/,
+        'an explicit sshHost override to the demo Pi must be refused for ' + name);
+    }
+  });
+
+  console.log('\n-- EUI guards compare against the SELECTED gateway, never a hardcoded one');
+  const stubSsh = (eui) => ({ host: 'stub-host', exec: async () => String(eui) + '\n' });
+  const stubRest = (eui, status = 200) => ({
+    get: async () => ({ status, body: { gatewayIdentity: { currentEui: eui } } }),
+  });
+  await check('the SSH EUI guard accepts the selected gateway\'s own EUI (rpi4-test)', async () => {
+    const eui = await configLib.assertGatewayViaSsh(stubSsh('0016c001f11369de'), config({ gateway: 'rpi4-test' }));
+    assert.strictEqual(eui, '0016C001F11369DE');
+  });
+  await check('the SSH EUI guard aborts when rpi4-test is selected but the gateway reports Silvan\'s EUI', async () => {
+    await assert.rejects(
+      () => configLib.assertGatewayViaSsh(stubSsh('0016C001F11715E2'), config({ gateway: 'rpi4-test' })),
+      /EUI GUARD TRIPPED \(ssh\)/);
+  });
+  await check('the SSH EUI guard aborts when silvan is selected but the gateway reports the rpi4 EUI', async () => {
+    await assert.rejects(
+      () => configLib.assertGatewayViaSsh(stubSsh('0016C001F11369DE'), config()),
+      /EUI GUARD TRIPPED \(ssh\)/);
+  });
+  await check('an empty EUI read back from the gateway aborts rather than passing', async () => {
+    await assert.rejects(() => configLib.assertGatewayViaSsh(stubSsh(''), config()), /EUI GUARD TRIPPED/);
+  });
+  await check('the API EUI guard accepts the selected gateway and aborts on the other one', async () => {
+    assert.strictEqual(
+      await configLib.assertGatewayViaApi(stubRest('0016C001F11369DE'), config({ gateway: 'rpi4-test' })),
+      '0016C001F11369DE');
+    await assert.rejects(
+      () => configLib.assertGatewayViaApi(stubRest('0016C001F11715E2'), config({ gateway: 'rpi4-test' })),
+      /EUI GUARD TRIPPED \(api\)/);
+  });
+  await check('the API EUI guard refuses a non-200 /api/sync/state rather than reading an absent EUI', async () => {
+    await assert.rejects(() => configLib.assertGatewayViaApi(stubRest('0016C001F11715E2', 503), config()), /EUI GUARD/);
+  });
+  await check('the EUI guards refuse a hand-built config, so a forged expectedEui cannot lower the bar', async () => {
+    await assert.rejects(
+      () => configLib.assertGatewayViaSsh(stubSsh('DEADBEEFDEADBEEF'),
+        { gateway: 'silvan', expectedEui: 'DEADBEEFDEADBEEF', sshHost: '100.81.220.8' }),
+      /REFUSING to start/);
+  });
+  await check('tampering with expectedEui on a guarded config does not move the guard: the allow-list is the source ' +
+    'of truth', async () => {
+    const cfg = config({ gateway: 'rpi4-test' });
+    cfg.expectedEui = '0016C001F11715E2';
+    await assert.rejects(() => configLib.assertGatewayViaSsh(stubSsh('0016C001F11715E2'), cfg), /EUI GUARD TRIPPED/);
+  });
+
+  console.log('\n-- endpoint guard: an SSH/MQTT host is a bare host, never a URL (V-297)');
+  // The payloads below defeated the guard as first written: hostOf() reads the
+  // WHATWG URL hostname ("100.81.220.8", allowed) while ssh(1) splits user@host
+  // on the LAST '@' and connects to what follows it. Verified by hand with
+  // `ssh -G root@https://100.81.220.8/@100.99.212.115`, which prints
+  // `hostname 100.99.212.115` -- the Bovey demo Pi.
+  const SSH_URL_PAYLOADS = [
+    { value: 'https://100.81.220.8/@100.99.212.115', gateway: 'silvan', tail: '100.99.212.115' },
+    { value: 'https://100.81.220.8/@osicloud.ch', gateway: 'silvan', tail: 'osicloud.ch' },
+    { value: 'http://100.85.226.64/@100.99.212.115', gateway: 'rpi4-test', tail: '100.99.212.115' },
+  ];
+  for (const p of SSH_URL_PAYLOADS) {
+    await check('SILVAN_SSH_HOST="' + p.value + '" is refused (--gateway ' + p.gateway + ')', () => {
+      withEnv({ SILVAN_SSH_HOST: p.value, SILVAN_ALLOW_ALT_HOST: '1' }, () => {
+        assert.throws(() => config({ gateway: p.gateway }), /REFUSING/);
+      });
+    });
+    await check('the deny-list sees "' + p.tail + '" inside "' + p.value + '", not only the URL hostname', () => {
+      assert.ok(configLib.hostTokens(p.value).includes(p.tail),
+        'hostTokens must expose every host-shaped token of the raw value');
+      assert.strictEqual(configLib.isForbiddenHost(p.tail), true);
+    });
+  }
+  refuses('a URL-shaped SSH host whose tail is NOT deny-listed is still refused, because it is not a bare host',
+    { sshHost: 'https://100.81.220.8/@10.1.2.3' }, ALT);
+  refuses('an SSH host with a :port suffix is refused (the port is SILVAN_MQTT_PORT/the tunnel, not the host)',
+    { sshHost: '100.81.220.8:22' });
+  refuses('an SSH host with whitespace is refused', { sshHost: '100.81.220.8 ' });
+  refuses('an SSH host starting with "-" cannot inject an ssh option',
+    { sshHost: '-oProxyCommand=curl http://example.invalid' }, ALT);
+  refuses('an MQTT host given as a URL is refused', { mqttHost: 'tcp://127.0.0.1/@100.99.212.115' });
+  refuses('an MQTT host with a :port suffix is refused', { mqttHost: '127.0.0.1:1883' });
+  refuses('an MQTT host starting with "-" is refused', { mqttHost: '-oProxyCommand=x' }, ALT);
+  refuses('an SSH user that smuggles an ssh option is refused', { sshUser: 'root -oProxyCommand=x' });
+
+  console.log('\n-- endpoint guard: deny-list matching is normalised (trailing dot, case, subdomain, userinfo)');
+  await check('a trailing-dot forbidden host is refused AS forbidden, not incidentally', () => {
+    assert.throws(() => config({ sshHost: '100.99.212.115.' }), /forbidden-host list/);
+    assert.throws(() => config({ apiBase: 'http://osicloud.ch./' }), /forbidden-host list/);
+  });
+  await check('a forbidden host in a different case is refused as forbidden', () => {
+    assert.throws(() => config({ guiBase: 'https://OSICLOUD.CH/gui/' }), /forbidden-host list/);
+  });
+  await check('a subdomain of a deny-listed name is refused as forbidden', () => {
+    assert.throws(() => config({ apiBase: 'https://api.osicloud.ch/' }), /forbidden-host list/);
+  });
+  await check('a URL that hides a forbidden host in its userinfo position is refused', () => {
+    assert.throws(() => config({ apiBase: 'http://100.81.220.8@100.99.212.115/' }), /REFUSING/);
+  });
+  refuses('an API base carrying userinfo is refused even when the host itself is the tunnel',
+    { apiBase: 'http://user:pass@127.0.0.1:18800' });
+  refuses('a GUI base carrying userinfo is refused', { guiBase: 'http://user:pass@127.0.0.1:18800/gui/' });
+  refuses('an API base on a non-HTTP scheme is refused', { apiBase: 'ftp://100.81.220.8/' });
+
+  console.log('\n-- the allow-list and the deny-list cannot be mutated at runtime');
+  await check('GATEWAYS, its entries, FORBIDDEN_HOSTS and LOOPBACK_HOSTS are all frozen', () => {
+    assert.throws(() => configLib.GATEWAYS.push({ name: 'demo', sshHost: '100.99.212.115' }), TypeError);
+    assert.throws(() => { configLib.GATEWAYS[0] = { name: 'silvan', sshHost: '100.99.212.115' }; }, TypeError);
+    assert.throws(() => { configLib.GATEWAYS[0].sshHost = '100.99.212.115'; }, TypeError);
+    assert.throws(() => configLib.FORBIDDEN_HOSTS.pop(), TypeError);
+    assert.throws(() => configLib.LOOPBACK_HOSTS.push('100.99.212.115'), TypeError);
+    assert.strictEqual(config().sshHost, '100.81.220.8');
+    assert.strictEqual(configLib.isForbiddenHost('100.99.212.115'), true);
+    assert.strictEqual(isLoopback('100.99.212.115'), false);
+  });
+
+  console.log('\n-- clients re-check their destination, so a config mutated after the guard is caught');
+  await check('the SSH client refuses a config whose host was changed to the demo Pi after config()', () => {
+    const cfg = config();
+    cfg.sshHost = '100.99.212.115';
+    assert.throws(() => new Ssh(cfg), /REFUSING/);
+  });
+  await check('the SSH client refuses a host mutated to the OTHER allow-listed gateway after config()', () => {
+    const cfg = config();
+    cfg.sshHost = '100.85.226.64';
+    assert.throws(() => new Ssh(cfg), /REFUSING to start/);
+  });
+  await check('the SSH client refuses a user mutated into an option after config()', () => {
+    const cfg = config();
+    cfg.sshUser = 'root -oProxyCommand=x';
+    assert.throws(() => new Ssh(cfg), /REFUSING to start/);
+  });
+  await check('the MQTT observer refuses a broker on the OTHER allow-listed gateway after config()', async () => {
+    const cfg = config();
+    cfg.mqttHost = '100.85.226.64';
+    const observer = new DownlinkObserver({ cfg, profiles: {}, actuatorsAppId: 'x' });
+    await assert.rejects(() => observer.start(), /REFUSING to start/);
+  });
+  await check('the SSH client refuses a URL-shaped host that was set after config()', () => {
+    const cfg = config();
+    cfg.sshHost = 'https://100.81.220.8/@100.99.212.115';
+    assert.throws(() => new Ssh(cfg), /REFUSING/);
+  });
+  await check('the SSH destination is the allow-list host, option-terminated, and pinned with HostName', () => {
+    const args = new Ssh(config())._args('true');
+    assert.ok(args.includes('-o') && args.includes('HostName=100.81.220.8'), 'HostName must pin the destination');
+    const sep = args.indexOf('--');
+    assert.ok(sep > 0, 'the option list must be terminated with --');
+    assert.strictEqual(args[sep + 1], 'root@100.81.220.8');
+    assert.strictEqual(args[sep + 2], 'true');
+  });
+  await check('the MQTT observer refuses a config whose broker host was changed after config()', async () => {
+    const cfg = config();
+    cfg.mqttHost = '100.99.212.115';
+    const observer = new DownlinkObserver({ cfg, profiles: {}, actuatorsAppId: 'x' });
+    await assert.rejects(() => observer.start(), /REFUSING/);
+  });
+  await check('the REST client refuses a base URL that is not the tunnel or an allow-listed gateway', () => {
+    assert.throws(() => new Rest('http://100.99.212.115:1880'), /REFUSING/);
+    assert.throws(() => new Rest('http://10.1.2.3:1880'), /REFUSING/);
+    assert.throws(() => new Rest('http://user:pass@127.0.0.1:18800'), /REFUSING/);
+  });
+  await check('the REST client accepts the tunnel and an allow-listed gateway', () => {
+    new Rest('http://127.0.0.1:18800');
+    new Rest('http://100.85.226.64:1880');
   });
 
   console.log('\n-- clients refuse an unguarded configuration');
@@ -159,6 +415,10 @@ async function main() {
   });
   await check('assertEndpointGuardPassed accepts a config() result', () => {
     assertEndpointGuardPassed(config(), 'a test');
+  });
+  await check('the SSH client accepts a guarded rpi4-test config and addresses that gateway, not Silvan', () => {
+    const ssh = new Ssh(config({ gateway: 'rpi4-test' }));
+    assert.strictEqual(ssh.host, '100.85.226.64');
   });
 
   console.log('\n-- simulated devices only');

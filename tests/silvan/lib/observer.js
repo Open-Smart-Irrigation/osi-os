@@ -21,7 +21,7 @@
 //   'observe'   record only; the case answers by hand
 
 const { connect } = require('./mqtt');
-const { assertEndpointGuardPassed } = require('./config');
+const { assertEndpointGuardPassed, assertConnectableHost } = require('./config');
 const U = require('./uplinks');
 
 const DOWNLINK_FILTER = 'application/+/device/+/command/down';
@@ -43,8 +43,11 @@ class DownlinkObserver {
     // broker, so it re-checks that its config cleared the endpoint guard rather
     // than trusting the caller to have used config().
     assertEndpointGuardPassed(this.cfg, 'the MQTT downlink observer');
+    // ...and re-checks the broker address itself, so a cfg mutated after the
+    // guard cannot aim this socket at another gateway's mosquitto.
+    const brokerHost = assertConnectableHost(this.cfg.mqttHost, 'the MQTT downlink observer', this.cfg.gateway);
     this.client = await connect({
-      host: this.cfg.mqttHost,
+      host: brokerHost,
       port: this.cfg.mqttPort,
       clientId: 'osi-silvan-observer-' + process.pid,
     });

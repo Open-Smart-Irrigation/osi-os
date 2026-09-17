@@ -1,5 +1,5 @@
 'use strict';
-// SSH access to the Silvan gateway: read-only SQLite queries, a couple of
+// SSH access to the selected test gateway: read-only SQLite queries, a couple of
 // read-only shell reads, and token minting.
 //
 // Everything here is read-only against the gateway filesystem. The harness
@@ -8,20 +8,29 @@
 // code path works, not that the harness can write rows.
 
 const { execFile } = require('node:child_process');
-const { assertEndpointGuardPassed } = require('./config');
+const { assertEndpointGuardPassed, assertAllowListedSshHost, assertSshUser } = require('./config');
 
 const FORBIDDEN_SQL = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM|ATTACH|PRAGMA\s+\w+\s*=)\b/i;
 
 class Ssh {
   constructor(cfg) {
     assertEndpointGuardPassed(cfg, 'the SSH client');
-    this.host = cfg.sshHost;
-    this.user = cfg.sshUser;
+    // SECOND, INDEPENDENT CHECK. The endpoint guard ran over the cfg as it was
+    // built; this runs over the cfg as it is NOW, at the point a connection
+    // becomes possible. It matters because ssh(1) parses a destination
+    // differently from a URL parser: `ssh root@https://100.81.220.8/@1.2.3.4`
+    // connects to 1.2.3.4, the host after the LAST '@'. So the destination is
+    // re-validated as a bare, allow-listed gateway host, never a URL.
+    this.host = assertAllowListedSshHost(cfg.sshHost, 'the SSH client', cfg.gateway);
+    this.user = assertSshUser(cfg.sshUser, 'the SSH client');
     this.key = cfg.sshKey;
     this.dbPath = cfg.dbPath;
     this.secretPath = cfg.secretPath;
   }
 
+  // `-o HostName=` pins the address ssh(1) will actually dial to the validated
+  // host, whatever the destination argument is later read as, and `--`
+  // terminates the option list so no host value can be taken for an option.
   _args(command) {
     return [
       '-i', this.key,
@@ -29,6 +38,8 @@ class Ssh {
       '-o', 'BatchMode=yes',
       '-o', 'LogLevel=ERROR',
       '-o', 'ConnectTimeout=15',
+      '-o', 'HostName=' + this.host,
+      '--',
       this.user + '@' + this.host,
       command,
     ];

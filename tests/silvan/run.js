@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-// Silvan end-to-end harness runner.
+// OSI gateway end-to-end harness runner.
 //
 //   node tests/silvan/run.js --cases A1,Z1 --out /tmp/silvan-run
+//   node tests/silvan/run.js --gateway rpi4-test --out /tmp/rpi4-run
 //   node tests/silvan/run.js --list
 //
 // Exits non-zero if any selected case fails. See tests/silvan/README.md.
@@ -12,9 +13,10 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const {
-  Ctx, config, assertSilvanViaSsh, assertSilvanViaApi,
+  Ctx, config, assertGatewayViaSsh, assertGatewayViaApi,
   Ssh, Rest, DownlinkObserver, readGatewayEnv, readDeployedFlows,
 } = require('./lib/harness');
+const { GATEWAYS, DEFAULT_GATEWAY } = require('./lib/config');
 const { makeProfiles } = require('./lib/uplinks');
 const { CaseEvidence, writeRunSummary } = require('./lib/evidence');
 
@@ -36,7 +38,7 @@ const CASES = [
 ];
 
 function parseArgs(argv) {
-  const out = { cases: null, out: null, list: false, keep: false, user: null };
+  const out = { cases: null, out: null, list: false, keep: false, user: null, gateway: null };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--cases') out.cases = String(argv[++i] || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -44,6 +46,11 @@ function parseArgs(argv) {
     else if (a === '--list') out.list = true;
     else if (a === '--keep') out.keep = true;             // skip cleanup (debugging only)
     else if (a === '--user') out.user = argv[++i];        // reuse an existing account instead of registering
+    else if (a === '--gateway') {                         // which allow-listed test gateway to target
+      out.gateway = argv[++i];
+      // A bare --gateway must not fall through to the default target.
+      if (!out.gateway) throw new Error('--gateway needs a name: ' + GATEWAYS.map((g) => g.name).join(' | '));
+    }
     else if (a === '--help' || a === '-h') out.help = true;
     else throw new Error('unknown argument: ' + a);
   }
@@ -52,10 +59,12 @@ function parseArgs(argv) {
 
 function usage() {
   console.log([
-    'Usage: node tests/silvan/run.js [--cases A1,Z1] [--out DIR] [--user NAME] [--keep] [--list]',
+    'Usage: node tests/silvan/run.js [--gateway NAME] [--cases A1,Z1] [--out DIR] [--user NAME] [--keep] [--list]',
     '',
+    '  --gateway which allow-listed test gateway to target: ' + GATEWAYS.map((g) => g.name).join(' | ') +
+    ' (default: ' + DEFAULT_GATEWAY + '; SILVAN_GATEWAY sets the same thing)',
     '  --cases   comma-separated case ids (default: all)',
-    '  --out     run directory for evidence (default: ./silvan-run-<timestamp>)',
+    '  --out     run directory for evidence (default: ./<gateway>-run-<timestamp>)',
     '  --user    reuse an existing gateway account (token is minted on the Pi)',
     '            instead of registering a throwaway harness account',
     '  --keep    leave created resources on the gateway (debugging only)',
@@ -134,15 +143,19 @@ async function main() {
   const unknown = (opts.cases || []).filter((id) => !CASES.some((c) => c.id === id));
   if (unknown.length) throw new Error('unknown case id(s): ' + unknown.join(', '));
 
-  const runDir = path.resolve(opts.out || ('silvan-run-' + new Date().toISOString().replace(/[:.]/g, '-')));
+  // The gateway is selected -- and the endpoint guard runs -- before anything
+  // is created on disk, so a refused target never leaves a run directory behind.
+  const cfg = config({ gateway: opts.gateway });
+  console.log('target gateway: ' + cfg.gateway + ' (' + cfg.sshHost + ', expected EUI ' + cfg.expectedEui + ')');
+
+  const runDir = path.resolve(opts.out || (cfg.gateway + '-run-' + new Date().toISOString().replace(/[:.]/g, '-')));
   fs.mkdirSync(runDir, { recursive: true });
 
-  const cfg = config();
   const ssh = new Ssh(cfg);
 
   // GUARD 1 (pre-flight, read-only, before any HTTP call): the gateway's own
-  // configured EUI must be Silvan's.
-  const sshEui = await assertSilvanViaSsh(ssh);
+  // configured EUI must be the selected gateway's.
+  const sshEui = await assertGatewayViaSsh(ssh, cfg);
   console.log('EUI guard (ssh): ' + sshEui + ' OK');
 
   const transcript = [];
@@ -153,7 +166,7 @@ async function main() {
   // bootstrapAuth registers anything, so a tunnel aimed at the wrong Node-RED
   // is caught before this harness writes a single row to it.
   const probeToken = await mintIdentityProbeToken(ssh);
-  const apiEui = await assertSilvanViaApi(new Rest(cfg.apiBase, { token: probeToken, transcript }));
+  const apiEui = await assertGatewayViaApi(new Rest(cfg.apiBase, { token: probeToken, transcript }), cfg);
   console.log('EUI guard (api): ' + apiEui + ' OK');
 
   const env = await readGatewayEnv(ssh);
@@ -170,6 +183,7 @@ async function main() {
   }).start();
 
   const meta = {
+    gateway: cfg.gateway,
     gatewayEui: apiEui,
     sshHost: cfg.sshHost,
     apiBase: cfg.apiBase,

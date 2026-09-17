@@ -51,7 +51,7 @@ exports.run = async (ctx) => {
 
   const s0 = await syncState(rest);
   ctx.expect('GET /api/sync/state reports this gateway identity',
-    s0.gatewayIdentity && s0.gatewayIdentity.currentEui === '0016C001F11715E2', s0.gatewayIdentity);
+    s0.gatewayIdentity && s0.gatewayIdentity.currentEui === ctx.cfg.expectedEui, s0.gatewayIdentity);
   ctx.expect('GET /api/sync/state reports a pending outbox count',
     typeof s0.pendingOutboxCount === 'number', { pendingOutboxCount: s0.pendingOutboxCount });
   ctx.expect('GET /api/sync/state reports database health',
@@ -167,7 +167,7 @@ exports.run = async (ctx) => {
   );
   ctx.expect('SQLite: the zone create is queued in sync_outbox', !!zoneEvent, zoneEvent);
   ctx.expect('SQLite: the queued event is stamped with this gateway EUI',
-    !!zoneEvent && String(zoneEvent.gateway_device_eui || '').toUpperCase() === '0016C001F11715E2', zoneEvent);
+    !!zoneEvent && String(zoneEvent.gateway_device_eui || '').toUpperCase() === ctx.cfg.expectedEui, zoneEvent);
 
   const deviceEvent = await ssh.sqlOne(
     "SELECT aggregate_type, op FROM sync_outbox WHERE aggregate_key = '" + eui + "' ORDER BY occurred_at DESC LIMIT 1"

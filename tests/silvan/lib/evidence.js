@@ -143,9 +143,9 @@ function writeRunSummary(runDir, meta, results) {
   fs.writeFileSync(jsonPath, JSON.stringify({ meta, results }, null, 2) + '\n');
 
   const L = [];
-  L.push('# Silvan E2E harness run');
+  L.push('# OSI edge E2E harness run');
   L.push('');
-  L.push('- Gateway: `' + meta.gatewayEui + '` (' + meta.sshHost + ')');
+  L.push('- Gateway: `' + (meta.gateway || 'silvan') + '` — EUI `' + meta.gatewayEui + '` (' + meta.sshHost + ')');
   L.push('- API: `' + meta.apiBase + '`  MQTT: `' + meta.mqttHost + ':' + meta.mqttPort + '`');
   L.push('- Started: ' + meta.startedAt);
   L.push('- Finished: ' + meta.finishedAt);

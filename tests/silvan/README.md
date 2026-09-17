@@ -1,14 +1,26 @@
-# Silvan end-to-end harness
+# OSI gateway end-to-end harness
 
-Drives the **Silvan test gateway** end to end: real HTTP against the running
+Drives an allow-listed **test gateway** end to end: real HTTP against the running
 Node-RED backend, real MQTT against the gateway's own mosquitto, real SQLite
 read-back over SSH, and a real browser against the GUI the gateway is serving.
 Nothing is mocked and nothing is stubbed — if a case passes, that code path
 works on a real gateway.
 
-Silvan is a **test** gateway with no valve hardware. Every valve, sensor and
-weather station this harness touches is a device it registers itself, with a
-DevEUI in a reserved simulated range.
+Two gateways are allow-listed. Both are **test** gateways with no valve hardware,
+and every valve, sensor and weather station this harness touches is a device it
+registers itself, with a DevEUI in a reserved simulated range.
+
+| `--gateway` | Host | DEVICE_EUI | Hardware | Credentials |
+|---|---|---|---|---|
+| `silvan` (default) | `100.81.220.8` | `0016C001F11715E2` | Pi 5, `bcm2712` | `~/osi-tools/.silvan-test-creds` |
+| `rpi4-test` | `100.85.226.64` | `0016C001F11369DE` | Pi 4B, `bcm2709` | `~/osi-tools/.rpi4-test-creds` |
+
+The list lives in `GATEWAYS` in `lib/config.js` and is the only way to name a
+target: a new gateway needs a reviewed commit carrying its host **and** its
+DEVICE_EUI. No environment variable and no flag adds one at runtime. The Bovey
+demo Pi (`100.99.212.115`) is Pi 4B hardware too, which is exactly why the name
+is the selector and the EUI is checked twice: same profile, different gateway,
+permanently on the deny-list.
 
 ---
 
@@ -19,11 +31,17 @@ anything under `lib/`.
 
 | Guard | Where | What it does |
 |---|---|---|
-| EUI guard, pre-flight | `lib/config.js` `assertSilvanViaSsh` | Reads `uci get osi-server.cloud.device_eui` over SSH **before any HTTP request** and aborts unless it is `0016C001F11715E2`. |
-| EUI guard, over the tunnel | `lib/config.js` `assertSilvanViaApi` | Reads `gatewayIdentity.currentEui` from `GET /api/sync/state` and aborts on a mismatch, so a tunnel terminating on a different Node-RED than the SSH session cannot go unnoticed. |
-| Forbidden hosts | `lib/config.js` `assertEndpointsAllowed` | Applies `FORBIDDEN_HOSTS` (by IP **and** by name) to **every** endpoint — SSH host, `SILVAN_API_BASE`, `SILVAN_GUI_BASE`, `SILVAN_MQTT_HOST` — unconditionally, and **before** `SILVAN_ALLOW_ALT_HOST` is even read. That escape hatch can never reach the Uganda production gateway, `osicloud.ch`, the OSI test server or `100.99.212.115`. |
-| Endpoint consistency | `lib/config.js` `assertEndpointsAllowed` | Every non-SSH endpoint must be either a loopback tunnel address (`127.0.0.1`, `localhost`, `::1`) or exactly the SSH host the EUI guards verify. This closes the gap where SSH points at Silvan — so both EUI guards pass — while the HTTP or MQTT client is quietly aimed elsewhere. `SILVAN_MQTT_PORT` must be a real TCP port. |
-| Host lock | `lib/config.js` `assertEndpointsAllowed` | Refuses any `sshHost` other than Silvan's unless `SILVAN_ALLOW_ALT_HOST` is set — checked last, after the two rules above, and the EUI guards still apply on top. |
+| EUI guard, pre-flight | `lib/config.js` `assertGatewayViaSsh` | Reads `uci get osi-server.cloud.device_eui` over SSH **before any HTTP request** and aborts unless it is the selected gateway's EUI, read from the allow-list rather than from the config object the caller passed. |
+| EUI guard, over the tunnel | `lib/config.js` `assertGatewayViaApi` | Reads `gatewayIdentity.currentEui` from `GET /api/sync/state` and aborts on a mismatch, so a tunnel terminating on a different Node-RED than the SSH session cannot go unnoticed. Same allow-list lookup as the SSH guard. |
+| Forbidden hosts | `lib/config.js` `assertNoForbiddenToken` | Applies `FORBIDDEN_HOSTS` to **every** endpoint — SSH host, `SILVAN_API_BASE`, `SILVAN_GUI_BASE`, `SILVAN_MQTT_HOST` — unconditionally, and **before** anything is parsed or the gateway selection and `SILVAN_ALLOW_ALT_HOST` are read. The match runs over *every host-shaped token of the raw value*, not just the host a URL parser would return, and both sides are canonicalised first (lowercased, IPv6 brackets and the trailing root dot removed), so `OSICLOUD.CH`, `100.99.212.115.` and `api.osicloud.ch` are all refused as forbidden. Nothing reaches the Uganda production gateway, `osicloud.ch`, the OSI test server or the Bovey demo Pi `100.99.212.115`. |
+| Hosts are hosts, not URLs | `lib/config.js` `assertBareHost` | `SILVAN_SSH_HOST` and `SILVAN_MQTT_HOST` must be a bare hostname or IP: no scheme, `@`, `/`, `?`, `#`, `:port`, whitespace, control characters, or leading `-`. `ssh(1)` splits `user@host` on the **last** `@`, so `https://100.81.220.8/@100.99.212.115` parses as the allowed gateway and connects to the demo Pi — that payload defeated an earlier version of this guard (V-297) and is now refused twice over: by the deny-list token scan and by this rule. |
+| No credentials in endpoint URLs | `lib/config.js` `assertHttpBase` | `SILVAN_API_BASE` and `SILVAN_GUI_BASE` must be `http(s)` URLs with no userinfo at all. A `user:pass@host` URL hides which host is addressed and would put a secret in a config value that reaches evidence. |
+| Endpoint consistency | `lib/config.js` `assertEndpointsAllowed` | Every non-SSH endpoint must be either a loopback tunnel address (`127.0.0.1`, `localhost`, `::1`) or exactly the SSH host the EUI guards verify, compared in canonical form. This closes the gap where SSH points at the selected gateway — so both EUI guards pass — while the HTTP or MQTT client is quietly aimed elsewhere. `SILVAN_MQTT_PORT` must be a real TCP port. |
+| Canonical config, not raw input | `lib/config.js` `assertEndpointsAllowed` | The cfg handed to the clients carries the allow-list entry's own host string and canonical values for the rest, never the raw environment value that was validated. `SILVAN_SSH_USER` must be a bare user name and `SILVAN_SSH_KEY` a plain path, so neither can smuggle an option into the ssh argument vector. |
+| Clients re-check their own destination | `lib/ssh.js`, `lib/rest.js`, `lib/observer.js` | Each client validates its destination again at the point a socket would open: the SSH client requires a bare, deny-list-clean host that is the **selected** gateway's, the REST client the same for its base URL (loopback or an allow-listed gateway), the MQTT observer the same for the broker. A cfg mutated after `config()` — or a caller that never used it — is caught there. The ssh argument vector pins `-o HostName=<validated>` and terminates options with `--`. |
+| Immutable lists | `lib/config.js` | `GATEWAYS` (and each entry), `FORBIDDEN_HOSTS` and `LOOPBACK_HOSTS` are frozen arrays, so nothing can widen the allow-list, shrink the deny-list, or add a host that counts as loopback at runtime. |
+| Gateway allow-list | `lib/config.js` `GATEWAYS`, `resolveGateway` | `--gateway`/`SILVAN_GATEWAY` takes a NAME. An unknown name is refused, and the SSH host must be exactly that entry's host, so `SILVAN_SSH_HOST` can no longer introduce an address of its own. `SILVAN_ALLOW_ALT_HOST` no longer admits a host: it is kept only so a stale export produces a refusal instead of silence. At load time the allow-list is checked against `FORBIDDEN_HOSTS` and for duplicate names, hosts and EUIs. |
+| One EUI per selection | `lib/config.js` `expectedGatewayFor` | Both EUI guards resolve the expected EUI from `GATEWAYS` by name, so overwriting `cfg.expectedEui` in a case does not move them. A config that carries an EUI contradicting its own selection is refused by the endpoint guard. |
 | Guarded clients only | `lib/config.js` `assertEndpointGuardPassed` | `config()` marks a cleared config with a `Symbol`. The SSH client and the MQTT observer both refuse to start unless their config carries it, so a hand-written object literal cannot slip past the checks. |
 | Evidence redaction | `lib/rest.js` `redact` | `password`, `token`, `sync_token`, `mqtt_password`, `appkey`, `Authorization` and friends are replaced with `[redacted]` **as the transcript record is built**, not filtered later — so no path exists that records a secret and relies on a downstream filter. |
 | Simulated devices only | `lib/config.js` `assertSimulatedDevice` | Every DevEUI the harness registers, actuates or answers for must start with `70B3D57ED00`. Commanding anything else throws. |
@@ -49,7 +67,8 @@ assertions need (`/auth/login` always issues `exp = iat + 7 days`).
 
 ## Running it
 
-Open the tunnel in one terminal and leave it running:
+Open the tunnel to the gateway you are testing in one terminal and leave it
+running (`100.81.220.8` for `silvan`, `100.85.226.64` for `rpi4-test`):
 
 ```bash
 ssh -N -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
@@ -59,7 +78,9 @@ ssh -N -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
 ```
 
 `18800` is Node-RED (HTTP API + GUI), `18830` is the gateway's mosquitto
-(`allow_anonymous true`, no credentials).
+(`allow_anonymous true`, no credentials). The port convention is the same for
+both gateways, so run one gateway at a time unless you also override
+`SILVAN_API_BASE`/`SILVAN_MQTT_PORT` to a second local port pair.
 
 First, the offline self-test — it needs no gateway, no SSH and no tunnel, and
 proves the safety machinery still refuses what it should:
@@ -73,9 +94,14 @@ Then, from the repo root:
 ```bash
 node tests/silvan/run.js --list
 node tests/silvan/run.js --cases A1,Z1 --out /tmp/silvan-run
-node tests/silvan/run.js --out /tmp/silvan-run           # every case
+node tests/silvan/run.js --out /tmp/silvan-run                          # every case, Silvan
+node tests/silvan/run.js --gateway rpi4-test --out /tmp/rpi4-run        # every case, Pi 4B
 NODE_OPTIONS=--max-old-space-size=2048 node tests/silvan/run.js --cases U1 --out /tmp/silvan-run
 ```
+
+The runner prints the selected gateway, its host and the EUI it will demand
+before it opens a single connection, and `summary.json` records the name
+alongside the EUI the guards read back.
 
 The runner exits non-zero if any selected case fails and prints a matrix
 summary. Evidence lands in the run directory: `<CASE>.md` and `<CASE>.json` per
@@ -83,15 +109,21 @@ case, plus `summary.md` / `summary.json`, and `ui/` for screenshots.
 
 | Flag | Meaning |
 |---|---|
+| `--gateway NAME` | Which allow-listed test gateway to target: `silvan` (default) or `rpi4-test`. `SILVAN_GATEWAY` sets the same thing. |
 | `--cases A1,Z1` | Run only these. Default: all. |
-| `--out DIR` | Evidence directory. Default: `./silvan-run-<timestamp>`. |
+| `--out DIR` | Evidence directory. Default: `./<gateway>-run-<timestamp>`. |
 | `--user NAME` | Authenticate as an existing gateway account (token minted on the Pi) instead of registering a throwaway one. |
 | `--keep` | Skip cleanup. Debugging only — it leaves zones, devices and schedules behind. |
 | `--list` | Print the case list and exit. |
 
-Environment overrides: `SILVAN_SSH_HOST`, `SILVAN_SSH_USER`, `SILVAN_SSH_KEY`,
-`SILVAN_API_BASE`, `SILVAN_GUI_BASE`, `SILVAN_MQTT_HOST`, `SILVAN_MQTT_PORT`,
-`OSI_PLAYWRIGHT_DIR`, `SILVAN_DEBUG=1` (print stack traces).
+Environment overrides: `SILVAN_GATEWAY` (an allow-listed name), `SILVAN_SSH_USER`,
+`SILVAN_SSH_KEY`, `SILVAN_API_BASE`, `SILVAN_GUI_BASE`, `SILVAN_MQTT_HOST`,
+`SILVAN_MQTT_PORT`, `OSI_PLAYWRIGHT_DIR`, `SILVAN_DEBUG=1` (print stack traces).
+`SILVAN_SSH_HOST` is still read, but it may only repeat the selected gateway's
+own host, as a bare address; anything else is refused rather than ignored, so a
+stale export is never silent. `SILVAN_MQTT_HOST` is a bare host too — the port
+belongs in `SILVAN_MQTT_PORT` — and the two URL bases must be `http(s)` without
+credentials.
 
 **Playwright** is not a repo dependency. It is loaded from
 `/home/phil/osi-tools/playwright` (override with `OSI_PLAYWRIGHT_DIR`). Do not
@@ -116,7 +148,7 @@ the smoke tests the bundle the gateway is actually serving.
 | `D1` | Ingest with no data / one sample / many samples, out-of-range clamping, NULL-not-zero for absent fields, stale and future-dated samples, and the cumulative-rain delta state machine. |
 | `ST1` | Settings read/write/validate/persist/restore, per-zone timezone, feature flags, system stats. |
 | `C1` | Local writes and outbox growth while the cloud is unreachable, observed through `/api/sync/state` and `sync_outbox`; plus duplicate uplink delivery, an expired (past-grace) queued one-time open, and a stale plan push's isolation from an unrelated recompile. Deliberately partial — see below. |
-| `R1` | Bounded runtime/recovery, Silvan only: a Node-RED restart with an uplink burst and a queued valve action in flight (plus the restart-triggered cloud bootstrap check, F81), a self-removing blackholed route toward whatever host this gateway is actually linked to, and a 200 MB `/data` disk-pressure probe. Every risky action is guarded, bounded, and self-cleaning — see below. |
+| `R1` | Bounded runtime/recovery, allow-listed test gateways only: a Node-RED restart with an uplink burst and a queued valve action in flight (plus the restart-triggered cloud bootstrap check, F81), a self-removing blackholed route toward whatever host this gateway is actually linked to, and a 200 MB `/data` disk-pressure probe. Every risky action is guarded, bounded, and self-cleaning — see below. |
 | `U1` | Browser smoke: real login form, screenshots at 1366×768 and 390×844 for every route, and a French hardcoded-English scan. |
 
 `selftest.js` is separate from the matrix: it tests the harness, not the
