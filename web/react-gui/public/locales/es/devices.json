@@ -51,6 +51,16 @@
     "failed": "Error al crear la zona"
   },
   "kiwiSensor": {
+    "invalidDepth": "Introduzca 0 o un número entero de centímetros entre 1 y {{max}}.",
+    "depthSaved": "Profundidades de los canales de humedad del suelo guardadas. Deje en blanco o introduzca 0 para un canal no conectado.",
+    "failedToSaveDepth": "No se pudieron guardar las profundidades de los sensores.",
+    "depthTitle": "PROFUNDIDADES DE LOS SENSORES DE HUMEDAD",
+    "depthNote": "Introduzca las profundidades instaladas en cm. Deje en blanco o introduzca 0 si una sonda no está conectada.",
+    "depth1Label": "Profundidad SWT 1 (cm)",
+    "depth2Label": "Profundidad SWT 2 (cm)",
+    "depthPlaceholder": "0 = apagado",
+    "savingDepths": "Guardando profundidades...",
+    "saveDepths": "Guardar profundidades",
     "badge": "SENSOR KIWI",
     "tooDry": "¡DEMASIADO SECO!",
     "soilNeedsWater": "El suelo necesita riego",
@@ -346,6 +356,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Humedad del suelo (SWT y VWC)",
+      "temperature": "Temperatura del suelo",
       "moistureSwt": "Humedad del suelo (SWT)",
       "moistureVwc": "Humedad del suelo (VWC)",
       "moisture": "Humedad del suelo"
@@ -367,6 +378,10 @@
     "loading": "Cargando datos ambientales…",
     "loadFailed": "No se pudieron cargar los datos ambientales",
     "tabs": {
+      "water": "Agua",
+      "soil": "Suelo",
+      "weather": "Clima",
+      "sensors": "Sensores",
       "local": "Local",
       "online": "Online",
       "agronomic": "Agronómico",

@@ -51,6 +51,16 @@
     "failed": "Impossibile creare la zona"
   },
   "kiwiSensor": {
+    "invalidDepth": "Inserisci 0 o un numero intero di centimetri tra 1 e {{max}}.",
+    "depthSaved": "Profondità dei canali di umidità del suolo salvate. Lascia vuoto o inserisci 0 per un canale non collegato.",
+    "failedToSaveDepth": "Impossibile salvare le profondità dei sensori.",
+    "depthTitle": "PROFONDITÀ DEI SENSORI DI UMIDITÀ",
+    "depthNote": "Inserisci le profondità di installazione in cm. Lascia vuoto o inserisci 0 se una sonda non è collegata.",
+    "depth1Label": "Profondità SWT 1 (cm)",
+    "depth2Label": "Profondità SWT 2 (cm)",
+    "depthPlaceholder": "0 = spento",
+    "savingDepths": "Salvataggio delle profondità...",
+    "saveDepths": "Salva le profondità",
     "badge": "SENSORE KIWI",
     "tooDry": "TROPPO SECCO!",
     "soilNeedsWater": "Il suolo ha bisogno di irrigazione",
@@ -346,6 +356,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Umidità del suolo (SWT e VWC)",
+      "temperature": "Temperatura del suolo",
       "moistureSwt": "Umidità del suolo (SWT)",
       "moistureVwc": "Umidità del suolo (VWC)",
       "moisture": "Umidità del suolo"
@@ -367,6 +378,10 @@
     "loading": "Caricamento dei dati ambientali…",
     "loadFailed": "Impossibile caricare i dati ambientali",
     "tabs": {
+      "water": "Acqua",
+      "soil": "Suolo",
+      "weather": "Meteo",
+      "sensors": "Sensori",
       "local": "Locale",
       "online": "Online",
       "agronomic": "Agronomico",

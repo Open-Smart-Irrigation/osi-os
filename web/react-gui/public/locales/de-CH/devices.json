@@ -51,6 +51,16 @@
     "failed": "Zone konnte nicht erstellt werden"
   },
   "kiwiSensor": {
+    "invalidDepth": "Geben Sie 0 oder eine ganze Zahl in Zentimetern zwischen 1 und {{max}} ein.",
+    "depthSaved": "Tiefen der Bodenfeuchtekanäle gespeichert. Leer lassen oder 0 eingeben, wenn ein Kanal nicht angeschlossen ist.",
+    "failedToSaveDepth": "Die Sensortiefen konnten nicht gespeichert werden.",
+    "depthTitle": "TIEFEN DER BODENFEUCHTESENSOREN",
+    "depthNote": "Installierte Tiefen in cm eingeben. Leer lassen oder 0 eingeben, wenn eine Sonde nicht angeschlossen ist.",
+    "depth1Label": "SWT-1-Tiefe (cm)",
+    "depth2Label": "SWT-2-Tiefe (cm)",
+    "depthPlaceholder": "0 = aus",
+    "savingDepths": "Tiefen werden gespeichert...",
+    "saveDepths": "Sensortiefen speichern",
     "badge": "KIWI SENSOR",
     "tooDry": "ZU TROCKEN!",
     "soilNeedsWater": "Boden benötigt Bewässerung",
@@ -346,6 +356,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Bodenfeuchte (SWT & VWC)",
+      "temperature": "Bodentemperatur",
       "moistureSwt": "Bodenfeuchte (SWT)",
       "moistureVwc": "Bodenfeuchte (VWC)",
       "moisture": "Bodenfeuchte"
@@ -367,6 +378,10 @@
     "loading": "Umweltdaten werden geladen…",
     "loadFailed": "Umweltdaten konnten nicht geladen werden",
     "tabs": {
+      "water": "Wasser",
+      "soil": "Boden",
+      "weather": "Wetter",
+      "sensors": "Sensoren",
       "local": "Lokal",
       "online": "Online",
       "agronomic": "Agronomisch",

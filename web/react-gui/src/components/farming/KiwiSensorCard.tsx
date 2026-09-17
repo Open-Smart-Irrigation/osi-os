@@ -149,7 +149,8 @@ const ConfigPanel: React.FC<{
     const swtDepth2Cm = parseDepth(swtDepth2Input);
     if (swtDepth1Cm === 'invalid' || swtDepth2Cm === 'invalid') {
       setError(t('kiwiSensor.invalidDepth', {
-        defaultValue: 'Enter 0 or a whole number of centimeters between 1 and 1000.',
+        max: MAX_KIWI_SENSOR_DEPTH_CM,
+        defaultValue: 'Enter 0 or a whole number of centimeters between 1 and {{max}}.',
       }));
       setInfo(null);
       return;

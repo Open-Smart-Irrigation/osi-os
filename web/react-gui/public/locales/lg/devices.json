@@ -51,6 +51,16 @@
     "failed": "Okutondawo ekifo kugaanye"
   },
   "kiwiSensor": {
+    "invalidDepth": "Enter 0 or a whole number of centimeters between 1 and {{max}}.",
+    "depthSaved": "Soil moisture channel depths saved. Leave blank or enter 0 to mark a channel as not connected.",
+    "failedToSaveDepth": "Failed to save soil moisture sensor depths.",
+    "depthTitle": "SOIL MOISTURE SENSOR DEPTHS",
+    "depthNote": "Enter installed depths in cm. Leave blank or enter 0 when a probe is not connected.",
+    "depth1Label": "SWT 1 depth (cm)",
+    "depth2Label": "SWT 2 depth (cm)",
+    "depthPlaceholder": "0 = off",
+    "savingDepths": "Saving depths...",
+    "saveDepths": "Save sensor depths",
     "badge": "EKYUMA EKY'OKUMANYA KIWI",
     "tooDry": "OMWAKA MUNGI NNYO!",
     "soilNeedsWater": "Obutaka butaagira amazzi",
@@ -346,6 +356,7 @@
   "environment": {
     "soil": {
       "moistureSwtVwc": "Soil Moisture (SWT & VWC)",
+      "temperature": "Soil temperature",
       "moistureSwt": "Soil Moisture (SWT)",
       "moistureVwc": "Soil Moisture (VWC)",
       "moisture": "Soil Moisture"
@@ -367,6 +378,10 @@
     "loading": "Loading environment data…",
     "loadFailed": "Failed to load environment data",
     "tabs": {
+      "water": "Water",
+      "soil": "Soil",
+      "weather": "Weather",
+      "sensors": "Sensors",
       "local": "Eky'omu kitundu",
       "online": "Ku mukutu",
       "agronomic": "Eby'okulima",
