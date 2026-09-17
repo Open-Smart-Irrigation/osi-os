@@ -608,6 +608,14 @@
     "sdi12-gate-fn": {
       "delta": 1070,
       "reason": "F83 (2026-09-17 overnight stabilization, T13j), incl. the F83-V1/V2/V4 fail-open/source-namespacing/rate-limited-warn hardening follow-up (coordinator review V-273): every device_data-writing decode function now calls osiLib.require('uplink-dedup').isDuplicateUplink({ source, ... }) right after its own device-type/profile match (before any DB write), guarded by a typeof probe and a try/catch, and drops a redelivered/retried ChirpStack uplink with a rate-limited node.warn (warnOncePerWindow) instead of writing a second device_data row. Freshly re-measured after rebasing onto origin/main 193290bea (#271/#272; neither touched these 7 nodes, so the deltas are unchanged from the pre-rebase measurement) with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles (bcm2712/bcm2709), origin/main -> HEAD: 3348 -> 4418 = +1070 (\"SDI12 Gate + Decode\")."
+    },
+    "sync-refresh-build": {
+      "delta": 1132,
+      "reason": "F130 fix (2026-08-31 outage, wave 2 W4, branch fix/sync-token-refresh-window): 'Build Sync Token Refresh' refreshed the cloud sync token only when its stored expiry was within a fixed 24h, so a gateway offline across the last day of a long-lived token's life never refreshed it and lost its cloud link once the token expired. Replaced the fixed threshold with a half-lifetime rule: decode the token's own 'iat' claim locally (base64url of the JWT's middle segment, no signature check -- this only gates a local refresh-or-skip decision) and refresh once less than half of (storedExpiry - iat) remains; when iat can't be decoded, fall back to refreshing inside 3.5 days of the stored expiry (the node's pre-existing skip-when-no-expiry-at-all behavior is unchanged). Measured with verify-flows-size-ratchet's nodeSizes over both byte-identical maintained profiles: origin/main 1738 -> HEAD 2870 = +1132."
+    },
+    "sync-refresh-mark": {
+      "delta": 128,
+      "reason": "F130 fix (2026-08-31 outage, wave 2 W4, branch fix/sync-token-refresh-window): added one node.log line to 'Store Refreshed Sync Token' on a successful refresh, stating the new expiry as ISO-8601 ('Sync token refreshed; new expiry ' + new Date(expiresAt).toISOString()), so a successful refresh leaves a positive, log-visible marker alongside the pre-existing failure-path node.warn calls. Measured with verify-flows-size-ratchet's nodeSizes over both byte-identical maintained profiles: origin/main 2582 -> HEAD 2710 = +128."
     }
   },
   "total_allowance": {
