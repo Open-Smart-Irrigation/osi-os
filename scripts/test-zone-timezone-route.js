@@ -34,6 +34,21 @@
 // userId gates it to that user's own zones -- never "any authenticated user
 // may edit any zone". Fixed by applying the identical predicate here.
 //
+// Follow-up (verifier V-265, mutation testing on PR #265): dropping
+// "AND user_id=<ownerId>" from the UPDATE's WHERE clause -- while leaving the
+// pre-flight SELECT above untouched -- left every behavioral test in this
+// file green. That's expected, not a harness gap: `zoneId` is the table's
+// primary key, so once the pre-flight SELECT has already confirmed the
+// caller owns that exact row, an UPDATE ... WHERE id=<zoneId> (with or
+// without the redundant "AND user_id=...") touches the same single row in
+// every one of this file's fixtures. The predicate is still required
+// defense-in-depth (it is what every sibling route on this guard does, and
+// it is the only thing that would matter if the SELECT and UPDATE ever
+// stopped being atomic, e.g. a future refactor onto a real transaction
+// boundary, a retry path, or a second write added between them) -- so its
+// presence is enforced with a static source-scan assertion below instead of
+// a behavioral one.
+//
 // Uses the shared flow-node-harness (scripts/lib/scoped-access-harness.js)
 // already exercising sibling nodes on the same guard in
 // scripts/test-scoped-access-writes.js.
@@ -41,6 +56,7 @@
 // Run: node --test scripts/test-zone-timezone-route.js
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
@@ -261,6 +277,64 @@ test('F53: flag off -- a signed token for a different user cannot retime a zone 
     assert.equal(row.timezone, before, 'a rejected write must leave the previous value intact');
   } finally {
     db.close();
+  }
+});
+
+// --- F53 mutation guard (verifier V-265) -----------------------------------
+// Static source-scan, not a behavioral test: see the header comment above for
+// why a behavioral test cannot distinguish "UPDATE ... WHERE id=<zoneId>"
+// from "UPDATE ... WHERE id=<zoneId> AND user_id=<ownerId>" once the
+// pre-flight SELECT has already run. This asserts the UPDATE statement's own
+// WHERE clause carries the exact same ownership expression the SELECT (and
+// every sibling route on this guard) uses -- checked against both maintained
+// hardware profiles.
+
+const PROFILE_FLOWS_PATHS = [
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
+  'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
+];
+
+function loadDendroTzFunc(relFlowsPath) {
+  const absPath = path.join(ROOT, relFlowsPath);
+  const flows = JSON.parse(fs.readFileSync(absPath, 'utf8'));
+  const node = flows.find((candidate) => candidate.id === 'dendro-tz-fn');
+  assert.ok(node, `${relFlowsPath}: dendro-tz-fn node not found`);
+  assert.equal(typeof node.func, 'string');
+  return node.func;
+}
+
+test('F53 mutation guard: the UPDATE itself (not just the pre-flight SELECT) carries the "AND user_id=<owner>" predicate, on both profiles', () => {
+  for (const relFlowsPath of PROFILE_FLOWS_PATHS) {
+    const func = loadDendroTzFunc(relFlowsPath);
+
+    // The owner expression every sibling route on scoped-zone-config-guard
+    // uses: `const <ownerVar> = (msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId);`
+    const ownerDeclMatch = func.match(
+      /const\s+(\w+)\s*=\s*\(\s*msg\._scopedZoneWriteAuthorized\s*\?\s*msg\._scopedZoneOwnerId\s*:\s*auth\.userId\s*\)/
+    );
+    assert.ok(
+      ownerDeclMatch,
+      `${relFlowsPath}: dendro-tz-fn must declare the same owner ternary its sibling routes use ` +
+      `(msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId)`
+    );
+    const ownerVar = ownerDeclMatch[1];
+
+    // Isolate the UPDATE statement specifically (not the earlier SELECT,
+    // which also legitimately contains "AND user_id=..."): from the
+    // "UPDATE irrigation_zones SET timezone" keyword to the next statement
+    // terminator.
+    const updateIdx = func.indexOf('UPDATE irrigation_zones SET timezone');
+    assert.notEqual(updateIdx, -1, `${relFlowsPath}: no UPDATE irrigation_zones SET timezone statement found`);
+    const terminatorIdx = func.indexOf(';', updateIdx);
+    assert.notEqual(terminatorIdx, -1, `${relFlowsPath}: UPDATE statement has no terminating ';'`);
+    const updateStatement = func.slice(updateIdx, terminatorIdx);
+
+    const predicateRe = new RegExp('AND\\s+user_id\\s*=\\s*"\\s*\\+\\s*' + ownerVar + '\\b');
+    assert.ok(
+      predicateRe.test(updateStatement),
+      `${relFlowsPath}: the UPDATE statement's WHERE clause must include AND user_id="+${ownerVar} ` +
+      `(same expression as the pre-flight SELECT), not rely on the SELECT alone -- found: ${JSON.stringify(updateStatement)}`
+    );
   }
 });
 
