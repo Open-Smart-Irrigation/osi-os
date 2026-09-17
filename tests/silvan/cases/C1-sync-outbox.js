@@ -20,7 +20,7 @@
 exports.title = 'Cloud-edge (partial): local writes while the cloud is unreachable, outbox growth';
 
 const {
-  PR_262_URL, REJECTED_RETENTION_DAYS, isKnownTerminalReason, hasRejectedOutboxShape, classifyOutboxEventOutcome,
+  PR_262_URL, REJECTED_RETENTION_DAYS, hasRejectedOutboxShape, classifyOutboxEventOutcome, isExplainedRejection,
 } = require('../lib/rejections');
 const { classifyOnceOutcome, ONCE_GRACE_MS } = require('../lib/onceGrace');
 const { outboxSettleBudgetMs } = require('../lib/edgeTimeouts');
@@ -33,13 +33,16 @@ const state = { zones: [], devices: [] };
 // there -- delivered, still queued, or terminally rejected for the
 // documented never-seen-resource reason -- rather than trusting a snapshot
 // captured right after creation, which cannot see a row that later vanished.
+// aggregate_type is included so classifyOutboxEventOutcome can tell a ZONE
+// (never expected to be ownership_denied -- F21) from a DEVICE/DEVICE_DATA
+// event (expected to be, against this interim cloud's never-seen registry).
 async function assertOutboxEventSurvived(ctx, label, eventUuid) {
   if (!eventUuid) {
     ctx.expect(label + "'s outbox event_uuid was captured so this check can re-query it", false, { label });
     return;
   }
   const row = await ctx.ssh.sqlOne(
-    "SELECT delivered_at, rejected_at, rejection_reason FROM sync_outbox WHERE event_uuid = '" + eventUuid + "'"
+    "SELECT aggregate_type, delivered_at, rejected_at, rejection_reason FROM sync_outbox WHERE event_uuid = '" + eventUuid + "'"
   );
   const outcome = classifyOutboxEventOutcome(row);
   ctx.expect(
@@ -286,43 +289,53 @@ exports.run = async (ctx) => {
 
   // (a) DELTA: what did THIS run's own traffic (the writes above) add to the
   // rejected pile since this case started, and is every new rejection
-  // classified with a known terminal reason? ownership_denied is the
-  // documented never-seen-resource rule for a simulated device/zone the
-  // interim cloud has never seen -- EXPECTED here, and reported as an
-  // observation below, never as a failure.
+  // classified with a known terminal reason FOR THE AGGREGATE IT LANDED ON?
+  // Orchestrator follow-up 2: ownership_denied is the documented never-seen-
+  // resource rule for a simulated DEVICE/DEVICE_DATA the interim cloud has
+  // never seen -- EXPECTED there, reported as an observation below, never a
+  // failure. It is NOT expected on a ZONE (F21: a first-seen resource binds
+  // to the authenticated gateway/user; this case's own zones are created
+  // through its own authenticated session and are accepted, not denied) --
+  // isExplainedRejection() (lib/rejections.js) enforces that distinction
+  // instead of a reason-only, kind-blind check that would wave an
+  // ownership_denied ZONE rejection through as if it were expected.
   const rejectedAfter = await rejectedOutbox(ssh);
   const rejectedDelta = await ssh.sql(
     'SELECT rejection_reason, aggregate_type, COUNT(*) AS n FROM sync_outbox ' +
     "WHERE rejected_at IS NOT NULL AND rejected_at >= '" + runStartedAt +
     "' GROUP BY rejection_reason, aggregate_type ORDER BY n DESC"
   );
-  const unexplainedDelta = rejectedDelta.filter((r) => !isKnownTerminalReason(r.rejection_reason));
+  const unexplainedDelta = rejectedDelta.filter((r) => !isExplainedRejection(r.rejection_reason, r.aggregate_type));
   ctx.expect("this run's own rejected-outbox rows (" + rejectedBefore + ' -> ' + rejectedAfter +
-    ') are all classified with a known terminal reason',
+    ') are all classified with a known terminal reason for the aggregate type it landed on',
     unexplainedDelta.length === 0,
     { rejectedBefore, rejectedAfter, rows: rejectedDelta, unexplained: unexplainedDelta });
   const expectedDelta = rejectedDelta
-    .filter((r) => isKnownTerminalReason(r.rejection_reason))
+    .filter((r) => isExplainedRejection(r.rejection_reason, r.aggregate_type))
     .reduce((sum, r) => sum + Number(r.n), 0);
   if (expectedDelta > 0) {
     ev.note('OBSERVATION, not a failure: this run added ' + expectedDelta + ' ownership_denied rejection(s) since ' +
       runStartedAt + ' (' + JSON.stringify(rejectedDelta) + '). Expected: the interim cloud denies first-seen ' +
-      'resources, and this run\'s simulated devices/zones are not pre-registered there.');
+      "device/telemetry resources, and this run's simulated devices are not pre-registered there.");
   }
 
   // Simulated devices are unknown to the cloud, so VALVE_*/DEVICE events for them
   // are legitimately answered ownership_denied -- that is the documented
   // never-seen-resource rule, not a defect, and it is excluded here. A rejection
-  // on a ZONE or ZONE_ENVIRONMENT aggregate is a different matter.
+  // on a ZONE or ZONE_ENVIRONMENT aggregate is a different matter (F21) and is
+  // NOT excluded -- isExplainedRejection() enforces that, not a reason-only SQL
+  // filter (the previous `rejection_reason NOT LIKE 'ownership_denied%'` would
+  // have waved an ownership_denied ZONE rejection through unfiltered).
   // Scoped to the resources THIS case created, so a sibling case's leftovers
   // cannot make or break the assertion.
   const mine = "(aggregate_key = '" + eui + "' OR aggregate_key = '" + (zone.body && zone.body.zone_uuid) +
     "' OR payload_json LIKE '%" + eui + "%')";
-  const freshRejects = await ssh.sql(
-    "SELECT aggregate_type, op, rejection_reason FROM sync_outbox " +
-    "WHERE rejected_at IS NOT NULL AND " + mine + " AND rejection_reason NOT LIKE 'ownership_denied%'"
+  const freshRejectsAll = await ssh.sql(
+    "SELECT aggregate_type, op, rejection_reason FROM sync_outbox WHERE rejected_at IS NOT NULL AND " + mine
   );
-  ctx.expect("this case's own zone and telemetry events were not rejected with a version/payload conflict",
+  const freshRejects = freshRejectsAll.filter((r) => !isExplainedRejection(r.rejection_reason, r.aggregate_type));
+  ctx.expect("this case's own zone and telemetry events were not rejected with a version/payload conflict " +
+    '(or, for the zone specifically, ownership_denied -- F21)',
     freshRejects.length === 0, freshRejects);
   if (freshRejects.length) {
     ev.note('A brand-new device\'s first DEVICE_DATA_APPENDED events came back ' +

@@ -28,6 +28,32 @@ function isKnownTerminalReason(reason) {
     KNOWN_TERMINAL_REASON_PREFIXES.some((prefix) => reason.startsWith(prefix));
 }
 
+// Orchestrator follow-up 2 (PR #301 review, 2026-09-17): `ownership_denied`
+// is only a documented, expected outcome for a DEVICE/DEVICE_DATA aggregate
+// -- a simulated device this harness registers under a DevEUI the interim
+// cloud has never seen. It is NOT expected for a ZONE: this harness creates
+// zones through its own authenticated tenant session, and osi-os F21 (fixed,
+// osi-server #118/#115) is precisely the fix that makes a first-seen
+// resource bind to the AUTHENTICATED gateway and its linked user -- a zone
+// created that way is accepted (measured under one second), never
+// ownership_denied. Allowing ownership_denied on a ZONE here would let
+// exactly F21's defect class come back silently: the check would pass while
+// the product rejected a zone it should have accepted.
+const OWNERSHIP_ALLOWED_AGGREGATE_TYPES = ['DEVICE', 'DEVICE_DATA'];
+
+function isOwnershipAllowedForAggregate(aggregateType) {
+  return OWNERSHIP_ALLOWED_AGGREGATE_TYPES.includes(String(aggregateType || '').toUpperCase());
+}
+
+// True when a terminal rejection is fully explained for the aggregate it
+// landed on: a known reason (ownership_denied) AND an aggregate type that
+// reason is actually documented for. Kind-blind callers (checking the
+// reason alone) would wave through an ownership_denied on a ZONE, which is
+// exactly the gap orchestrator follow-up 2 closes.
+function isExplainedRejection(reason, aggregateType) {
+  return isKnownTerminalReason(reason) && isOwnershipAllowedForAggregate(aggregateType);
+}
+
 // True only when `state` (a GET /api/sync/state body) carries the exact
 // #262 shape: rejectedOutboxCount/rejectedLast24h as numbers, and lastRejection
 // present as either null or an { at, op, reason } object. A response missing
@@ -66,19 +92,28 @@ function hasRejectedOutboxShape(state) {
 //                               turn; asserting it must have already resolved
 //                               would reintroduce F122's premise)
 //   rejected_at set:
-//     known terminal reason -- the documented never-seen-resource rule this
-//                               harness's own simulated resources trigger
-//                               against the interim test cloud (see this
-//                               case's other notes) -- survived, not dropped
-//     anything else         -- an unexplained rejection of THIS case's own
-//                               event: SILENTLY DROPPED in the sense that
-//                               matters here (the write never actually landed
-//                               and nothing explains why)
+//     explained (isExplainedRejection: known reason AND an aggregate type
+//                               that reason is documented for, e.g.
+//                               ownership_denied on DEVICE/DEVICE_DATA) --
+//                               survived, not dropped
+//     anything else         -- including ownership_denied on a ZONE, or any
+//                               reason outside KNOWN_TERMINAL_REASON_PREFIXES
+//                               on any aggregate -- an unexplained rejection
+//                               of THIS case's own event: SILENTLY DROPPED in
+//                               the sense that matters here (the write never
+//                               actually landed and nothing explains why)
+//
+// `row.aggregate_type` (the same column every SELECT in this file's caller
+// already reads, sync_outbox's own schema column -- database/seed-blank.sql,
+// `CREATE TABLE sync_outbox`) drives the aggregate-type check; the caller
+// must include it in its re-query rather than this function guessing it.
 function classifyOutboxEventOutcome(row) {
   if (!row) return { survived: false, state: 'missing' };
   if (row.delivered_at) return { survived: true, state: 'delivered' };
   if (!row.rejected_at) return { survived: true, state: 'pending' };
-  if (isKnownTerminalReason(row.rejection_reason)) return { survived: true, state: 'rejected_expected' };
+  if (isExplainedRejection(row.rejection_reason, row.aggregate_type)) {
+    return { survived: true, state: 'rejected_expected' };
+  }
   return { survived: false, state: 'rejected_unexplained' };
 }
 
@@ -86,7 +121,10 @@ module.exports = {
   PR_262_URL,
   REJECTED_RETENTION_DAYS,
   KNOWN_TERMINAL_REASON_PREFIXES,
+  OWNERSHIP_ALLOWED_AGGREGATE_TYPES,
   isKnownTerminalReason,
+  isOwnershipAllowedForAggregate,
+  isExplainedRejection,
   hasRejectedOutboxShape,
   classifyOutboxEventOutcome,
 };

@@ -25,7 +25,10 @@ const {
 const { Rest, redact, redactString, redactHeaders, isSecretKey, REDACTED } = require('./lib/rest');
 const { Ssh } = require('./lib/ssh');
 const { DownlinkObserver } = require('./lib/observer');
-const { hasRejectedOutboxShape, isKnownTerminalReason, classifyOutboxEventOutcome } = require('./lib/rejections');
+const {
+  hasRejectedOutboxShape, isKnownTerminalReason, classifyOutboxEventOutcome,
+  isOwnershipAllowedForAggregate, isExplainedRejection,
+} = require('./lib/rejections');
 const { classifyOnceOutcome, ONCE_GRACE_MS } = require('./lib/onceGrace');
 const { hasAdminRouterScopedGate, hasScopedOnlyRoleAssert } = require('./lib/roleGates');
 const { hasBlackholeRoute, firstIpv4, parsePingResolvedIp } = require('./lib/routeParse');
@@ -33,7 +36,7 @@ const planRef = require('./lib/planRef');
 const { truncate } = require('./lib/harness');
 const { CaseEvidence } = require('./lib/evidence');
 const {
-  templateToMatcher, buildInterpolatedMatchers, matchesInterpolatedLocale, isValueLikeSlot, MAX_SLOT_WORDS,
+  templateToMatcher, buildInterpolatedMatchers, matchesInterpolatedLocale, isValueLikeSlot, isNameLikePlaceholder,
 } = require('./lib/i18nScan');
 const {
   CLOUD_REST_TIMEOUT_MS, PENDING_POLL_INTERVAL_MS, resumeBudgetMs,
@@ -759,7 +762,27 @@ async function main() {
       }
     })(root);
     const repoRoot = path.join(__dirname, '..', '..');
-    const CALL_RE = /\b(?:fs\.)?(writeFileSync|appendFileSync|appendFile)\s*\(/g;
+    // Orchestrator follow-up 2 (optional item): also catch the async/stream
+    // writer forms, and require redact( INSIDE the matched call's own
+    // balanced argument list, not just somewhere in a character window
+    // (a window can both miss a redact() several lines away in a
+    // multi-line call, and false-accept an unrelated one nearby).
+    const CALL_RE = /\b(?:fs\.)?(?:promises\.)?(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\s*\(/g;
+    // Balanced-paren argument extraction, not a real JS parser: a literal
+    // '(' or ')' inside a string/template argument would confuse it. None of
+    // the calls in this tree do that (paths and JSON payloads only), so this
+    // stays a deliberately small sweep, not a full parser.
+    function callArgs(src, openParenIndex) {
+      let depth = 0;
+      for (let i = openParenIndex; i < src.length; i++) {
+        if (src[i] === '(') depth += 1;
+        else if (src[i] === ')') {
+          depth -= 1;
+          if (depth === 0) return src.slice(openParenIndex + 1, i);
+        }
+      }
+      return src.slice(openParenIndex + 1);
+    }
     const offenders = [];
     let sweptFiles = 0;
     let sweptCalls = 0;
@@ -771,9 +794,8 @@ async function main() {
       let m;
       while ((m = CALL_RE.exec(src))) {
         sweptCalls += 1;
-        const windowStart = Math.max(0, m.index - 200);
-        const windowEnd = Math.min(src.length, m.index + 400);
-        if (!/redact\(/.test(src.slice(windowStart, windowEnd))) {
+        const openParenIndex = m.index + m[0].length - 1;
+        if (!/redact\(/.test(callArgs(src, openParenIndex))) {
           const line = src.slice(0, m.index).split('\n').length;
           offenders.push(rel + ':' + line);
         }
@@ -1000,11 +1022,12 @@ async function main() {
   // neither locale bundle verbatim, since the bundle only ever holds the
   // un-interpolated template.
   const FR_DEVICES_FIXTURE = { 'devices.maxTemperature': 'max {{max}} °C', 'devices.plain': 'Réglages' };
-  await check('templateToMatcher builds a matcher from a real interpolated template', () => {
-    const re = templateToMatcher('max {{max}} °C');
-    assert.ok(re && re.test('max 85 °C'), 'the matcher must accept the real rendering');
-    assert.ok(re && !re.test('max 85°C'), 'the matcher must be exact about the template\'s own literal text (the ' +
-      'space before °C is part of what makes this a genuine, distinct French translation)');
+  await check('templateToMatcher builds a {regex, placeholderNames} matcher from a real interpolated template', () => {
+    const m = templateToMatcher('max {{max}} °C');
+    assert.ok(m && m.regex.test('max 85 °C'), 'the matcher must accept the real rendering');
+    assert.deepStrictEqual(m.placeholderNames, ['max']);
+    assert.ok(m && !m.regex.test('max 85°C'), 'the matcher must be exact about the template\'s own literal text ' +
+      '(the space before °C is part of what makes this a genuine, distinct French translation)');
   });
   await check('a template with no placeholder at all yields no matcher (smoke.js\'s exact-value check already ' +
     'covers a plain string)', () => {
@@ -1014,6 +1037,11 @@ async function main() {
     'any string, hiding a real leak instead of recognising one specific known-good rendering', () => {
     assert.strictEqual(templateToMatcher('{{value}}'), null);
     assert.strictEqual(templateToMatcher('{{a}}{{b}}'), null);
+  });
+  await check('a template whose literal text has no actual letter in it yields no matcher (symbols/spaces alone ' +
+    'are not "real substance")', () => {
+    assert.strictEqual(templateToMatcher('{{a}} - {{b}}'), null, 'a bare hyphen separator has no letter');
+    assert.ok(templateToMatcher('max {{max}} °C'), 'sanity: "max ... °C" DOES have letters and must still match');
   });
   await check('buildInterpolatedMatchers + matchesInterpolatedLocale recognise the real "max 85 °C" rendering as ' +
     'a legitimate translation, not a hardcoded-English leak', () => {
@@ -1040,49 +1068,85 @@ async function main() {
     assert.ok(matchIdx < markerIdx, 'the template check must run before the marker heuristic, not replace it');
   });
 
-  console.log('\n-- verifier follow-up (PR #301 review): a hardcoded English sentence must not be accepted ' +
-    'by squeezing into a bare placeholder\'s wildcard');
+  console.log('\n-- orchestrator follow-up 2: a slot is judged by its PLACEHOLDER, not by scanning its text ' +
+    'for English marker words');
   // The verifier's exact counterexample: valves.json/fr's own real template
   // has almost no literal text around its ONE placeholder, so the old lazy
-  // `[\s\S]*?` wildcard accepted ANY prefix -- including a whole hardcoded
-  // English sentence that merely happens to end the way the template's
-  // trailing literal text does.
+  // `[\s\S]*?` wildcard (then a word-count+marker slot check) accepted
+  // English prose ending in " °C". Separately, the OLD word-count+marker
+  // check would have started rejecting a legitimate customer NAME that
+  // happens to contain a marker word ("High tunnel control") -- a false
+  // positive that did not exist before. Both are fixed by classifying the
+  // placeholder itself: "value" is not name-like, so its slot must be
+  // value-like; "name" is name-like, so its slot accepts free text.
   const FR_VALVES_FIXTURE = { 'valves.format.temperature': '{{value}} °C' };
-  const ALL_FIXTURES = Object.assign({}, FR_DEVICES_FIXTURE, FR_VALVES_FIXTURE);
-  await check('isValueLikeSlot: a number, a unit-qualified number and a harness-created identifier are ' +
-    'value-like; an English sentence and a marker-bearing short phrase are not', () => {
+  const FR_OPEN_DIALOG_FIXTURE = { 'valves.openDialog.title': 'Ouvrir {{name}}' };
+  const ALL_FIXTURES = Object.assign({}, FR_DEVICES_FIXTURE, FR_VALVES_FIXTURE, FR_OPEN_DIALOG_FIXTURE);
+  await check('isNameLikePlaceholder: exactly the placeholders this codebase\'s real en locale bundles use for ' +
+    'user/customer content (name, zone, zoneName, username, crop, variety, names) are name-like; a value-shaped ' +
+    'placeholder like "value" or "max" is not', () => {
+    for (const n of ['name', 'zone', 'zoneName', 'username', 'crop', 'variety', 'names', 'NAME']) {
+      assert.strictEqual(isNameLikePlaceholder(n), true, n + ' must be name-like (case-insensitive)');
+    }
+    for (const n of ['value', 'max', 'min', 'count', 'minutes', 'percent', 'label', 'title']) {
+      assert.strictEqual(isNameLikePlaceholder(n), false, n + ' must NOT be name-like');
+    }
+  });
+  await check('isValueLikeSlot: a number, a unit-qualified number, a time, an ISO date and a spelled-month date ' +
+    'are value-like; ANY free-form phrase -- even one with no marker word -- is not', () => {
     assert.strictEqual(isValueLikeSlot('85'), true);
-    assert.strictEqual(isValueLikeSlot('osi_zone_ab12'), true, 'a harness-created resource name (one token, no ' +
-      'spaces) must pass');
-    assert.strictEqual(isValueLikeSlot('17 septembre 2026'), true, 'a short (<= ' + MAX_SLOT_WORDS + '-word) ' +
-      'compound/date-like value must still pass');
-    assert.strictEqual(isValueLikeSlot('Gateway temperature high 85'), false, 'the verifier\'s counterexample ' +
-      'slot content: an English sentence fragment, both too long and marker-bearing');
-    assert.strictEqual(isValueLikeSlot('not available'), false, 'short (2-word) but still contains an ' +
-      'ENGLISH_MARKERS word -- the marker check catches what the word-count bound alone would not');
+    assert.strictEqual(isValueLikeSlot('-3°C'), true);
+    assert.strictEqual(isValueLikeSlot('5 min'), true);
+    assert.strictEqual(isValueLikeSlot('20 kPa'), true);
+    assert.strictEqual(isValueLikeSlot('14:04'), true);
+    assert.strictEqual(isValueLikeSlot('2026-09-17'), true);
+    assert.strictEqual(isValueLikeSlot('17 septembre 2026'), true, 'a formatted date shape, not free prose, ' +
+      'despite containing one word');
+    assert.strictEqual(isValueLikeSlot('Gateway temperature high 85'), false, 'the verifier\'s first-round ' +
+      'counterexample slot content');
+    assert.strictEqual(isValueLikeSlot('please try again'), false, 'a marker-FREE English phrase -- this is ' +
+      'exactly the round-1 regression: word-count+marker alone would have accepted this');
+    assert.strictEqual(isValueLikeSlot('no data yet'), false, 'same family: no marker word, still not value-like');
     assert.strictEqual(isValueLikeSlot(''), false);
   });
-  await check('the verifier\'s counterexample -- "Gateway temperature high 85 °C" against valves.json/fr\'s own ' +
-    '"{{value}} °C" template -- is REJECTED, not accepted as a French translation', () => {
+  await check('the verifier\'s first-round counterexample -- "Gateway temperature high 85 °C" against ' +
+    'valves.json/fr\'s own "{{value}} °C" template -- is REJECTED, not accepted as a French translation', () => {
     const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
     assert.strictEqual(matchesInterpolatedLocale('Gateway temperature high 85 °C', matchers), false);
   });
-  await check('"max 85 °C" is still accepted even with the valves.json template also in play (the original ' +
-    'false positive stays fixed)', () => {
+  await check('"max 85 °C" is still accepted even with the other templates also in play (the original false ' +
+    'positive stays fixed)', () => {
     const matchers = buildInterpolatedMatchers(ALL_FIXTURES);
     assert.strictEqual(matchesInterpolatedLocale('max 85 °C', matchers), true);
   });
-  await check('a slot holding a harness-created name like "osi_zone_ab12" is accepted', () => {
+  await check('"please try again" in a {{value}} slot is rejected (the verifier\'s second-round regression: a ' +
+    'marker-free English phrase used to slip through)', () => {
     const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
-    assert.strictEqual(matchesInterpolatedLocale('osi_zone_ab12 °C', matchers), true);
+    assert.strictEqual(matchesInterpolatedLocale('please try again °C', matchers), false);
   });
-  await check('an English sentence squeezed into the SAME lone-placeholder template is rejected', () => {
-    const matchers = buildInterpolatedMatchers(FR_VALVES_FIXTURE);
-    assert.strictEqual(matchesInterpolatedLocale('Please contact support immediately °C', matchers), false,
-      '4 words, none of them an ENGLISH_MARKERS word -- the word-count bound alone must catch this');
+  await check('"Ouvrir High tunnel control" is accepted under valves.json/fr\'s real "Ouvrir {{name}}" template ' +
+    '-- a customer valve/zone name that happens to contain marker words ("control", "high") must not be flagged', () => {
+    const matchers = buildInterpolatedMatchers(FR_OPEN_DIALOG_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir High tunnel control', matchers), true);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir Control valve north', matchers), true);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir Low field 2', matchers), true);
+  });
+  await check('a harness-created identifier like "osi_zone_ab12" is accepted through a name-like placeholder ' +
+    '(this IS the realistic path: a zone/device name flows through {{name}}/{{zoneName}}, never through a ' +
+    'value-shaped placeholder like {{value}})', () => {
+    const matchers = buildInterpolatedMatchers(FR_OPEN_DIALOG_FIXTURE);
+    assert.strictEqual(matchesInterpolatedLocale('Ouvrir osi_zone_ab12', matchers), true);
+  });
+  await check('an English sentence that merely CONTAINS a French name template\'s static word, but is otherwise ' +
+    'English, is still flagged: the STATIC text is matched byte-for-byte, so an English rendering of the same ' +
+    'concept does not match this template at all and falls through to the marker heuristic unchanged', () => {
+    const matchers = buildInterpolatedMatchers(FR_OPEN_DIALOG_FIXTURE);
+    // "Open High tunnel control" does not start with the template's own
+    // French literal text "Ouvrir " -- no match, by construction.
+    assert.strictEqual(matchesInterpolatedLocale('Open High tunnel control', matchers), false);
   });
   await check('near-empty templates are still excluded after the slot-validation change (unaffected: this is ' +
-    'governed by MIN_LITERAL_CHARS, not by isValueLikeSlot)', () => {
+    'governed by MIN_LITERAL_CHARS/the letter check, not by isValueLikeSlot)', () => {
     assert.strictEqual(templateToMatcher('{{value}}'), null);
   });
 
@@ -1218,13 +1282,74 @@ async function main() {
       'the survival re-query must run after the rest of the case, not immediately after creation');
   });
   await check('classifyOutboxEventOutcome (lib/rejections.js): delivered -> survived; still pending -> ' +
-    'survived; row missing (deleted) -> NOT survived; rejected for an unexplained reason -> NOT survived; ' +
-    'rejected for the documented never-seen-resource reason -> survived', () => {
-    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: '2026-09-17T00:00:00Z', rejected_at: null }).survived, true);
-    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: null, rejected_at: null }).survived, true);
+    'survived; row missing (deleted) -> NOT survived; rejected for an unexplained reason -> NOT survived ' +
+    '(aggregate type unchanged by these three cases)', () => {
+    assert.strictEqual(classifyOutboxEventOutcome({ aggregate_type: 'ZONE', delivered_at: '2026-09-17T00:00:00Z', rejected_at: null }).survived, true);
+    assert.strictEqual(classifyOutboxEventOutcome({ aggregate_type: 'ZONE', delivered_at: null, rejected_at: null }).survived, true);
     assert.strictEqual(classifyOutboxEventOutcome(null).survived, false);
-    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: null, rejected_at: '2026-09-17T00:00:00Z', rejection_reason: 'equal_version_payload_conflict' }).survived, false);
-    assert.strictEqual(classifyOutboxEventOutcome({ delivered_at: null, rejected_at: '2026-09-17T00:00:00Z', rejection_reason: 'ownership_denied: zone never seen' }).survived, true);
+    assert.strictEqual(classifyOutboxEventOutcome({ aggregate_type: 'DEVICE', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z', rejection_reason: 'equal_version_payload_conflict' }).survived, false);
+  });
+  console.log('\n-- orchestrator follow-up 2 (PR #301 review): the ownership_denied allowance depends on WHICH ' +
+    'aggregate it landed on, not the reason alone');
+  await check('classifyOutboxEventOutcome: ownership_denied on a ZONE is an UNEXPLAINED rejection -- F21 means ' +
+    'a zone this harness creates through its own authenticated session is accepted, never ownership_denied; ' +
+    'allowing it here would let exactly that defect class pass silently', () => {
+    const outcome = classifyOutboxEventOutcome({
+      aggregate_type: 'ZONE', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z',
+      rejection_reason: 'ownership_denied: zone never seen',
+    });
+    assert.strictEqual(outcome.survived, false);
+    assert.strictEqual(outcome.state, 'rejected_unexplained');
+  });
+  await check('classifyOutboxEventOutcome: ownership_denied on a DEVICE survives, and is the documented never-' +
+    'seen-device rule (not a drop)', () => {
+    const outcome = classifyOutboxEventOutcome({
+      aggregate_type: 'DEVICE', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z',
+      rejection_reason: 'ownership_denied: device never seen',
+    });
+    assert.strictEqual(outcome.survived, true);
+    assert.strictEqual(outcome.state, 'rejected_expected');
+  });
+  await check('classifyOutboxEventOutcome: ownership_denied on DEVICE_DATA (telemetry) likewise survives', () => {
+    const outcome = classifyOutboxEventOutcome({
+      aggregate_type: 'DEVICE_DATA', delivered_at: null, rejected_at: '2026-09-17T00:00:00Z',
+      rejection_reason: 'ownership_denied: device_data_row never seen',
+    });
+    assert.strictEqual(outcome.survived, true);
+    assert.strictEqual(outcome.state, 'rejected_expected');
+  });
+  await check('isOwnershipAllowedForAggregate / isExplainedRejection: exactly DEVICE and DEVICE_DATA are ' +
+    'allowed, case-insensitively; ZONE and anything else are not; a reason outside the known-terminal list is ' +
+    'never explained regardless of aggregate type', () => {
+    assert.strictEqual(isOwnershipAllowedForAggregate('DEVICE'), true);
+    assert.strictEqual(isOwnershipAllowedForAggregate('device_data'), true, 'case-insensitive');
+    assert.strictEqual(isOwnershipAllowedForAggregate('ZONE'), false);
+    assert.strictEqual(isOwnershipAllowedForAggregate('VALVE_SCHEDULE'), false);
+    assert.strictEqual(isOwnershipAllowedForAggregate(undefined), false);
+    assert.strictEqual(isExplainedRejection('ownership_denied: x', 'DEVICE'), true);
+    assert.strictEqual(isExplainedRejection('ownership_denied: x', 'ZONE'), false);
+    assert.strictEqual(isExplainedRejection('equal_version_payload_conflict', 'DEVICE'), false,
+      'an unknown reason is never explained, even on an allowed aggregate type');
+  });
+  await check('C1\'s re-query includes aggregate_type (the sync_outbox schema column, ' +
+    'database/seed-blank.sql\'s "CREATE TABLE sync_outbox") so classifyOutboxEventOutcome is never guessing it', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /SELECT aggregate_type, delivered_at, rejected_at, rejection_reason FROM sync_outbox WHERE event_uuid/);
+  });
+  await check('C1\'s run-wide "known terminal reason" delta check and its own-resource "mine" check both use ' +
+    'isExplainedRejection (aggregate-type-aware), not a reason-only isKnownTerminalReason/LIKE filter that ' +
+    'would wave an ownership_denied ZONE rejection through unfiltered', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'C1-sync-outbox.js'), 'utf8');
+    assert.match(src, /unexplainedDelta = rejectedDelta\.filter\(\(r\) => !isExplainedRejection\(r\.rejection_reason, r\.aggregate_type\)\)/);
+    assert.match(src, /freshRejects = freshRejectsAll\.filter\(\(r\) => !isExplainedRejection\(r\.rejection_reason, r\.aggregate_type\)\)/);
+    // The old kind-blind exclusion was a SQL WHERE-clause filter, not a
+    // comment; check the actual freshRejectsAll query has no such filter,
+    // rather than a bare substring scan that would also match a comment or
+    // this file's own unrelated positive-match `simRejects` query below.
+    const freshRejectsAllIdx = src.indexOf('const freshRejectsAll = await ssh.sql(');
+    const freshRejectsAllQuery = src.slice(freshRejectsAllIdx, src.indexOf(');', freshRejectsAllIdx));
+    assert.ok(!/NOT LIKE 'ownership_denied%'/.test(freshRejectsAllQuery),
+      "the freshRejectsAll query itself must not re-exclude ownership_denied in SQL (that was the kind-blind bug)");
   });
   await check('C1\'s assertOutboxEventSurvived fails with a message naming the resource -- and refuses to query ' +
     'with an empty event_uuid -- when the id was never captured in the first place', () => {
