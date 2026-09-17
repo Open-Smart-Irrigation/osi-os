@@ -37,6 +37,7 @@ exports.title = 'Runtime/recovery (bounded): Node-RED restart, cloud disconnect,
 
 const { hostOf, blackholeTargetRefusal } = require('../lib/config');
 const { hasBlackholeRoute, parsePingResolvedIp } = require('../lib/routeParse');
+const { PENDING_POLL_INTERVAL_MS, resumeBudgetMs } = require('../lib/edgeTimeouts');
 
 const MIN_FREE_MB_AFTER = 500;
 const DISK_FILE_MB = 200;
@@ -260,6 +261,28 @@ async function cloudDisconnectCase(ctx) {
   const { rest, ssh, ev } = ctx;
   ev.step('(b) bounded cloud disconnect: begin');
 
+  // F125/F146: this case used to take its "before" snapshot and arm the
+  // blackhole immediately on entry. Coming straight off restartNodeRedCase's
+  // own restart, that raced the very FIRST post-restart pending-commands poll
+  // (still null moments after Node-RED restarts): sometimes the snapshot
+  // caught a legitimate success that landed in the gap before the route
+  // existed (ambiguous "before" baseline), and sometimes no poll had EVER
+  // succeeded yet, so the LATER "resumed after removal" comparison had no
+  // real baseline to compare against either. Waiting here for one real
+  // success first means the snapshot below is always a concrete timestamp,
+  // and any subsequent lack of advance is unambiguously attributable to the
+  // blackhole, not to this case's own timing.
+  const firstPollOk = await ctx.until(async () => {
+    const res = await rest.get('/api/sync/state');
+    return (res.body && res.body.lastPendingCommandPollSuccessAt) ? res : null;
+  }, { timeoutMs: PENDING_POLL_INTERVAL_MS * 4, intervalMs: 3000,
+    what: 'the first pending-commands poll to succeed before arming the blackhole' }).catch(() => null);
+  if (!firstPollOk) {
+    ev.note('(b) no pending-commands poll had succeeded even ' + Math.round(PENDING_POLL_INTERVAL_MS * 4 / 1000) +
+      's after (a) finished; proceeding anyway, but the "before" baseline below may still be null as a result ' +
+      '(see F125/F146 -- this is now recorded rather than silently racing the blackhole).');
+  }
+
   const target = await resolveLinkedCloudHost(ctx);
   if (!target) { ctx.expect('(b) skipped: no safe, distinct, linked cloud host to bound-disconnect', true, null); return; }
   const { host, ip } = target;
@@ -339,11 +362,17 @@ async function cloudDisconnectCase(ctx) {
   // not cause and cannot fix.
   const preRemovalPollSuccessAt = await rest.get('/api/sync/state')
     .then((r) => r.body && r.body.lastPendingCommandPollSuccessAt);
+  // F125/F146: this budget used to be a bare guessed 90000ms, which a request
+  // hung on the just-removed blackholed route could outlast. It is now sized
+  // from the edge's own HTTP client timeout and poll cadence (see
+  // lib/edgeTimeouts.js for the exact source citation and the worst-case
+  // reasoning), not a guess.
   const recovered = await ctx.until(async () => {
     const res = await rest.get('/api/sync/state');
     const successAt = res.body && res.body.lastPendingCommandPollSuccessAt;
     return (successAt && successAt !== preRemovalPollSuccessAt) ? res : null;
-  }, { timeoutMs: 90000, intervalMs: 5000, what: 'lastPendingCommandPollSuccessAt to advance after the route is removed' }).catch(() => null);
+  }, { timeoutMs: resumeBudgetMs(), intervalMs: 5000,
+    what: 'lastPendingCommandPollSuccessAt to advance after the route is removed' }).catch(() => null);
   ctx.expect('(b) the pending-commands poll resumes succeeding after connectivity is restored',
     !!recovered, recovered ? { lastPendingCommandPollSuccessAt: recovered.body.lastPendingCommandPollSuccessAt } :
       { preRemovalPollSuccessAt });

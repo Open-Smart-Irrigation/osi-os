@@ -5,6 +5,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { redact } = require('./rest');
 
 class CaseEvidence {
   constructor(runDir, caseId, title) {
@@ -22,19 +23,26 @@ class CaseEvidence {
     this.error = null;
   }
 
+  // F134/F136: every piece of free-form evidence a case hands in -- a step's
+  // detail, a check's detail, a note, a cleanup detail, a failure's error
+  // message/stack -- is redacted with the SAME `redact()` lib/rest.js already
+  // uses for the HTTP transcript, right here at intake. This is the one choke
+  // point every writer (write()'s JSON, _markdown(), and the run summary,
+  // which only ever reads these already-redacted fields back) goes through,
+  // so nothing downstream can leak a secret by forgetting to filter it again.
   step(name, detail) {
-    this.steps.push({ at: new Date().toISOString(), name, detail: detail === undefined ? null : detail });
+    this.steps.push({ at: new Date().toISOString(), name, detail: detail === undefined ? null : redact(detail) });
   }
 
-  note(text) { this.notes.push({ at: new Date().toISOString(), text }); }
+  note(text) { this.notes.push({ at: new Date().toISOString(), text: redact(text) }); }
 
   check(name, passed, detail) {
-    this.checks.push({ at: new Date().toISOString(), name, passed: !!passed, detail: detail === undefined ? null : detail });
+    this.checks.push({ at: new Date().toISOString(), name, passed: !!passed, detail: detail === undefined ? null : redact(detail) });
     return !!passed;
   }
 
   cleanupStep(name, ok, detail) {
-    this.cleanup.push({ at: new Date().toISOString(), name, ok: !!ok, detail: detail === undefined ? null : detail });
+    this.cleanup.push({ at: new Date().toISOString(), name, ok: !!ok, detail: detail === undefined ? null : redact(detail) });
   }
 
   artifact(name, relPath) { this.artifacts.push({ name, path: relPath }); }
@@ -43,7 +51,9 @@ class CaseEvidence {
 
   finish(status, error) {
     this.status = status;
-    this.error = error ? { message: String(error.message || error), stack: String(error.stack || '') } : null;
+    this.error = error
+      ? { message: redact(String(error.message || error)), stack: redact(String(error.stack || '')) }
+      : null;
     this.finishedAt = new Date().toISOString();
   }
 

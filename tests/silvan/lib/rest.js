@@ -42,6 +42,17 @@ function isSecretKey(key) {
   return SECRET_KEY_PATTERNS.some((re) => re.test(normalized));
 }
 
+// A bearer/session token by SHAPE alone: two or three dot-separated
+// base64url-ish segments, each long enough that this cannot be an incidental
+// dotted word (a filename, a hostname, an ISO timestamp, a version number).
+// This catches a token that reaches evidence with no recognisable key name
+// (isSecretKey never sees it) and no literal "Bearer " prefix -- e.g. a raw
+// `{"token":"..."}` response body already flattened to a string by a
+// truncator, or a token pasted into a free-text note (F134/F136). OSI's own
+// tokens are two-part (`header.signature`, see A1's own check); this also
+// matches a full three-part JWT, which is what the selftest probes with.
+const TOKEN_SHAPE_RE = /\b[A-Za-z0-9_-]{16,}(?:\.[A-Za-z0-9_-]{16,}){1,2}\b/g;
+
 // Deep copy with every secret-named value replaced. Returns a NEW structure;
 // the caller's request body is never mutated.
 function redact(value, depth = 0) {
@@ -59,16 +70,22 @@ function redact(value, depth = 0) {
 }
 
 // A body or header that arrived as text. If it is JSON, redact it structurally
-// and re-serialize; otherwise strip anything that looks like a bearer token.
+// and re-serialize; otherwise strip anything that looks like a bearer token --
+// by the literal "Bearer " prefix, or by shape alone (TOKEN_SHAPE_RE), so a
+// token survives neither path.
 function redactString(text) {
   const raw = String(text);
   const trimmed = raw.trim();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       return JSON.stringify(redact(JSON.parse(trimmed), 1));
-    } catch (_) { /* not JSON after all; fall through */ }
+    } catch (_) { /* not JSON after all (e.g. truncated mid-object); fall through
+                     to the shape-based scan below, which still finds a token
+                     inside the unparseable fragment. */ }
   }
-  return raw.replace(/\bBearer\s+\S+/gi, 'Bearer ' + REDACTED);
+  return raw
+    .replace(/\bBearer\s+\S+/gi, 'Bearer ' + REDACTED)
+    .replace(TOKEN_SHAPE_RE, REDACTED);
 }
 
 function redactHeaders(headers) {

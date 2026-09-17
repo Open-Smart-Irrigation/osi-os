@@ -6,7 +6,7 @@
 
 const { config, assertGatewayViaSsh, assertGatewayViaApi, assertSimulatedDevice, simDeveui } = require('./config');
 const { Ssh } = require('./ssh');
-const { Rest } = require('./rest');
+const { Rest, redact } = require('./rest');
 const { DownlinkObserver } = require('./observer');
 const U = require('./uplinks');
 const { connect } = require('./mqtt');
@@ -127,8 +127,17 @@ class Ctx {
   }
 }
 
+// F134/F136: `res.body` here is the RAW response Rest.request() hands back to
+// case code -- NOT the same object the redacted HTTP transcript records (that
+// redaction happens on a separate copy pushed into `transcript`, see
+// lib/rest.js). A check detail built directly from `res.body` (expectStatus,
+// above) must redact BEFORE stringifying/truncating, never after: once the
+// string below has been cut to `max` characters, a `{"token":"..."}` body is
+// no longer valid JSON, and a later redaction pass could only fall back to a
+// much weaker text scan of a possibly-truncated fragment.
 function truncate(value, max = 400) {
-  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  const safe = redact(value);
+  const s = typeof safe === 'string' ? safe : JSON.stringify(safe);
   if (!s) return s;
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
@@ -206,4 +215,4 @@ async function readDeployedFlows(ssh) {
   }
 }
 
-module.exports = { Ctx, config, assertGatewayViaSsh, assertGatewayViaApi, Ssh, Rest, DownlinkObserver, readGatewayEnv, readDeployedFlows, sleep, until, simDeveui };
+module.exports = { Ctx, config, assertGatewayViaSsh, assertGatewayViaApi, Ssh, Rest, DownlinkObserver, readGatewayEnv, readDeployedFlows, sleep, until, simDeveui, truncate };

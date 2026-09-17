@@ -69,10 +69,33 @@ exports.run = async (ctx) => {
   ev.note('Cloud delivery in the last 10 minutes: ' + (cloudReachable ? 'yes' : 'no') +
     '. The outbox-growth assertions below only hold while the cloud is NOT draining the outbox.');
 
-  const outboxBefore = await pendingOutbox(ssh);
-  ctx.expect('the API pending count matches the edge definition of pending (undelivered AND not rejected)',
-    Math.abs(Number(s0.pendingOutboxCount) - outboxBefore) <= 2,
-    { api: s0.pendingOutboxCount, sqlite: outboxBefore });
+  // F146 C1 #5: pendingOutboxCount is a genuinely LIVE `COUNT(*) ... FROM
+  // sync_outbox WHERE delivered_at IS NULL AND rejected_at IS NULL` on every
+  // call (flows.json node "sync-state-build", ~line 6633) -- there is no
+  // cache to go stale. The two numbers still diverged (API 38 vs SQLite 2,
+  // run 6) because they are read over DIFFERENT transports (HTTP vs an SSH
+  // sqlite3 CLI call) a moment apart, and this shared, backlog-heavy gateway
+  // can move by dozens of rows in that moment once an outbox flush is
+  // actively draining it -- the product never promised these two reads agree
+  // at an arbitrary instant mid-flush, only that they agree once activity
+  // settles (confirmed live: API==SQLite within two minutes). Poll for that
+  // instead of comparing one point-in-time pair, so a genuine drift in the
+  // API's own definition -- not a timing artifact -- still fails this check.
+  const pendingSettled = await ctx.until(async () => {
+    const apiNow = Number((await syncState(rest)).pendingOutboxCount);
+    const sqlNow = await pendingOutbox(ssh);
+    const diff = Math.abs(apiNow - sqlNow);
+    return diff <= 2 ? { api: apiNow, sqlite: sqlNow, diff } : null;
+  }, { timeoutMs: 20000, intervalMs: 2000, what: 'the API pending count to settle with the edge definition of pending' })
+    .catch(async () => {
+      const apiNow = Number((await syncState(rest)).pendingOutboxCount);
+      const sqlNow = await pendingOutbox(ssh);
+      return { api: apiNow, sqlite: sqlNow, diff: Math.abs(apiNow - sqlNow) };
+    });
+  ctx.expect('the API pending count matches the edge definition of pending (undelivered AND not rejected), ' +
+    'once outbox activity settles',
+    pendingSettled.diff <= 2, pendingSettled);
+  const outboxBefore = pendingSettled.sqlite;
 
   // Terminally rejected rows are invisible to the pending-outbox count: the API
   // counts only delivered_at IS NULL AND rejected_at IS NULL, so a gateway whose
@@ -113,9 +136,25 @@ exports.run = async (ctx) => {
     }
   );
   if (has262Shape) {
-    ctx.expect('rejectedOutboxCount from /api/sync/state matches sync_outbox (+/- 2 for events rejected mid-read)',
-      Math.abs(Number(s0.rejectedOutboxCount) - rejectedBefore) <= 2,
-      { api: s0.rejectedOutboxCount, sqlite: rejectedBefore });
+    // F146 C1 #7: same family as the pending-count settle above -- also a
+    // live COUNT(*) (same sync-state-build node), also read a moment apart
+    // from the SQLite ground truth over a different transport, also
+    // observed to settle (API 948 vs SQLite 954, settled to 959/959 within
+    // two minutes, run 6). Poll instead of comparing s0's single snapshot.
+    const rejectedSettled = await ctx.until(async () => {
+      const apiNow = Number((await syncState(rest)).rejectedOutboxCount);
+      const sqlNow = await rejectedOutbox(ssh);
+      const diff = Math.abs(apiNow - sqlNow);
+      return diff <= 2 ? { api: apiNow, sqlite: sqlNow, diff } : null;
+    }, { timeoutMs: 20000, intervalMs: 2000, what: 'the API rejected count to settle with sync_outbox' })
+      .catch(async () => {
+        const apiNow = Number((await syncState(rest)).rejectedOutboxCount);
+        const sqlNow = await rejectedOutbox(ssh);
+        return { api: apiNow, sqlite: sqlNow, diff: Math.abs(apiNow - sqlNow) };
+      });
+    ctx.expect('rejectedOutboxCount from /api/sync/state matches sync_outbox, once outbox activity settles ' +
+      '(+/- 2 for events rejected mid-read)',
+      rejectedSettled.diff <= 2, rejectedSettled);
   }
 
   // (c) Absolute growth guard: explicit and documented instead of an arbitrary
@@ -184,21 +223,33 @@ exports.run = async (ctx) => {
   ctx.expect('SQLite: telemetry is queued for the cloud by the device_data INSERT trigger',
     !!telemetryEvent, telemetryEvent);
 
-  // --- nothing is lost while the cloud is away -----------------------------
+  // --- nothing is lost, whether or not the cloud is currently draining -----
+  // F122/F146: this case never creates a real outage -- a bounded, controlled
+  // blackhole is R1(b)'s job (see the file header's SCOPE LIMIT). Fixing the
+  // premise here in the harness sense of the word: `cloudReachable` is only a
+  // heuristic guess from the staleness of lastOutboxDeliverySuccessAt, and it
+  // does not reliably predict what THIS case's short write burst will
+  // observably do to the outbox -- F122 found it guessing "unreachable" while
+  // the outbox actually drained to 0 (the cloud was, in fact, reachable; the
+  // 10-minute staleness window had simply not caught up yet). Asserting
+  // growth-vs-drop from that guess asserts a state this case does not control
+  // and the product never promised from it. What the product DOES promise --
+  // this file's own header invariant, "the edge is authoritative; local
+  // writes must succeed and be durably queued whether or not the cloud is
+  // reachable" -- is checked unconditionally below: a real regression here
+  // (a write silently dropped instead of queued/delivered) still fails this
+  // check regardless of which way the guess points. Whether the backlog
+  // happened to grow or drain during this run is recorded for the reader,
+  // not asserted on -- a point-in-time API-vs-SQL direction comparison would
+  // just reintroduce the same settle-timing race fixed above for #5/#7.
   const outboxAfter = await pendingOutbox(ssh);
   const s1 = await syncState(rest);
-  if (cloudReachable) {
-    ev.note('The cloud was draining the outbox during this run, so an exact growth assertion would be a ' +
-      'race. Recorded instead: pending ' + outboxBefore + ' -> ' + outboxAfter + '.');
-    ctx.expect('local writes are queued or already delivered, never dropped',
-      outboxAfter >= 0 && !!zoneEvent && !!deviceEvent, { before: outboxBefore, after: outboxAfter });
-  } else {
-    ctx.expect('with the cloud unreachable, the pending outbox grows rather than dropping events',
-      outboxAfter > outboxBefore, { before: outboxBefore, after: outboxAfter });
-    ctx.expect('GET /api/sync/state surfaces the growing backlog to the operator',
-      Number(s1.pendingOutboxCount) > Number(s0.pendingOutboxCount),
-      { before: s0.pendingOutboxCount, after: s1.pendingOutboxCount });
-  }
+  ev.note('Cloud reachability guess for this run: ' + (cloudReachable ? 'reachable' : 'unreachable') +
+    ' (lastOutboxDeliverySuccessAt ' + (s0.lastOutboxDeliverySuccessAt || 'never') + '). Observed outbox ' +
+    'movement (report, not an assertion): SQLite pending ' + outboxBefore + ' -> ' + outboxAfter +
+    ', API-reported ' + s0.pendingOutboxCount + ' -> ' + s1.pendingOutboxCount + '.');
+  ctx.expect('local writes are queued or already delivered, never dropped, regardless of cloud reachability',
+    outboxAfter >= 0 && !!zoneEvent && !!deviceEvent, { before: outboxBefore, after: outboxAfter });
 
   // (a) DELTA: what did THIS run's own traffic (the writes above) add to the
   // rejected pile since this case started, and is every new rejection
