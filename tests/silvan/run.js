@@ -159,14 +159,14 @@ async function main() {
   console.log('EUI guard (ssh): ' + sshEui + ' OK');
 
   const transcript = [];
-  const anonRest = new Rest(cfg.apiBase, { transcript });
+  const anonRest = new Rest(cfg.apiBase, { transcript, gateway: cfg.gateway });
 
   // GUARD 2 (over the tunnel, still BEFORE any mutation): the HTTP endpoint must
   // be the same gateway the SSH guard just verified. This runs before
   // bootstrapAuth registers anything, so a tunnel aimed at the wrong Node-RED
   // is caught before this harness writes a single row to it.
   const probeToken = await mintIdentityProbeToken(ssh);
-  const apiEui = await assertGatewayViaApi(new Rest(cfg.apiBase, { token: probeToken, transcript }), cfg);
+  const apiEui = await assertGatewayViaApi(new Rest(cfg.apiBase, { token: probeToken, transcript, gateway: cfg.gateway }), cfg);
   console.log('EUI guard (api): ' + apiEui + ' OK');
 
   const env = await readGatewayEnv(ssh);
@@ -175,7 +175,7 @@ async function main() {
 
   // Only now, with both guards green, is the gateway written to.
   const auth = await bootstrapAuth(anonRest, ssh, null, opts);
-  const rest = new Rest(cfg.apiBase, { token: auth.token, transcript });
+  const rest = new Rest(cfg.apiBase, { token: auth.token, transcript, gateway: cfg.gateway });
   console.log('harness account: ' + auth.username + (auth.created ? ' (registered by this run)' : ' (existing)'));
 
   const observer = await new DownlinkObserver({

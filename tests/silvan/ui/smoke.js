@@ -15,6 +15,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { browserRequestDecision, originOf } = require('../lib/browserGuard');
 
 const PLAYWRIGHT_DIR = process.env.OSI_PLAYWRIGHT_DIR || '/home/phil/osi-tools/playwright';
 
@@ -45,8 +46,11 @@ const VIEWPORTS = [
   { id: 'mobile', width: 390, height: 844 },
 ];
 
+// The one fetch in this harness that does not go through lib/rest.js. It takes
+// the same redirect rule: a locale bundle is served or it is not, and a 3xx
+// here would only be a way to send this request somewhere else.
 async function fetchLocale(apiBase, lng, ns) {
-  const res = await fetch(apiBase + '/gui/locales/' + lng + '/' + ns + '.json');
+  const res = await fetch(apiBase + '/gui/locales/' + lng + '/' + ns + '.json', { redirect: 'manual' });
   if (!res.ok) return null;
   try { return await res.json(); } catch (_) { return null; }
 }
@@ -114,7 +118,12 @@ exports.run = async (ctx) => {
   const I18N_ERROR = /returned an object instead of string|missingKey|^\[object Object\]$/i;
 
   const browser = await chromium.launch({ args: ['--no-sandbox'] });
-  const findings = { leaks: [], rawKeys: [], i18nErrors: [], englishBlocks: [], consoleErrors: [], pageErrors: [] };
+  const findings = { leaks: [], rawKeys: [], i18nErrors: [], englishBlocks: [], consoleErrors: [], pageErrors: [],
+    blockedRequests: [] };
+  // Every browser request is pinned to the GUI's own origin. The endpoint guard
+  // covers the sockets this harness opens; this covers the ones the PAGE opens.
+  const guiOrigin = originOf(cfg.guiBase);
+  const blockedRequests = findings.blockedRequests;
   const shots = [];
 
   try {
@@ -128,6 +137,20 @@ exports.run = async (ctx) => {
       // (src/i18n/config.ts: lookupLocalStorage 'i18n_language').
       await context.addInitScript(() => {
         try { window.localStorage.setItem('i18n_language', 'fr'); } catch (e) { /* storage blocked */ }
+      });
+      await context.route('**/*', async (route, request) => {
+        const decision = browserRequestDecision(request.url(), guiOrigin);
+        if (decision.allowed) {
+          await route.continue();
+          return;
+        }
+        blockedRequests.push({
+          viewport: vp.id,
+          url: String(request.url()).slice(0, 300),
+          resourceType: request.resourceType(),
+          reason: decision.reason,
+        });
+        await route.abort('blockedbyclient');
       });
       const page = await context.newPage();
       page.on('console', (m) => { if (m.type() === 'error') findings.consoleErrors.push({ viewport: vp.id, text: m.text().slice(0, 300) }); });
@@ -283,6 +306,16 @@ exports.run = async (ctx) => {
   ev.artifact('French i18n scan', path.relative(ctx.runDir, reportPath));
   for (const s of shots) ev.artifact('screenshot', s);
   ev.note('GUI account "' + username + '" was registered for this smoke and cannot be removed through the API.');
+  ctx.expect('the browser request guard was armed against the GUI origin', !!guiOrigin, { guiOrigin });
+  if (blockedRequests.length) {
+    // Not a failure: an offline-first GUI should not need a third-party origin,
+    // but a blocked font or tile explains a gap in a screenshot.
+    ev.note('The request guard blocked ' + blockedRequests.length + ' cross-origin request(s); every URL and ' +
+      'reason is in the i18n scan report under "blockedRequests". First: ' +
+      blockedRequests.slice(0, 3).map((b) => b.url).join(', '));
+  } else {
+    ev.note('The request guard blocked nothing: every request the GUI made stayed on ' + guiOrigin + '.');
+  }
 };
 
 exports.cleanup = async () => { /* no gateway resources are created beyond the account */ };

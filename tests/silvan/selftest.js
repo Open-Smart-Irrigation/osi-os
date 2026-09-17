@@ -12,6 +12,10 @@
 
 const http = require('node:http');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const configLib = require('./lib/config');
 const {
@@ -26,6 +30,9 @@ const { classifyOnceOutcome, ONCE_GRACE_MS } = require('./lib/onceGrace');
 const { hasAdminRouterScopedGate, hasScopedOnlyRoleAssert } = require('./lib/roleGates');
 const { hasBlackholeRoute, firstIpv4, parsePingResolvedIp } = require('./lib/routeParse');
 const planRef = require('./lib/planRef');
+// Lazily required so a missing module fails ONE assertion instead of the run.
+let browserGuard = null;
+try { browserGuard = require('./lib/browserGuard'); } catch (_) { browserGuard = null; }
 
 const failures = [];
 let passed = 0;
@@ -421,6 +428,164 @@ async function main() {
     assert.strictEqual(ssh.host, '100.85.226.64');
   });
 
+  console.log('\n-- deny-list canonicalisation: IPv4-mapped IPv6 literals');
+  await check('an IPv4-mapped IPv6 literal canonicalises to its dotted form, in every spelling', () => {
+    assert.strictEqual(configLib.canonicalHost('::ffff:100.99.212.115'), '100.99.212.115');
+    assert.strictEqual(configLib.canonicalHost('::ffff:6463:d473'), '100.99.212.115');
+    assert.strictEqual(configLib.canonicalHost('0:0:0:0:0:ffff:6463:d473'), '100.99.212.115');
+    assert.strictEqual(configLib.canonicalHost('[::FFFF:100.99.212.115]'), '100.99.212.115');
+    assert.strictEqual(configLib.canonicalHost('::ffff:127.0.0.1'), '127.0.0.1');
+  });
+  await check('ordinary IPv6 literals are NOT mangled into IPv4 by that rule', () => {
+    assert.strictEqual(configLib.canonicalHost('::1'), '::1');
+    assert.strictEqual(configLib.canonicalHost('[::1]'), '::1');
+    assert.strictEqual(configLib.canonicalHost('::'), '::');
+    assert.strictEqual(configLib.canonicalHost('2001:db8::1'), '2001:db8::1');
+    assert.ok(isLoopback('::1') && isLoopback('::ffff:127.0.0.1'), 'both loopback spellings still count as loopback');
+  });
+  await check('an IPv4-mapped forbidden host is refused AS forbidden, not by the consistency backstop', () => {
+    for (const spelling of ['::ffff:100.99.212.115', '[::ffff:100.99.212.115]', '::ffff:6463:d473',
+      '0:0:0:0:0:ffff:6463:d473', '::ffff:57.129.7.196']) {
+      assert.strictEqual(configLib.isForbiddenHost(spelling), true, spelling + ' must be a forbidden host');
+      assert.throws(() => config({ mqttHost: spelling }), /forbidden-host list/, spelling);
+    }
+  });
+
+  console.log('\n-- R1(b): a blackhole target may never be a gateway or one of this run\'s endpoints');
+  await check('the blackhole guard refuses a deny-listed host, by name, by IP and IPv4-mapped', () => {
+    const cfg = config();
+    assert.match(String(configLib.blackholeTargetRefusal('osicloud.ch', cfg)), /forbidden/i);
+    assert.match(String(configLib.blackholeTargetRefusal('100.99.212.115', cfg)), /forbidden/i);
+    assert.match(String(configLib.blackholeTargetRefusal('::ffff:100.99.212.115', cfg)), /forbidden/i);
+  });
+  await check('the blackhole guard refuses EVERY allow-listed test gateway, not just this run\'s', () => {
+    assert.match(String(configLib.blackholeTargetRefusal('100.85.226.64', config())), /allow-listed test gateway/);
+    assert.match(String(configLib.blackholeTargetRefusal('100.81.220.8', config({ gateway: 'rpi4-test' }))),
+      /allow-listed test gateway/);
+  });
+  await check('the blackhole guard refuses this run\'s own tunnel endpoints', () => {
+    assert.match(String(configLib.blackholeTargetRefusal('127.0.0.1', config())), /endpoint/);
+    assert.match(String(configLib.blackholeTargetRefusal('localhost', config())), /endpoint/);
+  });
+  await check('the blackhole guard allows an ordinary third-party cloud host', () => {
+    assert.strictEqual(configLib.blackholeTargetRefusal('bovey.cloud', config()), null);
+    assert.strictEqual(configLib.blackholeTargetRefusal('83.228.220.63', config()), null);
+  });
+  await check('an unparseable blackhole target is refused rather than allowed', () => {
+    assert.ok(configLib.blackholeTargetRefusal('', config()));
+    assert.ok(configLib.blackholeTargetRefusal(null, config()));
+  });
+  await check('R1 asks the shared blackhole guard instead of re-implementing it', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'cases', 'R1-runtime-recovery.js'), 'utf8');
+    assert.ok(/blackholeTargetRefusal/.test(src), 'R1 must call the shared guard');
+  });
+
+  console.log('\n-- the ssh argument vector ignores the operator\'s ssh_config');
+  // A scratch HOME with a ProxyCommand Host block. `ssh -G` only prints the
+  // effective configuration: it resolves nothing and connects to nothing.
+  const sshFixtureHome = () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-selftest-ssh-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.ssh', 'config'),
+      'Host *\n  ProxyCommand /bin/false osi-selftest-proxy %h %p\n  StrictHostKeyChecking no\n');
+    return home;
+  };
+  // stdio: stderr captured, not inherited -- ssh warns about the missing tty
+  // when a command is present, and that noise is not part of this output.
+  const sshG = (args, home) => execFileSync('ssh', ['-G'].concat(args), {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: Object.assign({}, process.env, { HOME: home }),
+  });
+  await check('an ssh_config with a ProxyCommand Host block IS honoured by ssh (otherwise the next assertion ' +
+    'proves nothing)', () => {
+    const home = sshFixtureHome();
+    try {
+      const out = sshG(['-F', path.join(home, '.ssh', 'config'), 'root@100.81.220.8'], home);
+      assert.match(out, /^proxycommand .*osi-selftest-proxy/m);
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+  await check('the harness\'s own ssh arguments drop that ProxyCommand and keep the default known_hosts files', () => {
+    const home = sshFixtureHome();
+    try {
+      const args = new Ssh(config())._args('true');
+      const out = sshG(args.slice(0, -1), home);
+      assert.ok(!/^proxycommand \S/m.test(out.replace(/^proxycommand none$/m, '')), 'no ProxyCommand may survive');
+      assert.ok(!/^proxyjump \S/m.test(out), 'no ProxyJump may survive');
+      assert.match(out, /^hostname 100\.81\.220\.8$/m);
+      assert.match(out, /^user root$/m);
+      assert.match(out, /^userknownhostsfile .*known_hosts/m, 'known_hosts handling must stay intact');
+      assert.match(out, /^globalknownhostsfile \S/m, 'the global known_hosts file must stay configured');
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
+  console.log('\n-- the REST client pins to the selected gateway and canonicalises its base URL');
+  await check('the base URL is rebuilt from the canonical host', () => {
+    assert.strictEqual(new Rest('http://LOCALHOST:18800').baseUrl, 'http://localhost:18800');
+    assert.strictEqual(new Rest('http://[::ffff:127.0.0.1]:18800').baseUrl, 'http://127.0.0.1:18800');
+    assert.strictEqual(new Rest('http://127.0.0.1:18800/').baseUrl, 'http://127.0.0.1:18800');
+  });
+  await check('with a gateway name, a base URL on the OTHER allow-listed gateway is refused', () => {
+    assert.throws(() => new Rest('http://100.85.226.64:1880', { gateway: 'silvan' }), /REFUSING/);
+    assert.throws(() => new Rest('http://100.81.220.8:1880', { gateway: 'rpi4-test' }), /REFUSING/);
+    new Rest('http://100.85.226.64:1880', { gateway: 'rpi4-test' });
+    new Rest('http://127.0.0.1:18800', { gateway: 'rpi4-test' });
+  });
+  await check('withToken keeps the gateway pin', () => {
+    assert.strictEqual(new Rest('http://127.0.0.1:18800', { gateway: 'rpi4-test' }).withToken('t').gateway, 'rpi4-test');
+  });
+  await check('the runner hands every REST client the selected gateway', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'run.js'), 'utf8');
+    const pinned = (src.match(/new Rest\(cfg\.apiBase, \{[^}]*gateway: cfg\.gateway/g) || []).length;
+    const total = (src.match(/new Rest\(/g) || []).length;
+    assert.strictEqual(pinned, total, 'every REST client in run.js must be pinned to the selected gateway');
+  });
+
+  console.log('\n-- U1 browser request guard (lib/browserGuard.js)');
+  await check('same-origin GUI requests are allowed', () => {
+    assert.ok(browserGuard, 'lib/browserGuard.js must exist');
+    const origin = 'http://127.0.0.1:18800';
+    assert.strictEqual(browserGuard.browserRequestDecision('http://127.0.0.1:18800/gui/index.html', origin).allowed, true);
+    assert.strictEqual(browserGuard.browserRequestDecision('http://127.0.0.1:18800/api/me', origin).allowed, true);
+  });
+  await check('a cross-origin request is blocked and keeps its URL for the evidence', () => {
+    assert.ok(browserGuard, 'lib/browserGuard.js must exist');
+    const d = browserGuard.browserRequestDecision('https://tile.openstreetmap.org/1/2/3.png', 'http://127.0.0.1:18800');
+    assert.strictEqual(d.allowed, false);
+    assert.match(d.reason, /origin/i);
+  });
+  await check('another gateway on the same port is blocked, and so is another port on the same host', () => {
+    assert.ok(browserGuard, 'lib/browserGuard.js must exist');
+    const origin = 'http://127.0.0.1:18800';
+    assert.strictEqual(browserGuard.browserRequestDecision('http://100.99.212.115:18800/gui/', origin).allowed, false);
+    assert.strictEqual(browserGuard.browserRequestDecision('http://127.0.0.1:1880/gui/', origin).allowed, false);
+    assert.strictEqual(browserGuard.browserRequestDecision('https://127.0.0.1:18800/gui/', origin).allowed, false);
+  });
+  await check('inline data:, blob: and about: requests are allowed -- they open no socket', () => {
+    assert.ok(browserGuard, 'lib/browserGuard.js must exist');
+    const origin = 'http://127.0.0.1:18800';
+    for (const url of ['data:image/png;base64,AAA', 'blob:http://127.0.0.1:18800/abc', 'about:blank']) {
+      assert.strictEqual(browserGuard.browserRequestDecision(url, origin).allowed, true, url);
+    }
+  });
+  await check('an unparseable or empty URL is blocked rather than allowed by accident', () => {
+    assert.ok(browserGuard, 'lib/browserGuard.js must exist');
+    assert.strictEqual(browserGuard.browserRequestDecision('not a url', 'http://127.0.0.1:18800').allowed, false);
+    assert.strictEqual(browserGuard.browserRequestDecision('', 'http://127.0.0.1:18800').allowed, false);
+    assert.strictEqual(browserGuard.browserRequestDecision('http://127.0.0.1:18800/', '').allowed, false);
+  });
+  await check('the guard pins to the GUI base\'s origin, path and all', () => {
+    assert.ok(browserGuard, 'lib/browserGuard.js must exist');
+    assert.strictEqual(browserGuard.originOf('http://127.0.0.1:18800/gui/'), 'http://127.0.0.1:18800');
+    assert.strictEqual(browserGuard.originOf('nonsense'), null);
+  });
+  await check('U1 installs the request guard on the browser context', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'ui', 'smoke.js'), 'utf8');
+    assert.ok(/\.route\(/.test(src), 'smoke.js must install a route handler');
+    assert.ok(/browserRequestDecision/.test(src), 'smoke.js must use the shared decision');
+    assert.ok(/blockedRequests/.test(src), 'blocked requests must be recorded for the evidence');
+    assert.ok(/redirect: 'manual'/.test(src), 'the locale fetch must not follow redirects either');
+  });
+
   console.log('\n-- simulated devices only');
   await check('a simulated DevEUI is accepted and is valid 16-char hex', () => {
     const eui = simDeveui('selftest', 1);
@@ -710,6 +875,69 @@ async function main() {
     });
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+
+  // Redirects, end to end through the real Rest client against two loopback
+  // stubs: the gateway's own /gui -> /gui/ 301 must still work, and nothing may
+  // be replayed to a different origin.
+  const otherOrigin = http.createServer((req, res) => {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ message: 'this server must never be reached by the harness' }));
+  });
+  await new Promise((resolve) => otherOrigin.listen(0, '127.0.0.1', resolve));
+  const otherPort = otherOrigin.address().port;
+
+  let loopHits = 0;
+  const redirector = http.createServer((req, res) => {
+    if (req.url === '/gui') { res.statusCode = 301; res.setHeader('Location', '/gui/'); res.end(); return; }
+    if (req.url === '/gui/') {
+      res.statusCode = 200; res.setHeader('Content-Type', 'text/html'); res.end('<html>gui</html>'); return;
+    }
+    if (req.url === '/cross') {
+      res.statusCode = 302; res.setHeader('Location', 'http://127.0.0.1:' + otherPort + '/stolen'); res.end(); return;
+    }
+    if (req.url === '/loop') { loopHits += 1; res.statusCode = 301; res.setHeader('Location', '/loop'); res.end(); return; }
+    if (req.url === '/moved-post') { res.statusCode = 303; res.setHeader('Location', '/landed'); res.end(); return; }
+    if (req.url === '/landed') {
+      res.statusCode = 200; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ method: req.method, message: 'landed' }));
+      return;
+    }
+    res.statusCode = 404; res.end('{}');
+  });
+  await new Promise((resolve) => redirector.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const transcript = [];
+    const rest = new Rest('http://127.0.0.1:' + redirector.address().port, { transcript });
+
+    await check('a same-origin 301 (the gateway\'s /gui -> /gui/) is still followed', async () => {
+      const res = await rest.get('/gui', { raw: true });
+      assert.strictEqual(res.status, 200);
+      const rec = transcript.find((r) => r.path === '/gui');
+      assert.deepStrictEqual((rec.redirects || []).map((h) => h.status), [301],
+        'the hop must be recorded in the transcript');
+    });
+    await check('a cross-origin redirect is refused rather than followed, so no token is replayed', async () => {
+      await assert.rejects(() => rest.get('/cross', { token: 'tok3n.s1gnature' }), /REFUSING to follow/);
+      const serialized = JSON.stringify(transcript);
+      assert.ok(!serialized.includes('tok3n.s1gnature'), 'the bearer token leaked into the transcript');
+      assert.ok(!serialized.includes('this server must never be reached'), 'the other origin was actually fetched');
+    });
+    await check('a redirect loop stops at the hop limit instead of spinning', async () => {
+      loopHits = 0;
+      await assert.rejects(() => rest.get('/loop'), /too many redirects/i);
+      assert.ok(loopHits <= 5, 'the client followed ' + loopHits + ' hops; the cap must bound it');
+    });
+    await check('a 303 turns the follow-up into a GET without the original body', async () => {
+      const res = await rest.post('/moved-post', { username: 'osi_selftest' });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.method, 'GET');
+    });
+  } finally {
+    await new Promise((resolve) => redirector.close(resolve));
+    await new Promise((resolve) => otherOrigin.close(resolve));
   }
 
   console.log('');

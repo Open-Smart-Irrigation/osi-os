@@ -31,8 +31,17 @@ class Ssh {
   // `-o HostName=` pins the address ssh(1) will actually dial to the validated
   // host, whatever the destination argument is later read as, and `--`
   // terminates the option list so no host value can be taken for an option.
+  //
+  // `-F /dev/null` drops the operator's ~/.ssh/config and, with it, the system
+  // ssh_config: a ProxyCommand, ProxyJump or HostName override in either would
+  // otherwise decide where this connection really goes, whatever the endpoint
+  // guard validated. It does NOT touch known_hosts -- UserKnownHostsFile and
+  // GlobalKnownHostsFile are compiled-in defaults, not config-file values, and
+  // `ssh -G -F /dev/null` still reports ~/.ssh/known_hosts and
+  // /etc/ssh/ssh_known_hosts (asserted in selftest.js).
   _args(command) {
     return [
+      '-F', '/dev/null',
       '-i', this.key,
       '-o', 'IdentitiesOnly=yes',
       '-o', 'BatchMode=yes',
