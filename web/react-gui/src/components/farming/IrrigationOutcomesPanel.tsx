@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDateFormat, type DateFormatter } from '../../utils/datetime';
 import {
   irrigationOutcomesAPI,
   type IrrigationActuation,
@@ -39,29 +40,21 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const INITIAL: State = { loading: true, error: null, generatedAt: null, actuations: [] };
 
-function formatRelativeTime(iso: string | null): string {
+/**
+ * Both used to ignore the app language: the relative time was built from
+ * English literals ("0s ago", "in 3 min", "now") and never went through
+ * `t()`, and the absolute one passed `undefined` to `Intl`, which is the
+ * operating system's locale. `utils/datetime` takes the language explicitly
+ * and formats the relative distance through `Intl.RelativeTimeFormat`.
+ */
+function formatAbsoluteDateTime(fmt: DateFormatter, iso: string | null, timeZone?: string | null): string {
   if (!iso) return '—';
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return iso;
-  const deltaSec = (Date.now() - t) / 1000;
-  if (deltaSec < -60) return `in ${Math.round(Math.abs(deltaSec) / 60)} min`;
-  if (deltaSec < 0) return 'now';
-  if (deltaSec < 60) return `${Math.round(deltaSec)}s ago`;
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)} min ago`;
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)} h ago`;
-  return `${Math.round(deltaSec / 86400)} d ago`;
+  return fmt.dateTime(iso, timeZone ? { timeZone } : undefined) ?? iso;
 }
 
-function formatAbsoluteDateTime(iso: string | null, timeZone?: string | null): string {
+function formatRelativeTime(fmt: DateFormatter, iso: string | null): string {
   if (!iso) return '—';
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return iso;
-  const options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' };
-  try {
-    return new Intl.DateTimeFormat(undefined, timeZone ? { ...options, timeZone } : options).format(date);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
-  }
+  return fmt.relativeToNow(iso) ?? iso;
 }
 
 function formatDuration(seconds: number): string {
@@ -201,8 +194,9 @@ const TimestampDetail: React.FC<{
   timeZone?: string | null;
 }> = ({ label, iso, timeZone }) => {
   const { t } = useTranslation('devices');
-  const absolute = formatAbsoluteDateTime(iso, timeZone);
-  const relative = formatRelativeTime(iso);
+  const fmt = useDateFormat();
+  const absolute = formatAbsoluteDateTime(fmt, iso, timeZone);
+  const relative = formatRelativeTime(fmt, iso);
   const title = t('irrigationOutcomes.timestampTitle', {
     defaultValue: '{{label}}: {{absolute}} ({{relative}})',
     label,
@@ -224,6 +218,7 @@ const CompactActuationRow: React.FC<{
   zoneContext?: IrrigationOutcomeZoneContext | null;
 }> = ({ row, zoneContext }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
   const metric = buildIrrigationMetric(row, zoneContext, t as Translate);
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
@@ -241,7 +236,7 @@ const CompactActuationRow: React.FC<{
         </div>
         <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-3 gap-y-0.5">
           <span>
-            <time dateTime={row.commandedAt}>{formatAbsoluteDateTime(row.commandedAt, zoneContext?.timeZone)}</time>
+            <time dateTime={row.commandedAt}>{formatAbsoluteDateTime(fmt, row.commandedAt, zoneContext?.timeZone)}</time>
           </span>
           <span>
             {t('irrigationOutcomes.duration', { defaultValue: 'Duration' })}: {formatDuration(row.commandedDurationSeconds)}
@@ -318,6 +313,7 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
   zoneTimezones,
 }) => {
   const { t } = useTranslation('devices');
+  const fmt = useDateFormat();
   const [state, setState] = useState<State>(INITIAL);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [advancedView, setAdvancedView] = useState(readStoredAdvancedView);
@@ -387,7 +383,7 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
         <div className="flex items-center gap-2">
           {viewState.generatedAt && (
             <span className="text-xs text-[var(--text-tertiary)]">
-              {t('irrigationOutcomes.updated', { defaultValue: 'updated' })} {formatRelativeTime(viewState.generatedAt)}
+              {t('irrigationOutcomes.updated', { defaultValue: 'updated' })} {formatRelativeTime(fmt, viewState.generatedAt)}
             </span>
           )}
           <div className="relative">
