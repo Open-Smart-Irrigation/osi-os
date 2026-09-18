@@ -91,9 +91,25 @@ function annotateError(error, step) {
   return wrapped;
 }
 
+// A ChirpStack that accepts the connection and never answers (it does that while it
+// restarts) left these promises pending for ever, and with them every HTTP route that
+// awaits one: the valve cancel, the valve API router, the device delete clean-up. With a
+// deadline grpc-js ends the call itself and the caller gets DEADLINE_EXCEEDED.
+const DEFAULT_GRPC_DEADLINE_MS = 20000;
+// Upper bound for the setting. grpc-js reads a deadline more than 2^31-1 ms away as "none"
+// and arms no timer, so an oversized value would switch the deadline off again.
+const MAX_GRPC_DEADLINE_MS = 120000;
+
+function grpcDeadlineMs() {
+  const configured = Number(process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS);
+  if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_GRPC_DEADLINE_MS;
+  return Math.min(configured, MAX_GRPC_DEADLINE_MS);
+}
+
 function grpcInvoke(client, methodName, request, metadata, step) {
   return new Promise((resolve, reject) => {
-    client[methodName](request, metadata, (error, response) => {
+    const options = { deadline: new Date(Date.now() + grpcDeadlineMs()) };
+    client[methodName](request, metadata, options, (error, response) => {
       if (error) {
         reject(toGrpcError(error, step || methodName));
         return;

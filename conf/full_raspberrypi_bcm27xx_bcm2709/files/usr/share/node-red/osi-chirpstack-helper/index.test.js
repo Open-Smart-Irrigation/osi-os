@@ -93,38 +93,38 @@ function stubClient(captured, fixtures) {
   };
 
   client.deviceClient = {
-    get: (request, metadata, callback) => {
+    get: (request, metadata, options, callback) => {
       calls.push('get');
       const device = nextDevice();
       if (!device) return callback(notFoundError());
       callback(null, { getDevice: () => device });
     },
-    create: (request, metadata, callback) => {
+    create: (request, metadata, options, callback) => {
       calls.push('create');
       captured.create = { device: request.getDevice().toObject() };
       callback(null, {});
     },
-    getKeys: (request, metadata, callback) => {
+    getKeys: (request, metadata, options, callback) => {
       calls.push('getKeys');
       if (!keysMessage) return callback(notFoundError());
       callback(null, { getDeviceKeys: () => keysMessage });
     },
-    createKeys: (request, metadata, callback) => {
+    createKeys: (request, metadata, options, callback) => {
       calls.push('createKeys');
       captured.createKeys = request.getDeviceKeys().toObject();
       callback(null, {});
     },
-    updateKeys: (request, metadata, callback) => {
+    updateKeys: (request, metadata, options, callback) => {
       calls.push('updateKeys');
       captured.updateKeys = request.getDeviceKeys().toObject();
       callback(null, {});
     },
-    delete: (request, metadata, callback) => {
+    delete: (request, metadata, options, callback) => {
       calls.push('delete');
       captured.delete = true;
       callback(null, {});
     },
-    update: (request, metadata, callback) => {
+    update: (request, metadata, options, callback) => {
       calls.push('update');
       captured.update = { device: request.getDevice().toObject() };
       callback(null, {});
@@ -219,4 +219,109 @@ test('ensureDeviceProvisioned does not claim profileAction "repointed" when no u
   const result = await client.ensureDeviceProvisioned({ devEui: '00DEC0DE00000001', appKey: 'A'.repeat(32), applicationId: 'app-1', deviceProfileId: 'prof-gen2', name: 'Vanne 1' });
   assert.equal(client.__calls.includes('update'), false, 'no update RPC was actually issued');
   assert.equal(result.profileAction, 'unchanged', 'profileAction must not claim a re-point that never happened');
+});
+
+// F110: a ChirpStack that accepts the connection and never answers (mid-restart) used to
+// leave the caller's promise pending for ever, and with it the HTTP route that awaited it:
+// the valve cancel, the valve API router and the device delete clean-up.
+test('every gRPC call carries a deadline', async () => {
+  const seen = [];
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  client.deviceClient = {
+    flushQueue: (request, metadata, options, callback) => {
+      seen.push(options);
+      callback(null, {});
+    }
+  };
+  const before = Date.now();
+  await client.flushDeviceQueue('00dec0de00000001');
+  assert.equal(seen.length, 1);
+  assert.ok(seen[0] && seen[0].deadline instanceof Date, 'options.deadline must be a Date');
+  const budgetMs = seen[0].deadline.getTime() - before;
+  assert.ok(budgetMs > 1000 && budgetMs <= 60000, `deadline budget out of range: ${budgetMs} ms`);
+});
+
+test('a server that accepts the connection and never answers ends in DEADLINE_EXCEEDED, not in a hang', async (t) => {
+  const net = require('node:net');
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.on('error', () => {});
+    // Hold the connection open and say nothing.
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  const port = server.address().port;
+
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = '400';
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  });
+
+  const client = createClient({ apiUrl: `http://127.0.0.1:${port}`, apiKey: 'test-key' });
+  const started = Date.now();
+  const outcome = await Promise.race([
+    client.flushDeviceQueue('00dec0de00000001').then(() => 'resolved', (error) => error),
+    new Promise((resolve) => setTimeout(() => resolve('still pending after 5 s'), 5000))
+  ]);
+  if (client.deviceClient && typeof client.deviceClient.close === 'function') client.deviceClient.close();
+
+  assert.ok(outcome instanceof Error, `expected a rejection, got: ${outcome}`);
+  assert.equal(outcome.grpcStatus, 'DEADLINE_EXCEEDED');
+  assert.equal(outcome.step, 'flushDeviceQueue');
+  assert.ok(Date.now() - started < 4000, 'must give up close to the deadline');
+});
+
+test('a bad deadline setting falls back to the default instead of disabling the deadline', async () => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  const seen = [];
+  try {
+    for (const bad of ['0', '-5', 'abc', '']) {
+      process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = bad;
+      const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+      client.deviceClient = {
+        flushQueue: (request, metadata, options, callback) => {
+          seen.push(options.deadline.getTime() - Date.now());
+          callback(null, {});
+        }
+      };
+      await client.flushDeviceQueue('00dec0de00000001');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  }
+  assert.equal(seen.length, 4);
+  for (const budgetMs of seen) assert.ok(budgetMs > 15000 && budgetMs <= 20000, `fallback budget was ${budgetMs} ms`);
+});
+
+// grpc-js treats a deadline more than 2^31-1 ms away as "no deadline" and arms no timer, so
+// an oversized setting would bring the hang back through the front door.
+test('an oversized deadline setting is clamped instead of switching the deadline off', async () => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  const seen = [];
+  try {
+    for (const huge of ['2147483648', '999999999999', '1e300']) {
+      process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = huge;
+      const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+      client.deviceClient = {
+        flushQueue: (request, metadata, options, callback) => {
+          seen.push(options.deadline.getTime() - Date.now());
+          callback(null, {});
+        }
+      };
+      await client.flushDeviceQueue('00dec0de00000001');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  }
+  assert.equal(seen.length, 3);
+  for (const budgetMs of seen) assert.ok(budgetMs > 100000 && budgetMs <= 120000, `clamped budget was ${budgetMs} ms`);
 });
