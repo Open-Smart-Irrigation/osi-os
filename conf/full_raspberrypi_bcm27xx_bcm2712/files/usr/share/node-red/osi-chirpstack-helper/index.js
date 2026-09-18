@@ -96,10 +96,14 @@ function annotateError(error, step) {
 // awaits one: the valve cancel, the valve API router, the device delete clean-up. With a
 // deadline grpc-js ends the call itself and the caller gets DEADLINE_EXCEEDED.
 const DEFAULT_GRPC_DEADLINE_MS = 20000;
+// Upper bound for the setting. grpc-js reads a deadline more than 2^31-1 ms away as "none"
+// and arms no timer, so an oversized value would switch the deadline off again.
+const MAX_GRPC_DEADLINE_MS = 120000;
 
 function grpcDeadlineMs() {
   const configured = Number(process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GRPC_DEADLINE_MS;
+  if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_GRPC_DEADLINE_MS;
+  return Math.min(configured, MAX_GRPC_DEADLINE_MS);
 }
 
 function grpcInvoke(client, methodName, request, metadata, step) {

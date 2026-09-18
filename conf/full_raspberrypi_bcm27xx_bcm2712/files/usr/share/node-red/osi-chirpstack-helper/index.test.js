@@ -300,3 +300,28 @@ test('a bad deadline setting falls back to the default instead of disabling the 
   assert.equal(seen.length, 4);
   for (const budgetMs of seen) assert.ok(budgetMs > 15000 && budgetMs <= 20000, `fallback budget was ${budgetMs} ms`);
 });
+
+// grpc-js treats a deadline more than 2^31-1 ms away as "no deadline" and arms no timer, so
+// an oversized setting would bring the hang back through the front door.
+test('an oversized deadline setting is clamped instead of switching the deadline off', async () => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  const seen = [];
+  try {
+    for (const huge of ['2147483648', '999999999999', '1e300']) {
+      process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = huge;
+      const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+      client.deviceClient = {
+        flushQueue: (request, metadata, options, callback) => {
+          seen.push(options.deadline.getTime() - Date.now());
+          callback(null, {});
+        }
+      };
+      await client.flushDeviceQueue('00dec0de00000001');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  }
+  assert.equal(seen.length, 3);
+  for (const budgetMs of seen) assert.ok(budgetMs > 100000 && budgetMs <= 120000, `clamped budget was ${budgetMs} ms`);
+});
