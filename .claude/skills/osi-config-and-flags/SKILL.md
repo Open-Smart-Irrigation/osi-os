@@ -281,6 +281,7 @@ Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
 |---|---|---|
 | `CHIRPSTACK_API_URL` | ChirpStack gRPC endpoint | none (env-file only) |
 | `CHIRPSTACK_API_KEY` | **Secret.** osi-nodered API key | none (env-file only) |
+| `OSI_CHIRPSTACK_GRPC_DEADLINE_MS` | Deadline of every ChirpStack gRPC call made through `osi-chirpstack-helper`, in ms. Default 20000; a missing, zero, negative or non-numeric value falls back to the default, so the deadline cannot be switched off. Read from the process environment at call time | none |
 | `CHIRPSTACK_APP_SENSORS` | OSI Sensors app UUID | `chirpstack_app_sensors` |
 | `CHIRPSTACK_APP_ACTUATORS` | OSI Actuators app UUID | `chirpstack_app_actuators` |
 | `CHIRPSTACK_APP_FIELD_TESTER` | OSI Field Tester app UUID | `chirpstack_app_field_tester` |
