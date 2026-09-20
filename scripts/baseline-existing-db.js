@@ -21,6 +21,22 @@ const { snapshotSchema, compareSchemas, FAILING_CLASSES } = require('./semantic-
 const REPO = path.resolve(__dirname, '..');
 const DEFAULT_MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 const APP_VERSION = 'baseline-existing-db';
+const PERSISTENT_RUNNER_ENV = 'OSI_BASELINE_RUNNER';
+const runnerFactoryIds = new WeakMap();
+let nextRunnerFactoryId = 1;
+
+function resolveRunner(options = {}) {
+  if (options.runnerFactory) {
+    if (!runnerFactoryIds.has(options.runnerFactory)) {
+      runnerFactoryIds.set(options.runnerFactory, nextRunnerFactoryId++);
+    }
+    return { factory: options.runnerFactory, key: `custom-${runnerFactoryIds.get(options.runnerFactory)}` };
+  }
+  if (process.env[PERSISTENT_RUNNER_ENV] === 'node-sqlite') {
+    return { factory: nodeSqliteRunner, key: 'node-sqlite' };
+  }
+  return { factory: cliRunner, key: 'cli' };
+}
 
 // --- Reference chain cache -------------------------------------------------
 // The candidate scan below needs reference(N) - "a fresh DB with exactly
@@ -40,15 +56,17 @@ const APP_VERSION = 'baseline-existing-db';
 // bootstrapFresh()/applyPending() calls (same fingerprint stamping, same
 // postflight, same everything) the runner would make for a real bootstrap -
 // it just makes each one ONCE instead of redundantly once per candidate.
-// Memoized at module scope (keyed by resolved migrationsDir) because the
-// chain is a pure function of the migration files on disk: safe to reuse
+// Memoized at module scope (keyed by resolved migrationsDir and runner mode)
+// because the chain is a pure function of the migration files and runner
+// semantics on disk: safe to reuse
 // across multiple runBaseline()/buildReference() calls within one process
 // run (e.g. the whole test file), and a no-op difference for the normal
 // CLI path, which only ever calls runBaseline() once per process.
 const referenceChains = new Map();
 
-function getChainState(migrationsDir, scratchRoot) {
-  const key = path.resolve(migrationsDir);
+function getChainState(migrationsDir, scratchRoot, runnerOptions = {}) {
+  const runner = resolveRunner(runnerOptions);
+  const key = `${path.resolve(migrationsDir)}\0${runner.key}`;
   let state = referenceChains.get(key);
   if (!state) {
     const dir = fs.mkdtempSync(path.join(scratchRoot, 'ref-chain-'));
@@ -65,6 +83,7 @@ function getChainState(migrationsDir, scratchRoot) {
       nextIdx: 0,
       byVersion: new Map(), // version -> { dbPath, snap }
       runner: null,
+      runnerFactory: runner.factory,
       chain: Promise.resolve(),
     };
     referenceChains.set(key, state);
@@ -74,11 +93,12 @@ function getChainState(migrationsDir, scratchRoot) {
 
 // Extends the shared chain to cover every migration <= n that isn't already
 // built, applying only the newly-reached ones. Serialized on state.chain so
-// concurrent callers for the same migrationsDir can't race the one working DB.
-function ensureReferenceUpTo(migrationsDir, n, scratchRoot) {
-  const state = getChainState(migrationsDir, scratchRoot);
+// concurrent callers for the same migrationsDir and runner mode can't race the
+// one working DB.
+function ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions = {}) {
+  const state = getChainState(migrationsDir, scratchRoot, runnerOptions);
   const run = state.chain.then(async () => {
-    if (!state.runner) state.runner = nodeSqliteRunner(state.workingDb);
+    if (!state.runner) state.runner = state.runnerFactory(state.workingDb);
     const runner = state.runner;
     while (state.nextIdx < state.files.length) {
       const f = state.files[state.nextIdx];
@@ -125,9 +145,9 @@ function ensureReferenceUpTo(migrationsDir, n, scratchRoot) {
 }
 
 // Reference(N) snapshot, built (or reused) via the shared incremental chain.
-async function referenceSnapshot(migrationsDir, n, scratchRoot) {
-  await ensureReferenceUpTo(migrationsDir, n, scratchRoot);
-  return getChainState(migrationsDir, scratchRoot).byVersion.get(n).snap;
+async function referenceSnapshot(migrationsDir, n, scratchRoot, runnerOptions = {}) {
+  await ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions);
+  return getChainState(migrationsDir, scratchRoot, runnerOptions).byVersion.get(n).snap;
 }
 
 function loadManifest(migrationsDir) {
@@ -156,9 +176,9 @@ function assertManifestMatchesDisk(migrations, manifest) {
 // already reached (by this call or an earlier one, e.g. while computing
 // head) are a cache hit, not a rebuild. External contract unchanged: still
 // takes (migrationsDir, n, scratchRoot) and returns a dbPath.
-async function buildReference(migrationsDir, n, scratchRoot) {
-  await ensureReferenceUpTo(migrationsDir, n, scratchRoot);
-  return getChainState(migrationsDir, scratchRoot).byVersion.get(n).dbPath;
+async function buildReference(migrationsDir, n, scratchRoot, runnerOptions = {}) {
+  await ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions);
+  return getChainState(migrationsDir, scratchRoot, runnerOptions).byVersion.get(n).dbPath;
 }
 
 function summarize(diffs) {
@@ -186,7 +206,7 @@ async function stamp(dbPath, migrations, manifest, n) {
   await syncFingerprints(runner);
 }
 
-async function runBaseline({ dbPath, version = null, report = false, migrationsDir = DEFAULT_MIGRATIONS_DIR, log = console.error }) {
+async function runBaseline({ dbPath, version = null, report = false, migrationsDir = DEFAULT_MIGRATIONS_DIR, log = console.error, runnerFactory = null }) {
   if (!dbPath) throw new Error('usage: baseline-existing-db.js <path-to-farming.db> [--version N] [--report]');
   if (!fs.existsSync(dbPath)) {
     throw new Error(`refusing: database file does not exist: ${dbPath}`);
@@ -202,7 +222,8 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
 
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-baseline-'));
   const liveSnap = await snapshotSchema(cliRunner(dbPath));
-  const headSnap = await referenceSnapshot(migrationsDir, head, scratchRoot);
+  const runnerOptions = { runnerFactory };
+  const headSnap = await referenceSnapshot(migrationsDir, head, scratchRoot, runnerOptions);
 
   const candidates = version !== null ? [version] : Array.from({ length: head }, (_, i) => head - i);
   const tried = [];
@@ -210,7 +231,7 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
   for (const n of candidates) {
     const refSnap = n === head
       ? headSnap
-      : await referenceSnapshot(migrationsDir, n, scratchRoot);
+      : await referenceSnapshot(migrationsDir, n, scratchRoot, runnerOptions);
     const res = compareSchemas(liveSnap, refSnap, headSnap);
     tried.push({ n, res });
     const failing = res.diffs.filter((d) => FAILING_CLASSES.has(d.class));

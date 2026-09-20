@@ -156,7 +156,27 @@ test('reference chain uses the persistent adapter without spawning sqlite3', () 
   `;
   const out = execFileSync(process.execPath, ['-e', script], {
     encoding: 'utf8',
-    env: { ...process.env, MIGRATIONS_DIR: dir, SCRATCH_ROOT: scratch() },
+    env: { ...process.env, OSI_BASELINE_RUNNER: 'node-sqlite', MIGRATIONS_DIR: dir, SCRATCH_ROOT: scratch() },
   });
   assert.equal(out, '0');
+});
+
+test('reference chain defaults to cliRunner when no persistent runner opt-in is set', () => {
+  const dir = path.join(scratch(), 'migrations');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, '0001__a.sql'), '-- risk: additive\nCREATE TABLE a (id INTEGER PRIMARY KEY);\n');
+  const script = `
+    const cp = require('node:child_process');
+    let sqlite3Calls = 0;
+    const execFileSync = cp.execFileSync;
+    cp.execFileSync = (...args) => { if (args[0] === 'sqlite3') sqlite3Calls++; return execFileSync(...args); };
+    const { buildReference } = require(${JSON.stringify(path.join(REPO, 'scripts/baseline-existing-db.js'))});
+    buildReference(process.env.MIGRATIONS_DIR, 1, process.env.SCRATCH_ROOT)
+      .then(() => process.stdout.write(String(sqlite3Calls)))
+      .catch((err) => { console.error(err); process.exitCode = 1; });
+  `;
+  const env = { ...process.env, MIGRATIONS_DIR: dir, SCRATCH_ROOT: scratch() };
+  delete env.OSI_BASELINE_RUNNER;
+  const out = execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', env });
+  assert.notEqual(out, '0');
 });
