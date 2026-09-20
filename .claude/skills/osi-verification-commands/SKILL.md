@@ -57,6 +57,7 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | Bare require scan | `node scripts/flows-bare-require-scan.js` | Exit 0. Fails if any function node uses bare `require()` instead of `osiLib.require()`. |
 | Channel manifest parity | `node scripts/verify-channel-manifest-parity.js` | Exit 0. GUI and edge manifest byte-identical. |
 | Command safety | `node scripts/verify-command-safety.js` | Exit 0. Actuator duration-bound + registry parity assertions. |
+| Live gateway identity | `node scripts/verify-live-gateway-identity.js` | Ends `Live gateway identity verification passed.`, exit 0. |
 | Heartbeat health | `node scripts/verify-heartbeat-health.js` | Exit 0. |
 | Dendro contract mirror | `node scripts/verify-dendro-contract-mirror.js` | Exit 0. |
 | Contract schemas | `node scripts/test-contract-schemas.js` | Exit 0. |

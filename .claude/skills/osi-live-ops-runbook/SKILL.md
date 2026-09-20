@@ -372,6 +372,13 @@ post-flip self-check, which either auto-rolls back and exits 1, or — when ther
 no previous payload — exits 1 with an `ERROR` and leaves the new payload live. All
 of these are hard aborts (`exit 1`), not partial continues.
 
+### Private branch deployments
+
+Deployments from private product branches use the same migration and payload
+safety gates as the public product. Complete schema migration and any ledger
+reconciliation before flipping the payload, and deploy compatible cloud and
+edge versions in that order.
+
 ---
 
 ## Post-deploy verification checklist
