@@ -29,6 +29,43 @@ jobs:
       - name: Scoped-access endpoint ratchet
         run: node scripts/verify-scoped-access.js
       - run: node scripts/verify-sync-flow.js
+      - name: Sync outbox JSON guard
+        run: node scripts/test-sync-outbox-json-guard.js
+      # Standalone inventory: each command passed locally within the 60 s cap
+      # and is not invoked by another workflow step or npm script.
+      - name: Standalone script inventory pass set
+        run: |
+          node scripts/test-account-link-legacy-cloud.js
+          node scripts/test-audit-schema.js
+          node scripts/test-command-ack-mark-delivered.js
+          node scripts/test-delete-device-flow.js
+          node scripts/test-deploy-init-log-check.js
+          node scripts/test-improvement-requests-schema.js
+          node scripts/test-installation-helper.js
+          node scripts/test-installation-recovery-flow.js
+          node scripts/test-installation-recovery-schema.js
+          node scripts/test-installation-revision-command.js
+          node scripts/test-migration-helpers.js
+          node scripts/test-node-red-admin-root-off.js
+          node scripts/test-radio-chirpstack.js
+          node scripts/test-radio-flow.js
+          node scripts/test-radio-history-flow-integration.js
+          node scripts/test-radio-history.js
+          node scripts/test-sdi12-recipe-flow.js
+          node scripts/test-sdi12-recipe-schema.js
+          node scripts/test-sdi12-registration.js
+          node scripts/test-sentek-vwc-vic-schema.js
+          node scripts/test-strega-gen2-reconcile.js
+          node scripts/test-sync-history-durable-flow.js
+          node scripts/test-sync-history-durable-integration.js
+          node scripts/test-sync-token-refresh-window.js
+          node scripts/test-verify-flows-output-arity.js
+          node scripts/test-zone-device-assignment-flow.js
+          node scripts/test-zone-timezone-route.js
+          node scripts/verify-chameleon-calibration.js
+          node scripts/verify-lsn50-chameleon-persistence.js
+          node scripts/verify-module-file-deploy-coverage.js
+          node scripts/verify-s2120-gust-fix.js
       # Parse-checks every function node's func/initialize/finalize in all
       # shipped flows.json profiles. Added after issue #6: dendro-raw-fn
       # shipped with a corrupted regex Node-RED could not compile, so its
