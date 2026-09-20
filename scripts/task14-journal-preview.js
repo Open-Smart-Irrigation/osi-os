@@ -51,7 +51,7 @@ function rowToObject(row) {
 
 function buildCatalog() {
   const core = require('./journal-catalog-core');
-  const source = require('../docs/superpowers/specs/agroscope-open-field/catalog.json');
+  const source = require('../docs/journal/catalog.json');
   const generator = require('./generate-journal-catalog');
   const compiled = generator.compileCatalog(core, source);
   const rows = compiled.rows.map(rowToObject);

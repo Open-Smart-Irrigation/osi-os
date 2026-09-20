@@ -278,7 +278,7 @@ git commit -m "feat(weather): WeatherProvider interface + adapt existing provide
 **Interfaces:**
 - Produces: a `WeatherProvider` with `source() == METEOSWISS`; returns `Optional.empty()` outside Swiss coverage or on any fetch/parse failure (so the resolver falls back). Model it on `OpenMeteoService` (same `RestTemplate`/`WeatherProperties` style). It reads MeteoSwiss OGD local-forecasting (STAC) precipitation → `precipitationMm` and derives `vpdMaxKpa` the same way `OpenMeteoService` does, so `WeatherSnapshot` is populated identically in shape. `getCurrentConditions`/`getForecast` may return `Optional.empty()` in this first cut (day path is what v6/dendro needs); the resolver falls back for those.
 
-> Implementation reference: the STAC fetch/nearest-point/param details are documented in `analysis/agroscope-irrigation-assessment/03-weather-pipeline.md` — reproduce the fetch + measured/forecast handling, but NOT its defects (per-row commits, Euclidean nearest without cos(lat), five clock conventions). Keep it stateless and return `Optional.empty()` on any failure.
+> Implementation reference: use the approved STAC fetch, nearest-point, and parameter handling from the private weather design record. Keep the implementation stateless and return `Optional.empty()` on any failure.
 
 - [ ] **Step 1: Write failing test** (coverage/empty-path behavior, which is deterministic without network)
 

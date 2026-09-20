@@ -4,7 +4,7 @@
 **Closes:** —
 **Supersedes:** —
 **Superseded by:** —
-**Spec:** [`docs/superpowers/specs/2026-07-19-agrolink-scoped-multiuser-design.md`](../superpowers/specs/2026-07-19-agrolink-scoped-multiuser-design.md)
+**Spec:** The detailed design record is maintained in the private companion repository.
 
 ## Context
 
