@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22 (`node:test`, no new dependencies), bash, GitHub Actions, `gh`.
 
-**Spec:** The audit is the spec: `/home/phil/guidance-audit-2026-09-14.md` (three reviewer reports, every claim tagged VERIFIED or STALE). The re-verification that produced this plan is summarised in "Audit corrections" below.
+**Spec:** The audit is the spec: `/path/to/guidance-audit-2026-09-14.md` (three reviewer reports, every claim tagged VERIFIED or STALE). The re-verification that produced this plan is summarised in "Audit corrections" below.
 
 ## Global Constraints
 
@@ -63,7 +63,7 @@ Token rules for executors: read only the line ranges named in the task, never a 
 | `.claude/skills/osi-hardest-problem-campaign/` | delete | Placeholder. |
 | `.claude/settings.json` | modify | Drop the permission line for a deleted global skill. |
 | `~/.claude/skills/code-reviewer/`, `~/.claude/skills/frontend-design/` | delete (outside repo) | Collide with built-in skills. |
-| `~/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md` | modify (outside repo) | Closed issues, stale handoffs, restart step. |
+| `~/.agent-memory/osi-os/MEMORY.md` | modify (outside repo) | Closed issues, stale handoffs, restart step. |
 
 ---
 
@@ -974,14 +974,14 @@ git add .claude/skills/osi-forge-boundaries/SKILL.md
 git commit -m "docs(forge): describe the branch contract gates.py enforces, not the unshipped one"
 ```
 
-Open question for Phil, not for the executor: should osi-server adopt the designed `forge/...` shape instead? If yes, that is an osi-server change and this skill flips back with it.
+Open question for the maintainer, not for the executor: should osi-server adopt the designed `forge/...` shape instead? If yes, that is an osi-server change and this skill flips back with it.
 
 ---
 
 ### Task 9: Memory index prune (orchestrator, outside the repo)
 
 **Files:**
-- Modify: `/home/phil/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md`
+- Modify: `~/.agent-memory/osi-os/MEMORY.md`
 
 - [ ] **Step 1: Refresh the issue bullet**
 
@@ -999,7 +999,7 @@ Merge `## Topic memories (newest)` and `## Topic memories` into one `## Topic me
 
 - [ ] **Step 4: Gate**
 
-Run: `wc -w ~/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md; grep -c "NEXT PRIORITY\|RESUME\|READY TO EXECUTE" ~/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md; bash scripts/session-closeout.sh 2>&1 | grep MEMORY`
+Run: `wc -w ~/.agent-memory/osi-os/MEMORY.md; grep -c "NEXT PRIORITY\|RESUME\|READY TO EXECUTE" ~/.agent-memory/osi-os/MEMORY.md; bash scripts/session-closeout.sh 2>&1 | grep MEMORY`
 Expected: under 1,700 words; at most 3 live-status markers; the three MEMORY.md `OK:` lines.
 
 ---
@@ -1011,7 +1011,7 @@ Expected: under 1,700 words; at most 3 live-status markers; the three MEMORY.md 
 - Modify: `.claude/settings.json` (the `Edit(~/.claude/skills/code-reviewer/**)` line)
 - Modify: `AGENTS.md` `## Agent skills` (one sentence)
 
-Both skills are preserved in `/home/phil/agent-guidance-2026-09-14.zip` under `global-claude/skills/`.
+Both skills are preserved in `/path/to/agent-guidance-2026-09-14.zip` under `global-claude/skills/`.
 
 - [ ] **Step 1: Delete**
 
