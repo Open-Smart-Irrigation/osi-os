@@ -228,6 +228,34 @@ test('ensureDeviceProvisioned treats a zero-filled unset AppKey as unchanged', a
   assert.equal(captured.updateKeys, undefined);
 });
 
+test('ensureDeviceProvisioned refuses an all-zero AppKey, which reads back as unset', async () => {
+  const captured = {};
+  const client = stubClient(captured, {
+    device: {
+      devEui: '00dec0de00000001',
+      name: 'Vanne 1',
+      applicationId: 'app-1',
+      deviceProfileId: 'prof-gen2'
+    },
+    keys: {
+      nwkKey: '',
+      appKey: ''
+    }
+  });
+  await assert.rejects(
+    client.ensureDeviceProvisioned({
+      devEui: '00DEC0DE00000001',
+      appKey: '0'.repeat(32),
+      applicationId: 'app-1',
+      deviceProfileId: 'prof-gen2',
+      name: 'Vanne 1'
+    }),
+    (error) => error.step === 'validate' && /all zeros/.test(error.message)
+  );
+  assert.equal(captured.updateKeys, undefined);
+  assert.equal(captured.createKeys, undefined);
+});
+
 test('ensureDeviceProvisioned does not claim profileAction "repointed" when no update RPC was issued (MINOR-1)', async () => {
   // The device is present on ensureDeviceProvisioned's own getDevice() read
   // (profile differs, so it decides to re-point) but has vanished by the time

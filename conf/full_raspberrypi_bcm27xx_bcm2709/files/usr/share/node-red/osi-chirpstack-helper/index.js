@@ -324,6 +324,12 @@ class ChirpStackClient {
     if (!/^[0-9A-F]{32}$/.test(appKey)) {
       throw annotateError(new Error('AppKey must be exactly 32 uppercase hex characters'), 'validate');
     }
+    if (appKey === UNSET_KEY_ZEROS) {
+      // An all-zero requested key is indistinguishable from an unset key on
+      // read-back, so it would compare as "unchanged" against a device that has
+      // no key at all. Refuse it here; the comparator needs the canonical form.
+      throw annotateError(new Error('AppKey must not be all zeros'), 'validate');
+    }
 
     const keySpec = { devEui, nwkKey: appKey };
     let deviceCreated = false;
