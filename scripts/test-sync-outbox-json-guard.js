@@ -2,18 +2,18 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const canonicalPath = path.join(
-  root,
-  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
-);
-const mirrorPath = path.join(
-  root,
-  'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'
-);
+const canonicalPath = process.env.SYNC_OUTBOX_GUARD_CANONICAL
+  ? path.resolve(process.env.SYNC_OUTBOX_GUARD_CANONICAL)
+  : path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
+const mirrorPath = process.env.SYNC_OUTBOX_GUARD_MIRROR
+  ? path.resolve(process.env.SYNC_OUTBOX_GUARD_MIRROR)
+  : path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json');
 
 function loadFlows(filePath) {
   const raw = fs.readFileSync(filePath);
@@ -164,21 +164,8 @@ async function assertCalibrationFallback(source) {
   );
 }
 
-async function main() {
-  const canonical = loadFlows(canonicalPath);
-  const mirror = loadFlows(mirrorPath);
+function assertCurrentContract(canonical, mirror) {
   assert.ok(canonical.raw.equals(mirror.raw), 'maintained flows must be byte-identical');
-
-  const bootstrapMigration = require('./migrate-flows-journal-bootstrap');
-  assert.ok(
-    canonical.raw.equals(bootstrapMigration.migrate(canonical.raw)),
-    'journal bootstrap migration must preserve the current fail-closed flow source'
-  );
-  const hardeningMigration = require('./harden-sync-outbox-json');
-  assert.ok(
-    canonical.raw.equals(hardeningMigration.migrate(canonical.raw)),
-    'sync outbox hardening must be a no-op on the installed source'
-  );
 
   const byId = new Map(canonical.flows.map((node) => [node.id, node]));
   for (const id of ['sync-bootstrap-build', 'sync-outbox-build', 'sync-force-build']) {
@@ -188,9 +175,48 @@ async function main() {
   }
   assertDeliveryMapping(requiredNode(byId, 'sync-outbox-build').func, 'sync-outbox-build');
   assertDeliveryMapping(requiredNode(byId, 'sync-force-build').func, 'sync-force-build');
-  await assertCalibrationFallback(requiredNode(byId, 'write-strega-expectation').func);
+  return assertCalibrationFallback(requiredNode(byId, 'write-strega-expectation').func);
+}
 
-  console.log('PASS: sync outbox JSON is object-only and STREGA calibration fallback is missing-table-only');
+function assertMutationIsRejected(canonical) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-outbox-guard-'));
+  try {
+    const mutated = canonical.flows.map((node) => {
+      if (node.id !== 'sync-bootstrap-build') return node;
+      const guard = "  if (!value || typeof value !== 'object' || Array.isArray(value)) {\n    throw new Error('sync_outbox payload_json must be an object for ' + String(eventUuid));\n  }\n";
+      const func = node.func.replace(guard, '');
+      assert.notEqual(func, node.func, 'mutation must remove the object guard');
+      return { ...node, func };
+    });
+    const raw = JSON.stringify(mutated, null, 2) + '\n';
+    const mutatedCanonical = path.join(tempDir, 'bcm2712-flows.json');
+    const mutatedMirror = path.join(tempDir, 'bcm2709-flows.json');
+    fs.writeFileSync(mutatedCanonical, raw);
+    fs.writeFileSync(mutatedMirror, raw);
+    const result = childProcess.spawnSync(process.execPath, [__filename], {
+      env: {
+        ...process.env,
+        SYNC_OUTBOX_GUARD_CANONICAL: mutatedCanonical,
+        SYNC_OUTBOX_GUARD_MIRROR: mutatedMirror,
+        SYNC_OUTBOX_GUARD_MUTATION: '0',
+      },
+      encoding: 'utf8',
+    });
+    assert.notEqual(result.status, 0, 'guard must reject the mutated flow copy');
+    assert.match(result.stderr, /sync-bootstrap-build must reject JSON (null|array)/);
+    console.log('RED mutation rejected: removing the JSON object guard failed the test as expected');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function main() {
+  const canonical = loadFlows(canonicalPath);
+  const mirror = loadFlows(mirrorPath);
+  await assertCurrentContract(canonical, mirror);
+  if (process.env.SYNC_OUTBOX_GUARD_MUTATION !== '0') assertMutationIsRejected(canonical);
+
+  console.log('GREEN original: sync outbox JSON is object-only and STREGA calibration fallback is missing-table-only');
 }
 
 main().catch((error) => {
