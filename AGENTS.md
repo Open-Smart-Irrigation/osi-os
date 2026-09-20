@@ -309,11 +309,12 @@ Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md 
 - `osi-react-gui-patterns` — GUI serving/routing/auth/i18n/missing-data patterns and test invocation; load for `web/react-gui` changes.
 - `osi-server-backend-patterns` — paired-repo awareness for osi-server (Flyway discipline, Gradle builds, API bridge); load for cloud-side work initiated from this repo.
 - `osi-forge-boundaries` — Stage 1 Forge worker/controller boundaries and stop-and-report rules; load for issue-to-PR automation tasks.
+- `osi-hardest-problem-campaign` — deferred stub; do not author without maintainer input.
 - `anti-slop-writing` — prose floor for ALL documentation and user-facing text; load before writing or editing any docs/README/ADR/runbook/PR prose. Mechanical check: `node .claude/skills/anti-slop-writing/slop-check.js <files>`.
 
 ### Cross-harness discovery and process parity
 
-The 13 project skills above load in all three supported harnesses from one
+The 14 project skills above load in all three supported harnesses from one
 source. Claude Code reads `.claude/skills/` directly. Codex reads the same
 files through the `.agents/skills` symlink (its `.agents` convention); it does
 not read `.claude/skills`, so that symlink is load-bearing. OpenCode scans both
