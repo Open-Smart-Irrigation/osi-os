@@ -53,7 +53,7 @@ function actuatorCommand(deviceEui, zoneId, minutes, commandId, reason) {
   return { type: 'actuator_command', device: { devEui: deviceEui, zone_id: zoneId }, data: { action: 'OPEN_FOR_DURATION', duration_minutes: minutes, reason, commandId, commandType: 'OPEN_FOR_DURATION', deviceEui, trigger: 'one_time' } };
 }
 
-async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt }) {
+async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, onError }) {
   const nowMs = (now || new Date()).getTime();
   // An ATTEMPTED marker means the process reached the QoS0 handoff boundary. There is no
   // broker acceptance signal, so a later tick makes that uncertainty explicit and never sends
@@ -65,54 +65,51 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt }) {
   const rows = await db.all("SELECT vs.*, d.irrigation_zone_id, d.user_id FROM valve_schedules vs JOIN devices d ON d.deveui = vs.device_eui WHERE vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL AND vs.fire_at <= ? AND NOT EXISTS (SELECT 1 FROM valve_once_dispatch_intents i WHERE i.schedule_uuid=vs.schedule_uuid) ORDER BY vs.fire_at", [new Date(nowMs).toISOString()]);
   const fired = []; const skipped = [];
   for (const r of rows) {
-    const fireMs = Date.parse(r.fire_at);
-    const nowIso = new Date(nowMs).toISOString();
-    // irrigation_events: user_id and irrigation_zone_id are NOT NULL, and event_uuid must be
-    // OMITTED so trg_sync_irrigation_events_uuid_ai mints the canonical 'irrig-<gwEui>-<seq>' key
-    // (a hand-rolled UUID would ship a non-conforming aggregate_key to the cloud). A zone-less or
-    // unclaimed valve gets no event row; the schedule row's once_state stays the source of truth.
-    // created_at is likewise OMITTED (DB default datetime('now')), consistent with every other
-    // scheduler-triggered irrigation_events writer in flows.json (minor b).
-    const canLog = r.user_id != null && r.irrigation_zone_id != null;
-    if (nowMs - fireMs > ONCE_GRACE_MS) {
-      await db.transaction(async (tx) => {
-        await tx.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state) VALUES (?,?,?,'SKIPPED')", [r.schedule_uuid, r.device_eui, crypto.randomUUID()]);
-        await store.updateSchedule(tx, r.schedule_uuid, { once_state: 'SKIPPED' }, r.device_eui); // (F144) scoped to the row's own valve
-        if (canLog) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [r.user_id, r.irrigation_zone_id, 'SKIP', 'one_time_missed', r.duration_minutes, r.device_eui, JSON.stringify({ schedule_uuid: r.schedule_uuid, fire_at: r.fire_at })]);
-      });
-      if (!canLog) warn && warn('[valve-control] one_time_missed not logged for ' + r.device_eui + ' (no zone/user)');
-      skipped.push({ schedule_uuid: r.schedule_uuid, device_eui: r.device_eui });
-      continue;
-    }
     await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state) VALUES (?,?,?,'PENDING') ON CONFLICT(schedule_uuid) DO NOTHING", [r.schedule_uuid, r.device_eui, crypto.randomUUID()]);
   }
-  const intents = await db.all("SELECT i.*, vs.duration_minutes, vs.fire_at, vs.device_eui, d.irrigation_zone_id, d.user_id FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui WHERE i.state='PENDING' AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL AND vs.fire_at <= ? ORDER BY vs.fire_at", [new Date(nowMs).toISOString()]);
+  const intents = await db.all("SELECT schedule_uuid FROM valve_once_dispatch_intents WHERE state='PENDING' ORDER BY created_at, schedule_uuid");
   for (const i of intents) {
-    const fireMs = Date.parse(i.fire_at);
-    if (nowMs - fireMs > ONCE_GRACE_MS) {
-      await db.transaction(async (tx) => {
-        await tx.run("UPDATE valve_once_dispatch_intents SET state='SKIPPED', updated_at=datetime('now') WHERE schedule_uuid=? AND state='PENDING'", [i.schedule_uuid]);
-        await store.updateSchedule(tx, i.schedule_uuid, { once_state: 'SKIPPED' }, i.device_eui);
+    try {
+      if (typeof beforeAttempt === 'function') await beforeAttempt(i);
+      const outcome = await db.transaction(async (tx) => {
+        const claimNowMs = now ? new Date(now).getTime() : Date.now();
+        const claimNowIso = new Date(claimNowMs).toISOString();
+        const current = await tx.get("SELECT i.state, i.command_id, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui WHERE i.schedule_uuid=? AND i.state='PENDING' AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL AND vs.fire_at <= ?", [i.schedule_uuid, claimNowIso]);
+        if (!current) return null;
+        const fireMs = Date.parse(current.fire_at);
+        if (claimNowMs - fireMs > ONCE_GRACE_MS) {
+          await tx.run("UPDATE valve_once_dispatch_intents SET state='SKIPPED', updated_at=datetime('now') WHERE schedule_uuid=? AND state='PENDING'", [current.schedule_uuid]);
+          const afterSkip = await tx.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?", [current.schedule_uuid]);
+          if (!afterSkip || afterSkip.state !== 'SKIPPED') return null;
+          await store.updateSchedule(tx, current.schedule_uuid, { once_state: 'SKIPPED' }, current.device_eui);
+          if (current.user_id != null && current.irrigation_zone_id != null) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [current.user_id, current.irrigation_zone_id, 'SKIP', 'one_time_missed', current.duration_minutes, current.device_eui, JSON.stringify({ schedule_uuid: current.schedule_uuid, fire_at: current.fire_at })]);
+          return { kind: 'skipped', row: current };
+        }
+        const nowIso = claimNowIso;
+        await tx.run("UPDATE valve_once_dispatch_intents SET state='ATTEMPTED', attempted_at=?, updated_at=datetime('now') WHERE schedule_uuid=? AND state='PENDING'", [nowIso, current.schedule_uuid]);
+        const after = await tx.get("SELECT state, attempted_at FROM valve_once_dispatch_intents WHERE schedule_uuid=?", [current.schedule_uuid]);
+        if (!after || after.state !== 'ATTEMPTED' || after.attempted_at !== nowIso) return null;
+        await store.updateSchedule(tx, current.schedule_uuid, { once_state: 'FIRED', once_fired_at: nowIso }, current.device_eui);
+        if (current.user_id != null && current.irrigation_zone_id != null) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [current.user_id, current.irrigation_zone_id, 'IRRIGATE', 'one_time_open', current.duration_minutes, current.device_eui, JSON.stringify({ schedule_uuid: current.schedule_uuid, command_id: current.command_id })]);
+        return { kind: 'fired', row: Object.assign({}, current, { attempted_at: nowIso }) };
       });
-      skipped.push({ schedule_uuid: i.schedule_uuid, device_eui: i.device_eui });
-      continue;
+      if (!outcome) continue;
+      if (outcome.kind === 'skipped') { skipped.push({ schedule_uuid: outcome.row.schedule_uuid, device_eui: outcome.row.device_eui }); continue; }
+      const row = outcome.row;
+      if (row.user_id == null || row.irrigation_zone_id == null) warn && warn('[valve-control] one_time_open not logged for ' + row.device_eui + ' (no zone/user)');
+      const command = { schedule_uuid: row.schedule_uuid, device_eui: row.device_eui, duration_minutes: row.duration_minutes, command_id: row.command_id, actuator_command: actuatorCommand(row.device_eui, row.irrigation_zone_id, row.duration_minutes, row.command_id, 'one_time_open') };
+      if (typeof emit === 'function') await emit(command);
+      if (typeof afterAttempt === 'function') await afterAttempt(row);
+      fired.push(command);
+    } catch (e) {
+      const detail = e && e.message ? e.message : e;
+      warn && warn('[valve-control] one-time dispatch failed for ' + i.schedule_uuid + ': ' + detail);
+      if (typeof onError === 'function') {
+        onError(e, i.schedule_uuid);
+      } else {
+        throw e;
+      }
     }
-    if (typeof beforeAttempt === 'function') await beforeAttempt(i);
-    const nowIso = new Date(nowMs).toISOString();
-    const claimed = await db.transaction(async (tx) => {
-      const before = await tx.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?", [i.schedule_uuid]);
-      if (!before || before.state !== 'PENDING') return false;
-      await tx.run("UPDATE valve_once_dispatch_intents SET state='ATTEMPTED', attempted_at=?, updated_at=datetime('now') WHERE schedule_uuid=? AND state='PENDING'", [nowIso, i.schedule_uuid]);
-      const after = await tx.get("SELECT state, attempted_at FROM valve_once_dispatch_intents WHERE schedule_uuid=?", [i.schedule_uuid]);
-      if (!after || after.state !== 'ATTEMPTED' || after.attempted_at !== nowIso) return false;
-      await store.updateSchedule(tx, i.schedule_uuid, { once_state: 'FIRED', once_fired_at: nowIso }, i.device_eui);
-      if (i.user_id != null && i.irrigation_zone_id != null) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [i.user_id, i.irrigation_zone_id, 'IRRIGATE', 'one_time_open', i.duration_minutes, i.device_eui, JSON.stringify({ schedule_uuid: i.schedule_uuid, command_id: i.command_id })]);
-      return true;
-    });
-    if (!claimed) continue;
-    if (i.user_id == null || i.irrigation_zone_id == null) warn && warn('[valve-control] one_time_open not logged for ' + i.device_eui + ' (no zone/user)');
-    if (typeof afterAttempt === 'function') await afterAttempt(i);
-    fired.push({ schedule_uuid: i.schedule_uuid, device_eui: i.device_eui, duration_minutes: i.duration_minutes, command_id: i.command_id, actuator_command: actuatorCommand(i.device_eui, i.irrigation_zone_id, i.duration_minutes, i.command_id, 'one_time_open') });
   }
   return { fired, skipped };
 }

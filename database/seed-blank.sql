@@ -1687,7 +1687,7 @@ CREATE INDEX IF NOT EXISTS idx_valve_schedules_once_due
   ON valve_schedules(fire_at) WHERE kind = 'ONCE' AND once_state = 'PENDING' AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS valve_once_dispatch_intents (
-  schedule_uuid TEXT PRIMARY KEY REFERENCES valve_schedules(schedule_uuid) ON DELETE CASCADE,
+  schedule_uuid TEXT PRIMARY KEY,
   device_eui TEXT NOT NULL,
   command_id TEXT NOT NULL UNIQUE,
   state TEXT NOT NULL CHECK (state IN ('PENDING','ATTEMPTED','UNKNOWN','SKIPPED')),

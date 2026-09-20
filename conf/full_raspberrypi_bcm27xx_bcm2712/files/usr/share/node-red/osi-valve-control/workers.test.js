@@ -92,6 +92,28 @@ test('runOnceTick claims a pending intent once even when the tick repeats', asyn
   assert.equal((await db.all("SELECT * FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-race'")).length, 1);
 });
 
+test('runOnceTick rereads eligibility at claim and leaves a disabled schedule pending', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'claim-disabled', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state) VALUES ('claim-disabled','0016C001F1000001','cmd-disabled','PENDING')");
+  await db.run("UPDATE valve_schedules SET enabled=0 WHERE schedule_uuid='claim-disabled'");
+  const r = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  assert.equal(r.fired.length, 0);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='claim-disabled'")).state, 'PENDING');
+});
+
+test('runOnceTick emits earlier claimed commands when a later row fails', async () => {
+  const { db } = await tempDb();
+  for (const uuid of ['claim-first', 'claim-second']) await store.insertSchedule(db, { schedule_uuid: uuid, device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  const emitted = [];
+  const errors = [];
+  const r = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: (command) => { if (command.schedule_uuid === 'claim-second') throw new Error('later row failed'); emitted.push(command.schedule_uuid); }, onError: (error) => errors.push(error.message), warn: () => {} });
+  assert.deepEqual(emitted, ['claim-first']);
+  assert.deepEqual(r.fired.map((row) => row.schedule_uuid), ['claim-first']);
+  assert.deepEqual(errors, ['later row failed']);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='claim-second'")).state, 'ATTEMPTED');
+});
+
 test('runOnceTick (I3) ignores PENDING ONCE rows on a soft-deleted device and leaves the row untouched', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'gone', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
