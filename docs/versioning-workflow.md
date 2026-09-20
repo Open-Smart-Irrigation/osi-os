@@ -143,35 +143,11 @@ Include the SHA-256 in the release notes so operators can verify downloads.
 
 ---
 
-## Step 7 — Deploy to Pis
+## Step 7 — Prepare deployment
 
-Run `deploy.sh` on each Pi in order: staging Pis first, production last.
+Build the release payload and hand it to the deployment procedure for the target gateway. The stable-link path can serve `deploy.sh` from a local HTTP server; the flaky-link path uses the self-contained bundle scripts described in [Deploying over a flaky link](operations/deploying-over-a-flaky-link.md).
 
-```bash
-# Start local file server (from repo root)
-python3 -m http.server 9876 &
-
-# Per Pi
-ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
-ssh root@<pi-ip> '/etc/init.d/node-red restart'
-
-# Set firmware_version on existing Pis (96_osi_server_config only runs on first boot)
-ssh root@<pi-ip> 'uci set osi-server.cloud.firmware_version=<NEW> && uci commit osi-server'
-
-# Verify
-ssh root@<pi-ip> 'uci get osi-server.cloud.firmware_version'   # → <NEW>
-ssh root@<pi-ip> 'cat /srv/node-red/node_modules/osi-cloud-http/index.js | head -1'  # → 'use strict';
-```
-
-Kill the server when done:
-```bash
-kill %1
-```
-
-Pi order for this project:
-1. **Silvan** `100.81.220.8` — staging
-2. **kaba100** `100.93.68.86` — staging
-3. **Uganda** `100.69.51.98` — production (always last)
+`deploy.sh` owns payload promotion, schema work, and the Node-RED restart. Read its verdict and the deployment runbook's post-deploy checks; do not add a separate manual restart after a green deploy.
 
 ---
 

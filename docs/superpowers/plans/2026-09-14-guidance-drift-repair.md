@@ -15,7 +15,7 @@
 - Prose edits under `docs/`, `AGENTS.md`, `README.md` and `SKILL.md` files must pass `node .claude/skills/anti-slop-writing/slop-check.js <file>` (`slop-check: PASS (no tier-1 findings)`, exit 0).
 - No edit to `flows.json`, `database/`, `conf/`, `deploy.sh`, or any Pi. This is a documentation and verifier change only.
 - No `npm install`, no GUI build. Reviewers and verifiers do not build (workstation OOMs on concurrent frontend builds).
-- Executors work in a worktree cut from `origin/main`, never in Phil's checkout. Branch name: `docs/guidance-drift-repair`.
+- Executors work in a worktree cut from `origin/main`, never in a maintainer's checkout. Branch name: `docs/guidance-drift-repair`.
 - Commit prefix `docs:` for guidance edits, `feat(verify):` for the new script, `chore:` for deletions.
 - Report rather than force: if a quoted line in this plan is not found verbatim, locate the passage by its heading and content, and note the drift in the task report. If the passage is gone, stop and report.
 - Three verifiers are red on `feat/valve-control` today for branch reasons, not guidance reasons: `verify-migrations.js` (branch lacks `0026__sdi12_columns.sql` which `origin/main` has), `verify-sync-op-parity.js` (server enum has two ops the edge union lacks), `verify-profile-parity.js` (uncommitted edit to the conf bootstrap copy). On a worktree cut from `origin/main` the first and third should be green. Report any red as `red-on-base` per `osi-verification-commands`; do not fix inside this plan.
@@ -840,7 +840,7 @@ Start with [AGENTS.md](../AGENTS.md) and [engineering-playbook.md](engineering-p
 | `build/` | Firmware and Pi image build. |
 | `contracts/` | Cross-repo contract fixtures: `dendro`, `history-router`, `sync-schema`, `zone-env`. |
 | `hardware/` | Sensor wiring and vendor codec notes. |
-| `operations/` | Runbooks and incident analyses: history retention, canary gate, LSN50 writer cutover, Uganda catch-up, live gateway identity. |
+| `operations/` | Runbooks and incident analyses: history retention, canary gate, LSN50 writer cutover, regional catch-up, live gateway identity. |
 | `superpowers/` | Plans, specs, prompts and execution reports produced by the agent workflow. Dated; historical once merged. |
 | `sync/` | History hash fixtures. |
 | `twatch-ultra/` | T-Watch Ultra surveyor design package. |

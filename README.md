@@ -218,7 +218,7 @@ ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.
 #    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
 
-The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi-chirpstack-helper`, `osi-db-helper`, `osi-dendro-helper`, `osi-chameleon-helper`, `osi-cloud-http`), `chirpstack-bootstrap.js`, device codecs (STREGA, LSN50, S2120), the React GUI bundle, and runs `npm install` on-device. It also performs idempotent live-DB schema repair (dendrometer + Chameleon SWT) and fixes Mosquitto file ownership.
+The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi-chirpstack-helper`, `osi-db-helper`, `osi-dendro-helper`, `osi-chameleon-helper`, `osi-cloud-http`), `chirpstack-bootstrap.js`, the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), the React GUI bundle, and runs `npm install` on-device. It also performs idempotent live-DB schema repair (dendrometer + Chameleon SWT) and fixes Mosquitto file ownership.
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
