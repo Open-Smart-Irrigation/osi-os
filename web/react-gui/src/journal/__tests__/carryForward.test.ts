@@ -20,7 +20,7 @@ import type {
 import coreCatalog from '../../../../../scripts/journal-catalog-core.js';
 // @ts-expect-error The authoritative generator is CommonJS and has no TypeScript declaration.
 import catalogGenerator from '../../../../../scripts/generate-journal-catalog.js';
-import agroscopeSource from '../../../../../docs/journal/catalog.json';
+import sourceCatalog from '../../../../../docs/journal/catalog.json';
 
 const draftUuid = 'draft-uuid';
 const timestamp = '2026-07-16T00:00:00.000Z';
@@ -421,7 +421,7 @@ describe('carry-forward partitioning', () => {
   it('derives protection expectations from the compiled plant-protection contract', () => {
     const compiled = (catalogGenerator as {
       compileCatalog: (core: unknown, source: unknown) => { rows: Array<{ table: string; columns: string[]; values: unknown[] }> };
-    }).compileCatalog(coreCatalog, agroscopeSource);
+    }).compileCatalog(coreCatalog, sourceCatalog);
     const rowObject = (row: { columns: string[]; values: unknown[] }) =>
       Object.fromEntries(row.columns.map((column, index) => [column, row.values[index]]));
     const definition = (table: string, code: string) => {

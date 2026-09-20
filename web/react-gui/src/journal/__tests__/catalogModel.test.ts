@@ -24,7 +24,7 @@ import type {
 import coreCatalog from '../../../../../scripts/journal-catalog-core.js';
 // @ts-expect-error The authoritative generator is CommonJS and has no TypeScript declaration.
 import catalogGenerator from '../../../../../scripts/generate-journal-catalog.js';
-import agroscopeSource from '../../../../../docs/journal/catalog.json';
+import sourceCatalog from '../../../../../docs/journal/catalog.json';
 
 const timestamp = '2026-07-15T00:00:00.000Z';
 
@@ -235,7 +235,7 @@ function shippedCatalog(): JournalCatalog {
       core: unknown,
       source: unknown,
     ) => { rows: CompiledCatalogRow[] };
-  }).compileCatalog(coreCatalog, agroscopeSource);
+  }).compileCatalog(coreCatalog, sourceCatalog);
   const vocabRows = compiled.rows
     .filter(({ table }) => table === 'journal_vocab')
     .map((row) => {
