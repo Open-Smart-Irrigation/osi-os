@@ -27,6 +27,19 @@ function normalizeHexKey(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+// ChirpStack 4.12 reads an unset appKey/genAppKey as 32 zero hex chars;
+// older versions returned an empty string. Treat both as the same stored key.
+const UNSET_KEY_ZEROS = '0'.repeat(32);
+
+function canonicalStoredKey(value) {
+  const normalized = normalizeHexKey(value);
+  return normalized === '' ? UNSET_KEY_ZEROS : normalized;
+}
+
+function storedKeyEqual(a, b) {
+  return canonicalStoredKey(a) === canonicalStoredKey(b);
+}
+
 function normalizeApiUrl(apiUrl) {
   const raw = String(apiUrl || '').trim();
   if (!raw) {
@@ -311,6 +324,12 @@ class ChirpStackClient {
     if (!/^[0-9A-F]{32}$/.test(appKey)) {
       throw annotateError(new Error('AppKey must be exactly 32 uppercase hex characters'), 'validate');
     }
+    if (appKey === UNSET_KEY_ZEROS) {
+      // An all-zero requested key is indistinguishable from an unset key on
+      // read-back, so it would compare as "unchanged" against a device that has
+      // no key at all. Refuse it here; the comparator needs the canonical form.
+      throw annotateError(new Error('AppKey must not be all zeros'), 'validate');
+    }
 
     const keySpec = { devEui, nwkKey: appKey };
     let deviceCreated = false;
@@ -349,8 +368,8 @@ class ChirpStackClient {
         await this.createKeys(keySpec);
         keysAction = 'created';
       } else if (
-        normalizeHexKey(existingKeys.getNwkKey()) !== keySpec.nwkKey ||
-        normalizeHexKey(existingKeys.getAppKey()) !== ''
+        !storedKeyEqual(existingKeys.getNwkKey(), keySpec.nwkKey) ||
+        !storedKeyEqual(existingKeys.getAppKey(), '')
       ) {
         await this.updateKeys(keySpec);
         keysAction = 'updated';
