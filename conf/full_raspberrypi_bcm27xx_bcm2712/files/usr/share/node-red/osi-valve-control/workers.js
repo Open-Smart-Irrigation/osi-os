@@ -99,7 +99,7 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, o
       const command = { schedule_uuid: row.schedule_uuid, device_eui: row.device_eui, duration_minutes: row.duration_minutes, command_id: row.command_id, actuator_command: actuatorCommand(row.device_eui, row.irrigation_zone_id, row.duration_minutes, row.command_id, 'one_time_open') };
       if (typeof emit === 'function') {
         await emit(command);
-        await db.run("UPDATE valve_once_dispatch_intents SET state='SENT', updated_at=datetime('now') WHERE schedule_uuid=? AND state='ATTEMPTED'", [row.schedule_uuid]);
+        await db.run("UPDATE valve_once_dispatch_intents SET state='SENT', updated_at=datetime('now') WHERE schedule_uuid=? AND command_id=? AND state IN ('ATTEMPTED','UNKNOWN')", [row.schedule_uuid, row.command_id]);
       }
       if (typeof afterAttempt === 'function') await afterAttempt(row);
       fired.push(command);

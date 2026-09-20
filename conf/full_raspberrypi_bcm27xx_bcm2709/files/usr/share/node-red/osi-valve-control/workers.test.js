@@ -113,6 +113,21 @@ test('runOnceTick leaves an attempted intent UNKNOWN after a handoff crash', asy
   assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-handoff-crash'")).state, 'UNKNOWN');
 });
 
+test('runOnceTick finalizes a slow handoff as SENT after an overlapping tick marks it UNKNOWN', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-slow-handoff', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  let resolveEmit;
+  let emitted = 0;
+  const first = W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: () => { emitted += 1; return new Promise((resolve) => { resolveEmit = resolve; }); }, warn: () => {} });
+  while (!(await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-slow-handoff'"))) await new Promise((resolve) => setImmediate(resolve));
+  await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), warn: () => {} });
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-slow-handoff'")).state, 'UNKNOWN');
+  resolveEmit();
+  await first;
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-slow-handoff'")).state, 'SENT');
+  assert.equal(emitted, 1);
+});
+
 test('runOnceTick rereads eligibility at claim and leaves a disabled schedule pending', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'claim-disabled', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
