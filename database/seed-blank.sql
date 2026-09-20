@@ -1686,6 +1686,18 @@ CREATE INDEX IF NOT EXISTS idx_valve_schedules_device ON valve_schedules(device_
 CREATE INDEX IF NOT EXISTS idx_valve_schedules_once_due
   ON valve_schedules(fire_at) WHERE kind = 'ONCE' AND once_state = 'PENDING' AND deleted_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS valve_once_dispatch_intents (
+  schedule_uuid TEXT PRIMARY KEY REFERENCES valve_schedules(schedule_uuid) ON DELETE CASCADE,
+  device_eui TEXT NOT NULL,
+  command_id TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK (state IN ('PENDING','ATTEMPTED','UNKNOWN','SKIPPED')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  attempted_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_valve_once_dispatch_intents_device_state
+  ON valve_once_dispatch_intents(device_eui, state);
+
 -- valve_schedules -> sync_outbox triggers (Valve control Phase B, migration 0024).
 -- Mirrors trg_sync_schedules_outbox_* (irrigation_schedules) but resolves
 -- gateway_device_eui through devices, since valve_schedules parents on a

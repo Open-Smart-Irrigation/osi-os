@@ -52,6 +52,46 @@ test('runOnceTick fires due ONCE rows within grace and skips stale ones', async 
   assert.equal(again.fired.length + again.skipped.length, 0, 'idempotent');
 });
 
+test('runOnceTick leaves a pending dispatch intent before the attempt marker and resumes it after restart', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-before', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await assert.rejects(() => W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), beforeAttempt: () => { throw new Error('simulated restart'); }, warn: () => {} }), /simulated restart/);
+  const pending = await db.get("SELECT state, command_id FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-before'");
+  assert.equal(pending.state, 'PENDING');
+  const resumed = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), warn: () => {} });
+  assert.equal(resumed.fired[0].command_id, pending.command_id);
+  assert.equal((await db.get("SELECT once_state FROM valve_schedules WHERE schedule_uuid='intent-before'")).once_state, 'FIRED');
+});
+
+test('runOnceTick marks an attempted intent unknown and never resends it after restart', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-after', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  const first = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), afterAttempt: () => { throw new Error('simulated restart'); }, warn: () => {} }).catch((e) => e);
+  assert.equal(first.message, 'simulated restart');
+  const row = await db.get("SELECT state, command_id FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-after'");
+  assert.equal(row.state, 'ATTEMPTED');
+  const resumed = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), warn: () => {} });
+  assert.equal(resumed.fired.length, 0);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-after'")).state, 'UNKNOWN');
+});
+
+test('runOnceTick records an overdue unsent intent as skipped', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-overdue', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T09:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  const row = await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-overdue'");
+  assert.equal(row.state, 'SKIPPED');
+});
+
+test('runOnceTick claims a pending intent once even when the tick repeats', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-race', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  const first = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  const second = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  assert.equal(first.fired.length + second.fired.length, 1);
+  assert.equal((await db.all("SELECT * FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-race'")).length, 1);
+});
+
 test('runOnceTick (I3) ignores PENDING ONCE rows on a soft-deleted device and leaves the row untouched', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'gone', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });

@@ -456,6 +456,12 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                               ? `${sortWeekdaysForDisplay(weekdaysFromMask(schedule.weekdaysMask ?? 0)).map((d) => td(`weekdays.${d}`)).join(', ')} · ${schedule.startTime ? `${schedule.startTime}–${windowEnd(schedule.startTime, schedule.durationMinutes)}` : '—'} · ${schedule.durationMinutes} min`
                               : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone, i18n?.language) : '—'} · ${schedule.durationMinutes} min`}
                           </p>
+                          {schedule.kind === 'ONCE' && schedule.dispatchState && (
+                            <p className={`truncate text-xs ${schedule.dispatchState === 'UNKNOWN' ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
+                              {td('scheduleDialog.dispatchStatus', { state: schedule.dispatchState, defaultValue: 'Dispatch: {{state}}' })}
+                              {schedule.dispatchAttemptedAt ? ` · ${formatDateTime(schedule.dispatchAttemptedAt, valve.timezone, i18n?.language)}` : ''}
+                            </p>
+                          )}
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
                           <label className="flex min-h-[44px] items-center gap-1.5 px-1.5 text-xs text-[var(--text-secondary)] sm:min-h-0 sm:px-0">

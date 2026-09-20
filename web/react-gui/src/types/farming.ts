@@ -850,6 +850,10 @@ export interface ValveSchedule {
   timezone: string;
   enabled: boolean;
   onceState: 'PENDING' | 'FIRED' | 'SKIPPED' | 'CANCELLED' | null;
+  dispatchState?: 'PENDING' | 'ATTEMPTED' | 'UNKNOWN' | 'SKIPPED' | null;
+  dispatchCommandId?: string | null;
+  dispatchCreatedAt?: string | null;
+  dispatchAttemptedAt?: string | null;
 }
 
 export interface ValveCompiledWindow {

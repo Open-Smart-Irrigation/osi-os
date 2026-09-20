@@ -54,5 +54,6 @@
   "0053__installation_identity_backfill.sql": "0714d087204d6ea6e779ca65f615612814191c706ccfa5e1ef01d57472e27822",
   "0054__installation_location_revisions.sql": "f42c7ccf9b89010e89cf33a268e2bd9b1ec824095d6375f295ac5b5a8adce206",
   "0055__radio_store_identity.sql": "21d21038f5b95610089fe279603abffef8286471ca92018f6c3dea3f04fdffa9",
-  "0056__installation_revision_outbox.sql": "35af4279d08229ab29819c7596e49f65cb526ee9017ea5f6e942895d486a24f0"
+  "0056__installation_revision_outbox.sql": "35af4279d08229ab29819c7596e49f65cb526ee9017ea5f6e942895d486a24f0",
+  "0057__valve_once_dispatch_intents.sql": "6cc4e57d9e089064602f36d8c48ba2fda91c1e6e3d6d326c68d9f97e302b8f05"
 }

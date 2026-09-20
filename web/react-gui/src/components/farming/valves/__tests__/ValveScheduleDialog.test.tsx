@@ -24,6 +24,7 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.preview': '{{days}} {{start}}–{{end}} · {{minutes}} min',
     'scheduleDialog.previewLiters': '≈ {{liters}} L',
     'scheduleDialog.onceNote': 'One-time opens are sent by the gateway at that minute; the gateway must be online.',
+    'scheduleDialog.dispatchStatus': 'Dispatch: {{state}}',
     'scheduleDialog.save': 'Save',
     'scheduleDialog.saving': 'Saving…',
     'scheduleDialog.delete': 'Delete',
@@ -248,6 +249,16 @@ describe('ValveScheduleDialog', () => {
     schedulesMock.mockResolvedValueOnce(responseWithTuesdayWindows());
     renderDialog(makeValve());
     expect(await screen.findByText('Morning soak')).toBeInTheDocument();
+  });
+
+  it('shows an unknown one-time dispatch outcome in the schedule row', async () => {
+    schedulesMock.mockResolvedValue({
+      ...emptyResponse(),
+      schedules: [{ scheduleUuid: 'once-unknown', deviceEui: '0016C001F1000001', kind: 'ONCE', label: 'One open', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 20, timezone: 'Europe/Zurich', enabled: true, onceState: 'FIRED', dispatchState: 'UNKNOWN', dispatchCommandId: 'cmd-1', dispatchCreatedAt: '2026-08-19T10:00:00Z', dispatchAttemptedAt: '2026-08-19T10:00:00Z' }],
+    });
+    renderDialog(makeValve());
+    expect(await screen.findByText('One open')).toBeInTheDocument();
+    expect(await screen.findByText(/Dispatch: UNKNOWN/)).toBeInTheDocument();
   });
 
   it('shows the window count for a weekday with two compiled windows', async () => {
