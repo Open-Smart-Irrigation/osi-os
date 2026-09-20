@@ -20,7 +20,7 @@ import type {
 import coreCatalog from '../../../../../scripts/journal-catalog-core.js';
 // @ts-expect-error The authoritative generator is CommonJS and has no TypeScript declaration.
 import catalogGenerator from '../../../../../scripts/generate-journal-catalog.js';
-import agroscopeSource from '../../../../../docs/superpowers/specs/agroscope-open-field/catalog.json';
+import agroscopeSource from '../../../../../docs/journal/catalog.json';
 
 const draftUuid = 'draft-uuid';
 const timestamp = '2026-07-16T00:00:00.000Z';
