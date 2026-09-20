@@ -2,7 +2,7 @@
 import coreCatalog from '../../../../../scripts/journal-catalog-core.js';
 // @ts-expect-error The authoritative generator is CommonJS and has no TypeScript declaration.
 import catalogGenerator from '../../../../../scripts/generate-journal-catalog.js';
-import agroscopeSource from '../../../../../docs/superpowers/specs/agroscope-open-field/catalog.json';
+import sourceCatalog from '../../../../../docs/journal/catalog.json';
 import type { JournalDefinitionRow, JournalVocabRow } from '../../types/journal';
 
 interface CompiledCatalogRow {
@@ -18,7 +18,7 @@ function rowObject(row: CompiledCatalogRow): Record<string, unknown> {
 function compiledRows(): CompiledCatalogRow[] {
   const compiled = (catalogGenerator as {
     compileCatalog: (core: unknown, source: unknown) => { rows: CompiledCatalogRow[] };
-  }).compileCatalog(coreCatalog, agroscopeSource);
+  }).compileCatalog(coreCatalog, sourceCatalog);
   return compiled.rows;
 }
 

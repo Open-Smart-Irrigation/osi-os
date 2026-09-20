@@ -267,9 +267,9 @@ ownership, do not conflate them:
   edge classification behavior is unchanged from v5 regardless of what the
   cloud does.
 
-**Agroscope dendrometer controller — draft only:**
-`docs/architecture/agroscope-dendrometer-controller.md` begins "**Status:**
-Draft design, not shipped behavior." It describes a future opt-in
+**Dendrometer controller — draft only:**
+The private controller design begins "**Status:** Draft design, not shipped
+behavior." It describes a future opt-in
 `controller_mode='dendrometer'` architecture that would compare against
 Agroscope's `Tree_HSMM`/`Tree_irrigator` reference logic. Treat it purely as
 a design reference, not current runtime behavior, and do not cite it as if

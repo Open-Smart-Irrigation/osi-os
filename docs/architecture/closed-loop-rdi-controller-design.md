@@ -13,8 +13,7 @@ with no memory of whether yesterday's water actually moved the tree.
 
 This adds a **closed-loop controller** as a parallel *shadow* decision path: a corrected PI controller that
 holds the zone at a deliberate mild-deficit **RDI setpoint** and self-corrects from the tree's measured
-next-day response. It is the P0 enhancement from the [Agroscope integration assessment](../../analysis/agroscope-irrigation-assessment/08-synthesis.md)
-(§5): OSI's superior signal + Agroscope's superior control paradigm.
+next-day response. It follows the approved integration assessment (§5).
 
 **Shadow-first, 2-way:** the controller computes a recommendation *alongside* v6's existing open-loop one,
 per zone/day; **v6's existing recommendation still drives actuation, unchanged; nothing new actuates.** Both

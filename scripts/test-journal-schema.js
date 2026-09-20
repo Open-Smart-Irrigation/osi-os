@@ -25,7 +25,7 @@ const migrationPath = path.join(
 );
 const sourceCatalog = require(path.join(
   repoRoot,
-  'docs/superpowers/specs/agroscope-open-field/catalog.json'
+  'docs/journal/catalog.json'
 ));
 
 const BUNDLED_DB_PATHS = [

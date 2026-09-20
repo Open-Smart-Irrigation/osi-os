@@ -9,7 +9,7 @@ const path = require('node:path');
 
 const repoRoot = path.resolve(__dirname, '..');
 const core = require('./journal-catalog-core');
-const source = require('../docs/superpowers/specs/agroscope-open-field/catalog.json');
+const source = require('../docs/journal/catalog.json');
 const generator = require('./generate-journal-catalog');
 
 function stableStringify(value) {

@@ -95,7 +95,7 @@ SQL INSERT** writes it to `device_data`. This tab also hosts **Process STREGA**
 / **Persist STREGA Uplink** (valve status messages ride the same uplink stream)
 and **Forward Agroscope Dendro**, which — when enabled — republishes dendrometer
 uplinks to the Agroscope research institute's IoT broker
-(see [docs/operations/agroscope-iot-forwarding.md](../../operations/agroscope-iot-forwarding.md)).
+(see the private IoT forwarding design record).
 
 ### Actuator_STREGA (5 function nodes)
 

@@ -10,7 +10,7 @@ const core = require('./journal-catalog-core');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SOURCE_PATH = path.join(
   REPO_ROOT,
-  'docs/superpowers/specs/agroscope-open-field/catalog.json'
+  'docs/journal/catalog.json'
 );
 const MIGRATIONS_DIR = path.join(REPO_ROOT, 'database/migrations/ordered');
 const MANIFEST_PATH = path.join(MIGRATIONS_DIR, 'CHECKSUMS.json');
