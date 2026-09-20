@@ -277,7 +277,7 @@ test('buildActuationPayload: OBSERVED_COMPLETE shapes to status=COMPLETED, field
   });
 });
 
-test('buildActuationPayload: CANCELLED shapes to status=CANCELLED and carries cancel_reason; archived_at falls back to expected_close_at when there is no observed_close_at', async () => {
+test('buildActuationPayload: CANCELLED shapes to status=CANCELLED and carries cancel_reason; archived_at falls back to commanded_at when there is no observed_close_at', async () => {
   const { db } = await tempDb();
   await db.run(
     'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, cancel_reason, trigger, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -287,7 +287,7 @@ test('buildActuationPayload: CANCELLED shapes to status=CANCELLED and carries ca
   assert.equal(payload.status, 'CANCELLED');
   assert.equal(payload.cancel_reason, 'operator_cancel');
   assert.equal(payload.zone_uuid, null);
-  assert.equal(payload.archived_at, '2026-08-25T10:15:00.000Z');
+  assert.equal(payload.archived_at, '2026-08-25T10:00:00.000Z');
 });
 
 test('buildActuationPayload: STALE_NO_OBSERVATION (never observed open) -> OPEN_TIMEOUT, STALE_OPEN_OBSERVED (observed open, never close) -> CLOSE_TIMEOUT', async () => {
@@ -348,14 +348,22 @@ test('deriveArchiveStatus: unit coverage of the full precedence, matching get-ac
   assert.equal(deriveArchiveStatus({ ...base, observed_open_at: null, observed_close_at: null }), 'OPEN_TIMEOUT');
 });
 
-test('buildActuationPayload: archived_at falls all the way back to commanded_at when neither observed_close_at nor expected_close_at carries a truthy value (expected_close_at is schema-NOT-NULL in production, but an empty string is a legal value and must fall through the same as null would)', async () => {
+test('buildActuationPayload: archived_at uses commanded_at when expected_close_at is in the future and there is no observed close', async () => {
   const { db } = await tempDb();
-  await db.run(
-    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-    ['e1', EUI, '2026-08-25T10:00:00.000Z', 900, '', 'unknown', 'CANCELLED', 'manual', '2026-08-25T10:00:00.000Z']
-  );
+  await insertExpectation(db, { id: 'e1', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T12:00:00.000Z', durationSeconds: 0, trigger: 'manual' });
   const payload = await buildActuationPayload(db, 'e1');
   assert.equal(payload.archived_at, '2026-08-25T10:00:00.000Z');
+});
+
+test('emitActuationArchived: a terminal expectation without a zone UUID is deferred with a warning', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await insertExpectation(db, { id: 'e-no-zone', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
+  const warnings = [];
+  const result = await emitActuationArchived(db, EUI, 'e-no-zone', (m) => warnings.push(m));
+  assert.equal(result, null);
+  assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0);
+  assert.match(warnings[0], /missing zone_uuid/);
 });
 
 test('emitActuationArchived: unlinked gateway is a no-op -- returns null and enqueues nothing', async () => {
@@ -390,12 +398,14 @@ test('emitActuationArchived: a non-terminal expectation is a no-op even when lin
 test('emitActuationArchived: a linked gateway enqueues a VALVE_ACTUATION_ARCHIVED sync_outbox row whose payload matches buildActuationPayload', async () => {
   const { db } = await tempDb();
   await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  const zone = await insertZone(db);
   await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z', observedOpenAt: '2026-08-25T10:00:05.000Z', observedCloseAt: '2026-08-25T10:15:03.000Z' });
+  await db.run('UPDATE valve_actuation_expectations SET zone_id=? WHERE expectation_id=?', [zone.id, 'e1']);
 
   const result = await emitActuationArchived(db, EUI, 'e1');
   assert.ok(result);
 
-  const rows = await db.all('SELECT * FROM sync_outbox');
+  const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
   assert.equal(rows.length, 1);
   const row = rows[0];
   assert.equal(row.aggregate_type, 'VALVE_ACTUATION');
@@ -408,6 +418,41 @@ test('emitActuationArchived: a linked gateway enqueues a VALVE_ACTUATION_ARCHIVE
   assert.deepEqual(payload, result.payload);
   assert.equal(payload.status, 'COMPLETED');
   assert.equal(row.occurred_at, payload.archived_at);
+});
+
+test('emitActuationArchived: repeated identical archive is stable and deduped after outbox pruning', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  const zone = await insertZone(db);
+  await db.run('UPDATE devices SET irrigation_zone_id=? WHERE UPPER(deveui)=?', [zone.id, EUI]);
+  await insertExpectation(db, { id: 'e-repeat', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
+  await db.run('UPDATE valve_actuation_expectations SET zone_id=? WHERE expectation_id=?', [zone.id, 'e-repeat']);
+
+  const first = await emitActuationArchived(db, EUI, 'e-repeat');
+  const duplicate = await emitActuationArchived(db, EUI, 'e-repeat');
+  assert.equal(duplicate.event_uuid, first.event_uuid);
+  assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'")).length, 1);
+  await db.run('DELETE FROM sync_outbox');
+  const second = await emitActuationArchived(db, EUI, 'e-repeat');
+  assert.match(first.event_uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(second.event_uuid, first.event_uuid);
+  assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'")).length, 1);
+});
+
+test('emitActuationArchived: corrected payload gets a distinct deterministic event ID', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  const zone = await insertZone(db);
+  await db.run('UPDATE devices SET irrigation_zone_id=? WHERE UPPER(deveui)=?', [zone.id, EUI]);
+  await insertExpectation(db, { id: 'e-correct', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
+  await db.run('UPDATE valve_actuation_expectations SET zone_id=? WHERE expectation_id=?', [zone.id, 'e-correct']);
+
+  const first = await emitActuationArchived(db, EUI, 'e-correct');
+  await db.run("UPDATE valve_actuation_expectations SET cancel_reason='corrected' WHERE expectation_id='e-correct'");
+  const second = await emitActuationArchived(db, EUI, 'e-correct');
+  assert.notEqual(second.event_uuid, first.event_uuid);
+  assert.equal(second.payload.archived_at, first.payload.archived_at);
+  assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'")).length, 2);
 });
 
 test('emitActuationArchived: an unknown expectation_id is a no-op even when linked', async () => {

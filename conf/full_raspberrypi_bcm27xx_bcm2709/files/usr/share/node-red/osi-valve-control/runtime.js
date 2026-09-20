@@ -17,6 +17,29 @@
 const crypto = require('node:crypto');
 const store = require('./store');
 
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((result, key) => {
+      result[key] = canonicalize(value[key]);
+      return result;
+    }, {});
+  }
+  return value;
+}
+
+function deterministicArchiveEventUuid(expectationId, payload) {
+  const digest = crypto.createHash('sha256')
+    .update(String(expectationId))
+    .update('\0')
+    .update(JSON.stringify(canonicalize(payload)))
+    .digest('hex')
+    .slice(0, 32);
+  // Keep the deterministic hash UUID-compatible for consumers that parse UUIDs strictly.
+  const uuidHex = digest.slice(0, 12) + '8' + digest.slice(13, 16) + '8' + digest.slice(17);
+  return uuidHex.slice(0, 8) + '-' + uuidHex.slice(8, 12) + '-' + uuidHex.slice(12, 16) + '-' + uuidHex.slice(16, 20) + '-' + uuidHex.slice(20);
+}
+
 // Same COALESCE(NULLIF(trim(devices.gateway_device_eui)), NULLIF(trim(sync_link_state.gateway_
 // device_eui))) fallback chain the 0024/0025 trigger payloads use, plus the `linked = 1` gate the
 // triggers guard on (`WHEN EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND
@@ -256,9 +279,9 @@ async function buildActuationPayload(db, expectationId) {
     // (carrying the fixed trigger/volume/status) would lose the tie to the row already applied
     // and be silently dropped. This deliberately diverges from ValveRuntime.as_of's own ruling
     // (P3-E1: strict last-write-wins, ties broken by arrival order) precisely because as_of is a
-    // fresh wall-clock read every emission (no two emissions ever truly tie) while archived_at is
-    // reused verbatim across corrections by design. See canonicalization.md.
-    archived_at: row.observed_close_at || row.expected_close_at || row.commanded_at,
+    // fresh wall-clock reads usually advance between emissions; same-time ties use arrival order,
+    // while archived_at is reused verbatim across corrections by design. See canonicalization.md.
+    archived_at: row.observed_close_at || row.commanded_at,
   };
 }
 
@@ -279,13 +302,21 @@ async function emitActuationArchived(db, deviceEui, expectationId, warn) {
     if (typeof warn === 'function') warn('[valve-control] actuation-archive emit skipped for ' + deviceEui + ': no resolvable gateway_device_eui');
     return null;
   }
+  if (!expectationId || !String(expectationId).trim()) {
+    if (typeof warn === 'function') warn('[valve-control] actuation-archive emit deferred: missing expectation_id');
+    return null;
+  }
   const payload = await buildActuationPayload(db, expectationId);
   if (!payload) return null;
-  const eventUuid = crypto.randomUUID();
+  if (!payload.zone_uuid) {
+    if (typeof warn === 'function') warn('[valve-control] actuation-archive emit deferred for ' + expectationId + ': missing zone_uuid');
+    return null;
+  }
+  const eventUuid = deterministicArchiveEventUuid(expectationId, payload);
   await db.run(
     'INSERT INTO sync_outbox (' +
       'event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui' +
-    ') VALUES (?,?,?,?,?,?,?,?)',
+    ') VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(event_uuid) DO NOTHING',
     [
       eventUuid,
       'VALVE_ACTUATION',
