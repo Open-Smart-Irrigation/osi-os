@@ -77,12 +77,12 @@ Keep entries user-facing: what changed and why it matters. Reference deploy.sh s
 ```bash
 cd web/react-gui && npm install && npm run build
 cd ../..
-tar -czf react_gui.tar.gz -C web/react-gui/dist .
+tar -czf react_gui.tar.gz -C web/react-gui/build .
 ```
 
 Verify the bundle includes the new version string:
 ```bash
-grep -r "v0\." web/react-gui/dist/ | head -5
+grep -r "v0\." web/react-gui/build/ | head -5
 ```
 
 ---
@@ -143,35 +143,11 @@ Include the SHA-256 in the release notes so operators can verify downloads.
 
 ---
 
-## Step 7 — Deploy to Pis
+## Step 7 — Prepare deployment
 
-Run `deploy.sh` on each Pi in order: staging Pis first, production last.
+Build the release payload and hand it to the deployment procedure for the target gateway. The stable-link path can serve `deploy.sh` from a local HTTP server; the flaky-link path uses the self-contained bundle scripts described in [Deploying over a flaky link](operations/deploying-over-a-flaky-link.md).
 
-```bash
-# Start local file server (from repo root)
-python3 -m http.server 9876 &
-
-# Per Pi
-ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
-ssh root@<pi-ip> '/etc/init.d/node-red restart'
-
-# Set firmware_version on existing Pis (96_osi_server_config only runs on first boot)
-ssh root@<pi-ip> 'uci set osi-server.cloud.firmware_version=<NEW> && uci commit osi-server'
-
-# Verify
-ssh root@<pi-ip> 'uci get osi-server.cloud.firmware_version'   # → <NEW>
-ssh root@<pi-ip> 'cat /srv/node-red/node_modules/osi-cloud-http/index.js | head -1'  # → 'use strict';
-```
-
-Kill the server when done:
-```bash
-kill %1
-```
-
-Pi order for this project:
-1. **Silvan** `100.81.220.8` — staging
-2. **kaba100** `100.93.68.86` — staging
-3. **Uganda** `100.69.51.98` — production (always last)
+`deploy.sh` owns payload promotion, schema work, and the Node-RED restart. Read its verdict and the deployment runbook's post-deploy checks; do not add a separate manual restart after a green deploy.
 
 ---
 
@@ -191,7 +167,9 @@ Do not store production SSH credentials, private keys, or host aliases in this r
 Run the deploy through SSH with the rollout key. Replace the host with the selected cloud environment from the table.
 
 ```bash
-ssh -i /path/to/ephemeral-key rocky@osicloud.ch <<'REMOTE'
+# Test host shown. Production (osicloud.ch) needs explicit consent in the current
+# conversation; see AGENTS.md "Production cloud access".
+ssh -i /path/to/ephemeral-key rocky@server.opensmartirrigation.org <<'REMOTE'
 set -e
 git -C /home/rocky/docker/osi-server pull --ff-only origin main
 cd /home/rocky/docker/osi-server/docker

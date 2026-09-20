@@ -1,6 +1,6 @@
 # TypeScript Rule Overlays
 
-This repo uses OSI-owned `architect.yaml` and `RULES.yaml` files as advisory TypeScript overlays for agent work.
+This repo uses OSI-owned `architect.yaml` and `RULES.yaml` files, both at the repo root (not under `web/react-gui/`), as advisory TypeScript overlays for agent work.
 
 ## How agents should use them
 

@@ -56,13 +56,15 @@ OSI Server  (optional cloud — remote monitoring & control)
 
 ## Supported Field Devices
 
-| Device type         | Description                                                                            |
-| ------------------- | -------------------------------------------------------------------------------------- |
-| **KIWI_SENSOR**     | Soil water tension (kPa), soil moisture                                                |
-| **DRAGINO_LSN50**   | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter |
-| **STREGA_VALVE**    | Gen1, Motorized or solenoid irrigation valve                                           |
-| **SENSECAP_S2120**  | Weather station (wind, rain, UV, barometric pressure)                                  |
-| **TEKTELIC_CLOVER** | Volumetric water content (%), soil moisture                                            |
+| Device type          | Description                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| **KIWI_SENSOR**      | Soil water tension (kPa), soil moisture                                                |
+| **TEKTELIC_CLOVER**  | Volumetric water content (%), soil moisture                                            |
+| **DRAGINO_LSN50**    | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter |
+| **SENSECAP_S2120**   | Weather station (wind, rain, UV, barometric pressure)                                  |
+| **AQUASCOPE_LORAIN** | Interval rain gauge with ambient temperature and battery                               |
+| **STREGA_VALVE**     | Gen1 and Gen2 (SV2) motorized or solenoid irrigation valve with on-valve scheduler     |
+| **MILESIGHT_UC512**  | Two-channel valve controller with pulse counters and pipe pressure                     |
 
 ---
 
@@ -82,7 +84,7 @@ osi-os/
 ├── database/farming.db     # Source-of-truth database schema
 ├── scripts/                # Deploy + verification scripts
 ├── Makefile                # Build system entry point
-├── Jenkinsfile             # CI/CD pipeline
+├── Jenkinsfile             # Legacy; CI runs from .github/workflows/
 ├── AGENTS.md               # Architecture, sync model, conventions
 ├── CHANGELOG.md            # Release history
 └── docs/                   # Build, contracts, hardware, versioning
@@ -207,16 +209,16 @@ cd web/react-gui && npm install && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
 
 # 2. Serve the repo from your dev machine
-python3 -m http.server 9876
+python3 -m http.server 9876 --bind 127.0.0.1
 
 # 3. In a second terminal - deploy via tunnel (runs on the Pi, pulls from your machine)
 ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
 
-# 4. Restart Node-RED
-ssh root@<pi-ip> '/etc/init.d/node-red restart'
+# 4. Nothing to restart: deploy.sh restarts Node-RED itself and prints a verdict.
+#    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
 
-The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi-chirpstack-helper`, `osi-db-helper`, `osi-dendro-helper`, `osi-chameleon-helper`, `osi-cloud-http`), `chirpstack-bootstrap.js`, device codecs (STREGA, LSN50, S2120), the React GUI bundle, and runs `npm install` on-device. It also performs idempotent live-DB schema repair (dendrometer + Chameleon SWT) and fixes Mosquitto file ownership.
+The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi-chirpstack-helper`, `osi-db-helper`, `osi-dendro-helper`, `osi-chameleon-helper`, `osi-cloud-http`), `chirpstack-bootstrap.js`, the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), the React GUI bundle, and runs `npm install` on-device. It also performs idempotent live-DB schema repair (dendrometer + Chameleon SWT) and fixes Mosquitto file ownership.
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
@@ -231,7 +233,6 @@ On first boot after a Path B deploy, OSI OS attempts a one-shot in-place resize 
 
 ```bash
 PI=root@<pi-ip>
-/
 scp feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js $PI:/srv/node-red/settings.js
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json $PI:/srv/node-red/flows.json
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db $PI:/tmp/osi-os-seed-farming.db
@@ -313,10 +314,9 @@ cd web/react-gui && npm install && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
 
 # Serve and deploy
-python3 -m http.server 9876
+python3 -m http.server 9876 --bind 127.0.0.1
 # second terminal:
 ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
-ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
 No need to re-run `chirpstack-bootstrap.js` unless ChirpStack was re-provisioned or device profiles are missing.
