@@ -3,6 +3,7 @@
 // end-to-end kaba100-shaped scenario. Uses the real repo migrations.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -120,4 +121,42 @@ test('checksum manifest divergence from disk refuses before comparing', async ()
 
 test('refuses a missing db path (anti-typo)', async () => {
   await assert.rejects(() => runBaseline({ dbPath: '/nonexistent/nope.db', log: () => {} }), /does not exist/);
+});
+
+test('reference chain retry rebuilds from the last published snapshot after a migration failure', async () => {
+  const dir = path.join(scratch(), 'migrations');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, '0001__a.sql'), '-- risk: additive\nCREATE TABLE a (id INTEGER PRIMARY KEY);\n');
+  fs.writeFileSync(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\nNOT VALID SQL;\n');
+  await assert.rejects(() => buildReference(dir, 2, scratch()), /syntax error|SQLITE_ERROR/);
+  fs.writeFileSync(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\n');
+  const db = await buildReference(dir, 2, scratch());
+  assert.deepEqual(await cliRunner(db).all("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"), [
+    { name: 'a' }, { name: 'b' }, { name: 'schema_migrations' },
+    { name: 'schema_object_fingerprints' },
+  ]);
+});
+
+test('reference chain uses the persistent adapter without spawning sqlite3', () => {
+  const dir = path.join(scratch(), 'migrations');
+  fs.mkdirSync(dir);
+  for (const version of [1, 2, 3]) {
+    fs.writeFileSync(path.join(dir, `000${version}__a${version}.sql`),
+      `-- risk: additive\nCREATE TABLE a${version} (id INTEGER PRIMARY KEY);\n`);
+  }
+  const script = `
+    const cp = require('node:child_process');
+    let sqlite3Calls = 0;
+    const execFileSync = cp.execFileSync;
+    cp.execFileSync = (...args) => { if (args[0] === 'sqlite3') sqlite3Calls++; return execFileSync(...args); };
+    const { buildReference } = require(${JSON.stringify(path.join(REPO, 'scripts/baseline-existing-db.js'))});
+    buildReference(process.env.MIGRATIONS_DIR, 3, process.env.SCRATCH_ROOT)
+      .then(() => process.stdout.write(String(sqlite3Calls)))
+      .catch((err) => { console.error(err); process.exitCode = 1; });
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    encoding: 'utf8',
+    env: { ...process.env, MIGRATIONS_DIR: dir, SCRATCH_ROOT: scratch() },
+  });
+  assert.equal(out, '0');
 });

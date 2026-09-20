@@ -11,7 +11,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { cliRunner } = require('../lib/osi-migrate/runner-iface');
+const { cliRunner, nodeSqliteRunner } = require('../lib/osi-migrate/runner-iface');
 const { bootstrapFresh, applyPending } = require('../lib/osi-migrate');
 const { syncFingerprints } = require('../lib/osi-migrate/runner');
 const { ensureLedger, successInsertSql } = require('../lib/osi-migrate/ledger');
@@ -64,6 +64,7 @@ function getChainState(migrationsDir, scratchRoot) {
       bootstrapped: false,
       nextIdx: 0,
       byVersion: new Map(), // version -> { dbPath, snap }
+      runner: null,
       chain: Promise.resolve(),
     };
     referenceChains.set(key, state);
@@ -76,8 +77,9 @@ function getChainState(migrationsDir, scratchRoot) {
 // concurrent callers for the same migrationsDir can't race the one working DB.
 function ensureReferenceUpTo(migrationsDir, n, scratchRoot) {
   const state = getChainState(migrationsDir, scratchRoot);
-  state.chain = state.chain.then(async () => {
-    const runner = cliRunner(state.workingDb);
+  const run = state.chain.then(async () => {
+    if (!state.runner) state.runner = nodeSqliteRunner(state.workingDb);
+    const runner = state.runner;
     while (state.nextIdx < state.files.length) {
       const f = state.files[state.nextIdx];
       const version = Number(f.slice(0, 4));
@@ -96,7 +98,30 @@ function ensureReferenceUpTo(migrationsDir, n, scratchRoot) {
       state.nextIdx += 1;
     }
   });
-  return state.chain;
+  // Keep the serialization chain usable after a failed attempt. The caller
+  // still receives the rejection, while the next call starts from the last
+  // published snapshot with a fresh connection.
+  state.chain = run.catch(async () => {
+    // nodeSqliteRunner closes on exec failure, rolling back any open
+    // transaction. Do not reuse a failed handle on the next retry.
+    if (state.runner) await state.runner.close();
+    state.runner = null;
+    // A failed first migration leaves recordFailure's metadata tables behind,
+    // while a later failure leaves the working DB one step past the last
+    // published snapshot. Restore the exact published file before retrying so
+    // bootstrapFresh/applyPending see the same state as a fresh attempt.
+    for (const suffix of ['', '-wal', '-shm']) {
+      const target = state.workingDb + suffix;
+      if (fs.existsSync(target)) fs.unlinkSync(target);
+    }
+    if (state.nextIdx > 0) {
+      const prior = state.byVersion.get(Number(state.files[state.nextIdx - 1].slice(0, 4))).dbPath;
+      fs.copyFileSync(prior, state.workingDb);
+    }
+    state.bootstrapped = state.nextIdx > 0;
+    return undefined;
+  });
+  return run;
 }
 
 // Reference(N) snapshot, built (or reused) via the shared incremental chain.
