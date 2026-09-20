@@ -40,7 +40,7 @@
     "list": "Schedules", "addWeekly": "+ Weekly", "addOnce": "+ One-time",
     "label": "Label (optional)", "weekdays": "Days", "startTime": "Start", "duration": "Duration (min)", "date": "Date", "time": "Time",
     "preview": "{{days}} {{start}}–{{end}} · {{minutes}} min", "previewLiters": "≈ {{liters}} L",
-    "onceNote": "One-time opens are sent by the gateway at that minute; the gateway must be online.", "dispatchStatus": "Dispatch: {{state}}",
+    "onceNote": "One-time opens are sent by the gateway at that minute; the gateway must be online.", "dispatchStatus": "Dispatch: {{state}}", "dispatchStates": { "PENDING": "Pending", "ATTEMPTED": "Attempted", "SENT": "Sent to the radio network", "UNKNOWN": "Unknown", "SKIPPED": "Skipped" },
     "save": "Save", "saving": "Saving…", "delete": "Delete", "enabled": "Enabled",
     "conflictTooMany": "{{weekday}} would have more than 4 windows.", "conflictOverlap": "Overlaps another window on {{weekday}}.", "conflictGeneric": "The schedule conflicts with the plan.", "conflictInvalidStart": "A schedule has an invalid start time.", "invalidStartTime": "That start time is not valid.", "saveFailed": "Could not save the schedule.", "updateFailed": "Could not update the schedule.", "deleteFailed": "Could not delete the schedule.",
     "push": { "QUEUED": "waiting for valve", "ACKED": "confirmado {{when}}", "FAILED": "failed" }

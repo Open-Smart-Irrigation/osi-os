@@ -55,9 +55,8 @@ function actuatorCommand(deviceEui, zoneId, minutes, commandId, reason) {
 
 async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, onError }) {
   const nowMs = (now || new Date()).getTime();
-  // An ATTEMPTED marker means the process reached the QoS0 handoff boundary. There is no
-  // broker acceptance signal, so a later tick makes that uncertainty explicit and never sends
-  // the command again.
+  // An ATTEMPTED marker means the process reached the QoS0 handoff boundary. A successful emit
+  // advances it to SENT; a later tick marks only an interrupted ATTEMPTED handoff UNKNOWN.
   await db.run("UPDATE valve_once_dispatch_intents SET state='UNKNOWN', updated_at=datetime('now') WHERE state='ATTEMPTED' AND attempted_at IS NOT NULL AND julianday(attempted_at) < julianday('now','-1 second')");
   // (I3) AND d.deleted_at IS NULL: a soft-deleted device's PENDING ONCE rows must be left
   // completely untouched (not fired, not skipped) rather than logging a phantom SKIP against a
@@ -98,7 +97,10 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, o
       const row = outcome.row;
       if (row.user_id == null || row.irrigation_zone_id == null) warn && warn('[valve-control] one_time_open not logged for ' + row.device_eui + ' (no zone/user)');
       const command = { schedule_uuid: row.schedule_uuid, device_eui: row.device_eui, duration_minutes: row.duration_minutes, command_id: row.command_id, actuator_command: actuatorCommand(row.device_eui, row.irrigation_zone_id, row.duration_minutes, row.command_id, 'one_time_open') };
-      if (typeof emit === 'function') await emit(command);
+      if (typeof emit === 'function') {
+        await emit(command);
+        await db.run("UPDATE valve_once_dispatch_intents SET state='SENT', updated_at=datetime('now') WHERE schedule_uuid=? AND state='ATTEMPTED'", [row.schedule_uuid]);
+      }
       if (typeof afterAttempt === 'function') await afterAttempt(row);
       fired.push(command);
     } catch (e) {

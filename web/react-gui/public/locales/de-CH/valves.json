@@ -40,7 +40,7 @@
     "list": "Zeitpläne", "addWeekly": "+ Wöchentlich", "addOnce": "+ Einmalig",
     "label": "Bezeichnung (optional)", "weekdays": "Tage", "startTime": "Start", "duration": "Dauer (Min.)", "date": "Datum", "time": "Zeit",
     "preview": "{{days}} {{start}}–{{end}} · {{minutes}} Min.", "previewLiters": "≈ {{liters}} L",
-    "onceNote": "Einmalige Öffnungen werden vom Gateway zu diesem Zeitpunkt gesendet; das Gateway muss online sein.", "dispatchStatus": "Dispatch: {{state}}",
+    "onceNote": "Einmalige Öffnungen werden vom Gateway zu diesem Zeitpunkt gesendet; das Gateway muss online sein.", "dispatchStatus": "Dispatch: {{state}}", "dispatchStates": { "PENDING": "Pending", "ATTEMPTED": "Attempted", "SENT": "Sent to the radio network", "UNKNOWN": "Unknown", "SKIPPED": "Skipped" },
     "save": "Speichern", "saving": "Speichert…", "delete": "Löschen", "enabled": "Aktiviert",
     "conflictTooMany": "{{weekday}} hätte mehr als 4 Fenster.", "conflictOverlap": "Überschneidet sich mit einem anderen Fenster am {{weekday}}.", "conflictGeneric": "Der Zeitplan steht im Konflikt mit dem Plan.", "conflictInvalidStart": "Ein Zeitplan hat eine ungültige Startzeit.", "invalidStartTime": "Diese Startzeit ist ungültig.", "saveFailed": "Zeitplan konnte nicht gespeichert werden.", "updateFailed": "Zeitplan konnte nicht aktualisiert werden.", "deleteFailed": "Zeitplan konnte nicht gelöscht werden.",
     "push": { "QUEUED": "wartet auf Ventil", "ACKED": "bestätigt {{when}}", "FAILED": "fehlgeschlagen" }

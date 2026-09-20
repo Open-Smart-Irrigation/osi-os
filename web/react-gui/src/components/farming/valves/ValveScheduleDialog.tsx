@@ -36,6 +36,10 @@ function formatDateTime(iso: string, timeZone: string, language: string | undefi
   return formatDateTimeIn(iso, language, { timeZone }) ?? '—';
 }
 
+function dispatchStateLabel(state: NonNullable<ValveSchedule['dispatchState']>, translate: Translate): string {
+  return translate(`scheduleDialog.dispatchStates.${state}`, { defaultValue: state });
+}
+
 /** Offset (in minutes) of `timeZone` from UTC at the given instant: local = UTC + offset. */
 function timeZoneOffsetMinutes(timeZone: string, at: Date): number {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -458,7 +462,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           </p>
                           {schedule.kind === 'ONCE' && schedule.dispatchState && (
                             <p className={`truncate text-xs ${schedule.dispatchState === 'UNKNOWN' ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
-                              {td('scheduleDialog.dispatchStatus', { state: schedule.dispatchState, defaultValue: 'Dispatch: {{state}}' })}
+                              {td('scheduleDialog.dispatchStatus', { state: dispatchStateLabel(schedule.dispatchState, td), defaultValue: 'Dispatch: {{state}}' })}
                               {schedule.dispatchAttemptedAt ? ` · ${formatDateTime(schedule.dispatchAttemptedAt, valve.timezone, i18n?.language)}` : ''}
                             </p>
                           )}

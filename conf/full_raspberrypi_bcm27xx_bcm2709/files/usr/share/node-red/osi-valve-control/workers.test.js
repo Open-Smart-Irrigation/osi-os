@@ -92,6 +92,27 @@ test('runOnceTick claims a pending intent once even when the tick repeats', asyn
   assert.equal((await db.all("SELECT * FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-race'")).length, 1);
 });
 
+test('runOnceTick marks a successfully emitted command SENT', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-sent', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  let emitted = 0;
+  await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: async () => { emitted += 1; }, warn: () => {} });
+  assert.equal(emitted, 1);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-sent'")).state, 'SENT');
+  const next = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), emit: async () => { emitted += 1; }, warn: () => {} });
+  assert.equal(next.fired.length, 0);
+  assert.equal(emitted, 1);
+});
+
+test('runOnceTick leaves an attempted intent UNKNOWN after a handoff crash', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-handoff-crash', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await assert.rejects(() => W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: async () => { throw new Error('handoff crashed'); }, warn: () => {} }), /handoff crashed/);
+  const next = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), emit: async () => { throw new Error('must not resend'); }, warn: () => {} });
+  assert.equal(next.fired.length, 0);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-handoff-crash'")).state, 'UNKNOWN');
+});
+
 test('runOnceTick rereads eligibility at claim and leaves a disabled schedule pending', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'claim-disabled', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
