@@ -27,6 +27,19 @@ function normalizeHexKey(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+// ChirpStack 4.12 reads an unset appKey/genAppKey as 32 zero hex chars;
+// older versions returned an empty string. Treat both as the same stored key.
+const UNSET_KEY_ZEROS = '0'.repeat(32);
+
+function canonicalStoredKey(value) {
+  const normalized = normalizeHexKey(value);
+  return normalized === '' ? UNSET_KEY_ZEROS : normalized;
+}
+
+function storedKeyEqual(a, b) {
+  return canonicalStoredKey(a) === canonicalStoredKey(b);
+}
+
 function normalizeApiUrl(apiUrl) {
   const raw = String(apiUrl || '').trim();
   if (!raw) {
@@ -349,8 +362,8 @@ class ChirpStackClient {
         await this.createKeys(keySpec);
         keysAction = 'created';
       } else if (
-        normalizeHexKey(existingKeys.getNwkKey()) !== keySpec.nwkKey ||
-        normalizeHexKey(existingKeys.getAppKey()) !== ''
+        !storedKeyEqual(existingKeys.getNwkKey(), keySpec.nwkKey) ||
+        !storedKeyEqual(existingKeys.getAppKey(), '')
       ) {
         await this.updateKeys(keySpec);
         keysAction = 'updated';
