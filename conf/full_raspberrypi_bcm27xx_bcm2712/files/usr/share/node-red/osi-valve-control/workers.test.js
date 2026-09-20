@@ -119,7 +119,7 @@ test('runOnceTick finalizes a slow handoff as SENT after an overlapping tick mar
   let resolveEmit;
   let emitted = 0;
   const first = W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: () => { emitted += 1; return new Promise((resolve) => { resolveEmit = resolve; }); }, warn: () => {} });
-  while (!(await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-slow-handoff'"))) await new Promise((resolve) => setImmediate(resolve));
+  while (!resolveEmit) await new Promise((resolve) => setImmediate(resolve));
   await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), warn: () => {} });
   assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-slow-handoff'")).state, 'UNKNOWN');
   resolveEmit();
