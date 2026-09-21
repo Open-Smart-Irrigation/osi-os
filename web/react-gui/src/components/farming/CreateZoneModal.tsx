@@ -4,13 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
 import { normalizeEntityName } from '../../utils/entityName';
 
-// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
-// then they're absent from en_devices and react-i18next's typed t() overload
-// rejects them at compile time. Same drift, same fix as EditableName.tsx
-// documents in full: a compile-time-only cast, no runtime defaultValue,
-// removed once Task 14 lands the keys.
-type TranslationKey = any;
-
 interface CreateZoneModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -38,7 +31,7 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
     if (!normalized.ok) {
       setError(normalized.reason === 'name_empty'
         ? t('createZoneModal.zoneNameRequired')
-        : t(`rename.reason.${normalized.reason}` as TranslationKey));
+        : t(`rename.reason.${normalized.reason}`));
       return;
     }
 

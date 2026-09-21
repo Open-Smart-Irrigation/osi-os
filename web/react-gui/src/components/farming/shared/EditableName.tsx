@@ -16,23 +16,6 @@ export interface EditableNameProps {
   headingClassName?: string;
 }
 
-// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
-// then they are absent from en_devices, so react-i18next's resource-typed
-// `t()` overload rejects every literal below at compile time. An `as
-// TranslationKey` cast (rather than reaching for `t()`'s `{ defaultValue }`
-// overload, the pattern ScheduleSection.tsx's swtMetricLabel uses for a key
-// mid-migration) is deliberate: tests/i18nDefaultValueCoverage.test.ts
-// specifically forbids a defaultValue for a key no locale file defines yet,
-// because that would silently ship the defaultValue text as the string in
-// all seven languages once Task 13 starts rendering this component (the F35
-// defect class). No options object reaches `t()` from this file, so that
-// guard has nothing to see, and the missing key renders through
-// react-i18next's own missing-key fallback (the raw key) until Task 14 lands
-// the real strings. `any` is the honest type here: `t()`'s key type is a
-// closed union built from the current devices.json, and these keys are not
-// in it yet.
-type TranslationKey = any;
-
 // The reason codes the routes send. An unknown string from a newer gateway
 // falls back to the generic failure text instead of rendering a raw key.
 const REASON_CODES: ReadonlySet<string> = new Set([
@@ -41,6 +24,23 @@ const REASON_CODES: ReadonlySet<string> = new Set([
   'name_control_characters',
   'name_invalid_unicode',
 ]);
+
+// Fallback text for `t()`'s `{ defaultValue }` overload below, the pattern
+// IrrigationZoneCard.tsx's formatWaterAction/formatWaterReason and
+// ScheduleSection.tsx's swtMetricLabel use for a t() key built from a runtime
+// string: REASON_CODES.has(reason) proves reason is one of the four codes at
+// runtime but does not narrow its TypeScript type, so
+// `rename.reason.${reason}` types as `` `rename.reason.${string}` ``, wider
+// than the resource union react-i18next's typed t() accepts. The four
+// `rename.reason.*` keys exist in every locale bundle since Task 14, so this
+// text is the type-satisfier of last resort: it ships only if a locale
+// bundle were missing the key react-i18next just resolved by the same path.
+const REASON_FALLBACK_TEXT: Record<string, string> = {
+  name_empty: 'Enter a name.',
+  name_too_long: 'Use 100 characters or fewer.',
+  name_control_characters: 'Remove tabs, line breaks and other control characters.',
+  name_invalid_unicode: 'This name contains a character that cannot be saved.',
+};
 
 // The treatment the ⚙ control next to the name already uses (Sdi12SoilCard.tsx),
 // so the pencil sits on the same 48 px target its neighbour does.
@@ -132,7 +132,7 @@ export const EditableName: React.FC<EditableNameProps> = ({
 
     const result = normalizeEntityName(draft);
     if (!result.ok) {
-      setError(t(`rename.reason.${result.reason}` as TranslationKey));
+      setError(t(`rename.reason.${result.reason}`));
       return;
     }
     if (result.name === name) {
@@ -148,8 +148,8 @@ export const EditableName: React.FC<EditableNameProps> = ({
       const reason = (caught as { reason?: unknown } | null | undefined)?.reason;
       setError(
         typeof reason === 'string' && REASON_CODES.has(reason)
-          ? t(`rename.reason.${reason}` as TranslationKey)
-          : t('rename.failed' as TranslationKey),
+          ? t(`rename.reason.${reason}`, { defaultValue: REASON_FALLBACK_TEXT[reason] })
+          : t('rename.failed'),
       );
     } finally {
       savingRef.current = false;

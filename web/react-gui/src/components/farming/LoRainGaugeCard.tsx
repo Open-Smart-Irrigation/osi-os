@@ -9,13 +9,6 @@ import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 
-// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
-// then they're absent from en_devices and react-i18next's typed t() overload
-// rejects them at compile time. Same drift, same fix as EditableName.tsx
-// documents in full: a compile-time-only cast, no runtime defaultValue,
-// removed once Task 14 lands the keys.
-type TranslationKey = any;
-
 interface LoRainGaugeCardProps {
   device: Device;
   onRemove?: () => void;
@@ -124,8 +117,8 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           name={device.name}
           canEdit={!readOnly}
           onSave={handleRename}
-          renameLabel={t('rename.device' as TranslationKey)}
-          inputLabel={t('rename.deviceInputLabel' as TranslationKey)}
+          renameLabel={t('rename.device')}
+          inputLabel={t('rename.deviceInputLabel')}
           headingClassName="truncate text-base font-semibold leading-tight text-[var(--text)]"
         />
         <div className="flex shrink-0 items-center gap-1.5">

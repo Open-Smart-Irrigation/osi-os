@@ -14,13 +14,6 @@ import { formatSwtValue, kpaToPf } from '../../utils/swt';
 // only; the devices.sdi12_probe_status CHECK constraint has no such value.
 const SDI12_IDENTIFY_TIMEOUT_MINUTES = 15;
 
-// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
-// then they're absent from en_devices and react-i18next's typed t() overload
-// rejects them at compile time. Same drift, same fix as EditableName.tsx
-// documents in full: a compile-time-only cast, no runtime defaultValue,
-// removed once Task 14 lands the keys.
-type TranslationKey = any;
-
 interface Sdi12SoilCardProps {
   device: Device;
   onOpenSettings?: () => void;
@@ -142,8 +135,8 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
           name={device.name}
           canEdit={!readOnly}
           onSave={handleRename}
-          renameLabel={t('rename.device' as TranslationKey)}
-          inputLabel={t('rename.deviceInputLabel' as TranslationKey)}
+          renameLabel={t('rename.device')}
+          inputLabel={t('rename.deviceInputLabel')}
           headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
         />
         <div className="flex items-center gap-1.5 shrink-0">

@@ -26,13 +26,6 @@ import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge, type SoilChannel
 import { useDateFormat } from '../../utils/datetime';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
-// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
-// then they're absent from en_devices and react-i18next's typed t() overload
-// rejects them at compile time. Same drift, same fix as EditableName.tsx
-// documents in full: a compile-time-only cast, no runtime defaultValue,
-// removed once Task 14 lands the keys.
-type TranslationKey = any;
-
 interface IrrigationZoneCardProps {
   zone: IrrigationZone;
   devices: Device[];
@@ -419,8 +412,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             name={zone.name}
             canEdit={canWrite}
             onSave={handleRenameZone}
-            renameLabel={t('rename.zone' as TranslationKey)}
-            inputLabel={t('rename.zoneInputLabel' as TranslationKey)}
+            renameLabel={t('rename.zone')}
+            inputLabel={t('rename.zoneInputLabel')}
             headingClassName="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text break-words"
           />
           <button
