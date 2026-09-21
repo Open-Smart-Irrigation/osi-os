@@ -32,6 +32,24 @@ function scheduleOwnerMismatch(existing, eui) {
   return !!existing && String(existing.device_eui || '').trim().toUpperCase() !== eui;
 }
 
+function onceDispatchMarker(scheduleUuid, fireAt) {
+  return 'one_time_open:' + scheduleUuid + ':' + fireAt;
+}
+
+async function historicalOnceDispatch(db, scheduleUuid, fireAt) {
+  return db.get('SELECT created_at FROM actuator_log WHERE action=\'OPEN_FOR_DURATION\' AND reason=? ORDER BY id LIMIT 1', [onceDispatchMarker(scheduleUuid, fireAt)]);
+}
+
+async function ensureOnceDispatchMarker(db, schedule, intent) {
+  if (!schedule || schedule.kind !== 'ONCE' || !schedule.fire_at || !intent || !['ATTEMPTED', 'SENT', 'UNKNOWN'].includes(intent.state)) return;
+  await db.run(
+    "INSERT INTO actuator_log(deveui, irrigation_zone_id, action, duration_minutes, reason, created_at) " +
+      "SELECT ?, ?, 'OPEN_FOR_DURATION', ?, ?, COALESCE(?, datetime('now')) " +
+      "WHERE NOT EXISTS (SELECT 1 FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=? LIMIT 1)",
+    [schedule.device_eui, schedule.irrigation_zone_id || null, schedule.duration_minutes, onceDispatchMarker(schedule.schedule_uuid, schedule.fire_at), schedule.once_fired_at || intent.attempted_at || null, onceDispatchMarker(schedule.schedule_uuid, schedule.fire_at)]
+  );
+}
+
 async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now, tzFallback }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   const scheduleUuid = String(cmd.schedule_uuid || cmd.scheduleUuid || '').trim();
@@ -47,12 +65,18 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   // The lookup, owner fence, plan trial, and row mutation share one IMMEDIATE transaction.
   // Plan compilation and the physical queue/flush stay outside it so no network work holds
   // the SQLite write lock.
-  const outcome = await db.transaction(async (tx) => {
+  let outcome;
+  try {
+    outcome = await db.transaction(async (tx) => {
     const device = await getDevice(tx, eui);
     if (!device) return { ok: false, error: 'not_found' };
     if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
     const existing = await tx.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [scheduleUuid]);
     if (scheduleOwnerMismatch(existing, eui)) return { ok: false, error: 'schedule_device_mismatch' };
+    const intent = existing ? await tx.get('SELECT state, attempted_at FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [scheduleUuid]) : null;
+    // Preserve a legacy terminal fire before any upsert can replace its fire_at
+    // or kind. SKIPPED is excluded because it never opened the valve.
+    await ensureOnceDispatchMarker(tx, existing, intent);
 
     if (cmd.deleted_at) {
       if (!existing) return { ok: true, weekly: false }; // idempotent: nothing to delete
@@ -76,12 +100,51 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
 
     if (existing) {
       if (existing.deleted_at) {
-        const revivePatch = Object.assign({}, v.value, v.value.kind === 'ONCE'
-          ? { once_state: 'PENDING', once_fired_at: null }
-          : { once_state: null, once_fired_at: null });
+        let revivePatch;
+        const historical = v.value.kind === 'ONCE' ? await historicalOnceDispatch(tx, scheduleUuid, v.value.fire_at) : null;
+        if (historical) {
+          // This fire_at already opened the valve in an earlier lifecycle. A
+          // later tombstone must not turn that history back into PENDING.
+          if (intent && intent.state === 'PENDING') await tx.run('DELETE FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [scheduleUuid]);
+          revivePatch = Object.assign({}, v.value, { once_state: 'FIRED', once_fired_at: existing.once_fired_at || historical.created_at });
+        } else if (v.value.kind !== 'ONCE') {
+          // A schedule that changes away from ONCE must not leave an old intent
+          // blocking a later ONCE revival under the schedule_uuid primary key.
+          await tx.run('DELETE FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [scheduleUuid]);
+          revivePatch = Object.assign({}, v.value, { once_state: null, once_fired_at: null });
+        } else {
+          const terminal = intent && ['ATTEMPTED', 'SENT', 'UNKNOWN', 'SKIPPED'].includes(intent.state);
+          const sameFireAt = existing.kind === 'ONCE' && existing.fire_at === v.value.fire_at;
+          if (sameFireAt && terminal) {
+            // Replaying the old cloud value after a delete is not a new command.
+            // Preserve FIRED/SKIPPED so the existing intent remains the only dispatch.
+            revivePatch = Object.assign({}, v.value, {
+              once_state: intent.state === 'SKIPPED' ? 'SKIPPED' : 'FIRED',
+              once_fired_at: existing.once_fired_at,
+            });
+          } else if (intent && intent.state === 'PENDING') {
+            // A handoff that has not started remains the same intent, even when
+            // the tombstone is revived with a changed fire_at.
+            revivePatch = Object.assign({}, v.value, { once_state: 'PENDING', once_fired_at: null });
+          } else {
+            if (intent && terminal) {
+              // A new fire_at is a new logical dispatch. Removing the terminal
+              // intent in this transaction lets the next due tick create a new id.
+              await tx.run('DELETE FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [scheduleUuid]);
+            }
+            revivePatch = Object.assign({}, v.value, { once_state: 'PENDING', once_fired_at: null });
+          }
+        }
         const revived = await store.reviveSchedule(tx, scheduleUuid, revivePatch, eui);
         if (!revived) return { ok: false, error: 'not_found' };
       } else {
+        // Once dispatch history is durable in actuator_log. A stale replay can
+        // arrive while a replacement fire_at is live; do not turn that replay
+        // into a pending schedule that the next tick can emit.
+        if (existing.kind === 'ONCE' && v.value.kind === 'ONCE' && existing.fire_at !== v.value.fire_at &&
+            await historicalOnceDispatch(tx, scheduleUuid, v.value.fire_at)) {
+          return { ok: true, weekly: false };
+        }
         await store.updateSchedule(tx, scheduleUuid, v.value, eui);
       }
     } else {
@@ -90,8 +153,12 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
         v.value
       ));
     }
-    return { ok: true, weekly: v.value.kind === 'WEEKLY' };
-  });
+      return { ok: true, weekly: v.value.kind === 'WEEKLY' };
+    });
+  } catch (error) {
+    if (error && error.code === 'once_fire_at_immutable') return { ok: false, error: error.code };
+    throw error;
+  }
   if (!outcome.ok) return { ok: false, error: outcome.error };
   if (!outcome.weekly) return { ok: true, downlinks: [] };
   const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: false, now, flushQueue, warn, timeZoneFallback: tzFallback });

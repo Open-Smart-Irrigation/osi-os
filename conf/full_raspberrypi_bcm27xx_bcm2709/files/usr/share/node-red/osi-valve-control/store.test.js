@@ -67,6 +67,35 @@ test('updateSchedule and softDeleteSchedule resolve with no return value (MINOR 
   db.close();
 });
 
+function workerFiresBetweenGuardAndUpdate(db, scheduleUuid) {
+  let raced = false;
+  return {
+    get: (...args) => db.get(...args),
+    all: (...args) => db.all(...args),
+    run: async (sql, params) => {
+      if (!raced && /^UPDATE valve_schedules SET/.test(sql) && sql.includes('fire_at')) {
+        raced = true;
+        await db.run("UPDATE valve_schedules SET once_state='FIRED', once_fired_at=? WHERE schedule_uuid=?", ['2026-08-19T10:00:00.000Z', scheduleUuid]);
+      }
+      return db.run(sql, params);
+    },
+  };
+}
+
+test('updateSchedule fences a worker firing between the guard and UPDATE', async () => {
+  const { db } = await tempDb();
+  const uuid = 'store-race-once';
+  await store.insertSchedule(db, { schedule_uuid: uuid, device_eui: '0016C001F1000001', kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, timezone: 'UTC', enabled: 1 });
+  await assert.rejects(
+    () => store.updateSchedule(workerFiresBetweenGuardAndUpdate(db, uuid), uuid, { fire_at: '2026-08-19T11:00:00.000Z' }, '0016C001F1000001'),
+    (error) => error && error.code === 'once_fire_at_immutable'
+  );
+  const row = await db.get('SELECT fire_at, once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.fire_at, '2026-08-19T10:00:00.000Z');
+  assert.equal(row.once_state, 'FIRED');
+  db.close();
+});
+
 test('failStalePushes (C2) compares like-formatted timestamps: a fresh push survives a 24h ISO cutoff, a genuinely 25h-stale one fails', async () => {
   const { db } = await tempDb();
   await store.insertPushes(db, [{ push_id: 'fresh', device_eui: '0016C001F1000001', purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null }]);

@@ -53,6 +53,10 @@ function actuatorCommand(deviceEui, zoneId, minutes, commandId, reason) {
   return { type: 'actuator_command', device: { devEui: deviceEui, zone_id: zoneId }, data: { action: 'OPEN_FOR_DURATION', duration_minutes: minutes, reason, commandId, commandType: 'OPEN_FOR_DURATION', deviceEui, trigger: 'one_time' } };
 }
 
+function onceDispatchMarker(scheduleUuid, fireAt) {
+  return 'one_time_open:' + scheduleUuid + ':' + fireAt;
+}
+
 async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, onError }) {
   const nowMs = (now || new Date()).getTime();
   // An ATTEMPTED marker means the process reached the QoS0 handoff boundary. A successful emit
@@ -75,6 +79,14 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, o
         const claimNowIso = new Date(claimNowMs).toISOString();
         const current = await tx.get("SELECT i.state, i.command_id, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui WHERE i.schedule_uuid=? AND i.state='PENDING' AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL AND vs.fire_at <= ?", [i.schedule_uuid, claimNowIso]);
         if (!current) return null;
+        const historical = await tx.get("SELECT created_at FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=? ORDER BY id LIMIT 1", [onceDispatchMarker(current.schedule_uuid, current.fire_at)]);
+        if (historical) {
+          // A stale re-arm can only dispatch once the scheduler reaches this
+          // claim path, so guard the durable marker here as well as the applier.
+          await tx.run('DELETE FROM valve_once_dispatch_intents WHERE schedule_uuid=? AND state=\'PENDING\'', [current.schedule_uuid]);
+          await store.updateSchedule(tx, current.schedule_uuid, { once_state: 'FIRED', once_fired_at: historical.created_at }, current.device_eui);
+          return null;
+        }
         const fireMs = Date.parse(current.fire_at);
         if (claimNowMs - fireMs > ONCE_GRACE_MS) {
           await tx.run("UPDATE valve_once_dispatch_intents SET state='SKIPPED', updated_at=datetime('now') WHERE schedule_uuid=? AND state='PENDING'", [current.schedule_uuid]);
@@ -89,7 +101,10 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, o
         const after = await tx.get("SELECT state, attempted_at FROM valve_once_dispatch_intents WHERE schedule_uuid=?", [current.schedule_uuid]);
         if (!after || after.state !== 'ATTEMPTED' || after.attempted_at !== nowIso) return null;
         await store.updateSchedule(tx, current.schedule_uuid, { once_state: 'FIRED', once_fired_at: nowIso }, current.device_eui);
-        if (current.user_id != null && current.irrigation_zone_id != null) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [current.user_id, current.irrigation_zone_id, 'IRRIGATE', 'one_time_open', current.duration_minutes, current.device_eui, JSON.stringify({ schedule_uuid: current.schedule_uuid, command_id: current.command_id })]);
+        // Keep a gateway-local replay marker even when the valve has no user or
+        // zone row. The marker survives schedule tombstones and intent replacement.
+        await tx.run("INSERT INTO actuator_log(deveui, irrigation_zone_id, action, duration_minutes, reason, created_at) VALUES (?,?,?,?,?,?)", [current.device_eui, current.irrigation_zone_id, 'OPEN_FOR_DURATION', current.duration_minutes, onceDispatchMarker(current.schedule_uuid, current.fire_at), nowIso]);
+        if (current.user_id != null && current.irrigation_zone_id != null) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [current.user_id, current.irrigation_zone_id, 'IRRIGATE', 'one_time_open', current.duration_minutes, current.device_eui, JSON.stringify({ schedule_uuid: current.schedule_uuid, command_id: current.command_id, fire_at: current.fire_at })]);
         return { kind: 'fired', row: Object.assign({}, current, { attempted_at: nowIso }) };
       });
       if (!outcome) continue;

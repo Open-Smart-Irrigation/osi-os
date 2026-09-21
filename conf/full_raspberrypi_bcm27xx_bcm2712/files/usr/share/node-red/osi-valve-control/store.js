@@ -107,6 +107,13 @@ const SCHEDULE_COLUMNS = ['label', 'weekdays_mask', 'start_time', 'fire_at', 'du
 // passes the EUI the command addressed.
 const EUI_SCOPE_RE = /^[0-9A-F]{16}$/;
 
+function onceFireAtImmutableError() {
+  const error = new Error('A live terminal ONCE schedule cannot change fire_at; delete and revive it with the new time.');
+  error.code = 'once_fire_at_immutable';
+  error.statusCode = 409;
+  return error;
+}
+
 function scheduleScope(deviceEui, fnName) {
   const eui = String(deviceEui == null ? '' : deviceEui).trim().toUpperCase();
   if (!EUI_SCOPE_RE.test(eui)) throw new Error(fnName + ': a 16-hex deviceEui scope is required');
@@ -120,8 +127,18 @@ async function updateSchedule(db, scheduleUuid, patch, deviceEui) {
   const eui = scheduleScope(deviceEui, 'updateSchedule');
   const cols = SCHEDULE_COLUMNS.filter((c) => Object.prototype.hasOwnProperty.call(patch || {}, c));
   if (!cols.length) return;
+  const hasFireAt = Object.prototype.hasOwnProperty.call(patch || {}, 'fire_at');
+  const fireAt = hasFireAt ? n(patch.fire_at) : null;
+  const terminalFence = hasFireAt
+    ? " AND (kind <> 'ONCE' OR once_state IS NULL OR once_state NOT IN ('FIRED','SKIPPED') OR fire_at=?)"
+    : '';
+  const params = cols.map((c) => patch[c]).concat(hasFireAt ? [scheduleUuid, eui, fireAt] : [scheduleUuid, eui]);
   // datetime('now'), matching valve_schedules.updated_at/created_at's own DEFAULT (datetime('now')).
-  await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid, eui]));
+  await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL" + terminalFence, params);
+  if (hasFireAt) {
+    const after = await db.get('SELECT kind, fire_at, once_state FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL', [scheduleUuid, eui]);
+    if (after && after.kind === 'ONCE' && ['FIRED', 'SKIPPED'].includes(after.once_state) && after.fire_at !== fireAt) throw onceFireAtImmutableError();
+  }
 }
 
 // A cloud upsert without deleted_at means the desired state is live. Tombstones retain their
