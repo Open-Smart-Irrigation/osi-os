@@ -1820,8 +1820,19 @@ expectOrderedIncludesById('zone-rename-fn', [
   'AND user_id=? AND deleted_at IS NULL',
   'nameLoad.value.renameZone(db, { zoneId: zoneId, name: normalized })',
 ], 'authenticates, normalizes, scopes by owner, then delegates the zone write');
-expectIncludesById('zone-rename-fn', 'reason: String(nameError && nameError.code', 'returns the name reason code on a 400');
+expectIncludesById('zone-rename-fn', 'reason: nameReasonCode', 'returns the name reason code on a 400');
 expectIncludesById('zone-rename-fn', '.close(', 'closes the zone rename database handle');
+// T6-I1b (Task 6 review, fix round 1): the handler never trusts it was
+// reached through zone-rename-scope-guard -- it fails closed on its own when
+// scoped access is on and the guard's own authorization marker is absent,
+// and never falls back to the flag-off owner check in that case.
+expectIncludesById('zone-rename-fn', "if (scopedOn && msg._scopedZoneWriteAuthorized !== true) {", 'fails closed in scoped mode without the guard\'s authorization marker');
+expectIncludesById('zone-rename-fn', "return respond(403, { message: 'Forbidden' });", 'answers a missing scoped-mode marker with 403 Forbidden');
+// T6-M3 (Task 6 review, fix round 1): only the four reviewed name reason
+// codes reach the 400 path; any other normalizeEntityName failure (including
+// no .code at all) is a 500 with no reason key, not a 400/name_empty fallback.
+expectIncludesById('zone-rename-fn', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('zone-rename-fn', "return respond(500, { message: 'Zone name could not be validated' });", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
 // AgroLink fix-wave E1 (2026-08): a scoped GUI weather-zone edit must mirror
 // weather_station_zone_state in the same transaction as weather_station_zones, or
 // WEATHER_STATION_ZONES_REPLACED never publishes and a later cloud replace at the

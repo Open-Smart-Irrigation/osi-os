@@ -209,3 +209,78 @@ test('a deleted zone answers 404', async () => {
     db.close();
   }
 });
+
+// --- T6-I1b (fix round 1): zone-rename-fn must fail closed on its own in
+// scoped mode, never trusting that it was reached through
+// zone-rename-scope-guard. The guard's authorization marker is
+// msg._scopedZoneWriteAuthorized === true (set only after
+// scope.assertFreshZoneAccess succeeds); msg._scopedZoneOwnerId carries the
+// real owner it resolved. Both tests below call zone-rename-fn directly,
+// bypassing the guard entirely -- exactly the shape of a request that would
+// reach the handler if the guard's own wires were ever swapped (see the
+// wiring pin added to scripts/test-flows-wiring.js for the wiring half of
+// this defense).
+
+test('T6-I1b: scoped ON, handler called directly with a valid owner bearer but no guard marker -- 403, not a write', async () => {
+  const db = seedScopedDb();
+  try {
+    // OWNER (res1, userId 2) really does own zone 1 ('Z One') -- a stale or
+    // pre-fix handler would fall back to auth.userId and let this succeed.
+    const { result } = await executeFunction(loadNode('zone-rename-fn'), {
+      msg: renameRequest({ zoneId: 1, name: 'Sneaky rename', authorization: token(OWNER) }),
+      env: FLAG_ON,
+      db,
+    });
+    assert.equal(result.statusCode, 403, JSON.stringify(result.payload));
+    assert.equal(result.payload.message, 'Forbidden');
+    assert.equal(db.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'Z One');
+  } finally {
+    db.close();
+  }
+});
+
+test('T6-I1b: scoped ON, handler called directly with the guard marker set -- 200, ownership comes from the marker not the bearer', async () => {
+  const db = seedScopedDb();
+  try {
+    // STRANGER (admin1, userId 1) authenticates, but the marker names the
+    // real owner (userId 2, res1) -- proves ownerId is sourced from the
+    // guard's own resolved marker, not from whoever is merely authenticated.
+    const msg = renameRequest({ zoneId: 1, name: 'Marker-authorized rename', authorization: token(STRANGER) });
+    msg._scopedZoneWriteAuthorized = true;
+    msg._scopedZoneOwnerId = 2;
+    const { result } = await executeFunction(loadNode('zone-rename-fn'), { msg, env: FLAG_ON, db });
+    assert.equal(result.statusCode, 200, JSON.stringify(result.payload));
+    assert.equal(result.payload.name, 'Marker-authorized rename');
+    assert.equal(db.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'Marker-authorized rename');
+  } finally {
+    db.close();
+  }
+});
+
+// --- T6-M3 (fix round 1): normalizeEntityName is only ever documented to
+// throw one of the four reviewed reason codes (osi-entity-name/index.js), so
+// provoking any other code requires a stubbed osi-lib loader rather than
+// real input -- the same osiLibModules override the shared harness already
+// exposes for scripts/test-zone-timezone-route.js's osi-system-settings stub.
+
+test('T6-M3: a normalizeEntityName throw with an unrecognized (or missing) reason code answers 500, not a 400 with a fallback reason', async () => {
+  const db = seedScopedDb();
+  try {
+    const stubbedEntityName = {
+      normalizeEntityName: () => { throw new Error('unexpected internal failure'); }, // no .code at all
+      renameZone: async () => { throw new Error('must not be called: name validation should have short-circuited'); },
+    };
+    const { result } = await executeFunction(loadNode('zone-rename-fn'), {
+      msg: renameRequest({ name: 'Anything', authorization: token(OWNER) }),
+      env: FLAG_OFF,
+      db,
+      osiLibModules: { 'entity-name': stubbedEntityName },
+    });
+    assert.equal(result.statusCode, 500, JSON.stringify(result.payload));
+    assert.equal(typeof result.payload.message, 'string');
+    assert.equal('reason' in result.payload, false, 'a 500 must not carry a name-validation reason code');
+    assert.equal(db.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'Z One');
+  } finally {
+    db.close();
+  }
+});

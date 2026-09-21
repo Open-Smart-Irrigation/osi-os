@@ -1722,6 +1722,22 @@ if (!valveUnclaimFn) {
     }
 }
 
+// I1 (Task 6 review, zone/device rename Stage 1): zone-rename-scope-guard's
+// two outputs are the whole authorization boundary for PUT
+// /api/irrigation-zones/:id/name -- output 0 is the authorized path into
+// zone-rename-fn, output 1 is the refusal straight to zone-rename-resp. A
+// swapped wires array would route a refusal into the writer instead, and
+// since a refused msg never sets _scopedZoneWriteAuthorized, that would only
+// be caught at runtime by zone-rename-fn's own fail-closed check (T6-I1b) --
+// this pin catches the wiring defect directly, the way expectWireById's
+// wires.flat().includes(...) check (which is order-blind) cannot.
+const zoneRenameGuardNode = byId['zone-rename-scope-guard'];
+if (!zoneRenameGuardNode || JSON.stringify(zoneRenameGuardNode.wires) !== JSON.stringify([['zone-rename-fn'], ['zone-rename-resp']])) {
+    failures.push('zone-rename-scope-guard.wires must be exactly [["zone-rename-fn"],["zone-rename-resp"]] (output 0 = authorized -> writer, output 1 = refused -> response)');
+} else {
+    console.log('OK  zone-rename-scope-guard routes output 0 (authorized) to zone-rename-fn and output 1 (refused) to zone-rename-resp');
+}
+
 runJournalHelperFailureMatrix()
     .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {

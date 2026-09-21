@@ -1219,9 +1219,15 @@ if (sizeAllowances) {
   // raises the standing 41203 by the 9044 chars measured for the two new nodes
   // zone-rename-scope-guard (2609) and zone-rename-fn (6435) -- verify-flows-size-ratchet
   // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1548671 = +9044.
-  expectCondition(sizeAllowances.total_allowance?.delta === 50247,
-    'size total allowance: exact cumulative delta 50247',
-    'size total allowance: expected exact cumulative delta 50247');
+  // 50818: 2026-09-21 zone-device-rename-stage-1 Task 6 fix round 1 (controller ruling
+  // T6-I1b/T6-M3) raises 50247 by the 571 chars zone-rename-fn grew from 6435 to 7006
+  // (scopedOn fail-closed 403 without the guard's _scopedZoneWriteAuthorized marker, plus
+  // the NAME_REASON_CODES allowlist that sends an unrecognized normalizeEntityName code to
+  // 500 instead of a 400 fallback) -- verify-flows-size-ratchet totalChars over both
+  // byte-identical profiles: origin/main 1539627 -> HEAD 1549242 = +9615.
+  expectCondition(sizeAllowances.total_allowance?.delta === 50818,
+    'size total allowance: exact cumulative delta 50818',
+    'size total allowance: expected exact cumulative delta 50818');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
