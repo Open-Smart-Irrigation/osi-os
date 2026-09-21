@@ -426,6 +426,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           <button
             className="text-left flex items-center gap-2 group"
             aria-expanded={!zoneCollapsed}
+            // T13-M2: the heading moved out of this button (above), so its own visible
+            // content -- the chevron glyph plus the device-count text -- no longer names
+            // the zone, and every zone card's toggle would otherwise share the same
+            // accessible name. Built only from strings the component already has (the
+            // zone name and the existing device-count translation); no new i18n key.
+            aria-label={`${zone.name} ${t('zone.deviceCount', { count: zone.device_count })}`}
             onClick={() => setZoneCollapsed(c => !c)}
           >
             <span

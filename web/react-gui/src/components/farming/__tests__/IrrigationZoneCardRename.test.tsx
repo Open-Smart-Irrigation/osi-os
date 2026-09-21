@@ -87,4 +87,27 @@ describe('IrrigationZoneCard rename', () => {
     fireEvent.click(toggle);
     expect(screen.getByRole('button', { expanded: true })).toBe(toggle);
   });
+
+  it('names the collapse toggle by its own zone, so two cards are not ambiguous', () => {
+    // T13-M2: the heading moved out of this button, so its own visible content (the
+    // chevron plus the device-count text) no longer distinguishes one zone card's
+    // toggle from another's. Two cards with different names prove the fix: querying
+    // by the second zone's name must resolve to exactly its own toggle.
+    const zoneA = { ...zone, id: 12, name: 'Zone B', device_count: 0 };
+    const zoneB = { ...zone, id: 13, name: 'Zone C', device_count: 2 };
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={zoneA} devices={[]} unassignedDevices={[]} onUpdate={vi.fn()} canWrite />
+        <IrrigationZoneCard zone={zoneB} devices={[]} unassignedDevices={[]} onUpdate={vi.fn()} canWrite />
+      </MemoryRouter>,
+    );
+
+    const toggleB = screen.getByRole('button', { name: /Zone C/ });
+    expect(toggleB).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(toggleB);
+    expect(toggleB).toHaveAttribute('aria-expanded', 'true');
+    // The other card's toggle is untouched.
+    expect(screen.getByRole('button', { name: /Zone B/ })).toHaveAttribute('aria-expanded', 'false');
+  });
 });

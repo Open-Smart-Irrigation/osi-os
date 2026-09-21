@@ -115,7 +115,7 @@ describe('ValveControlPanel', () => {
     vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce(new Error('boom'));
     const onUpdate = vi.fn();
 
-    render(<ValveControlPanel onUpdate={onUpdate} />);
+    render(<ValveControlPanel onUpdate={onUpdate} canWrite />);
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
 
     expect(await screen.findByText('The action could not be completed.')).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe('ValveControlPanel', () => {
     vi.mocked(valvesAPI.updateSettings).mockRejectedValueOnce(new Error('pref save failed'));
     const onUpdate = vi.fn();
 
-    render(<ValveControlPanel onUpdate={onUpdate} />);
+    render(<ValveControlPanel onUpdate={onUpdate} canWrite />);
     fireEvent.click(await screen.findByRole('button', { name: 'Open-0016C001F1000001' }));
     fireEvent.click(await screen.findByRole('button', { name: 'SubmitOpen' }));
 

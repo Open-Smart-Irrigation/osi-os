@@ -13,8 +13,11 @@ import { ValveServiceDialog } from './ValveServiceDialog';
 
 export interface ValveControlPanelProps {
   onUpdate: () => void;
+  // T13-M5 (controller ruling, overrides the brief): required, no default. A permission
+  // signal that fails open when a caller forgets to pass it is worse than a caller that
+  // must supply it -- the one non-test caller (FarmingDashboard) already does.
   /** False for a role that cannot mutate; hides the tiles' rename pencils. */
-  canWrite?: boolean;
+  canWrite: boolean;
   // I-1 (final fix wave review): ValveSummary (GET /api/valves) carries no battery
   // field -- only Device.latest_data does -- so the caller must build this from the device
   // list it already polls and key it by deviceEui (uppercased, matching normaliseValveSummary/
@@ -27,7 +30,7 @@ type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
 
 const valvesFetcher = () => valvesAPI.list();
 
-export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, canWrite = true, batteryByEui }) => {
+export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, canWrite, batteryByEui }) => {
   const { t } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
 
