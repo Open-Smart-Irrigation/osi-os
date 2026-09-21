@@ -27,6 +27,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'dendro-analytics',
     'device-commands',
     'device-writer',
+    'entity-name',
     'history-router',
     'history-sync',
     'installation',
@@ -57,6 +58,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['dendro-analytics'], 'osi-dendro-analytics');
   assert.equal(osiLib.NAME_TO_PATH['zone-env'], 'osi-zone-env');
   assert.equal(osiLib.NAME_TO_PATH['device-writer'], 'osi-device-writer');
+  assert.equal(osiLib.NAME_TO_PATH['entity-name'], 'osi-entity-name');
   assert.equal(osiLib.NAME_TO_PATH['uc512-normalize'], 'osi-uc512-normalize');
   assert.equal(osiLib.NAME_TO_PATH['osi-valve-control'], 'osi-valve-control');
   assert.equal(osiLib.NAME_TO_PATH['scope'], 'osi-scope-helper');

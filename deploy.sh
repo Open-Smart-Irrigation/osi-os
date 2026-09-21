@@ -1437,6 +1437,14 @@ fetch_required "osi-device-commands weather.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/weather.js" \
     "/srv/node-red/osi-device-commands/weather.js"
 
+fetch_required "osi-entity-name package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/package.json" \
+    "/srv/node-red/osi-entity-name/package.json"
+
+fetch_required "osi-entity-name index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/index.js" \
+    "/srv/node-red/osi-entity-name/index.js"
+
 fetch_required "osi-radio-helper chirpstack.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/chirpstack.js" \
     "/srv/node-red/osi-radio-helper/chirpstack.js"
