@@ -13,6 +13,26 @@ async function apply(db, cmd, extra) {
   return applyCloudCommand(Object.assign({ db, cmd, appId: 'app', flushQueue: noopFlush, warn: noopWarn, now: new Date() }, extra || {}));
 }
 
+function undefinedRunInterleavingDb(db, scheduleUuid) {
+  let interleaved = false;
+  return {
+    get: (...args) => db.get(...args),
+    all: (...args) => db.all(...args),
+    run: async (...args) => { await db.run(...args); return undefined; },
+    transaction: (executor) => db.transaction((tx) => executor({
+      get: async (sql, params) => {
+        if (!interleaved && /SELECT kind, label/.test(sql)) {
+          interleaved = true;
+          await tx.run('UPDATE valve_schedules SET duration_minutes=99 WHERE schedule_uuid=?', [scheduleUuid]);
+        }
+        return tx.get(sql, params);
+      },
+      all: (...args) => tx.all(...args),
+      run: async (...args) => { await tx.run(...args); return undefined; },
+    })),
+  };
+}
+
 test('UPSERT_VALVE_SCHEDULE inserts a new WEEKLY schedule and compiles a plan push', async () => {
   const { db } = await tempDb();
   const out = await apply(db, {
@@ -80,6 +100,88 @@ test('DELETE_VALVE_SCHEDULE on an unknown schedule_uuid returns not_found', asyn
   const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: 'does-not-exist' });
   assert.equal(out.ok, false);
   assert.equal(out.error, 'not_found');
+});
+
+test('UPSERT_VALVE_SCHEDULE revives a same-valve tombstone and advances its sync version', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000009';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  const deleted = await db.get('SELECT deleted_at, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.ok(deleted.deleted_at);
+  assert.equal(deleted.sync_version, 1);
+
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:30', duration_minutes: 20, enabled: true });
+  assert.equal(out.ok, true);
+  assert.ok(out.downlinks.length >= 1, 'a revived WEEKLY schedule must compile and queue a plan push');
+  const revived = await db.get('SELECT deleted_at, start_time, duration_minutes, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(revived.deleted_at, null);
+  assert.equal(revived.start_time, '07:30');
+  assert.equal(revived.duration_minutes, 20);
+  assert.equal(revived.sync_version, 2, 'revival must preserve monotonic sync-versioning');
+});
+
+test('UPSERT_VALVE_SCHEDULE rejects a revived WEEKLY candidate that conflicts with a live plan', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000010';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: 'a1111111-0000-0000-0000-000000000011', kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:00', duration_minutes: 60, enabled: true });
+  const before = await db.get('SELECT deleted_at, start_time, duration_minutes, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:15', duration_minutes: 20, enabled: true });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'plan_conflict');
+  const after = await db.get('SELECT deleted_at, start_time, duration_minutes, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.deepEqual(after, before, 'a conflicting revival must leave the tombstone and version untouched');
+});
+
+test('UPSERT_VALVE_SCHEDULE with deleted_at still deletes a revived schedule', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000012';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 5, enabled: true });
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+  const revived = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 7200000).toISOString(), duration_minutes: 7, enabled: true });
+  assert.equal(revived.ok, true);
+  const deleted = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+  assert.equal(deleted.ok, true);
+  const row = await db.get('SELECT deleted_at, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.ok(row.deleted_at);
+  assert.equal(row.sync_version, 3, 'delete after revival must retain the monotonic version sequence');
+});
+
+test('UPSERT_VALVE_SCHEDULE revival persists a changed kind and resets ONCE state', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000013';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 5, enabled: true });
+  await db.run("UPDATE valve_schedules SET once_state='FIRED', once_fired_at='2026-08-25T10:00:00.000Z' WHERE schedule_uuid=?", [uuid]);
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 2, start_time: '08:15', duration_minutes: 20, enabled: true });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT kind, weekdays_mask, start_time, fire_at, duration_minutes, once_state, once_fired_at, deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.kind, 'WEEKLY');
+  assert.equal(row.weekdays_mask, 2);
+  assert.equal(row.start_time, '08:15');
+  assert.equal(row.fire_at, null);
+  assert.equal(row.duration_minutes, 20);
+  assert.equal(row.once_state, null);
+  assert.equal(row.once_fired_at, null);
+  assert.equal(row.deleted_at, null);
+});
+
+test('UPSERT_VALVE_SCHEDULE does not report success when a competing revival changes the committed values', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000014';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 5, enabled: true });
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+
+  const out = await apply(undefinedRunInterleavingDb(db, uuid), { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 7200000).toISOString(), duration_minutes: 7, enabled: true });
+  assert.equal(out.ok, false, 'the command must not acknowledge values it did not commit');
+  assert.equal(out.error, 'not_found');
+  const row = await db.get('SELECT deleted_at, duration_minutes FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.deleted_at, null);
+  assert.equal(row.duration_minutes, 99, 'the competing write must be visible, proving verification ran after it');
 });
 
 test('RESEND_VALVE_PLAN force-recompiles even when nothing changed', async () => {

@@ -124,6 +124,25 @@ async function updateSchedule(db, scheduleUuid, patch, deviceEui) {
   await db.run('UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').join(', ') + ", sync_version = COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL", cols.map((c) => patch[c]).concat([scheduleUuid, eui]));
 }
 
+// A cloud upsert without deleted_at means the desired state is live. Tombstones retain their
+// globally unique UUID and owner, so revival must clear deleted_at in the same scoped write as
+// the validated schedule fields. The live osi-db-helper facade's run() resolves undefined;
+// re-read the row so callers can distinguish a row that actually became live from a missed
+// update (the test facade also exposes changes, which is checked when available).
+async function reviveSchedule(db, scheduleUuid, patch, deviceEui) {
+  const eui = scheduleScope(deviceEui, 'reviveSchedule');
+  const cols = ['kind'].concat(SCHEDULE_COLUMNS).filter((c) => Object.prototype.hasOwnProperty.call(patch || {}, c));
+  const result = await db.run(
+    'UPDATE valve_schedules SET ' + cols.map((c) => c + '=?').concat(['deleted_at=NULL', 'sync_version=COALESCE(sync_version,0)+1', "updated_at=datetime('now')"]).join(', ') +
+      ' WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NOT NULL',
+    cols.map((c) => patch[c]).concat([scheduleUuid, eui])
+  );
+  if (result && Object.prototype.hasOwnProperty.call(result, 'changes') && Number(result.changes) !== 1) return false;
+  const row = await db.get('SELECT kind, label, weekdays_mask, start_time, fire_at, duration_minutes, timezone, enabled, once_state, once_fired_at, deleted_at FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=?', [scheduleUuid, eui]);
+  if (!row || row.deleted_at !== null) return false;
+  return cols.every((c) => row[c] === (patch[c] === undefined ? null : patch[c]));
+}
+
 async function softDeleteSchedule(db, scheduleUuid, deviceEui) {
   const eui = scheduleScope(deviceEui, 'softDeleteSchedule');
   await db.run("UPDATE valve_schedules SET deleted_at=datetime('now'), sync_version=COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL", [scheduleUuid, eui]);
@@ -376,4 +395,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { listQueued, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { listQueued, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

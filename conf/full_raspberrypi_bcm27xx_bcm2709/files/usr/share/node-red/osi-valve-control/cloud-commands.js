@@ -36,47 +36,64 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   const scheduleUuid = String(cmd.schedule_uuid || cmd.scheduleUuid || '').trim();
   if (!eui || !scheduleUuid) return { ok: false, error: 'device_eui and schedule_uuid are required' };
-  const device = await getDevice(db, eui);
-  if (!device) return { ok: false, error: 'not_found' };
-  if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
-  const existing = await db.get('SELECT schedule_uuid, device_eui, kind FROM valve_schedules WHERE schedule_uuid=?', [scheduleUuid]);
-  if (scheduleOwnerMismatch(existing, eui)) return { ok: false, error: 'schedule_device_mismatch' };
 
   // D5: deleted_at carried in the upsert - there is no separate VALVE_SCHEDULE_DELETED op
   // on the edge->cloud side, and the same ValveSchedule shape is reused for this command,
   // so a cloud-issued deletion can in principle arrive here too. DELETE_VALVE_SCHEDULE is
   // the normal path; this is defensive, not the expected route.
-  if (cmd.deleted_at) {
-    if (!existing) return { ok: true, downlinks: [] }; // idempotent: nothing to delete
-    await store.softDeleteSchedule(db, scheduleUuid, eui);
-    if (existing.kind !== 'WEEKLY') return { ok: true, downlinks: [] };
-    const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: false, now, flushQueue, warn, timeZoneFallback: tzFallback });
-    return { ok: true, downlinks: q.messages || [] };
-  }
+  const v = cmd.deleted_at ? null : P.validateScheduleInput(cmd);
+  if (v && !v.ok) return { ok: false, error: String(v.error || 'invalid_schedule') };
 
-  const v = P.validateScheduleInput(cmd);
-  if (!v.ok) return { ok: false, error: String(v.error || 'invalid_schedule') };
+  // The lookup, owner fence, plan trial, and row mutation share one IMMEDIATE transaction.
+  // Plan compilation and the physical queue/flush stay outside it so no network work holds
+  // the SQLite write lock.
+  const outcome = await db.transaction(async (tx) => {
+    const device = await getDevice(tx, eui);
+    if (!device) return { ok: false, error: 'not_found' };
+    if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
+    const existing = await tx.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', [scheduleUuid]);
+    if (scheduleOwnerMismatch(existing, eui)) return { ok: false, error: 'schedule_device_mismatch' };
 
-  // Validate the compiled plan BEFORE persisting (same order as api.js's POST/PUT routes):
-  // a rejected schedule must never reach the DB.
-  if (v.value.kind === 'WEEKLY') {
-    const allSchedules = await store.listSchedules(db, eui);
-    const trialList = existing
-      ? allSchedules.map((s) => (s.schedule_uuid === scheduleUuid ? Object.assign({}, s, v.value) : s))
-      : allSchedules.concat([Object.assign({ schedule_uuid: scheduleUuid, enabled: 1 }, v.value)]);
-    const trial = P.compileWindows(trialList);
-    if (trial.errors.length) return { ok: false, error: 'plan_conflict' };
-  }
+    if (cmd.deleted_at) {
+      if (!existing) return { ok: true, weekly: false }; // idempotent: nothing to delete
+      if (!existing.deleted_at) await store.softDeleteSchedule(tx, scheduleUuid, eui);
+      const afterDelete = await tx.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=?', [scheduleUuid, eui]);
+      if (!afterDelete || afterDelete.deleted_at === null) return { ok: false, error: 'not_found' };
+      return { ok: true, weekly: existing.kind === 'WEEKLY' };
+    }
 
-  if (existing) {
-    await store.updateSchedule(db, scheduleUuid, v.value, eui);
-  } else {
-    await store.insertSchedule(db, Object.assign(
-      { schedule_uuid: scheduleUuid, device_eui: eui, timezone: device.zone_timezone || tzFallback },
-      v.value
-    ));
-  }
-  if (v.value.kind !== 'WEEKLY') return { ok: true, downlinks: [] };
+    // Validate the compiled plan BEFORE persisting (same order as api.js's POST/PUT routes):
+    // a rejected schedule must never reach the DB.
+    if (v.value.kind === 'WEEKLY') {
+      const allSchedules = await store.listSchedules(tx, eui);
+      const candidate = Object.assign({ schedule_uuid: scheduleUuid, device_eui: eui, deleted_at: null }, existing || {}, v.value, { deleted_at: null });
+      const trialList = existing && !existing.deleted_at
+        ? allSchedules.map((s) => (s.schedule_uuid === scheduleUuid ? candidate : s))
+        : allSchedules.concat([candidate]);
+      const trial = P.compileWindows(trialList);
+      if (trial.errors.length) return { ok: false, error: 'plan_conflict' };
+    }
+
+    if (existing) {
+      if (existing.deleted_at) {
+        const revivePatch = Object.assign({}, v.value, v.value.kind === 'ONCE'
+          ? { once_state: 'PENDING', once_fired_at: null }
+          : { once_state: null, once_fired_at: null });
+        const revived = await store.reviveSchedule(tx, scheduleUuid, revivePatch, eui);
+        if (!revived) return { ok: false, error: 'not_found' };
+      } else {
+        await store.updateSchedule(tx, scheduleUuid, v.value, eui);
+      }
+    } else {
+      await store.insertSchedule(tx, Object.assign(
+        { schedule_uuid: scheduleUuid, device_eui: eui, timezone: device.zone_timezone || tzFallback },
+        v.value
+      ));
+    }
+    return { ok: true, weekly: v.value.kind === 'WEEKLY' };
+  });
+  if (!outcome.ok) return { ok: false, error: outcome.error };
+  if (!outcome.weekly) return { ok: true, downlinks: [] };
   const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: false, now, flushQueue, warn, timeZoneFallback: tzFallback });
   return { ok: true, downlinks: q.messages || [] };
 }
