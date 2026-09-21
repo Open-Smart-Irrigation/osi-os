@@ -44,13 +44,22 @@ TMP_DIR="/tmp/osi-os-deploy.$$"
 PAYLOADS_ROOT="/srv/node-red/payloads"
 DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
+GUI_ROOT="/usr/lib/node-red/gui"
+NODE_RED_INIT="/etc/init.d/node-red"
 # Tracks whether this deploy's staged payload has already been flipped into
 # /srv/node-red/flows.json. Set by run_schema_migration() on a successful
 # migration (issue #222 / F4 — see there) and consulted by the later
 # "Flip payload + local health self-check" block so it never re-flips (or,
 # on the no-op path, still flips exactly once).
 PAYLOAD_FLIPPED=0
+ROLLBACK_RESTORED=0
+NODE_RED_LOG_MARK=""
+DB_MIGRATION_COMMITTED=0
+PREV_CAPTURED=0
+DEPLOY_HOLD_SERVICES=0
 SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
+SWAP_ROOT="${SWAP_ROOT:-/srv/node-red}"
+export SWAP_ROOT
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -99,8 +108,9 @@ swap_call() {
       const m = require(process.argv[1]);
       const fn = process.argv[2];
       const args = process.argv.slice(3);
-      const out = m[fn]("/srv/node-red", ...args);
+      const out = m[fn](process.env.SWAP_ROOT || "/srv/node-red", ...args);
       if (out === null || out === undefined) process.exit(0);
+      if (typeof out === "boolean") process.exit(out ? 0 : 1);
       if (typeof out === "object") process.stdout.write(JSON.stringify(out));
       else process.stdout.write(String(out));
     ' "$SWAP_JS" "$@"
@@ -509,6 +519,16 @@ quiesce_identityd_for_deploy() {
     echo "OK"
 }
 
+hold_identityd_stopped() {
+    echo "ERROR: migrated database has no proven compatible active payload; keeping identityd stopped" >&2
+    if ! quiesce_identityd_instance; then
+        echo "ERROR: could not prove identityd stopped after the committed migration" >&2
+        return 1
+    fi
+    identityd_deploy_state="fatal_hold"
+    return 0
+}
+
 restore_identityd_prior_state() {
     case "$identityd_deploy_state" in
         untouched|disarmed|fatal_hold)
@@ -547,10 +567,44 @@ deploy_exit_handler() {
     exit_status="$1"
     trap - EXIT INT TERM
     set +e
-    if ! restart_node_red; then
-        [ "$exit_status" -ne 0 ] || exit_status=1
+    if [ "${ROLLBACK_RESTORED:-0}" = "1" ] && [ "$exit_status" -ne 0 ]; then
+        echo "OK: preserving the verified rollback pair while returning deploy failure" >&2
+        if ! restore_identityd_prior_state; then
+            echo "ERROR: identityd could not be restored after the verified rollback" >&2
+        fi
+    elif [ "${DB_MIGRATION_COMMITTED:-0}" = "1" ] && [ "$exit_status" -ne 0 ]; then
+        DEPLOY_HOLD_SERVICES=1
+        if [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
+            { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
+            cleanup_failed_first_payload
+        else
+            echo "ERROR: migrated database has no proven compatible active payload; keeping Node-RED stopped" >&2
+            hold_node_red_stopped || true
+            if [ -n "${DEPLOY_STAMP:-}" ] && [ "${PAYLOAD_FLIPPED:-0}" != "1" ]; then
+                swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
+            fi
+        fi
+        hold_identityd_stopped || true
+    elif [ "$exit_status" -ne 0 ] && [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
+        { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
+        cleanup_failed_first_payload
+    else
+        # A pre-activation failure still has the old pair live; remove only
+        # the staged directory before restoring Node-RED.
+        if [ "${PAYLOAD_FLIPPED:-0}" != "1" ] && [ -n "${DEPLOY_STAMP:-}" ]; then
+            swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
+        fi
+        if [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ] && \
+            ! verify_payload_db_compatibility "$PREV_STAMP" retained; then
+            echo "ERROR: fallback payload is not proven compatible with the current database; keeping services stopped" >&2
+            DEPLOY_HOLD_SERVICES=1
+            hold_node_red_stopped || true
+            hold_identityd_stopped || true
+        elif ! restart_node_red; then
+            [ "$exit_status" -ne 0 ] || exit_status=1
+        fi
     fi
-    if ! restore_identityd_prior_state; then
+    if [ "${DEPLOY_HOLD_SERVICES:-0}" != "1" ] && ! restore_identityd_prior_state; then
         [ "$exit_status" -ne 0 ] || exit_status=1
     fi
     cleanup
@@ -673,6 +727,86 @@ wait_for_node_red_health() {
     return 1
 }
 # node-red health wait end
+
+# deploy payload lifecycle begin
+hold_node_red_stopped() {
+    "$NODE_RED_INIT" stop || true
+    if wait_for_node_red_stop "${NODE_RED_STOP_TIMEOUT:-30}"; then
+        node_red_restart_needed=0
+        return 0
+    fi
+    node_red_restart_needed=0
+    return 1
+}
+
+schema_compatibility_metadata() {
+    if schema_compatibility_metadata_raw="$(sqlite3 "$DB_PATH" "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')" 2>/dev/null)"; then
+        printf '%s\n' "$schema_compatibility_metadata_raw"
+        return 0
+    fi
+    if sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;" 2>/dev/null | grep -qx '1'; then
+        echo "ERROR: could not read schema_migrations compatibility metadata" >&2
+        return 1
+    fi
+    echo '0|'
+}
+
+write_payload_compatibility() {
+    compatibility_stamp="$1"
+    if ! compatibility_metadata="$(schema_compatibility_metadata)"; then
+        return 1
+    fi
+    compatibility_head="${compatibility_metadata%%|*}"
+    compatibility_ledger="${compatibility_metadata#*|}"
+    if ! swap_call writeCompatibility "$compatibility_stamp" "$compatibility_head" "$compatibility_ledger" >/dev/null; then
+        echo "ERROR: could not record schema compatibility for payload $compatibility_stamp" >&2
+        return 1
+    fi
+}
+
+verify_payload_db_compatibility() {
+    compatibility_stamp="$1"
+    compatibility_mode="${2:-full}"
+    if ! swap_call verifyPair "$compatibility_stamp" >/dev/null; then
+        echo "ERROR: retained payload $compatibility_stamp is missing a complete flows+GUI pair" >&2
+        return 1
+    fi
+    if ! compatibility_metadata="$(schema_compatibility_metadata)"; then
+        echo "ERROR: could not read migrated database compatibility metadata" >&2
+        return 1
+    fi
+    compatibility_head="${compatibility_metadata%%|*}"
+    compatibility_ledger="${compatibility_metadata#*|}"
+    if ! swap_call verifyCompatibility "$compatibility_stamp" "$compatibility_head" "$compatibility_ledger" >/dev/null; then
+        echo "ERROR: retained payload $compatibility_stamp was recorded for a different schema head/ledger" >&2
+        return 1
+    fi
+    if [ "$compatibility_mode" = "full" ]; then
+        if ! node "$TMP_DIR/scripts/verify-head-cli.js" "$DB_PATH" --migrations-dir "$migrations_dir" >/dev/null; then
+            echo "ERROR: retained payload $compatibility_stamp was not proven compatible with the migrated database" >&2
+            return 1
+        fi
+    elif [ "$compatibility_mode" != "retained" ]; then
+        echo "ERROR: unknown payload compatibility verification mode: $compatibility_mode" >&2
+        return 1
+    fi
+    return 0
+}
+cleanup_failed_first_payload() {
+    [ -n "${DEPLOY_STAMP:-}" ] || return 0
+    echo "--- Clean up failed first payload activation ---"
+    if hold_node_red_stopped; then
+        echo "OK: Node-RED stopped before removing the first-deploy payload"
+    else
+        echo "ERROR: could not prove Node-RED stopped while cleaning up the first-deploy payload" >&2
+    fi
+    swap_call deactivate "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null || true
+    swap_call discardPayload "$DEPLOY_STAMP" >/dev/null || true
+    PAYLOAD_FLIPPED=0
+    node_red_restart_needed=0
+    echo "OK: first-deploy flows+GUI payload removed; Node-RED restart suppressed"
+}
+# deploy payload lifecycle end
 
 checkpoint_live_db() {
     if ! sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null; then
@@ -825,6 +959,18 @@ run_schema_migration() {
             ;;
     esac
 
+    if [ -n "${PREV_STAMP:-}" ]; then
+        if [ "${PREV_CAPTURED:-0}" = "1" ]; then
+            if ! write_payload_compatibility "$PREV_STAMP"; then
+                echo "ERROR: could not record the retained payload's pre-migration schema compatibility" >&2
+                return 1
+            fi
+        elif ! swap_call compatibilityExists "$PREV_STAMP" >/dev/null; then
+            echo "ERROR: retained payload $PREV_STAMP has no immutable schema compatibility metadata; refusing migration" >&2
+            return 1
+        fi
+    fi
+
     node_red_restart_needed=1
 
     echo "--- Stop Node-RED for schema migration ---"
@@ -931,6 +1077,7 @@ run_schema_migration() {
     fi
 
     if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then
+        DB_MIGRATION_COMMITTED=1
         # osi-os stabilization program, PR-L / external consult Q1: verify the
         # post-migration ledger AND schema fingerprints agree with what main
         # expects, BEFORE flipping to the new flows payload or restarting
@@ -945,6 +1092,12 @@ run_schema_migration() {
         fi
         echo "OK: verify-head-cli confirmed the post-migration ledger and schema fingerprints"
 
+        if ! write_payload_compatibility "$DEPLOY_STAMP"; then
+            echo "ERROR: could not record the new payload's schema compatibility; leaving services stopped" >&2
+            node_red_restart_needed=0
+            return 1
+        fi
+
         # issue #222 / F4 (Uganda 2026-09-12): flip the staged payload BEFORE
         # restarting Node-RED. This restart used to run immediately after a
         # successful migration while the new flows.json was still only
@@ -954,11 +1107,25 @@ run_schema_migration() {
         # rebuild cascade-deleted all of `device_data`. Flipping first means
         # any restart from this point on always runs the migration-target
         # flows against the schema it was migrated for.
-        if [ "$PAYLOAD_FLIPPED" != "1" ] && [ -d "$PAYLOADS_ROOT/$DEPLOY_STAMP" ]; then
-            echo "--- Flip payload before Node-RED restart (issue #222 / F4) ---"
-            swap_call flipTo "$DEPLOY_STAMP" >/dev/null
+        if [ "$PAYLOAD_FLIPPED" != "1" ]; then
+            echo "--- Activate paired flows+GUI payload before Node-RED restart ---"
+            if [ ! -d "$PAYLOADS_ROOT/$DEPLOY_STAMP" ]; then
+                echo "ERROR: staged paired payload is missing; leaving Node-RED stopped" >&2
+                node_red_restart_needed=0
+                return 1
+            fi
+            if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
+                echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
+                node_red_restart_needed=0
+                return 1
+            fi
             PAYLOAD_FLIPPED=1
-            echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+            echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+        fi
+        NODE_RED_LOG_MARK=0
+        if command -v logread >/dev/null 2>&1; then
+            NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"
+            case "$NODE_RED_LOG_MARK" in ''|*[!0-9]*) NODE_RED_LOG_MARK=0 ;; esac
         fi
         if ! restart_node_red; then
             return 1
@@ -1034,12 +1201,40 @@ fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
 same_fs_or_die
 echo "OK"
 
-echo "--- flows.json (staged payload; flip deferred to post-migration) ---"
+echo "--- flows.json + React GUI (staged payload; activation deferred to migration) ---"
 STAGED_FLOWS="$TMP_DIR/flows.json"
 fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGED_FLOWS"
-swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" >/dev/null
+STAGED_GUI_ARCHIVE="$TMP_DIR/react_gui.tar.gz"
+STAGED_GUI="$TMP_DIR/gui"
+fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
+mkdir -p "$STAGED_GUI"
+tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
+swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" >/dev/null
 PREV_STAMP="$(swap_call currentStamp || true)"
-echo "OK: staged payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; flip deferred)"
+PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+# legacy payload capture begin
+if { [ -z "${PREV_STAMP:-}" ] || [ "$PREV_GUI_STAMP" != "$PREV_STAMP" ]; } && [ -f /srv/node-red/flows.json ]; then
+    if PREV_LEGACY_STAMP="$(swap_call legacyCaptureStamp "/srv/node-red/flows.json" "$GUI_ROOT")"; then
+        if [ -n "$PREV_LEGACY_STAMP" ]; then
+            PREV_STAMP="$PREV_LEGACY_STAMP"
+            PREV_CAPTURED=0
+            echo "OK: reused immutable legacy flows+GUI capture payloads/$PREV_STAMP"
+        else
+            PREV_STAMP="${DEPLOY_STAMP}-previous"
+            swap_call captureExisting "$PREV_STAMP" "/srv/node-red/flows.json" "$GUI_ROOT" >/dev/null
+            PREV_CAPTURED=1
+            echo "OK: captured existing flows+GUI pair as payloads/$PREV_STAMP"
+        fi
+    else
+        echo "ERROR: legacy flows+GUI evidence is missing or changed; refusing recapture" >&2
+        exit 1
+    fi
+fi
+# legacy payload capture end
+if [ -n "${PREV_STAMP:-}" ]; then
+    swap_call captureGui "$PREV_STAMP" "$GUI_ROOT" >/dev/null
+fi
+echo "OK: staged paired payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; activation deferred)"
 
 seed_db_if_missing
 
@@ -1605,42 +1800,36 @@ echo "--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) --
 # deploy. Captured here, before the flip, since nothing between this point and
 # the restart below touches logread -- the flip/no-op and restart must stay
 # directly adjacent (issue #222 / F4).
-NODE_RED_LOG_MARK=0
-if command -v logread >/dev/null 2>&1; then
-    NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"
-    case "$NODE_RED_LOG_MARK" in ''|*[!0-9]*) NODE_RED_LOG_MARK=0 ;; esac
+if [ -z "$NODE_RED_LOG_MARK" ]; then
+    NODE_RED_LOG_MARK=0
+    if command -v logread >/dev/null 2>&1; then
+        NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"
+        case "$NODE_RED_LOG_MARK" in ''|*[!0-9]*) NODE_RED_LOG_MARK=0 ;; esac
+    fi
+fi
+
+if ! write_payload_compatibility "$DEPLOY_STAMP"; then
+    echo "ERROR: could not record the payload's schema compatibility; refusing activation" >&2
+    node_red_restart_needed=0
+    exit 1
 fi
 
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
-    swap_call flipTo "$DEPLOY_STAMP" >/dev/null
-    PAYLOAD_FLIPPED=1
-    echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
-else
-    echo "OK: payload already flipped -> payloads/$DEPLOY_STAMP (flipped before the post-migration Node-RED restart, issue #222 / F4)"
-fi
-
-/etc/init.d/node-red restart || true
-
-PROBE_OK=1
-NODE_RED_HEALTH_TIMEOUT="${NODE_RED_HEALTH_TIMEOUT:-30}"
-case "$NODE_RED_HEALTH_TIMEOUT" in
-    ''|*[!0-9]*|0) NODE_RED_HEALTH_TIMEOUT=30 ;;
-esac
-if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then
-    echo "OK: local health self-check PASSED (Node-RED service running, /gui reachable after ${probe_elapsed}s)"
-    PROBE_OK=0
-else
-    health_wait_rc=$?
-    if [ "$health_wait_rc" = "2" ]; then
-        echo "ALERT: could not determine Node-RED service state during local health self-check" >&2
+    if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
+        echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
+        node_red_restart_needed=0
+        exit 1
     fi
+    PAYLOAD_FLIPPED=1
+    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+else
+    echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"
 fi
-if [ "$PROBE_OK" != "0" ]; then
-    case "$node_red_state" in
-        running) echo "WARN: Node-RED service is running but /gui was not reachable within ${NODE_RED_HEALTH_TIMEOUT}s" >&2 ;;
-        stopped) echo "ALERT: Node-RED service is stopped after ${NODE_RED_HEALTH_TIMEOUT}s" >&2 ;;
-        *) echo "ALERT: Node-RED service state is unknown; local health self-check failed closed" >&2 ;;
-    esac
+
+if [ "$PAYLOAD_FLIPPED" != "1" ]; then
+    /etc/init.d/node-red restart || true
+else
+    echo "OK: Node-RED already restarted on the activated pair during migration"
 fi
 
 # osi-os stabilization program, PR-L / external consult Q1 fix 2 (PR #242
@@ -1666,7 +1855,8 @@ fi
 # treated as unhealthy, not healthy, on the theory that a false rollback is
 # recoverable but a false commit of an aborted rebuild is not.
 # init log check begin
-if [ "$PROBE_OK" = "0" ] && command -v logread >/dev/null 2>&1; then
+PROBE_OK=1
+if command -v logread >/dev/null 2>&1; then
     NODE_RED_INIT_TIMEOUT="${NODE_RED_INIT_TIMEOUT:-45}"
     case "$NODE_RED_INIT_TIMEOUT" in
         ''|*[!0-9]*|0) NODE_RED_INIT_TIMEOUT=45 ;;
@@ -1693,41 +1883,85 @@ if [ "$PROBE_OK" = "0" ] && command -v logread >/dev/null 2>&1; then
             ;;
         OK)
             echo "OK: boot node confirmed 'sync-init: schema init complete' after ${init_elapsed}s"
+            PROBE_OK=0
             ;;
         *)
             echo "WARN: schema initialization could not be confirmed via logread within ${NODE_RED_INIT_TIMEOUT}s (neither the completion marker nor an abort line was seen); failing closed - NOT committing this payload (PR #242 verifier fix 2)" >&2
             PROBE_OK=1
             ;;
     esac
+else
+    echo "WARN: logread is unavailable; schema initialization cannot be proven - failing closed" >&2
 fi
 # init log check end
 
+NODE_RED_HEALTH_TIMEOUT="${NODE_RED_HEALTH_TIMEOUT:-30}"
+case "$NODE_RED_HEALTH_TIMEOUT" in
+    ''|*[!0-9]*|0) NODE_RED_HEALTH_TIMEOUT=30 ;;
+esac
+if [ "$PROBE_OK" = "0" ]; then
+    if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then
+        echo "OK: local health self-check PASSED (Node-RED service running, /gui reachable after ${probe_elapsed}s)"
+    else
+        health_wait_rc=$?
+        PROBE_OK=1
+        if [ "$health_wait_rc" = "2" ]; then
+            echo "ALERT: could not determine Node-RED service state during local health self-check" >&2
+        fi
+    fi
+fi
+if [ "$PROBE_OK" != "0" ] && [ -n "${node_red_state:-}" ]; then
+    case "$node_red_state" in
+        running) echo "WARN: Node-RED service is running but /gui was not reachable within ${NODE_RED_HEALTH_TIMEOUT}s" >&2 ;;
+        stopped) echo "ALERT: Node-RED service is stopped after ${NODE_RED_HEALTH_TIMEOUT}s" >&2 ;;
+        *) echo "ALERT: Node-RED service state is unknown; local health self-check failed closed" >&2 ;;
+    esac
+fi
+
 if [ "$PROBE_OK" = "0" ]; then
     echo "OK: committing payload $DEPLOY_STAMP"
+    swap_call clearLegacyCapture >/dev/null || true
     swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
 else
-    echo "ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload" >&2
+    echo "ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI" >&2
+    # payload rollback begin
     if [ -n "${PREV_STAMP:-}" ]; then
-        swap_call flipTo "$PREV_STAMP" >/dev/null
-        /etc/init.d/node-red restart || true
-        echo "ROLLED BACK: flows.json -> payloads/$PREV_STAMP; Node-RED restarted on last-known-good payload" >&2
+        if ! hold_node_red_stopped; then
+            echo "ERROR: could not prove Node-RED stopped before rollback activation; leaving payload links unchanged" >&2
+            exit 1
+        fi
+        if ! verify_payload_db_compatibility "$PREV_STAMP"; then
+            node_red_restart_needed=0
+            echo "ERROR: refusing rollback restart because the retained payload/database pair was not proven compatible" >&2
+            exit 1
+        fi
+        if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
+            echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
+            node_red_restart_needed=0
+            exit 1
+        fi
+        if ! swap_call verifyPair "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
+            node_red_restart_needed=0
+            echo "ERROR: restored payload pair could not be verified after activation; Node-RED remains stopped" >&2
+            exit 1
+        fi
+        if ! "$NODE_RED_INIT" restart; then
+            node_red_restart_needed=0
+            echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2
+            exit 1
+        fi
+        ROLLBACK_RESTORED=1
+        PAYLOAD_FLIPPED=0
+        echo "ROLLED BACK: flows+GUI -> payloads/$PREV_STAMP; Node-RED restarted on last-known-good pair" >&2
         echo "NOTE: any committed DB migration is NOT auto-undone (DD10); restore is an operator call via 1.B1 backup." >&2
         echo "NOTE: run deploy-canary-gate.js from your operator machine for the full cloud verdict." >&2
         exit 1
     fi
-    echo "ERROR: no previous payload to roll back to. Payload $DEPLOY_STAMP left live; investigate." >&2
+    # payload rollback end
+    cleanup_failed_first_payload
+    echo "ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped." >&2
     exit 1
 fi
-
-echo "--- React GUI ---"
-fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
-mkdir -p /usr/lib/node-red/gui
-for entry in /usr/lib/node-red/gui/* /usr/lib/node-red/gui/.[!.]* /usr/lib/node-red/gui/..?*; do
-    [ -e "$entry" ] || continue
-    rm -rf "$entry"
-done
-tar xzf "$TMP_DIR/react_gui.tar.gz" -C /usr/lib/node-red/gui/
-echo "OK"
 
 echo "--- Gateway identity supervisor ---"
 if ! identityd_service enable; then

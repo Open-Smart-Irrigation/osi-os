@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 'use strict';
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -75,6 +74,8 @@ test('deploy.sh fetches the tested payload-swap module and verifies same-filesys
   assert.match(deploy, /same_fs_or_die\(\)/);
   assert.match(deploy, /stat -c %d \/srv\/node-red/);
   assert.match(deploy, /stat -c %d "\$PAYLOADS_ROOT"/);
+  assert.match(deploy, /typeof out === "boolean"\) process\.exit\(out \? 0 : 1\)/,
+    'boolean swap results must propagate false as a nonzero shell status');
 });
 
 for (const mod of FENCED_MODULES) {
@@ -139,18 +140,55 @@ test('deploy.sh stages flows before migration and flips only after migration suc
   );
 });
 
+test('deploy.sh stages the GUI into the same payload before migration and activates the pair', () => {
+  const guiFetchIdx = indexOf('fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"');
+  const guiExtractIdx = indexOf('tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"');
+  const stageIdx = indexOf('swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"');
+  const migrationIdx = indexOf('run_schema_migration || exit 1');
+  const migrateIdx = indexOf('if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH"');
+  const pairFlipIdx = indexOf('swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT"');
+  const restartIdx = deploy.indexOf('if ! restart_node_red; then', migrateIdx);
+
+  assert.ok(guiFetchIdx < stageIdx, 'GUI must be fetched before payload staging');
+  assert.ok(guiExtractIdx < stageIdx, 'GUI must be unpacked into staging before payload staging');
+  assert.ok(stageIdx < migrationIdx, 'both payload halves must be staged before schema migration');
+  assert.match(deploy, /captureExisting "\$PREV_STAMP" "\/srv\/node-red\/flows\.json" "\$GUI_ROOT"/,
+    'a pre-existing in-place payload must be captured before activation');
+  assert.ok(migrateIdx < pairFlipIdx, `paired activation follows migration (${migrateIdx} < ${pairFlipIdx})`);
+  assert.ok(pairFlipIdx < restartIdx, `paired activation precedes restart (${pairFlipIdx} < ${restartIdx})`);
+  assert.match(deploy, /GUI_ROOT="\/usr\/lib\/node-red\/gui"/);
+  assert.doesNotMatch(deploy, /tar xzf "\$TMP_DIR\/react_gui\.tar\.gz" -C \/usr\/lib\/node-red\/gui\//,
+    'GUI must not be extracted into the live directory after the health gate');
+});
+
 test('deploy.sh captures the previous payload before flip and rolls back to it on failed local self-check', () => {
   const migrationIdx = indexOf('run_schema_migration || exit 1');
   const prevIdx = indexOf('PREV_STAMP="$(swap_call currentStamp || true)"');
   const flipIdx = deploy.indexOf('swap_call flipTo "$DEPLOY_STAMP"', migrationIdx);
   const rollbackIdx = indexOf('swap_call flipTo "$PREV_STAMP"');
-  const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', rollbackIdx);
+  const restartIdx = deploy.indexOf('"$NODE_RED_INIT" restart', rollbackIdx);
 
   assert.ok(prevIdx < flipIdx, 'previous payload must be captured before the new flip');
   assert.ok(flipIdx < rollbackIdx, 'rollback must happen only after the new payload was tried');
   assert.notEqual(restartIdx, -1, 'rollback must restart Node-RED after flipping back');
   assert.match(deploy, /AUTO-ROLLING-BACK the flows payload/);
   assert.match(deploy, /committed DB migration is NOT auto-undone/);
+  assert.match(deploy, /verify_payload_db_compatibility "\$PREV_STAMP"/);
+  assert.match(deploy, /swap_call flipTo "\$PREV_STAMP" "\$GUI_ROOT"/);
+  assert.match(deploy, /discardPayload "\$DEPLOY_STAMP"/);
+});
+
+test('schema-init completion is required before the bounded /gui health gate', () => {
+  const initBegin = indexOf('# init log check begin');
+  const healthCall = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
+  const initResult = deploy.indexOf('sync-init: schema init complete', initBegin);
+  assert.ok(initBegin < initResult && initResult < healthCall,
+    'schema-init completion must be checked before /gui readiness');
+  const healthHelper = deploy.slice(deploy.indexOf('wait_for_node_red_health() {'), healthCall);
+  assert.ok(healthHelper.indexOf('node_red_state="$(node_red_service_state)"') < healthHelper.indexOf('127.0.0.1:1880/gui'),
+    'the health helper proves named service state before /gui');
+  assert.match(deploy, /NODE_RED_HEALTH_TIMEOUT:-30/);
+  assert.match(deploy, /sleep 1/);
 });
 
 test('deploy.sh uses a local self-check on the Pi and leaves cloud canary gate to the operator', () => {
@@ -169,4 +207,36 @@ test('deploy.sh prunes retained payloads only after the flipped payload passes t
 
   assert.ok(passIdx < pruneIdx, 'prune must be inside the passing post-check branch');
   assert.ok(pruneIdx < rollbackIdx, 'rollback branch must still have the retained previous payload');
+});
+
+test('deploy exit cleanup runs only for failed first deployments', () => {
+  const exitStart = indexOf('deploy_exit_handler() {');
+  const exitEnd = indexOf('install_deploy_exit_trap() {');
+  const exitHandler = deploy.slice(exitStart, exitEnd);
+  const statusGate = exitHandler.search(/if .*\$exit_status.*-ne 0/);
+  const cleanupCall = exitHandler.indexOf('cleanup_failed_first_payload');
+  assert.ok(statusGate >= 0 && statusGate < cleanupCall, 'successful first deploys must not clean up their active payload');
+  assert.match(exitHandler, /DB_MIGRATION_COMMITTED/);
+});
+
+test('rollback stops and proves Node-RED stopped before compatibility or link activation', () => {
+  const rollbackIdx = deploy.lastIndexOf('if [ -n "${PREV_STAMP:-}" ]; then');
+  assert.notEqual(rollbackIdx, -1, 'health rollback branch must exist');
+  const stopIdx = deploy.indexOf('hold_node_red_stopped', rollbackIdx);
+  const compatibilityIdx = deploy.indexOf('verify_payload_db_compatibility', rollbackIdx);
+  const flipIdx = deploy.indexOf('swap_call flipTo "$PREV_STAMP"', rollbackIdx);
+  assert.ok(rollbackIdx < stopIdx && stopIdx < compatibilityIdx && compatibilityIdx < flipIdx,
+    'rollback must stop/prove service state before compatibility proof and activation');
+});
+
+test('verified rollback is preserved through the EXIT handler while returning deploy failure', () => {
+  assert.match(deploy, /ROLLBACK_RESTORED=1/);
+  assert.match(deploy, /preserving the verified rollback pair while returning deploy failure/);
+  assert.match(deploy, /if \[ "\$\{ROLLBACK_RESTORED:-0\}" = "1" \] && \[ "\$exit_status" -ne 0 \]/);
+});
+
+test('legacy regular payload capture persists evidence across retries', () => {
+  assert.match(deploy, /legacyCaptureStamp/);
+  assert.match(deploy, /refusing recapture/);
+  assert.match(deploy, /PREV_CAPTURED=0/);
 });

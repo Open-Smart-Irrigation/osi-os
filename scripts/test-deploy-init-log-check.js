@@ -129,7 +129,7 @@ test('init log check: neither line observed within the timeout fails closed (doe
   assert.match(stderr, /WARN:.*schema initialization could not be confirmed/, 'must print a WARN explaining the unconfirmed boot, distinct from the ALERT/abort case');
 });
 
-test('init log check: an already-unhealthy probe (PROBE_OK=1 from the /gui reachability loop) is left alone', () => {
+test('init log check: schema completion is evaluated even before /gui readiness', () => {
   const fragment = extractInitLogCheckFragment();
   const stubDir = buildStubBinDir();
   const counterFile = path.join(stubDir, 'call-counter');
@@ -140,13 +140,13 @@ test('init log check: an already-unhealthy probe (PROBE_OK=1 from the /gui reach
       ...process.env,
       PATH: `${stubDir}:${process.env.PATH}`,
       LOGREAD_CALL_COUNTER_FILE: counterFile,
-      LOGREAD_MARKER_AT_CALL: '',
+      LOGREAD_MARKER_AT_CALL: '1',
       LOGREAD_ABORT_AT_CALL: '',
       NODE_RED_INIT_TIMEOUT: '6',
     },
   });
   assert.equal(result.status, 0);
   const match = /PROBE_OK=(.*)/.exec(result.stdout);
-  assert.equal(match && match[1].trim(), '1', 'the poll must not run (and must not flip PROBE_OK back to 0) when /gui was never reachable in the first place');
-  assert.ok(!fs.existsSync(counterFile), 'logread must never be invoked when PROBE_OK is already 1 entering this block');
+  assert.equal(match && match[1].trim(), '0', 'schema completion must clear the initial failed /gui probe once the boot node is confirmed');
+  assert.ok(fs.existsSync(counterFile), 'schema initialization must be checked before /gui readiness is evaluated');
 });
