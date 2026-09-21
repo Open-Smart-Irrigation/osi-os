@@ -3818,6 +3818,34 @@ expectIncludesById('cs-reg-cloud-fn', 'if (scopedOn && error.verificationRequire
 expectIncludesById('cs-reg-cloud-fn', 'successExtras.zoneAssignedId = zoneId;', 'reports the P9 zone-resolution outcome only in scoped mode');
 expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', successExtras), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
 
+// Task 9 (zone/device rename stage 1): the name rule on the four create
+// paths. cs-reg-cloud-fn falls back to the DevEUI label instead of failing a
+// registration on a bad name (spec 5.3); T4-W1 additionally reads the name
+// devices.name actually holds after the node's own write before it reaches
+// ChirpStack (spec 5.5), since flag-off INSERT OR IGNORE no-ops on an
+// existing row and must not let ChirpStack run ahead of the database.
+expectLibById('cs-reg-cloud-fn', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
+expectIncludesById('post-zone-auth', "osiLib.require('entity-name')", 'applies the shared name rule to zone creation');
+expectIncludesById('post-zone-auth', "reason: String(nameError && nameError.code", 'returns the zone name reason code on a 400');
+expectExcludesById('post-zone-auth', "if (!name || name.trim() === '') {", 'the ad hoc zone-name check');
+expectIncludesById('scoped-zone-create-router', "osiLib.require('entity-name')", 'applies the shared name rule to scoped zone creation');
+expectIncludesById('scoped-zone-create-router', 'if (error && error.reason) msg.payload.reason = String(error.reason);', 'surfaces the name reason code on a scoped 400');
+expectIncludesById('post-devices-auth', "osiLib.require('entity-name')", 'applies the shared name rule to device creation');
+expectIncludesById('post-devices-auth', "flow.set('new_device_name', normalizedDeviceName);", 'hands post-devices-insert the normalized device name');
+expectOrderedIncludesById('cs-reg-cloud-fn', [
+  "var name = String(devEui || 'Device');",
+  "if (commandType !== 'REGISTER_DEVICE') {",
+  "var nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(params.name)',
+  'using the DevEUI as the label',
+], 'falls back to the DevEUI label instead of failing a registration on a bad name');
+expectOrderedIncludesById('cs-reg-cloud-fn', [
+  'await run(msg.topic);',
+  "SELECT name FROM devices WHERE deveui = ?",
+  'const client = chirpstack.createProvisioningClientFromEnv(env);',
+  'const result = await client.ensureDeviceProvisioned(registration);',
+], 'T4-W1: writes the device row and re-reads its stored name before ChirpStack ever sees the registration');
+
 // cs-reg-cloud-ack-fn (Build Special Command ACK) — forwards the P9 zone
 // resolution outcome on every REGISTER_DEVICE ack, scoped mode only: the
 // applier omits both keys on a flag-off gateway, and this ACK payload omits

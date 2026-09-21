@@ -106,7 +106,8 @@ jobs:
         run: |
           node --test scripts/test-zone-rename-route.js \
             scripts/test-device-rename-route.js \
-            scripts/test-entity-name-command-path.js
+            scripts/test-entity-name-command-path.js \
+            scripts/test-entity-name-create-paths.js
       # F128: a local zone create/delete must ping the outbox flush gate over the
       # link pair instead of waiting up to 30 s for the "Flush Sync Outbox" inject.
       # Pins the wiring (both scoped and legacy routes tap it) and the gate's

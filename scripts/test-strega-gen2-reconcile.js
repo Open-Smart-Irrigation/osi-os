@@ -713,6 +713,14 @@ test('cs-register-device-fn (execution): a GEN2-resolved registration promotes a
 // --- cs-reg-cloud-fn: independent registration path (no generation field in the cloud
 // command payload at all), promotion-only valve_settings upsert executed for real ---
 
+// Zone/device rename Stage 1, Task 9: cs-reg-cloud-fn now also binds osiLib to
+// reach osi-entity-name's normalizeEntityName for the REGISTER_DEVICE name.
+// The real module is required (not stubbed) so this harness exercises the
+// actual name rule, matching every fixture name here ('Cloud Valve' etc.).
+const entityNameModule = require(path.resolve(
+  __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/index.js'
+));
+
 async function runCsRegCloudFn({ raw, payload, envVars, osiDb }) {
   const node = noopNode();
   const calls = { ensureDeviceProvisioned: [] };
@@ -722,10 +730,16 @@ async function runCsRegCloudFn({ raw, payload, envVars, osiDb }) {
       deleteDevice: async () => {},
     }),
   };
+  const osiLib = {
+    require: (name) => {
+      if (name === 'entity-name') return { ok: true, value: entityNameModule };
+      throw new Error('unexpected osiLib.require: ' + name);
+    },
+  };
   const db = osiDb || makeOsiDbStub(raw);
   const msg = { payload };
-  const execute = new Function('osiDb', 'chirpstack', 'env', 'node', 'msg', byId['cs-reg-cloud-fn'].func);
-  const out = await execute(db, chirpstack, makeEnv(envVars), node, msg);
+  const execute = new Function('osiDb', 'chirpstack', 'osiLib', 'env', 'node', 'msg', byId['cs-reg-cloud-fn'].func);
+  const out = await execute(db, chirpstack, osiLib, makeEnv(envVars), node, msg);
   return { out, calls, node };
 }
 

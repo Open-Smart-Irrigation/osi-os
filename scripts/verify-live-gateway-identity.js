@@ -1242,9 +1242,22 @@ if (sizeAllowances) {
   // (+236), sync-bootstrap-build (+27), al-link-build-req (+27) and sync-force-build (+27), all
   // within their existing node_allowances headroom -- verify-flows-size-ratchet totalChars over
   // both byte-identical profiles: origin/main 1539627 -> HEAD 1564903 = +25276.
-  expectCondition(sizeAllowances.total_allowance?.delta === 66479,
-    'size total allowance: exact cumulative delta 66479',
-    'size total allowance: expected exact cumulative delta 66479');
+  // 69194: 2026-09-22 zone-device-rename-stage-1 Task 9 (the name rule on the four create paths)
+  // re-reads the standing 41203 from origin/main (unchanged) and raises it by the 27991 chars
+  // measured for the whole branch: the five Task 6-8 new nodes (zone-rename-scope-guard 2609,
+  // zone-rename-fn 7006, device-rename-scope-guard 2606, device-rename-fn 8351,
+  // entity-name-command-apply-fn 4151) and the five Task 8 registry/capability deltas
+  // (cmd-type-registry +236, reject-indefinite-open +236, sync-bootstrap-build +27,
+  // al-link-build-req +27, sync-force-build +27) carried forward unchanged (=25276), plus four
+  // existing nodes Task 9 grew, each within its own node_allowances headroom: post-zone-auth
+  // 5468 -> 5880 (+412), post-devices-auth 6218 -> 6784 (+566), cs-reg-cloud-fn 19838 -> 21115
+  // (+1277 -- the entity-name normalization plus the T4-W1 controller-ruling reorder that reads
+  // devices.name back before the ChirpStack call) and scoped-zone-create-router 3962 -> 4422
+  // (+460, a fresh node_allowances entry since it had none) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1567618 = +27991.
+  expectCondition(sizeAllowances.total_allowance?.delta === 69194,
+    'size total allowance: exact cumulative delta 69194',
+    'size total allowance: expected exact cumulative delta 69194');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
