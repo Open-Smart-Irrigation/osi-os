@@ -95,6 +95,18 @@ const SYNC_LINK_STATE_SQL = `CREATE TABLE sync_link_state (
   updated_at TEXT NOT NULL,
   installation_uuid TEXT
 )`;
+// The finalizer backfills the gateway identity on these two tables inside the
+// same transaction as the account/link writes.  Keep only the columns touched
+// by that production node; this harness deliberately does not duplicate the
+// full seed schema.
+const IDENTITY_BACKFILL_TABLES_SQL = `CREATE TABLE devices (
+  id INTEGER PRIMARY KEY,
+  gateway_device_eui TEXT
+);
+CREATE TABLE irrigation_zones (
+  id INTEGER PRIMARY KEY,
+  gateway_device_eui TEXT
+)`;
 
 function readFlows() {
   return JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
@@ -147,6 +159,15 @@ function sqlite3Adapter(redirectPath) {
       }
     }
 
+    exec(sql, callback) {
+      try {
+        this.native.exec(sql);
+        callback && callback.call(this, null);
+      } catch (error) {
+        callback && callback.call(this, error);
+      }
+    }
+
     close(callback) {
       try {
         callback && callback.call(this, null);
@@ -182,6 +203,7 @@ function freshSeededDb(seedFn, installationUuid) {
   native.exec(USERS_TABLE_SQL + ';');
   native.exec(INSTALLATION_TABLE_SQL + ';');
   native.exec(SYNC_LINK_STATE_SQL + ';');
+  native.exec(IDENTITY_BACKFILL_TABLES_SQL + ';');
   native
     .prepare('INSERT INTO installation_identity(singleton_id, installation_uuid) VALUES(1, ?)')
     .run(installationUuid || '123e4567-e89b-42d3-a456-426614174000');
