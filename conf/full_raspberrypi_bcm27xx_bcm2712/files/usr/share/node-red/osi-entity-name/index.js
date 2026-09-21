@@ -164,4 +164,7 @@ module.exports = {
   renameDeviceInTransaction,
   renameZone,
   renameDevice,
+  // Lazy: commands.js requires this file back, and a REST handler that only
+  // needs the rule must not pull osi-scope-helper in with it.
+  applyNameCommand: (...args) => require('./commands').applyNameCommand(...args),
 };

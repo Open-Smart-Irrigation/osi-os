@@ -93,11 +93,18 @@ test('a missing name is name_empty and any other non-string is name_invalid_unic
 });
 
 test('the surrogate scan does not depend on String.prototype.isWellFormed', () => {
-  const source = require('node:fs').readFileSync(__dirname + '/index.js', 'utf8');
-  // Call-shaped, so the comment in index.js that explains why the feature is
-  // avoided does not trip its own guard.
-  assert.equal(/\.(?:isWellFormed|toWellFormed)\s*\(/.test(source), false,
-    'the gateway image ships a Node 20-era package; the scan must be hand-written');
+  // Every non-test .js file in the module, not just index.js: commands.js
+  // (Task 3) shares the same Node 20-era gateway constraint.
+  const moduleFiles = fs.readdirSync(__dirname)
+    .filter((name) => name.endsWith('.js') && !name.endsWith('.test.js'));
+  assert.ok(moduleFiles.length >= 2, 'expected index.js and commands.js at least');
+  for (const name of moduleFiles) {
+    const source = fs.readFileSync(path.join(__dirname, name), 'utf8');
+    // Call-shaped, so the comment that explains why the feature is avoided
+    // does not trip its own guard.
+    assert.equal(/\.(?:isWellFormed|toWellFormed)\s*\(/.test(source), false,
+      'the gateway image ships a Node 20-era package; the scan must be hand-written (' + name + ')');
+  }
 });
 
 // A fixture on the real schema: seed-blank.sql brings the two outbox triggers
