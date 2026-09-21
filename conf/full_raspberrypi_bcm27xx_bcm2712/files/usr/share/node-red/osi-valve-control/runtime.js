@@ -308,10 +308,6 @@ async function emitActuationArchived(db, deviceEui, expectationId, warn) {
   }
   const payload = await buildActuationPayload(db, expectationId);
   if (!payload) return null;
-  if (!payload.zone_uuid) {
-    if (typeof warn === 'function') warn('[valve-control] actuation-archive emit deferred for ' + expectationId + ': missing zone_uuid');
-    return null;
-  }
   const eventUuid = deterministicArchiveEventUuid(expectationId, payload);
   await db.run(
     'INSERT INTO sync_outbox (' +

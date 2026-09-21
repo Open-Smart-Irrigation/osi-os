@@ -355,15 +355,18 @@ test('buildActuationPayload: archived_at uses commanded_at when expected_close_a
   assert.equal(payload.archived_at, '2026-08-25T10:00:00.000Z');
 });
 
-test('emitActuationArchived: a terminal expectation without a zone UUID is deferred with a warning', async () => {
+test('emitActuationArchived: a linked terminal expectation without a zone UUID is archived with null zone_uuid', async () => {
   const { db } = await tempDb();
   await linkCloud(db);
   await insertExpectation(db, { id: 'e-no-zone', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
   const warnings = [];
   const result = await emitActuationArchived(db, EUI, 'e-no-zone', (m) => warnings.push(m));
-  assert.equal(result, null);
-  assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0);
-  assert.match(warnings[0], /missing zone_uuid/);
+  assert.ok(result);
+  assert.equal(result.payload.zone_uuid, null);
+  const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
+  assert.equal(rows.length, 1);
+  assert.equal(JSON.parse(rows[0].payload_json).zone_uuid, null);
+  assert.equal(warnings.length, 0);
 });
 
 test('emitActuationArchived: unlinked gateway is a no-op -- returns null and enqueues nothing', async () => {

@@ -189,6 +189,23 @@ async function main() {
     assert.ok(node.calls.warns.some((w) => /observed run not logged/.test(w)), 'must warn about the skipped log');
   });
 
+  await test('a linked zone-less terminal actuation still emits its archive with a null zone_uuid', async () => {
+    const { db, raw } = await tempDb();
+    await linkCloud(db);
+    const exp = await seedExpectation(db, {
+      trigger: 'manual', reconciliation_state: 'PENDING_OBSERVATION',
+      observed_open_at: null, observed_close_at: null,
+      expected_close_at: new Date(Date.now() - 40 * 60000).toISOString(),
+    });
+
+    await runMonitor(raw);
+    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
+    assert.equal(rows.length, 1, 'a linked terminal row must be archived even without a zone');
+    assert.equal(JSON.parse(rows[0].payload_json).zone_uuid, null);
+    assert.equal(JSON.parse(rows[0].payload_json).status, 'OPEN_TIMEOUT');
+    assert.equal(exp.zone_id, null);
+  });
+
   await test('observed_open_at null (never confirmed open) logs with a NULL duration, not zero', async () => {
     const { db, raw } = await tempDb();
     await db.run("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES ('Z1',1,datetime('now'),datetime('now'))");
