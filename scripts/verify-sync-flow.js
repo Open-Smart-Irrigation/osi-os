@@ -213,6 +213,7 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/dendro-config',
   '/api/devices/:deveui/dendro-baseline/reset',
   '/api/devices/:deveui/zone-assignments',
+  '/api/devices/:deveui/name',
   '/api/gateway/location',
   '/api/gateways/:gatewayEui/location',
   '/api/irrigation-zones/:zone_id/environment-summary',
@@ -1833,6 +1834,45 @@ expectIncludesById('zone-rename-fn', "return respond(403, { message: 'Forbidden'
 // no .code at all) is a 500 with no reason key, not a 400/name_empty fallback.
 expectIncludesById('zone-rename-fn', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
 expectIncludesById('zone-rename-fn', "return respond(500, { message: 'Zone name could not be validated' });", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+expectNodeTypeById('device-rename-http', 'http in', 'exposes the device rename route');
+expectWireById('device-rename-http', 'device-rename-scope-guard', 'routes device renames through the fresh scope guard');
+expectWireById('device-rename-scope-guard', 'device-rename-fn', 'passes authorized device renames to the writer');
+expectWireById('device-rename-scope-guard', 'device-rename-resp', 'answers refused device renames on the route response node');
+expectWireById('device-rename-fn', 'device-rename-resp', 'answers every device rename on the route response node');
+expectLibById('device-rename-scope-guard', 'osiLib', 'osi-lib', 'loads the scope helper through the osi-lib seam');
+expectLibById('device-rename-fn', 'osiLib', 'osi-lib', 'loads the entity-name and chirpstack helpers through the osi-lib seam');
+expectOrderedIncludesById('device-rename-scope-guard', [
+  "if (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {",
+  "const scopeLoad = osiLib.require('scope');",
+  'scope.assertFreshRole(',
+  'scope.canMutate(',
+  'scope.assertFreshDeviceAccess(',
+], 'gates the scope helper behind the flag and asserts role before device access');
+expectOrderedIncludesById('device-rename-fn', [
+  'const auth = verifyBearer(',
+  "const nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(body.name)',
+  'AND user_id=? AND deleted_at IS NULL',
+  'nameLoad.value.renameDevice(db, { deveui: deveui, name: normalized })',
+  "const csLoad = osiLib.require('chirpstack');",
+  'csLoad.value.createProvisioningClientFromEnv(env)',
+  'csLoad.value.updateDeviceName(client, deveui,',
+], 'writes the database first and only then updates the ChirpStack name');
+expectIncludesById('device-rename-fn', 'reason: nameReasonCode', 'returns the name reason code on a 400');
+expectIncludesById('device-rename-fn', "chirpstackOutcome = 'failed';", 'reports a ChirpStack failure without changing the 200');
+expectIncludesById('device-rename-fn', 'Device rename ChirpStack provisioning not configured:', 'treats unconfigured provisioning as a skip, not a failure');
+expectIncludesById('device-rename-fn', '.close(', 'closes the device rename database handle');
+// Task 7 (GLOBAL.md amendments A4.2/A4.3, mirroring zone-rename-fn's
+// T6-I1b/T6-M3 above): device-rename-fn never trusts it was reached through
+// device-rename-scope-guard -- it fails closed on its own when scoped access
+// is on and the guard's own authorization marker is absent, never falling
+// back to the flag-off owner check in that case; and only the four reviewed
+// name reason codes reach the 400 path, any other normalizeEntityName
+// failure (including no .code at all) is a 500 with no reason key.
+expectIncludesById('device-rename-fn', "if (scopedOn && msg._scopedDeviceWriteAuthorized !== true) {", 'fails closed in scoped mode without the guard\'s authorization marker');
+expectIncludesById('device-rename-fn', "return respond(403, { message: 'Forbidden' });", 'answers a missing scoped-mode marker with 403 Forbidden');
+expectIncludesById('device-rename-fn', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('device-rename-fn', "return respond(500, { message: 'Device name could not be validated' });", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
 // AgroLink fix-wave E1 (2026-08): a scoped GUI weather-zone edit must mirror
 // weather_station_zone_state in the same transaction as weather_station_zones, or
 // WEATHER_STATION_ZONES_REPLACED never publishes and a later cloud replace at the

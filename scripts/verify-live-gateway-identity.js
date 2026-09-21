@@ -1225,9 +1225,17 @@ if (sizeAllowances) {
   // the NAME_REASON_CODES allowlist that sends an unrecognized normalizeEntityName code to
   // 500 instead of a 400 fallback) -- verify-flows-size-ratchet totalChars over both
   // byte-identical profiles: origin/main 1539627 -> HEAD 1549242 = +9615.
-  expectCondition(sizeAllowances.total_allowance?.delta === 50818,
-    'size total allowance: exact cumulative delta 50818',
-    'size total allowance: expected exact cumulative delta 50818');
+  // 61775: 2026-09-21 zone-device-rename-stage-1 Task 7 (PUT /api/devices/:deveui/name)
+  // re-reads the standing 41203 from origin/main (unchanged) and raises it by the 20572
+  // chars measured for the whole branch: zone-rename-scope-guard (2609), zone-rename-fn
+  // (7006, Task 6), device-rename-scope-guard (2606) and device-rename-fn (8351, Task 7;
+  // applies the same scopedOn fail-closed check and NAME_REASON_CODES allowlist as
+  // zone-rename-fn's fix round 1 from the start, plus the best-effort ChirpStack update
+  // block) -- verify-flows-size-ratchet totalChars over both byte-identical profiles:
+  // origin/main 1539627 -> HEAD 1560199 = +20572.
+  expectCondition(sizeAllowances.total_allowance?.delta === 61775,
+    'size total allowance: exact cumulative delta 61775',
+    'size total allowance: expected exact cumulative delta 61775');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);

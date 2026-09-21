@@ -1738,6 +1738,23 @@ if (!zoneRenameGuardNode || JSON.stringify(zoneRenameGuardNode.wires) !== JSON.s
     console.log('OK  zone-rename-scope-guard routes output 0 (authorized) to zone-rename-fn and output 1 (refused) to zone-rename-resp');
 }
 
+// I1 analog (Task 7, GLOBAL.md amendment A4.1): device-rename-scope-guard's
+// two outputs are the whole authorization boundary for PUT
+// /api/devices/:deveui/name -- output 0 is the authorized path into
+// device-rename-fn, output 1 is the refusal straight to device-rename-resp. A
+// swapped wires array would route a refusal into the writer instead, and
+// since a refused msg never sets _scopedDeviceWriteAuthorized, that would
+// only be caught at runtime by device-rename-fn's own fail-closed check
+// (T7-I1) -- this pin catches the wiring defect directly, the way
+// expectWireById's wires.flat().includes(...) check (which is order-blind)
+// cannot.
+const deviceRenameGuardNode = byId['device-rename-scope-guard'];
+if (!deviceRenameGuardNode || JSON.stringify(deviceRenameGuardNode.wires) !== JSON.stringify([['device-rename-fn'], ['device-rename-resp']])) {
+    failures.push('device-rename-scope-guard.wires must be exactly [["device-rename-fn"],["device-rename-resp"]] (output 0 = authorized -> writer, output 1 = refused -> response)');
+} else {
+    console.log('OK  device-rename-scope-guard routes output 0 (authorized) to device-rename-fn and output 1 (refused) to device-rename-resp');
+}
+
 runJournalHelperFailureMatrix()
     .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {
