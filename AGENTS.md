@@ -56,6 +56,24 @@ Per-module system map (both repos, every module described with location): [docs/
 `entity-name-command-apply-fn` and are only sent to a gateway that reported the
 `entity_name_commands_v1` sync capability.
 
+**Edge rename routes** (local dashboard → gateway, HMAC bearer):
+`PUT /api/irrigation-zones/:id/name` answers
+`200 { id, zone_uuid, name, sync_version, changed }`, and
+`PUT /api/devices/:deveui/name` answers
+`200 { deveui, name, sync_version, changed, chirpstack }` with `chirpstack` in
+`updated` / `failed` / `skipped`. Both answer `400 { message, reason }` with a
+reason code from the shared name rule in `osi-entity-name`, which is also what
+zone create, device create, `REGISTER_DEVICE` and both `UPSERT_ZONE` paths
+apply. The `chirpstack` update is best effort and carries a 5 s gRPC deadline of
+its own, not the 20 s default.
+
+**Sync capabilities the edge reports** (built identically by `sync-bootstrap-build`,
+`al-link-build-req` and `sync-force-build`): `linked_auth_sync_v1`,
+`force_edge_sync_v1`, `installation_recovery_v1`, `installation_locations_v1`,
+`entity_name_commands_v1`, and `field_journal_v1` when the journal is enabled.
+The cloud reads the list as `gatewayIdentity.syncCapabilities()` and sends a
+name command only to a gateway that reported `entity_name_commands_v1`.
+
 ---
 
 ## MQTT topics (edge → cloud only)
