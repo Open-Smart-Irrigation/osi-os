@@ -613,3 +613,32 @@ test('the versioned UPSERT_ZONE applier accepts a 100-code-point name', async ()
     db.raw.close();
   }
 });
+
+test('an UPSERT_ZONE_LOCATION carrying a legacy 110-character name still applies', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    const legacyName = 'a'.repeat(110);
+    seedZone(db.raw, { name: legacyName });
+    db.raw.exec('DELETE FROM sync_outbox');
+
+    const location = await commands.applyZoneCommand(
+      db.facade,
+      envelope(24, 'UPSERT_ZONE_LOCATION', 1, {
+        name: legacyName,
+        latitude: 46.9,
+        longitude: 7.4,
+      }),
+      runtime()
+    );
+    assert.equal(location.ack.result, 'APPLIED');
+    const zone = db.raw.prepare(
+      'SELECT name, latitude, longitude FROM irrigation_zones WHERE zone_uuid=?'
+    ).get(ZONE_UUID);
+    assert.equal(zone.name, legacyName);
+    assert.equal(zone.latitude, 46.9);
+    assert.equal(zone.longitude, 7.4);
+  } finally {
+    db.raw.close();
+  }
+});

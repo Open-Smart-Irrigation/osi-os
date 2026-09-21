@@ -747,13 +747,26 @@ function normalizedZone(input, type) {
     syncVersion: version2(zone.sync_version, 'zone.sync_version'),
   };
   if (type !== 'DELETE_ZONE') {
-    // One name rule for create and for rename, on both sides (decision D4).
-    // classify() turns malformed_command into a REJECTED_PERMANENT ack, so a
-    // bad name ends as a visible rejection and never as a silent truncation.
-    try {
-      result.name = entityName.normalizeEntityName(zone.name);
-    } catch (error) {
-      throw commandError('malformed_command', 'zone.name is invalid: ' + error.code);
+    if (type === 'UPSERT_ZONE') {
+      // One name rule for create and for rename, on both sides (decision D4).
+      // classify() turns malformed_command into a REJECTED_PERMANENT ack, so a
+      // bad name ends as a visible rejection and never as a silent truncation.
+      try {
+        result.name = entityName.normalizeEntityName(zone.name);
+      } catch (error) {
+        if (!error || !error.code) throw error;
+        throw commandError('malformed_command', 'zone.name is invalid: ' + error.code);
+      }
+    } else {
+      // UPSERT_ZONE_LOCATION never writes the name (updateLocation touches
+      // only latitude/longitude/sync_version/updated_at), but exactObject
+      // still requires the key, so every location command carries the
+      // zone's current name. A legacy row whose stored name is over the
+      // shared rule's 100-code-point limit but within the old 128-character
+      // bound must keep receiving location updates until it is next saved
+      // as a rename (spec: legacy rows "stay as they are, keep syncing, and
+      // must satisfy the rule the next time someone saves the name").
+      result.name = requiredText(zone.name, 'zone.name', 128);
     }
     result.timezone = requiredText(zone.timezone, 'zone.timezone', 64);
     result.latitude = nullableFinite(
