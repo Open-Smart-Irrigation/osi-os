@@ -1801,6 +1801,7 @@ expectIncludesById('entity-name-command-apply-fn', 'Entity name command helpers 
 expectIncludesById('entity-name-command-apply-fn', "'devices/' + gatewayEui + '/command_ack'", 'publishes the entity-name acknowledgement on the command_ack topic');
 expectIncludesById('entity-name-command-apply-fn', 'Entity name command ChirpStack update failed for ', 'reports a ChirpStack failure as a warning, never as a rejected command');
 expectIncludesById('entity-name-command-apply-fn', '.close(', 'closes the entity-name command database handle');
+expectIncludesById('entity-name-command-apply-fn', 'Entity name command apply failed closed:', 'fails closed with no acknowledgement when applyNameCommand itself throws (Task 3: a bad commandId or an unset runtime gateway EUI, including on replay)');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'db.transaction(async (tx) => {', 'applies weather station zone replacements and terminal ACK persistence in one transaction');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'base_version_conflict', 'rejects a stale weather station zones command with a terminal conflict');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'INSERT INTO weather_station_zone_state', 'versions the first-ever weather station zones assignment set');

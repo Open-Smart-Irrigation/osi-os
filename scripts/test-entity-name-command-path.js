@@ -12,12 +12,18 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { DatabaseSync } = require('node:sqlite');
+const { facadeDb } = require('./lib/scoped-access-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROFILES = ['bcm2712', 'bcm2709'];
 const GATEWAY_EUI = '0016C001F11715E2';
 const DEVICE_EUI = 'AABBCCDDEEFF0011';
 const ZONE_UUID = '11111111-1111-4111-8111-111111111111';
+const REAL_ENTITY_NAME_MODULE = path.join(
+  ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/index.js'
+);
 
 function loadFlows(profile) {
   return JSON.parse(fs.readFileSync(path.join(
@@ -62,7 +68,7 @@ function flowDbHelper(events) {
   };
 }
 
-async function runNode(nodeId, msg, helperResults, events) {
+async function runNode(nodeId, msg, helperResults, events, envOverrides) {
   const node = FLOWS.find((candidate) => candidate.id === nodeId);
   assert.ok(node, 'missing shipped function node ' + nodeId);
   const requested = [];
@@ -88,6 +94,10 @@ async function runNode(nodeId, msg, helperResults, events) {
   };
   const env = {
     get(name) {
+      // envOverrides lets a test reproduce an unset UCI/env value (e.g.
+      // DEVICE_EUI: '') without disturbing the defaults every other test in
+      // this file relies on.
+      if (envOverrides && Object.prototype.hasOwnProperty.call(envOverrides, name)) return envOverrides[name];
       if (name === 'DEVICE_EUI') return GATEWAY_EUI;
       if (name === 'OSI_SCOPED_ACCESS') return '1';
       if (name === 'CHIRPSTACK_API_URL') return 'http://127.0.0.1:8080';
@@ -112,6 +122,72 @@ function nameHelper(ack, captured) {
       },
     },
   };
+}
+
+// Fix round 1 (review gap): pins the one closed path that had no test --
+// applyNameCommand itself throwing. Task 3's amendment made this load-bearing:
+// osi-entity-name throws with .code = 'invalid_entity_name_command' (writing
+// nothing, acknowledging nothing) when commandId is not a positive safe
+// integer or when runtime.gateway_device_eui does not canonicalize to 16
+// upper-case hex digits, including on replay. The node's outer catch must
+// answer that with node.error only -- no node.send, no ChirpStack call -- and
+// still close the DB handle.
+function rejectingNameHelper() {
+  return {
+    ok: true,
+    value: {
+      async applyNameCommand() {
+        const error = new Error('runtime gateway EUI is missing or invalid');
+        error.code = 'invalid_entity_name_command';
+        throw error;
+      },
+    },
+  };
+}
+
+// The real osi-entity-name module (not a stub), for the end-to-end variant of
+// the fix-round-1 test below.
+function realEntityNameHelper() {
+  return { ok: true, value: require(REAL_ENTITY_NAME_MODULE) };
+}
+
+// Wraps the shared scoped-access harness's facadeDb (the same promise-based
+// db.transaction(async (tx) => {...}) facade osi-command-ledger and
+// osi-device-commands are tested against) so a real node:sqlite database can
+// stand in for osi-db-helper here too, with the same db-open/db-close event
+// recording every other test in this file already relies on.
+function realDbHelper(dbSync, events) {
+  return {
+    ok: true,
+    value: {
+      // A plain `function` (not an object-literal method shorthand): the node
+      // calls this with `new`, and a shorthand method is not constructible.
+      Database: function Database(filename) {
+        events.push(['db-open', filename]);
+        const facade = facadeDb(dbSync);
+        const originalClose = facade.close.bind(facade);
+        facade.close = function patchedClose(callback) {
+          events.push(['db-close']);
+          return originalClose(callback);
+        };
+        return facade;
+      },
+    },
+  };
+}
+
+// A minimal, self-contained seed: the real schema plus one device row this
+// file's own DEVICE_EUI constant names, so the end-to-end test can assert the
+// row is untouched without depending on the unrelated fixture set
+// scripts/lib/scoped-access-harness.js's seedScopedDb() carries for the HTTP
+// route tests.
+function seedEntityNameDb() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
+  db.prepare(
+    'INSERT INTO devices (deveui, name, type_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(DEVICE_EUI, 'Original Name', 'DRAGINO_LSN50', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  return db;
 }
 
 function chirpStackHelper(behaviour, calls, events) {
@@ -382,6 +458,67 @@ for (const missing of ['osi-db-helper', 'entity-name']) {
     assert.match(run.errors[0].message, /Entity name command helpers unavailable/);
   });
 }
+
+// Fix round 1 (review gap): the missing-envelope and unavailable-helper closed
+// paths above both have a test; applyNameCommand itself throwing did not.
+// This is the path Task 3's amendment made load-bearing -- a bad commandId or
+// an unset runtime gateway EUI, including on replay -- and the node's outer
+// catch is the only thing standing between that throw and a silently
+// double-acknowledged (or silently dropped) command.
+test('a rejected applyNameCommand fails the node closed without emitting an acknowledgement', async () => {
+  const events = [];
+  const msg = commandMessage('UPSERT_DEVICE_NAME', 4112, DEVICE_EUI);
+  const run = await runNode('entity-name-command-apply-fn', msg, {
+    'osi-db-helper': flowDbHelper(events),
+    'entity-name': rejectingNameHelper(),
+  }, events);
+  assert.deepEqual(run.result, [null, null]);
+  assert.deepEqual(run.sent, [], 'no acknowledgement and no NACK on a fail-closed throw');
+  assert.deepEqual(
+    run.requested,
+    ['osi-db-helper', 'entity-name'],
+    'the ChirpStack helper must never be required when applyNameCommand itself throws'
+  );
+  assert.equal(run.errors.length, 1);
+  assert.match(run.errors[0].message, /^Entity name command apply failed closed:/);
+  assert.equal(events[events.length - 1][0], 'db-close', 'the DB handle must still be closed');
+});
+
+// The end-to-end variant: the REAL osi-entity-name module (not a stub) against
+// a real SQLite database, with DEVICE_EUI unset -- Task 3's case (b) -- on a
+// well-formed UPSERT_DEVICE_NAME envelope naming a device that really exists.
+// Proves the guard fires before any row is read or written, not just that a
+// stub can be made to throw.
+test('DEVICE_EUI unset: the real osi-entity-name module fails closed against a real database, writing nothing', async () => {
+  const db = seedEntityNameDb();
+  try {
+    const events = [];
+    const msg = commandMessage('UPSERT_DEVICE_NAME', 4113, DEVICE_EUI);
+    const run = await runNode('entity-name-command-apply-fn', msg, {
+      'osi-db-helper': realDbHelper(db, events),
+      'entity-name': realEntityNameHelper(),
+    }, events, { DEVICE_EUI: '' });
+    assert.deepEqual(run.result, [null, null]);
+    assert.deepEqual(run.sent, [], 'no acknowledgement and no NACK on a fail-closed throw');
+    assert.deepEqual(
+      run.requested,
+      ['osi-db-helper', 'entity-name'],
+      'the ChirpStack helper must never be required when applyNameCommand itself throws'
+    );
+    assert.equal(run.errors.length, 1);
+    assert.match(run.errors[0].message, /^Entity name command apply failed closed:/);
+    // Pins the specific reason (Task 3's case (b)), not just that some throw
+    // was caught -- a bad commandId throws the same .code with a different
+    // message, and this test's envelope carries a valid one.
+    assert.match(run.errors[0].message, /runtime gateway EUI is missing or invalid/);
+    assert.equal(events[events.length - 1][0], 'db-close', 'the DB handle must still be closed');
+    assert.equal(db.prepare('SELECT count(*) n FROM applied_commands').get().n, 0);
+    assert.equal(db.prepare('SELECT count(*) n FROM command_ack_outbox').get().n, 0);
+    assert.equal(db.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE_EUI).name, 'Original Name');
+  } finally {
+    db.close();
+  }
+});
 
 test('both command types are in the registry and in the fallback table, on both profiles', () => {
   for (const profile of PROFILES) {
