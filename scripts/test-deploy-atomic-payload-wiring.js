@@ -154,7 +154,8 @@ test('deploy.sh captures the previous payload before flip and rolls back to it o
 });
 
 test('deploy.sh uses a local self-check on the Pi and leaves cloud canary gate to the operator', () => {
-  assert.match(deploy, /pgrep -f 'node-red'/);
+  assert.match(deploy, /node_red_service_state/);
+  assert.doesNotMatch(deploy, /pgrep\s+-f\s+['"]node-red['"]/, 'health must use the named procd service, not command-line matches');
   assert.match(deploy, /http:\/\/127\.0\.0\.1:1880\/gui/);
   assert.match(deploy, /local health self-check PASSED/);
   assert.match(deploy, /deploy-canary-gate\.js from your operator machine/);
