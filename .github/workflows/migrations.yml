@@ -105,6 +105,8 @@ jobs:
         run: node scripts/generate-sync-trigger-source.js --check
       - name: Canonical runtime trigger source tests
         run: node --test scripts/test-sync-trigger-source.js
+      - name: Gateway identity attribution tests
+        run: node --test scripts/test-gateway-eui-attribution.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/*.test.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state/protocol-verbs.test.js
         env:

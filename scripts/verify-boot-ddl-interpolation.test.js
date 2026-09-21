@@ -42,7 +42,11 @@ test('escaped-quote gatewaySql interpolation (issue #4 shape) is caught', () => 
     assert.ok(start > -1, 'dendro AI trigger DDL not found in sync-init-fn');
     const end = func.indexOf('END;",', start);
     const segment = func.slice(start, end);
-    const broken = segment.split('" + gatewaySql + "').join('\\" + gatewaySql + \\"');
+    // The maintained boot node now emits the link-state fallback directly.
+    // Reintroduce the historical escaped concatenation at that fallback site
+    // so this mutation continues to exercise the literal gatewaySql guard.
+    const fallback = "NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')";
+    const broken = segment.split(fallback).join('\\" + gatewaySql + \\"');
     assert.notStrictEqual(segment, broken, 'fixture mutation did not change the DDL');
     return func.slice(0, start) + broken + func.slice(end);
   });

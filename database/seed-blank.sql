@@ -2157,7 +2157,7 @@ BEGIN
   UPDATE irrigation_zones
   SET
     zone_uuid              = COALESCE(zone_uuid, lower(hex(randomblob(16)))),
-    gateway_device_eui     = COALESCE(gateway_device_eui, '0016C001F11715E2'),
+    gateway_device_eui     = COALESCE(gateway_device_eui, NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     sync_version           = CASE WHEN COALESCE(sync_version,0)=0 THEN 1 ELSE sync_version END,
     prediction_card_enabled = COALESCE(prediction_card_enabled, 0)
   WHERE id = NEW.id;
@@ -2222,7 +2222,7 @@ BEGIN
       'contract_version', 1,
       'zone_uuid',                NEW.zone_uuid,
       'name',                     NEW.name,
-      'gateway_device_eui',       COALESCE(NEW.gateway_device_eui,'0016C001F11715E2'),
+      'gateway_device_eui',       COALESCE(NEW.gateway_device_eui,NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'timezone',                 NEW.timezone,
       'latitude',                 NEW.latitude,
       'longitude',                NEW.longitude,
@@ -2247,7 +2247,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE(NEW.gateway_device_eui,'0016C001F11715E2')
+    COALESCE(NEW.gateway_device_eui,NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -2315,7 +2315,7 @@ FOR EACH ROW
 BEGIN
   UPDATE devices
   SET
-    gateway_device_eui = COALESCE(gateway_device_eui, '0016C001F11715E2'),
+    gateway_device_eui = COALESCE(gateway_device_eui, NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     sync_version       = CASE WHEN COALESCE(sync_version,0)=0 THEN 1 ELSE sync_version END
   WHERE deveui = NEW.deveui;
 END;
@@ -2339,7 +2339,7 @@ CREATE TRIGGER trg_sync_devices_outbox_au AFTER UPDATE ON devices FOR EACH ROW W
     COALESCE(NEW.chameleon_swt2_depth_cm,-1) <> COALESCE(OLD.chameleon_swt2_depth_cm,-1) OR
     COALESCE(NEW.chameleon_swt3_depth_cm,-1) <> COALESCE(OLD.chameleon_swt3_depth_cm,-1) OR
     COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)) BEGIN INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, gateway_device_eui) VALUES (lower(hex(randomblob(16))), 'DEVICE', NEW.deveui, CASE WHEN OLD.user_id IS NOT NULL AND NEW.user_id IS NULL THEN 'DEVICE_UNCLAIMED' WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NULL THEN 'DEVICE_UNASSIGNED' WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NOT NULL THEN 'DEVICE_ASSIGNED' ELSE 'DEVICE_FLAGS_UPDATED' END, json_object('contract_version', 1, 'device_eui', NEW.deveui, 'name', NEW.name, 'type', NEW.type_id, 'claimed_user_uuid', (SELECT user_uuid FROM users WHERE id = NEW.user_id), 'claimed_by_username', (SELECT COALESCE(server_username, username) FROM users WHERE id = NEW.user_id), 'zone_uuid', (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL), 'dendro_enabled', NEW.dendro_enabled, 'temp_enabled', NEW.temp_enabled, 'rain_gauge_enabled', NEW.rain_gauge_enabled, 'flow_meter_enabled', NEW.flow_meter_enabled, 'is_reference_tree', NEW.is_reference_tree, 'current_state', NEW.current_state, 'target_state', NEW.target_state, 'strega_model', NEW.strega_model, 'sdi12_probe_profile', NEW.sdi12_probe_profile, 'sdi12_value_count', NEW.sdi12_value_count, 'soil_moisture_probe_depths_json', json(COALESCE(NEW.soil_moisture_probe_depths_json, '{}')), 'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured, 0), 'chameleon_enabled', NEW.chameleon_enabled, 'chameleon_swt1_depth_cm', NEW.chameleon_swt1_depth_cm, 'chameleon_swt2_depth_cm', NEW.chameleon_swt2_depth_cm, 'chameleon_swt3_depth_cm', NEW.chameleon_swt3_depth_cm, 'gateway_device_eui', COALESCE(NEW.gateway_device_eui, '0016C001F11715E2'), 'sync_version', NEW.sync_version, 'deleted_at', NEW.deleted_at), NEW.sync_version, strftime('%Y-%m-%dT%H:%M:%fZ','now'), COALESCE(NEW.gateway_device_eui, '0016C001F11715E2')); END;
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)) BEGIN INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, gateway_device_eui) VALUES (lower(hex(randomblob(16))), 'DEVICE', NEW.deveui, CASE WHEN OLD.user_id IS NOT NULL AND NEW.user_id IS NULL THEN 'DEVICE_UNCLAIMED' WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NULL THEN 'DEVICE_UNASSIGNED' WHEN COALESCE(OLD.irrigation_zone_id,'') <> COALESCE(NEW.irrigation_zone_id,'') AND NEW.irrigation_zone_id IS NOT NULL THEN 'DEVICE_ASSIGNED' ELSE 'DEVICE_FLAGS_UPDATED' END, json_object('contract_version', 1, 'device_eui', NEW.deveui, 'name', NEW.name, 'type', NEW.type_id, 'claimed_user_uuid', (SELECT user_uuid FROM users WHERE id = NEW.user_id), 'claimed_by_username', (SELECT COALESCE(server_username, username) FROM users WHERE id = NEW.user_id), 'zone_uuid', (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL), 'dendro_enabled', NEW.dendro_enabled, 'temp_enabled', NEW.temp_enabled, 'rain_gauge_enabled', NEW.rain_gauge_enabled, 'flow_meter_enabled', NEW.flow_meter_enabled, 'is_reference_tree', NEW.is_reference_tree, 'current_state', NEW.current_state, 'target_state', NEW.target_state, 'strega_model', NEW.strega_model, 'sdi12_probe_profile', NEW.sdi12_probe_profile, 'sdi12_value_count', NEW.sdi12_value_count, 'soil_moisture_probe_depths_json', json(COALESCE(NEW.soil_moisture_probe_depths_json, '{}')), 'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured, 0), 'chameleon_enabled', NEW.chameleon_enabled, 'chameleon_swt1_depth_cm', NEW.chameleon_swt1_depth_cm, 'chameleon_swt2_depth_cm', NEW.chameleon_swt2_depth_cm, 'chameleon_swt3_depth_cm', NEW.chameleon_swt3_depth_cm, 'gateway_device_eui', COALESCE(NEW.gateway_device_eui, NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')), 'sync_version', NEW.sync_version, 'deleted_at', NEW.deleted_at), NEW.sync_version, strftime('%Y-%m-%dT%H:%M:%fZ','now'), COALESCE(NEW.gateway_device_eui, NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))); END;
 
 -- Schedule defaults on insert
 CREATE TRIGGER trg_sync_schedules_defaults_ai
@@ -2427,7 +2427,7 @@ BEGIN
         'device_type',           (SELECT type_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
         'zone_id',               (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
         'zone_uuid',             (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
-        'gateway_device_eui',    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2'),
+        'gateway_device_eui',    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
         'recorded_at',           NEW.recorded_at,
         'swt_wm1',               NEW.swt_wm1,
         'swt_wm2',               NEW.swt_wm2,
@@ -2500,7 +2500,7 @@ BEGIN
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -2605,11 +2605,11 @@ BEGIN
       'comp_pending',         COALESCE(NEW.comp_pending,0),
       'zone_id',              (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
       'zone_uuid',            (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
-      'gateway_device_eui',   COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+      'gateway_device_eui',   COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -2922,7 +2922,7 @@ BEGIN
       'device_eui',            NEW.deveui,
       'zone_id',               (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
       'zone_uuid',             (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
-      'gateway_device_eui',    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui',    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'date',                  NEW.date,
       'd_max_um',              NEW.d_max_um,
       'd_min_um',              NEW.d_min_um,
@@ -2962,7 +2962,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -2989,7 +2989,7 @@ BEGIN
       'device_eui',            NEW.deveui,
       'zone_id',               (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
       'zone_uuid',             (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
-      'gateway_device_eui',    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui',    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'date',                  NEW.date,
       'd_max_um',              NEW.d_max_um,
       'd_min_um',              NEW.d_min_um,
@@ -3029,7 +3029,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -3157,12 +3157,12 @@ BEGIN
       'flow_liters',        NEW.flow_liters,
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'sync_version',       NEW.sync_version
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -3193,12 +3193,12 @@ BEGIN
       'flow_liters',        NEW.flow_liters,
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'sync_version',       NEW.sync_version
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -3224,7 +3224,7 @@ BEGIN
       'zone_id',                       NEW.zone_id,
       'zone_uuid',                     (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),
       'date',                          NEW.date,
-      'gateway_device_eui',            COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui',            COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'zone_stress_summary',           NEW.zone_stress_summary,
       'rainfall_mm',                   NEW.rainfall_mm,
       'water_delivered_liters',        NEW.water_delivered_liters,
@@ -3245,7 +3245,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -3272,7 +3272,7 @@ BEGIN
       'zone_id',                       NEW.zone_id,
       'zone_uuid',                     (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),
       'date',                          NEW.date,
-      'gateway_device_eui',            COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui',            COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'zone_stress_summary',           NEW.zone_stress_summary,
       'rainfall_mm',                   NEW.rainfall_mm,
       'water_delivered_liters',        NEW.water_delivered_liters,
@@ -3293,7 +3293,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
