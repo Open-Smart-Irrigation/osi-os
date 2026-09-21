@@ -113,15 +113,32 @@ const DEFAULT_GRPC_DEADLINE_MS = 20000;
 // and arms no timer, so an oversized value would switch the deadline off again.
 const MAX_GRPC_DEADLINE_MS = 120000;
 
+// A rename waits behind this call: the REST handler answers only once it settles,
+// and the command applier holds its database handle open across it. Twenty seconds
+// of a restarting ChirpStack is too long for a label change, so the name update
+// carries its own budget. It never exceeds the general setting, so lowering
+// OSI_CHIRPSTACK_GRPC_DEADLINE_MS lowers this one too.
+const NAME_UPDATE_DEADLINE_MS = 5000;
+
 function grpcDeadlineMs() {
   const configured = Number(process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS);
   if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_GRPC_DEADLINE_MS;
   return Math.min(configured, MAX_GRPC_DEADLINE_MS);
 }
 
-function grpcInvoke(client, methodName, request, metadata, step) {
+function nameUpdateDeadlineMs() {
+  return Math.min(NAME_UPDATE_DEADLINE_MS, grpcDeadlineMs());
+}
+
+// deadlineMs is optional: a caller that needs a shorter budget than the general
+// setting passes one, and every existing call site keeps grpcDeadlineMs().
+function grpcInvoke(client, methodName, request, metadata, step, deadlineMs) {
   return new Promise((resolve, reject) => {
-    const options = { deadline: new Date(Date.now() + grpcDeadlineMs()) };
+    const requested = Number(deadlineMs);
+    const budgetMs = Number.isFinite(requested) && requested > 0
+      ? Math.min(requested, grpcDeadlineMs())
+      : grpcDeadlineMs();
+    const options = { deadline: new Date(Date.now() + budgetMs) };
     client[methodName](request, metadata, options, (error, response) => {
       if (error) {
         reject(toGrpcError(error, step || methodName));
@@ -206,11 +223,14 @@ class ChirpStackClient {
     this.gatewayClient = new gatewayGrpc.GatewayServiceClient(this.apiUrl.target, this.credentials);
   }
 
-  async getDevice(devEui) {
+  async getDevice(devEui, options) {
     const request = new devicePb.GetDeviceRequest();
     request.setDevEui(normalizeDevEui(devEui));
     try {
-      const response = await grpcInvoke(this.deviceClient, 'get', request, this.metadata, 'getDevice');
+      const response = await grpcInvoke(
+        this.deviceClient, 'get', request, this.metadata, 'getDevice',
+        options && options.deadlineMs
+      );
       return response.getDevice();
     } catch (error) {
       if (error.code === grpc.status.NOT_FOUND) {
@@ -308,6 +328,22 @@ class ChirpStackClient {
     return true;
   }
 
+  // Re-reads the device rather than taking a caller's copy: setDeviceProfile
+  // may have written to it a moment ago, and an UpdateDeviceRequest replaces
+  // the whole message.
+  async setDeviceName(devEui, name) {
+    const wanted = String(name === null || name === undefined ? '' : name).trim();
+    if (!wanted) return false;
+    const existing = await this.getDevice(devEui);
+    if (!existing) return false;
+    if (String(existing.getName() || '') === wanted) return false;
+    existing.setName(wanted);
+    const request = new devicePb.UpdateDeviceRequest();
+    request.setDevice(existing);
+    await grpcInvoke(this.deviceClient, 'update', request, this.metadata, 'setDeviceName');
+    return true;
+  }
+
   async ensureDeviceProvisioned(input) {
     const devEui = normalizeDevEui(input.devEui);
     const appKey = normalizeHexKey(input.appKey);
@@ -335,6 +371,7 @@ class ChirpStackClient {
     let deviceCreated = false;
     let keysAction = 'unchanged';
     let profileAction = 'unchanged';
+    let nameAction = 'unchanged';
 
     try {
       const existingDevice = await this.getDevice(devEui);
@@ -355,12 +392,19 @@ class ChirpStackClient {
             throw error;
           }
         }
-      } else if (String(existingDevice.getDeviceProfileId() || '') !== deviceProfileId) {
-        // setDeviceProfile re-fetches the device itself (the price of routing every
-        // profile assignment through the single seam); its boolean return is the
-        // truth about whether an update RPC was actually issued -- do not assume
-        // 'repointed' just because the two getDevice reads disagreed once.
-        profileAction = (await this.setDeviceProfile(devEui, deviceProfileId)) ? 'repointed' : 'unchanged';
+      } else {
+        if (String(existingDevice.getDeviceProfileId() || '') !== deviceProfileId) {
+          // setDeviceProfile re-fetches the device itself (the price of routing every
+          // profile assignment through the single seam); its boolean return is the
+          // truth about whether an update RPC was actually issued -- do not assume
+          // 'repointed' just because the two getDevice reads disagreed once.
+          profileAction = (await this.setDeviceProfile(devEui, deviceProfileId)) ? 'repointed' : 'unchanged';
+        }
+        // The OSI database owns the label. A rename that could not reach
+        // ChirpStack (an outage, a restart) heals at the next provisioning.
+        // createDevice above already set the name, so this runs only for a
+        // device that was already there.
+        nameAction = (await this.setDeviceName(devEui, name)) ? 'updated' : 'unchanged';
       }
 
       const existingKeys = await this.getKeys(devEui);
@@ -380,7 +424,8 @@ class ChirpStackClient {
         deviceCreated,
         deviceExisted: !deviceCreated,
         keysAction,
-        profileAction
+        profileAction,
+        nameAction
       };
     } catch (error) {
       if (deviceCreated) {
@@ -535,6 +580,55 @@ class ChirpStackClient {
   }
 }
 
+// One promise chain per DevEUI. Two renames of one device in quick succession
+// must end with ChirpStack on the newer name whichever gRPC call is slower, so
+// the second call's readCurrentName and its update RPC both wait for the first
+// to settle. The chain is dropped once it drains, so the map cannot grow with
+// the fleet.
+const deviceNameQueues = new Map();
+
+function serializeByDevEui(devEui, task) {
+  const previous = deviceNameQueues.get(devEui) || Promise.resolve();
+  const scheduled = previous.then(task, task);
+  const settled = scheduled.then(() => undefined, () => undefined);
+  deviceNameQueues.set(devEui, settled);
+  settled.then(() => {
+    if (deviceNameQueues.get(devEui) === settled) deviceNameQueues.delete(devEui);
+  });
+  return scheduled;
+}
+
+// readCurrentName reads devices.name from SQLite at the moment this call
+// actually runs, never before it is queued: the value that reaches ChirpStack
+// is the one the database holds after every earlier rename has committed.
+// Both RPCs carry nameUpdateDeadlineMs(), so a ChirpStack that accepts the
+// connection and never answers costs the caller five seconds, not twenty.
+async function updateDeviceName(client, devEui, readCurrentName) {
+  const normalized = normalizeDevEui(devEui);
+  if (!/^[0-9A-F]{16}$/.test(normalized)) {
+    throw annotateError(new Error('DevEUI is required'), 'updateDeviceName');
+  }
+  if (typeof readCurrentName !== 'function') {
+    throw annotateError(new Error('updateDeviceName requires a readCurrentName function'), 'updateDeviceName');
+  }
+  return serializeByDevEui(normalized, async () => {
+    const stored = await readCurrentName();
+    if (stored === null || stored === undefined) return 'skipped';
+    const wanted = String(stored);
+    const budgetMs = nameUpdateDeadlineMs();
+    const device = await client.getDevice(normalized, { deadlineMs: budgetMs });
+    if (!device) return 'skipped';
+    if (String(device.getName() || '') === wanted) return 'unchanged';
+    device.setName(wanted);
+    const request = new devicePb.UpdateDeviceRequest();
+    request.setDevice(device);
+    await grpcInvoke(
+      client.deviceClient, 'update', request, client.metadata, 'updateDeviceName', budgetMs
+    );
+    return 'updated';
+  });
+}
+
 function createClient(config) {
   return new ChirpStackClient(config || {});
 }
@@ -552,6 +646,8 @@ function createProvisioningClientFromEnv(env) {
 module.exports = {
   createClient,
   createProvisioningClientFromEnv,
+  updateDeviceName,
+  NAME_UPDATE_DEADLINE_MS,
   normalizeApiUrl,
   normalizeDevEui,
   normalizeHexKey,
