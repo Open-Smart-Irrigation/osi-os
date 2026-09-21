@@ -142,6 +142,21 @@ test('PUT a ONCE schedule with no WEEKLY rows does not compile/push a plan', asy
   assert.equal(rows.length, 0, 'a ONCE-only valve must never get an all-FF weekday plan pushed as a side effect');
 });
 
+test('PUT cannot change fire_at on a live terminal ONCE schedule; delete and revival is explicit', async () => {
+  const { path, db } = await tempDb();
+  const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 10 }));
+  const uuid = created.payload.schedule.schedule_uuid;
+  await db.run("UPDATE valve_schedules SET once_state='FIRED', once_fired_at='2026-08-19T10:00:00.000Z' WHERE schedule_uuid=?", [uuid]);
+  await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid, device_eui, command_id, state, attempted_at) VALUES (?, '0016C001F1000001', 'api-legacy-a', 'SENT', '2026-08-19T10:00:00.000Z')", [uuid]);
+  const out = await call(path, req('PUT', `/api/valves/0016C001F1000001/schedules/${uuid}`, { fire_at: '2026-08-19T11:00:00.000Z' }));
+  assert.equal(out.statusCode, 409);
+  assert.equal(out.payload.error, 'once_fire_at_immutable');
+  assert.match(out.payload.message, /delete and revive/i);
+  const row = await db.get('SELECT fire_at, once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.fire_at, '2026-08-19T10:00:00.000Z');
+  assert.equal(row.once_state, 'FIRED');
+});
+
 test('DELETE a ONCE schedule does not compile/push a plan', async () => {
   const { path, db } = await tempDb();
   const created = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 10 }));

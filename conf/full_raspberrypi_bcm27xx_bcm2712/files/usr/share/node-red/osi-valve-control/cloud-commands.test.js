@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { tempDb } = require('./test-helpers');
 const { applyCloudCommand } = require('./cloud-commands');
 const store = require('./store');
+const workers = require('./workers');
 
 const EUI = '0016C001F1000001';
 const noopFlush = async () => {};
@@ -11,6 +12,42 @@ const noopWarn = () => {};
 
 async function apply(db, cmd, extra) {
   return applyCloudCommand(Object.assign({ db, cmd, appId: 'app', flushQueue: noopFlush, warn: noopWarn, now: new Date() }, extra || {}));
+}
+
+function undefinedRunInterleavingDb(db, scheduleUuid) {
+  let interleaved = false;
+  return {
+    get: (...args) => db.get(...args),
+    all: (...args) => db.all(...args),
+    run: async (...args) => { await db.run(...args); return undefined; },
+    transaction: (executor) => db.transaction((tx) => executor({
+      get: async (sql, params) => {
+        if (!interleaved && /SELECT kind, label/.test(sql)) {
+          interleaved = true;
+          await tx.run('UPDATE valve_schedules SET duration_minutes=99 WHERE schedule_uuid=?', [scheduleUuid]);
+        }
+        return tx.get(sql, params);
+      },
+      all: (...args) => tx.all(...args),
+      run: async (...args) => { await tx.run(...args); return undefined; },
+    })),
+  };
+}
+
+function failAfterIntentReplacementDb(db) {
+  return {
+    get: (...args) => db.get(...args),
+    all: (...args) => db.all(...args),
+    transaction: (executor) => db.transaction((tx) => executor({
+      get: (...args) => tx.get(...args),
+      all: (...args) => tx.all(...args),
+      run: async (...args) => {
+        const result = await tx.run(...args);
+        if (/DELETE FROM valve_once_dispatch_intents/.test(args[0])) throw new Error('replacement failed');
+        return result;
+      },
+    })),
+  };
 }
 
 test('UPSERT_VALVE_SCHEDULE inserts a new WEEKLY schedule and compiles a plan push', async () => {
@@ -80,6 +117,339 @@ test('DELETE_VALVE_SCHEDULE on an unknown schedule_uuid returns not_found', asyn
   const out = await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: 'does-not-exist' });
   assert.equal(out.ok, false);
   assert.equal(out.error, 'not_found');
+});
+
+test('UPSERT_VALVE_SCHEDULE revives a same-valve tombstone and advances its sync version', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000009';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  const deleted = await db.get('SELECT deleted_at, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.ok(deleted.deleted_at);
+  assert.equal(deleted.sync_version, 1);
+
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:30', duration_minutes: 20, enabled: true });
+  assert.equal(out.ok, true);
+  assert.ok(out.downlinks.length >= 1, 'a revived WEEKLY schedule must compile and queue a plan push');
+  const revived = await db.get('SELECT deleted_at, start_time, duration_minutes, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(revived.deleted_at, null);
+  assert.equal(revived.start_time, '07:30');
+  assert.equal(revived.duration_minutes, 20);
+  assert.equal(revived.sync_version, 2, 'revival must preserve monotonic sync-versioning');
+});
+
+test('UPSERT_VALVE_SCHEDULE rejects a revived WEEKLY candidate that conflicts with a live plan', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000010';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: 'a1111111-0000-0000-0000-000000000011', kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:00', duration_minutes: 60, enabled: true });
+  const before = await db.get('SELECT deleted_at, start_time, duration_minutes, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:15', duration_minutes: 20, enabled: true });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'plan_conflict');
+  const after = await db.get('SELECT deleted_at, start_time, duration_minutes, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.deepEqual(after, before, 'a conflicting revival must leave the tombstone and version untouched');
+});
+
+test('UPSERT_VALVE_SCHEDULE with deleted_at still deletes a revived schedule', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000012';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 5, enabled: true });
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+  const revived = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 7200000).toISOString(), duration_minutes: 7, enabled: true });
+  assert.equal(revived.ok, true);
+  const deleted = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+  assert.equal(deleted.ok, true);
+  const row = await db.get('SELECT deleted_at, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.ok(row.deleted_at);
+  assert.equal(row.sync_version, 3, 'delete after revival must retain the monotonic version sequence');
+});
+
+test('UPSERT_VALVE_SCHEDULE revival persists a changed kind and resets ONCE state', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000013';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 5, enabled: true });
+  await db.run("UPDATE valve_schedules SET once_state='FIRED', once_fired_at='2026-08-25T10:00:00.000Z' WHERE schedule_uuid=?", [uuid]);
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 2, start_time: '08:15', duration_minutes: 20, enabled: true });
+  assert.equal(out.ok, true);
+  const row = await db.get('SELECT kind, weekdays_mask, start_time, fire_at, duration_minutes, once_state, once_fired_at, deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.kind, 'WEEKLY');
+  assert.equal(row.weekdays_mask, 2);
+  assert.equal(row.start_time, '08:15');
+  assert.equal(row.fire_at, null);
+  assert.equal(row.duration_minutes, 20);
+  assert.equal(row.once_state, null);
+  assert.equal(row.once_fired_at, null);
+  assert.equal(row.deleted_at, null);
+});
+
+test('UPSERT_VALVE_SCHEDULE does not report success when a competing revival changes the committed values', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000014';
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 3600000).toISOString(), duration_minutes: 5, enabled: true });
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, deleted_at: new Date().toISOString() });
+
+  const out = await apply(undefinedRunInterleavingDb(db, uuid), { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: new Date(Date.now() + 7200000).toISOString(), duration_minutes: 7, enabled: true });
+  assert.equal(out.ok, false, 'the command must not acknowledge values it did not commit');
+  assert.equal(out.error, 'not_found');
+  const row = await db.get('SELECT deleted_at, duration_minutes FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.deleted_at, null);
+  assert.equal(row.duration_minutes, 99, 'the competing write must be visible, proving verification ran after it');
+});
+
+test('a fired ONCE schedule replayed after delete stays FIRED and does not emit twice', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000015';
+  const fireAt = '2026-08-19T10:00:00.000Z';
+  const command = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: fireAt, duration_minutes: 5, enabled: true };
+  await apply(db, command);
+  let emitted = 0;
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  const replay = await apply(db, command);
+  assert.equal(replay.ok, true);
+  const schedule = (await store.listSchedules(db, EUI)).find((row) => row.schedule_uuid === uuid);
+  assert.equal(schedule.once_state, 'FIRED');
+  assert.equal(schedule.dispatch_state, 'SENT');
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:02:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal(emitted, 1);
+});
+
+test('a fired ONCE revival with a new fire_at replaces the terminal intent and emits once', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000016';
+  const first = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, first);
+  let emitted = [];
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async (command) => { emitted.push(command); }, warn: noopWarn });
+  const oldIntent = await db.get('SELECT command_id, state FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [uuid]);
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  const second = Object.assign({}, first, { fire_at: '2026-08-19T11:00:00.000Z' });
+  await apply(db, second);
+  const revived = (await store.listSchedules(db, EUI)).find((row) => row.schedule_uuid === uuid);
+  assert.equal(revived.once_state, 'PENDING');
+  assert.equal(revived.dispatch_state, null);
+  assert.equal(await db.get('SELECT COUNT(*) AS n FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [uuid]).then((row) => row.n), 0);
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T11:01:00Z'), emit: async (command) => { emitted.push(command); }, warn: noopWarn });
+  assert.equal(emitted.length, 2);
+  assert.notEqual(emitted[0].command_id, emitted[1].command_id);
+  const newIntent = await db.get('SELECT command_id, state FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [uuid]);
+  assert.equal(newIntent.state, 'SENT');
+  assert.notEqual(newIntent.command_id, oldIntent.command_id);
+});
+
+test('a skipped ONCE revival with a future fire_at returns to PENDING and fires', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000017';
+  const first = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T09:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, first);
+  let emitted = 0;
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:00:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal((await db.get('SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [uuid])).state, 'SKIPPED');
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, Object.assign({}, first, { fire_at: '2026-08-19T11:00:00.000Z' }));
+  const revived = (await store.listSchedules(db, EUI)).find((row) => row.schedule_uuid === uuid);
+  assert.equal(revived.once_state, 'PENDING');
+  assert.equal(revived.dispatch_state, null);
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T11:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal(emitted, 1);
+  assert.equal((await store.listSchedules(db, EUI)).find((row) => row.schedule_uuid === uuid).once_state, 'FIRED');
+});
+
+test('a stale A replay cannot replace live B after A was fired and B was revived', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000018';
+  const a = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, a);
+  const emitted = [];
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async (command) => { emitted.push(command); }, warn: noopWarn });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, Object.assign({}, a, { fire_at: '2026-08-19T11:00:00.000Z' }));
+  const stale = await apply(db, a);
+  assert.equal(stale.ok, true);
+  let schedule = (await store.listSchedules(db, EUI)).find((row) => row.schedule_uuid === uuid);
+  assert.equal(schedule.fire_at, '2026-08-19T11:00:00.000Z');
+  assert.equal(schedule.once_state, 'PENDING');
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:02:00Z'), emit: async (command) => { emitted.push(command); }, warn: noopWarn });
+  assert.equal(emitted.length, 1, 'the stale A replay must not emit at 10:02');
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T11:01:00Z'), emit: async (command) => { emitted.push(command); }, warn: noopWarn });
+  assert.equal(emitted.length, 2, 'the live B schedule still emits at its own time');
+  schedule = (await store.listSchedules(db, EUI)).find((row) => row.schedule_uuid === uuid);
+  assert.equal(schedule.fire_at, '2026-08-19T11:00:00.000Z');
+});
+
+test('a stale A replay through a second tombstone stays FIRED and keeps one marker', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000022';
+  const a = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, a);
+  let emitted = 0;
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, Object.assign({}, a, { fire_at: '2026-08-19T11:00:00.000Z' }));
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, a);
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:02:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  const row = await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  const marker = await db.get("SELECT COUNT(*) AS n FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=?", ['one_time_open:' + uuid + ':2026-08-19T10:00:00.000Z']);
+  assert.equal(emitted, 1);
+  assert.equal(row.once_state, 'FIRED');
+  assert.equal(marker.n, 1);
+});
+
+test('replacement backfills the old fire marker before deleting a legacy terminal intent', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000023';
+  const a = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, a);
+  await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid, device_eui, command_id, state, attempted_at) VALUES (?, ?, ?, 'SENT', ?)", [uuid, EUI, 'legacy-a', '2026-08-19T10:00:00.000Z']);
+  await db.run("UPDATE valve_schedules SET once_state='FIRED', once_fired_at='2026-08-19T10:00:00.000Z' WHERE schedule_uuid=?", [uuid]);
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, Object.assign({}, a, { fire_at: '2026-08-19T11:00:00.000Z' }));
+  const marker = await db.get("SELECT COUNT(*) AS n FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=?", ['one_time_open:' + uuid + ':2026-08-19T10:00:00.000Z']);
+  assert.equal(marker.n, 1);
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, a);
+  assert.equal((await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).once_state, 'FIRED');
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=?", ['one_time_open:' + uuid + ':2026-08-19T10:00:00.000Z'])).n, 1);
+});
+
+test('legacy terminal history is backfilled before live replacement and survives later tombstones', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000025';
+  const a = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, a);
+  await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid, device_eui, command_id, state, attempted_at) VALUES (?, ?, ?, 'SENT', ?)", [uuid, EUI, 'legacy-a', '2026-08-19T10:00:00.000Z']);
+  await db.run("UPDATE valve_schedules SET once_state='FIRED', once_fired_at='2026-08-19T10:00:00.000Z' WHERE schedule_uuid=?", [uuid]);
+
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, Object.assign({}, a, { fire_at: '2026-08-19T11:00:00.000Z' }));
+  assert.equal((await db.get('SELECT fire_at, once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).fire_at, '2026-08-19T11:00:00.000Z');
+  assert.equal((await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).once_state, 'PENDING');
+  const markerA = 'one_time_open:' + uuid + ':2026-08-19T10:00:00.000Z';
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=?", [markerA])).n, 1);
+
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, Object.assign({}, a, { fire_at: '2026-08-19T12:00:00.000Z' }));
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, a);
+  let emitted = 0;
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:02:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal(emitted, 0, 'replaying legacy A after later replacements must not dispatch it again');
+  assert.equal((await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).once_state, 'FIRED');
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=?", [markerA])).n, 1);
+});
+
+test('an ONCE schedule can move through WEEKLY and back to ONCE without losing dispatch history', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000026';
+  const onceA = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, onceA);
+  let emitted = 0;
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  assert.equal((await db.get('SELECT kind FROM valve_schedules WHERE schedule_uuid=?', [uuid])).kind, 'WEEKLY');
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  const onceB = Object.assign({}, onceA, { fire_at: '2026-08-19T11:00:00.000Z' });
+  await apply(db, onceB);
+  assert.equal((await db.get('SELECT kind, once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).kind, 'ONCE');
+  assert.equal((await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).once_state, 'PENDING');
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T11:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal(emitted, 2, 'the new ONCE fire_at emits once after the kind transition');
+  await apply(db, onceA);
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:02:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal(emitted, 2, 'the old ONCE fire_at remains deduplicated after the kind transition');
+});
+
+test('a live terminal ONCE cannot change fire_at, while a deleted revival can dispatch the new time', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000027';
+  const a = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  const b = Object.assign({}, a, { fire_at: '2026-08-19T11:00:00.000Z' });
+  await apply(db, a);
+  let emitted = 0;
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  const blocked = await apply(db, b);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error, 'once_fire_at_immutable');
+  const unchanged = await db.get('SELECT fire_at, once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  assert.equal(unchanged.fire_at, a.fire_at);
+  assert.equal(unchanged.once_state, 'FIRED');
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM actuator_log WHERE reason=?", ['one_time_open:' + uuid + ':' + b.fire_at])).n, 0, 'a rejected live update must not invent a B marker');
+
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, b);
+  assert.equal((await db.get('SELECT fire_at, once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).fire_at, b.fire_at);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM actuator_log WHERE reason=?", ['one_time_open:' + uuid + ':' + b.fire_at])).n, 0);
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T11:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal(emitted, 2, 'the new fire_at dispatches once after an explicit delete and revival');
+});
+
+test('runOnceTick refuses a pending re-arm when its fire marker already exists', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000024';
+  const command = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, command);
+  let emitted = 0;
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  await db.run("DELETE FROM valve_once_dispatch_intents WHERE schedule_uuid=?", [uuid]);
+  await db.run("UPDATE valve_schedules SET once_state='PENDING' WHERE schedule_uuid=?", [uuid]);
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:02:00Z'), emit: async () => { emitted += 1; }, warn: noopWarn });
+  assert.equal(emitted, 1);
+  assert.equal((await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid])).once_state, 'FIRED');
+});
+
+test('reviving an unchanged fire_at preserves ATTEMPTED and UNKNOWN terminal states', async () => {
+  for (const state of ['ATTEMPTED', 'UNKNOWN']) {
+    const { db } = await tempDb();
+    const uuid = 'a1111111-0000-0000-0000-00000000001' + (state === 'ATTEMPTED' ? '9' : '0');
+    const command = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+    await apply(db, command);
+    await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid, device_eui, command_id, state, attempted_at) VALUES (?, ?, ?, ?, ?)", [uuid, EUI, 'cmd-' + state, state, '2026-08-19T10:00:00.000Z']);
+    await db.run("UPDATE valve_schedules SET once_state='FIRED', once_fired_at='2026-08-19T10:00:00.000Z' WHERE schedule_uuid=?", [uuid]);
+    await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+    await apply(db, command);
+    const row = await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+    const intent = await db.get('SELECT state, command_id FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [uuid]);
+    assert.equal(row.once_state, 'FIRED');
+    assert.equal(intent.state, state);
+    assert.equal(intent.command_id, 'cmd-' + state);
+  }
+});
+
+test('reviving a new fire_at keeps a PENDING intent and its command id', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000020';
+  const first = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, first);
+  await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid, device_eui, command_id, state) VALUES (?, ?, ?, 'PENDING')", [uuid, EUI, 'cmd-pending']);
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await apply(db, Object.assign({}, first, { fire_at: '2026-08-19T11:00:00.000Z' }));
+  const row = await db.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  const intent = await db.get('SELECT state, command_id FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.once_state, 'PENDING');
+  assert.equal(intent.state, 'PENDING');
+  assert.equal(intent.command_id, 'cmd-pending');
+});
+
+test('terminal intent replacement rolls back with the tombstone and old intent intact', async () => {
+  const { db } = await tempDb();
+  const uuid = 'a1111111-0000-0000-0000-000000000021';
+  const first = { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 5, enabled: true };
+  await apply(db, first);
+  await workers.runOnceTick({ db, now: new Date('2026-08-19T10:01:00Z'), emit: async () => {}, warn: noopWarn });
+  await apply(db, { commandType: 'DELETE_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid });
+  await assert.rejects(() => apply(failAfterIntentReplacementDb(db), Object.assign({}, first, { fire_at: '2026-08-19T11:00:00.000Z' })), /replacement failed/);
+  const row = await db.get('SELECT fire_at, deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
+  const intent = await db.get('SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [uuid]);
+  assert.equal(row.fire_at, '2026-08-19T10:00:00.000Z');
+  assert.ok(row.deleted_at);
+  assert.equal(intent.state, 'SENT');
 });
 
 test('RESEND_VALVE_PLAN force-recompiles even when nothing changed', async () => {
