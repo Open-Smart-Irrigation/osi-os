@@ -449,3 +449,52 @@ test('the command ledger still catches an exact delivery replay before the recei
   assert.equal(replay.ack.commandId, 62);
   assert.equal(replay.ack.result, 'APPLIED');
 });
+
+// Fix round 1 / finding I1: TARGETS is a plain object literal, so a
+// caller-supplied commandType equal to an inherited Object.prototype key
+// (constructor, toString, __proto__, valueOf, hasOwnProperty) reads as
+// truthy through TARGETS[type] even though it was never one of the two real
+// command types. Each must be refused the same as any other unrecognized
+// type, and must never reach the write path.
+test('a command type inherited from Object.prototype is not handled', async (t) => {
+  const { raw, db } = fixture(t);
+  const dangerous = ['constructor', 'toString', '__proto__', 'valueOf', 'hasOwnProperty'];
+  let id = 200;
+  for (const commandType of dangerous) {
+    const result = await commands.applyNameCommand(
+      db, { commandId: id, commandType, payload: {} }, runtime()
+    );
+    assert.deepEqual(result, { handled: false }, commandType + ' must not be handled');
+    id += 1;
+  }
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 0);
+});
+
+// Fix round 1 / controller ruling T3-M6: a local misconfiguration (the
+// runtime never supplied a valid gateway EUI) must not burn the delivery id.
+// It must throw before the transaction opens, write nothing, and leave the
+// command retryable once the runtime is fixed.
+test('a missing or invalid runtime gateway EUI throws before any write, and a retry with a valid one applies', async (t) => {
+  const { raw, db } = fixture(t);
+  for (const badGateway of [undefined, '']) {
+    await assert.rejects(
+      () => commands.applyNameCommand(db, deviceCommand(70), runtime({ gateway_device_eui: badGateway })),
+      (error) => error.code === 'invalid_entity_name_command'
+    );
+  }
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 0);
+  const retry = await commands.applyNameCommand(db, deviceCommand(70), runtime());
+  assert.equal(retry.ack.result, 'APPLIED');
+});
+
+test('a command of another type is not handled and never inspects the runtime gateway EUI', async (t) => {
+  const { db } = fixture(t);
+  const result = await commands.applyNameCommand(
+    db,
+    { commandId: 1, commandType: 'REBOOT', payload: {} },
+    { command_type_recognized: true }
+  );
+  assert.deepEqual(result, { handled: false });
+});

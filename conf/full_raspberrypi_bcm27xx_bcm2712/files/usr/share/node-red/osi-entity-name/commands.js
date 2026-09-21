@@ -209,7 +209,12 @@ async function applyZone(tx, parsed, runtime) {
 
 async function applyNameCommand(db, envelope, runtime = {}) {
   const type = String((envelope && envelope.commandType) || '');
-  if (!TARGETS[type]) return { handled: false };
+  // TARGETS is a plain object literal: an in() check via truthiness alone
+  // (`!TARGETS[type]`) also matches an inherited Object.prototype key such
+  // as 'constructor', 'toString', '__proto__', 'valueOf' or
+  // 'hasOwnProperty'. hasOwnProperty rules those out; only the two real
+  // command types are own properties of TARGETS.
+  if (!Object.prototype.hasOwnProperty.call(TARGETS, type)) return { handled: false };
   const id = envelope.commandId;
   if (!Number.isSafeInteger(id) || id < 1) {
     const error = new Error('invalid protected delivery envelope');
@@ -217,6 +222,16 @@ async function applyNameCommand(db, envelope, runtime = {}) {
     throw error;
   }
   const gatewayDeviceEui = canonicalEui(runtime.gateway_device_eui);
+  // Controller ruling T3-M6: a runtime that never resolved a real gateway
+  // EUI is a local misconfiguration, not a rejectable command. Throwing here
+  // -- before the transaction opens, so nothing is written -- keeps the
+  // delivery id retryable instead of burning it on an ack keyed to
+  // 'UNKNOWN'.
+  if (!EUI.test(gatewayDeviceEui)) {
+    const error = new Error('runtime gateway EUI is missing or invalid');
+    error.code = 'invalid_entity_name_command';
+    throw error;
+  }
   return db.transaction(async (tx) => {
     const previous = await tx.get(
       'SELECT result_detail FROM applied_commands WHERE command_id=?',
@@ -265,7 +280,7 @@ async function applyNameCommand(db, envelope, runtime = {}) {
       ') VALUES(?,?,?,?,?,?,?,?)',
       [
         String(id),
-        gatewayDeviceEui || 'UNKNOWN',
+        gatewayDeviceEui,
         type,
         null,
         ack.appliedAt,
