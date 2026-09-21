@@ -624,6 +624,19 @@
     "buttonZone": "Aus dieser Zone entfernen",
     "buttonFarm": "Gerät entfernen"
   },
+  "rename": {
+    "zone": "Zone umbenennen",
+    "device": "Gerät umbenennen",
+    "zoneInputLabel": "Zonenname",
+    "deviceInputLabel": "Gerätename",
+    "reason": {
+      "name_empty": "Geben Sie einen Namen ein.",
+      "name_too_long": "Verwenden Sie höchstens 100 Zeichen.",
+      "name_control_characters": "Entfernen Sie Tabulatoren, Zeilenumbrüche und andere Steuerzeichen.",
+      "name_invalid_unicode": "Dieser Name enthält ein Zeichen, das nicht gespeichert werden kann."
+    },
+    "failed": "Der Name konnte nicht gespeichert werden."
+  },
   "common": {
     "viewHistory": "Verlauf anzeigen",
     "batteryEstimated": "Aus der Batteriespannung geschätzt"

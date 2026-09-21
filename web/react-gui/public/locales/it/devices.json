@@ -624,6 +624,19 @@
     "buttonZone": "Rimuovi da questa zona",
     "buttonFarm": "Rimuovi dispositivo"
   },
+  "rename": {
+    "zone": "Rinomina la zona",
+    "device": "Rinomina il dispositivo",
+    "zoneInputLabel": "Nome della zona",
+    "deviceInputLabel": "Nome del dispositivo",
+    "reason": {
+      "name_empty": "Inserisci un nome.",
+      "name_too_long": "Usa al massimo 100 caratteri.",
+      "name_control_characters": "Rimuovi tabulazioni, interruzioni di riga e altri caratteri di controllo.",
+      "name_invalid_unicode": "Questo nome contiene un carattere che non può essere salvato."
+    },
+    "failed": "Impossibile salvare il nome."
+  },
   "common": {
     "viewHistory": "Vedi cronologia",
     "batteryEstimated": "Stimato dalla tensione della batteria"
