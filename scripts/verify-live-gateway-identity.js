@@ -1287,9 +1287,25 @@ if (sizeAllowances) {
   // headroom) and scoped-zone-create-router 3962 -> 4929 (+967, exceeding its prior +460
   // node_allowances entry, which this round supersedes) -- verify-flows-size-ratchet totalChars
   // over both byte-identical profiles: origin/main 1539627 -> HEAD 1568928 = +29301.
-  expectCondition(sizeAllowances.total_allowance?.delta === 70504,
-    'size total allowance: exact cumulative delta 70504',
-    'size total allowance: expected exact cumulative delta 70504');
+  // 71235: 2026-09-22 zone-device-rename-stage-1 Task 10 (legacy UPSERT_ZONE branch of
+  // node 4f4a765f36cee6f3, "Build UPDATE SQL"): the branch built s(cmd.name || 'Zone')
+  // into an unguarded ON CONFLICT(zone_uuid) DO UPDATE SET name=excluded.name, so a
+  // legacy-shaped command without a name silently renamed an existing zone to 'Zone'.
+  // It now decides validity in JavaScript via osi-entity-name's normalizeEntityName
+  // (reached with osiLib.require('entity-name'); the node gains its first libs binding)
+  // and emits name=excluded.name only for a valid name, name=irrigation_zones.name on
+  // conflict otherwise, with 'Zone' still the first-insert fallback and a node.warn on
+  // the rejected/unavailable case. Re-reads the standing 41203 from origin/main
+  // (unchanged) and raises it by the 30032 chars measured for the whole branch: the same
+  // five Task 6-8 new nodes and five Task 8 registry/capability deltas above, unchanged
+  // (=25276), cs-reg-cloud-fn 19838 -> 20980 (+1142, unchanged), the three Task 9
+  // fix-round-1 HTTP nodes post-zone-auth/post-devices-auth/scoped-zone-create-router
+  // (+917/+999/+967 = 2883, unchanged) and 4f4a765f36cee6f3 18655 -> 19386 (+731,
+  // superseding its prior +428 node_allowances entry) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1569659 = +30032.
+  expectCondition(sizeAllowances.total_allowance?.delta === 71235,
+    'size total allowance: exact cumulative delta 71235',
+    'size total allowance: expected exact cumulative delta 71235');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);

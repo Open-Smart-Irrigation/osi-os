@@ -2059,6 +2059,17 @@ expectIncludesForEach(
   'advertises the entity-name command capability to the cloud'
 );
 expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped device_eui payloads for device-scoped SQL commands');
+expectLibById('4f4a765f36cee6f3', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
+expectOrderedIncludesById('4f4a765f36cee6f3', [
+  "if (commandType === 'UPSERT_ZONE') {",
+  "var nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(cmd.name)',
+  "var insertName = zoneName === null ? \"'Zone'\" : s(zoneName);",
+  "var conflictName = zoneName === null ? 'irrigation_zones.name' : 'excluded.name';",
+  '"ON CONFLICT(zone_uuid) DO UPDATE SET name=" + conflictName + ",',
+], 'runs a legacy UPSERT_ZONE name through the rule and keeps the stored name when it fails');
+expectExcludesById('4f4a765f36cee6f3', "s(cmd.name || 'Zone')", 'the unguarded legacy zone-name fallback that renamed a zone to "Zone"');
+expectIncludesById('4f4a765f36cee6f3', 'keeping the stored zone name', 'warns instead of silently discarding an invalid legacy zone name');
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
