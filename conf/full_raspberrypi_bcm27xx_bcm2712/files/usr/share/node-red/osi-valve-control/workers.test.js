@@ -52,6 +52,104 @@ test('runOnceTick fires due ONCE rows within grace and skips stale ones', async 
   assert.equal(again.fired.length + again.skipped.length, 0, 'idempotent');
 });
 
+test('runOnceTick leaves a pending dispatch intent before the attempt marker and resumes it after restart', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-before', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await assert.rejects(() => W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), beforeAttempt: () => { throw new Error('simulated restart'); }, warn: () => {} }), /simulated restart/);
+  const pending = await db.get("SELECT state, command_id FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-before'");
+  assert.equal(pending.state, 'PENDING');
+  const resumed = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), warn: () => {} });
+  assert.equal(resumed.fired[0].command_id, pending.command_id);
+  assert.equal((await db.get("SELECT once_state FROM valve_schedules WHERE schedule_uuid='intent-before'")).once_state, 'FIRED');
+});
+
+test('runOnceTick marks an attempted intent unknown and never resends it after restart', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-after', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  const first = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), afterAttempt: () => { throw new Error('simulated restart'); }, warn: () => {} }).catch((e) => e);
+  assert.equal(first.message, 'simulated restart');
+  const row = await db.get("SELECT state, command_id FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-after'");
+  assert.equal(row.state, 'ATTEMPTED');
+  const resumed = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), warn: () => {} });
+  assert.equal(resumed.fired.length, 0);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-after'")).state, 'UNKNOWN');
+});
+
+test('runOnceTick records an overdue unsent intent as skipped', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-overdue', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T09:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  const row = await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-overdue'");
+  assert.equal(row.state, 'SKIPPED');
+});
+
+test('runOnceTick claims a pending intent once even when the tick repeats', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-race', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  const first = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  const second = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  assert.equal(first.fired.length + second.fired.length, 1);
+  assert.equal((await db.all("SELECT * FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-race'")).length, 1);
+});
+
+test('runOnceTick marks a successfully emitted command SENT', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-sent', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  let emitted = 0;
+  await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: async () => { emitted += 1; }, warn: () => {} });
+  assert.equal(emitted, 1);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-sent'")).state, 'SENT');
+  const next = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), emit: async () => { emitted += 1; }, warn: () => {} });
+  assert.equal(next.fired.length, 0);
+  assert.equal(emitted, 1);
+});
+
+test('runOnceTick leaves an attempted intent UNKNOWN after a handoff crash', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-handoff-crash', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await assert.rejects(() => W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: async () => { throw new Error('handoff crashed'); }, warn: () => {} }), /handoff crashed/);
+  const next = await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), emit: async () => { throw new Error('must not resend'); }, warn: () => {} });
+  assert.equal(next.fired.length, 0);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-handoff-crash'")).state, 'UNKNOWN');
+});
+
+test('runOnceTick finalizes a slow handoff as SENT after an overlapping tick marks it UNKNOWN', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'intent-slow-handoff', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  let resolveEmit;
+  let emitted = 0;
+  const first = W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: () => { emitted += 1; return new Promise((resolve) => { resolveEmit = resolve; }); }, warn: () => {} });
+  while (!resolveEmit) await new Promise((resolve) => setImmediate(resolve));
+  await W.runOnceTick({ db, now: new Date('2026-08-19T10:04:00Z'), warn: () => {} });
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-slow-handoff'")).state, 'UNKNOWN');
+  resolveEmit();
+  await first;
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-slow-handoff'")).state, 'SENT');
+  assert.equal(emitted, 1);
+});
+
+test('runOnceTick rereads eligibility at claim and leaves a disabled schedule pending', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'claim-disabled', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state) VALUES ('claim-disabled','0016C001F1000001','cmd-disabled','PENDING')");
+  await db.run("UPDATE valve_schedules SET enabled=0 WHERE schedule_uuid='claim-disabled'");
+  const r = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), warn: () => {} });
+  assert.equal(r.fired.length, 0);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='claim-disabled'")).state, 'PENDING');
+});
+
+test('runOnceTick emits earlier claimed commands when a later row fails', async () => {
+  const { db } = await tempDb();
+  for (const uuid of ['claim-first', 'claim-second']) await store.insertSchedule(db, { schedule_uuid: uuid, device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });
+  const emitted = [];
+  const errors = [];
+  const r = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), emit: (command) => { if (command.schedule_uuid === 'claim-second') throw new Error('later row failed'); emitted.push(command.schedule_uuid); }, onError: (error) => errors.push(error.message), warn: () => {} });
+  assert.deepEqual(emitted, ['claim-first']);
+  assert.deepEqual(r.fired.map((row) => row.schedule_uuid), ['claim-first']);
+  assert.deepEqual(errors, ['later row failed']);
+  assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='claim-second'")).state, 'ATTEMPTED');
+});
+
 test('runOnceTick (I3) ignores PENDING ONCE rows on a soft-deleted device and leaves the row untouched', async () => {
   const { db } = await tempDb();
   await store.insertSchedule(db, { schedule_uuid: 'gone', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 20, timezone: 'UTC', enabled: 1 });

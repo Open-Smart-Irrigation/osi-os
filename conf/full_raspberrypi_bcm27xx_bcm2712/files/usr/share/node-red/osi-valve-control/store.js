@@ -46,7 +46,7 @@ SELECT d.deveui, d.name, d.type_id, d.irrigation_zone_id, d.current_state, d.tar
 async function listValvesForUser(db, userId) { return db.all(VALVE_LIST_SQL, [userId]); }
 
 async function listSchedules(db, deviceEui) {
-  return db.all('SELECT * FROM valve_schedules WHERE UPPER(device_eui)=UPPER(?) AND deleted_at IS NULL ORDER BY kind, start_time, fire_at', [deviceEui]);
+  return db.all('SELECT vs.*, i.state AS dispatch_state, i.command_id AS dispatch_command_id, i.created_at AS dispatch_created_at, i.attempted_at AS dispatch_attempted_at FROM valve_schedules vs LEFT JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid WHERE UPPER(vs.device_eui)=UPPER(?) AND vs.deleted_at IS NULL ORDER BY vs.kind, vs.start_time, vs.fire_at', [deviceEui]);
 }
 
 const SETTINGS_DEFAULTS = { strega_generation: 'GEN1', flow_rate_lpm: null, flow_rate_source: null, default_open_minutes: null, scheduler_status: 'ACTIVE', skip_today_date: null, last_clock_sync_queued_at: null, last_clock_sync_acked_at: null };

@@ -1461,6 +1461,10 @@ function normaliseValveSchedule(row: any): ValveSchedule {
     timezone: row?.timezone ?? '',
     enabled: Boolean(row?.enabled),
     onceState: row?.once_state ?? row?.onceState ?? null,
+    dispatchState: row?.dispatch_state ?? row?.dispatchState ?? null,
+    dispatchCommandId: row?.dispatch_command_id ?? row?.dispatchCommandId ?? null,
+    dispatchCreatedAt: row?.dispatch_created_at ?? row?.dispatchCreatedAt ?? null,
+    dispatchAttemptedAt: row?.dispatch_attempted_at ?? row?.dispatchAttemptedAt ?? null,
   };
 }
 
