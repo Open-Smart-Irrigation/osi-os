@@ -15,12 +15,12 @@
   ],
   "files": {
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json": {
-      "functionNodes": 299,
-      "total": 1548671
+      "functionNodes": 295,
+      "total": 1524435
     },
     "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json": {
-      "functionNodes": 299,
-      "total": 1548671
+      "functionNodes": 295,
+      "total": 1524435
     }
   }
 }
