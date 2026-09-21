@@ -146,7 +146,10 @@ reason code. It runs these steps in order:
 
 1. `raw` must be a string of well-formed UTF-16. A lone high or low surrogate
    fails with `name_invalid_unicode`: JavaScript and Java can hold one, UTF-8
-   storage in SQLite and PostgreSQL cannot.
+   storage in SQLite and PostgreSQL cannot. A missing value (`null` or
+   `undefined`) fails with `name_empty`, so a request without a `name` field
+   tells the user the name is blank; any other non-string fails with
+   `name_invalid_unicode`.
 2. Strip leading and trailing characters of the ECMAScript trim set, which is
    WhiteSpace plus LineTerminator: U+0009, U+000A, U+000B, U+000C, U+000D,
    U+0020, U+00A0, U+2028, U+2029, U+FEFF and every character of category Zs.
@@ -222,8 +225,9 @@ its 128-character bound), the legacy branch in 5.7, and the create paths
 | `PUT /api/devices/:deveui/name` | `{ "name": string }` | `200 { deveui, name, sync_version, changed, chirpstack }` |
 
 `changed` is `false` when the normalized name equals the stored one; the handler
-then writes nothing. `chirpstack` is `updated`, `failed` or `skipped`
-(`skipped` when nothing changed or provisioning is not configured).
+then writes nothing. `chirpstack` is `updated`, `failed` or `skipped`. It is
+`skipped` when nothing changed, when provisioning is not configured, or when
+ChirpStack already holds the name.
 
 Authentication is the existing HMAC bearer check. Authorization follows the
 other zone and device writes:
@@ -271,18 +275,25 @@ migration, no `sync-init-fn` edit and no fingerprint restamp.
 
 ### 5.5 ChirpStack name
 
-`osi-chirpstack-helper` gains `updateDeviceName(client, devEui)`. It takes no
-name argument: it reads `devices.name` from the database at the moment it runs,
-reads the ChirpStack device, returns `unchanged` if the names match, and
-otherwise sends `UpdateDeviceRequest` under the existing gRPC deadline. Calls
-are serialized per DevEUI inside the Node-RED process. Two renames in quick
+`osi-chirpstack-helper` gains
+`updateDeviceName(client, devEui, readCurrentName)`. It takes no name argument.
+`readCurrentName` is a function the caller supplies; the helper calls it to read
+`devices.name` at the moment the update runs, which keeps the helper free of
+database code. The helper then reads the ChirpStack device, returns `unchanged`
+if the names match, and otherwise sends `UpdateDeviceRequest`. Calls are
+serialized per DevEUI inside the Node-RED process. Two renames in quick
 succession therefore end with ChirpStack on the newer name, whichever gRPC call
 is slower.
+
+The name update has its own gRPC deadline of 5 s. The helper's default deadline
+is 20 s, and a rename must not wait that long on a hung ChirpStack.
 
 The REST handler and the command function node call it after the database
 transaction has committed, never inside it. On failure they log with
 `node.warn`, the REST response carries `chirpstack: "failed"`, and the command
-acknowledgement stays `APPLIED`.
+acknowledgement stays `APPLIED`. The REST handler waits for the attempt, at most
+the 5 s, because its response reports the outcome. The command node sends the
+acknowledgement first and starts the attempt afterwards.
 
 `ensureDeviceProvisioned` also reconciles the name of an existing device from
 `devices.name`, so a missed update heals at the next provisioning. It never
@@ -333,7 +344,8 @@ In one transaction the receiver:
    `APPLIED`;
 8. writes the `applied_commands` row and the `command_ack_outbox` row. The
    stored acknowledgement carries `target`, `requestedAt` and
-   `appliedSyncVersion`, the row's `sync_version` after the write.
+   `appliedSyncVersion`, the row's `sync_version` after the write. `target` and
+   `requestedAt` are `null` when a malformed payload does not supply them.
 
 The commands carry no `effect_key` and no base version. `effect_key` binds a
 physical effect, and the ledger treats a repeated key as a replay; a constant
@@ -361,10 +373,11 @@ Both types are added to `cmd-type-registry` and to the fallback list in
 
 Node `4f4a765f36cee6f3` runs `cmd.name` through the name rule. A valid name is
 written as today. When the name is missing or breaks the rule, an existing row
-keeps its stored name
-(`name = CASE WHEN <valid name> THEN excluded.name ELSE irrigation_zones.name END`),
-a first insert falls back to `Zone`, and the node logs a `node.warn` for the
-invalid case. The unguarded `sync_version` and the whole-row overwrite of that
+keeps its stored name, a first insert falls back to `Zone`, and the node logs a
+`node.warn` for the invalid case. The node decides validity in JavaScript and
+emits `name=excluded.name` or `name=irrigation_zones.name` in the `ON CONFLICT`
+clause; the node has little room left under the flows size ratchet, and this is
+the shorter statement. The unguarded `sync_version` and the whole-row overwrite of that
 branch are outside this design (section 11).
 
 ### 5.8 Edge GUI
@@ -380,10 +393,22 @@ trigger until it settles. The interaction matches the cloud zone card.
 
 It replaces the plain name heading in `IrrigationZoneCard.tsx` and in the device
 cards `KiwiSensorCard`, `StregaValveCard`, `DraginoTempCard`, `LoRainGaugeCard`,
-`SenseCapWeatherCard`, `Sdi12SoilCard` and `valves/ValveTile`. The pencil
-follows the permission signal that already hides the other zone and device edit
-controls from a role that cannot mutate; the route in 5.2 enforces the rule
-regardless.
+`SenseCapWeatherCard`, `Sdi12SoilCard` and `valves/ValveTile`. Three of these
+are more than a swap:
+
+- In `IrrigationZoneCard.tsx` the heading sits inside the collapse button, and a
+  button cannot hold the pencil button. The heading moves out of it, and the
+  existing tests that expand the card by clicking its heading select the
+  collapse button instead.
+- `Sdi12SoilCard` and `LoRainGaugeCard` have no refresh callback, and
+  `DraginoTempCard` declares one that its parent never passes. They gain it, or
+  they cannot show the new name.
+- The permission signal from `useScope()` (`canWrite` or `readOnly`) reaches
+  seven of the eight surfaces. `valves/ValveTile` gets it through a new
+  `canWrite` prop on `ValveControlPanel`.
+
+The pencil follows that signal, so a role that cannot mutate does not see it;
+the route in 5.2 enforces the rule regardless.
 
 `src/services/api.ts` gains `irrigationZonesAPI.rename(id, name)` and
 `devicesAPI.rename(deveui, name)`. A TypeScript copy of the name rule lives in
@@ -411,6 +436,14 @@ the matching test allowlist entry until a human Luganda pass supplies them.
   existing helper modules are.
 - `scripts/verify-sync-flow.js` pins GUI and flow files by path. New routes and
   API functions get assertions there, following the repository convention.
+  `scripts/verify-command-safety.js` also pins `ValveTile.tsx`,
+  `ValveControlPanel.tsx` and `StregaValveCard.tsx` by path and runs as a gate.
+- `scripts/verify-sync-contract.js` requires the `command_type` enum in
+  `commands.schema.json` to equal the types in `cmd-type-registry`. The schema
+  edit and the registry edit therefore land in one commit.
+- `scripts/verify-flows-size-ratchet.js` caps the size of function nodes. Each
+  flows task raises the allowance it needs, measured at that point in the
+  branch.
 - New HTTP nodes use parameterised SQL. The string-concatenated SQL in
   `post-zone-insert` and `post-devices-insert` is not rewritten here.
 
