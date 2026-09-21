@@ -101,6 +101,10 @@ jobs:
       # customer branch edits, and its consumer checks read the sibling packages
       # of whichever profile they run in, so the mirror has to be exercised too.
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/*.test.js conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-module-defaults/*.test.js
+      - name: Verify canonical runtime trigger source
+        run: node scripts/generate-sync-trigger-source.js --check
+      - name: Canonical runtime trigger source tests
+        run: node --test scripts/test-sync-trigger-source.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/*.test.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state/protocol-verbs.test.js
         env:
