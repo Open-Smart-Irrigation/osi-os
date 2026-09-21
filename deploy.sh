@@ -578,6 +578,102 @@ restart_node_red() {
     return 1
 }
 
+# node-red service state begin
+node_red_service_state() {
+    local service_json
+
+    if ! command -v ubus >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+        echo "unknown"
+        return 2
+    fi
+    if ! service_json="$(ubus call service list '{"name":"node-red"}' 2>/dev/null)"; then
+        echo "unknown"
+        return 2
+    fi
+
+    printf '%s' "$service_json" | node -e '
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { raw += chunk; });
+process.stdin.on("end", () => {
+    try {
+        const response = JSON.parse(raw);
+        const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+        if (!isObject(response)) {
+            console.log("unknown");
+            process.exitCode = 2;
+            return;
+        }
+        if (!Object.prototype.hasOwnProperty.call(response, "node-red")) {
+            console.log("stopped");
+            return;
+        }
+        const service = response["node-red"];
+        if (!isObject(service) || !isObject(service.instances)) {
+            console.log("unknown");
+            process.exitCode = 2;
+            return;
+        }
+        const instances = Object.values(service.instances);
+        if (instances.some((instance) => instance && instance.running === true)) {
+            console.log("running");
+            return;
+        }
+        if (instances.length === 0 || instances.every((instance) => instance && instance.running === false)) {
+            console.log("stopped");
+            return;
+        }
+        console.log("unknown");
+        process.exitCode = 2;
+    } catch (_) {
+        console.log("unknown");
+        process.exitCode = 2;
+    }
+});
+'
+}
+# node-red service state end
+
+# node-red stop wait begin
+wait_for_node_red_stop() {
+    local stop_timeout="$1"
+    stop_wait=0
+    node_red_state="unknown"
+
+    while :; do
+        if ! node_red_state="$(node_red_service_state)"; then
+            return 2
+        fi
+        [ "$node_red_state" = "running" ] || break
+        [ "$stop_wait" -lt "$stop_timeout" ] || return 1
+        sleep 1
+        stop_wait=$((stop_wait + 1))
+    done
+    [ "$node_red_state" = "stopped" ]
+}
+# node-red stop wait end
+
+# node-red health wait begin
+wait_for_node_red_health() {
+    local health_timeout="$1"
+    probe_elapsed=0
+    node_red_state="unknown"
+
+    while [ "$probe_elapsed" -lt "$health_timeout" ]; do
+        if ! node_red_state="$(node_red_service_state)"; then
+            return 2
+        fi
+        if [ "$node_red_state" = "running" ] && \
+            wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+        probe_elapsed=$((probe_elapsed + 1))
+    done
+    return 1
+}
+# node-red health wait end
+
 checkpoint_live_db() {
     if ! sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null; then
         echo "ERROR: failed to checkpoint $DB_PATH before migration" >&2
@@ -738,13 +834,19 @@ run_schema_migration() {
         echo "ERROR: failed to stop Node-RED before schema migration" >&2
         return 1
     fi
-    stop_wait=0
-    while command -v pgrep >/dev/null 2>&1 && pgrep -f 'node-red' >/dev/null 2>&1 && [ "$stop_wait" -lt 30 ]; do
-        sleep 1
-        stop_wait=$((stop_wait + 1))
-    done
-    if command -v pgrep >/dev/null 2>&1 && pgrep -f 'node-red' >/dev/null 2>&1; then
-        echo "ERROR: Node-RED did not stop within 30s; refusing schema migration" >&2
+    NODE_RED_STOP_TIMEOUT="${NODE_RED_STOP_TIMEOUT:-30}"
+    case "$NODE_RED_STOP_TIMEOUT" in
+        ''|*[!0-9]*|0) NODE_RED_STOP_TIMEOUT=30 ;;
+    esac
+    if wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"; then
+        :
+    else
+        stop_wait_rc=$?
+        if [ "$stop_wait_rc" = "1" ]; then
+            echo "ERROR: Node-RED service did not stop within ${NODE_RED_STOP_TIMEOUT}s; refusing schema migration" >&2
+        else
+            echo "ERROR: could not determine Node-RED service state after stop; refusing schema migration" >&2
+        fi
         return 1
     fi
 
@@ -1524,23 +1626,21 @@ NODE_RED_HEALTH_TIMEOUT="${NODE_RED_HEALTH_TIMEOUT:-30}"
 case "$NODE_RED_HEALTH_TIMEOUT" in
     ''|*[!0-9]*|0) NODE_RED_HEALTH_TIMEOUT=30 ;;
 esac
-probe_elapsed=0
-while [ "$probe_elapsed" -lt "$NODE_RED_HEALTH_TIMEOUT" ]; do
-    if pgrep -f 'node-red' >/dev/null 2>&1 && \
-       wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
-        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable after ${probe_elapsed}s)"
-        PROBE_OK=0
-        break
+if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then
+    echo "OK: local health self-check PASSED (Node-RED service running, /gui reachable after ${probe_elapsed}s)"
+    PROBE_OK=0
+else
+    health_wait_rc=$?
+    if [ "$health_wait_rc" = "2" ]; then
+        echo "ALERT: could not determine Node-RED service state during local health self-check" >&2
     fi
-    sleep 1
-    probe_elapsed=$((probe_elapsed + 1))
-done
+fi
 if [ "$PROBE_OK" != "0" ]; then
-    if pgrep -f 'node-red' >/dev/null 2>&1; then
-        echo "WARN: Node-RED process alive but /gui not reachable after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
-    else
-        echo "ALERT: Node-RED process not found after ${NODE_RED_HEALTH_TIMEOUT}s" >&2
-    fi
+    case "$node_red_state" in
+        running) echo "WARN: Node-RED service is running but /gui was not reachable within ${NODE_RED_HEALTH_TIMEOUT}s" >&2 ;;
+        stopped) echo "ALERT: Node-RED service is stopped after ${NODE_RED_HEALTH_TIMEOUT}s" >&2 ;;
+        *) echo "ALERT: Node-RED service state is unknown; local health self-check failed closed" >&2 ;;
+    esac
 fi
 
 # osi-os stabilization program, PR-L / external consult Q1 fix 2 (PR #242

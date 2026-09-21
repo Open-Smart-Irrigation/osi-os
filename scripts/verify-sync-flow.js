@@ -3144,7 +3144,7 @@ expectFileIncludes('deploy.sh', deployScript, 'rm -rf "$entry"', 'removes stale 
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration()', 'defines the deploy-time schema migration runner');
 expectFileIncludes('deploy.sh', deployScript, 'opkg install sqlite3-cli', 'provisions sqlite3-cli before running migrations');
-expectFileIncludes('deploy.sh', deployScript, "pgrep -f 'node-red'", 'verifies Node-RED has stopped before migrating');
+expectFileIncludes('deploy.sh', deployScript, 'wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"', 'verifies the named Node-RED service has stopped before migrating');
 expectFileExcludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'inline dendrometer retracted-ratio deploy repair');
 expectFileExcludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'inline dendrometer extended-ratio deploy repair');
 expectFileExcludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'inline dendrometer retracted-ratio deploy backfill');

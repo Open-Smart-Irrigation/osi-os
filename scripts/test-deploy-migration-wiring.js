@@ -62,7 +62,8 @@ test('deploy migration wiring fetches the runner, Stage 0 helpers, and semantic 
 
 test('deploy migration wiring stops writers, checkpoints WAL, baselines, and applies in order', () => {
   const stopIdx = indexOf('/etc/init.d/node-red stop');
-  const pgrepIdx = indexOf("pgrep -f 'node-red'");
+  const serviceStateIdx = indexOf('node_red_service_state()');
+  const stopStateIdx = deploy.indexOf('wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"', stopIdx);
   const firstCheckpointIdx = indexOf('if ! checkpoint_live_db; then');
   const ledgerIdx = indexOf("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;");
   const ledgerRowsIdx = indexOf('SELECT COUNT(*) FROM schema_migrations;');
@@ -72,7 +73,8 @@ test('deploy migration wiring stops writers, checkpoints WAL, baselines, and app
   const migrateIdx = indexOf('node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"');
 
   assert.ok(stopIdx < firstCheckpointIdx, 'Node-RED must stop before checkpointing');
-  assert.ok(stopIdx < pgrepIdx && pgrepIdx < firstCheckpointIdx, 'Node-RED process poll must precede checkpointing');
+  assert.ok(serviceStateIdx < stopIdx, 'the named service-state helper must be defined before the stop gate');
+  assert.ok(stopIdx < stopStateIdx && stopStateIdx < firstCheckpointIdx, 'Node-RED service-state poll must precede checkpointing');
   assert.ok(firstCheckpointIdx < ledgerIdx, 'checkpoint must precede ledger inspection');
   assert.ok(ledgerIdx < ledgerRowsIdx, 'ledger presence check must precede row-count inspection');
   assert.ok(ledgerRowsIdx < repairIdx, 'pre-baseline repair only runs after ledger row-count inspection');
@@ -284,14 +286,14 @@ test('deploy migration wiring: a boot-node "devices rebuild ABORTED" log line du
   const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
   const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
   const logMarkIdx = indexOf('NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"');
-  const probeLoopIdx = indexOf('while [ "$probe_elapsed" -lt "$NODE_RED_HEALTH_TIMEOUT" ]; do');
+  const probeCallIdx = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
   const grepIdx = indexOf('grep -q "devices rebuild ABORTED"');
   const overrideIdx = deploy.indexOf('PROBE_OK=1', grepIdx);
   const commitDecisionIdx = deploy.indexOf('if [ "$PROBE_OK" = "0" ]; then\n    echo "OK: committing payload $DEPLOY_STAMP"');
 
   assert.ok(logMarkIdx >= 0 && logMarkIdx < restartIdx, 'the log line count must be captured BEFORE the restart, so only new lines from this restart are considered');
-  assert.ok(restartIdx < probeLoopIdx, 'restart still precedes the /gui reachability probe loop');
-  assert.ok(probeLoopIdx < grepIdx, 'the abort-log check runs after the reachability probe loop has settled PROBE_OK');
+  assert.ok(restartIdx < probeCallIdx, 'restart still precedes the /gui reachability wait');
+  assert.ok(probeCallIdx < grepIdx, 'the abort-log check runs after the reachability wait has settled PROBE_OK');
   assert.ok(grepIdx < overrideIdx && overrideIdx < commitDecisionIdx, 'a found abort log line must flip PROBE_OK back to failing BEFORE the commit/rollback decision');
   assert.match(deploy, /tail -n "\+\$\(\(NODE_RED_LOG_MARK \+ 1\)\)"/, 'must only scan log lines appended since the mark (busybox tail -n +N), never the whole ring including stale prior aborts');
 });
