@@ -103,7 +103,7 @@ async function openCard(devices: Device[]) {
       <IrrigationZoneCard zone={zone} devices={devices} unassignedDevices={[]} onUpdate={vi.fn()} />
     </MemoryRouter>,
   );
-  fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+  fireEvent.click(screen.getByRole('button', { expanded: false }));
   await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
   await screen.findByTestId('water-today-card');
 }
@@ -329,7 +329,7 @@ describe('water card source gating', () => {
         <IrrigationZoneCard zone={zone} devices={[]} unassignedDevices={[]} onUpdate={vi.fn()} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
     await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
 
     expect(screen.queryByTestId('water-today-card')).not.toBeInTheDocument();
@@ -391,7 +391,7 @@ describe('soil tile channel and verdict', () => {
         <IrrigationZoneCard zone={scheduledZone} devices={devices} unassignedDevices={[]} onUpdate={vi.fn()} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
     await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
     await screen.findByTestId('water-today-card');
   }
@@ -450,7 +450,7 @@ describe('soil tile channel and verdict', () => {
         <IrrigationZoneCard zone={dendroZone} devices={[sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]} unassignedDevices={[]} onUpdate={vi.fn()} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
     await screen.findByTestId('water-today-card');
 
     const tile = screen.getByTestId('water-soil-tile');

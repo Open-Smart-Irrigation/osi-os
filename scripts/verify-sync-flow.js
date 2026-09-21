@@ -2269,6 +2269,14 @@ expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT', 'in
 expectCalibrationCreateTableParity();
 expectFileIncludes('api.ts', reactGuiApiSource, 'updateCalibration: async (zoneId: number', 'adds a shared client helper for zone irrigation calibration');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/irrigation-zones/${zoneId}/calibration`, payload);", 'targets the local zone irrigation calibration endpoint');
+expectFileIncludes('api.ts', reactGuiApiSource, 'rename: async (zoneId: number, name: string)', 'adds a shared client helper for zone rename');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put<ZoneRenameResult>(`/api/irrigation-zones/${zoneId}/name`, { name });", 'targets the local zone rename endpoint');
+expectFileIncludes('api.ts', reactGuiApiSource, 'rename: async (deveui: string, name: string)', 'adds a shared client helper for device rename');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put<DeviceRenameResult>(`/api/devices/${deveui}/name`, { name });", 'targets the local device rename endpoint');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '<EditableName', 'renames the zone from its card heading');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'irrigationZonesAPI.rename(zone.id,', 'sends the zone rename through the shared client helper');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, '<EditableName', 'renames the device from the Kiwi card heading');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, 'devicesAPI.rename(device.deveui,', 'sends the device rename through the shared client helper');
 expectFileIncludes('farming.ts', farmingTypesSource, 'irrigationTodayMeasuredLiters', 'types measured irrigation separately from estimated irrigation');
 expectFileIncludes('farming.ts', farmingTypesSource, 'irrigationTodayEstimatedLiters', 'types estimated irrigation separately from measured irrigation');
 expectFileExcludes('WaterTab.tsx', fs.readFileSync(path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'WaterTab.tsx'), 'utf8'), 'irrigationTodayMeasuredLiters ?? water.irrigationTodayLiters', 'legacy mixed irrigation fallback under the measured label');

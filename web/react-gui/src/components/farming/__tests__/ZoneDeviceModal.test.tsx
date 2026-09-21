@@ -223,4 +223,17 @@ describe('ZoneDeviceModal', () => {
 
     await screen.findByText('ChirpStack unreachable');
   });
+
+  it('sends a trimmed device name from the zone modal', async () => {
+    renderModal();
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    await screen.findByLabelText('addModal.deviceName');
+
+    fireEvent.change(screen.getByLabelText('addModal.deveui'), { target: { value: '70B3D5E75E004202' } });
+    fireEvent.change(screen.getByLabelText('addModal.deviceName'), { target: { value: '  Row 4  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'zoneDeviceModal.registerSubmit' }));
+
+    await waitFor(() =>
+      expect(devicesAPI.add).toHaveBeenCalledWith(expect.objectContaining({ name: 'Row 4' })));
+  });
 });

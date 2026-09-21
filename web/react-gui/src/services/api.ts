@@ -107,6 +107,45 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+export interface ZoneRenameResult {
+  id: number;
+  zone_uuid: string;
+  name: string;
+  sync_version: number;
+  changed: boolean;
+}
+
+export interface DeviceRenameResult {
+  deveui: string;
+  name: string;
+  sync_version: number;
+  changed: boolean;
+  /** `skipped` when nothing changed or provisioning is not configured. */
+  chirpstack: 'updated' | 'failed' | 'skipped';
+}
+
+/** An Error that also carries the `reason` code from a 400 rename response. */
+export interface EntityRenameError extends Error {
+  reason?: string;
+}
+
+/**
+ * The rename routes answer `400 { message, reason }`. getApiErrorMessage
+ * already lifts `message`; EditableName also needs the machine-readable
+ * `reason` so it can show a translated sentence instead of the route's English.
+ * Both travel on one Error, which keeps axios out of the component.
+ */
+function toRenameError(error: unknown, fallback: string): EntityRenameError {
+  const mapped: EntityRenameError = new Error(getApiErrorMessage(error, fallback));
+  if (axios.isAxiosError<{ reason?: unknown }>(error)) {
+    const reason = error.response?.data?.reason;
+    if (typeof reason === 'string' && reason.length > 0) {
+      mapped.reason = reason;
+    }
+  }
+  return mapped;
+}
+
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL: '/', // Vite proxy will forward to localhost:1880
@@ -381,6 +420,15 @@ export const devicesAPI = {
   remove: async (deveui: string): Promise<void> => {
     await api.delete(`/api/devices/${deveui}`);
   },
+
+  rename: async (deveui: string, name: string): Promise<DeviceRenameResult> => {
+    try {
+      const response = await api.put<DeviceRenameResult>(`/api/devices/${deveui}/name`, { name });
+      return response.data;
+    } catch (error) {
+      throw toRenameError(error, 'Failed to rename device');
+    }
+  },
 };
 
 export interface InstallationLocationRevision {
@@ -526,6 +574,15 @@ export const irrigationZonesAPI = {
 
   delete: async (zoneId: number): Promise<void> => {
     await api.delete(`/api/irrigation-zones/${zoneId}`);
+  },
+
+  rename: async (zoneId: number, name: string): Promise<ZoneRenameResult> => {
+    try {
+      const response = await api.put<ZoneRenameResult>(`/api/irrigation-zones/${zoneId}/name`, { name });
+      return response.data;
+    } catch (error) {
+      throw toRenameError(error, 'Failed to rename zone');
+    }
   },
 
   assignDevice: async (zoneId: number, deveui: string): Promise<void> => {

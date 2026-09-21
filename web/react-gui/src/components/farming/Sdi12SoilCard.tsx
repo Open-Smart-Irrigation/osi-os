@@ -2,7 +2,9 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Device } from '../../types/farming';
+import { devicesAPI } from '../../services/api';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { formatSwtValue, kpaToPf } from '../../utils/swt';
@@ -12,10 +14,18 @@ import { formatSwtValue, kpaToPf } from '../../utils/swt';
 // only; the devices.sdi12_probe_status CHECK constraint has no such value.
 const SDI12_IDENTIFY_TIMEOUT_MINUTES = 15;
 
+// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
+// then they're absent from en_devices and react-i18next's typed t() overload
+// rejects them at compile time. Same drift, same fix as EditableName.tsx
+// documents in full: a compile-time-only cast, no runtime defaultValue,
+// removed once Task 14 lands the keys.
+type TranslationKey = any;
+
 interface Sdi12SoilCardProps {
   device: Device;
   onOpenSettings?: () => void;
   onRemove?: () => void;
+  onUpdate?: () => void;
   readOnly?: boolean;
   /** Required: 'zone' detaches from the zone only, 'farm' unlinks from the account. */
   removeContext: DeviceRemoveContext;
@@ -79,10 +89,16 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   device,
   onOpenSettings,
   onRemove,
+  onUpdate,
   readOnly = false,
   removeContext,
 }) => {
   const { t } = useTranslation('devices');
+
+  const handleRename = async (nextName: string) => {
+    await devicesAPI.rename(device.deveui, nextName);
+    onUpdate?.();
+  };
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
   const data = device.latest_data ?? {};
   const status = device.sdi12_probe_status ?? 'unknown';
@@ -122,9 +138,14 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="flex items-center justify-between gap-2 mb-0.5">
-        <h3 className="text-base font-semibold text-[var(--text)] truncate leading-tight">
-          {device.name}
-        </h3>
+        <EditableName
+          name={device.name}
+          canEdit={!readOnly}
+          onSave={handleRename}
+          renameLabel={t('rename.device' as TranslationKey)}
+          inputLabel={t('rename.deviceInputLabel' as TranslationKey)}
+          headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
+        />
         <div className="flex items-center gap-1.5 shrink-0">
           <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             SDI-12

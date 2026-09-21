@@ -3,6 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { devicesAPI, irrigationZonesAPI } from '../../services/api';
 import type { Device, DeviceCatalogItem, DeviceType } from '../../types/farming';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
+import { normalizeEntityName } from '../../utils/entityName';
+
+// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
+// then they're absent from en_devices and react-i18next's typed t() overload
+// rejects them at compile time. Same drift, same fix as EditableName.tsx
+// documents in full: a compile-time-only cast, no runtime defaultValue,
+// removed once Task 14 lands the keys.
+type TranslationKey = any;
 
 interface ZoneDeviceModalProps {
   isOpen: boolean;
@@ -119,6 +127,12 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
       return;
     }
 
+    const normalized = normalizeEntityName(name);
+    if (!normalized.ok) {
+      setError(t(`rename.reason.${normalized.reason}` as TranslationKey));
+      return;
+    }
+
     if (catalog.length === 0 || !selectedType) {
       setError(t('addModal.deviceTypeRequired', 'Select a device type'));
       return;
@@ -132,7 +146,7 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
       const typeId = selectedType;
       await devicesAPI.add({
         deveui,
-        name,
+        name: normalized.name,
         type_id: typeId,
         appkey: appkey || undefined,
         zone_id: zoneId,

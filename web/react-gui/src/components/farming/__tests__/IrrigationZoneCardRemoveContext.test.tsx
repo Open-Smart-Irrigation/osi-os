@@ -108,7 +108,7 @@ function renderZone(devices: Device[]) {
     </MemoryRouter>,
   );
   // The whole zone body and then the device grid are both collapsed by default.
-  fireEvent.click(screen.getByRole('heading', { name: zone.name }));
+  fireEvent.click(screen.getByRole('button', { expanded: false }));
   fireEvent.click(screen.getByText('Devices in zone'));
 }
 

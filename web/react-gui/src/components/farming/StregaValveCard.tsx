@@ -5,8 +5,16 @@ import { devicesAPI, stregaAPI, valveAPI, type IrrigationActuation } from '../..
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { EditableName } from './shared/EditableName';
 import { formatTime } from '../../utils/datetime';
 import ValveCancelButton from './ValveCancelButton';
+
+// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
+// then they're absent from en_devices and react-i18next's typed t() overload
+// rejects them at compile time. Same drift, same fix as EditableName.tsx
+// documents in full: a compile-time-only cast, no runtime defaultValue,
+// removed once Task 14 lands the keys.
+type TranslationKey = any;
 
 interface StregaValveCardProps {
   device: Device;
@@ -736,6 +744,11 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   const { t, i18n } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const { t: tv } = useTranslation('valves');
+
+  const handleRename = async (nextName: string) => {
+    await devicesAPI.rename(device.deveui, nextName);
+    onUpdate();
+  };
   const [loading, setLoading] = useState<'OPEN' | null>(null);
   // One tap must not move water. The Valve control panel already requires an explicit
   // confirm (ValveOpenDialog); this card went straight to controlValve, so the same valve
@@ -837,9 +850,14 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--focus)] rounded-xl p-4 shadow-sm transition-colors">
       <div className="flex items-center justify-between gap-2 mb-0.5">
-        <h3 className="text-base font-semibold text-[var(--text)] truncate leading-tight">
-          {device.name}
-        </h3>
+        <EditableName
+          name={device.name}
+          canEdit={!readOnly}
+          onSave={handleRename}
+          renameLabel={t('rename.device' as TranslationKey)}
+          inputLabel={t('rename.deviceInputLabel' as TranslationKey)}
+          headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
+        />
         <div className="flex items-center gap-1.5 shrink-0 relative">
           <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             {t('stregaValve.badge')}

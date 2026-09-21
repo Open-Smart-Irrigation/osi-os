@@ -85,6 +85,8 @@ function renderTile() {
       onSettings={vi.fn()}
       onService={vi.fn()}
       onDelete={vi.fn()}
+      canEdit
+      onRename={vi.fn()}
       busy={false}
     />,
   );
@@ -137,6 +139,8 @@ describe('valve enclosure climate', () => {
         onSettings={vi.fn()}
         onService={vi.fn()}
         onDelete={vi.fn()}
+        canEdit
+        onRename={vi.fn()}
         busy={false}
       />,
     );

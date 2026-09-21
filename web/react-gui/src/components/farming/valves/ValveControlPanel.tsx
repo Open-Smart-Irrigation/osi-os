@@ -13,6 +13,8 @@ import { ValveServiceDialog } from './ValveServiceDialog';
 
 export interface ValveControlPanelProps {
   onUpdate: () => void;
+  /** False for a role that cannot mutate; hides the tiles' rename pencils. */
+  canWrite?: boolean;
   // I-1 (final fix wave review): ValveSummary (GET /api/valves) carries no battery
   // field -- only Device.latest_data does -- so the caller must build this from the device
   // list it already polls and key it by deviceEui (uppercased, matching normaliseValveSummary/
@@ -25,7 +27,7 @@ type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
 
 const valvesFetcher = () => valvesAPI.list();
 
-export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, batteryByEui }) => {
+export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, canWrite = true, batteryByEui }) => {
   const { t } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
 
@@ -67,6 +69,14 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
   const refresh = async () => {
     await mutate();
     onUpdate();
+  };
+
+  // Deliberately not routed through runAction: that helper swallows the error
+  // into the panel's own banner, and EditableName needs the rejection so it can
+  // show the route's reason under the input.
+  const handleRename = async (eui: string, nextName: string) => {
+    await devicesAPI.rename(eui, nextName);
+    await refresh();
   };
 
   const handleOpenSubmit = async (minutes: number) => {
@@ -185,6 +195,8 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
               onResume={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'ACTIVE'))}
               onResend={() => runAction(valve.deviceEui, () => valvesAPI.resendPlan(valve.deviceEui))}
               onDelete={() => runAction(valve.deviceEui, () => devicesAPI.remove(valve.deviceEui))}
+              canEdit={canWrite}
+              onRename={(nextName: string) => handleRename(valve.deviceEui, nextName)}
               batteryPercent={batteryByEui?.get(valve.deviceEui)?.batPct}
               batteryVoltage={batteryByEui?.get(valve.deviceEui)?.batV}
             />

@@ -2,14 +2,24 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Device } from '../../types/farming';
+import { devicesAPI } from '../../services/api';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
+
+// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
+// then they're absent from en_devices and react-i18next's typed t() overload
+// rejects them at compile time. Same drift, same fix as EditableName.tsx
+// documents in full: a compile-time-only cast, no runtime defaultValue,
+// removed once Task 14 lands the keys.
+type TranslationKey = any;
 
 interface LoRainGaugeCardProps {
   device: Device;
   onRemove?: () => void;
+  onUpdate?: () => void;
   readOnly?: boolean;
   /** Required: 'zone' detaches from the zone only, 'farm' unlinks from the account. */
   removeContext: DeviceRemoveContext;
@@ -73,10 +83,16 @@ function formatCounterStatus(status: string | null | undefined): string | null {
 export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   device,
   onRemove,
+  onUpdate,
   readOnly = false,
   removeContext,
 }) => {
   const { t } = useTranslation('devices');
+
+  const handleRename = async (nextName: string) => {
+    await devicesAPI.rename(device.deveui, nextName);
+    onUpdate?.();
+  };
   const data = device.latest_data ?? {};
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
   const [sensorMonitor, setSensorMonitor] = useState<SensorMonitorConfig | null>(null);
@@ -104,7 +120,14 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="mb-0.5 flex items-center justify-between gap-2">
-        <h3 className="truncate text-base font-semibold leading-tight text-[var(--text)]">{device.name}</h3>
+        <EditableName
+          name={device.name}
+          canEdit={!readOnly}
+          onSave={handleRename}
+          renameLabel={t('rename.device' as TranslationKey)}
+          inputLabel={t('rename.deviceInputLabel' as TranslationKey)}
+          headingClassName="truncate text-base font-semibold leading-tight text-[var(--text)]"
+        />
         <div className="flex shrink-0 items-center gap-1.5">
           <span className="rounded-md bg-cyan-100 px-2 py-0.5 text-xs font-semibold tracking-wide text-cyan-800">
             LoRain

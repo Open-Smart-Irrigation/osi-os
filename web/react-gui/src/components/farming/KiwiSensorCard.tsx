@@ -1,14 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Device } from '../../types/farming';
-import { deviceMetadataAPI, kiwiAPI } from '../../services/api';
+import { deviceMetadataAPI, devicesAPI, kiwiAPI } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { canonicalSwtChannels, formatSwtValue } from '../../utils/swt';
+
+// Task 14 lands the `rename.*` keys in public/locales/*/devices.json; until
+// then they're absent from en_devices and react-i18next's typed t() overload
+// rejects them at compile time. Same drift, same fix as EditableName.tsx
+// documents in full: a compile-time-only cast, no runtime defaultValue,
+// removed once Task 14 lands the keys.
+type TranslationKey = any;
 
 interface KiwiSensorCardProps {
   device: Device;
@@ -319,6 +327,11 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
 }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
+
+  const handleRename = async (nextName: string) => {
+    await devicesAPI.rename(device.deveui, nextName);
+    onUpdate?.();
+  };
   const { light_lux, ambient_temperature, relative_humidity } = device.latest_data;
   const [swt1, swt2] = canonicalSwtChannels(device.latest_data);
   const { swtUnit } = useDisplayPreferences();
@@ -350,9 +363,14 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
   return (
     <div className="rounded-xl p-4 border shadow-sm transition-colors bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
       <div className="flex items-center justify-between gap-2 mb-0.5">
-        <h3 className="text-base font-semibold text-[var(--text)] truncate leading-tight">
-          {device.name}
-        </h3>
+        <EditableName
+          name={device.name}
+          canEdit={!readOnly}
+          onSave={handleRename}
+          renameLabel={t('rename.device' as TranslationKey)}
+          inputLabel={t('rename.deviceInputLabel' as TranslationKey)}
+          headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
+        />
         <div className="flex items-center gap-1.5 shrink-0 relative">
           <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             {t('kiwiSensor.badge')}
