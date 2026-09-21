@@ -8,6 +8,7 @@
 // Run: node --test scripts/test-entity-name-create-paths.js
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 const {
   executeFunction,
@@ -15,6 +16,15 @@ const {
   makeAuthHeader,
   seedScopedDb,
 } = require('./lib/scoped-access-harness');
+
+// scoped-zone-create-router calls osiLib.require('scope') before it ever
+// reaches the entity-name seam, so a test that fakes an unloadable
+// entity-name module for that node must still hand it a real scope module
+// (this is the SAME real module scripts/test-scoped-access-writes.js and
+// friends require directly for the same reason).
+const REAL_SCOPE_MODULE = require(path.join(
+  __dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper'
+));
 
 const AUTH_SECRET = 'entity-name-create-paths-test-secret';
 const FLAG_OFF = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' };
@@ -374,6 +384,199 @@ test('T4-W1: a rule-breaking command name still falls back to the DevEUI and nev
     assert.equal(run.result[0].specialAck.result, 'SUCCESS', JSON.stringify(run.result[0] && run.result[0].specialAck));
     assert.equal(capturedRegistration.name, '70B3D57ED006AAAA');
     assert.equal(db.prepare('SELECT name FROM devices WHERE deveui = ?').get('70B3D57ED006AAAA').name, '70B3D57ED006AAAA');
+  } finally {
+    db.close();
+  }
+});
+
+// --- Fix round 1 (reviewer findings I1/I2 on the three HTTP nodes; T9-M4) -
+//
+// I1: normalizeEntityName is only ever documented to throw one of the four
+// reviewed reason codes (osi-entity-name/index.js). A throw with any other
+// (or no) .code is a server-side fault, not a bad request, and must answer
+// 500 with an English message and no `reason` key -- the same shape
+// zone-rename-fn/device-rename-fn already carry (T6-M3 precedent below).
+//
+// I2: node.error(text, msg) in a handler that answers msg.res itself races
+// the tab-wide catch node (device-api-catch -> device-api-http500), which
+// would also try to answer the same msg.res with the raw internal error
+// text. The harness's node.error stub ignores a second argument, so these
+// tests cannot catch a reintroduced `, msg` by themselves -- that pin lives
+// in scripts/verify-sync-flow.js. What these tests DO prove: the response
+// payload never carries anything beyond the node's own English message.
+
+function entityNameThrowsCodeless() {
+  return {
+    normalizeEntityName: () => { throw new Error('unexpected internal failure'); }, // no .code at all
+  };
+}
+
+// A name-aware osiLib stub: real scope (scoped-zone-create-router needs it
+// to get past its own guard before ever reaching the name seam), faked
+// entity-name failure.
+function entityNameUnavailableOsiLib() {
+  return {
+    require: (name) => {
+      if (name === 'entity-name') return { ok: false, error: 'entity-name module unavailable (test)' };
+      if (name === 'scope') return { ok: true, value: REAL_SCOPE_MODULE };
+      return { ok: false, error: 'unexpected osiLib.require: ' + name };
+    },
+  };
+}
+
+test('F1(a): post-zone-auth answers 500 with no reason key when normalizeEntityName throws without a .code', async () => {
+  const db = seedScopedDb();
+  try {
+    const run = await executeFunction(loadNode('post-zone-auth'), {
+      msg: {
+        req: { method: 'POST', path: '/api/irrigation-zones', headers: { authorization: token() }, params: {}, body: { name: 'Anything' } },
+        payload: { name: 'Anything' },
+      },
+      env: FLAG_OFF,
+      db,
+      osiLibModules: { 'entity-name': entityNameThrowsCodeless() },
+    });
+    assert.equal(run.result[0], null);
+    assert.equal(run.result[1].statusCode, 500, JSON.stringify(run.result[1].payload));
+    assert.equal(typeof run.result[1].payload.message, 'string');
+    assert.equal('reason' in run.result[1].payload, false, 'a 500 must not carry a name-validation reason code');
+    assert.equal(run.flowState.new_zone_name, undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('F1(a): post-devices-auth answers 500 with no reason key when normalizeEntityName throws without a .code', async () => {
+  const db = seedScopedDb();
+  try {
+    const body = { deveui: '70B3D57ED0061234', name: 'Anything', type_id: 'KIWI_SENSOR', appkey: 'A'.repeat(32) };
+    const run = await executeFunction(loadNode('post-devices-auth'), {
+      msg: {
+        req: { method: 'POST', path: '/api/devices', headers: { authorization: token() }, params: {}, body },
+        payload: body,
+      },
+      env: FLAG_OFF,
+      db,
+      osiLibModules: { 'entity-name': entityNameThrowsCodeless() },
+    });
+    assert.equal(run.result[0], null);
+    assert.equal(run.result[1].statusCode, 500, JSON.stringify(run.result[1].payload));
+    assert.equal(typeof run.result[1].payload.message, 'string');
+    assert.equal('reason' in run.result[1].payload, false, 'a 500 must not carry a name-validation reason code');
+    assert.equal(run.flowState.new_device_name, undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('F1(a): scoped-zone-create-router answers 500 with no reason key when normalizeEntityName throws without a .code', async () => {
+  const db = seedScopedDb();
+  const before = db.prepare('SELECT count(*) n FROM irrigation_zones').get().n;
+  try {
+    const run = await executeFunction(loadNode('scoped-zone-create-router'), {
+      msg: {
+        req: { method: 'POST', path: '/api/irrigation-zones', headers: { authorization: token() }, params: {}, body: { name: 'Anything' } },
+        payload: { name: 'Anything' },
+      },
+      env: FLAG_ON,
+      db,
+      osiLibModules: { 'entity-name': entityNameThrowsCodeless() },
+    });
+    assert.equal(run.result[1].statusCode, 500, JSON.stringify(run.result[1].payload));
+    assert.equal(typeof run.result[1].payload.message, 'string');
+    assert.equal('reason' in run.result[1].payload, false, 'a 500 must not carry a name-validation reason code');
+    assert.equal(db.prepare('SELECT count(*) n FROM irrigation_zones').get().n, before);
+  } finally {
+    db.close();
+  }
+});
+
+test('F1(b): post-zone-auth answers 500 with no internal text when the entity-name helper cannot be loaded', async () => {
+  const db = seedScopedDb();
+  try {
+    const run = await executeFunction(loadNode('post-zone-auth'), {
+      msg: {
+        req: { method: 'POST', path: '/api/irrigation-zones', headers: { authorization: token() }, params: {}, body: { name: 'Anything' } },
+        payload: { name: 'Anything' },
+      },
+      env: FLAG_OFF,
+      db,
+      libOverrides: { osiLib: entityNameUnavailableOsiLib() },
+    });
+    assert.equal(run.result[0], null);
+    assert.equal(run.result[1].statusCode, 500, JSON.stringify(run.result[1].payload));
+    assert.equal(run.result[1].payload.message, 'Entity name helper unavailable');
+    assert.doesNotMatch(run.result[1].payload.message, /unavailable \(test\)/, 'the response must never carry the internal osiLib.require error text');
+    assert.equal(run.flowState.new_zone_name, undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('F1(b): post-devices-auth answers 500 with no internal text when the entity-name helper cannot be loaded', async () => {
+  const db = seedScopedDb();
+  try {
+    const body = { deveui: '70B3D57ED0061234', name: 'Anything', type_id: 'KIWI_SENSOR', appkey: 'A'.repeat(32) };
+    const run = await executeFunction(loadNode('post-devices-auth'), {
+      msg: {
+        req: { method: 'POST', path: '/api/devices', headers: { authorization: token() }, params: {}, body },
+        payload: body,
+      },
+      env: FLAG_OFF,
+      db,
+      libOverrides: { osiLib: entityNameUnavailableOsiLib() },
+    });
+    assert.equal(run.result[0], null);
+    assert.equal(run.result[1].statusCode, 500, JSON.stringify(run.result[1].payload));
+    assert.equal(run.result[1].payload.message, 'Entity name helper unavailable');
+    assert.doesNotMatch(run.result[1].payload.message, /unavailable \(test\)/, 'the response must never carry the internal osiLib.require error text');
+    assert.equal(run.flowState.new_device_name, undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('F1(b): scoped-zone-create-router answers 500 with no internal text when the entity-name helper cannot be loaded', async () => {
+  const db = seedScopedDb();
+  const before = db.prepare('SELECT count(*) n FROM irrigation_zones').get().n;
+  try {
+    const run = await executeFunction(loadNode('scoped-zone-create-router'), {
+      msg: {
+        req: { method: 'POST', path: '/api/irrigation-zones', headers: { authorization: token() }, params: {}, body: { name: 'Anything' } },
+        payload: { name: 'Anything' },
+      },
+      env: FLAG_ON,
+      db,
+      libOverrides: { osiLib: entityNameUnavailableOsiLib() },
+    });
+    assert.equal(run.result[1].statusCode, 500, JSON.stringify(run.result[1].payload));
+    assert.equal(run.result[1].payload.message, 'Entity name helper unavailable');
+    assert.doesNotMatch(run.result[1].payload.message, /unavailable \(test\)/, 'the response must never carry the internal osiLib.require error text');
+    assert.equal(db.prepare('SELECT count(*) n FROM irrigation_zones').get().n, before);
+  } finally {
+    db.close();
+  }
+});
+
+test('T9-M4: post-zone-auth answers "Zone name is required" with reason name_empty for an empty name', async () => {
+  const db = seedScopedDb();
+  try {
+    const run = await callZoneAuth(db, '');
+    assert.equal(run.result[1].statusCode, 400, JSON.stringify(run.result[1].payload));
+    assert.equal(run.result[1].payload.message, 'Zone name is required');
+    assert.equal(run.result[1].payload.reason, 'name_empty');
+  } finally {
+    db.close();
+  }
+});
+
+test('T9-M4: scoped-zone-create-router answers "Zone name is required" with reason name_empty for an empty name', async () => {
+  const db = seedScopedDb();
+  try {
+    const run = await callScopedZoneCreate(db, '');
+    assert.equal(run.result[1].statusCode, 400, JSON.stringify(run.result[1].payload));
+    assert.equal(run.result[1].payload.message, 'Zone name is required');
+    assert.equal(run.result[1].payload.reason, 'name_empty');
   } finally {
     db.close();
   }

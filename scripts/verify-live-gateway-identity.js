@@ -1271,9 +1271,25 @@ if (sizeAllowances) {
   // ", name" on the existing SELECT instead of a second query and an early write/catch) and
   // scoped-zone-create-router 3962 -> 4422 (+460, unchanged) -- verify-flows-size-ratchet
   // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1567483 = +27856.
-  expectCondition(sizeAllowances.total_allowance?.delta === 69059,
-    'size total allowance: exact cumulative delta 69059',
-    'size total allowance: expected exact cumulative delta 69059');
+  // 70504: 2026-09-22 zone-device-rename-stage-1 Task 9 fix round 1 (reviewer findings I1/I2 on
+  // post-zone-auth, post-devices-auth and scoped-zone-create-router; controller ruling T9-M4).
+  // I1: a NAME_REASON_CODES allowlist (matching zone-rename-fn/device-rename-fn) means only the
+  // four reviewed normalizeEntityName reason codes reach a 400; any other or missing .code is a
+  // 500 with no reason key. I2: every name-rule node.error call in these three nodes drops the
+  // `, msg` argument -- with it, the tab-wide catch node races the node's own response on the
+  // same msg.res and can leak internal error text to the client. T9-M4: name_empty answers 'Zone
+  // name is required' on the two zone-create nodes only (post-devices-auth unchanged). cs-reg-cloud-fn
+  // is untouched this round. Re-reads the standing 41203 from origin/main (unchanged) and raises
+  // it by the 29301 chars measured for the whole branch: the same five Task 6-8 new nodes and five
+  // Task 8 registry/capability deltas above, unchanged (=25276), cs-reg-cloud-fn 19838 -> 20980
+  // (+1142, unchanged from the T4-W1 correction), post-zone-auth 5468 -> 6385 (+917, inside its
+  // existing 1947 headroom), post-devices-auth 6218 -> 7217 (+999, inside its existing 1953
+  // headroom) and scoped-zone-create-router 3962 -> 4929 (+967, exceeding its prior +460
+  // node_allowances entry, which this round supersedes) -- verify-flows-size-ratchet totalChars
+  // over both byte-identical profiles: origin/main 1539627 -> HEAD 1568928 = +29301.
+  expectCondition(sizeAllowances.total_allowance?.delta === 70504,
+    'size total allowance: exact cumulative delta 70504',
+    'size total allowance: expected exact cumulative delta 70504');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);

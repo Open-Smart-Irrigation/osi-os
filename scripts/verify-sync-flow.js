@@ -3834,12 +3834,47 @@ expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', successExtras
 // database).
 expectLibById('cs-reg-cloud-fn', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
 expectIncludesById('post-zone-auth', "osiLib.require('entity-name')", 'applies the shared name rule to zone creation');
-expectIncludesById('post-zone-auth', "reason: String(nameError && nameError.code", 'returns the zone name reason code on a 400');
 expectExcludesById('post-zone-auth', "if (!name || name.trim() === '') {", 'the ad hoc zone-name check');
 expectIncludesById('scoped-zone-create-router', "osiLib.require('entity-name')", 'applies the shared name rule to scoped zone creation');
 expectIncludesById('scoped-zone-create-router', 'if (error && error.reason) msg.payload.reason = String(error.reason);', 'surfaces the name reason code on a scoped 400');
 expectIncludesById('post-devices-auth', "osiLib.require('entity-name')", 'applies the shared name rule to device creation');
 expectIncludesById('post-devices-auth', "flow.set('new_device_name', normalizedDeviceName);", 'hands post-devices-insert the normalized device name');
+
+// Fix round 1 (reviewer findings I1/I2 on the three HTTP create-path nodes;
+// controller ruling T9-M4). I1: only the four reviewed normalizeEntityName
+// reason codes reach a 400 (matching zone-rename-fn/device-rename-fn's own
+// NAME_REASON_CODES shape) -- any other or missing .code is a server fault,
+// answered 500 with no `reason` key. I2: every node.error call these three
+// nodes make for the name rule takes ONE argument -- with `msg`, Node-RED
+// would hand the tab-wide catch node (device-api-catch -> device-api-http500)
+// the same msg.res this node is about to answer itself, and that catch
+// node's body includes the raw internal error text. T9-M4: only the
+// name_empty case on the two zone-create nodes uses 'Zone name is required'
+// (all three other reason codes, and every case on post-devices-auth, keep
+// 'Zone name is not valid' / 'Device name is not valid').
+expectIncludesById('post-zone-auth', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('post-zone-auth', "message: nameReasonCode === 'name_empty' ? 'Zone name is required' : 'Zone name is not valid',", "T9-M4: only name_empty keeps the 'Zone name is required' message");
+expectIncludesById('post-zone-auth', "msg.payload = { message: 'Zone name could not be validated' };", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+expectIncludesById('post-zone-auth', "node.error('Zone create name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('post-zone-auth', "node.error('Zone create name helper unavailable: ' + nameLoad.error, msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+expectIncludesById('post-zone-auth', "node.error('Zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('post-zone-auth', "node.error('Zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+
+expectIncludesById('post-devices-auth', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('post-devices-auth', "msg.payload = { message: 'Device name is not valid', reason: nameReasonCode };", 'keeps one message for every reason code (T9-M4 does not apply to device creation)');
+expectIncludesById('post-devices-auth', "msg.payload = { message: 'Device name could not be validated' };", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+expectIncludesById('post-devices-auth', "node.error('Device create name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('post-devices-auth', "node.error('Device create name helper unavailable: ' + nameLoad.error, msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+expectIncludesById('post-devices-auth', "node.error('Device create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('post-devices-auth', "node.error('Device create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+
+expectIncludesById('scoped-zone-create-router', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('scoped-zone-create-router', "const error = new Error(nameReasonCode === 'name_empty' ? 'Zone name is required' : 'Zone name is not valid');", "T9-M4: only name_empty keeps the 'Zone name is required' message");
+expectIncludesById('scoped-zone-create-router', "const error = new Error('Zone name could not be validated');", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+expectIncludesById('scoped-zone-create-router', "node.error('Scoped zone create name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('scoped-zone-create-router', "node.error('Scoped zone create name helper unavailable: ' + nameLoad.error, msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+expectIncludesById('scoped-zone-create-router', "node.error('Scoped zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('scoped-zone-create-router', "node.error('Scoped zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
 expectOrderedIncludesById('cs-reg-cloud-fn', [
   "var name = String(devEui || 'Device');",
   "if (commandType !== 'REGISTER_DEVICE') {",
