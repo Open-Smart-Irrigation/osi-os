@@ -1215,10 +1215,20 @@ if (sizeAllowances) {
   // the 4265 chars measured across the three touched nodes above (verify-flows-size-ratchet
   // nodeSizes over both byte-identical profiles): sync-bootstrap-build +1373,
   // sync-outbox-build +1426, sync-force-build +1466. No other node changed in this fix.
-  expectCondition(sizeAllowances.total_allowance?.delta === 41203,
-    'size total allowance: exact cumulative delta 41203',
-    'size total allowance: expected exact cumulative delta 41203');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
+  // 9044: zone/device rename Stage 1, Task 6 (branch feat/zone-device-rename-edge) does not
+  // inherit the 41203 figure above -- that chain documents growth on unrelated, separately
+  // merged (or superseded) branches, and this branch's flows.json was byte-identical to
+  // origin/main (1539627 chars/profile) before this task's own edit, so there is no standing
+  // amount to carry forward. Re-measured fresh with verify-flows-size-ratchet's nodeSizes/
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1548671 = 9044,
+  // entirely the two new nodes for PUT /api/irrigation-zones/:id/name (zone-rename-scope-guard
+  // 2609 chars, zone-rename-fn 6435 chars). Tasks 7-10 each grow flows.json further on this
+  // same branch and will re-pin both this guard and the allowances file again from their own
+  // fresh measurement, per the plan's non-additive size-ratchet recipe.
+  expectCondition(sizeAllowances.total_allowance?.delta === 9044,
+    'size total allowance: exact cumulative delta 9044',
+    'size total allowance: expected exact cumulative delta 9044');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Zone/device rename Stage 1, Task 6', 'declares this task\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',

@@ -217,6 +217,7 @@ const requiredHttpRoutes = [
   '/api/gateways/:gatewayEui/location',
   '/api/irrigation-zones/:zone_id/environment-summary',
   '/api/irrigation-zones/:id/calibration',
+  '/api/irrigation-zones/:id/name',
   '/api/irrigation/recent-actuations'
 ];
 
@@ -1798,6 +1799,29 @@ expectIncludesById('zone-calibration-fn', 'hasExistingCalibrationRow', 'distingu
 expectIncludesById('zone-calibration-fn', 'nextCalibrationSyncVersion', 'increments the independent calibration aggregate version');
 expectIncludesById('zone-calibration-fn', 'sync_version=excluded.sync_version, deleted_at=NULL, last_applied_at=NULL', 'persists local calibration desired state without marking it cloud-applied');
 expectIncludesById('zone-calibration-fn', '[zoneId, measuredFlowRateLpm, measurementMethod, now, now, now, nextCalibrationSyncVersion, null]', 'binds local calibration write parameters');
+expectNodeTypeById('zone-rename-http', 'http in', 'exposes the zone rename route');
+expectWireById('zone-rename-http', 'zone-rename-scope-guard', 'routes zone renames through the fresh scope guard');
+expectWireById('zone-rename-scope-guard', 'zone-rename-fn', 'passes authorized zone renames to the writer');
+expectWireById('zone-rename-scope-guard', 'zone-rename-resp', 'answers refused zone renames on the route response node');
+expectWireById('zone-rename-fn', 'zone-rename-resp', 'answers every zone rename on the route response node');
+expectLibById('zone-rename-scope-guard', 'osiLib', 'osi-lib', 'loads the scope helper through the osi-lib seam');
+expectLibById('zone-rename-fn', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
+expectOrderedIncludesById('zone-rename-scope-guard', [
+  "if (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {",
+  "const scopeLoad = osiLib.require('scope');",
+  'scope.assertFreshRole(',
+  'scope.canMutate(',
+  'scope.assertFreshZoneAccess(',
+], 'gates the scope helper behind the flag and asserts role before zone access');
+expectOrderedIncludesById('zone-rename-fn', [
+  'const auth = verifyBearer(',
+  "const nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(body.name)',
+  'AND user_id=? AND deleted_at IS NULL',
+  'nameLoad.value.renameZone(db, { zoneId: zoneId, name: normalized })',
+], 'authenticates, normalizes, scopes by owner, then delegates the zone write');
+expectIncludesById('zone-rename-fn', 'reason: String(nameError && nameError.code', 'returns the name reason code on a 400');
+expectIncludesById('zone-rename-fn', '.close(', 'closes the zone rename database handle');
 // AgroLink fix-wave E1 (2026-08): a scoped GUI weather-zone edit must mirror
 // weather_station_zone_state in the same transaction as weather_station_zones, or
 // WEATHER_STATION_ZONES_REPLACED never publishes and a later cloud replace at the

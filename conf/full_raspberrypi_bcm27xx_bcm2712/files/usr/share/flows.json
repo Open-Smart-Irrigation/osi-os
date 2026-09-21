@@ -14471,6 +14471,100 @@
     ]
   },
   {
+    "id": "zone-rename-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "PUT /api/irrigation-zones/:id/name",
+    "method": "put",
+    "url": "/api/irrigation-zones/:id/name",
+    "x": 200,
+    "y": 2660,
+    "wires": [
+      [
+        "zone-rename-scope-guard"
+      ]
+    ]
+  },
+  {
+    "id": "zone-rename-scope-guard",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Fresh Zone Rename Scope",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 460,
+    "y": 2660,
+    "wires": [
+      [
+        "zone-rename-fn"
+      ],
+      [
+        "zone-rename-resp"
+      ]
+    ],
+    "func": "return (async () => {\nconst outputs = [null, null];\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  outputs[0] = msg;\n  return outputs;\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('zone rename scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  const actorScope = await scope.assertFreshRole(db, actor.user_uuid, actor.role, { scopedMode: true });\n  if (!scope.canMutate(actorScope.role)) {\n    throw Object.assign(new Error('insufficient role'), { statusCode: 403 });\n  }\n  const zoneId = Number(msg.req && msg.req.params && msg.req.params.id);\n  if (!Number.isInteger(zoneId)) {\n    throw Object.assign(new Error('Invalid zone ID'), { statusCode: 400 });\n  }\n  const zone = await db.get(\n    'SELECT id,user_id,zone_uuid FROM irrigation_zones WHERE id=? AND deleted_at IS NULL LIMIT 1',\n    [zoneId]\n  );\n  if (!zone || !zone.zone_uuid) {\n    throw Object.assign(new Error('zone not found'), { statusCode: 404 });\n  }\n  await scope.assertFreshZoneAccess(db, actor.user_uuid, zone.zone_uuid, { scopedMode: true });\n  msg._scopedZoneWriteAuthorized = true;\n  msg._scopedZoneOwnerId = Number(zone.user_id);\n  msg.actor_user_uuid = actor.user_uuid;\n  outputs[0] = msg;\n  return outputs;\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    message: msg.statusCode === 404 ? 'Zone not found' :\n      (msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error))\n  };\n  outputs[1] = msg;\n  return outputs;\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('zone rename scope close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();"
+  },
+  {
+    "id": "zone-rename-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Rename Zone",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 720,
+    "y": 2660,
+    "wires": [
+      [
+        "zone-rename-resp"
+      ]
+    ],
+    "func": "return (async () => {\nfunction getAuthSecret() {\n  const scopedForSecret = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';\n  if (scopedForSecret) {\n    const scopeLoad = osiLib.require('scope');\n    if (!scopeLoad.ok) {\n      const error = new Error('Authentication scope helper unavailable');\n      error.statusCode = 500;\n      throw error;\n    }\n    return scopeLoad.value.resolveAuthSecret({\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: (message) => node.warn(message),\n    });\n  }\n  // Flag-off: this path must never touch osiLib/the scope helper\n  // (scripts/verify-auth-flag-off-hermetic.js enforces it).\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fsMod = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fsMod) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fsMod.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (error) {\n        if (!error || error.code !== 'ENOENT') {\n          node.warn('zone-rename-fn auth secret read failed for ' + secretPath + ': ' + String(error && error.message ? error.message : error));\n        }\n      }\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fsMod.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (error) {\n        node.warn('zone-rename-fn auth secret write failed for ' + secretPath + ': ' + String(error && error.message ? error.message : error));\n      }\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) { return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, ''); }\nfunction fromBase64Url(input) { let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/'); while (value.length % 4) value += '='; return Buffer.from(value, 'base64'); }\nfunction verifyBearer(authHeader) { delete msg._osiAuthFailure;\n  if (!authHeader || !authHeader.startsWith('Bearer ')) { const err = new Error('Unauthorized'); err.statusCode = 401; msg._osiAuthFailure = { format: 1, code: 'MISSING_BEARER', sourceId: 'zone-rename-fn' }; throw err; }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) { const err = new Error('Invalid token'); err.statusCode = 401; msg._osiAuthFailure = { format: 1, code: 'INVALID_TOKEN', sourceId: 'zone-rename-fn' }; throw err; }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) { const err = new Error('Invalid token'); err.statusCode = 401; msg._osiAuthFailure = { format: 1, code: 'INVALID_TOKEN', sourceId: 'zone-rename-fn' }; throw err; }\n  let payload;\n  try { payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8')); } catch (_) { const err = new Error('Invalid token'); err.statusCode = 401; msg._osiAuthFailure = { format: 1, code: 'INVALID_TOKEN', sourceId: 'zone-rename-fn' }; throw err; }\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username) { const err = new Error('Invalid token'); err.statusCode = 401; msg._osiAuthFailure = { format: 1, code: 'INVALID_TOKEN', sourceId: 'zone-rename-fn' }; throw err; }\n  if (exp && Date.now() > exp) { const err = new Error('Token expired'); err.statusCode = 401; msg._osiAuthFailure = { format: 1, code: 'TOKEN_EXPIRED', sourceId: 'zone-rename-fn' }; throw err; }\n  return { userId, username };\n}\nfunction respond(statusCode, payload) { msg.statusCode = statusCode; msg.payload = payload; return msg; }\ntry {\n  const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n  const zoneId = Number(msg.req && msg.req.params && msg.req.params.id);\n  if (!Number.isInteger(zoneId)) return respond(400, { message: 'Invalid zone ID' });\n  const nameLoad = osiLib.require('entity-name');\n  if (!nameLoad.ok) {\n    node.error('Zone rename name helper unavailable: ' + nameLoad.error, msg);\n    return respond(500, { message: 'Entity name helper unavailable' });\n  }\n  const body = (msg.req && msg.req.body && typeof msg.req.body === 'object') ? msg.req.body :\n    ((msg.payload && typeof msg.payload === 'object' && !Array.isArray(msg.payload)) ? msg.payload : {});\n  let normalized = '';\n  try {\n    normalized = nameLoad.value.normalizeEntityName(body.name);\n  } catch (nameError) {\n    return respond(400, { message: 'Zone name is not valid', reason: String(nameError && nameError.code || 'name_empty') });\n  }\n  const ownerId = msg._scopedZoneWriteAuthorized ? Number(msg._scopedZoneOwnerId) : Number(auth.userId);\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve) => db.close(() => resolve()));\n  try {\n    const owned = await db.get(\n      'SELECT id FROM irrigation_zones WHERE id=? AND user_id=? AND deleted_at IS NULL LIMIT 1',\n      [zoneId, ownerId]\n    );\n    if (!owned) return respond(404, { message: 'Zone not found' });\n    const renamed = await nameLoad.value.renameZone(db, { zoneId: zoneId, name: normalized });\n    return respond(200, {\n      id: renamed.id,\n      zone_uuid: renamed.zone_uuid,\n      name: renamed.name,\n      sync_version: renamed.sync_version,\n      changed: renamed.changed\n    });\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('zone rename close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n} catch (error) {\n  const statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  return respond(statusCode, {\n    message: statusCode === 404 ? 'Zone not found' : String(error && error.message || error)\n  });\n}\n})();"
+  },
+  {
+    "id": "zone-rename-resp",
+    "type": "http response",
+    "z": "device-api-tab",
+    "name": "Zone Rename Response",
+    "statusCode": "",
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
+    },
+    "x": 980,
+    "y": 2660,
+    "wires": []
+  },
+  {
     "id": "journal-v2-replication-tab",
     "type": "tab",
     "label": "Journal V2 Replication",
