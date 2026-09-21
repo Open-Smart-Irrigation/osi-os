@@ -105,9 +105,14 @@ export const EditableName: React.FC<EditableNameProps> = ({
     }
   }, [editing]);
 
-  const closeEditor = useCallback(() => {
+  // restoreFocus is false only for a blur-initiated close: the operator has
+  // already moved focus somewhere else (Tab, a click on another control), and
+  // it must stay there. Escape and Enter both unmount the input while it
+  // holds focus, so those close paths return focus to the pencil or the
+  // browser would drop it to the document body.
+  const closeEditor = useCallback((restoreFocus: boolean) => {
     suppressBlurRef.current = true;
-    restoreFocusRef.current = true;
+    restoreFocusRef.current = restoreFocus;
     setError(null);
     setEditing(false);
   }, []);
@@ -119,7 +124,10 @@ export const EditableName: React.FC<EditableNameProps> = ({
     setEditing(true);
   }, [name]);
 
-  const commit = useCallback(async () => {
+  // restoreFocus travels down from whichever path triggered the commit: true
+  // for Enter (the input is about to unmount while focused), false for blur
+  // (the operator already moved focus and it must not be pulled back).
+  const commit = useCallback(async (restoreFocus: boolean) => {
     if (savingRef.current) return;
 
     const result = normalizeEntityName(draft);
@@ -128,14 +136,14 @@ export const EditableName: React.FC<EditableNameProps> = ({
       return;
     }
     if (result.name === name) {
-      closeEditor();
+      closeEditor(restoreFocus);
       return;
     }
 
     savingRef.current = true;
     try {
       await onSave(result.name);
-      closeEditor();
+      closeEditor(restoreFocus);
     } catch (caught) {
       const reason = (caught as { reason?: unknown } | null | undefined)?.reason;
       setError(
@@ -151,13 +159,13 @@ export const EditableName: React.FC<EditableNameProps> = ({
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      void commit();
+      void commit(true);
       return;
     }
     if (event.key === 'Escape') {
       event.preventDefault();
       setDraft(name);
-      closeEditor();
+      closeEditor(true);
     }
   };
 
@@ -166,7 +174,7 @@ export const EditableName: React.FC<EditableNameProps> = ({
       suppressBlurRef.current = false;
       return;
     }
-    void commit();
+    void commit(false);
   };
 
   if (!editing) {

@@ -112,6 +112,31 @@ describe('EditableName cancelling', () => {
   });
 });
 
+describe('EditableName focus after close', () => {
+  it('leaves focus where the operator moved it after a blur-initiated save', async () => {
+    const { onSave } = renderName();
+    render(<button type="button">Other</button>);
+    const other = screen.getByRole('button', { name: 'Other' });
+    const input = openEditor();
+    fireEvent.change(input, { target: { value: 'South block' } });
+    other.focus();
+    fireEvent.blur(input);
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('South block'));
+    await waitFor(() => expect(screen.getByRole('button', { name: PENCIL })).toBeInTheDocument());
+    expect(other).toHaveFocus();
+  });
+
+  it('returns focus to the pencil after an Enter-initiated save', async () => {
+    const { onSave } = renderName();
+    const input = openEditor();
+    fireEvent.change(input, { target: { value: 'South block' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('South block'));
+    await waitFor(() => expect(screen.getByRole('button', { name: PENCIL })).toHaveFocus());
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('EditableName rejection', () => {
   it('blocks a blank name client-side', () => {
     const { onSave } = renderName();
