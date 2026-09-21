@@ -169,12 +169,17 @@ test('REGISTER_DEVICE keeps a valid name and never loses the registration to a b
   assert.doesNotMatch(branch, /return \[buildAck\('FAILED'[^)]*name/i);
 });
 
-// T4-W1 (controller ruling, not in this task's brief): with scoped access
-// off, cs-reg-cloud-fn writes the device row with INSERT OR IGNORE, so an
-// EXISTING row keeps its own stored name. ChirpStack must receive that
-// stored name, never the command's, per spec 5.5 ("ChirpStack must not run
-// ahead of the database").
-test('T4-W1: REGISTER_DEVICE with scoped access off sends ChirpStack the name stored in devices, not the command name', async () => {
+// T4-W1 (controller ruling, corrected -- not in this task's brief): the
+// ORIGINAL cs-reg-cloud-fn provisions ChirpStack FIRST and writes the device
+// row only after provisioning succeeds; that order stays (a rejected
+// registration must leave no device row behind -- test (c) below). The name
+// handed to ChirpStack is decided BEFORE provisioning, from the row the
+// write is about to produce: with scoped access off, cs-reg-cloud-fn writes
+// with INSERT OR IGNORE, so an EXISTING row's stored name survives the
+// write untouched, and ChirpStack must receive THAT name, never the
+// command's, per spec 5.5 ("ChirpStack must not run ahead of the
+// database").
+test('T4-W1(a): REGISTER_DEVICE with scoped access off sends ChirpStack the name stored in devices, not the command name', async () => {
   const db = seedScopedDb();
   try {
     db.exec(`
@@ -220,6 +225,111 @@ test('T4-W1: REGISTER_DEVICE with scoped access off sends ChirpStack the name st
     assert.equal(capturedRegistration.name, 'Stored label');
     // The row itself keeps its stored name too: INSERT OR IGNORE never overwrote it.
     assert.equal(db.prepare('SELECT name FROM devices WHERE deveui = ?').get('70B3D57ED0069999').name, 'Stored label');
+  } finally {
+    db.close();
+  }
+});
+
+test('T4-W1(b): REGISTER_DEVICE with scoped access on updates an allowed existing row and sends ChirpStack the command name', async () => {
+  const db = seedScopedDb();
+  try {
+    // Owned by user_id 2 (u-res1, the claimant below) so the cross-owner
+    // claim fence -- which runs in BOTH flag modes -- does not trip.
+    db.exec(`
+      INSERT INTO devices (
+        deveui, name, type_id, user_id, created_at, updated_at
+      ) VALUES ('70B3D57ED006BBBB', 'Stored label', 'KIWI_SENSOR', 2, '2026-01-01', '2026-01-01');
+    `);
+    let capturedRegistration = null;
+    const chirpstack = {
+      createProvisioningClientFromEnv: () => ({
+        ensureDeviceProvisioned: async (registration) => {
+          capturedRegistration = registration;
+          return { devEui: registration.devEui, deviceCreated: false };
+        },
+        deleteDevice: async () => {},
+      }),
+    };
+    const env = {
+      OSI_SCOPED_ACCESS: '1',
+      DEVICE_EUI: '0016C001F11715E2',
+      CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
+      CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
+    };
+    const payload = {
+      commandType: 'REGISTER_DEVICE',
+      commandId: 'cmd-t4w1b',
+      params: {
+        devEui: '70B3D57ED006BBBB',
+        name: 'Command label',
+        deviceType: 'KIWI_SENSOR',
+        appKey: 'C'.repeat(32),
+        userUuid: 'u-res1',
+      },
+    };
+    const run = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: { payload: JSON.stringify(payload) },
+      env,
+      db,
+      libOverrides: { chirpstack },
+    });
+    assert.equal(run.result[0].specialAck.result, 'SUCCESS', JSON.stringify(run.result[0] && run.result[0].specialAck));
+    assert.ok(capturedRegistration, 'ensureDeviceProvisioned must have been called');
+    assert.equal(capturedRegistration.name, 'Command label');
+    // The UPDATE branch (existing && scopedOn) actually rewrites the name,
+    // so the row and the ChirpStack registration must agree on it.
+    assert.equal(db.prepare('SELECT name FROM devices WHERE deveui = ?').get('70B3D57ED006BBBB').name, 'Command label');
+  } finally {
+    db.close();
+  }
+});
+
+// T4-W1(c) regression: the ORIGINAL order (ChirpStack before the device-row
+// write) must survive this fix. A ChirpStack rejection for a brand-new
+// device (no existing row) must leave NO row behind and answer the node's
+// own FAILED shape -- a device must never sync to the cloud for hardware
+// the network server refused to provision.
+test('T4-W1(c): a ChirpStack rejection for a brand-new device leaves no device row behind', async () => {
+  const db = seedScopedDb();
+  try {
+    const chirpstack = {
+      createProvisioningClientFromEnv: () => ({
+        ensureDeviceProvisioned: async () => {
+          throw new Error('injected ChirpStack rejection');
+        },
+        deleteDevice: async () => {},
+      }),
+    };
+    const env = {
+      OSI_SCOPED_ACCESS: '0',
+      DEVICE_EUI: '0016C001F11715E2',
+      CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
+      CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
+    };
+    const devEui = '70B3D57ED006CCCC';
+    const payload = {
+      commandType: 'REGISTER_DEVICE',
+      commandId: 'cmd-t4w1c',
+      params: {
+        devEui,
+        name: 'New device',
+        deviceType: 'KIWI_SENSOR',
+        appKey: 'D'.repeat(32),
+        userUuid: 'u-res1',
+      },
+    };
+    const run = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+      msg: { payload: JSON.stringify(payload) },
+      env,
+      db,
+      libOverrides: { chirpstack },
+    });
+    assert.equal(run.result[0].specialAck.result, 'FAILED', JSON.stringify(run.result[0] && run.result[0].specialAck));
+    assert.equal(
+      db.prepare('SELECT COUNT(*) n FROM devices WHERE deveui = ?').get(devEui).n,
+      0,
+      'ChirpStack must be asked before any device row is written'
+    );
   } finally {
     db.close();
   }

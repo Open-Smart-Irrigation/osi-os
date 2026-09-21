@@ -3810,7 +3810,7 @@ expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns
 // Spec section 10: the whole P9 zone seam is scoped-mode only, so a flag-off
 // gateway ignores a cloud-supplied zoneUuid and emits the pre-seam ACK shape.
 expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
-expectIncludesById('cs-reg-cloud-fn', 'SELECT user_id, type_id, irrigation_zone_id, deleted_at, gateway_device_eui, sync_version FROM devices WHERE deveui = ? LIMIT 1', 'loads deleted, unclaimed, assigned, and owned device state before the scoped claim fence');
+expectIncludesById('cs-reg-cloud-fn', 'SELECT user_id, type_id, irrigation_zone_id, deleted_at, gateway_device_eui, sync_version, name FROM devices WHERE deveui = ? LIMIT 1', 'loads deleted, unclaimed, assigned, and owned device state (plus its stored name, T4-W1) before the scoped claim fence');
 expectIncludesById('cs-reg-cloud-fn', "code: 'ALREADY_CLAIMED'", 'refuses an EUI another account already claimed before touching ChirpStack');
 expectIncludesById('cs-reg-cloud-fn', "var successState = scopedOn && existing && existingOwnerId !== null ? 'ALREADY_REGISTERED' : 'APPLIED';", 'scopes the already-registered ACK state while retaining the legacy APPLIED state when the flag is off');
 expectIncludesById('cs-reg-cloud-fn', ', deleted_at = NULL', 'revives a deleted existing device during an allowed scoped claim');
@@ -3820,10 +3820,18 @@ expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', successExtras
 
 // Task 9 (zone/device rename stage 1): the name rule on the four create
 // paths. cs-reg-cloud-fn falls back to the DevEUI label instead of failing a
-// registration on a bad name (spec 5.3); T4-W1 additionally reads the name
-// devices.name actually holds after the node's own write before it reaches
-// ChirpStack (spec 5.5), since flag-off INSERT OR IGNORE no-ops on an
-// existing row and must not let ChirpStack run ahead of the database.
+// registration on a bad name (spec 5.3). T4-W1 (controller ruling, corrected
+// after an initial version of this task reordered ChirpStack behind the
+// device-row write, which let a device row exist -- and sync to the cloud --
+// for hardware ChirpStack had refused to provision): the ORIGINAL order
+// (ChirpStack provisioning before the device-row write) is preserved: a
+// rejected ensureDeviceProvisioned call must leave no row behind. The name
+// handed to ChirpStack is decided BEFORE provisioning, from the SAME
+// existing-row lookup already used for the claim fence (extended with
+// `name`, never queried twice) and from which write (INSERT OR IGNORE vs.
+// UPDATE) is about to run, so it always equals what devices.name will hold
+// after the write completes (spec 5.5: ChirpStack must not run ahead of the
+// database).
 expectLibById('cs-reg-cloud-fn', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
 expectIncludesById('post-zone-auth', "osiLib.require('entity-name')", 'applies the shared name rule to zone creation');
 expectIncludesById('post-zone-auth', "reason: String(nameError && nameError.code", 'returns the zone name reason code on a 400');
@@ -3839,12 +3847,15 @@ expectOrderedIncludesById('cs-reg-cloud-fn', [
   'nameLoad.value.normalizeEntityName(params.name)',
   'using the DevEUI as the label',
 ], 'falls back to the DevEUI label instead of failing a registration on a bad name');
+// The existing-row lookup pinned above ("loads deleted, unclaimed, assigned,
+// and owned device state ... T4-W1", now selecting `name` too) is the SAME
+// lookup T4-W1 reuses for its name decision below -- no second query.
 expectOrderedIncludesById('cs-reg-cloud-fn', [
-  'await run(msg.topic);',
-  "SELECT name FROM devices WHERE deveui = ?",
+  'var registrationName = (existing && !scopedOn && existing.name !== undefined && existing.name !== null)',
   'const client = chirpstack.createProvisioningClientFromEnv(env);',
   'const result = await client.ensureDeviceProvisioned(registration);',
-], 'T4-W1: writes the device row and re-reads its stored name before ChirpStack ever sees the registration');
+  'await run(msg.topic);',
+], 'T4-W1: decides the ChirpStack name from the row the pending write will produce, keeps ChirpStack ahead of the device-row write (a rejection leaves no row behind)');
 
 // cs-reg-cloud-ack-fn (Build Special Command ACK) — forwards the P9 zone
 // resolution outcome on every REGISTER_DEVICE ack, scoped mode only: the

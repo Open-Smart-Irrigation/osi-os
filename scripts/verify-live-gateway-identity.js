@@ -1255,9 +1255,25 @@ if (sizeAllowances) {
   // devices.name back before the ChirpStack call) and scoped-zone-create-router 3962 -> 4422
   // (+460, a fresh node_allowances entry since it had none) -- verify-flows-size-ratchet
   // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1567618 = +27991.
-  expectCondition(sizeAllowances.total_allowance?.delta === 69194,
-    'size total allowance: exact cumulative delta 69194',
-    'size total allowance: expected exact cumulative delta 69194');
+  // SUPERSEDED before review, same task: T4-W1's premise was wrong (the ORIGINAL cs-reg-cloud-fn
+  // provisions ChirpStack BEFORE the device-row write, not after) -- the 69194 reorder above let
+  // a device row exist, and sync to the cloud, for hardware ChirpStack had refused to provision.
+  // 69059: 2026-09-22 zone-device-rename-stage-1 Task 9, T4-W1 corrected: restores the ORIGINAL
+  // order (ChirpStack provisioning first; a rejection leaves no device row behind) and decides
+  // the ChirpStack name BEFORE provisioning, from the SAME existing-row lookup the claim fence
+  // already runs (extended with `name`, never queried twice) and from which write (INSERT OR
+  // IGNORE vs. the scoped UPDATE) is about to run -- the name always equals what devices.name
+  // will hold once that write completes. Re-reads the standing 41203 from origin/main (unchanged)
+  // and raises it by the 27856 chars measured for the whole branch: the same five Task 6-8 new
+  // nodes and five Task 8 registry/capability deltas above, unchanged (=25276), plus post-zone-auth
+  // 5468 -> 5880 (+412), post-devices-auth 6218 -> 6784 (+566), cs-reg-cloud-fn 19838 -> 20980
+  // (+1142, smaller than the superseded +1277: the corrected fix adds one decision variable plus
+  // ", name" on the existing SELECT instead of a second query and an early write/catch) and
+  // scoped-zone-create-router 3962 -> 4422 (+460, unchanged) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1567483 = +27856.
+  expectCondition(sizeAllowances.total_allowance?.delta === 69059,
+    'size total allowance: exact cumulative delta 69059',
+    'size total allowance: expected exact cumulative delta 69059');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
