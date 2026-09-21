@@ -394,7 +394,9 @@ const protectedNodeHashes = {
   // IIFE's success path -- no schema/DDL/rebuild logic touched. Hash re-derived
   // on this branch.
   // Previous pin: 878ef2417b5ec01e46acf05b160ebbb409b979d9ba7474955b3a35b328202978
-  'sync-init-fn': 'e3fea2f2a2247e20f23e75415589efb02af8b4df225290742c5ad8e9df50e133',
+  // PR1's generator owns the trigger array. Hash this node with that generated
+  // region replaced by a sentinel so unrelated frozen-node edits still fail.
+  'sync-init-fn': '27155b48af0292ab035f0f038ce10abb7b06b0aede552b5e23466138da01a615',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
@@ -402,6 +404,13 @@ const migrationPreflightHashes = {
   'sync-pending-build': ['\nfunction normalizeCloudServerUrl', '6f4fbe26fd5954042736f07e05d99c40ffe55ad1bff2a35097c8fec32f49570b'],
   'sync-force-build': ['\nfunction recordFailure', 'df5cb5ca7dae8dc1bfeba7b8546e1d215ead1f71730f426400bbafb02f07864d'],
 };
+
+function protectedFunctionForHash(nodeId, func) {
+  if (nodeId !== 'sync-init-fn') return String(func || '');
+  const triggerRe = /const\s+triggers\s*=\s*\[[\s\S]*?\n\];/;
+  if (!triggerRe.test(String(func || ''))) return String(func || '');
+  return String(func).replace(triggerRe, 'const triggers = [<GENERATED_TRIGGER_REGION>];');
+}
 
 function executeRestartOwner(func, msgId, options) {
   const fixtureOptions = options || {};
@@ -1018,7 +1027,7 @@ for (const flowRelativePath of flowRelativePaths) {
   }
   for (const [nodeId, expectedHash] of Object.entries(protectedNodeHashes)) {
     const node = byId.get(nodeId);
-    expectCondition(node && sha256(node.func || '') === expectedHash,
+    expectCondition(node && sha256(protectedFunctionForHash(nodeId, node.func || '')) === expectedHash,
       `${flowRelativePath}:${nodeId}: protected function is byte-identical to its pre-edit snapshot`,
       `${flowRelativePath}:${nodeId}: protected function changed from its pre-edit snapshot`);
   }

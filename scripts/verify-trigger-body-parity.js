@@ -42,6 +42,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { extractTriggerStatements, TEST_GATEWAY_SQL } = require('./verify-boot-ddl-interpolation.js');
+const { checkCanonical } = require('./generate-sync-trigger-source.js');
 
 const repoRoot = path.resolve(__dirname, '..');
 const DEFAULT_FLOWS = [
@@ -64,6 +65,7 @@ function canonicalizeTriggerSql(sql) {
   for (const lit of GATEWAY_EUI_LITERALS) s = s.split(lit).join("'<GATEWAY_EUI>'"); // rule 1
   s = s.replace(/\bIF\s+NOT\s+EXISTS\b/gi, ' ');                                    // rule 2
   s = s.replace(/\s+/g, ' ');                                                       // rule 3
+  s = s.replace(/\s+\(/g, '(');                                                     // rule 3b
   s = s.replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').replace(/\s*,\s*/g, ', ');
   s = s.replace(/\s*(?<![<>=!])=(?!=)\s*/g, ' = ');                                  // rule 4
   return s.trim();
@@ -165,6 +167,20 @@ function run() {
     } else {
       console.log(`OK ${rel} (all boot-managed trigger bodies match seed-blank.sql after canonicalization)`);
     }
+  }
+  // The seed/boot comparison above catches semantic drift.  The checked-in
+  // source adds the stronger completeness contract: both runtime owners must
+  // render exactly the same named set and body as the canonical definition,
+  // including the delayed dendrometer trigger.
+  if (!o.flows.every((flowPath) => DEFAULT_FLOWS.includes(path.resolve(flowPath)))) {
+    throw new Error('canonical trigger-source parity requires the two maintained flow profiles');
+  }
+  try {
+    const canonical = checkCanonical();
+    console.log(`OK scripts/sync-trigger-source.json (${canonical.triggers.length} canonical runtime triggers)`);
+  } catch (error) {
+    failed = true;
+    console.error(`FAIL scripts/sync-trigger-source.json: ${error.message}`);
   }
   if (failed) {
     console.error('verify-trigger-body-parity: FAIL');
