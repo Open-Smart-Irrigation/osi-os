@@ -328,20 +328,28 @@ class ChirpStackClient {
     return true;
   }
 
-  // Re-reads the device rather than taking a caller's copy: setDeviceProfile
-  // may have written to it a moment ago, and an UpdateDeviceRequest replaces
-  // the whole message.
-  async setDeviceName(devEui, name) {
+  // The one place that reads, compares and writes a ChirpStack device name.
+  // Re-reads the device rather than taking a caller's copy: a profile
+  // repoint (or another rename) may have just written to it, and an
+  // UpdateDeviceRequest replaces the whole message. Shared by
+  // ensureDeviceProvisioned (general deadline, no options) and the module-level
+  // updateDeviceName (bounded deadline via options.deadlineMs, its own step
+  // name via options.step). A blank name -- after trimming -- and a device
+  // ChirpStack does not have both resolve 'skipped' with no update RPC; a
+  // blank name is 'skipped' before any gRPC read at all.
+  async setDeviceName(devEui, name, options) {
+    const opts = options || {};
+    const step = opts.step || 'setDeviceName';
     const wanted = String(name === null || name === undefined ? '' : name).trim();
-    if (!wanted) return false;
-    const existing = await this.getDevice(devEui);
-    if (!existing) return false;
-    if (String(existing.getName() || '') === wanted) return false;
+    if (!wanted) return 'skipped';
+    const existing = await this.getDevice(devEui, { deadlineMs: opts.deadlineMs });
+    if (!existing) return 'skipped';
+    if (String(existing.getName() || '') === wanted) return 'unchanged';
     existing.setName(wanted);
     const request = new devicePb.UpdateDeviceRequest();
     request.setDevice(existing);
-    await grpcInvoke(this.deviceClient, 'update', request, this.metadata, 'setDeviceName');
-    return true;
+    await grpcInvoke(this.deviceClient, 'update', request, this.metadata, step, opts.deadlineMs);
+    return 'updated';
   }
 
   async ensureDeviceProvisioned(input) {
@@ -349,7 +357,12 @@ class ChirpStackClient {
     const appKey = normalizeHexKey(input.appKey);
     const applicationId = String(input.applicationId || '').trim();
     const deviceProfileId = String(input.deviceProfileId || '').trim();
+    // createDevice needs a name for a brand-new device, so it falls back to the
+    // DevEUI. Reconciling an EXISTING device must never invent that fallback --
+    // an omitted or blank `name` on a rename-less call must leave ChirpStack's
+    // label alone, so reconciliation below reads providedName, not name.
     const name = String(input.name || devEui).trim();
+    const providedName = String(input.name || '').trim();
 
     if (!devEui) {
       throw annotateError(new Error('DevEUI is required'), 'validate');
@@ -400,11 +413,25 @@ class ChirpStackClient {
           // 'repointed' just because the two getDevice reads disagreed once.
           profileAction = (await this.setDeviceProfile(devEui, deviceProfileId)) ? 'repointed' : 'unchanged';
         }
-        // The OSI database owns the label. A rename that could not reach
-        // ChirpStack (an outage, a restart) heals at the next provisioning.
-        // createDevice above already set the name, so this runs only for a
-        // device that was already there.
-        nameAction = (await this.setDeviceName(devEui, name)) ? 'updated' : 'unchanged';
+        // The OSI database owns the label, and only when the caller actually
+        // supplied one: an omitted/blank providedName leaves ChirpStack alone,
+        // exactly like leaving keysAction/profileAction at 'unchanged' above.
+        // A rename that could not reach ChirpStack (an outage, a restart) heals
+        // at the next provisioning. createDevice above already set the name on
+        // a brand-new device, so this runs only for one that was already there.
+        //
+        // The name comparison uses existingDevice, already read above, to cost
+        // no extra round trip when it already matches (the profile repoint
+        // just above, if it ran, only ever touches deviceProfileId, so
+        // existingDevice's name is still current). Only a genuine difference
+        // pays for setDeviceName's own fresh read -- required for correctness,
+        // since a repoint may have just replaced the whole device message and
+        // existingDevice's copy of it would be stale to send back.
+        if (providedName) {
+          nameAction = String(existingDevice.getName() || '') === providedName
+            ? 'unchanged'
+            : await this.setDeviceName(devEui, providedName, { step: 'ensureDeviceProvisioned' });
+        }
       }
 
       const existingKeys = await this.getKeys(devEui);
@@ -601,8 +628,10 @@ function serializeByDevEui(devEui, task) {
 // readCurrentName reads devices.name from SQLite at the moment this call
 // actually runs, never before it is queued: the value that reaches ChirpStack
 // is the one the database holds after every earlier rename has committed.
-// Both RPCs carry nameUpdateDeadlineMs(), so a ChirpStack that accepts the
-// connection and never answers costs the caller five seconds, not twenty.
+// Delegates to ChirpStackClient.setDeviceName for the actual read-compare-update
+// (the one place that trims and refuses a blank name), bounding both of its
+// RPCs with nameUpdateDeadlineMs() so a ChirpStack that accepts the connection
+// and never answers costs the caller five seconds, not twenty.
 async function updateDeviceName(client, devEui, readCurrentName) {
   const normalized = normalizeDevEui(devEui);
   if (!/^[0-9A-F]{16}$/.test(normalized)) {
@@ -614,18 +643,10 @@ async function updateDeviceName(client, devEui, readCurrentName) {
   return serializeByDevEui(normalized, async () => {
     const stored = await readCurrentName();
     if (stored === null || stored === undefined) return 'skipped';
-    const wanted = String(stored);
-    const budgetMs = nameUpdateDeadlineMs();
-    const device = await client.getDevice(normalized, { deadlineMs: budgetMs });
-    if (!device) return 'skipped';
-    if (String(device.getName() || '') === wanted) return 'unchanged';
-    device.setName(wanted);
-    const request = new devicePb.UpdateDeviceRequest();
-    request.setDevice(device);
-    await grpcInvoke(
-      client.deviceClient, 'update', request, client.metadata, 'updateDeviceName', budgetMs
-    );
-    return 'updated';
+    return client.setDeviceName(normalized, stored, {
+      deadlineMs: nameUpdateDeadlineMs(),
+      step: 'updateDeviceName'
+    });
   });
 }
 

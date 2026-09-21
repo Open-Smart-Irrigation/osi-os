@@ -586,3 +586,86 @@ test('ensureDeviceProvisioned leaves a created device alone: createDevice alread
   assert.equal(captured.create.device.name, 'Probe 7');
   assert.equal(captured.update, undefined);
 });
+
+// Fix round 1 / Finding I1: `input.name || devEui` is the createDevice fallback
+// only. Reconciling an EXISTING device's name must use what the caller actually
+// supplied, never the DevEUI fallback, or an omitted/blank name silently
+// overwrites a good ChirpStack label with the DevEUI.
+test('ensureDeviceProvisioned leaves the ChirpStack name untouched when no name is supplied', async () => {
+  const captured = {};
+  const client = stubClient(captured, {
+    device: { devEui: '00dec0de00000115', name: 'Probe 7', deviceProfileId: 'prof-gen2' },
+    keys: { nwkKey: 'A'.repeat(32) },
+  });
+  const result = await client.ensureDeviceProvisioned({
+    devEui: '00DEC0DE00000115',
+    appKey: 'A'.repeat(32),
+    applicationId: 'app-1',
+    deviceProfileId: 'prof-gen2',
+  });
+  assert.equal(result.nameAction, 'unchanged');
+  assert.equal(captured.update, undefined, 'an omitted name must not invent the DevEUI as the ChirpStack label');
+});
+
+test('ensureDeviceProvisioned leaves the ChirpStack name untouched when the supplied name is blank', async () => {
+  for (const blank of ['', '   ']) {
+    const captured = {};
+    const client = stubClient(captured, {
+      device: { devEui: '00dec0de00000116', name: 'Probe 7', deviceProfileId: 'prof-gen2' },
+      keys: { nwkKey: 'A'.repeat(32) },
+    });
+    const result = await client.ensureDeviceProvisioned({
+      devEui: '00DEC0DE00000116',
+      appKey: 'A'.repeat(32),
+      applicationId: 'app-1',
+      deviceProfileId: 'prof-gen2',
+      name: blank,
+    });
+    assert.equal(result.nameAction, 'unchanged');
+    assert.equal(captured.update, undefined, `a blank name (${JSON.stringify(blank)}) must not invent the DevEUI as the ChirpStack label`);
+  }
+});
+
+// Fix round 1 / Finding I1, folded ruling T4-M3: a name that already matches
+// must cost no extra device round trip and must not be able to fail before
+// the key reconciliation that follows.
+test('ensureDeviceProvisioned costs no extra device read when the supplied name already matches', async () => {
+  const captured = {};
+  const client = stubClient(captured, {
+    device: { devEui: '00dec0de00000117', name: 'Probe 7', deviceProfileId: 'prof-gen2' },
+    keys: { nwkKey: 'A'.repeat(32) },
+  });
+  const result = await client.ensureDeviceProvisioned({
+    devEui: '00DEC0DE00000117',
+    appKey: 'A'.repeat(32),
+    applicationId: 'app-1',
+    deviceProfileId: 'prof-gen2',
+    name: 'Probe 7',
+  });
+  assert.equal(result.nameAction, 'unchanged');
+  assert.deepEqual(client.__calls, ['get', 'getKeys'], 'a matching name must not cost an extra getDevice round trip');
+});
+
+// Fix round 1 / Finding I2, controller ruling T4-I2: setDeviceName is now the
+// one place that trims and compares. updateDeviceName must not push an
+// untrimmed label -- the divergence the reviewer found let the two callers of
+// the old duplicated logic flip a device's ChirpStack name back and forth.
+test('updateDeviceName trims a stored name with surrounding white space, and a later call with the same value resolves unchanged', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, { device: { devEui: '00dec0de00000118', name: 'Old' } });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000118', async () => '  Probe 7  '), 'updated');
+  assert.deepEqual(captured.updates, ['Probe 7'], 'the label sent to ChirpStack must be trimmed');
+
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000118', async () => '  Probe 7  '), 'unchanged');
+  assert.deepEqual(captured.updates, ['Probe 7'], 'a repeat call with the same (untrimmed) stored value must send nothing new');
+});
+
+test('updateDeviceName treats a blank or whitespace-only stored name as skipped without a gRPC read', async () => {
+  for (const blank of ['', '   ']) {
+    const captured = {};
+    const client = nameStubClient(captured, { device: { devEui: '00dec0de00000119', name: 'Old' } });
+    assert.equal(await updateDeviceName(client, '00DEC0DE00000119', async () => blank), 'skipped');
+    assert.deepEqual(captured.reads, [], `a blank stored name (${JSON.stringify(blank)}) must not cost a gRPC round trip`);
+    assert.deepEqual(captured.updates, []);
+  }
+});
