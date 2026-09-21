@@ -330,3 +330,11 @@ test('retry EXIT path proves retained payload compatibility before any fallback 
   assert.match(deploy.slice(fallbackIdx, restartIdx), /hold_node_red_stopped/);
   assert.match(deploy.slice(fallbackIdx, restartIdx), /hold_identityd_stopped/);
 });
+
+test('rollback uses retained verification only when the migration runner was unavailable', () => {
+  assert.match(deploy, /MIGRATION_RUNNER_AVAILABLE=0/);
+  assert.match(deploy, /MIGRATION_RUNNER_AVAILABLE=1/);
+  assert.match(deploy, /rollback_verify_mode="full"/);
+  assert.match(deploy, /rollback_verify_mode="retained"/);
+  assert.match(deploy, /verify_payload_db_compatibility "\$PREV_STAMP" "\$rollback_verify_mode"/);
+});

@@ -57,6 +57,7 @@ NODE_RED_LOG_MARK=""
 DB_MIGRATION_COMMITTED=0
 PREV_CAPTURED=0
 DEPLOY_HOLD_SERVICES=0
+MIGRATION_RUNNER_AVAILABLE=0
 SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 SWAP_ROOT="${SWAP_ROOT:-/srv/node-red}"
 export SWAP_ROOT
@@ -877,6 +878,7 @@ fetch_migration_runner() {
     do
         fetch_required "Migration runner module $module" "lib/osi-migrate/$module" "$TMP_DIR/lib/osi-migrate/$module"
     done
+    MIGRATION_RUNNER_AVAILABLE=1
 }
 
 # Fetched lazily — only when run_schema_migration's own cheap checksum probe
@@ -1213,7 +1215,12 @@ swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" >/dev/null
 PREV_STAMP="$(swap_call currentStamp || true)"
 PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
 # legacy payload capture begin
-if { [ -z "${PREV_STAMP:-}" ] || [ "$PREV_GUI_STAMP" != "$PREV_STAMP" ]; } && [ -f /srv/node-red/flows.json ]; then
+if [ -n "${PREV_STAMP:-}" ] && [ ! -d "$GUI_ROOT" ]; then
+    echo "WARN: existing flows have no GUI directory; skipping retained-pair capture"
+    PREV_STAMP=""
+    PREV_GUI_STAMP=""
+fi
+if { [ -z "${PREV_STAMP:-}" ] || [ "$PREV_GUI_STAMP" != "$PREV_STAMP" ]; } && [ -f /srv/node-red/flows.json ] && [ -d "$GUI_ROOT" ]; then
     if PREV_LEGACY_STAMP="$(swap_call legacyCaptureStamp "/srv/node-red/flows.json" "$GUI_ROOT")"; then
         if [ -n "$PREV_LEGACY_STAMP" ]; then
             PREV_STAMP="$PREV_LEGACY_STAMP"
@@ -1814,6 +1821,7 @@ if ! write_payload_compatibility "$DEPLOY_STAMP"; then
     exit 1
 fi
 
+PAYLOAD_WAS_FLIPPED="$PAYLOAD_FLIPPED"
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
     if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
         echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
@@ -1826,7 +1834,7 @@ else
     echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"
 fi
 
-if [ "$PAYLOAD_FLIPPED" != "1" ]; then
+if [ "$PAYLOAD_WAS_FLIPPED" != "1" ]; then
     /etc/init.d/node-red restart || true
 else
     echo "OK: Node-RED already restarted on the activated pair during migration"
@@ -1930,7 +1938,11 @@ else
             echo "ERROR: could not prove Node-RED stopped before rollback activation; leaving payload links unchanged" >&2
             exit 1
         fi
-        if ! verify_payload_db_compatibility "$PREV_STAMP"; then
+        rollback_verify_mode="full"
+        if [ "${MIGRATION_RUNNER_AVAILABLE:-0}" != "1" ]; then
+            rollback_verify_mode="retained"
+        fi
+        if ! verify_payload_db_compatibility "$PREV_STAMP" "$rollback_verify_mode"; then
             node_red_restart_needed=0
             echo "ERROR: refusing rollback restart because the retained payload/database pair was not proven compatible" >&2
             exit 1

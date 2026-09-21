@@ -240,3 +240,13 @@ test('legacy regular payload capture persists evidence across retries', () => {
   assert.match(deploy, /refusing recapture/);
   assert.match(deploy, /PREV_CAPTURED=0/);
 });
+
+test('missing legacy GUI skips retained capture so the staged pair can activate', () => {
+  assert.match(deploy, /\[ ! -d "\$GUI_ROOT" \][\s\S]*skipping retained-pair capture/);
+  assert.match(deploy, /\[ -f \/srv\/node-red\/flows\.json \] && \[ -d "\$GUI_ROOT" \]/);
+});
+
+test('post-flip restart decision uses the pre-activation state', () => {
+  assert.match(deploy, /PAYLOAD_WAS_FLIPPED="\$PAYLOAD_FLIPPED"/);
+  assert.match(deploy, /if \[ "\$PAYLOAD_WAS_FLIPPED" != "1" \]; then/);
+});
