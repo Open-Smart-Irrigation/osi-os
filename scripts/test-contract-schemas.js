@@ -24,7 +24,9 @@ const SCOPED_ACCESS_COMMANDS = [
     'UPSERT_USER_PLOT_ASSIGNMENT',
     'DELETE_USER_PLOT_ASSIGNMENT',
 ];
-const DEVICE_EUI_EXEMPT_COMMANDS = [...JOURNAL_COMMANDS, ...SCOPED_ACCESS_COMMANDS];
+// UPSERT_ZONE_NAME joins the journal and scoped-access commands as a device_eui
+// exemption: it names its target with zone_uuid, and no device is involved.
+const DEVICE_EUI_EXEMPT_COMMANDS = [...JOURNAL_COMMANDS, ...SCOPED_ACCESS_COMMANDS, 'UPSERT_ZONE_NAME'];
 // Scoped-access outbox events, cloud-deferred pending osi-server PR #83 (see the long-form
 // rationale in scripts/verify-sync-op-parity.js next to EXACT_SCOPED_ACCESS_EVENT_OPS).
 const SCOPED_ACCESS_EVENT_OPS = [
@@ -1981,6 +1983,86 @@ for (const command of [
         `Field Journal CI must run ${command} exactly once; found ${matchingRuns.length}`
     );
 }
+
+const NAME_ACTOR = '12345678-1234-4234-8234-123456789abc';
+const NAME_GATEWAY = '0016C001F11715E2';
+const NAME_REQUESTED_AT = '2026-09-21T10:00:00.000Z';
+const validDeviceName = {
+    command_type: 'UPSERT_DEVICE_NAME',
+    command_id: UUID,
+    device_eui: 'AABBCCDDEEFF0011',
+    gateway_device_eui: NAME_GATEWAY,
+    actor_user_uuid: NAME_ACTOR,
+    requested_at: NAME_REQUESTED_AT,
+    values: { name: 'Probe 7' },
+};
+const validZoneName = {
+    command_type: 'UPSERT_ZONE_NAME',
+    command_id: UUID,
+    zone_uuid: UUID,
+    gateway_device_eui: NAME_GATEWAY,
+    actor_user_uuid: NAME_ACTOR,
+    requested_at: NAME_REQUESTED_AT,
+    values: { name: 'North block' },
+};
+expectValid('UPSERT_DEVICE_NAME command', cmdSchema, validDeviceName);
+expectValid('UPSERT_ZONE_NAME command', cmdSchema, validZoneName);
+expectValid(
+    'UPSERT_DEVICE_NAME accepts a 100-code-point name',
+    cmdSchema,
+    Object.assign({}, validDeviceName, { values: { name: 'a'.repeat(100) } })
+);
+expectInvalid(
+    'UPSERT_DEVICE_NAME rejects a 101-character name',
+    cmdSchema,
+    Object.assign({}, validDeviceName, { values: { name: 'a'.repeat(101) } }),
+    /name.*longer/
+);
+expectInvalid(
+    'UPSERT_DEVICE_NAME rejects an empty name',
+    cmdSchema,
+    Object.assign({}, validDeviceName, { values: { name: '' } }),
+    /name.*short/
+);
+expectInvalid(
+    'UPSERT_DEVICE_NAME without requested_at',
+    cmdSchema,
+    (() => { const value = Object.assign({}, validDeviceName); delete value.requested_at; return value; })(),
+    /requested_at.*required/
+);
+expectInvalid(
+    'UPSERT_ZONE_NAME without zone_uuid',
+    cmdSchema,
+    (() => { const value = Object.assign({}, validZoneName); delete value.zone_uuid; return value; })(),
+    /zone_uuid.*required/
+);
+expectInvalid(
+    'UPSERT_ZONE_NAME with an extra values field',
+    cmdSchema,
+    Object.assign({}, validZoneName, { values: { name: 'North block', colour: 'green' } }),
+    /colour|additional/
+);
+expectInvalid(
+    'UPSERT_ZONE_NAME with a non-canonical requested_at',
+    cmdSchema,
+    Object.assign({}, validZoneName, { requested_at: '2026-09-21T10:00:00Z' }),
+    /requested_at.*(?:match|format)/
+);
+
+// D6: the v1 resource schema keeps no name length bound. A row that predates
+// the rule must still travel through bootstrap and through an unrelated event.
+expectValid(
+    'a Zone resource with a 101-character name stays valid',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'a'.repeat(101) },
+    resourcesSchema
+);
+expectValid(
+    'a Device resource with a 101-character name stays valid',
+    resourcesSchema.definitions.Device,
+    { deveui: '0016C001F11715E2', type_id: 'DRAGINO_LSN50', name: 'a'.repeat(101) },
+    resourcesSchema
+);
 
 if (!ok) process.exit(1);
 console.log('PASS: contract schema checks pass');

@@ -1787,6 +1787,20 @@ expectOrderedIncludesById('weather-zones-command-apply-fn', [
 expectIncludesById('weather-zones-command-apply-fn', 'Weather station zones command helpers unavailable:', 'fails closed when weather station zones helpers are unavailable');
 expectIncludesById('weather-zones-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied weather station zones mutation');
 expectIncludesById('weather-zones-command-apply-fn', '.close(', 'closes the weather station zones command database handle');
+expectOrderedIncludesById('entity-name-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const nameLoad = osiLib.require('entity-name');",
+  'applyNameCommand(db, envelope, {',
+  'node.send([null, {',
+  "const csLoad = osiLib.require('chirpstack');",
+  'updateDeviceName(client, devEui,',
+], 'acknowledges a protected entity-name command before it attempts the ChirpStack rename');
+expectIncludesById('entity-name-command-apply-fn', 'Entity name command helpers unavailable:', 'fails closed when entity-name helpers are unavailable');
+expectIncludesById('entity-name-command-apply-fn', "'devices/' + gatewayEui + '/command_ack'", 'publishes the entity-name acknowledgement on the command_ack topic');
+expectIncludesById('entity-name-command-apply-fn', 'Entity name command ChirpStack update failed for ', 'reports a ChirpStack failure as a warning, never as a rejected command');
+expectIncludesById('entity-name-command-apply-fn', '.close(', 'closes the entity-name command database handle');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'db.transaction(async (tx) => {', 'applies weather station zone replacements and terminal ACK persistence in one transaction');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'base_version_conflict', 'rejects a stale weather station zones command with a terminal conflict');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'INSERT INTO weather_station_zone_state', 'versions the first-ever weather station zones assignment set');
@@ -2034,6 +2048,15 @@ expectIncludesById('cmd-type-registry', 'REMOVE_DEVICE_FROM_ZONE:', 'allows clou
 expectIncludesById('cmd-type-registry', 'UNCLAIM_DEVICE:', 'allows cloud device-unclaim commands through the pending-command guard');
 expectIncludes('Reject Indefinite Open', 'REMOVE_DEVICE_FROM_ZONE:', 'fallback command registry allows zone-detach commands before startup registry loads');
 expectIncludes('Reject Indefinite Open', 'UNCLAIM_DEVICE:', 'fallback command registry allows device-unclaim commands before startup registry loads');
+expectIncludesById('cmd-type-registry', 'UPSERT_DEVICE_NAME:', 'allows cloud device rename commands through the pending-command guard');
+expectIncludesById('cmd-type-registry', 'UPSERT_ZONE_NAME:', 'allows cloud zone rename commands through the pending-command guard');
+expectIncludes('Reject Indefinite Open', 'UPSERT_DEVICE_NAME:', 'fallback command registry allows device rename commands before startup registry loads');
+expectIncludes('Reject Indefinite Open', 'UPSERT_ZONE_NAME:', 'fallback command registry allows zone rename commands before startup registry loads');
+expectIncludesForEach(
+  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
+  "'entity_name_commands_v1'",
+  'advertises the entity-name command capability to the cloud'
+);
 expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped device_eui payloads for device-scoped SQL commands');
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
@@ -2047,7 +2070,9 @@ expectWireById('terra-zone-config-command-apply-fn', '9d5e3035c3d069c4', 'publis
 expectWireById('zone-command-apply-fn', 'weather-zones-command-apply-fn', 'routes recognized non-zone commands through the weather station zones applier');
 expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted versioned zone ACKs');
 expectWireById('weather-zones-command-apply-fn', 'installation-revision-command-apply-fn', 'routes non-weather commands through installation revisions');
-expectWireById('installation-revision-command-apply-fn', '934bf2bc19a8ce22', 'falls through other commands to the existing router');
+expectWireById('installation-revision-command-apply-fn', 'entity-name-command-apply-fn', 'routes non-revision commands through the entity-name applier');
+expectWireById('entity-name-command-apply-fn', '934bf2bc19a8ce22', 'falls through other commands to the existing router');
+expectWireById('entity-name-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted entity-name ACKs');
 expectWireById('weather-zones-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted weather station zones ACKs');
 expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');

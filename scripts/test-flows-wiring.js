@@ -73,6 +73,8 @@ const OSI_INSTALLATION_LOCATION_BINDING = {
     variable: 'installationLocation',
     module: 'installation-location',
 };
+const OSI_ENTITY_NAME_BINDING = { variable: 'entityName', module: 'entity-name' };
+const OSI_CHIRPSTACK_BINDING = { variable: 'chirpstack', module: 'chirpstack' };
 
 function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
@@ -84,6 +86,18 @@ function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPr
         ok = false;
     }
     return ok;
+}
+
+// A rename must be acknowledged before the best-effort ChirpStack update is
+// attempted, or a ChirpStack that accepts the connection and never answers
+// holds the cloud's answer for the whole gRPC deadline. Source order is the
+// only thing a static guard can see, and in this node it is the truth: the
+// send is a plain statement on the path to the ChirpStack block.
+function ackPrecedesChirpStack(node) {
+    const source = node && typeof node.func === 'string' ? node.func : '';
+    const sendAt = source.indexOf('node.send([null, {');
+    const chirpStackAt = source.indexOf("osiLib.require('chirpstack')");
+    return sendAt >= 0 && chirpStackAt > sendAt;
 }
 
 function findHttpIn(method, url) {
@@ -438,11 +452,26 @@ if (!installationRevisionApply || !requireOsiLibContract(
     'installation revision commands: applier',
     'Installation revision command helpers unavailable:'
 ) || JSON.stringify(installationRevisionApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
+    ['entity-name-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyCommand/.test(installationRevisionApply.func || '') ||
     !/\.close\s*\(/.test(installationRevisionApply.func || '')) {
-    failures.push('installation revision commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
+    failures.push('installation revision commands: applier must delegate, close DB, and hand unrecognized commands to the entity-name applier');
+}
+const entityNameApply = byId['entity-name-command-apply-fn'];
+if (!entityNameApply || !requireOsiLibContract(
+    entityNameApply,
+    [OSI_DB_BINDING, OSI_ENTITY_NAME_BINDING, OSI_CHIRPSTACK_BINDING],
+    'entity name commands: applier',
+    'Entity name command helpers unavailable:'
+) || JSON.stringify(entityNameApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyNameCommand/.test(entityNameApply.func || '') ||
+    !/updateDeviceName\(client, devEui,/.test(entityNameApply.func || '') ||
+    !/\.close\s*\(/.test(entityNameApply.func || '') ||
+    !ackPrecedesChirpStack(entityNameApply)) {
+    failures.push('entity name commands: applier must delegate, acknowledge before the ChirpStack attempt, update the ChirpStack name best effort, close DB, and separate legacy fallback from durable ACK');
 }
 if (!ackQueue || !requireOsiLibContract(
     ackQueue,

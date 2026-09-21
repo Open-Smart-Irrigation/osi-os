@@ -50,7 +50,11 @@ Per-module system map (both repos, every module described with location): [docs/
 | `/api/v1/devices/claim-bulk` | POST | Bulk claim during link | On-demand |
 
 **Cloud → edge command types** (via pending-commands):
-`UPSERT_ZONE`, `DELETE_ZONE`, `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE`, `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION`, `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE`, `UPSERT_DEVICE_FLAGS`, `UNCLAIM_DEVICE`, `SYNC_LINKED_AUTH`, `FORCE_EDGE_SYNC`, `VALVE_COMMAND`, `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*`, `SET_FAN`, `REBOOT`, `REGISTER_DEVICE`.
+`UPSERT_ZONE`, `DELETE_ZONE`, `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE`, `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION`, `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE`, `UPSERT_DEVICE_FLAGS`, `UNCLAIM_DEVICE`, `SYNC_LINKED_AUTH`, `FORCE_EDGE_SYNC`, `VALVE_COMMAND`, `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*`, `SET_FAN`, `REBOOT`, `REGISTER_DEVICE`, `UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`.
+
+`UPSERT_ZONE_NAME` and `UPSERT_DEVICE_NAME` are applied by
+`entity-name-command-apply-fn` and are only sent to a gateway that reported the
+`entity_name_commands_v1` sync capability.
 
 ---
 

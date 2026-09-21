@@ -22,6 +22,8 @@ const bindings = {
     variable: 'installationLocation',
     module: 'installation-location',
   },
+  entityName: { variable: 'entityName', module: 'entity-name' },
+  chirpstack: { variable: 'chirpstack', module: 'chirpstack' },
 };
 const expectedById = {
   'journal-api-router-fn': [bindings.db, bindings.journal, bindings.scope],
@@ -41,6 +43,7 @@ const expectedById = {
     bindings.scope,
   ],
   'command-ack-queue-rest': [bindings.db, bindings.ledger],
+  'entity-name-command-apply-fn': [bindings.db, bindings.entityName, bindings.chirpstack],
 };
 const exactLibs = [{ var: 'osiLib', module: 'osi-lib' }];
 const flowsPath = path.resolve(

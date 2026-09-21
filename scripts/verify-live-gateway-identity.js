@@ -1233,9 +1233,18 @@ if (sizeAllowances) {
   // zone-rename-fn's fix round 1 from the start, plus the best-effort ChirpStack update
   // block) -- verify-flows-size-ratchet totalChars over both byte-identical profiles:
   // origin/main 1539627 -> HEAD 1560199 = +20572.
-  expectCondition(sizeAllowances.total_allowance?.delta === 61775,
-    'size total allowance: exact cumulative delta 61775',
-    'size total allowance: expected exact cumulative delta 61775');
+  // 66479: 2026-09-21 zone-device-rename-stage-1 Task 8 (command path, registry, capability,
+  // contract) re-reads the standing 41203 from origin/main (unchanged) and raises it by the
+  // 25276 chars measured for the whole branch: zone-rename-scope-guard (2609, Task 6),
+  // zone-rename-fn (7006, Task 6), device-rename-scope-guard (2606, Task 7), device-rename-fn
+  // (8351, Task 7), the new entity-name-command-apply-fn (4151) and five existing nodes that
+  // grew for Task 8's registry/capability edits: cmd-type-registry (+236), reject-indefinite-open
+  // (+236), sync-bootstrap-build (+27), al-link-build-req (+27) and sync-force-build (+27), all
+  // within their existing node_allowances headroom -- verify-flows-size-ratchet totalChars over
+  // both byte-identical profiles: origin/main 1539627 -> HEAD 1564903 = +25276.
+  expectCondition(sizeAllowances.total_allowance?.delta === 66479,
+    'size total allowance: exact cumulative delta 66479',
+    'size total allowance: expected exact cumulative delta 66479');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
