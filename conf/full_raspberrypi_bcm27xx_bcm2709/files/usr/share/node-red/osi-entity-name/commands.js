@@ -142,9 +142,9 @@ async function assertActor(tx, actorUuid) {
 // the actor may not see the target.
 function accessRejection(error) {
   const status = Number(error.statusCode || error.status);
-  return status === 403
-    ? rejection('actor_missing_or_disabled', error.message)
-    : rejection('forbidden', error.message);
+  if (status === 403) return rejection('actor_missing_or_disabled', error.message);
+  if (status === 404) return rejection('forbidden', error.message);
+  throw error;
 }
 
 // One cloud clock orders cloud renames of one target among themselves. A

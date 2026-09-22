@@ -24,14 +24,12 @@ plans merged in lockstep:
 
 ## Entity name commands (`UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`)
 
-Two notes a reader of `commands.schema.json` cannot get from the schema alone:
+Two boundary details apply to these commands:
 
 - `zone_uuid`: the edge accepts both UUID spellings on zone commands — 32 hex
   digits without dashes, which is what a zone created on the gateway carries,
   and the hyphenated form a cloud-created zone carries. `osi-zone-commands`
-  has always accepted both. The root-level `zone_uuid: CanonicalUuid` in
-  `commands.schema.json` allows only the hyphenated form; that predates the
-  rename work and is tracked as a contract issue.
+  and the command schema accept both forms.
 - `values.name`: `maxLength: 100` counts the raw string, while the receiver
   trims before it counts, so a padded 100-character name passes the receiver
   and fails the schema. The cloud normalizes the name before it sends the

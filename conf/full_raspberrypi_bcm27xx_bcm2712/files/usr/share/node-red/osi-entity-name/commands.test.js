@@ -11,6 +11,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const commands = require('./commands');
 const ledger = require('../osi-command-ledger');
+const scopeHelper = require('../osi-scope-helper');
 
 const repo = path.resolve(__dirname, '../../../../../../..');
 const SEED = fs.readFileSync(path.join(repo, 'database/seed-blank.sql'), 'utf8');
@@ -347,6 +348,37 @@ test('with scoped access on, a viewer who has the zone still cannot rename it', 
   );
   assert.equal(result.ack.reason, 'forbidden');
   assert.equal(raw.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'Old zone');
+});
+
+test('a scoped access database fault writes no terminal result and the command can retry', async (t) => {
+  const { raw, db } = fixture(t);
+  const original = scopeHelper.assertFreshDeviceAccess;
+  let attempts = 0;
+  scopeHelper.assertFreshDeviceAccess = async (...args) => {
+    attempts += 1;
+    if (attempts === 1) {
+      const error = new Error('database is locked');
+      error.code = 'SQLITE_BUSY';
+      throw error;
+    }
+    return original(...args);
+  };
+  t.after(() => { scopeHelper.assertFreshDeviceAccess = original; });
+
+  await assert.rejects(
+    commands.applyNameCommand(db, deviceCommand(47), runtime({ scopedMode: true })),
+    (error) => error && error.code === 'SQLITE_BUSY'
+  );
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 0);
+  assert.equal(raw.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE).name, 'Old device');
+
+  const retry = await commands.applyNameCommand(
+    db, deviceCommand(47), runtime({ scopedMode: true })
+  );
+  assert.equal(retry.ack.result, 'APPLIED');
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 1);
 });
 
 test('two renames of one target apply in order', async (t) => {
