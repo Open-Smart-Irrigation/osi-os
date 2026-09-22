@@ -867,6 +867,7 @@ fetch_migration_runner() {
     done
 
     for module in \
+        add-column-compat.js \
         backup.js \
         fingerprints.js \
         index.js \
