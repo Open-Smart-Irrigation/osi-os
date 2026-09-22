@@ -605,7 +605,7 @@ deploy_exit_handler() {
             DEPLOY_HOLD_SERVICES=1
             hold_node_red_stopped || true
             hold_identityd_stopped || true
-        elif [ "${node_red_restart_needed:-0}" = "1" ]; then
+        elif [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ]; then
             :
         elif ! restart_node_red; then
             [ "$exit_status" -ne 0 ] || exit_status=1

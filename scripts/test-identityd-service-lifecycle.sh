@@ -52,6 +52,10 @@ restart_node_red() {
     node_red_restart_needed=0
 }
 
+restart_previous_payload() {
+    return 1
+}
+
 hold_node_red_stopped() {
     printf '%s\n' node-red-stop >> "$STATE_LOG"
     node_red_restart_needed=0
