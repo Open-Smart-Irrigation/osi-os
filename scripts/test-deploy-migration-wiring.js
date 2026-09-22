@@ -46,6 +46,7 @@ test('deploy migration wiring fetches the runner, Stage 0 helpers, and semantic 
   }
   assert.match(deploy, /"scripts\/\$script" "\$TMP_DIR\/scripts\/\$script"/);
   for (const module of [
+    'add-column-compat.js',
     'backup.js',
     'fingerprints.js',
     'index.js',
