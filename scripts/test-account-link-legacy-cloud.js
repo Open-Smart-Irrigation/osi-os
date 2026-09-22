@@ -106,6 +106,11 @@ const IDENTITY_BACKFILL_TABLES_SQL = `CREATE TABLE devices (
 CREATE TABLE irrigation_zones (
   id INTEGER PRIMARY KEY,
   gateway_device_eui TEXT
+);
+CREATE TABLE irrigation_events (
+  id INTEGER PRIMARY KEY,
+  irrigation_zone_id INTEGER,
+  event_uuid TEXT
 )`;
 
 function readFlows() {
