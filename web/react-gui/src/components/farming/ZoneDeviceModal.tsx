@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { devicesAPI, irrigationZonesAPI } from '../../services/api';
 import type { Device, DeviceCatalogItem, DeviceType } from '../../types/farming';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
+import { normalizeEntityName } from '../../utils/entityName';
 
 interface ZoneDeviceModalProps {
   isOpen: boolean;
@@ -119,6 +120,12 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
       return;
     }
 
+    const normalized = normalizeEntityName(name);
+    if (!normalized.ok) {
+      setError(t(`rename.reason.${normalized.reason}`));
+      return;
+    }
+
     if (catalog.length === 0 || !selectedType) {
       setError(t('addModal.deviceTypeRequired', 'Select a device type'));
       return;
@@ -132,7 +139,7 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
       const typeId = selectedType;
       await devicesAPI.add({
         deveui,
-        name,
+        name: normalized.name,
         type_id: typeId,
         appkey: appkey || undefined,
         zone_id: zoneId,

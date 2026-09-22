@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { irrigationZonesAPI } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
+import { normalizeEntityName } from '../../utils/entityName';
 
 interface CreateZoneModalProps {
   isOpen: boolean;
@@ -24,14 +25,19 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
     e.preventDefault();
     setError('');
 
-    if (!name.trim()) {
-      setError(t('createZoneModal.zoneNameRequired'));
+    // One rule for create and for rename (design decision D4): otherwise create
+    // accepts names a later rename would refuse.
+    const normalized = normalizeEntityName(name);
+    if (!normalized.ok) {
+      setError(normalized.reason === 'name_empty'
+        ? t('createZoneModal.zoneNameRequired')
+        : t(`rename.reason.${normalized.reason}`));
       return;
     }
 
     setLoading(true);
     try {
-      await irrigationZonesAPI.create({ name: name.trim() });
+      await irrigationZonesAPI.create({ name: normalized.name });
       setName('');
       onZoneCreated();
       onClose();

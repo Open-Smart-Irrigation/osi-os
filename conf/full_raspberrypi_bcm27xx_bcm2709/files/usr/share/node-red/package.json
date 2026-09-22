@@ -13,6 +13,7 @@
     "osi-scoped-access-commands": "file:osi-scoped-access-commands",
     "osi-zone-commands": "file:osi-zone-commands",
     "osi-device-commands": "file:osi-device-commands",
+    "osi-entity-name": "file:osi-entity-name",
     "osi-dendro-helper": "file:osi-dendro-helper",
     "osi-db-helper": "file:osi-db-helper",
     "osi-radio-helper": "file:osi-radio-helper",

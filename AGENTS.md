@@ -50,7 +50,31 @@ Per-module system map (both repos, every module described with location): [docs/
 | `/api/v1/devices/claim-bulk` | POST | Bulk claim during link | On-demand |
 
 **Cloud → edge command types** (via pending-commands):
-`UPSERT_ZONE`, `DELETE_ZONE`, `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE`, `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION`, `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE`, `UPSERT_DEVICE_FLAGS`, `UNCLAIM_DEVICE`, `SYNC_LINKED_AUTH`, `FORCE_EDGE_SYNC`, `VALVE_COMMAND`, `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*`, `SET_FAN`, `REBOOT`, `REGISTER_DEVICE`.
+`UPSERT_ZONE`, `DELETE_ZONE`, `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE`, `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION`, `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE`, `UPSERT_DEVICE_FLAGS`, `UNCLAIM_DEVICE`, `SYNC_LINKED_AUTH`, `FORCE_EDGE_SYNC`, `VALVE_COMMAND`, `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*`, `SET_FAN`, `REBOOT`, `REGISTER_DEVICE`, `UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`.
+
+`UPSERT_ZONE_NAME` and `UPSERT_DEVICE_NAME` are applied by
+`entity-name-command-apply-fn` and are only sent to a gateway that reported the
+`entity_name_commands_v1` sync capability.
+
+**Edge rename routes** (local dashboard → gateway, HMAC bearer):
+`PUT /api/irrigation-zones/:id/name` answers
+`200 { id, zone_uuid, name, sync_version, changed }`, and
+`PUT /api/devices/:deveui/name` answers
+`200 { deveui, name, sync_version, changed, chirpstack }` with `chirpstack` in
+`updated` / `failed` / `skipped`. Both answer `400 { message, reason }` with a
+reason code from the shared name rule in `osi-entity-name`, which is also what
+zone create, device create, `REGISTER_DEVICE` and both `UPSERT_ZONE` paths
+apply. The `chirpstack` update is best effort, and its read and its write share
+one 5 s gRPC budget instead of the 20 s default: a ChirpStack that accepts the
+connection and never answers costs the caller five seconds in total, not five
+per call.
+
+**Sync capabilities the edge reports** (built identically by `sync-bootstrap-build`,
+`al-link-build-req` and `sync-force-build`): `linked_auth_sync_v1`,
+`force_edge_sync_v1`, `installation_recovery_v1`, `installation_locations_v1`,
+`entity_name_commands_v1`, and `field_journal_v1` when the journal is enabled.
+The cloud reads the list as `gatewayIdentity.syncCapabilities()` and sends a
+name command only to a gateway that reported `entity_name_commands_v1`.
 
 ---
 

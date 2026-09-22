@@ -290,7 +290,7 @@ export const FarmingDashboard: React.FC = () => {
                 there anything to control at all" gate. */}
             {modules.valveControl && hasStregaValve && (
               <div className="mt-8">
-                <ValveControlPanel onUpdate={handleUpdate} batteryByEui={batteryByEui} />
+                <ValveControlPanel onUpdate={handleUpdate} canWrite={canWrite} batteryByEui={batteryByEui} />
               </div>
             )}
 
@@ -376,6 +376,7 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onOpenSettings={() => setSdi12SettingsDevice(device)}
                             onRemove={handleUpdate}
+                            onUpdate={handleUpdate}
                             readOnly={!canWrite}
                             removeContext="farm"
                           />
@@ -414,6 +415,7 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             onRemove={handleUpdate}
+                            onUpdate={handleUpdate}
                             readOnly={!canWrite}
                             removeContext="farm"
                           />

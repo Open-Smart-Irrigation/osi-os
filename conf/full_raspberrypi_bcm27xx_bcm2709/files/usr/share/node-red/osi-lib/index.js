@@ -39,6 +39,9 @@ const NAME_TO_PATH = {
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'device-writer': 'osi-device-writer',
+  // Zone and device rename: the name rule, the two writers and the receiver
+  // for UPSERT_DEVICE_NAME / UPSERT_ZONE_NAME live in one module.
+  'entity-name': 'osi-entity-name',
   'uc512-normalize': 'osi-uc512-normalize',
   'lsn50-normalize': 'osi-lsn50-normalize',
   'sdi12-normalize': 'osi-sdi12-normalize',

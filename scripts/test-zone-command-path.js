@@ -548,3 +548,97 @@ test('legacy zone commands fall through while malformed protected commands fail 
     db.raw.close();
   }
 });
+
+test('the versioned UPSERT_ZONE applier holds zone.name to the shared name rule', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.exec('DELETE FROM sync_outbox');
+
+    const tooLong = await commands.applyZoneCommand(
+      db.facade,
+      envelope(20, 'UPSERT_ZONE', 1, { name: 'a'.repeat(101) }),
+      runtime()
+    );
+    assert.equal(tooLong.ack.result, 'REJECTED_PERMANENT');
+    assert.match(tooLong.ack.reason, /zone\.name/);
+
+    const control = await commands.applyZoneCommand(
+      db.facade,
+      envelope(21, 'UPSERT_ZONE', 1, { name: 'North\tblock' }),
+      runtime()
+    );
+    assert.equal(control.ack.result, 'REJECTED_PERMANENT');
+    assert.match(control.ack.reason, /zone\.name/);
+
+    assert.equal(
+      db.raw.prepare('SELECT name FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).name,
+      'North'
+    );
+
+    const trimmed = await commands.applyZoneCommand(
+      db.facade,
+      envelope(22, 'UPSERT_ZONE', 1, { name: '\u00a0Bloc nord\u00a0' }),
+      runtime()
+    );
+    assert.equal(trimmed.ack.result, 'APPLIED');
+    assert.equal(
+      db.raw.prepare('SELECT name FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).name,
+      'Bloc nord'
+    );
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('the versioned UPSERT_ZONE applier accepts a 100-code-point name', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.exec('DELETE FROM sync_outbox');
+    const seedlings = '\ud83c\udf31'.repeat(100);
+    const applied = await commands.applyZoneCommand(
+      db.facade,
+      envelope(23, 'UPSERT_ZONE', 1, { name: seedlings }),
+      runtime()
+    );
+    assert.equal(applied.ack.result, 'APPLIED');
+    assert.equal(
+      db.raw.prepare('SELECT name FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).name,
+      seedlings
+    );
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('an UPSERT_ZONE_LOCATION carrying a legacy 110-character name still applies', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    const legacyName = 'a'.repeat(110);
+    seedZone(db.raw, { name: legacyName });
+    db.raw.exec('DELETE FROM sync_outbox');
+
+    const location = await commands.applyZoneCommand(
+      db.facade,
+      envelope(24, 'UPSERT_ZONE_LOCATION', 1, {
+        name: legacyName,
+        latitude: 46.9,
+        longitude: 7.4,
+      }),
+      runtime()
+    );
+    assert.equal(location.ack.result, 'APPLIED');
+    const zone = db.raw.prepare(
+      'SELECT name, latitude, longitude FROM irrigation_zones WHERE zone_uuid=?'
+    ).get(ZONE_UUID);
+    assert.equal(zone.name, legacyName);
+    assert.equal(zone.latitude, 46.9);
+    assert.equal(zone.longitude, 7.4);
+  } finally {
+    db.raw.close();
+  }
+});

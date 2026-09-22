@@ -213,10 +213,12 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/dendro-config',
   '/api/devices/:deveui/dendro-baseline/reset',
   '/api/devices/:deveui/zone-assignments',
+  '/api/devices/:deveui/name',
   '/api/gateway/location',
   '/api/gateways/:gatewayEui/location',
   '/api/irrigation-zones/:zone_id/environment-summary',
   '/api/irrigation-zones/:id/calibration',
+  '/api/irrigation-zones/:id/name',
   '/api/irrigation/recent-actuations'
 ];
 
@@ -1785,6 +1787,21 @@ expectOrderedIncludesById('weather-zones-command-apply-fn', [
 expectIncludesById('weather-zones-command-apply-fn', 'Weather station zones command helpers unavailable:', 'fails closed when weather station zones helpers are unavailable');
 expectIncludesById('weather-zones-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied weather station zones mutation');
 expectIncludesById('weather-zones-command-apply-fn', '.close(', 'closes the weather station zones command database handle');
+expectOrderedIncludesById('entity-name-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const nameLoad = osiLib.require('entity-name');",
+  'applyNameCommand(db, envelope, {',
+  'node.send([null, {',
+  "const csLoad = osiLib.require('chirpstack');",
+  'updateDeviceName(client, devEui,',
+], 'acknowledges a protected entity-name command before it attempts the ChirpStack rename');
+expectIncludesById('entity-name-command-apply-fn', 'Entity name command helpers unavailable:', 'fails closed when entity-name helpers are unavailable');
+expectIncludesById('entity-name-command-apply-fn', "'devices/' + gatewayEui + '/command_ack'", 'publishes the entity-name acknowledgement on the command_ack topic');
+expectIncludesById('entity-name-command-apply-fn', 'Entity name command ChirpStack update failed for ', 'reports a ChirpStack failure as a warning, never as a rejected command');
+expectIncludesById('entity-name-command-apply-fn', '.close(', 'closes the entity-name command database handle');
+expectIncludesById('entity-name-command-apply-fn', 'Entity name command apply failed closed:', 'fails closed with no acknowledgement when applyNameCommand itself throws (Task 3: a bad commandId or an unset runtime gateway EUI, including on replay)');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'db.transaction(async (tx) => {', 'applies weather station zone replacements and terminal ACK persistence in one transaction');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'base_version_conflict', 'rejects a stale weather station zones command with a terminal conflict');
 expectFileIncludes('osi-device-commands/weather.js', deviceCommandsWeatherSource, 'INSERT INTO weather_station_zone_state', 'versions the first-ever weather station zones assignment set');
@@ -1798,6 +1815,91 @@ expectIncludesById('zone-calibration-fn', 'hasExistingCalibrationRow', 'distingu
 expectIncludesById('zone-calibration-fn', 'nextCalibrationSyncVersion', 'increments the independent calibration aggregate version');
 expectIncludesById('zone-calibration-fn', 'sync_version=excluded.sync_version, deleted_at=NULL, last_applied_at=NULL', 'persists local calibration desired state without marking it cloud-applied');
 expectIncludesById('zone-calibration-fn', '[zoneId, measuredFlowRateLpm, measurementMethod, now, now, now, nextCalibrationSyncVersion, null]', 'binds local calibration write parameters');
+expectNodeTypeById('zone-rename-http', 'http in', 'exposes the zone rename route');
+expectWireById('zone-rename-http', 'zone-rename-scope-guard', 'routes zone renames through the fresh scope guard');
+expectWireById('zone-rename-scope-guard', 'zone-rename-fn', 'passes authorized zone renames to the writer');
+expectWireById('zone-rename-scope-guard', 'zone-rename-resp', 'answers refused zone renames on the route response node');
+expectWireById('zone-rename-fn', 'zone-rename-resp', 'answers every zone rename on the route response node');
+expectLibById('zone-rename-scope-guard', 'osiLib', 'osi-lib', 'loads the scope helper through the osi-lib seam');
+expectLibById('zone-rename-fn', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
+expectOrderedIncludesById('zone-rename-scope-guard', [
+  "if (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {",
+  "const scopeLoad = osiLib.require('scope');",
+  'scope.assertFreshRole(',
+  'scope.canMutate(',
+  'scope.assertFreshZoneAccess(',
+], 'gates the scope helper behind the flag and asserts role before zone access');
+expectOrderedIncludesById('zone-rename-fn', [
+  'const auth = verifyBearer(',
+  "const nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(body.name)',
+  'AND user_id=? AND deleted_at IS NULL',
+  'nameLoad.value.renameZone(db, { zoneId: zoneId, name: normalized })',
+], 'authenticates, normalizes, scopes by owner, then delegates the zone write');
+expectIncludesById('zone-rename-fn', 'reason: nameReasonCode', 'returns the name reason code on a 400');
+expectIncludesById('zone-rename-fn', '.close(', 'closes the zone rename database handle');
+// T6-I1b (Task 6 review, fix round 1): the handler never trusts it was
+// reached through zone-rename-scope-guard -- it fails closed on its own when
+// scoped access is on and the guard's own authorization marker is absent,
+// and never falls back to the flag-off owner check in that case.
+expectIncludesById('zone-rename-fn', "if (scopedOn && msg._scopedZoneWriteAuthorized !== true) {", 'fails closed in scoped mode without the guard\'s authorization marker');
+expectIncludesById('zone-rename-fn', "return respond(403, { message: 'Forbidden' });", 'answers a missing scoped-mode marker with 403 Forbidden');
+// T6-M3 (Task 6 review, fix round 1): only the four reviewed name reason
+// codes reach the 400 path; any other normalizeEntityName failure (including
+// no .code at all) is a 500 with no reason key, not a 400/name_empty fallback.
+expectIncludesById('zone-rename-fn', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('zone-rename-fn', "return respond(500, { message: 'Zone name could not be validated' });", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+// Final fix wave, Important 1 (GLOBAL.md amendment A5, the same pin shape the
+// three create-path nodes carry below): node.error(text, msg) in a node that
+// answers msg.res itself hands the tab-wide catch node (device-api-catch ->
+// device-api-http500) the same msg.res, so two responses race for one request
+// and the client can receive the catch node's body with internal error text in
+// it. Both of this route's nodes take the one-argument form.
+expectIncludesById('zone-rename-fn', "node.error('Zone rename name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('zone-rename-fn', "node.error('Zone rename name helper unavailable: ' + nameLoad.error, msg);", 'the two-argument node.error form that races the tab-wide catch node for msg.res');
+expectIncludesById('zone-rename-fn', "node.error('Zone rename name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('zone-rename-fn', "node.error('Zone rename name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", 'the two-argument node.error form that races the tab-wide catch node for msg.res');
+expectIncludesById('zone-rename-scope-guard', "node.error('zone rename scope: module unavailable: ' + scopeLoad.error);", 'logs the scope-helper fault without the msg argument');
+expectExcludesById('zone-rename-scope-guard', "node.error('zone rename scope: module unavailable: ' + scopeLoad.error, msg);", 'the two-argument node.error form that races the tab-wide catch node for msg.res');
+expectNodeTypeById('device-rename-http', 'http in', 'exposes the device rename route');
+expectWireById('device-rename-http', 'device-rename-scope-guard', 'routes device renames through the fresh scope guard');
+expectWireById('device-rename-scope-guard', 'device-rename-fn', 'passes authorized device renames to the writer');
+expectWireById('device-rename-scope-guard', 'device-rename-resp', 'answers refused device renames on the route response node');
+expectWireById('device-rename-fn', 'device-rename-resp', 'answers every device rename on the route response node');
+expectLibById('device-rename-scope-guard', 'osiLib', 'osi-lib', 'loads the scope helper through the osi-lib seam');
+expectLibById('device-rename-fn', 'osiLib', 'osi-lib', 'loads the entity-name and chirpstack helpers through the osi-lib seam');
+expectOrderedIncludesById('device-rename-scope-guard', [
+  "if (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {",
+  "const scopeLoad = osiLib.require('scope');",
+  'scope.assertFreshRole(',
+  'scope.canMutate(',
+  'scope.assertFreshDeviceAccess(',
+], 'gates the scope helper behind the flag and asserts role before device access');
+expectOrderedIncludesById('device-rename-fn', [
+  'const auth = verifyBearer(',
+  "const nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(body.name)',
+  'AND user_id=? AND deleted_at IS NULL',
+  'nameLoad.value.renameDevice(db, { deveui: deveui, name: normalized })',
+  "const csLoad = osiLib.require('chirpstack');",
+  'csLoad.value.createProvisioningClientFromEnv(env)',
+  'csLoad.value.updateDeviceName(client, deveui,',
+], 'writes the database first and only then updates the ChirpStack name');
+expectIncludesById('device-rename-fn', 'reason: nameReasonCode', 'returns the name reason code on a 400');
+expectIncludesById('device-rename-fn', "chirpstackOutcome = 'failed';", 'reports a ChirpStack failure without changing the 200');
+expectIncludesById('device-rename-fn', 'Device rename ChirpStack provisioning not configured:', 'treats unconfigured provisioning as a skip, not a failure');
+expectIncludesById('device-rename-fn', '.close(', 'closes the device rename database handle');
+// Task 7 (GLOBAL.md amendments A4.2/A4.3, mirroring zone-rename-fn's
+// T6-I1b/T6-M3 above): device-rename-fn never trusts it was reached through
+// device-rename-scope-guard -- it fails closed on its own when scoped access
+// is on and the guard's own authorization marker is absent, never falling
+// back to the flag-off owner check in that case; and only the four reviewed
+// name reason codes reach the 400 path, any other normalizeEntityName
+// failure (including no .code at all) is a 500 with no reason key.
+expectIncludesById('device-rename-fn', "if (scopedOn && msg._scopedDeviceWriteAuthorized !== true) {", 'fails closed in scoped mode without the guard\'s authorization marker');
+expectIncludesById('device-rename-fn', "return respond(403, { message: 'Forbidden' });", 'answers a missing scoped-mode marker with 403 Forbidden');
+expectIncludesById('device-rename-fn', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('device-rename-fn', "return respond(500, { message: 'Device name could not be validated' });", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
 // AgroLink fix-wave E1 (2026-08): a scoped GUI weather-zone edit must mirror
 // weather_station_zone_state in the same transaction as weather_station_zones, or
 // WEATHER_STATION_ZONES_REPLACED never publishes and a later cloud replace at the
@@ -1959,7 +2061,27 @@ expectIncludesById('cmd-type-registry', 'REMOVE_DEVICE_FROM_ZONE:', 'allows clou
 expectIncludesById('cmd-type-registry', 'UNCLAIM_DEVICE:', 'allows cloud device-unclaim commands through the pending-command guard');
 expectIncludes('Reject Indefinite Open', 'REMOVE_DEVICE_FROM_ZONE:', 'fallback command registry allows zone-detach commands before startup registry loads');
 expectIncludes('Reject Indefinite Open', 'UNCLAIM_DEVICE:', 'fallback command registry allows device-unclaim commands before startup registry loads');
+expectIncludesById('cmd-type-registry', 'UPSERT_DEVICE_NAME:', 'allows cloud device rename commands through the pending-command guard');
+expectIncludesById('cmd-type-registry', 'UPSERT_ZONE_NAME:', 'allows cloud zone rename commands through the pending-command guard');
+expectIncludes('Reject Indefinite Open', 'UPSERT_DEVICE_NAME:', 'fallback command registry allows device rename commands before startup registry loads');
+expectIncludes('Reject Indefinite Open', 'UPSERT_ZONE_NAME:', 'fallback command registry allows zone rename commands before startup registry loads');
+expectIncludesForEach(
+  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
+  "'entity_name_commands_v1'",
+  'advertises the entity-name command capability to the cloud'
+);
 expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped device_eui payloads for device-scoped SQL commands');
+expectLibById('4f4a765f36cee6f3', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
+expectOrderedIncludesById('4f4a765f36cee6f3', [
+  "if (commandType === 'UPSERT_ZONE') {",
+  "var nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(cmd.name)',
+  "var insertName = zoneName === null ? \"'Zone'\" : s(zoneName);",
+  "var conflictName = zoneName === null ? 'irrigation_zones.name' : 'excluded.name';",
+  '"ON CONFLICT(zone_uuid) DO UPDATE SET name=" + conflictName + ",',
+], 'runs a legacy UPSERT_ZONE name through the rule and keeps the stored name when it fails');
+expectExcludesById('4f4a765f36cee6f3', "s(cmd.name || 'Zone')", 'the unguarded legacy zone-name fallback that renamed a zone to "Zone"');
+expectIncludesById('4f4a765f36cee6f3', 'keeping the stored zone name', 'warns instead of silently discarding an invalid legacy zone name');
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
@@ -1972,7 +2094,9 @@ expectWireById('terra-zone-config-command-apply-fn', '9d5e3035c3d069c4', 'publis
 expectWireById('zone-command-apply-fn', 'weather-zones-command-apply-fn', 'routes recognized non-zone commands through the weather station zones applier');
 expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted versioned zone ACKs');
 expectWireById('weather-zones-command-apply-fn', 'installation-revision-command-apply-fn', 'routes non-weather commands through installation revisions');
-expectWireById('installation-revision-command-apply-fn', '934bf2bc19a8ce22', 'falls through other commands to the existing router');
+expectWireById('installation-revision-command-apply-fn', 'entity-name-command-apply-fn', 'routes non-revision commands through the entity-name applier');
+expectWireById('entity-name-command-apply-fn', '934bf2bc19a8ce22', 'falls through other commands to the existing router');
+expectWireById('entity-name-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted entity-name ACKs');
 expectWireById('weather-zones-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted weather station zones ACKs');
 expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
@@ -2157,6 +2281,14 @@ expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT', 'in
 expectCalibrationCreateTableParity();
 expectFileIncludes('api.ts', reactGuiApiSource, 'updateCalibration: async (zoneId: number', 'adds a shared client helper for zone irrigation calibration');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/irrigation-zones/${zoneId}/calibration`, payload);", 'targets the local zone irrigation calibration endpoint');
+expectFileIncludes('api.ts', reactGuiApiSource, 'rename: async (zoneId: number, name: string)', 'adds a shared client helper for zone rename');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put<ZoneRenameResult>(`/api/irrigation-zones/${zoneId}/name`, { name });", 'targets the local zone rename endpoint');
+expectFileIncludes('api.ts', reactGuiApiSource, 'rename: async (deveui: string, name: string)', 'adds a shared client helper for device rename');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put<DeviceRenameResult>(`/api/devices/${deveui}/name`, { name });", 'targets the local device rename endpoint');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '<EditableName', 'renames the zone from its card heading');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'irrigationZonesAPI.rename(zone.id,', 'sends the zone rename through the shared client helper');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, '<EditableName', 'renames the device from the Kiwi card heading');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, 'devicesAPI.rename(device.deveui,', 'sends the device rename through the shared client helper');
 expectFileIncludes('farming.ts', farmingTypesSource, 'irrigationTodayMeasuredLiters', 'types measured irrigation separately from estimated irrigation');
 expectFileIncludes('farming.ts', farmingTypesSource, 'irrigationTodayEstimatedLiters', 'types estimated irrigation separately from measured irrigation');
 expectFileExcludes('WaterTab.tsx', fs.readFileSync(path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'WaterTab.tsx'), 'utf8'), 'irrigationTodayMeasuredLiters ?? water.irrigationTodayLiters', 'legacy mixed irrigation fallback under the measured label');
@@ -3709,13 +3841,91 @@ expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns
 // Spec section 10: the whole P9 zone seam is scoped-mode only, so a flag-off
 // gateway ignores a cloud-supplied zoneUuid and emits the pre-seam ACK shape.
 expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
-expectIncludesById('cs-reg-cloud-fn', 'SELECT user_id, type_id, irrigation_zone_id, deleted_at, gateway_device_eui, sync_version FROM devices WHERE deveui = ? LIMIT 1', 'loads deleted, unclaimed, assigned, and owned device state before the scoped claim fence');
+expectIncludesById('cs-reg-cloud-fn', 'SELECT user_id, type_id, irrigation_zone_id, deleted_at, gateway_device_eui, sync_version, name FROM devices WHERE deveui = ? LIMIT 1', 'loads deleted, unclaimed, assigned, and owned device state (plus its stored name, T4-W1) before the scoped claim fence');
 expectIncludesById('cs-reg-cloud-fn', "code: 'ALREADY_CLAIMED'", 'refuses an EUI another account already claimed before touching ChirpStack');
 expectIncludesById('cs-reg-cloud-fn', "var successState = scopedOn && existing && existingOwnerId !== null ? 'ALREADY_REGISTERED' : 'APPLIED';", 'scopes the already-registered ACK state while retaining the legacy APPLIED state when the flag is off');
 expectIncludesById('cs-reg-cloud-fn', ', deleted_at = NULL', 'revives a deleted existing device during an allowed scoped claim');
 expectIncludesById('cs-reg-cloud-fn', 'if (scopedOn && error.verificationRequired === true)', 'gates verification-required failure detail on scoped mode');
 expectIncludesById('cs-reg-cloud-fn', 'successExtras.zoneAssignedId = zoneId;', 'reports the P9 zone-resolution outcome only in scoped mode');
 expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', successExtras), null];", 'preserves the success ACK shape and reports the P9 zone-resolution outcome');
+
+// Task 9 (zone/device rename stage 1): the name rule on the four create
+// paths. cs-reg-cloud-fn falls back to the DevEUI label instead of failing a
+// registration on a bad name (spec 5.3). T4-W1 (controller ruling, corrected
+// after an initial version of this task reordered ChirpStack behind the
+// device-row write, which let a device row exist -- and sync to the cloud --
+// for hardware ChirpStack had refused to provision): the ORIGINAL order
+// (ChirpStack provisioning before the device-row write) is preserved: a
+// rejected ensureDeviceProvisioned call must leave no row behind. The name
+// handed to ChirpStack is decided BEFORE provisioning, from the SAME
+// existing-row lookup already used for the claim fence (extended with
+// `name`, never queried twice) and from which write (INSERT OR IGNORE vs.
+// UPDATE) is about to run, so it always equals what devices.name will hold
+// after the write completes (spec 5.5: ChirpStack must not run ahead of the
+// database).
+expectLibById('cs-reg-cloud-fn', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
+expectIncludesById('post-zone-auth', "osiLib.require('entity-name')", 'applies the shared name rule to zone creation');
+expectExcludesById('post-zone-auth', "if (!name || name.trim() === '') {", 'the ad hoc zone-name check');
+expectIncludesById('scoped-zone-create-router', "osiLib.require('entity-name')", 'applies the shared name rule to scoped zone creation');
+expectIncludesById('scoped-zone-create-router', 'if (error && error.reason) msg.payload.reason = String(error.reason);', 'surfaces the name reason code on a scoped 400');
+expectIncludesById('post-devices-auth', "osiLib.require('entity-name')", 'applies the shared name rule to device creation');
+expectIncludesById('post-devices-auth', "flow.set('new_device_name', normalizedDeviceName);", 'hands post-devices-insert the normalized device name');
+
+// Fix round 1 (reviewer findings I1/I2 on the three HTTP create-path nodes;
+// controller ruling T9-M4). I1: only the four reviewed normalizeEntityName
+// reason codes reach a 400 (matching zone-rename-fn/device-rename-fn's own
+// NAME_REASON_CODES shape) -- any other or missing .code is a server fault,
+// answered 500 with no `reason` key. I2: every node.error call these three
+// nodes make for the name rule takes ONE argument -- with `msg`, Node-RED
+// would hand the tab-wide catch node (device-api-catch -> device-api-http500)
+// the same msg.res this node is about to answer itself, and that catch
+// node's body includes the raw internal error text. T9-M4: only the
+// name_empty case on the two zone-create nodes uses 'Zone name is required'
+// (all three other reason codes, and every case on post-devices-auth, keep
+// 'Zone name is not valid' / 'Device name is not valid').
+expectIncludesById('post-zone-auth', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('post-zone-auth', "message: nameReasonCode === 'name_empty' ? 'Zone name is required' : 'Zone name is not valid',", "T9-M4: only name_empty keeps the 'Zone name is required' message");
+expectIncludesById('post-zone-auth', "msg.payload = { message: 'Zone name could not be validated' };", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+expectIncludesById('post-zone-auth', "node.error('Zone create name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('post-zone-auth', "node.error('Zone create name helper unavailable: ' + nameLoad.error, msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+expectIncludesById('post-zone-auth', "node.error('Zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('post-zone-auth', "node.error('Zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+
+expectIncludesById('post-devices-auth', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('post-devices-auth', "msg.payload = { message: 'Device name is not valid', reason: nameReasonCode };", 'keeps one message for every reason code (T9-M4 does not apply to device creation)');
+expectIncludesById('post-devices-auth', "msg.payload = { message: 'Device name could not be validated' };", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+expectIncludesById('post-devices-auth', "node.error('Device create name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('post-devices-auth', "node.error('Device create name helper unavailable: ' + nameLoad.error, msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+expectIncludesById('post-devices-auth', "node.error('Device create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('post-devices-auth', "node.error('Device create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+
+expectIncludesById('scoped-zone-create-router', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
+expectIncludesById('scoped-zone-create-router', "const error = new Error(nameReasonCode === 'name_empty' ? 'Zone name is required' : 'Zone name is not valid');", "T9-M4: only name_empty keeps the 'Zone name is required' message");
+expectIncludesById('scoped-zone-create-router', "const error = new Error('Zone name could not be validated');", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+expectIncludesById('scoped-zone-create-router', "node.error('Scoped zone create name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('scoped-zone-create-router', "node.error('Scoped zone create name helper unavailable: ' + nameLoad.error, msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+expectIncludesById('scoped-zone-create-router', "node.error('Scoped zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('scoped-zone-create-router', "node.error('Scoped zone create name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", "the two-argument node.error form that races the tab-wide catch node for msg.res");
+expectOrderedIncludesById('cs-reg-cloud-fn', [
+  "var name = String(devEui || 'Device');",
+  "if (commandType !== 'REGISTER_DEVICE') {",
+  "var nameLoad = osiLib.require('entity-name');",
+  'nameLoad.value.normalizeEntityName(params.name)',
+  'using the DevEUI as the label',
+], 'falls back to the DevEUI label instead of failing a registration on a bad name');
+// Final fix wave / M3: a REGISTER_DEVICE that carries no name at all is the
+// legacy norm, and its DevEUI fallback is the intended outcome, so it must not
+// log a warning. Only a name the command actually supplied reaches the rule.
+expectIncludesById('cs-reg-cloud-fn', '} else if (params.name !== null && params.name !== undefined) {', 'runs the name rule only for a name the command actually carries');
+// The existing-row lookup pinned above ("loads deleted, unclaimed, assigned,
+// and owned device state ... T4-W1", now selecting `name` too) is the SAME
+// lookup T4-W1 reuses for its name decision below -- no second query.
+expectOrderedIncludesById('cs-reg-cloud-fn', [
+  'var registrationName = (existing && !scopedOn && existing.name !== undefined && existing.name !== null)',
+  'const client = chirpstack.createProvisioningClientFromEnv(env);',
+  'const result = await client.ensureDeviceProvisioned(registration);',
+  'await run(msg.topic);',
+], 'T4-W1: decides the ChirpStack name from the row the pending write will produce, keeps ChirpStack ahead of the device-row write (a rejection leaves no row behind)');
 
 // cs-reg-cloud-ack-fn (Build Special Command ACK) — forwards the P9 zone
 // resolution outcome on every REGISTER_DEVICE ack, scoped mode only: the

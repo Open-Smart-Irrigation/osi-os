@@ -73,6 +73,8 @@ const OSI_INSTALLATION_LOCATION_BINDING = {
     variable: 'installationLocation',
     module: 'installation-location',
 };
+const OSI_ENTITY_NAME_BINDING = { variable: 'entityName', module: 'entity-name' };
+const OSI_CHIRPSTACK_BINDING = { variable: 'chirpstack', module: 'chirpstack' };
 
 function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
@@ -84,6 +86,18 @@ function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPr
         ok = false;
     }
     return ok;
+}
+
+// A rename must be acknowledged before the best-effort ChirpStack update is
+// attempted, or a ChirpStack that accepts the connection and never answers
+// holds the cloud's answer for the whole gRPC deadline. Source order is the
+// only thing a static guard can see, and in this node it is the truth: the
+// send is a plain statement on the path to the ChirpStack block.
+function ackPrecedesChirpStack(node) {
+    const source = node && typeof node.func === 'string' ? node.func : '';
+    const sendAt = source.indexOf('node.send([null, {');
+    const chirpStackAt = source.indexOf("osiLib.require('chirpstack')");
+    return sendAt >= 0 && chirpStackAt > sendAt;
 }
 
 function findHttpIn(method, url) {
@@ -438,11 +452,26 @@ if (!installationRevisionApply || !requireOsiLibContract(
     'installation revision commands: applier',
     'Installation revision command helpers unavailable:'
 ) || JSON.stringify(installationRevisionApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
+    ['entity-name-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyCommand/.test(installationRevisionApply.func || '') ||
     !/\.close\s*\(/.test(installationRevisionApply.func || '')) {
-    failures.push('installation revision commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
+    failures.push('installation revision commands: applier must delegate, close DB, and hand unrecognized commands to the entity-name applier');
+}
+const entityNameApply = byId['entity-name-command-apply-fn'];
+if (!entityNameApply || !requireOsiLibContract(
+    entityNameApply,
+    [OSI_DB_BINDING, OSI_ENTITY_NAME_BINDING, OSI_CHIRPSTACK_BINDING],
+    'entity name commands: applier',
+    'Entity name command helpers unavailable:'
+) || JSON.stringify(entityNameApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyNameCommand/.test(entityNameApply.func || '') ||
+    !/updateDeviceName\(client, devEui,/.test(entityNameApply.func || '') ||
+    !/\.close\s*\(/.test(entityNameApply.func || '') ||
+    !ackPrecedesChirpStack(entityNameApply)) {
+    failures.push('entity name commands: applier must delegate, acknowledge before the ChirpStack attempt, update the ChirpStack name best effort, close DB, and separate legacy fallback from durable ACK');
 }
 if (!ackQueue || !requireOsiLibContract(
     ackQueue,
@@ -1720,6 +1749,39 @@ if (!valveUnclaimFn) {
     if (!failures.some((f) => f.includes('delete-device-valve-cleanup-fn') || f.includes('delete-device-response must route') || f.includes('scoped-device-delete-router'))) {
         console.log('OK  both device-delete routes clear an unclaimed valve\'s on-valve plan (F104)');
     }
+}
+
+// I1 (Task 6 review, zone/device rename Stage 1): zone-rename-scope-guard's
+// two outputs are the whole authorization boundary for PUT
+// /api/irrigation-zones/:id/name -- output 0 is the authorized path into
+// zone-rename-fn, output 1 is the refusal straight to zone-rename-resp. A
+// swapped wires array would route a refusal into the writer instead, and
+// since a refused msg never sets _scopedZoneWriteAuthorized, that would only
+// be caught at runtime by zone-rename-fn's own fail-closed check (T6-I1b) --
+// this pin catches the wiring defect directly, the way expectWireById's
+// wires.flat().includes(...) check (which is order-blind) cannot.
+const zoneRenameGuardNode = byId['zone-rename-scope-guard'];
+if (!zoneRenameGuardNode || JSON.stringify(zoneRenameGuardNode.wires) !== JSON.stringify([['zone-rename-fn'], ['zone-rename-resp']])) {
+    failures.push('zone-rename-scope-guard.wires must be exactly [["zone-rename-fn"],["zone-rename-resp"]] (output 0 = authorized -> writer, output 1 = refused -> response)');
+} else {
+    console.log('OK  zone-rename-scope-guard routes output 0 (authorized) to zone-rename-fn and output 1 (refused) to zone-rename-resp');
+}
+
+// I1 analog (Task 7, GLOBAL.md amendment A4.1): device-rename-scope-guard's
+// two outputs are the whole authorization boundary for PUT
+// /api/devices/:deveui/name -- output 0 is the authorized path into
+// device-rename-fn, output 1 is the refusal straight to device-rename-resp. A
+// swapped wires array would route a refusal into the writer instead, and
+// since a refused msg never sets _scopedDeviceWriteAuthorized, that would
+// only be caught at runtime by device-rename-fn's own fail-closed check
+// (T7-I1) -- this pin catches the wiring defect directly, the way
+// expectWireById's wires.flat().includes(...) check (which is order-blind)
+// cannot.
+const deviceRenameGuardNode = byId['device-rename-scope-guard'];
+if (!deviceRenameGuardNode || JSON.stringify(deviceRenameGuardNode.wires) !== JSON.stringify([['device-rename-fn'], ['device-rename-resp']])) {
+    failures.push('device-rename-scope-guard.wires must be exactly [["device-rename-fn"],["device-rename-resp"]] (output 0 = authorized -> writer, output 1 = refused -> response)');
+} else {
+    console.log('OK  device-rename-scope-guard routes output 0 (authorized) to device-rename-fn and output 1 (refused) to device-rename-resp');
 }
 
 runJournalHelperFailureMatrix()

@@ -624,6 +624,19 @@
     "buttonZone": "Unassign from this zone",
     "buttonFarm": "Remove device"
   },
+  "rename": {
+    "zone": "Rename zone",
+    "device": "Rename device",
+    "zoneInputLabel": "Zone name",
+    "deviceInputLabel": "Device name",
+    "reason": {
+      "name_empty": "Enter a name.",
+      "name_too_long": "Use 100 characters or fewer.",
+      "name_control_characters": "Remove tabs, line breaks and other control characters.",
+      "name_invalid_unicode": "This name contains a character that cannot be saved."
+    },
+    "failed": "Could not save the name."
+  },
   "common": {
     "viewHistory": "View history",
     "batteryEstimated": "Estimated from battery voltage"

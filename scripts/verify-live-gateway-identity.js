@@ -1215,10 +1215,115 @@ if (sizeAllowances) {
   // the 4265 chars measured across the three touched nodes above (verify-flows-size-ratchet
   // nodeSizes over both byte-identical profiles): sync-bootstrap-build +1373,
   // sync-outbox-build +1426, sync-force-build +1466. No other node changed in this fix.
-  expectCondition(sizeAllowances.total_allowance?.delta === 41203,
-    'size total allowance: exact cumulative delta 41203',
-    'size total allowance: expected exact cumulative delta 41203');
+  // 50247: 2026-09-21 zone-device-rename-stage-1 Task 6 (PUT /api/irrigation-zones/:id/name)
+  // raises the standing 41203 by the 9044 chars measured for the two new nodes
+  // zone-rename-scope-guard (2609) and zone-rename-fn (6435) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1548671 = +9044.
+  // 50818: 2026-09-21 zone-device-rename-stage-1 Task 6 fix round 1 (controller ruling
+  // T6-I1b/T6-M3) raises 50247 by the 571 chars zone-rename-fn grew from 6435 to 7006
+  // (scopedOn fail-closed 403 without the guard's _scopedZoneWriteAuthorized marker, plus
+  // the NAME_REASON_CODES allowlist that sends an unrecognized normalizeEntityName code to
+  // 500 instead of a 400 fallback) -- verify-flows-size-ratchet totalChars over both
+  // byte-identical profiles: origin/main 1539627 -> HEAD 1549242 = +9615.
+  // 61775: 2026-09-21 zone-device-rename-stage-1 Task 7 (PUT /api/devices/:deveui/name)
+  // re-reads the standing 41203 from origin/main (unchanged) and raises it by the 20572
+  // chars measured for the whole branch: zone-rename-scope-guard (2609), zone-rename-fn
+  // (7006, Task 6), device-rename-scope-guard (2606) and device-rename-fn (8351, Task 7;
+  // applies the same scopedOn fail-closed check and NAME_REASON_CODES allowlist as
+  // zone-rename-fn's fix round 1 from the start, plus the best-effort ChirpStack update
+  // block) -- verify-flows-size-ratchet totalChars over both byte-identical profiles:
+  // origin/main 1539627 -> HEAD 1560199 = +20572.
+  // 66479: 2026-09-21 zone-device-rename-stage-1 Task 8 (command path, registry, capability,
+  // contract) re-reads the standing 41203 from origin/main (unchanged) and raises it by the
+  // 25276 chars measured for the whole branch: zone-rename-scope-guard (2609, Task 6),
+  // zone-rename-fn (7006, Task 6), device-rename-scope-guard (2606, Task 7), device-rename-fn
+  // (8351, Task 7), the new entity-name-command-apply-fn (4151) and five existing nodes that
+  // grew for Task 8's registry/capability edits: cmd-type-registry (+236), reject-indefinite-open
+  // (+236), sync-bootstrap-build (+27), al-link-build-req (+27) and sync-force-build (+27), all
+  // within their existing node_allowances headroom -- verify-flows-size-ratchet totalChars over
+  // both byte-identical profiles: origin/main 1539627 -> HEAD 1564903 = +25276.
+  // 69194: 2026-09-22 zone-device-rename-stage-1 Task 9 (the name rule on the four create paths)
+  // re-reads the standing 41203 from origin/main (unchanged) and raises it by the 27991 chars
+  // measured for the whole branch: the five Task 6-8 new nodes (zone-rename-scope-guard 2609,
+  // zone-rename-fn 7006, device-rename-scope-guard 2606, device-rename-fn 8351,
+  // entity-name-command-apply-fn 4151) and the five Task 8 registry/capability deltas
+  // (cmd-type-registry +236, reject-indefinite-open +236, sync-bootstrap-build +27,
+  // al-link-build-req +27, sync-force-build +27) carried forward unchanged (=25276), plus four
+  // existing nodes Task 9 grew, each within its own node_allowances headroom: post-zone-auth
+  // 5468 -> 5880 (+412), post-devices-auth 6218 -> 6784 (+566), cs-reg-cloud-fn 19838 -> 21115
+  // (+1277 -- the entity-name normalization plus the T4-W1 controller-ruling reorder that reads
+  // devices.name back before the ChirpStack call) and scoped-zone-create-router 3962 -> 4422
+  // (+460, a fresh node_allowances entry since it had none) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1567618 = +27991.
+  // SUPERSEDED before review, same task: T4-W1's premise was wrong (the ORIGINAL cs-reg-cloud-fn
+  // provisions ChirpStack BEFORE the device-row write, not after) -- the 69194 reorder above let
+  // a device row exist, and sync to the cloud, for hardware ChirpStack had refused to provision.
+  // 69059: 2026-09-22 zone-device-rename-stage-1 Task 9, T4-W1 corrected: restores the ORIGINAL
+  // order (ChirpStack provisioning first; a rejection leaves no device row behind) and decides
+  // the ChirpStack name BEFORE provisioning, from the SAME existing-row lookup the claim fence
+  // already runs (extended with `name`, never queried twice) and from which write (INSERT OR
+  // IGNORE vs. the scoped UPDATE) is about to run -- the name always equals what devices.name
+  // will hold once that write completes. Re-reads the standing 41203 from origin/main (unchanged)
+  // and raises it by the 27856 chars measured for the whole branch: the same five Task 6-8 new
+  // nodes and five Task 8 registry/capability deltas above, unchanged (=25276), plus post-zone-auth
+  // 5468 -> 5880 (+412), post-devices-auth 6218 -> 6784 (+566), cs-reg-cloud-fn 19838 -> 20980
+  // (+1142, smaller than the superseded +1277: the corrected fix adds one decision variable plus
+  // ", name" on the existing SELECT instead of a second query and an early write/catch) and
+  // scoped-zone-create-router 3962 -> 4422 (+460, unchanged) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1567483 = +27856.
+  // 70504: 2026-09-22 zone-device-rename-stage-1 Task 9 fix round 1 (reviewer findings I1/I2 on
+  // post-zone-auth, post-devices-auth and scoped-zone-create-router; controller ruling T9-M4).
+  // I1: a NAME_REASON_CODES allowlist (matching zone-rename-fn/device-rename-fn) means only the
+  // four reviewed normalizeEntityName reason codes reach a 400; any other or missing .code is a
+  // 500 with no reason key. I2: every name-rule node.error call in these three nodes drops the
+  // `, msg` argument -- with it, the tab-wide catch node races the node's own response on the
+  // same msg.res and can leak internal error text to the client. T9-M4: name_empty answers 'Zone
+  // name is required' on the two zone-create nodes only (post-devices-auth unchanged). cs-reg-cloud-fn
+  // is untouched this round. Re-reads the standing 41203 from origin/main (unchanged) and raises
+  // it by the 29301 chars measured for the whole branch: the same five Task 6-8 new nodes and five
+  // Task 8 registry/capability deltas above, unchanged (=25276), cs-reg-cloud-fn 19838 -> 20980
+  // (+1142, unchanged from the T4-W1 correction), post-zone-auth 5468 -> 6385 (+917, inside its
+  // existing 1947 headroom), post-devices-auth 6218 -> 7217 (+999, inside its existing 1953
+  // headroom) and scoped-zone-create-router 3962 -> 4929 (+967, exceeding its prior +460
+  // node_allowances entry, which this round supersedes) -- verify-flows-size-ratchet totalChars
+  // over both byte-identical profiles: origin/main 1539627 -> HEAD 1568928 = +29301.
+  // 71235: 2026-09-22 zone-device-rename-stage-1 Task 10 (legacy UPSERT_ZONE branch of
+  // node 4f4a765f36cee6f3, "Build UPDATE SQL"): the branch built s(cmd.name || 'Zone')
+  // into an unguarded ON CONFLICT(zone_uuid) DO UPDATE SET name=excluded.name, so a
+  // legacy-shaped command without a name silently renamed an existing zone to 'Zone'.
+  // It now decides validity in JavaScript via osi-entity-name's normalizeEntityName
+  // (reached with osiLib.require('entity-name'); the node gains its first libs binding)
+  // and emits name=excluded.name only for a valid name, name=irrigation_zones.name on
+  // conflict otherwise, with 'Zone' still the first-insert fallback and a node.warn on
+  // the rejected/unavailable case. Re-reads the standing 41203 from origin/main
+  // (unchanged) and raises it by the 30032 chars measured for the whole branch: the same
+  // five Task 6-8 new nodes and five Task 8 registry/capability deltas above, unchanged
+  // (=25276), cs-reg-cloud-fn 19838 -> 20980 (+1142, unchanged), the three Task 9
+  // fix-round-1 HTTP nodes post-zone-auth/post-devices-auth/scoped-zone-create-router
+  // (+917/+999/+967 = 2883, unchanged) and 4f4a765f36cee6f3 18655 -> 19386 (+731,
+  // superseding its prior +428 node_allowances entry) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1569659 = +30032.
+  // 71275: 2026-09-22 zone-device-rename-stage-1 final fix wave (controller rulings W1/W2,
+  // review Important 1 and M3). Important 1 applies GLOBAL amendment A5 to the zone rename
+  // route: zone-rename-fn (two sites) and zone-rename-scope-guard (one site) drop the `msg`
+  // argument from node.error, so both nodes SHRINK (7006 -> 6996 and 2609 -> 2604; the
+  // zone-rename-fn new-node ceiling is tightened to match). M3 stops cs-reg-cloud-fn warning
+  // for a REGISTER_DEVICE that carries no name at all, at the cost of one guard condition
+  // (20980 -> 21035, +1197 over origin/main, still inside its existing 5391 headroom).
+  // W1 and W2 are module-side and do not touch flows.json. Re-reads the standing 41203 from
+  // origin/main (unchanged) and raises it by the 30072 chars measured for the whole branch
+  // across the 15 nodes that differ from origin/main: the five Task 6-8 new nodes
+  // (zone-rename-scope-guard 2604, zone-rename-fn 6996, device-rename-scope-guard 2606,
+  // device-rename-fn 8351, entity-name-command-apply-fn 4151 = 24708), the five Task 8
+  // registry/capability deltas unchanged (+236/+236/+27/+27/+27 = 553) and the five existing
+  // nodes that grew (cs-reg-cloud-fn +1197, post-zone-auth +917, post-devices-auth +999,
+  // scoped-zone-create-router +967, 4f4a765f36cee6f3 +731 = 4811) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1569699 = +30072.
+  expectCondition(sizeAllowances.total_allowance?.delta === 71275,
+    'size total allowance: exact cumulative delta 71275',
+    'size total allowance: expected exact cumulative delta 71275');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',

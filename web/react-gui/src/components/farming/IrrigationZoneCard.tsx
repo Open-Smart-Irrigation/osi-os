@@ -12,6 +12,7 @@ import { Sdi12SoilCard } from './Sdi12SoilCard';
 import { Sdi12SettingsModal } from './Sdi12SettingsModal';
 import { ScheduleSection, normalizeTriggerMetric } from './ScheduleSection';
 import { ZoneDeviceModal } from './ZoneDeviceModal';
+import { EditableName } from './shared/EditableName';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
@@ -244,6 +245,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const [environmentSummary, setEnvironmentSummary] = useState<ZoneEnvironmentSummary | null>(null);
   const [latestZoneRecommendation, setLatestZoneRecommendation] = useState<ZoneRecommendation | null>(null);
 
+  const handleRenameZone = async (nextName: string) => {
+    await irrigationZonesAPI.rename(zone.id, nextName);
+    onUpdate();
+  };
+
   const handleDeleteZone = async () => {
     setIsDeleting(true);
     setError(null);
@@ -396,24 +402,42 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
       {/* Zone Header — stacks vertically on mobile */}
       <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-3">
-        <button
-          className="flex-1 min-w-0 text-left flex items-center gap-2 group"
-          aria-expanded={!zoneCollapsed}
-          onClick={() => setZoneCollapsed(c => !c)}
-        >
-          <h3 className="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text break-words">
-            {zone.name}
-          </h3>
-          <span
-            className="text-[var(--text-tertiary)] text-xl transition-transform duration-200 mt-0.5 shrink-0"
-            style={{ display: 'inline-block', transform: zoneCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+        {/* The pencil is a button, so the heading can no longer sit inside the
+            collapse button: nested interactive elements are invalid markup and
+            make the collapse control ambiguous to assistive technology. The
+            heading moves out; the chevron and the device count stay the
+            collapse control and keep aria-expanded. */}
+        <div className="flex-1 min-w-0">
+          <EditableName
+            name={zone.name}
+            canEdit={canWrite}
+            onSave={handleRenameZone}
+            renameLabel={t('rename.zone')}
+            inputLabel={t('rename.zoneInputLabel')}
+            headingClassName="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text break-words"
+          />
+          <button
+            className="text-left flex items-center gap-2 group"
+            aria-expanded={!zoneCollapsed}
+            // T13-M2: the heading moved out of this button (above), so its own visible
+            // content -- the chevron glyph plus the device-count text -- no longer names
+            // the zone, and every zone card's toggle would otherwise share the same
+            // accessible name. Built only from strings the component already has (the
+            // zone name and the existing device-count translation); no new i18n key.
+            aria-label={`${zone.name} ${t('zone.deviceCount', { count: zone.device_count })}`}
+            onClick={() => setZoneCollapsed(c => !c)}
           >
-            ▾
-          </span>
-          <p className="text-[var(--text-secondary)] text-sm mt-1">
-            {t('zone.deviceCount', { count: zone.device_count })}
-          </p>
-        </button>
+            <span
+              className="text-[var(--text-tertiary)] text-xl transition-transform duration-200 shrink-0"
+              style={{ display: 'inline-block', transform: zoneCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+            >
+              ▾
+            </span>
+            <p className="text-[var(--text-secondary)] text-sm">
+              {t('zone.deviceCount', { count: zone.device_count })}
+            </p>
+          </button>
+        </div>
         <div className="flex flex-wrap gap-2 shrink-0 max-w-full">
           {canWrite && (
             <>
@@ -794,6 +818,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                         <DraginoTempCard
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          onUpdate={onUpdate}
                           readOnly={!canWrite}
                           removeContext="zone"
                         />
@@ -819,6 +844,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onOpenSettings={() => setSdi12SettingsDevice(device)}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          onUpdate={onUpdate}
                           readOnly={!canWrite}
                           removeContext="zone"
                         />
@@ -869,6 +895,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                         <LoRainGaugeCard
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          onUpdate={onUpdate}
                           readOnly={!canWrite}
                           removeContext="zone"
                         />

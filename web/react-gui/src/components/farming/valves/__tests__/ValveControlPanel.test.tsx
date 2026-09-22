@@ -32,10 +32,17 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: translateForTest, i18n: { language: 'en' } }),
 }));
 
+// The tile stub's rename button records how the panel's onRename promise
+// settled, which is the whole point of the M4 test below: EditableName renders
+// its error line from a rejection, so a rename that committed must not reject
+// just because the list could not be revalidated afterwards.
+const { renameOutcomes } = vi.hoisted(() => ({ renameOutcomes: [] as string[] }));
+
 vi.mock('../../../../services/api', () => ({
   devicesAPI: {
     controlValve: vi.fn(),
     cancelIrrigation: vi.fn(),
+    rename: vi.fn(),
   },
   valvesAPI: {
     list: vi.fn(),
@@ -58,6 +65,16 @@ vi.mock('../ValveTile', () => ({
       <button onClick={props.onResume}>Resume-{props.valve.deviceEui}</button>
       <button onClick={props.onResend}>Resend-{props.valve.deviceEui}</button>
       <button onClick={props.onSettings}>Settings-{props.valve.deviceEui}</button>
+      <button
+        onClick={() => {
+          props.onRename('Renamed valve').then(
+            () => renameOutcomes.push('resolved'),
+            () => renameOutcomes.push('rejected'),
+          );
+        }}
+      >
+        Rename-{props.valve.deviceEui}
+      </button>
     </div>
   ),
 }));
@@ -108,6 +125,7 @@ function makeValve(overrides: Partial<ValveSummary> = {}): ValveSummary {
 describe('ValveControlPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    renameOutcomes.length = 0;
   });
 
   it('labels a failed non-open action (cancel/skip/pause/resume/resend) with actionFailed, not the open error', async () => {
@@ -115,7 +133,7 @@ describe('ValveControlPanel', () => {
     vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce(new Error('boom'));
     const onUpdate = vi.fn();
 
-    render(<ValveControlPanel onUpdate={onUpdate} />);
+    render(<ValveControlPanel onUpdate={onUpdate} canWrite />);
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
 
     expect(await screen.findByText('The action could not be completed.')).toBeInTheDocument();
@@ -129,7 +147,7 @@ describe('ValveControlPanel', () => {
     vi.mocked(valvesAPI.updateSettings).mockRejectedValueOnce(new Error('pref save failed'));
     const onUpdate = vi.fn();
 
-    render(<ValveControlPanel onUpdate={onUpdate} />);
+    render(<ValveControlPanel onUpdate={onUpdate} canWrite />);
     fireEvent.click(await screen.findByRole('button', { name: 'Open-0016C001F1000001' }));
     fireEvent.click(await screen.findByRole('button', { name: 'SubmitOpen' }));
 
@@ -141,6 +159,37 @@ describe('ValveControlPanel', () => {
     await waitFor(() => expect(onUpdate).toHaveBeenCalled());
     expect(warnSpy).toHaveBeenCalled();
     expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+
+    warnSpy.mockRestore();
+  });
+
+  // M4: the rename has already committed on the gateway by the time the list
+  // is revalidated. Awaiting the revalidation made its failure the rename's
+  // failure, and EditableName shows a rejection as an error line under the
+  // input: the operator would read "could not save" about a name that is
+  // saved. The eight cards call onUpdate?.() unawaited for the same reason.
+  it('does not report a failed revalidation after a committed rename as a save failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(devicesAPI.rename).mockResolvedValue({
+      deveui: '0016C001F1000001',
+      name: 'Renamed valve',
+      sync_version: 2,
+      changed: true,
+      chirpstack: 'updated',
+    });
+    // The panel's refresh is `await mutate(); onUpdate();`. The dashboard's
+    // onUpdate reloads its own data and can fail on its own, which is the
+    // reachable way for the refresh to reject.
+    const onUpdate = vi.fn(() => { throw new Error('dashboard reload failed'); });
+
+    render(<ValveControlPanel onUpdate={onUpdate} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename-0016C001F1000001' }));
+
+    await waitFor(() => expect(devicesAPI.rename).toHaveBeenCalledWith('0016C001F1000001', 'Renamed valve'));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+    await waitFor(() => expect(renameOutcomes).toEqual(['resolved']));
+    expect(warnSpy).toHaveBeenCalled();
 
     warnSpy.mockRestore();
   });

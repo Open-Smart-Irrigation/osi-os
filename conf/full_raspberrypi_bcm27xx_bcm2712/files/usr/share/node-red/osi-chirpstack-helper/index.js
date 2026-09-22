@@ -113,15 +113,48 @@ const DEFAULT_GRPC_DEADLINE_MS = 20000;
 // and arms no timer, so an oversized value would switch the deadline off again.
 const MAX_GRPC_DEADLINE_MS = 120000;
 
+// A rename waits behind this call: the REST handler answers only once it settles,
+// and the command applier holds its database handle open across it. Twenty seconds
+// of a restarting ChirpStack is too long for a label change, so the name update
+// carries its own budget. It never exceeds the general setting, so lowering
+// OSI_CHIRPSTACK_GRPC_DEADLINE_MS lowers this one too.
+const NAME_UPDATE_DEADLINE_MS = 5000;
+
 function grpcDeadlineMs() {
   const configured = Number(process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS);
   if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_GRPC_DEADLINE_MS;
   return Math.min(configured, MAX_GRPC_DEADLINE_MS);
 }
 
-function grpcInvoke(client, methodName, request, metadata, step) {
+function nameUpdateDeadlineMs() {
+  return Math.min(NAME_UPDATE_DEADLINE_MS, grpcDeadlineMs());
+}
+
+// deadlineMs is optional: a caller that needs a shorter budget than the general
+// setting passes one, and every existing call site keeps grpcDeadlineMs().
+// It may also be a FUNCTION returning the milliseconds still left of a budget
+// that covers several RPCs. The getter is called here, at the moment the call
+// is actually issued, so the second RPC of an operation gets what the first
+// one left rather than a fresh full budget.
+function grpcInvoke(client, methodName, request, metadata, step, deadlineMs) {
   return new Promise((resolve, reject) => {
-    const options = { deadline: new Date(Date.now() + grpcDeadlineMs()) };
+    const isGetter = typeof deadlineMs === 'function';
+    const requested = Number(isGetter ? deadlineMs() : deadlineMs);
+    const generalMs = grpcDeadlineMs();
+    let budgetMs;
+    if (!Number.isFinite(requested)) {
+      budgetMs = generalMs;
+    } else if (requested > 0) {
+      budgetMs = Math.min(requested, generalMs);
+    } else if (isGetter) {
+      // The shared budget is already spent. That is an expired deadline, not
+      // "no deadline": falling back to the general setting here would hand
+      // this call the very twenty seconds the shared budget exists to avoid.
+      budgetMs = 0;
+    } else {
+      budgetMs = generalMs;
+    }
+    const options = { deadline: new Date(Date.now() + budgetMs) };
     client[methodName](request, metadata, options, (error, response) => {
       if (error) {
         reject(toGrpcError(error, step || methodName));
@@ -206,11 +239,14 @@ class ChirpStackClient {
     this.gatewayClient = new gatewayGrpc.GatewayServiceClient(this.apiUrl.target, this.credentials);
   }
 
-  async getDevice(devEui) {
+  async getDevice(devEui, options) {
     const request = new devicePb.GetDeviceRequest();
     request.setDevEui(normalizeDevEui(devEui));
     try {
-      const response = await grpcInvoke(this.deviceClient, 'get', request, this.metadata, 'getDevice');
+      const response = await grpcInvoke(
+        this.deviceClient, 'get', request, this.metadata, 'getDevice',
+        options && options.deadlineMs
+      );
       return response.getDevice();
     } catch (error) {
       if (error.code === grpc.status.NOT_FOUND) {
@@ -308,12 +344,44 @@ class ChirpStackClient {
     return true;
   }
 
+  // The one place that reads, compares and writes a ChirpStack device name.
+  // Re-reads the device rather than taking a caller's copy: a profile
+  // repoint (or another rename) may have just written to it, and an
+  // UpdateDeviceRequest replaces the whole message. Shared by
+  // ensureDeviceProvisioned (general deadline, no options) and the module-level
+  // updateDeviceName (bounded deadline via options.deadlineMs, its own step
+  // name via options.step). options.deadlineMs may be a fixed number of
+  // milliseconds or a getter returning what is left of a budget that covers
+  // both RPCs below; it is passed straight through to each one, which resolves
+  // it when it issues its call. A blank name -- after trimming -- and a device
+  // ChirpStack does not have both resolve 'skipped' with no update RPC; a
+  // blank name is 'skipped' before any gRPC read at all.
+  async setDeviceName(devEui, name, options) {
+    const opts = options || {};
+    const step = opts.step || 'setDeviceName';
+    const wanted = String(name === null || name === undefined ? '' : name).trim();
+    if (!wanted) return 'skipped';
+    const existing = await this.getDevice(devEui, { deadlineMs: opts.deadlineMs });
+    if (!existing) return 'skipped';
+    if (String(existing.getName() || '') === wanted) return 'unchanged';
+    existing.setName(wanted);
+    const request = new devicePb.UpdateDeviceRequest();
+    request.setDevice(existing);
+    await grpcInvoke(this.deviceClient, 'update', request, this.metadata, step, opts.deadlineMs);
+    return 'updated';
+  }
+
   async ensureDeviceProvisioned(input) {
     const devEui = normalizeDevEui(input.devEui);
     const appKey = normalizeHexKey(input.appKey);
     const applicationId = String(input.applicationId || '').trim();
     const deviceProfileId = String(input.deviceProfileId || '').trim();
+    // createDevice needs a name for a brand-new device, so it falls back to the
+    // DevEUI. Reconciling an EXISTING device must never invent that fallback --
+    // an omitted or blank `name` on a rename-less call must leave ChirpStack's
+    // label alone, so reconciliation below reads providedName, not name.
     const name = String(input.name || devEui).trim();
+    const providedName = String(input.name || '').trim();
 
     if (!devEui) {
       throw annotateError(new Error('DevEUI is required'), 'validate');
@@ -335,6 +403,7 @@ class ChirpStackClient {
     let deviceCreated = false;
     let keysAction = 'unchanged';
     let profileAction = 'unchanged';
+    let nameAction = 'unchanged';
 
     try {
       const existingDevice = await this.getDevice(devEui);
@@ -355,12 +424,33 @@ class ChirpStackClient {
             throw error;
           }
         }
-      } else if (String(existingDevice.getDeviceProfileId() || '') !== deviceProfileId) {
-        // setDeviceProfile re-fetches the device itself (the price of routing every
-        // profile assignment through the single seam); its boolean return is the
-        // truth about whether an update RPC was actually issued -- do not assume
-        // 'repointed' just because the two getDevice reads disagreed once.
-        profileAction = (await this.setDeviceProfile(devEui, deviceProfileId)) ? 'repointed' : 'unchanged';
+      } else {
+        if (String(existingDevice.getDeviceProfileId() || '') !== deviceProfileId) {
+          // setDeviceProfile re-fetches the device itself (the price of routing every
+          // profile assignment through the single seam); its boolean return is the
+          // truth about whether an update RPC was actually issued -- do not assume
+          // 'repointed' just because the two getDevice reads disagreed once.
+          profileAction = (await this.setDeviceProfile(devEui, deviceProfileId)) ? 'repointed' : 'unchanged';
+        }
+        // The OSI database owns the label, and only when the caller actually
+        // supplied one: an omitted/blank providedName leaves ChirpStack alone,
+        // exactly like leaving keysAction/profileAction at 'unchanged' above.
+        // A rename that could not reach ChirpStack (an outage, a restart) heals
+        // at the next provisioning. createDevice above already set the name on
+        // a brand-new device, so this runs only for one that was already there.
+        //
+        // The name comparison uses existingDevice, already read above, to cost
+        // no extra round trip when it already matches (the profile repoint
+        // just above, if it ran, only ever touches deviceProfileId, so
+        // existingDevice's name is still current). Only a genuine difference
+        // pays for setDeviceName's own fresh read -- required for correctness,
+        // since a repoint may have just replaced the whole device message and
+        // existingDevice's copy of it would be stale to send back.
+        if (providedName) {
+          nameAction = String(existingDevice.getName() || '') === providedName
+            ? 'unchanged'
+            : await this.setDeviceName(devEui, providedName, { step: 'ensureDeviceProvisioned' });
+        }
       }
 
       const existingKeys = await this.getKeys(devEui);
@@ -380,7 +470,8 @@ class ChirpStackClient {
         deviceCreated,
         deviceExisted: !deviceCreated,
         keysAction,
-        profileAction
+        profileAction,
+        nameAction
       };
     } catch (error) {
       if (deviceCreated) {
@@ -535,6 +626,54 @@ class ChirpStackClient {
   }
 }
 
+// One promise chain per DevEUI. Two renames of one device in quick succession
+// must end with ChirpStack on the newer name whichever gRPC call is slower, so
+// the second call's readCurrentName and its update RPC both wait for the first
+// to settle. The chain is dropped once it drains, so the map cannot grow with
+// the fleet.
+const deviceNameQueues = new Map();
+
+function serializeByDevEui(devEui, task) {
+  const previous = deviceNameQueues.get(devEui) || Promise.resolve();
+  const scheduled = previous.then(task, task);
+  const settled = scheduled.then(() => undefined, () => undefined);
+  deviceNameQueues.set(devEui, settled);
+  settled.then(() => {
+    if (deviceNameQueues.get(devEui) === settled) deviceNameQueues.delete(devEui);
+  });
+  return scheduled;
+}
+
+// readCurrentName reads devices.name from SQLite at the moment this call
+// actually runs, never before it is queued: the value that reaches ChirpStack
+// is the one the database holds after every earlier rename has committed.
+// Delegates to ChirpStackClient.setDeviceName for the actual read-compare-update
+// (the one place that trims and refuses a blank name). nameUpdateDeadlineMs()
+// is ONE budget for the whole update, armed when this task starts rather than
+// when it was queued, and each RPC gets what is left of it. Giving both RPCs
+// the full budget instead cost a caller up to ten seconds against a ChirpStack
+// that accepts the connection and never answers -- past the dashboard's
+// ten-second HTTP timeout, so the operator saw a save failure after a rename
+// that had already committed.
+async function updateDeviceName(client, devEui, readCurrentName) {
+  const normalized = normalizeDevEui(devEui);
+  if (!/^[0-9A-F]{16}$/.test(normalized)) {
+    throw annotateError(new Error('DevEUI is required'), 'updateDeviceName');
+  }
+  if (typeof readCurrentName !== 'function') {
+    throw annotateError(new Error('updateDeviceName requires a readCurrentName function'), 'updateDeviceName');
+  }
+  return serializeByDevEui(normalized, async () => {
+    const expiresAt = Date.now() + nameUpdateDeadlineMs();
+    const stored = await readCurrentName();
+    if (stored === null || stored === undefined) return 'skipped';
+    return client.setDeviceName(normalized, stored, {
+      deadlineMs: () => expiresAt - Date.now(),
+      step: 'updateDeviceName'
+    });
+  });
+}
+
 function createClient(config) {
   return new ChirpStackClient(config || {});
 }
@@ -552,6 +691,8 @@ function createProvisioningClientFromEnv(env) {
 module.exports = {
   createClient,
   createProvisioningClientFromEnv,
+  updateDeviceName,
+  NAME_UPDATE_DEADLINE_MS,
   normalizeApiUrl,
   normalizeDevEui,
   normalizeHexKey,

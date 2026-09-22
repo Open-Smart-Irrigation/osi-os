@@ -77,6 +77,18 @@ each key's `lg` value is still byte-identical to `en`, the same mechanism
 from that list and from the table above in the same change; the test fails
 otherwise, so the two cannot drift apart.
 
+## `devices.json` — zone and device rename
+
+| Keys | Reason |
+|---|---|
+| `rename.zone`, `rename.device`, `rename.zoneInputLabel`, `rename.deviceInputLabel`, `rename.reason.name_empty`, `rename.reason.name_too_long`, `rename.reason.name_control_characters`, `rename.reason.name_invalid_unicode`, `rename.failed` (9 keys in `devices.json`) | New keys for the rename pencil on the zone card and the seven device surfaces, and for the four reason codes of the shared name rule. No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change. |
+
+Tracked in code at `web/react-gui/tests/renameLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism the sections above use. A human
+Luganda pass must drop the key from that set and from the table above in the
+same change; the test fails otherwise, so the two cannot drift apart.
+
 ## Related keys not listed here
 
 Two other `accountLink.json` keys recovered from PR #150 in the same

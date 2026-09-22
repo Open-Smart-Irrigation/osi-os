@@ -182,7 +182,7 @@ async function renderIn(language: string) {
       </MemoryRouter>
     </I18nextProvider>,
   );
-  fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+  fireEvent.click(screen.getByRole('button', { expanded: false }));
   await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
   await screen.findByTestId('water-today-card');
   // Expand the device list so the group headings render too.

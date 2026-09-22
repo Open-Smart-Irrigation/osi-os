@@ -99,6 +99,16 @@ jobs:
             scripts/test-terra-zone-config-command-flow.js
           node --test scripts/osi-lib-binding-audit.test.js
           node scripts/test-flows-wiring.js
+      # Rename routes, the entity-name command path and the create/legacy name
+      # rule. Each runs the shipped function-node source against an in-memory
+      # SQLite fixture through scripts/lib/scoped-access-harness.js.
+      - name: Zone and device rename gates
+        run: |
+          node --test scripts/test-zone-rename-route.js \
+            scripts/test-device-rename-route.js \
+            scripts/test-entity-name-command-path.js \
+            scripts/test-entity-name-create-paths.js \
+            scripts/test-legacy-upsert-zone-name.js
       # F128: a local zone create/delete must ping the outbox flush gate over the
       # link pair instead of waiting up to 30 s for the "Flush Sync Outbox" inject.
       # Pins the wiring (both scoped and legacy routes tap it) and the gate's

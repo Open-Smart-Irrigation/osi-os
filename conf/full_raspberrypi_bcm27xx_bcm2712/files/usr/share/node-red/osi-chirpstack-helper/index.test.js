@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const grpc = require('@grpc/grpc-js');
 const devicePb = require('@chirpstack/chirpstack-api/api/device_pb');
 
-const { createClient } = require('./index');
+const { createClient, updateDeviceName, NAME_UPDATE_DEADLINE_MS } = require('./index');
 
 function notFoundError() {
   const error = new Error('not found');
@@ -197,9 +197,10 @@ test('ensureDeviceProvisioned re-points an existing device whose profile differs
 
 test('ensureDeviceProvisioned reports unchanged when the profile already matches', async () => {
   const captured = {};
-  const client = stubClient(captured, { device: { devEui: '00dec0de00000001', deviceProfileId: 'prof-gen2' }, keys: { nwkKey: 'A'.repeat(32) } });
+  const client = stubClient(captured, { device: { devEui: '00dec0de00000001', name: 'Vanne 1', deviceProfileId: 'prof-gen2' }, keys: { nwkKey: 'A'.repeat(32) } });
   const result = await client.ensureDeviceProvisioned({ devEui: '00DEC0DE00000001', appKey: 'A'.repeat(32), applicationId: 'app-1', deviceProfileId: 'prof-gen2', name: 'Vanne 1' });
   assert.equal(result.profileAction, 'unchanged');
+  assert.equal(result.nameAction, 'unchanged');
   assert.equal(captured.update, undefined);
 });
 
@@ -377,4 +378,398 @@ test('an oversized deadline setting is clamped instead of switching the deadline
   }
   assert.equal(seen.length, 3);
   for (const budgetMs of seen) assert.ok(budgetMs > 100000 && budgetMs <= 120000, `clamped budget was ${budgetMs} ms`);
+});
+
+// updateDeviceName keeps one promise chain per DevEUI in module state, so each
+// test below uses its own DevEUI and no test can inherit another's queue.
+function nameStubClient(captured, fixtures) {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  const device = fixtures.device === null
+    ? null
+    : buildMinimalDeviceMessage(fixtures.device || { devEui: '00dec0de00000001', name: 'Old' });
+  captured.updates = [];
+  captured.reads = [];
+  captured.deadlines = [];
+  client.deviceClient = {
+    get: (request, metadata, options, callback) => {
+      captured.reads.push('get');
+      captured.deadlines.push(options.deadline.getTime() - Date.now());
+      if (!device) return callback(notFoundError());
+      callback(null, { getDevice: () => device });
+    },
+    update: (request, metadata, options, callback) => {
+      const name = request.getDevice().getName();
+      captured.updates.push(name);
+      captured.deadlines.push(options.deadline.getTime() - Date.now());
+      if (fixtures.updateFails) return callback(Object.assign(new Error('boom'), { code: 13 }));
+      const delay = fixtures.updateDelayMs ? fixtures.updateDelayMs(name) : 0;
+      setTimeout(() => callback(null, {}), delay);
+    },
+  };
+  return client;
+}
+
+test('updateDeviceName sends the database name when ChirpStack disagrees', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, { device: { devEui: '00dec0de00000101', name: 'Old' } });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000101', async () => 'Probe 7'), 'updated');
+  assert.deepEqual(captured.updates, ['Probe 7']);
+});
+
+test('updateDeviceName sends nothing when the names already match', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, { device: { devEui: '00dec0de00000102', name: 'Probe 7' } });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000102', async () => 'Probe 7'), 'unchanged');
+  assert.deepEqual(captured.updates, []);
+});
+
+test('updateDeviceName skips when the database has no name to send', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, { device: { devEui: '00dec0de00000103', name: 'Old' } });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000103', async () => null), 'skipped');
+  assert.deepEqual(captured.reads, [], 'a null name must not cost a gRPC round trip');
+  assert.deepEqual(captured.updates, []);
+});
+
+test('updateDeviceName skips a device ChirpStack does not have', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, { device: null });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000104', async () => 'Probe 7'), 'skipped');
+  assert.deepEqual(captured.updates, []);
+});
+
+test('updateDeviceName rejects on a gRPC failure so the caller can report "failed"', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, {
+    device: { devEui: '00dec0de00000105', name: 'Old' },
+    updateFails: true,
+  });
+  await assert.rejects(
+    updateDeviceName(client, '00DEC0DE00000105', async () => 'Probe 7'),
+    (error) => error.step === 'updateDeviceName'
+  );
+});
+
+test('two renames whose gRPC calls finish in reverse order end on the newer name', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, {
+    device: { devEui: '00dec0de00000106', name: 'Old' },
+    // The first update is the slow one. Without per-DevEUI serialization the
+    // second would land first and the first would overwrite it.
+    updateDelayMs: (name) => (name === 'Probe 7' ? 60 : 0),
+  });
+  const reads = [];
+  const first = updateDeviceName(client, '00DEC0DE00000106', async () => {
+    reads.push('first');
+    return 'Probe 7';
+  });
+  const second = updateDeviceName(client, '00DEC0DE00000106', async () => {
+    reads.push('second');
+    return 'Probe 8';
+  });
+  assert.deepEqual(await Promise.all([first, second]), ['updated', 'updated']);
+  assert.deepEqual(captured.updates, ['Probe 7', 'Probe 8'], 'the newer name must be sent last');
+  assert.deepEqual(reads, ['first', 'second'], 'the second read happens after the first call settles');
+});
+
+test('a failed rename does not block the next rename of the same device', async () => {
+  const captured = {};
+  const failing = nameStubClient(captured, {
+    device: { devEui: '00dec0de00000107', name: 'Old' },
+    updateFails: true,
+  });
+  await assert.rejects(updateDeviceName(failing, '00DEC0DE00000107', async () => 'Probe 7'));
+  const recovered = {};
+  const client = nameStubClient(recovered, { device: { devEui: '00dec0de00000107', name: 'Old' } });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000107', async () => 'Probe 8'), 'updated');
+  assert.deepEqual(recovered.updates, ['Probe 8']);
+});
+
+// F110 bounded the whole client at 20 s. A rename waits behind this call, so
+// both of its RPCs carry the shorter name-update budget instead.
+test('both name-update RPCs carry the five-second budget, not the twenty-second default', async () => {
+  assert.equal(NAME_UPDATE_DEADLINE_MS, 5000);
+  const captured = {};
+  const client = nameStubClient(captured, { device: { devEui: '00dec0de00000110', name: 'Old' } });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000110', async () => 'Probe 7'), 'updated');
+  assert.equal(captured.deadlines.length, 2, 'the read and the update each carry a deadline');
+  for (const budgetMs of captured.deadlines) {
+    assert.ok(budgetMs > 4000 && budgetMs <= 5000, `name-update budget was ${budgetMs} ms`);
+  }
+});
+
+test('a longer operator deadline does not lengthen the name update', async () => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = '60000';
+  try {
+    const captured = {};
+    const client = nameStubClient(captured, { device: { devEui: '00dec0de00000111', name: 'Old' } });
+    await updateDeviceName(client, '00DEC0DE00000111', async () => 'Probe 7');
+    // Without this the loop below would pass over an empty array and the test
+    // would prove nothing at all.
+    assert.equal(captured.deadlines.length, 2, 'the read and the update each carry a deadline');
+    for (const budgetMs of captured.deadlines) {
+      assert.ok(budgetMs > 4000 && budgetMs <= 5000, `name-update budget was ${budgetMs} ms`);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  }
+});
+
+// Controller ruling W2: NAME_UPDATE_DEADLINE_MS is the budget for the WHOLE
+// name update, not for each of its two RPCs. Bounding them separately let a
+// ChirpStack that accepts the connection and never answers hold the REST
+// handler for about ten seconds, past the dashboard's ten-second axios
+// timeout: the operator saw "Could not save" after a rename that had already
+// committed. Spec 5.5 allows at most five.
+//
+// grpc-js ends a call itself once its deadline passes. These two tests need a
+// client that behaves the same way -- one that never answers but still
+// honours the deadline it was handed -- because a stub that simply never
+// calls back would hang the suite, and the real never-answering socket of the
+// F110 fixture cannot be told to answer the read quickly and then stall the
+// update.
+function deadlineExceededError() {
+  const error = new Error('Deadline exceeded');
+  error.code = grpc.status.DEADLINE_EXCEEDED;
+  error.details = 'Deadline exceeded';
+  return error;
+}
+
+function budgetedNameStub(captured, fixtures) {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  const device = buildMinimalDeviceMessage(fixtures.device);
+  captured.updates = [];
+  captured.deadlines = [];
+  const answerAtDeadline = (options, callback) => {
+    const remainingMs = Math.max(0, options.deadline.getTime() - Date.now());
+    setTimeout(() => callback(deadlineExceededError()), remainingMs);
+  };
+  client.deviceClient = {
+    get: (request, metadata, options, callback) => {
+      captured.deadlines.push(options.deadline.getTime() - Date.now());
+      if (fixtures.readHangs) {
+        answerAtDeadline(options, callback);
+        return;
+      }
+      setTimeout(() => callback(null, { getDevice: () => device }), fixtures.readDelayMs || 0);
+    },
+    update: (request, metadata, options, callback) => {
+      captured.updates.push(request.getDevice().getName());
+      captured.deadlines.push(options.deadline.getTime() - Date.now());
+      answerAtDeadline(options, callback);
+    },
+  };
+  return client;
+}
+
+test('W2: a hung read spends the whole budget and the update never starts', async (t) => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = '400';
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  });
+  const budgetMs = 400;
+  const captured = {};
+  const client = budgetedNameStub(captured, {
+    device: { devEui: '00dec0de00000120', name: 'Old' },
+    readHangs: true,
+  });
+  const started = Date.now();
+  await assert.rejects(
+    updateDeviceName(client, '00DEC0DE00000120', async () => 'Probe 7'),
+    (error) => error.grpcStatus === 'DEADLINE_EXCEEDED' && error.step === 'getDevice'
+  );
+  const elapsed = Date.now() - started;
+  assert.deepEqual(captured.updates, [], 'the update RPC must not start once the read spent the budget');
+  assert.equal(captured.deadlines.length, 1);
+  assert.ok(elapsed < 2 * budgetMs, `the whole update must cost one budget, not two: ${elapsed} ms`);
+});
+
+test('W2: a fast read leaves the update only the remaining budget', async (t) => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = '400';
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  });
+  const budgetMs = 400;
+  const readDelayMs = 300;
+  const captured = {};
+  const client = budgetedNameStub(captured, {
+    device: { devEui: '00dec0de00000121', name: 'Old' },
+    readDelayMs,
+  });
+  const started = Date.now();
+  await assert.rejects(
+    updateDeviceName(client, '00DEC0DE00000121', async () => 'Probe 7'),
+    (error) => error.grpcStatus === 'DEADLINE_EXCEEDED' && error.step === 'updateDeviceName'
+  );
+  const elapsed = Date.now() - started;
+  assert.deepEqual(captured.updates, ['Probe 7']);
+  assert.equal(captured.deadlines.length, 2);
+  assert.ok(
+    captured.deadlines[1] <= budgetMs - readDelayMs + 50,
+    `the update must inherit only what the read left: got ${captured.deadlines[1]} ms of ${budgetMs}`
+  );
+  assert.ok(elapsed < 2 * budgetMs, `the whole update must cost one budget, not two: ${elapsed} ms`);
+  assert.ok(elapsed < budgetMs + 200, `one budget plus scheduling slack, not two: ${elapsed} ms`);
+});
+
+// The budget is injected through the existing setting so this test finishes in
+// under a second while driving the same code path a five-second wait would.
+// The fixture is the one the F110 deadline test uses: a socket that accepts the
+// connection and says nothing.
+test('a ChirpStack that never answers ends the name update at its deadline, not in a hang', async (t) => {
+  const net = require('node:net');
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.on('error', () => {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  const port = server.address().port;
+
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = '400';
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  });
+
+  const client = createClient({ apiUrl: `http://127.0.0.1:${port}`, apiKey: 'test-key' });
+  const started = Date.now();
+  const outcome = await Promise.race([
+    updateDeviceName(client, '00DEC0DE00000112', async () => 'Probe 7').then(() => 'resolved', (error) => error),
+    new Promise((resolve) => setTimeout(() => resolve('still pending after 5 s'), 5000))
+  ]);
+  if (client.deviceClient && typeof client.deviceClient.close === 'function') client.deviceClient.close();
+
+  assert.ok(outcome instanceof Error, `expected a rejection, got: ${outcome}`);
+  assert.equal(outcome.grpcStatus, 'DEADLINE_EXCEEDED');
+  assert.ok(Date.now() - started < 4000, 'must give up close to the injected deadline');
+});
+
+test('ensureDeviceProvisioned reconciles an existing device name from the value it is given', async () => {
+  const captured = {};
+  const client = stubClient(captured, {
+    device: { devEui: '00dec0de00000108', name: 'Stale label', deviceProfileId: 'prof-gen2' },
+    keys: { nwkKey: 'A'.repeat(32) },
+  });
+  const result = await client.ensureDeviceProvisioned({
+    devEui: '00DEC0DE00000108',
+    appKey: 'A'.repeat(32),
+    applicationId: 'app-1',
+    deviceProfileId: 'prof-gen2',
+    name: 'Probe 7',
+  });
+  assert.equal(result.nameAction, 'updated');
+  assert.equal(result.profileAction, 'unchanged');
+  assert.equal(captured.update.device.name, 'Probe 7');
+});
+
+test('ensureDeviceProvisioned leaves a created device alone: createDevice already set its name', async () => {
+  const captured = {};
+  const client = stubClient(captured, { device: null, keys: null });
+  const result = await client.ensureDeviceProvisioned({
+    devEui: '00DEC0DE00000109',
+    appKey: 'A'.repeat(32),
+    applicationId: 'app-1',
+    deviceProfileId: 'prof-gen2',
+    name: 'Probe 7',
+  });
+  assert.equal(result.deviceCreated, true);
+  assert.equal(result.nameAction, 'unchanged');
+  assert.equal(captured.create.device.name, 'Probe 7');
+  assert.equal(captured.update, undefined);
+});
+
+// Fix round 1 / Finding I1: `input.name || devEui` is the createDevice fallback
+// only. Reconciling an EXISTING device's name must use what the caller actually
+// supplied, never the DevEUI fallback, or an omitted/blank name silently
+// overwrites a good ChirpStack label with the DevEUI.
+test('ensureDeviceProvisioned leaves the ChirpStack name untouched when no name is supplied', async () => {
+  const captured = {};
+  const client = stubClient(captured, {
+    device: { devEui: '00dec0de00000115', name: 'Probe 7', deviceProfileId: 'prof-gen2' },
+    keys: { nwkKey: 'A'.repeat(32) },
+  });
+  const result = await client.ensureDeviceProvisioned({
+    devEui: '00DEC0DE00000115',
+    appKey: 'A'.repeat(32),
+    applicationId: 'app-1',
+    deviceProfileId: 'prof-gen2',
+  });
+  assert.equal(result.nameAction, 'unchanged');
+  assert.equal(captured.update, undefined, 'an omitted name must not invent the DevEUI as the ChirpStack label');
+});
+
+test('ensureDeviceProvisioned leaves the ChirpStack name untouched when the supplied name is blank', async () => {
+  for (const blank of ['', '   ']) {
+    const captured = {};
+    const client = stubClient(captured, {
+      device: { devEui: '00dec0de00000116', name: 'Probe 7', deviceProfileId: 'prof-gen2' },
+      keys: { nwkKey: 'A'.repeat(32) },
+    });
+    const result = await client.ensureDeviceProvisioned({
+      devEui: '00DEC0DE00000116',
+      appKey: 'A'.repeat(32),
+      applicationId: 'app-1',
+      deviceProfileId: 'prof-gen2',
+      name: blank,
+    });
+    assert.equal(result.nameAction, 'unchanged');
+    assert.equal(captured.update, undefined, `a blank name (${JSON.stringify(blank)}) must not invent the DevEUI as the ChirpStack label`);
+  }
+});
+
+// Fix round 1 / Finding I1, folded ruling T4-M3: a name that already matches
+// must cost no extra device round trip and must not be able to fail before
+// the key reconciliation that follows.
+test('ensureDeviceProvisioned costs no extra device read when the supplied name already matches', async () => {
+  const captured = {};
+  const client = stubClient(captured, {
+    device: { devEui: '00dec0de00000117', name: 'Probe 7', deviceProfileId: 'prof-gen2' },
+    keys: { nwkKey: 'A'.repeat(32) },
+  });
+  const result = await client.ensureDeviceProvisioned({
+    devEui: '00DEC0DE00000117',
+    appKey: 'A'.repeat(32),
+    applicationId: 'app-1',
+    deviceProfileId: 'prof-gen2',
+    name: 'Probe 7',
+  });
+  assert.equal(result.nameAction, 'unchanged');
+  assert.deepEqual(client.__calls, ['get', 'getKeys'], 'a matching name must not cost an extra getDevice round trip');
+});
+
+// Fix round 1 / Finding I2, controller ruling T4-I2: setDeviceName is now the
+// one place that trims and compares. updateDeviceName must not push an
+// untrimmed label -- the divergence the reviewer found let the two callers of
+// the old duplicated logic flip a device's ChirpStack name back and forth.
+test('updateDeviceName trims a stored name with surrounding white space, and a later call with the same value resolves unchanged', async () => {
+  const captured = {};
+  const client = nameStubClient(captured, { device: { devEui: '00dec0de00000118', name: 'Old' } });
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000118', async () => '  Probe 7  '), 'updated');
+  assert.deepEqual(captured.updates, ['Probe 7'], 'the label sent to ChirpStack must be trimmed');
+
+  assert.equal(await updateDeviceName(client, '00DEC0DE00000118', async () => '  Probe 7  '), 'unchanged');
+  assert.deepEqual(captured.updates, ['Probe 7'], 'a repeat call with the same (untrimmed) stored value must send nothing new');
+});
+
+test('updateDeviceName treats a blank or whitespace-only stored name as skipped without a gRPC read', async () => {
+  for (const blank of ['', '   ']) {
+    const captured = {};
+    const client = nameStubClient(captured, { device: { devEui: '00dec0de00000119', name: 'Old' } });
+    assert.equal(await updateDeviceName(client, '00DEC0DE00000119', async () => blank), 'skipped');
+    assert.deepEqual(captured.reads, [], `a blank stored name (${JSON.stringify(blank)}) must not cost a gRPC round trip`);
+    assert.deepEqual(captured.updates, []);
+  }
 });

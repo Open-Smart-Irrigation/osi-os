@@ -16,6 +16,8 @@ const INSTALLATION_LOCATION_BINDING = Object.freeze({
   variable: 'installationLocation',
   module: 'installation-location',
 });
+const ENTITY_NAME_BINDING = Object.freeze({ variable: 'entityName', module: 'entity-name' });
+const CHIRPSTACK_BINDING = Object.freeze({ variable: 'chirpstack', module: 'chirpstack' });
 
 // Fail closed on complete reviewed sources. Any function change must be reviewed
 // and explicitly re-pinned here before either executable flow audit accepts it.
@@ -75,6 +77,17 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
     // queued on the durable ACK path.
     funcSha256: '48be4fcf2f22f89ee330f0661142cd69f5e4078b035eafe8644fd363ca053aa6',
     bindings: Object.freeze([DB_BINDING, INSTALLATION_LOCATION_BINDING, SCOPE_BINDING]),
+  }),
+  'entity-name-command-apply-fn': Object.freeze({
+    // Zone/device rename Stage 1: applies UPSERT_DEVICE_NAME and
+    // UPSERT_ZONE_NAME only, delegating the whole transaction to
+    // osi-entity-name's applyNameCommand. After an APPLIED device rename it
+    // runs the best-effort ChirpStack name update, awaited before the database
+    // handle closes because readCurrentName reads devices.name through it. A
+    // ChirpStack failure only warns; it never changes the acknowledgement.
+    // Last link of the command-apply delegation chain before Route Command.
+    funcSha256: '3b053b66c8b9daa583482e15f91fcbf271693c0a80b0791e01dc69a8f99a28db',
+    bindings: Object.freeze([DB_BINDING, ENTITY_NAME_BINDING, CHIRPSTACK_BINDING]),
   }),
 });
 

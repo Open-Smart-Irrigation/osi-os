@@ -280,7 +280,7 @@ describe('IrrigationZoneCard Data entry', () => {
     window.localStorage.setItem('osi.modules.predictionAdvisory', 'false');
 
     renderCard([dendroDevice]);
-    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
 
     await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
 
@@ -294,7 +294,7 @@ describe('IrrigationZoneCard Data entry', () => {
     apiMocks.getSummary.mockResolvedValue(environmentSummary);
 
     renderCard([dendroDevice]);
-    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
 
     expect(await screen.findByText('Water balance')).toBeInTheDocument();
     expect(screen.getByTestId('schedule-section')).toBeInTheDocument();
@@ -320,7 +320,7 @@ describe('IrrigationZoneCard Data entry', () => {
     });
 
     renderCard([dendroDevice]);
-    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
 
     expect(await screen.findByText('Water balance')).toBeInTheDocument();
     expect(screen.queryByText('Local scheduling')).not.toBeInTheDocument();
@@ -333,7 +333,7 @@ describe('IrrigationZoneCard Data entry', () => {
     window.localStorage.setItem('osi.modules.predictionAdvisory', 'true');
 
     renderCard([dendroDevice]);
-    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
 
     expect(screen.getByTestId('dendrometer-section')).toHaveTextContent('advisory-on');
   });

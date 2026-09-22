@@ -80,11 +80,13 @@
                 "DELETE_ZONE",
                 "UPSERT_ZONE_CONFIG",
                 "UPSERT_ZONE_LOCATION",
+                "UPSERT_ZONE_NAME",
                 "ASSIGN_DEVICE_TO_ZONE",
                 "UPSERT_DEVICE_FLAGS",
                 "UPSERT_DEVICE_RADIO_CONFIGURATION",
                 "UPSERT_DEVICE_INSTALLATION_LOCATION",
                 "UPSERT_DEVICE_SOIL_DEPTHS",
+                "UPSERT_DEVICE_NAME",
                 "UPDATE_SCHEDULE",
                 "UPSERT_SCHEDULE",
                 "UPSERT_VALVE_SCHEDULE",
@@ -112,6 +114,9 @@
         "base_revision_uuid": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUuid"},
         "values": {"type": "object"},
         "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
+        "gateway_device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
+        "zone_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
+        "requested_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"},
         "zone_id": {"type": ["integer", "null"]},
         "duration_seconds": {"type": ["integer", "null"], "minimum": 1},
         "duration_minutes": {"type": ["integer", "null"], "minimum": 1},
@@ -337,7 +342,8 @@
                             "UPSERT_USER_ZONE_ASSIGNMENT",
                             "DELETE_USER_ZONE_ASSIGNMENT",
                             "UPSERT_USER_PLOT_ASSIGNMENT",
-                            "DELETE_USER_PLOT_ASSIGNMENT"
+                            "DELETE_USER_PLOT_ASSIGNMENT",
+                            "UPSERT_ZONE_NAME"
                         ]
                     }
                 },
@@ -632,6 +638,57 @@
                 },
                 "properties": {
                     "effect_key": {"type": "string", "pattern": "^scoped_plot_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"}
+                }
+            }
+        }
+        ,
+        {
+            "if": {
+                "properties": {"command_type": {"const": "UPSERT_DEVICE_NAME"}},
+                "required": ["command_type"]
+            },
+            "then": {
+                "required": [
+                    "device_eui",
+                    "gateway_device_eui",
+                    "actor_user_uuid",
+                    "requested_at",
+                    "values"
+                ],
+                "properties": {
+                    "values": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["name"],
+                        "properties": {
+                            "name": {"type": "string", "minLength": 1, "maxLength": 100}
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"command_type": {"const": "UPSERT_ZONE_NAME"}},
+                "required": ["command_type"]
+            },
+            "then": {
+                "required": [
+                    "zone_uuid",
+                    "gateway_device_eui",
+                    "actor_user_uuid",
+                    "requested_at",
+                    "values"
+                ],
+                "properties": {
+                    "values": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["name"],
+                        "properties": {
+                            "name": {"type": "string", "minLength": 1, "maxLength": 100}
+                        }
+                    }
                 }
             }
         }

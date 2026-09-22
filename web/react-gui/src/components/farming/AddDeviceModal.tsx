@@ -3,6 +3,7 @@ import type { DeviceCatalogItem, DeviceType, StregaGeneration } from '../../type
 import { devicesAPI } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
+import { normalizeEntityName } from '../../utils/entityName';
 
 interface AddDeviceModalProps {
   isOpen: boolean;
@@ -59,6 +60,12 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
       return;
     }
 
+    const normalized = normalizeEntityName(name);
+    if (!normalized.ok) {
+      setError(t(`rename.reason.${normalized.reason}`));
+      return;
+    }
+
     if (catalog.length === 0 || !selectedType) {
       setError(t('addModal.deviceTypeRequired', 'Select a device type'));
       return;
@@ -72,7 +79,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
       const typeId = selectedType;
       await devicesAPI.add({
         deveui,
-        name,
+        name: normalized.name,
         type_id: typeId,
         appkey: appkey || undefined,
         ...(selectedType === 'STREGA_VALVE' ? { strega_generation: stregaGeneration } : {}),

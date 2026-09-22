@@ -7,6 +7,7 @@ import { describeLastSeen, renderLastSeen } from './valveCardHelpers';
 import { getBatteryPercentFromVoltage, getValidBatteryPercent } from '../shared/deviceCardBattery';
 import { useDismissOnPointerDown } from '../../../hooks/useDismissOnPointerDown';
 import { formatTime } from '../../../utils/datetime';
+import { EditableName } from '../shared/EditableName';
 
 export interface ValveTileProps {
   valve: ValveSummary;
@@ -27,6 +28,10 @@ export interface ValveTileProps {
   // StregaValveCard put its remove control beside a one-tap water-moving action. This
   // lives inside the overflow menu instead, with its own confirmation step.
   onDelete: () => void;
+  /** True when the caller's role may mutate; false hides the rename pencil. */
+  canEdit: boolean;
+  /** Renames the valve's device. Rejects so EditableName can show the reason. */
+  onRename: (name: string) => Promise<void>;
   busy: boolean;
   // I6: battery footer line, ported from the OSI Server cloud's ValveTile.tsx. `ValveSummary`
   // (GET /api/valves) carries no battery field -- only `Device.latest_data` does -- so the
@@ -66,11 +71,14 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   onSettings,
   onService,
   onDelete,
+  canEdit,
+  onRename,
   busy,
   batteryPercent,
   batteryVoltage,
 }) => {
   const { t, i18n } = useTranslation('valves');
+  const { t: tDevices } = useTranslation('devices');
   // `utils/datetime` resolves the locale from the app language and already
   // handles the unsupported-tag fallback for `lg`; the local helper this
   // replaces passed `undefined`, which is the operating system's locale.
@@ -162,7 +170,23 @@ export const ValveTile: React.FC<ValveTileProps> = ({
         <ValveGlyph state={glyph.state} size={48} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate text-sm font-semibold text-[var(--text)]">{valve.name}</h3>
+            {/* This row (unlike the six device cards, which pin the badge flush right with
+                justify-between) has no justify-between -- the zone badge sits directly beside
+                the name. EditableName's edit-mode wrapper carries flex-1, and this row is a
+                flex container, so without this block-level div breaking that inheritance the
+                input would grow to fill the row and shove the badge to the far edge (or wrap
+                it under flex-wrap) the moment the pencil is pressed. The div keeps EditableName
+                sized to its own content in both modes, so the badge never moves. */}
+            <div className="min-w-0">
+              <EditableName
+                name={valve.name}
+                canEdit={canEdit}
+                onSave={onRename}
+                renameLabel={tDevices('rename.device')}
+                inputLabel={tDevices('rename.deviceInputLabel')}
+                headingClassName="truncate text-sm font-semibold text-[var(--text)]"
+              />
+            </div>
             <span className="shrink-0 rounded-full bg-[var(--card)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">
               {valve.zoneName ?? t('unassignedZone')}
             </span>

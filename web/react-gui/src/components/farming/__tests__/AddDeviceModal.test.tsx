@@ -233,4 +233,16 @@ describe('AddDeviceModal generation control', () => {
     fireEvent.click(submit);
     expect(devicesAPI.add).not.toHaveBeenCalled();
   });
+
+  it('refuses an over-long device name before calling the API', async () => {
+    render(<AddDeviceModal isOpen onClose={() => {}} onDeviceAdded={() => {}} />);
+    await screen.findByLabelText('Device Name');
+
+    fireEvent.change(screen.getByLabelText('DevEUI'), { target: { value: '70B3D5E75E004202' } });
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'a'.repeat(101) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+
+    await waitFor(() => expect(screen.getByText('rename.reason.name_too_long')).toBeTruthy());
+    expect(devicesAPI.add).not.toHaveBeenCalled();
+  });
 });

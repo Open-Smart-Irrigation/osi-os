@@ -12,7 +12,16 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../../../services/api', () => ({
-  devicesAPI: { remove: vi.fn().mockResolvedValue(undefined) },
+  devicesAPI: {
+    remove: vi.fn().mockResolvedValue(undefined),
+    rename: vi.fn().mockResolvedValue({
+      deveui: '70B3D5E75E004202',
+      name: 'Row 4',
+      sync_version: 2,
+      changed: true,
+      chirpstack: 'updated',
+    }),
+  },
 }));
 
 const baseDevice: Device = {
@@ -130,5 +139,23 @@ describe('Sdi12SoilCard', () => {
   it('does not render a remove button in readOnly mode', () => {
     render(<Sdi12SoilCard device={makeDevice()} readOnly removeContext="farm" />);
     expect(screen.queryByTitle('deviceRemoval.buttonFarm')).not.toBeInTheDocument();
+  });
+
+  it('renames the device through the device route and refreshes', async () => {
+    const onUpdate = vi.fn();
+    render(<Sdi12SoilCard device={makeDevice()} onUpdate={onUpdate} removeContext="farm" />);
+
+    fireEvent.click(screen.getByTitle('rename.device'));
+    const input = screen.getByLabelText('rename.deviceInputLabel');
+    fireEvent.change(input, { target: { value: 'Row 4' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(devicesAPI.rename).toHaveBeenCalledWith('70B3D5E75E004202', 'Row 4'));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+  });
+
+  it('does not offer a rename in readOnly mode', () => {
+    render(<Sdi12SoilCard device={makeDevice()} readOnly removeContext="farm" />);
+    expect(screen.queryByTitle('rename.device')).not.toBeInTheDocument();
   });
 });

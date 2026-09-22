@@ -112,6 +112,8 @@ function renderTile(overrides: Partial<ValveSummary> = {}, callbackOverrides: Pa
       onSettings={vi.fn()}
       onService={vi.fn()}
       onDelete={vi.fn()}
+      canEdit
+      onRename={vi.fn()}
       busy={false}
       {...callbackOverrides}
     />,
