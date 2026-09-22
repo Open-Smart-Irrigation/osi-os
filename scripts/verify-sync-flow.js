@@ -3140,7 +3140,9 @@ expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bc
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js"', 'deploys the shipped STREGA ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js"', 'deploys the shipped LoRain ChirpStack decoder to live devices');
-expectFileIncludes('deploy.sh', deployScript, 'rm -rf "$entry"', 'removes stale hashed GUI assets AND locale files before extracting the rebuilt React bundle (loop covers assets/, locales/, index.html, dotfiles)');
+expectFileIncludes('deploy.sh', deployScript, 'STAGED_GUI="$TMP_DIR/gui"', 'extracts the React bundle into a staged GUI payload before activation');
+expectFileIncludes('deploy.sh', deployScript, 'swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"', 'stages flows and GUI as one payload pair');
+expectFileIncludes('deploy.sh', deployScript, 'swap_call captureExisting "$PREV_STAMP" "/srv/node-red/flows.json" "$GUI_ROOT"', 'captures an existing flows and GUI pair before first activation');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration()', 'defines the deploy-time schema migration runner');
 expectFileIncludes('deploy.sh', deployScript, 'opkg install sqlite3-cli', 'provisions sqlite3-cli before running migrations');

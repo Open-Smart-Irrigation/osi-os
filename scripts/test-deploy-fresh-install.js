@@ -94,6 +94,7 @@ DB_DIR=${JSON.stringify(dbDir)}
 DB_PATH="$DB_DIR/farming.db"
 TMP_DIR=${JSON.stringify(tmpDir)}
 SEED_DB_REL=${JSON.stringify(CANONICAL_SEED_DB_RELATIVE_PATH)}
+GUI_ROOT="$TMP_DIR/gui"
 backup_dir="$TMP_DIR/backups"
 PAYLOADS_ROOT="$TMP_DIR/payloads"
 DEPLOY_STAMP="test-stamp"
@@ -114,6 +115,7 @@ fetch_required() {
 # Not schema: the Node-RED service and the payload symlink flip.
 restart_node_red() { echo "STUB restart_node_red"; return 0; }
 swap_call() { echo "STUB swap_call $*"; return 0; }
+write_payload_compatibility() { echo "STUB write_payload_compatibility $*"; return 0; }
 fetch_reconciliation_assets() { echo "STUB fetch_reconciliation_assets"; return 0; }
 
 ${extractFunction('checkpoint_live_db')}
@@ -138,7 +140,7 @@ TRIPWIRE
 case "$1" in
     seed) seed_db_if_missing ;;
     prepare) fetch_migration_runner >/dev/null; install_tripwire ;;
-    migrate) migrations_dir="$TMP_DIR/database/migrations/ordered"; osi_schema_decision ;;
+    migrate) mkdir -p "$PAYLOADS_ROOT/$DEPLOY_STAMP"; migrations_dir="$TMP_DIR/database/migrations/ordered"; osi_schema_decision ;;
     *) echo "unknown phase: $1" >&2; exit 64 ;;
 esac
 `;

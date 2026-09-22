@@ -52,6 +52,17 @@ restart_node_red() {
     node_red_restart_needed=0
 }
 
+hold_node_red_stopped() {
+    printf '%s\n' node-red-stop >> "$STATE_LOG"
+    node_red_restart_needed=0
+    [ "${NODE_RED_STOP_OK:-1}" = 1 ]
+}
+
+swap_call() {
+    printf 'swap-%s\n' "$1" >> "$STATE_LOG"
+    return 0
+}
+
 . "$TEST_ROOT/lifecycle.sh"
 
 IDENTITYD_LOCK_PATH="$RUN_DIR/osi-identityd.lock"
@@ -181,6 +192,24 @@ assert_eq 23 "$handler_status" "exit handler status preservation"
 node_red_line="$(grep -n '^node-red-start$' "$STATE_LOG" | tail -1 | cut -d: -f1)"
 identityd_line="$(grep -n '^identityd-start$' "$STATE_LOG" | tail -1 | cut -d: -f1)"
 [ "$node_red_line" -lt "$identityd_line" ] || fail "identityd restored before Node-RED"
+
+reset_fixture 1
+quiesce_identityd_for_deploy || fail "committed-migration quiescence failed"
+PREV_STAMP=last-known-good
+DEPLOY_STAMP=failed-retry
+DB_MIGRATION_COMMITTED=1
+node_red_restart_needed=1
+if (deploy_exit_handler 23); then
+    fail "committed-migration handler discarded the original nonzero status"
+else
+    handler_status=$?
+fi
+assert_eq 23 "$handler_status" "committed-migration status preservation"
+assert_eq 0 "$SERVICE_RUNNING" "committed-migration left identityd stopped"
+if grep -q '^identityd-start$' "$STATE_LOG"; then
+    fail "committed-migration handler restarted identityd with an unverified payload"
+fi
+grep -q '^node-red-stop$' "$STATE_LOG" || fail "committed-migration handler did not stop Node-RED"
 
 reset_fixture 1
 quiesce_identityd_for_deploy || fail "restore-failure quiescence failed"

@@ -237,9 +237,9 @@ const identityReadyAt = deploySource.lastIndexOf('wait_for_identityd_ready');
 const activationPrerequisites = [
   ['chmod 755 /usr/libexec/osi-gateway-identity.sh', 'gateway identity helper installation'],
   ['chmod 755 /usr/libexec/osi-identityd.sh', 'identity daemon installation'],
-  ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" >/dev/null', 'flows payload staging'],
-  ['swap_call flipTo "$DEPLOY_STAMP" >/dev/null', 'flows payload activation'],
-  ['tar xzf "$TMP_DIR/react_gui.tar.gz" -C /usr/lib/node-red/gui/', 'GUI extraction'],
+  ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" >/dev/null', 'paired flows+GUI payload staging'],
+  ['swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null', 'paired flows+GUI payload activation'],
+  ['tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"', 'GUI staging extraction'],
 ];
 for (const [needle, description] of activationPrerequisites) {
   const prerequisiteAt = deploySource.indexOf(needle);
@@ -269,8 +269,11 @@ expectIncludes('deploy.sh', deploySource,
   'identityd_deploy_state="fatal_hold"\n        echo "ERROR: migration failed and backup restore integrity check failed; leaving Node-RED and identityd stopped"',
   'catastrophic migration failure explicitly holds both services stopped');
 expectIncludes('deploy.sh', deploySource,
-  'if ! restart_node_red; then\n        [ "$exit_status" -ne 0 ] || exit_status=1\n    fi\n    if ! restore_identityd_prior_state; then',
+  'if ! restart_node_red; then\n            [ "$exit_status" -ne 0 ] || exit_status=1\n        fi',
   'EXIT restoration handles Node-RED before identityd and preserves failure status');
+expectIncludes('deploy.sh', deploySource,
+  'if [ "${DEPLOY_HOLD_SERVICES:-0}" != "1" ] && ! restore_identityd_prior_state; then',
+  'EXIT restoration skips identityd restart while committed migration services are held');
 expectIncludes('deploy.sh', deploySource,
   'trap \'deploy_exit_handler $?\' EXIT\n    trap \'exit 130\' INT\n    trap \'exit 143\' TERM',
   'uses one EXIT cleanup path with signal-specific exit status');
@@ -286,12 +289,13 @@ expectIncludes('deploy.sh', deploySource,
 
 expectIncludes('deploy.sh', deploySource, 'if [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; then', 'preserves the missing-DB sidecar guard');
 expectIncludes('deploy.sh', deploySource,
-  'if [ "$PAYLOAD_FLIPPED" != "1" ]; then\n    swap_call flipTo "$DEPLOY_STAMP" >/dev/null\n    PAYLOAD_FLIPPED=1\n    echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"\nelse\n    echo "OK: payload already flipped -> payloads/$DEPLOY_STAMP (flipped before the post-migration Node-RED restart, issue #222 / F4)"\nfi\n\n/etc/init.d/node-red restart || true',
-  'retains the direct Node-RED restart immediately after the live payload flip (or its issue #222/F4 already-flipped no-op) and its existing log');
-expectIncludes('deploy.sh', deploySource, 'swap_call flipTo "$PREV_STAMP" >/dev/null\n        /etc/init.d/node-red restart || true', 'retains the rollback restart');
-expectCondition(countMatches(deploySource, /\/etc\/init\.d\/node-red restart/g) === 2,
-  'deploy.sh: only payload flip and rollback directly restart Node-RED',
-  'deploy.sh: expected exactly two direct Node-RED restarts for payload flip and rollback');
+  'if [ "$PAYLOAD_FLIPPED" != "1" ]; then\n    if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then\n        echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2\n        node_red_restart_needed=0\n        exit 1\n    fi\n    PAYLOAD_FLIPPED=1\n    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"\nelse\n    echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"\nfi',
+  'retains paired payload activation and its already-active no-op');
+expectIncludes('deploy.sh', deploySource, 'if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then\n            echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2', 'retains the verified paired rollback');
+expectCondition(countMatches(deploySource, /\/etc\/init\.d\/node-red restart/g) === 1 &&
+  countMatches(deploySource, /\"\$NODE_RED_INIT\" restart/g) === 1,
+  'deploy.sh: payload flip and rollback each restart Node-RED once',
+  'deploy.sh: expected one direct and one lifecycle-configured Node-RED restart');
 
 const flowRelativePaths = profiles.map((profile) => `${profile}/files/usr/share/flows.json`);
 const identityGateIds = [

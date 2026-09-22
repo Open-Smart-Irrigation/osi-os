@@ -65,7 +65,7 @@ test('deploy migration wiring stops writers, checkpoints WAL, baselines, and app
   const serviceStateIdx = indexOf('node_red_service_state()');
   const stopStateIdx = deploy.indexOf('wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"', stopIdx);
   const firstCheckpointIdx = indexOf('if ! checkpoint_live_db; then');
-  const ledgerIdx = indexOf("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;");
+  const ledgerIdx = deploy.indexOf("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;", firstCheckpointIdx);
   const ledgerRowsIdx = indexOf('SELECT COUNT(*) FROM schema_migrations;');
   const repairIdx = indexOf('node "$TMP_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH"');
   const baselineIdx = indexOf('node "$TMP_DIR/scripts/baseline-existing-db.js" "$DB_PATH" --migrations-dir "$migrations_dir"');
@@ -134,8 +134,8 @@ test('deploy migration wiring uses persistent backup path and lifecycle-aware cl
   const exitHandlerStart = indexOf('deploy_exit_handler() {');
   const trapInstallStart = indexOf('install_deploy_exit_trap() {');
   const exitHandlerBlock = deploy.slice(exitHandlerStart, trapInstallStart);
-  const nodeRedRestoreIdx = exitHandlerBlock.indexOf('restart_node_red');
-  const identitydRestoreIdx = exitHandlerBlock.indexOf('restore_identityd_prior_state');
+  const nodeRedRestoreIdx = exitHandlerBlock.lastIndexOf('restart_node_red');
+  const identitydRestoreIdx = exitHandlerBlock.lastIndexOf('restore_identityd_prior_state');
   assert.ok(nodeRedRestoreIdx >= 0, 'EXIT handler must restore Node-RED when required');
   assert.ok(identitydRestoreIdx > nodeRedRestoreIdx, 'EXIT handler must restore Node-RED before identityd');
 
@@ -254,6 +254,10 @@ test('deploy migration wiring flips the payload BEFORE restarting Node-RED on mi
   const defaultDeclIdx = deploy.indexOf('PAYLOAD_FLIPPED=0');
   const runSchemaMigrationDefIdx = indexOf('run_schema_migration() {');
   assert.ok(defaultDeclIdx >= 0 && defaultDeclIdx < runSchemaMigrationDefIdx, 'PAYLOAD_FLIPPED must default to 0 before run_schema_migration is defined');
+  assert.match(successBlock, /if ! swap_call flipTo "\$DEPLOY_STAMP" "\$GUI_ROOT"/,
+    'paired activation must be checked explicitly while errexit is disabled by the migration call site');
+  assert.match(successBlock, /if \[ ! -d "\$PAYLOADS_ROOT\/\$DEPLOY_STAMP" \]; then[\s\S]*leaving Node-RED stopped/,
+    'a missing staged payload must abort before restarting on an older payload');
 });
 
 test('deploy migration wiring verifies the post-migration ledger/fingerprint head before flipping the payload (PR-L / external consult Q1)', () => {
@@ -272,6 +276,8 @@ test('deploy migration wiring verifies the post-migration ledger/fingerprint hea
   assert.ok(verifyHeadAbortIdx > verifyHeadCallIdx, 'a non-ok verify-head-cli result must abort the deploy');
   assert.ok(verifyHeadAbortIdx < flipCallIdx, 'verify-head-cli must be checked BEFORE the payload flip');
   assert.ok(flipCallIdx < restartCallIdx, 'payload flip still precedes the Node-RED restart');
+  assert.match(successBlock, /write_payload_compatibility "\$DEPLOY_STAMP"/,
+    'new payload records its schema head/ledger before activation');
 
   // verify-head-cli.js and lib/osi-migrate are already fetched by
   // fetch_migration_runner (osi-os#212) — this must be the only place that
@@ -285,15 +291,15 @@ test('deploy migration wiring: a boot-node "devices rebuild ABORTED" log line du
   // listener, so /gui reachability alone cannot prove schema init succeeded.
   const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
   const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
-  const logMarkIdx = indexOf('NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"');
+  const logMarkIdx = deploy.indexOf('NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"', healthCheckHeaderIdx);
   const probeCallIdx = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
   const grepIdx = indexOf('grep -q "devices rebuild ABORTED"');
   const overrideIdx = deploy.indexOf('PROBE_OK=1', grepIdx);
   const commitDecisionIdx = deploy.indexOf('if [ "$PROBE_OK" = "0" ]; then\n    echo "OK: committing payload $DEPLOY_STAMP"');
 
   assert.ok(logMarkIdx >= 0 && logMarkIdx < restartIdx, 'the log line count must be captured BEFORE the restart, so only new lines from this restart are considered');
-  assert.ok(restartIdx < probeCallIdx, 'restart still precedes the /gui reachability wait');
-  assert.ok(probeCallIdx < grepIdx, 'the abort-log check runs after the reachability wait has settled PROBE_OK');
+  assert.ok(restartIdx < grepIdx, 'restart still precedes the schema-init log gate');
+  assert.ok(grepIdx < probeCallIdx, 'the abort-log check must run before the /gui reachability wait');
   assert.ok(grepIdx < overrideIdx && overrideIdx < commitDecisionIdx, 'a found abort log line must flip PROBE_OK back to failing BEFORE the commit/rollback decision');
   assert.match(deploy, /tail -n "\+\$\(\(NODE_RED_LOG_MARK \+ 1\)\)"/, 'must only scan log lines appended since the mark (busybox tail -n +N), never the whole ring including stale prior aborts');
 });
@@ -305,4 +311,30 @@ test('deploy.sh has a single migration call site and no inline schema DDL helper
   assert.doesNotMatch(deploy, /\bCREATE\s+(TABLE|INDEX|UNIQUE\s+INDEX|TRIGGER)\b/i);
   assert.doesNotMatch(deploy, /\bALTER\s+TABLE\b/i);
   assert.doesNotMatch(deploy, /\bDROP\s+(TABLE|TRIGGER)\b/i);
+});
+
+test('migration failure after commit keeps Node-RED stopped without restarting an unverified pair', () => {
+  assert.match(deploy, /DB_MIGRATION_COMMITTED=1/);
+  assert.match(deploy, /migrated database has no proven compatible active payload; keeping Node-RED stopped/);
+  assert.match(deploy, /hold_node_red_stopped/);
+  assert.match(deploy, /hold_identityd_stopped/);
+  assert.match(deploy, /DEPLOY_HOLD_SERVICES=1/);
+});
+
+test('retry EXIT path proves retained payload compatibility before any fallback restart', () => {
+  const fallbackIdx = deploy.indexOf('fallback payload is not proven compatible with the current database');
+  const verifyIdx = deploy.lastIndexOf('verify_payload_db_compatibility "$PREV_STAMP"', fallbackIdx);
+  const restartIdx = deploy.indexOf('restart_node_red', fallbackIdx);
+  assert.ok(fallbackIdx > 0 && verifyIdx < fallbackIdx && fallbackIdx < restartIdx,
+    'a retry failure must prove the retained payload before fallback restart');
+  assert.match(deploy.slice(fallbackIdx, restartIdx), /hold_node_red_stopped/);
+  assert.match(deploy.slice(fallbackIdx, restartIdx), /hold_identityd_stopped/);
+});
+
+test('rollback uses retained verification only when the migration runner was unavailable', () => {
+  assert.match(deploy, /MIGRATION_RUNNER_AVAILABLE=0/);
+  assert.match(deploy, /MIGRATION_RUNNER_AVAILABLE=1/);
+  assert.match(deploy, /rollback_verify_mode="full"/);
+  assert.match(deploy, /rollback_verify_mode="retained"/);
+  assert.match(deploy, /verify_payload_db_compatibility "\$PREV_STAMP" "\$rollback_verify_mode"/);
 });
