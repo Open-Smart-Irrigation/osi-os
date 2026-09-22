@@ -132,12 +132,28 @@ function nameUpdateDeadlineMs() {
 
 // deadlineMs is optional: a caller that needs a shorter budget than the general
 // setting passes one, and every existing call site keeps grpcDeadlineMs().
+// It may also be a FUNCTION returning the milliseconds still left of a budget
+// that covers several RPCs. The getter is called here, at the moment the call
+// is actually issued, so the second RPC of an operation gets what the first
+// one left rather than a fresh full budget.
 function grpcInvoke(client, methodName, request, metadata, step, deadlineMs) {
   return new Promise((resolve, reject) => {
-    const requested = Number(deadlineMs);
-    const budgetMs = Number.isFinite(requested) && requested > 0
-      ? Math.min(requested, grpcDeadlineMs())
-      : grpcDeadlineMs();
+    const isGetter = typeof deadlineMs === 'function';
+    const requested = Number(isGetter ? deadlineMs() : deadlineMs);
+    const generalMs = grpcDeadlineMs();
+    let budgetMs;
+    if (!Number.isFinite(requested)) {
+      budgetMs = generalMs;
+    } else if (requested > 0) {
+      budgetMs = Math.min(requested, generalMs);
+    } else if (isGetter) {
+      // The shared budget is already spent. That is an expired deadline, not
+      // "no deadline": falling back to the general setting here would hand
+      // this call the very twenty seconds the shared budget exists to avoid.
+      budgetMs = 0;
+    } else {
+      budgetMs = generalMs;
+    }
     const options = { deadline: new Date(Date.now() + budgetMs) };
     client[methodName](request, metadata, options, (error, response) => {
       if (error) {
@@ -334,7 +350,10 @@ class ChirpStackClient {
   // UpdateDeviceRequest replaces the whole message. Shared by
   // ensureDeviceProvisioned (general deadline, no options) and the module-level
   // updateDeviceName (bounded deadline via options.deadlineMs, its own step
-  // name via options.step). A blank name -- after trimming -- and a device
+  // name via options.step). options.deadlineMs may be a fixed number of
+  // milliseconds or a getter returning what is left of a budget that covers
+  // both RPCs below; it is passed straight through to each one, which resolves
+  // it when it issues its call. A blank name -- after trimming -- and a device
   // ChirpStack does not have both resolve 'skipped' with no update RPC; a
   // blank name is 'skipped' before any gRPC read at all.
   async setDeviceName(devEui, name, options) {
@@ -629,9 +648,13 @@ function serializeByDevEui(devEui, task) {
 // actually runs, never before it is queued: the value that reaches ChirpStack
 // is the one the database holds after every earlier rename has committed.
 // Delegates to ChirpStackClient.setDeviceName for the actual read-compare-update
-// (the one place that trims and refuses a blank name), bounding both of its
-// RPCs with nameUpdateDeadlineMs() so a ChirpStack that accepts the connection
-// and never answers costs the caller five seconds, not twenty.
+// (the one place that trims and refuses a blank name). nameUpdateDeadlineMs()
+// is ONE budget for the whole update, armed when this task starts rather than
+// when it was queued, and each RPC gets what is left of it. Giving both RPCs
+// the full budget instead cost a caller up to ten seconds against a ChirpStack
+// that accepts the connection and never answers -- past the dashboard's
+// ten-second HTTP timeout, so the operator saw a save failure after a rename
+// that had already committed.
 async function updateDeviceName(client, devEui, readCurrentName) {
   const normalized = normalizeDevEui(devEui);
   if (!/^[0-9A-F]{16}$/.test(normalized)) {
@@ -641,10 +664,11 @@ async function updateDeviceName(client, devEui, readCurrentName) {
     throw annotateError(new Error('updateDeviceName requires a readCurrentName function'), 'updateDeviceName');
   }
   return serializeByDevEui(normalized, async () => {
+    const expiresAt = Date.now() + nameUpdateDeadlineMs();
     const stored = await readCurrentName();
     if (stored === null || stored === undefined) return 'skipped';
     return client.setDeviceName(normalized, stored, {
-      deadlineMs: nameUpdateDeadlineMs(),
+      deadlineMs: () => expiresAt - Date.now(),
       step: 'updateDeviceName'
     });
   });

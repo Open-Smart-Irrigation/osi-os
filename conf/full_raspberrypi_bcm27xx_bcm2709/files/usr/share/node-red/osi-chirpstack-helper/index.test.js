@@ -505,6 +505,9 @@ test('a longer operator deadline does not lengthen the name update', async () =>
     const captured = {};
     const client = nameStubClient(captured, { device: { devEui: '00dec0de00000111', name: 'Old' } });
     await updateDeviceName(client, '00DEC0DE00000111', async () => 'Probe 7');
+    // Without this the loop below would pass over an empty array and the test
+    // would prove nothing at all.
+    assert.equal(captured.deadlines.length, 2, 'the read and the update each carry a deadline');
     for (const budgetMs of captured.deadlines) {
       assert.ok(budgetMs > 4000 && budgetMs <= 5000, `name-update budget was ${budgetMs} ms`);
     }
@@ -512,6 +515,107 @@ test('a longer operator deadline does not lengthen the name update', async () =>
     if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
     else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
   }
+});
+
+// Controller ruling W2: NAME_UPDATE_DEADLINE_MS is the budget for the WHOLE
+// name update, not for each of its two RPCs. Bounding them separately let a
+// ChirpStack that accepts the connection and never answers hold the REST
+// handler for about ten seconds, past the dashboard's ten-second axios
+// timeout: the operator saw "Could not save" after a rename that had already
+// committed. Spec 5.5 allows at most five.
+//
+// grpc-js ends a call itself once its deadline passes. These two tests need a
+// client that behaves the same way -- one that never answers but still
+// honours the deadline it was handed -- because a stub that simply never
+// calls back would hang the suite, and the real never-answering socket of the
+// F110 fixture cannot be told to answer the read quickly and then stall the
+// update.
+function deadlineExceededError() {
+  const error = new Error('Deadline exceeded');
+  error.code = grpc.status.DEADLINE_EXCEEDED;
+  error.details = 'Deadline exceeded';
+  return error;
+}
+
+function budgetedNameStub(captured, fixtures) {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  const device = buildMinimalDeviceMessage(fixtures.device);
+  captured.updates = [];
+  captured.deadlines = [];
+  const answerAtDeadline = (options, callback) => {
+    const remainingMs = Math.max(0, options.deadline.getTime() - Date.now());
+    setTimeout(() => callback(deadlineExceededError()), remainingMs);
+  };
+  client.deviceClient = {
+    get: (request, metadata, options, callback) => {
+      captured.deadlines.push(options.deadline.getTime() - Date.now());
+      if (fixtures.readHangs) {
+        answerAtDeadline(options, callback);
+        return;
+      }
+      setTimeout(() => callback(null, { getDevice: () => device }), fixtures.readDelayMs || 0);
+    },
+    update: (request, metadata, options, callback) => {
+      captured.updates.push(request.getDevice().getName());
+      captured.deadlines.push(options.deadline.getTime() - Date.now());
+      answerAtDeadline(options, callback);
+    },
+  };
+  return client;
+}
+
+test('W2: a hung read spends the whole budget and the update never starts', async (t) => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = '400';
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  });
+  const budgetMs = 400;
+  const captured = {};
+  const client = budgetedNameStub(captured, {
+    device: { devEui: '00dec0de00000120', name: 'Old' },
+    readHangs: true,
+  });
+  const started = Date.now();
+  await assert.rejects(
+    updateDeviceName(client, '00DEC0DE00000120', async () => 'Probe 7'),
+    (error) => error.grpcStatus === 'DEADLINE_EXCEEDED' && error.step === 'getDevice'
+  );
+  const elapsed = Date.now() - started;
+  assert.deepEqual(captured.updates, [], 'the update RPC must not start once the read spent the budget');
+  assert.equal(captured.deadlines.length, 1);
+  assert.ok(elapsed < 2 * budgetMs, `the whole update must cost one budget, not two: ${elapsed} ms`);
+});
+
+test('W2: a fast read leaves the update only the remaining budget', async (t) => {
+  const previous = process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+  process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = '400';
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS;
+    else process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS = previous;
+  });
+  const budgetMs = 400;
+  const readDelayMs = 300;
+  const captured = {};
+  const client = budgetedNameStub(captured, {
+    device: { devEui: '00dec0de00000121', name: 'Old' },
+    readDelayMs,
+  });
+  const started = Date.now();
+  await assert.rejects(
+    updateDeviceName(client, '00DEC0DE00000121', async () => 'Probe 7'),
+    (error) => error.grpcStatus === 'DEADLINE_EXCEEDED' && error.step === 'updateDeviceName'
+  );
+  const elapsed = Date.now() - started;
+  assert.deepEqual(captured.updates, ['Probe 7']);
+  assert.equal(captured.deadlines.length, 2);
+  assert.ok(
+    captured.deadlines[1] <= budgetMs - readDelayMs + 50,
+    `the update must inherit only what the read left: got ${captured.deadlines[1]} ms of ${budgetMs}`
+  );
+  assert.ok(elapsed < 2 * budgetMs, `the whole update must cost one budget, not two: ${elapsed} ms`);
+  assert.ok(elapsed < budgetMs + 200, `one budget plus scheduling slack, not two: ${elapsed} ms`);
 });
 
 // The budget is injected through the existing setting so this test finishes in

@@ -64,8 +64,10 @@ Per-module system map (both repos, every module described with location): [docs/
 `updated` / `failed` / `skipped`. Both answer `400 { message, reason }` with a
 reason code from the shared name rule in `osi-entity-name`, which is also what
 zone create, device create, `REGISTER_DEVICE` and both `UPSERT_ZONE` paths
-apply. The `chirpstack` update is best effort and carries a 5 s gRPC deadline of
-its own, not the 20 s default.
+apply. The `chirpstack` update is best effort, and its read and its write share
+one 5 s gRPC budget instead of the 20 s default: a ChirpStack that accepts the
+connection and never answers costs the caller five seconds in total, not five
+per call.
 
 **Sync capabilities the edge reports** (built identically by `sync-bootstrap-build`,
 `al-link-build-req` and `sync-force-build`): `linked_auth_sync_v1`,
