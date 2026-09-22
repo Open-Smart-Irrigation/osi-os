@@ -2008,6 +2008,11 @@ const validZoneName = {
 expectValid('UPSERT_DEVICE_NAME command', cmdSchema, validDeviceName);
 expectValid('UPSERT_ZONE_NAME command', cmdSchema, validZoneName);
 expectValid(
+    'UPSERT_ZONE_NAME accepts the compact zone UUID minted by the edge',
+    cmdSchema,
+    Object.assign({}, validZoneName, { zone_uuid: UUID.replace(/-/g, '') })
+);
+expectValid(
     'UPSERT_DEVICE_NAME accepts a 100-code-point name',
     cmdSchema,
     Object.assign({}, validDeviceName, { values: { name: 'a'.repeat(100) } })

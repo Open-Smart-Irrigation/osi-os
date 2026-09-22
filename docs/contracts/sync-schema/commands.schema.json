@@ -115,7 +115,7 @@
         "values": {"type": "object"},
         "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
         "gateway_device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
-        "zone_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "zone_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
         "requested_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"},
         "zone_id": {"type": ["integer", "null"]},
         "duration_seconds": {"type": ["integer", "null"], "minimum": 1},
