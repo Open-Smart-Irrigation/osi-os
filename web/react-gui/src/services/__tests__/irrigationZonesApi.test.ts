@@ -135,10 +135,14 @@ describe('irrigationZonesAPI.rename', () => {
       .rejects.toMatchObject({ reason: 'name_too_long' });
   });
 
+  // `.catch(e => e)` resolves whether the call rejected or not, so a bare
+  // `reason` assertion would also pass for a call that resolved with a plain
+  // object. Each case below proves the rejection first.
   it('leaves reason undefined when the 400 response carries no reason', async () => {
     put.mockRejectedValue(axiosError(400, { message: 'Bad request' }));
 
     const caught = await irrigationZonesAPI.rename(7, 'x').catch((error) => error);
+    expect(caught).toBeInstanceOf(Error);
     expect(caught.reason).toBeUndefined();
   });
 
@@ -146,6 +150,7 @@ describe('irrigationZonesAPI.rename', () => {
     put.mockRejectedValue(axiosError(400, { message: 'Bad request', reason: 12345 }));
 
     const caught = await irrigationZonesAPI.rename(7, 'x').catch((error) => error);
+    expect(caught).toBeInstanceOf(Error);
     expect(caught.reason).toBeUndefined();
   });
 
@@ -153,6 +158,7 @@ describe('irrigationZonesAPI.rename', () => {
     put.mockRejectedValue(new Error('network down'));
 
     const caught = await irrigationZonesAPI.rename(7, 'x').catch((error) => error);
+    expect(caught).toBeInstanceOf(Error);
     expect(caught.reason).toBeUndefined();
   });
 });
@@ -178,10 +184,14 @@ describe('devicesAPI.rename', () => {
       .rejects.toMatchObject({ reason: 'name_too_long' });
   });
 
+  // `.catch(e => e)` resolves whether the call rejected or not, so a bare
+  // `reason` assertion would also pass for a call that resolved with a plain
+  // object. Each case below proves the rejection first.
   it('leaves reason undefined when the 400 response carries no reason', async () => {
     put.mockRejectedValue(axiosError(400, { message: 'Bad request' }));
 
     const caught = await devicesAPI.rename('70B3D5E75E004202', 'x').catch((error) => error);
+    expect(caught).toBeInstanceOf(Error);
     expect(caught.reason).toBeUndefined();
   });
 
@@ -189,6 +199,7 @@ describe('devicesAPI.rename', () => {
     put.mockRejectedValue(axiosError(400, { message: 'Bad request', reason: 12345 }));
 
     const caught = await devicesAPI.rename('70B3D5E75E004202', 'x').catch((error) => error);
+    expect(caught).toBeInstanceOf(Error);
     expect(caught.reason).toBeUndefined();
   });
 
@@ -196,6 +207,7 @@ describe('devicesAPI.rename', () => {
     put.mockRejectedValue(new Error('network down'));
 
     const caught = await devicesAPI.rename('70B3D5E75E004202', 'x').catch((error) => error);
+    expect(caught).toBeInstanceOf(Error);
     expect(caught.reason).toBeUndefined();
   });
 });

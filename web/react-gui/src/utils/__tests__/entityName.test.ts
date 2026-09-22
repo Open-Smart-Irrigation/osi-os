@@ -76,4 +76,42 @@ describe('normalizeEntityName', () => {
   it('rejects a lone low surrogate', () => {
     expect(normalizeEntityName('\udf31x')).toEqual({ ok: false, reason: 'name_invalid_unicode' });
   });
+
+  // The Zs half of the trim set. String.prototype.trim strips every Zs
+  // character; the edge module spells U+3000 out in its own trim class, so
+  // this vector is what proves the two agree on it.
+  it('strips an ideographic space at both ends', () => {
+    expect(normalizeEntityName('\u3000North\u3000')).toEqual({ ok: true, name: 'North' });
+  });
+
+  // Step precedence, which the sixteen vectors above do not pin: the trim runs
+  // before the count, and the count runs before the control-character scan.
+  it('trims before it counts, so padding a 100-character name still fits', () => {
+    const name = 'a'.repeat(ENTITY_NAME_MAX);
+    expect(normalizeEntityName('   ' + name + '   ')).toEqual({ ok: true, name });
+  });
+
+  it('reports a name that is both too long and control-bearing as name_too_long', () => {
+    expect(normalizeEntityName('a'.repeat(ENTITY_NAME_MAX) + '\u0000'))
+      .toEqual({ ok: false, reason: 'name_too_long' });
+  });
+
+  // The routes answer name_empty for a body with no name field, and the edge
+  // module's rule maps null/undefined to name_empty for the same reason: the
+  // operator sees one sentence for "you did not type a name", never the
+  // broken-Unicode one. Unreachable from a typed caller, which is why it is
+  // asserted here rather than left to the compiler.
+  it('reports a nullish value as name_empty, as the edge rule does', () => {
+    for (const nullish of [null, undefined]) {
+      expect(normalizeEntityName(nullish as unknown as string))
+        .toEqual({ ok: false, reason: 'name_empty' });
+    }
+  });
+
+  it('still reports any other non-string as name_invalid_unicode', () => {
+    for (const wrongType of [42, {}, ['North'], true]) {
+      expect(normalizeEntityName(wrongType as unknown as string))
+        .toEqual({ ok: false, reason: 'name_invalid_unicode' });
+    }
+  });
 });

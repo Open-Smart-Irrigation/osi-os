@@ -49,8 +49,15 @@ function hasLoneSurrogate(value: string): boolean {
 }
 
 export function normalizeEntityName(raw: string): EntityNameResult {
-  // The type guard is not decoration: the modals hand this whatever their
+  // The type guards are not decoration: the modals hand this whatever their
   // input state holds, and a caller compiled from JavaScript can pass anything.
+  // An absent value is a missing name, not a broken one, and gets the reason
+  // an empty string gets, so the operator reads one sentence for both. That is
+  // what the edge module answers for the same input; the two copies of this
+  // rule may only differ where the design says they do.
+  if (raw === null || raw === undefined) {
+    return { ok: false, reason: 'name_empty' };
+  }
   if (typeof raw !== 'string' || hasLoneSurrogate(raw)) {
     return { ok: false, reason: 'name_invalid_unicode' };
   }

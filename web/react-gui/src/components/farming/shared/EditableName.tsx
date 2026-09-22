@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ENTITY_NAME_MAX, normalizeEntityName } from '../../../utils/entityName';
+import { ENTITY_NAME_MAX, normalizeEntityName, type EntityNameReason } from '../../../utils/entityName';
 
 export interface EditableNameProps {
   name: string;
@@ -16,31 +16,26 @@ export interface EditableNameProps {
   headingClassName?: string;
 }
 
-// The reason codes the routes send. An unknown string from a newer gateway
-// falls back to the generic failure text instead of rendering a raw key.
-const REASON_CODES: ReadonlySet<string> = new Set([
+// The reason codes the routes send, typed by EntityNameReason so a code that
+// the rule does not define is a compile error here. A string from a newer
+// gateway that is not one of them falls back to the generic failure text
+// instead of rendering a raw key.
+const REASON_CODES: ReadonlySet<string> = new Set<EntityNameReason>([
   'name_empty',
   'name_too_long',
   'name_control_characters',
   'name_invalid_unicode',
 ]);
 
-// Fallback text for `t()`'s `{ defaultValue }` overload below, the pattern
-// IrrigationZoneCard.tsx's formatWaterAction/formatWaterReason and
-// ScheduleSection.tsx's swtMetricLabel use for a t() key built from a runtime
-// string: REASON_CODES.has(reason) proves reason is one of the four codes at
-// runtime but does not narrow its TypeScript type, so
-// `rename.reason.${reason}` types as `` `rename.reason.${string}` ``, wider
-// than the resource union react-i18next's typed t() accepts. The four
-// `rename.reason.*` keys exist in every locale bundle since Task 14, so this
-// text is the type-satisfier of last resort: it ships only if a locale
-// bundle were missing the key react-i18next just resolved by the same path.
-const REASON_FALLBACK_TEXT: Record<string, string> = {
-  name_empty: 'Enter a name.',
-  name_too_long: 'Use 100 characters or fewer.',
-  name_control_characters: 'Remove tabs, line breaks and other control characters.',
-  name_invalid_unicode: 'This name contains a character that cannot be saved.',
-};
+// A predicate rather than a plain `.has()` test: it narrows the runtime string
+// to the union, which makes `rename.reason.${reason}` an ordinary typed key
+// for react-i18next's typed t() instead of the wider
+// `` `rename.reason.${string}` ``. Without it the call needed a
+// `{ defaultValue }` overload carrying a second copy of the four English
+// sentences, free to drift from the locale bundles that actually ship.
+function isEntityNameReason(value: string): value is EntityNameReason {
+  return REASON_CODES.has(value);
+}
 
 // The treatment the ⚙ control next to the name already uses (Sdi12SoilCard.tsx),
 // so the pencil sits on the same 48 px target its neighbour does.
@@ -87,12 +82,6 @@ export const EditableName: React.FC<EditableNameProps> = ({
   const suppressBlurRef = useRef(false);
   const restoreFocusRef = useRef(false);
 
-  // A rename that lands from elsewhere (the SWR poll, another browser) must
-  // reach the heading. While the operator is typing, the draft wins.
-  useEffect(() => {
-    if (!editing) setDraft(name);
-  }, [editing, name]);
-
   useEffect(() => {
     if (editing) {
       inputRef.current?.focus();
@@ -108,8 +97,8 @@ export const EditableName: React.FC<EditableNameProps> = ({
   // restoreFocus is false only for a blur-initiated close: the operator has
   // already moved focus somewhere else (Tab, a click on another control), and
   // it must stay there. Escape and Enter both unmount the input while it
-  // holds focus, so those close paths return focus to the pencil or the
-  // browser would drop it to the document body.
+  // holds focus, so those close paths return focus to the pencil; otherwise
+  // the browser would drop it to the document body.
   const closeEditor = useCallback((restoreFocus: boolean) => {
     suppressBlurRef.current = true;
     restoreFocusRef.current = restoreFocus;
@@ -147,8 +136,8 @@ export const EditableName: React.FC<EditableNameProps> = ({
     } catch (caught) {
       const reason = (caught as { reason?: unknown } | null | undefined)?.reason;
       setError(
-        typeof reason === 'string' && REASON_CODES.has(reason)
-          ? t(`rename.reason.${reason}`, { defaultValue: REASON_FALLBACK_TEXT[reason] })
+        typeof reason === 'string' && isEntityNameReason(reason)
+          ? t(`rename.reason.${reason}`)
           : t('rename.failed'),
       );
     } finally {

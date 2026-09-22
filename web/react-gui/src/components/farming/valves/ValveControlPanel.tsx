@@ -79,7 +79,11 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
   // show the route's reason under the input.
   const handleRename = async (eui: string, nextName: string) => {
     await devicesAPI.rename(eui, nextName);
-    await refresh();
+    // Not awaited, the way the eight cards call onUpdate?.(): the rename has
+    // already committed by now, and EditableName renders a rejection as an
+    // error line under the input. Awaiting here would tell the operator the
+    // name could not be saved because the list could not be reloaded.
+    refresh().catch((err) => console.warn('Failed to refresh the valve list after a rename', err));
   };
 
   const handleOpenSubmit = async (minutes: number) => {
