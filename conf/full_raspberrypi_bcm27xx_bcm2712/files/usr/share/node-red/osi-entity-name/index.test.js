@@ -29,6 +29,11 @@ const ACCEPTED = [
   ['\u2028North\u2029', 'North'],
   ['a'.repeat(100), 'a'.repeat(100)],
   ['\ud83c\udf31'.repeat(100), '\ud83c\udf31'.repeat(100)],
+  // The Zs half of the trim set: U+3000, the ideographic space.
+  ['\u3000North\u3000', 'North'],
+  // Step precedence: the trim runs before the count, so padding a name that is
+  // already at the limit does not push it over.
+  ['   ' + 'a'.repeat(100) + '   ', 'a'.repeat(100)],
 ];
 
 const REJECTED = [
@@ -39,6 +44,9 @@ const REJECTED = [
   ['A\u2028B', 'name_control_characters'],
   ['\u0085North', 'name_control_characters'],
   ['a'.repeat(101), 'name_too_long'],
+  // Step precedence: the length check runs before the control-character scan,
+  // so a name that breaks both reports name_too_long.
+  ['a'.repeat(100) + '\u0000', 'name_too_long'],
   ['\ud83c', 'name_invalid_unicode'],
   ['\udf31x', 'name_invalid_unicode'],
 ];
@@ -169,7 +177,6 @@ function outbox(raw) {
 
 test('renaming a zone writes the row once and enqueues one ZONE_UPSERTED', async (t) => {
   const { raw, db } = fixture(t);
-  const before = Date.now();
   const result = await entityName.renameZone(db, { zoneId: 1, name: 'North block' });
   assert.deepEqual(
     {
@@ -184,7 +191,11 @@ test('renaming a zone writes the row once and enqueues one ZONE_UPSERTED', async
   const row = raw.prepare('SELECT name, sync_version, updated_at FROM irrigation_zones WHERE id=1').get();
   assert.equal(row.name, 'North block');
   assert.equal(row.sync_version, 4);
-  assert.ok(Date.parse(row.updated_at) >= before - 1000, 'updated_at must be refreshed');
+  // Not a wall-clock bound: the seeded NOW is a date this test could really
+  // run on, and a comparison against Date.now() would then pass whether or not
+  // the writer touched updated_at. Inequality with the seeded value is the
+  // assertion that always means something.
+  assert.notEqual(row.updated_at, NOW, 'updated_at must be refreshed');
   const events = outbox(raw);
   assert.equal(events.length, 1);
   assert.equal(events[0].op, 'ZONE_UPSERTED');
@@ -206,7 +217,9 @@ test('renaming a device writes the row once and enqueues one DEVICE_FLAGS_UPDATE
   const { raw, db } = fixture(t);
   const result = await entityName.renameDevice(db, { deveui: DEVICE, name: 'Probe 7' });
   assert.deepEqual(result, { changed: true, deveui: DEVICE, name: 'Probe 7', sync_version: 6 });
-  assert.equal(raw.prepare('SELECT sync_version FROM devices WHERE deveui=?').get(DEVICE).sync_version, 6);
+  const row = raw.prepare('SELECT sync_version, updated_at FROM devices WHERE deveui=?').get(DEVICE);
+  assert.equal(row.sync_version, 6);
+  assert.notEqual(row.updated_at, NOW, 'updated_at must be refreshed');
   const events = outbox(raw);
   assert.equal(events.length, 1);
   assert.equal(events[0].op, 'DEVICE_FLAGS_UPDATED');
@@ -261,6 +274,29 @@ test('a deleted row is a 404 not_found', async (t) => {
     () => entityName.renameDevice(db, { deveui: DEVICE, name: 'Probe 7' }),
     (error) => error.code === 'not_found'
   );
+});
+
+// Final fix wave / L73: the writers used to do String(args.name), so a caller
+// that skipped normalizeEntityName and handed an absent name would have stored
+// the text "undefined". Unreachable from the REST routes and the receiver,
+// which both normalize first -- and the guard is what keeps it unreachable.
+test('a non-string name is an invalid_argument 400 and nothing is written', async (t) => {
+  const { raw, db } = fixture(t);
+  for (const wrong of [undefined, null, 42, {}, ['North block'], true]) {
+    await assert.rejects(
+      () => entityName.renameZone(db, { zoneId: 1, name: wrong }),
+      (error) => error.code === 'invalid_argument' && error.statusCode === 400,
+      'zone vector ' + JSON.stringify(wrong)
+    );
+    await assert.rejects(
+      () => entityName.renameDevice(db, { deveui: DEVICE, name: wrong }),
+      (error) => error.code === 'invalid_argument' && error.statusCode === 400,
+      'device vector ' + JSON.stringify(wrong)
+    );
+  }
+  assert.equal(raw.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'Old zone');
+  assert.equal(raw.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE).name, 'Old device');
+  assert.equal(outbox(raw).length, 0);
 });
 
 test('exactly one of zoneId and zoneUuid is required', async (t) => {

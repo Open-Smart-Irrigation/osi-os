@@ -20,7 +20,19 @@ const TARGETS = {
   UPSERT_DEVICE_NAME: 'device',
   UPSERT_ZONE_NAME: 'zone',
 };
+// command_id and actor_user_uuid are minted by the cloud and are always
+// hyphenated.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// zone_uuid is not. A zone created on the gateway gets 32 hex digits without
+// dashes -- from the seed trigger trg_sync_zones_defaults_ai
+// (lower(hex(randomblob(16)))) on the flag-off path, and from
+// scoped-zone-create-router (crypto.randomBytes(16).toString('hex')) on the
+// flag-on path -- and only a cloud-created zone carries the hyphenated form.
+// Demanding UUID here would reject every locally created zone. The sibling
+// applier osi-zone-commands has accepted both spellings since it was ported
+// (its UUID2), and the fence and ack.target compare the canonicalized string
+// either way.
+const ZONE_UUID = /^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EUI = /^[0-9A-F]{16}$/;
 const UTC_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const NAME_REASONS = new Set([
@@ -104,8 +116,8 @@ function parsePayload(type, payload, runtime) {
     }
   } else {
     parsed.target = canonicalUuid(payload.zone_uuid);
-    if (!UUID.test(parsed.target)) {
-      throw rejection('malformed_command', 'zone_uuid must be a canonical UUID');
+    if (!ZONE_UUID.test(parsed.target)) {
+      throw rejection('malformed_command', 'zone_uuid must be 32 hex digits or a canonical UUID');
     }
   }
   if (parsed.gateway !== canonicalEui(runtime && runtime.gateway_device_eui)) {

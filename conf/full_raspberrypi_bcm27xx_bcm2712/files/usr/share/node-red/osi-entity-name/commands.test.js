@@ -489,6 +489,72 @@ test('a missing or invalid runtime gateway EUI throws before any write, and a re
   assert.equal(retry.ack.result, 'APPLIED');
 });
 
+// Final fix wave / controller ruling W1: only a cloud-created zone carries the
+// hyphenated UUID. Every zone minted on the gateway -- by the seed trigger
+// trg_sync_zones_defaults_ai (flag-off path) or by scoped-zone-create-router
+// (flag-on path) -- carries 32 hex digits without dashes, so a receiver that
+// demanded the hyphenated form would answer REJECTED_PERMANENT
+// malformed_command for every locally created zone. osi-zone-commands' UUID2
+// has accepted both spellings since the zone applier was ported.
+test('W1: a zone_uuid minted by the real seed trigger is renamed, not rejected', async (t) => {
+  const { raw, db } = fixture(t);
+  raw.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,gateway_device_eui,created_at,updated_at) ' +
+    'VALUES(2,?,1,?,?,?)'
+  ).run('Trigger zone', GATEWAY, NOW, NOW);
+  const minted = raw.prepare('SELECT zone_uuid FROM irrigation_zones WHERE id=2').get().zone_uuid;
+  assert.match(minted, /^[0-9a-f]{32}$/, 'the seed trigger mints 32 hex digits without dashes');
+  raw.exec('DELETE FROM sync_outbox');
+  const result = await commands.applyNameCommand(db, zoneCommand(80, { zone_uuid: minted }), runtime());
+  assert.equal(result.ack.result, 'APPLIED', JSON.stringify(result.ack));
+  assert.equal(result.ack.target, minted);
+  assert.equal(raw.prepare('SELECT name FROM irrigation_zones WHERE id=2').get().name, 'North block');
+  const events = raw.prepare("SELECT op FROM sync_outbox WHERE aggregate_type='ZONE'").all();
+  assert.deepEqual(events.map((event) => event.op), ['ZONE_UPSERTED']);
+});
+
+test('W1: the hyphenated cloud spelling still applies, in any case', async (t) => {
+  const { raw, db } = fixture(t);
+  const result = await commands.applyNameCommand(
+    db, zoneCommand(81, { zone_uuid: ZONE_UUID.toUpperCase() }), runtime()
+  );
+  assert.equal(result.ack.result, 'APPLIED', JSON.stringify(result.ack));
+  assert.equal(result.ack.target, ZONE_UUID);
+  assert.equal(raw.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'North block');
+});
+
+test('W1: a zone_uuid in neither spelling is still malformed_command', async (t) => {
+  const { raw, db } = fixture(t);
+  let id = 82;
+  for (const bad of ['a'.repeat(31), 'a'.repeat(33), 'g'.repeat(32), 'not-a-uuid', '']) {
+    const result = await commands.applyNameCommand(db, zoneCommand(id, { zone_uuid: bad }), runtime());
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', JSON.stringify(result.ack));
+    assert.equal(result.ack.reason, 'malformed_command', 'vector ' + JSON.stringify(bad));
+    id += 1;
+  }
+  assert.equal(raw.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'Old zone');
+});
+
+// Final fix wave / L94: spec 5.6 step 8 says a terminal rejection is recorded
+// and acknowledged exactly like an application. Without this the receiver could
+// drop a rejection on the floor and every other rejection test would still pass.
+test('a REJECTED_PERMANENT outcome still writes one applied_commands row and one ack row', async (t) => {
+  const { raw, db } = fixture(t);
+  const result = await commands.applyNameCommand(
+    db, deviceCommand(90, { values: { name: 'a'.repeat(101) } }), runtime()
+  );
+  assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+  const applied = raw.prepare('SELECT command_id, result, result_detail FROM applied_commands').all();
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].command_id, '90');
+  assert.equal(applied[0].result, 'REJECTED_PERMANENT');
+  assert.equal(JSON.parse(applied[0].result_detail).reason, 'name_too_long');
+  const acks = raw.prepare('SELECT command_id, payload_json FROM command_ack_outbox WHERE delivered_at IS NULL').all();
+  assert.equal(acks.length, 1);
+  assert.equal(acks[0].command_id, '90');
+  assert.equal(JSON.parse(acks[0].payload_json).status, 'NACKED');
+});
+
 test('a command of another type is not handled and never inspects the runtime gateway EUI', async (t) => {
   const { db } = fixture(t);
   const result = await commands.applyNameCommand(

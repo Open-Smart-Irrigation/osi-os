@@ -83,6 +83,24 @@ function notFound(message) {
   return error;
 }
 
+function invalidArgument(message) {
+  const error = new Error(message);
+  error.code = 'invalid_argument';
+  error.statusCode = 400;
+  return error;
+}
+
+// The writers store what they are handed. Every shipped caller runs
+// normalizeEntityName first, so `name` is always a string here -- and a
+// coercing String(args.name) would have written the text "undefined" for the
+// caller that ever forgot. This is the guard that keeps that unreachable.
+function requireName(args) {
+  if (!args || typeof args.name !== 'string') {
+    throw invalidArgument('rename requires a string name');
+  }
+  return args.name;
+}
+
 // Each in-transaction writer reads the row, returns early when the stored name
 // already equals the new one, and otherwise writes name, updated_at and
 // sync_version in one statement. The outbox triggers read sync_version; they
@@ -93,7 +111,7 @@ async function renameZoneInTransaction(tx, args) {
   if (byId === byUuid) {
     throw new Error('renameZone requires exactly one of zoneId / zoneUuid');
   }
-  const name = String(args.name);
+  const name = requireName(args);
   const row = byId
     ? await tx.get(
         'SELECT id, zone_uuid, name, sync_version FROM irrigation_zones WHERE id=? AND deleted_at IS NULL LIMIT 1',
@@ -132,7 +150,7 @@ async function renameDeviceInTransaction(tx, args) {
   if (!EUI.test(deveui)) {
     throw new Error('renameDevice requires a 16-hex DevEUI');
   }
-  const name = String(args.name);
+  const name = requireName(args);
   const row = await tx.get(
     'SELECT deveui, name, sync_version FROM devices WHERE deveui=? AND deleted_at IS NULL LIMIT 1',
     [deveui]
