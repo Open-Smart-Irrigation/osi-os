@@ -272,6 +272,45 @@ test('scoped: a granted researcher renames a device owned by someone else', asyn
   }
 });
 
+// The plan's coverage row claims an admin case and a no-access case on this
+// route. In scoped mode nobody holds a wildcard: osi-scope-helper's loadScope
+// builds an admin's scope from owned zones plus grants, exactly as it does for
+// a researcher, so the admin role buys canMutate and nothing more. The two
+// tests below are the same actor on either side of that line.
+test('scoped: an admin renames a device in a zone it owns', async () => {
+  const db = seedScopedDb();
+  seedRenameableDevice(db, { deveui: DEVICE_HEX_2, name: 'Tree 2', userId: 1, zoneId: 2 });
+  linkCloud(db);
+  const cs = fakeChirpStack({ outcome: 'updated' });
+  try {
+    // admin1 (STRANGER here) owns z-2, where DEVICE_HEX_2 sits.
+    const { stage, result } = await callRoute(db, FLAG_ON, { deveui: DEVICE_HEX_2, name: 'Admin tree', authorization: token(STRANGER) }, cs);
+    assert.equal(stage, 'handler');
+    assert.equal(result.statusCode, 200, JSON.stringify(result.payload));
+    assert.equal(result.payload.changed, true);
+    assert.equal(db.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE_HEX_2).name, 'Admin tree');
+  } finally {
+    db.close();
+  }
+});
+
+test('scoped: a mutation-capable actor with no grant on the device zone is refused without a write', async () => {
+  const db = seedScopedDb();
+  seedRenameableDevice(db, { deveui: DEVICE_HEX_1, name: 'Tree 1', userId: 2, zoneId: 1 });
+  const cs = fakeChirpStack({ outcome: 'updated' });
+  try {
+    // admin1 passes the role check and then fails the device check:
+    // DEVICE_HEX_1 sits in z-1, which admin1 neither owns nor was granted.
+    const { stage, result } = await callRoute(db, FLAG_ON, { deveui: DEVICE_HEX_1, name: 'Nope', authorization: token(STRANGER) }, cs);
+    assert.equal(stage, 'guard');
+    assert.ok(result.statusCode === 403 || result.statusCode === 404, String(result.statusCode));
+    assert.equal(cs.calls.length, 0);
+    assert.equal(db.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE_HEX_1).name, 'Tree 1');
+  } finally {
+    db.close();
+  }
+});
+
 test('scoped: a viewer is refused 403 before any write or ChirpStack call', async () => {
   const db = seedScopedDb();
   const cs = fakeChirpStack({ outcome: 'updated' });

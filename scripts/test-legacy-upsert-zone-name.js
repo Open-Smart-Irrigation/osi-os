@@ -166,6 +166,12 @@ test('the node binds the osi-lib seam on both profiles and bare-requires nothing
 // difference anywhere else in the statement (verified in Task 10 fix round 1
 // by altering one character inside the frozen DELETE_ZONE fixture's non-
 // timestamp SQL and confirming the comparison fails; see the fix-round report).
+//
+// To regenerate a fixture after a DELIBERATE change to one of these branches:
+// run that branch's NON_UPSERT_ZONE_CASES entry through node 4f4a765f36cee6f3
+// with scripts/lib/scoped-access-harness.js's executeFunction (the same call
+// the loop below makes), pass the resulting msg.topic through
+// normalizeTimestamps, and paste the string here.
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g;
 const normalizeTimestamps = (topic) => String(topic).replace(ISO_TIMESTAMP, '<TS>');
 

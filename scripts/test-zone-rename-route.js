@@ -173,6 +173,25 @@ test('scoped: a granted researcher renames a zone owned by someone else', async 
   }
 });
 
+// The plan's coverage row claims an admin case on both routes. In scoped mode
+// nobody holds a wildcard: osi-scope-helper's loadScope builds an admin's
+// scope from owned zones plus grants, exactly as it does for a researcher, so
+// what the admin role buys is canMutate, not universal reach.
+test('scoped: an admin renames a zone it owns', async () => {
+  const db = seedScopedDb();
+  linkCloud(db);
+  try {
+    // admin1 (STRANGER here) owns z-2 and holds no grant on it.
+    const { stage, result } = await callRoute(db, FLAG_ON, { zoneId: 2, name: 'Admin block', authorization: token(STRANGER) });
+    assert.equal(stage, 'handler');
+    assert.equal(result.statusCode, 200, JSON.stringify(result.payload));
+    assert.equal(result.payload.changed, true);
+    assert.equal(db.prepare('SELECT name FROM irrigation_zones WHERE id=2').get().name, 'Admin block');
+  } finally {
+    db.close();
+  }
+});
+
 test('scoped: a viewer is refused 403 before any write', async () => {
   const db = seedScopedDb();
   try {
