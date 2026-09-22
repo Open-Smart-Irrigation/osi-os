@@ -37,6 +37,7 @@ function setLink(db, linked, eui) {
 
 async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
   const base = facadeDb(db);
+  const failAfter = typeof failAfterWrites === 'number' ? failAfterWrites : (failAfterWrites ? 4 : 0);
   const database = {
     Database: function Database() {
       return {
@@ -49,7 +50,7 @@ async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
               async run(...args) {
                 const result = await tx.run(...args);
                 writes += 1;
-                if (failAfterWrites && writes === 4) throw new Error('injected finalize failure');
+                if (failAfter && writes === failAfter) throw new Error('injected finalize failure');
                 return result;
               },
             };
@@ -106,6 +107,50 @@ test('pre-link blank device and zone are attributed during finalization with one
   } finally { db.close(); }
 });
 
+test('unlinked irrigation events receive identity and outbox delivery during finalization', async () => {
+  const db = freshDb();
+  try {
+    insertBlankRows(db, '06');
+    const zone = db.prepare('SELECT id FROM irrigation_zones').get();
+    db.prepare("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, payload_json) VALUES (?, ?, 'IRRIGATE', 'pre_link', '{}')").run(1, zone.id);
+    const before = db.prepare('SELECT event_uuid FROM irrigation_events').get();
+    assert.equal(before.event_uuid, null, 'an unlinked event on an unassigned zone has no key at insert');
+    assert.equal(db.prepare("SELECT count(*) AS n FROM sync_outbox WHERE aggregate_type = 'IRRIGATION_EVENT'").get().n, 0);
+
+    const execution = await executeFinalize(db, LINK_EUI);
+    assert.deepEqual(execution.result, [{}, null]);
+    const repeat = await executeFinalize(db, LINK_EUI);
+    assert.deepEqual(repeat.result, [{}, null], 'repeated finalization must succeed');
+    const after = db.prepare('SELECT event_uuid FROM irrigation_events').get();
+    assert.match(after.event_uuid, new RegExp(`^irrig-${LINK_EUI}-\\d+$`), 'finalization must mint the canonical key');
+    const outbox = db.prepare("SELECT aggregate_key, gateway_device_eui FROM sync_outbox WHERE aggregate_type = 'IRRIGATION_EVENT'").all();
+    assert.equal(outbox.length, 1, 'finalization must make the event deliverable');
+    assert.equal(outbox[0].aggregate_key, after.event_uuid);
+    assert.equal(outbox[0].gateway_device_eui, LINK_EUI);
+  } finally { db.close(); }
+});
+
+test('finalization preserves existing keys and leaves another gateway untouched', async () => {
+  const db = freshDb();
+  try {
+    insertBlankRows(db, '07');
+    const ownZone = db.prepare('SELECT id FROM irrigation_zones').get();
+    db.prepare("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, payload_json, event_uuid) VALUES (?, ?, 'IRRIGATE', 'custom', '{}', 'custom-pre-link-key')").run(1, ownZone.id);
+    db.prepare("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, payload_json, event_uuid) VALUES (?, ?, 'IRRIGATE', 'whitespace', '{}', ' ')").run(1, ownZone.id);
+    db.prepare("INSERT INTO irrigation_zones(name, user_id, zone_uuid, gateway_device_eui) VALUES ('other-gateway', 1, '00000000-0000-4000-8000-000000000008', '1122334455667788')").run();
+    const otherZone = db.prepare("SELECT id FROM irrigation_zones WHERE gateway_device_eui = '1122334455667788'").get();
+    db.prepare("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, payload_json) VALUES (?, ?, 'IRRIGATE', 'other-gateway', '{}')").run(1, otherZone.id);
+    db.prepare("UPDATE irrigation_events SET event_uuid = NULL WHERE reason = 'other-gateway'").run();
+    const otherEventBefore = db.prepare("SELECT event_uuid FROM irrigation_events WHERE reason = 'other-gateway'").get().event_uuid;
+
+    await executeFinalize(db, LINK_EUI);
+    assert.equal(db.prepare("SELECT event_uuid FROM irrigation_events WHERE reason = 'custom'").get().event_uuid, 'custom-pre-link-key');
+    assert.equal(db.prepare("SELECT event_uuid FROM irrigation_events WHERE reason = 'whitespace'").get().event_uuid, ' ');
+    assert.equal(db.prepare("SELECT event_uuid FROM irrigation_events WHERE reason = 'other-gateway'").get().event_uuid, otherEventBefore);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM sync_outbox WHERE aggregate_type = 'IRRIGATION_EVENT'").get().n, 0);
+  } finally { db.close(); }
+});
+
 test('linked inserts use sync_link_state identity even when the process environment differs', () => {
   const db = freshDb();
   const priorEnvEui = process.env.DEVICE_EUI;
@@ -152,7 +197,9 @@ test('failure after all finalizer writes but before commit rolls back state, ide
   const db = freshDb();
   try {
     insertBlankRows(db, '05');
-    const execution = await executeFinalize(db, LINK_EUI, { failAfterWrites: true });
+    const zone = db.prepare('SELECT id FROM irrigation_zones').get();
+    db.prepare("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, payload_json) VALUES (?, ?, 'IRRIGATE', 'pre_link', '{}')").run(1, zone.id);
+    const execution = await executeFinalize(db, LINK_EUI, { failAfterWrites: 5 });
     assert.equal(execution.result[0], null, 'failure must not reach the success output');
     assert.equal(execution.result[1].statusCode, 500);
     assert.match(execution.result[1].payload.detail, /injected finalize failure/);
@@ -160,6 +207,7 @@ test('failure after all finalizer writes but before commit rolls back state, ide
     assert.equal(db.prepare("SELECT linked FROM sync_link_state WHERE peer_node = 'cloud'").get().linked, 0);
     assert.equal(db.prepare('SELECT gateway_device_eui FROM devices').get().gateway_device_eui, null);
     assert.equal(db.prepare('SELECT gateway_device_eui FROM irrigation_zones').get().gateway_device_eui, null);
+    assert.equal(db.prepare('SELECT event_uuid FROM irrigation_events').get().event_uuid, null);
     assert.equal(db.prepare('SELECT count(*) AS n FROM sync_outbox').get().n, 0);
   } finally { db.close(); }
 });

@@ -546,8 +546,8 @@
       "reason": "Wave 3 durable-history-batch + installation-identity port (AgroLink 77d3c52a, renumbered migrations 0052-0053, port/wave3-edge-durable): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4513 -> HEAD 5308 = +795. Persists the installation_uuid the cloud echoed back in the /auth/local-sync response alongside the existing linked-account fields."
     },
     "al-link-finalize": {
-      "delta": 637,
-      "reason": "Wave 3 durable-history-batch + installation-identity port (AgroLink 77d3c52a, renumbered migrations 0052-0053, port/wave3-edge-durable): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3076 -> HEAD 3713 = +637. Records the installation_uuid into the persisted linked-account row; the pre-existing DB-close catch(_){} was also converted to a visible node.warn (touched-node silent-catch ratchet)."
+      "delta": 798,
+      "reason": "Gateway identity convergence through migration 0058: measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3683 -> HEAD 4481 = +798. The finalizer persists link state, attributes blank device and zone identities, mints missing irrigation-event keys for the linked gateway, and relies on the existing event-key update trigger to enqueue those events in the same transaction."
     },
     "sync-history-build": {
       "delta": 4087,

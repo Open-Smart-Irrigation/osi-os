@@ -124,7 +124,7 @@ async function simulateCloseUplink(db) {
 async function main() {
   await test('OBSERVED_COMPLETE + trigger=on_valve_schedule logs exactly one irrigation_events row with the observed-span duration', async () => {
     const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES ('Z1',1,datetime('now'),datetime('now'))");
+    await db.run("INSERT INTO irrigation_zones(name, user_id, gateway_device_eui, created_at, updated_at) VALUES ('Z1',1,?,datetime('now'),datetime('now'))", [EUI]);
     const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
     await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
     const exp = await seedExpectation(db, { trigger: 'on_valve_schedule' });
@@ -150,7 +150,7 @@ async function main() {
 
   await test('OBSERVED_COMPLETE + trigger=unexplained also logs, with a distinct reason', async () => {
     const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES ('Z1',1,datetime('now'),datetime('now'))");
+    await db.run("INSERT INTO irrigation_zones(name, user_id, gateway_device_eui, created_at, updated_at) VALUES ('Z1',1,?,datetime('now'),datetime('now'))", [EUI]);
     const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
     await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
     await seedExpectation(db, { trigger: 'unexplained' });
@@ -208,7 +208,7 @@ async function main() {
 
   await test('observed_open_at null (never confirmed open) logs with a NULL duration, not zero', async () => {
     const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES ('Z1',1,datetime('now'),datetime('now'))");
+    await db.run("INSERT INTO irrigation_zones(name, user_id, gateway_device_eui, created_at, updated_at) VALUES ('Z1',1,?,datetime('now'),datetime('now'))", [EUI]);
     const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
     await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
     await seedExpectation(db, { trigger: 'unexplained', reconciliation_state: 'PENDING_OBSERVATION', observed_open_at: null });
