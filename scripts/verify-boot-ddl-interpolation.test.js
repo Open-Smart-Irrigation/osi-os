@@ -32,6 +32,18 @@ test('repo flows pass on both profiles', () => {
   }
 });
 
+test('legacy users migration nodes are rejected when retained', () => {
+  const flows = JSON.parse(fs.readFileSync(CANONICAL, 'utf8'));
+  const fixtureFlows = flows.concat({ id: 'al-migrate-func', type: 'function', func: 'return msg;' });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bootddl-')), 'flows.json');
+  fs.writeFileSync(file, JSON.stringify(fixtureFlows, null, 2) + '\n');
+  const { failures } = verifyFlows(file, SEED);
+  assert.ok(
+    failures.some((failure) => failure.includes('al-migrate-func') && failure.includes('must be removed')),
+    `expected a retained legacy node failure, got: ${failures.join('; ') || '(none)'}`
+  );
+});
+
 test('escaped-quote gatewaySql interpolation (issue #4 shape) is caught', () => {
   const fixture = writeFixture((func) => {
     // Reintroduce the broken form into the dendro-daily AI trigger DDL string:

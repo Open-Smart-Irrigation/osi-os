@@ -58,6 +58,15 @@ const VERSIONED_OUTBOX_TRIGGERS = [
   'trg_dp_zone_env_outbox_au',
 ];
 
+// These nodes were a one-shot users-table migration path. The schema is now
+// supplied by the blank seed and ordered baseline migration.
+const LEGACY_BOOT_NODE_IDS = [
+  'al-migrate-inject',
+  'al-migrate-func',
+  'al-migrate-db',
+  'al-migrate-debug',
+];
+
 function normalizeSql(sql) {
   return String(sql || '').replace(/\s+/g, ' ').trim();
 }
@@ -90,8 +99,16 @@ function extractTriggerStatements(flowsPath) {
   return stmts;
 }
 
+function findLegacyBootNodes(flowsPath) {
+  const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+  const ids = new Set(flows.filter((node) => node && node.id).map((node) => node.id));
+  return LEGACY_BOOT_NODE_IDS
+    .filter((id) => ids.has(id))
+    .map((id) => `${id}: legacy users migration node must be removed`);
+}
+
 function verifyFlows(flowsPath, seedPath) {
-  const failures = [];
+  const failures = findLegacyBootNodes(flowsPath);
   const stmts = extractTriggerStatements(flowsPath);
 
   const db = new DatabaseSync(':memory:');
@@ -186,4 +203,12 @@ if (require.main === module) {
   }
 }
 
-module.exports = { verifyFlows, extractTriggerStatements, passesLiteralZeroVersion, VERSIONED_OUTBOX_TRIGGERS, TEST_GATEWAY_SQL };
+module.exports = {
+  verifyFlows,
+  extractTriggerStatements,
+  findLegacyBootNodes,
+  passesLiteralZeroVersion,
+  VERSIONED_OUTBOX_TRIGGERS,
+  LEGACY_BOOT_NODE_IDS,
+  TEST_GATEWAY_SQL,
+};
