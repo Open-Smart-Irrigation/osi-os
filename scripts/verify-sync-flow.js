@@ -1849,6 +1849,18 @@ expectIncludesById('zone-rename-fn', "return respond(403, { message: 'Forbidden'
 // no .code at all) is a 500 with no reason key, not a 400/name_empty fallback.
 expectIncludesById('zone-rename-fn', "const NAME_REASON_CODES = new Set(['name_empty', 'name_too_long', 'name_control_characters', 'name_invalid_unicode']);", 'allowlists exactly the four reviewed name reason codes for the 400 path');
 expectIncludesById('zone-rename-fn', "return respond(500, { message: 'Zone name could not be validated' });", 'answers an unrecognized name-validation failure with 500, not a 400 fallback');
+// Final fix wave, Important 1 (GLOBAL.md amendment A5, the same pin shape the
+// three create-path nodes carry below): node.error(text, msg) in a node that
+// answers msg.res itself hands the tab-wide catch node (device-api-catch ->
+// device-api-http500) the same msg.res, so two responses race for one request
+// and the client can receive the catch node's body with internal error text in
+// it. Both of this route's nodes take the one-argument form.
+expectIncludesById('zone-rename-fn', "node.error('Zone rename name helper unavailable: ' + nameLoad.error);", 'logs the helper-unavailable fault without the msg argument');
+expectExcludesById('zone-rename-fn', "node.error('Zone rename name helper unavailable: ' + nameLoad.error, msg);", 'the two-argument node.error form that races the tab-wide catch node for msg.res');
+expectIncludesById('zone-rename-fn', "node.error('Zone rename name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError));", 'logs an unrecognized normalization fault without the msg argument');
+expectExcludesById('zone-rename-fn', "node.error('Zone rename name normalization failed: ' + String(nameError && nameError.message ? nameError.message : nameError), msg);", 'the two-argument node.error form that races the tab-wide catch node for msg.res');
+expectIncludesById('zone-rename-scope-guard', "node.error('zone rename scope: module unavailable: ' + scopeLoad.error);", 'logs the scope-helper fault without the msg argument');
+expectExcludesById('zone-rename-scope-guard', "node.error('zone rename scope: module unavailable: ' + scopeLoad.error, msg);", 'the two-argument node.error form that races the tab-wide catch node for msg.res');
 expectNodeTypeById('device-rename-http', 'http in', 'exposes the device rename route');
 expectWireById('device-rename-http', 'device-rename-scope-guard', 'routes device renames through the fresh scope guard');
 expectWireById('device-rename-scope-guard', 'device-rename-fn', 'passes authorized device renames to the writer');
@@ -3901,6 +3913,10 @@ expectOrderedIncludesById('cs-reg-cloud-fn', [
   'nameLoad.value.normalizeEntityName(params.name)',
   'using the DevEUI as the label',
 ], 'falls back to the DevEUI label instead of failing a registration on a bad name');
+// Final fix wave / M3: a REGISTER_DEVICE that carries no name at all is the
+// legacy norm, and its DevEUI fallback is the intended outcome, so it must not
+// log a warning. Only a name the command actually supplied reaches the rule.
+expectIncludesById('cs-reg-cloud-fn', '} else if (params.name !== null && params.name !== undefined) {', 'runs the name rule only for a name the command actually carries');
 // The existing-row lookup pinned above ("loads deleted, unclaimed, assigned,
 // and owned device state ... T4-W1", now selecting `name` too) is the SAME
 // lookup T4-W1 reuses for its name decision below -- no second query.

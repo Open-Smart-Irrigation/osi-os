@@ -389,6 +389,94 @@ test('T4-W1: a rule-breaking command name still falls back to the DevEUI and nev
   }
 });
 
+// --- Final fix wave / M3: a REGISTER_DEVICE that carries no name at all is
+// the normal legacy shape, not an operator mistake. Running it through
+// normalizeEntityName made it throw name_empty, so every nameless
+// registration logged a warning and buried the one that matters: a name that
+// WAS supplied and broke the rule. The fallback label is unchanged either way.
+
+function registerDeviceEnv() {
+  return {
+    OSI_SCOPED_ACCESS: '0',
+    DEVICE_EUI: '0016C001F11715E2',
+    CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
+    CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
+  };
+}
+
+async function runRegisterDevice(db, { devEui, params, commandId }) {
+  const box = {};
+  const chirpstack = {
+    createProvisioningClientFromEnv: () => ({
+      ensureDeviceProvisioned: async (registration) => {
+        box.registration = registration;
+        return { devEui: registration.devEui, deviceCreated: true };
+      },
+      deleteDevice: async () => {},
+    }),
+  };
+  const run = await executeFunction(loadNode('cs-reg-cloud-fn'), {
+    msg: {
+      payload: JSON.stringify({
+        commandType: 'REGISTER_DEVICE',
+        commandId,
+        params: Object.assign({
+          devEui,
+          deviceType: 'KIWI_SENSOR',
+          appKey: 'E'.repeat(32),
+          userUuid: 'u-res1',
+        }, params),
+      }),
+    },
+    env: registerDeviceEnv(),
+    db,
+    libOverrides: { chirpstack },
+  });
+  return { run, registration: box.registration };
+}
+
+for (const [label, devEui, params] of [
+  ['omits the name key', '70B3D57ED006D001', {}],
+  ['sends name: null', '70B3D57ED006D002', { name: null }],
+]) {
+  test('M3: a REGISTER_DEVICE that ' + label + ' provisions without a warning', async () => {
+    const db = seedScopedDb();
+    try {
+      const { run, registration } = await runRegisterDevice(db, {
+        devEui,
+        params,
+        commandId: 'cmd-m3-' + devEui,
+      });
+      assert.equal(run.result[0].specialAck.result, 'SUCCESS', JSON.stringify(run.result[0] && run.result[0].specialAck));
+      assert.deepEqual(run.warnings, [], 'a nameless REGISTER_DEVICE is the legacy norm, not a fault');
+      assert.equal(registration.name, devEui, 'the DevEUI is still the label');
+      assert.equal(db.prepare('SELECT name FROM devices WHERE deveui = ?').get(devEui).name, devEui);
+    } finally {
+      db.close();
+    }
+  });
+}
+
+test('M3: a supplied name that breaks the rule still warns with its reason code', async () => {
+  const db = seedScopedDb();
+  const devEui = '70B3D57ED006D003';
+  try {
+    const { run, registration } = await runRegisterDevice(db, {
+      devEui,
+      params: { name: 'Row\t7' },
+      commandId: 'cmd-m3-bad',
+    });
+    assert.equal(run.result[0].specialAck.result, 'SUCCESS', JSON.stringify(run.result[0] && run.result[0].specialAck));
+    assert.ok(
+      run.warnings.some((warning) => /name_control_characters/.test(warning)),
+      JSON.stringify(run.warnings)
+    );
+    assert.equal(registration.name, devEui);
+  } finally {
+    db.close();
+  }
+});
+
 // --- Fix round 1 (reviewer findings I1/I2 on the three HTTP nodes; T9-M4) -
 //
 // I1: normalizeEntityName is only ever documented to throw one of the four

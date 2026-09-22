@@ -1303,9 +1303,25 @@ if (sizeAllowances) {
   // (+917/+999/+967 = 2883, unchanged) and 4f4a765f36cee6f3 18655 -> 19386 (+731,
   // superseding its prior +428 node_allowances entry) -- verify-flows-size-ratchet
   // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1569659 = +30032.
-  expectCondition(sizeAllowances.total_allowance?.delta === 71235,
-    'size total allowance: exact cumulative delta 71235',
-    'size total allowance: expected exact cumulative delta 71235');
+  // 71275: 2026-09-22 zone-device-rename-stage-1 final fix wave (controller rulings W1/W2,
+  // review Important 1 and M3). Important 1 applies GLOBAL amendment A5 to the zone rename
+  // route: zone-rename-fn (two sites) and zone-rename-scope-guard (one site) drop the `msg`
+  // argument from node.error, so both nodes SHRINK (7006 -> 6996 and 2609 -> 2604; the
+  // zone-rename-fn new-node ceiling is tightened to match). M3 stops cs-reg-cloud-fn warning
+  // for a REGISTER_DEVICE that carries no name at all, at the cost of one guard condition
+  // (20980 -> 21035, +1197 over origin/main, still inside its existing 5391 headroom).
+  // W1 and W2 are module-side and do not touch flows.json. Re-reads the standing 41203 from
+  // origin/main (unchanged) and raises it by the 30072 chars measured for the whole branch
+  // across the 15 nodes that differ from origin/main: the five Task 6-8 new nodes
+  // (zone-rename-scope-guard 2604, zone-rename-fn 6996, device-rename-scope-guard 2606,
+  // device-rename-fn 8351, entity-name-command-apply-fn 4151 = 24708), the five Task 8
+  // registry/capability deltas unchanged (+236/+236/+27/+27/+27 = 553) and the five existing
+  // nodes that grew (cs-reg-cloud-fn +1197, post-zone-auth +917, post-devices-auth +999,
+  // scoped-zone-create-router +967, 4f4a765f36cee6f3 +731 = 4811) -- verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1569699 = +30072.
+  expectCondition(sizeAllowances.total_allowance?.delta === 71275,
+    'size total allowance: exact cumulative delta 71275',
+    'size total allowance: expected exact cumulative delta 71275');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
