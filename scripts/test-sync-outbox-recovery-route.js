@@ -29,10 +29,9 @@ function runGuard(msg, authorizeAdminRead) {
 test('recovery route returns 401 for anonymous and 403 for authenticated non-admin', async () => {
   const anonymous = await runGuard({ req: { headers: {} } }, async () => { const error = new Error('Unauthorized'); error.statusCode = 401; throw error; });
   assert.equal(anonymous[1].statusCode, 401);
-  let writes = 0;
   const nonAdmin = await runGuard({ req: { headers: { authorization: 'Bearer valid' } } }, async () => { const error = new Error('Forbidden'); error.statusCode = 403; throw error; });
   assert.equal(nonAdmin[1].statusCode, 403);
-  assert.equal(writes, 0);
+  assert.equal(nonAdmin[0], null, 'non-admin must not reach the recovery worker');
   const admin = await runGuard({ req: { headers: { authorization: 'Bearer valid' } } }, async () => ({ username: 'admin' }));
   assert.equal(admin[0]._recoveryActor, 'admin');
 });
