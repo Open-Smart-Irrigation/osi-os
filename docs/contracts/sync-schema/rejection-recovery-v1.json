@@ -1,0 +1,76 @@
+{
+  "contract_version": "rejection-recovery-v1",
+  "reason_classes": {
+    "ownership_precondition_missing": "REPAIRABLE",
+    "parent_missing": "RETRYABLE",
+    "ownership_mismatch": "PERMANENT",
+    "missing_event_uuid": "PERMANENT",
+    "unknown_op": "PERMANENT",
+    "invalid_payload": "PERMANENT",
+    "integrity_violation": "PERMANENT",
+    "stale_sync_version": "PERMANENT",
+    "equal_version_payload_conflict": "PERMANENT",
+    "irrigation_event_identity_collision": "PERMANENT"
+  },
+  "ordinary_event_result_statuses": [
+    "APPLIED",
+    "DUPLICATE",
+    "REJECTED",
+    "RETRYABLE_ERROR"
+  ],
+  "result_statuses": [
+    "APPLIED",
+    "ALREADY_APPLIED",
+    "STILL_REJECTED",
+    "RETRYABLE_ERROR"
+  ],
+  "event_result": {
+    "required": [
+      "eventUuid",
+      "status",
+      "retryable",
+      "reason",
+      "rejectionCode",
+      "rejectionClass"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "eventUuid": {"type": "string", "minLength": 1},
+      "status": {"enum": ["APPLIED", "DUPLICATE", "REJECTED", "RETRYABLE_ERROR"]},
+      "retryable": {"type": "boolean"},
+      "reason": {"type": ["string", "null"]},
+      "rejectionCode": {
+        "type": ["string", "null"],
+        "enum": [
+          "ownership_precondition_missing",
+          "parent_missing",
+          "ownership_mismatch",
+          "missing_event_uuid",
+          "unknown_op",
+          "invalid_payload",
+          "integrity_violation",
+          "stale_sync_version",
+          "equal_version_payload_conflict",
+          "irrigation_event_identity_collision",
+          null
+        ]
+      },
+      "rejectionClass": {
+        "type": ["string", "null"],
+        "enum": ["REPAIRABLE", "RETRYABLE", "PERMANENT", "LEGACY_UNCLASSIFIED", null]
+      }
+    }
+  },
+  "recovery_receipt": {
+    "required": ["cloudReplayRequest", "cloudReplayResponse"],
+    "properties": {
+      "cloudReplayRequest": {
+        "required": ["eventUuid", "expectedGatewayEui", "expectedReason"]
+      },
+      "cloudReplayResponse": {
+        "required": ["eventUuid", "outcome", "reason", "replayAttemptCount", "attemptedAt"],
+        "outcome": ["APPLIED", "ALREADY_APPLIED"]
+      }
+    }
+  }
+}

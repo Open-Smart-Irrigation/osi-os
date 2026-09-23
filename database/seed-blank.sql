@@ -1010,11 +1010,31 @@ CREATE TABLE sync_outbox (
   gateway_device_eui        TEXT,
   rejected_at               TEXT,
   rejection_reason          TEXT,
-  last_retryable_failure_at TEXT
+  last_retryable_failure_at TEXT,
+  rejection_code            TEXT,
+  rejection_class           TEXT,
+  recovery_generation       INTEGER NOT NULL DEFAULT 0 CHECK (recovery_generation IN (0, 1))
 );
 
 CREATE INDEX idx_sync_outbox_pending ON sync_outbox(delivered_at, occurred_at);
 CREATE INDEX idx_sync_outbox_eviction ON sync_outbox(aggregate_type, delivered_at, occurred_at);
+
+CREATE TABLE sync_outbox_recovery_audit (
+  id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_uuid                  TEXT NOT NULL,
+  generation                  INTEGER NOT NULL CHECK (generation = 1),
+  actor                       TEXT NOT NULL,
+  attempted_at                TEXT NOT NULL,
+  previous_rejection_code     TEXT,
+  previous_rejection_class    TEXT,
+  previous_rejection_reason   TEXT,
+  envelope_sha256             TEXT NOT NULL,
+  receipt_json                TEXT NOT NULL,
+  UNIQUE (event_uuid, generation)
+);
+
+CREATE INDEX idx_sync_outbox_recovery_audit_event
+  ON sync_outbox_recovery_audit(event_uuid, attempted_at, id);
 
 -- ---------------------------------------------------------------------------
 -- sync_inbox

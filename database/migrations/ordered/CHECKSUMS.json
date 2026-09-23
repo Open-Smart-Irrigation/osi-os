@@ -56,5 +56,6 @@
   "0055__radio_store_identity.sql": "21d21038f5b95610089fe279603abffef8286471ca92018f6c3dea3f04fdffa9",
   "0056__installation_revision_outbox.sql": "35af4279d08229ab29819c7596e49f65cb526ee9017ea5f6e942895d486a24f0",
   "0057__valve_once_dispatch_intents.sql": "96849e222c6b3550b35cf6755f214fc83b0a2f03242a925efea0413a56564577",
-  "0058__gateway_eui_fallback.sql": "eae7f36423f693d0a5dfd239ce750b0b361a510d5b48a693fc08edb031f235b7"
+  "0058__gateway_eui_fallback.sql": "eae7f36423f693d0a5dfd239ce750b0b361a510d5b48a693fc08edb031f235b7",
+  "0059__sync_rejection_recovery.sql": "e44c234f5176dc22a006cd31360e793524b17ded3e66019bcc3b5d01e8e97a88"
 }

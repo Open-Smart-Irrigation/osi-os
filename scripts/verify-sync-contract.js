@@ -8,6 +8,7 @@ const SCHEMA_DIR = path.join(ROOT, 'docs/contracts/sync-schema');
 const FLOWS = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const STAGING_MANIFEST = path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json');
 const V2_CONTRACT_FILES = ['journal-v2.schema.json', 'journal-v2-golden.json', 'canonicalization-v2.md'];
+const RECOVERY_CONTRACT_FILE = 'rejection-recovery-v1.json';
 const SEPARATELY_ROUTED_COMMANDS = ['WORK_REQUEST_STATUS'];
 const SEPARATE_ROUTE_SPECS = [
     {
@@ -232,7 +233,7 @@ function main() {
     console.log('  ok journal semantic bindings are exact and machine-readable');
 
     // 2. Verify schema files exist
-    for (const name of ['commands.schema.json', 'events.schema.json', 'resources.schema.json', ...V2_CONTRACT_FILES]) {
+    for (const name of ['commands.schema.json', 'events.schema.json', 'resources.schema.json', RECOVERY_CONTRACT_FILE, ...V2_CONTRACT_FILES]) {
         const f = path.join(SCHEMA_DIR, name);
         if (!fs.existsSync(f)) throw new Error(`Missing schema: ${name}`);
         if (name.endsWith('.json')) JSON.parse(fs.readFileSync(f, 'utf8'));
