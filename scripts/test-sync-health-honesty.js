@@ -25,6 +25,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+const rejectionRecovery = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rejection-recovery');
 
 const REPO = path.resolve(__dirname, '..');
 const SEED = path.join(REPO, 'database/seed-blank.sql');
@@ -91,8 +92,13 @@ async function runOutboxMark({ db, results, requestedIds, initialState }) {
   const node = { warn: (m) => warnings.push(String(m)), error: (m) => warnings.push('ERROR ' + m) };
   const msg = { statusCode: 200, _syncEventIds: requestedIds, payload: { results } };
   // eslint-disable-next-line no-new-func
-  const fn = new Function('msg', 'flow', 'node', 'osiDb', func);
-  await fn(msg, flow, node, osiDbStub(db));
+  const fn = new Function('msg', 'flow', 'node', 'osiDb', 'osiLib', func);
+  const osiLib = {
+    require: (name) => name === 'rejection-recovery'
+      ? { ok: true, value: rejectionRecovery }
+      : { ok: false, error: `unexpected helper ${name}` },
+  };
+  await fn(msg, flow, node, osiDbStub(db), osiLib);
   return { state, warnings };
 }
 
@@ -127,8 +133,8 @@ test('sync-force-build applies the same rule on the manual force-sync path', () 
     !f.includes('setSyncState({ lastOutboxDeliverySuccessAt: now, lastOutboxBatchCount:'),
     'force sync must not stamp delivery success unconditionally'
   );
-  assert.match(f, /if \(deliveredIds\.length > 0\) forceOutboxPatch\.lastOutboxDeliverySuccessAt = now;/);
-  assert.match(f, /recordFailure\('outbox', \(rejectedIds\.length \+ ' event\(s\) rejected by cloud: '/);
+  assert.match(f, /if \(summary\.outbox\.deliveredCount > 0\) forceOutboxPatch\.lastOutboxDeliverySuccessAt = now;/);
+  assert.match(f, /recordFailure\('outbox', classified\.rejected\.length \+ ' event\(s\) rejected by cloud: '/);
 });
 
 test('sync-state-build exposes rejected counters and the last rejection reason', () => {
@@ -156,8 +162,8 @@ test('mixed batch: accepted events advance delivery success, rejections keep las
     requestedIds: ['evt-ok', 'evt-bad-1', 'evt-bad-2'],
     results: [
       { eventUuid: 'evt-ok', status: 'APPLIED' },
-      { eventUuid: 'evt-bad-1', status: 'REJECTED', reason: 'stale_sync_version' },
-      { eventUuid: 'evt-bad-2', status: 'REJECTED', reason: 'stale_sync_version' },
+      { eventUuid: 'evt-bad-1', status: 'REJECTED', reason: 'stale_sync_version', rejectionCode: 'stale_sync_version', rejectionClass: 'PERMANENT' },
+      { eventUuid: 'evt-bad-2', status: 'REJECTED', reason: 'stale_sync_version', rejectionCode: 'stale_sync_version', rejectionClass: 'PERMANENT' },
     ],
     initialState: { lastError: { source: 'outbox', message: 'older failure' } },
   });
@@ -188,8 +194,8 @@ test('fully rejected batch does NOT report a delivery success', async () => {
     db,
     requestedIds: ['evt-bad-1', 'evt-bad-2'],
     results: [
-      { eventUuid: 'evt-bad-1', status: 'REJECTED', reason: 'stale_sync_version' },
-      { eventUuid: 'evt-bad-2', status: 'REJECTED', reason: 'equal_version_payload_conflict' },
+      { eventUuid: 'evt-bad-1', status: 'REJECTED', reason: 'stale_sync_version', rejectionCode: 'stale_sync_version', rejectionClass: 'PERMANENT' },
+      { eventUuid: 'evt-bad-2', status: 'REJECTED', reason: 'equal_version_payload_conflict', rejectionCode: 'equal_version_payload_conflict', rejectionClass: 'PERMANENT' },
     ],
     initialState: { lastOutboxDeliverySuccessAt: '2026-01-01T00:00:00.000Z' },
   });
@@ -226,7 +232,7 @@ test('a protocol-level issue still outranks the rejection summary in lastError',
   const { state } = await runOutboxMark({
     db,
     requestedIds: ['evt-bad-1', 'evt-missing'],
-    results: [{ eventUuid: 'evt-bad-1', status: 'REJECTED', reason: 'ownership_denied' }],
+    results: [{ eventUuid: 'evt-bad-1', status: 'REJECTED', reason: 'ownership mismatch', rejectionCode: 'ownership_mismatch', rejectionClass: 'PERMANENT' }],
   });
   assert.ok(state.lastError);
   assert.match(state.lastError.message, /protocol_response_missing_result:evt-missing/);
