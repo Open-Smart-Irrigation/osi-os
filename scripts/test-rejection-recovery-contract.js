@@ -8,10 +8,11 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const CONTRACT = path.join(ROOT, 'docs/contracts/sync-schema/rejection-recovery-v1.json');
 const VENDOR_CANDIDATES = [
-  path.resolve(ROOT, '../../../osi-server/.worktrees/w58-rejection-result-fields/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
+  process.env.OSI_SERVER_REJECTION_RECOVERY_CONTRACT,
+  path.resolve(ROOT, 'osi-server/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
   path.resolve(ROOT, '../../../osi-server/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
-  path.resolve(ROOT, '../../osi-server/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
-];
+  path.resolve(ROOT, '../osi-server/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
+].filter(Boolean);
 
 const EXPECTED_REASONS = {
   ownership_precondition_missing: 'REPAIRABLE',
@@ -47,21 +48,14 @@ function verify() {
   const contract = readJson(CONTRACT);
   assertContract(contract);
   const vendor = VENDOR_CANDIDATES.find((file) => fs.existsSync(file));
-  if (vendor) {
-    const vendorContract = readJson(vendor);
-    // The vendor file is the source for the policy vocabulary. When a sibling
-    // vendor publishes the extended shape, its bytes must match this copy.
-    assert.deepEqual(contract.reason_classes, vendorContract.reason_classes);
-    assert.deepEqual(contract.result_statuses, vendorContract.result_statuses);
-    if (Object.prototype.hasOwnProperty.call(vendorContract, 'event_result_statuses')) {
-      assert.equal(
-        fs.readFileSync(CONTRACT, 'utf8'),
-        fs.readFileSync(vendor, 'utf8'),
-        'edge and extended sibling vendor contract must be byte-identical',
-      );
-    }
-  }
-  console.log(`rejection recovery contract: OK${vendor ? ` (vendor policy ${vendor})` : ''}`);
+  assert.ok(vendor, 'osi-server rejection recovery contract vendor is required');
+  assert.equal(
+    fs.readFileSync(CONTRACT, 'utf8'),
+    fs.readFileSync(vendor, 'utf8'),
+    'edge and osi-server rejection recovery contracts must be byte-identical',
+  );
+  assertContract(readJson(vendor));
+  console.log(`rejection recovery contract: OK (vendor ${vendor})`);
 }
 
 if (require.main === module) {

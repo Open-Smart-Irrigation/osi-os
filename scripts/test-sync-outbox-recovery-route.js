@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -11,6 +12,7 @@ const flow = JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/f
 const guardSource = flow.find((node) => node.id === 'sync-outbox-recover-admin-guard').func;
 const workerSource = flow.find((node) => node.id === 'sync-outbox-recover-fn').func;
 const policy = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rejection-recovery');
+const scope = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper');
 
 function runGuard(msg, authorizeAdminRead) {
   return new Function('msg', 'osiLib', 'env', 'node', 'global', guardSource)(
@@ -31,6 +33,51 @@ test('recovery route returns 401 for anonymous and 403 for authenticated non-adm
   assert.equal(writes, 0);
   const admin = await runGuard({ req: { headers: { authorization: 'Bearer valid' } } }, async () => ({ username: 'admin' }));
   assert.equal(admin[0]._recoveryActor, 'admin');
+});
+
+function bearer(secret, userId, username, exp = Date.now() + 60000) {
+  const payload = Buffer.from(JSON.stringify({ userId, username, exp })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return `Bearer ${payload}.${signature}`;
+}
+
+async function runGuardWithRealScope(role, authorization) {
+  scope._resetForTests();
+  class AuthDatabase {
+    async get(sql) {
+      if (sql.includes('id = ? AND username = ?')) return { user_uuid: 'user-1' };
+      if (sql.includes('FROM users WHERE user_uuid = ?')) {
+        return { id: 7, username: 'operator', role, disabled_at: null, user_uuid: 'user-1' };
+      }
+      return undefined;
+    }
+    async all() { return []; }
+    close(callback) { callback(); }
+  }
+  return new Function('msg', 'osiLib', 'env', 'node', 'global', guardSource)(
+    { req: { headers: { authorization } } },
+    { require: (name) => {
+      if (name === 'scope') return { ok: true, value: scope };
+      if (name === 'osi-db-helper') return { ok: true, value: { Database: AuthDatabase } };
+      return { ok: false, error: name };
+    } },
+    { get: (name) => name === 'AUTH_TOKEN_SECRET' ? 'route-auth-secret' : '' },
+    { error: () => {}, warn: () => {} },
+    { get: () => null },
+  );
+}
+
+test('recovery route applies the real bearer and current admin-role checks', async () => {
+  const valid = bearer('route-auth-secret', 7, 'operator');
+  const nonAdmin = await runGuardWithRealScope('researcher', valid);
+  assert.equal(nonAdmin[1].statusCode, 403);
+
+  const expired = bearer('route-auth-secret', 7, 'operator', Date.now() - 1);
+  const expiredResult = await runGuardWithRealScope('admin', expired);
+  assert.equal(expiredResult[1].statusCode, 401);
+
+  const admin = await runGuardWithRealScope('admin', valid);
+  assert.equal(admin[0]._recoveryActor, 'operator');
 });
 
 const SCHEMA = `
