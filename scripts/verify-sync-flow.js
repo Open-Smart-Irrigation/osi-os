@@ -2118,6 +2118,15 @@ expectIncludes('Prune Sync Outbox', 'DELETE FROM sync_outbox', 'prunes delivered
 expectIncludes('Prune Sync Outbox', 'delivered_at IS NOT NULL', 'does not prune pending sync outbox rows');
 expectIncludes('Prune Sync Outbox', 'PRAGMA wal_checkpoint(TRUNCATE)', 'attempts a WAL checkpoint after deleting old outbox rows');
 expectWireById('outbox-retention-tick', 'prune-sync-outbox', 'runs the sync outbox retention function');
+expectNodeTypeById('sync-outbox-recover-http', 'http in', 'exposes the exact-UUID outbox recovery route');
+expectWireById('sync-outbox-recover-http', 'sync-outbox-recover-admin-guard', 'routes outbox recovery through the admin bearer guard');
+expectWireById('sync-outbox-recover-admin-guard', 'sync-outbox-recover-fn', 'passes only authorized outbox recovery requests to the worker');
+expectWireById('sync-outbox-recover-admin-guard', 'sync-outbox-recover-response', 'answers rejected outbox recovery authorization on the route response');
+expectWireById('sync-outbox-recover-fn', 'sync-outbox-recover-response', 'answers outbox recovery validation and execution');
+expectIncludes('Admin Guard: Outbox Recovery', "authorizeAdminRead", 'requires the existing HMAC bearer and scoped admin role');
+expectIncludes('Recover Rejected Outbox', "osiLib.require('rejection-recovery')", 'loads the shared rejection recovery helper');
+expectIncludes('Recover Rejected Outbox', 'execute === true', 'requires explicit execute opt-in');
+expectIncludes('Recover Rejected Outbox', 'recoverOutbox', 'uses the shared atomic recovery implementation');
 expectIncludes('Run Force Sync', "'X-OSI-Sync-Protocol': '2'", 'uses sync protocol v2 for manual force-sync outbox and command polling');
 expectIncludes('Run Force Sync', 'classifySyncResults', 'manual force-sync classifies each protocol-v2 event result before applying it');
 expectIncludes('Run Force Sync', 'pendingRes.payload.commands', 'manual force-sync accepts protocol-v2 pending-command envelopes');

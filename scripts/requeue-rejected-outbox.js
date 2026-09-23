@@ -6,7 +6,7 @@
 
 const fs = require('node:fs');
 const { DatabaseSync } = require('node:sqlite');
-const policy = require('./requeue-rejected-outbox-policy');
+const policy = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rejection-recovery');
 
 function requireValue(argv, index, flag) {
   const value = argv[index + 1];
@@ -80,17 +80,7 @@ function loadRow(db, eventUuid) {
 }
 
 function assertRecoverableRow(row, eventUuid) {
-  if (!row) throw new Error(`event UUID not found: ${eventUuid}`);
-  if (row.delivered_at !== null) throw new Error(`event ${eventUuid} is already delivered`);
-  if (row.rejected_at === null) throw new Error(`event ${eventUuid} is not rejected`);
-  if (row.rejection_code !== policy.REPAIRABLE_REJECTION_CODE ||
-      row.rejection_class !== policy.REPAIRABLE_REJECTION_CLASS) {
-    throw new Error(`event ${eventUuid} does not have the fixed repairable rejection policy`);
-  }
-  if (row.recovery_generation !== 0) {
-    throw new Error(`event ${eventUuid} has already consumed recovery generation ${row.recovery_generation}`);
-  }
-  return policy.assertPayloadObject(row.payload_json);
+  return policy.validateRecoverableRow(row, eventUuid);
 }
 
 function summarize(db, eventUuids, receipts) {

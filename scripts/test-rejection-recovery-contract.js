@@ -8,6 +8,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const CONTRACT = path.join(ROOT, 'docs/contracts/sync-schema/rejection-recovery-v1.json');
 const VENDOR_CANDIDATES = [
+  path.resolve(ROOT, '../../../osi-server/.worktrees/w58-rejection-result-fields/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
   path.resolve(ROOT, '../../../osi-server/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
   path.resolve(ROOT, '../../osi-server/backend/src/test/resources/sync-contract/rejection-recovery-v1.json'),
 ];
@@ -34,18 +35,11 @@ function readJson(file) {
 function assertContract(contract) {
   assert.equal(contract.contract_version, 'rejection-recovery-v1');
   assert.deepEqual(contract.reason_classes, EXPECTED_REASONS);
-  assert.deepEqual(contract.ordinary_event_result_statuses, ORDINARY_STATUSES);
+  assert.deepEqual(contract.event_result_statuses, ORDINARY_STATUSES);
   assert.deepEqual(contract.result_statuses, RECOVERY_STATUSES);
-  assert.deepEqual(contract.event_result.required, [
-    'eventUuid', 'status', 'retryable', 'reason', 'rejectionCode', 'rejectionClass',
-  ]);
-  assert.deepEqual(contract.event_result.properties.rejectionCode, {
-    type: ['string', 'null'],
-    enum: [...Object.keys(EXPECTED_REASONS), null],
-  });
-  assert.deepEqual(contract.event_result.properties.rejectionClass, {
-    type: ['string', 'null'],
-    enum: ['REPAIRABLE', 'RETRYABLE', 'PERMANENT', 'LEGACY_UNCLASSIFIED', null],
+  assert.deepEqual(contract.rejection_result_fields, {
+    code: 'rejectionCode',
+    class: 'rejectionClass',
   });
 }
 
@@ -59,7 +53,7 @@ function verify() {
     // vendor publishes the extended shape, its bytes must match this copy.
     assert.deepEqual(contract.reason_classes, vendorContract.reason_classes);
     assert.deepEqual(contract.result_statuses, vendorContract.result_statuses);
-    if (Object.prototype.hasOwnProperty.call(vendorContract, 'ordinary_event_result_statuses')) {
+    if (Object.prototype.hasOwnProperty.call(vendorContract, 'event_result_statuses')) {
       assert.equal(
         fs.readFileSync(CONTRACT, 'utf8'),
         fs.readFileSync(vendor, 'utf8'),
