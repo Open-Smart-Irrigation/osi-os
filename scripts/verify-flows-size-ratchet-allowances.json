@@ -694,6 +694,10 @@
     "entity-name-command-apply-fn": {
       "max_chars": 4151,
       "reason": "Zone/device rename Stage 1, Task 8. Applies UPSERT_DEVICE_NAME and UPSERT_ZONE_NAME, delegating the whole transaction to osi-entity-name's applyNameCommand. Over the 4096-char new-node ceiling: the node sends the acknowledgement with node.send before the best-effort ChirpStack name update (osiLib.require('chirpstack'), createProvisioningClientFromEnv, updateDeviceName with its own readCurrentName closure reading through the still-open database handle), all wrapped in the fail-closed try/catch/finally that keeps every throw from osi-entity-name (including the invalid_entity_name_command case reviewed in Task 3) emitting no output and leaving the command pending for retry. Measured with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles."
+    },
+    "sync-outbox-recover-admin-guard": {
+      "max_chars": 4209,
+      "reason": "Exact measured size for the rejection recovery administrator guard on both maintained profiles. The node exceeds the 4096-character default because it carries the established inline bearer verification for flag-off operation and delegates scoped authorization to the shared scope helper only when scoped access is enabled."
     }
   }
 }

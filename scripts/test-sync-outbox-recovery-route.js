@@ -15,12 +15,14 @@ const policy = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share
 const scope = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper');
 
 function runGuard(msg, authorizeAdminRead) {
-  return new Function('msg', 'osiLib', 'env', 'node', 'global', guardSource)(
+  return new Function('msg', 'osiLib', 'osiDb', 'env', 'node', 'global', 'crypto', guardSource)(
     msg,
     { require: (name) => name === 'scope' ? { ok: true, value: { authorizeAdminRead } } : { ok: true, value: {} } },
-    { get: () => 'test-secret' },
+    { Database: function Database() {} },
+    { get: (name) => name === 'OSI_SCOPED_ACCESS' ? '1' : 'test-secret' },
     { error: () => {}, warn: () => {} },
     { get: () => ({}) },
+    crypto,
   );
 }
 
@@ -54,16 +56,29 @@ async function runGuardWithRealScope(role, authorization) {
     async all() { return []; }
     close(callback) { callback(); }
   }
-  return new Function('msg', 'osiLib', 'env', 'node', 'global', guardSource)(
+  return new Function('msg', 'osiLib', 'osiDb', 'env', 'node', 'global', 'crypto', guardSource)(
     { req: { headers: { authorization } } },
     { require: (name) => {
       if (name === 'scope') return { ok: true, value: scope };
-      if (name === 'osi-db-helper') return { ok: true, value: { Database: AuthDatabase } };
       return { ok: false, error: name };
     } },
+    { Database: AuthDatabase },
+    { get: (name) => name === 'OSI_SCOPED_ACCESS' ? '1' : (name === 'AUTH_TOKEN_SECRET' ? 'route-auth-secret' : '') },
+    { error: () => {}, warn: () => {} },
+    { get: () => null },
+    crypto,
+  );
+}
+
+async function runGuardFlagOff(authorization) {
+  return new Function('msg', 'osiLib', 'osiDb', 'env', 'node', 'global', 'crypto', guardSource)(
+    { req: { headers: { authorization } } },
+    { require: (name) => { throw new Error(`flag-off loaded ${name}`); } },
+    { Database: function UnexpectedDatabase() { throw new Error('flag-off opened database'); } },
     { get: (name) => name === 'AUTH_TOKEN_SECRET' ? 'route-auth-secret' : '' },
     { error: () => {}, warn: () => {} },
     { get: () => null },
+    crypto,
   );
 }
 
@@ -78,6 +93,17 @@ test('recovery route applies the real bearer and current admin-role checks', asy
 
   const admin = await runGuardWithRealScope('admin', valid);
   assert.equal(admin[0]._recoveryActor, 'operator');
+});
+
+test('flag-off recovery route verifies the bearer without loading scope or opening the database', async () => {
+  const valid = await runGuardFlagOff(bearer('route-auth-secret', 7, 'operator'));
+  assert.equal(valid[0]._recoveryActor, 'operator');
+
+  const expired = await runGuardFlagOff(bearer('route-auth-secret', 7, 'operator', Date.now() - 1));
+  assert.equal(expired[1].statusCode, 401);
+
+  const forged = await runGuardFlagOff('Bearer payload.forged');
+  assert.equal(forged[1].statusCode, 401);
 });
 
 const SCHEMA = `
