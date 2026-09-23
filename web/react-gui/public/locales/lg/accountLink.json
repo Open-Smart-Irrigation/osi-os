@@ -53,6 +53,17 @@
     "usedCurrentToken": "Kikozesa token y'okusinkroniza ekiriwo kaakano.",
     "bootstrap": "Bootstrap ekozesebbwa: {{applied}}, eyasaziddwaawo: {{skipped}}",
     "outbox": "Enkyukakyuka {{delivered}} ziweereddwa e OSI Server ({{after}} zikyalindirira)",
+    "outboxCounts": {
+      "title": "Outbox result",
+      "selected": "Selected: {{count}}",
+      "applied": "Applied: {{count}}",
+      "duplicate": "Duplicate: {{count}}",
+      "retryable": "Retryable: {{count}}",
+      "rejected": "Rejected: {{count}}",
+      "protocolErrors": "Protocol errors: {{count}}",
+      "pendingAfter": "Pending after sync: {{count}}",
+      "rejectedCode": "Rejected {{code}}: {{count}}"
+    },
     "pending": "Ebiragiro ebirindiridde ebifunibbwa: {{fetched}}, ebiterekeddwa okukozesebwa mu kitundu: {{queued}}",
     "pendingAfterResponse": "Okukozesa mu kitundu kugenda mu maaso oluvannyuma lw'okuddamu kuno.",
     "lastError": "Ensobi esembayo okuva ku {{source}}: {{message}}"

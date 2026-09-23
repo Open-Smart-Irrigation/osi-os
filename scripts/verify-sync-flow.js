@@ -1713,7 +1713,7 @@ expectIncludes('Mark Synced Events Delivered', "issues.push('protocol_response_m
 expectIncludes('Mark Synced Events Delivered', "issues.push('protocol_response_duplicate_result:' + id)", 'classifies a requested event retryable when the response carries more than one result for it');
 expectIncludes('Mark Synced Events Delivered', "issues.push('protocol_response_unrequested_result:' + id)", 'reports a result identity the request never asked about without updating any row for it');
 expectIncludes('Mark Synced Events Delivered', "classified into more than one disposition group", 'asserts each requested event lands in exactly one of delivered/rejected/retryable before writing SQL');
-expectIncludes('Run Force Sync', 'rejectedIds', 'tracks rejected force-sync event results separately from delivered results');
+expectIncludes('Run Force Sync', 'classified.rejected', 'tracks rejected force-sync event results separately from delivered results');
 expectIncludes('Run Force Sync', 'rejection_reason', 'stores rejected force-sync event reasons in sync_outbox');
 expectIncludes('Run Force Sync', 'UPDATE sync_outbox SET rejected_at', 'marks rejected force-sync event results without setting delivered_at');
 expectIncludes('Run Force Sync', 'delivered_at IS NULL AND rejected_at IS NULL', 'excludes terminal rejected outbox events from force-sync delivery batches');
@@ -2119,7 +2119,7 @@ expectIncludes('Prune Sync Outbox', 'delivered_at IS NOT NULL', 'does not prune 
 expectIncludes('Prune Sync Outbox', 'PRAGMA wal_checkpoint(TRUNCATE)', 'attempts a WAL checkpoint after deleting old outbox rows');
 expectWireById('outbox-retention-tick', 'prune-sync-outbox', 'runs the sync outbox retention function');
 expectIncludes('Run Force Sync', "'X-OSI-Sync-Protocol': '2'", 'uses sync protocol v2 for manual force-sync outbox and command polling');
-expectIncludes('Run Force Sync', 'terminalStatuses', 'manual force-sync marks only terminal protocol-v2 event results delivered');
+expectIncludes('Run Force Sync', 'classifySyncResults', 'manual force-sync classifies each protocol-v2 event result before applying it');
 expectIncludes('Run Force Sync', 'pendingRes.payload.commands', 'manual force-sync accepts protocol-v2 pending-command envelopes');
 expectIncludes('Build Sync State', 'gatewayIdentity = {', 'returns gateway identity diagnostics in sync state');
 expectIncludes('Build Sync State', 'migrationPending', 'reports pending gateway migration state in sync state');

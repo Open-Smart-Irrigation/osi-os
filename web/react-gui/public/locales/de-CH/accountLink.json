@@ -53,6 +53,17 @@
     "usedCurrentToken": "Aktuelles Sync-Token wird verwendet.",
     "bootstrap": "Bootstrap angewendet: {{applied}}, übersprungen: {{skipped}}",
     "outbox": "{{delivered}} Aktualisierung(en) an OSI Server gesendet ({{after}} ausstehend)",
+    "outboxCounts": {
+      "title": "Ergebnis der Ausgangsbox",
+      "selected": "Ausgewählt: {{count}}",
+      "applied": "Angewendet: {{count}}",
+      "duplicate": "Doppelt: {{count}}",
+      "retryable": "Wiederholbar: {{count}}",
+      "rejected": "Abgelehnt: {{count}}",
+      "protocolErrors": "Protokollfehler: {{count}}",
+      "pendingAfter": "Nach der Synchronisierung ausstehend: {{count}}",
+      "rejectedCode": "{{code}} abgelehnt: {{count}}"
+    },
     "pending": "Ausstehende Befehle abgerufen: {{fetched}}, zur lokalen Anwendung eingereiht: {{queued}}",
     "pendingAfterResponse": "Die lokale Anwendung wird fortgesetzt, nachdem diese Antwort zurückkommt.",
     "lastError": "Letzter Fehler von {{source}}: {{message}}"

@@ -53,6 +53,17 @@
     "usedCurrentToken": "Utilizzo del token di sincronizzazione attuale.",
     "bootstrap": "Bootstrap applicato: {{applied}}, saltato: {{skipped}}",
     "outbox": "{{delivered}} aggiornamento/i inviato/i a OSI Server ({{after}} in attesa)",
+    "outboxCounts": {
+      "title": "Risultato della posta in uscita",
+      "selected": "Selezionati: {{count}}",
+      "applied": "Applicati: {{count}}",
+      "duplicate": "Duplicati: {{count}}",
+      "retryable": "Riprovabili: {{count}}",
+      "rejected": "Rifiutati: {{count}}",
+      "protocolErrors": "Errori di protocollo: {{count}}",
+      "pendingAfter": "In attesa dopo la sincronizzazione: {{count}}",
+      "rejectedCode": "Rifiutati per {{code}}: {{count}}"
+    },
     "pending": "Comandi in attesa recuperati: {{fetched}}, in coda per l'applicazione locale: {{queued}}",
     "pendingAfterResponse": "L'applicazione locale continua dopo il ritorno di questa risposta.",
     "lastError": "Ultimo errore da {{source}}: {{message}}"

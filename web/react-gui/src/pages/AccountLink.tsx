@@ -259,7 +259,7 @@ export const AccountLink: React.FC = () => {
                 </div>
 
                 {forceSyncResult && (
-                  <div className={`mt-4 rounded-lg border p-4 ${
+                  <div data-testid="force-sync-result" className={`mt-4 rounded-lg border p-4 ${
                     forceSyncResult.success
                       ? 'border-green-200 bg-green-50'
                       : 'border-yellow-300 bg-yellow-50'
@@ -288,9 +288,24 @@ export const AccountLink: React.FC = () => {
                         {t('sync.outbox', {
                           delivered: forceSyncResult.outbox.deliveredCount,
                           before: forceSyncResult.outbox.beforeCount,
-                          after: forceSyncResult.outbox.afterCount,
+                          after: forceSyncResult.outbox.pendingAfter,
                         })}
                       </p>
+                      <div className="rounded-md border border-[var(--border)] p-3" data-testid="force-sync-outbox-counts">
+                        <p className="font-semibold">{t('sync.outboxCounts.title')}</p>
+                        <p>{t('sync.outboxCounts.selected', { count: forceSyncResult.outbox.selected })}</p>
+                        <p>{t('sync.outboxCounts.applied', { count: forceSyncResult.outbox.applied })}</p>
+                        <p>{t('sync.outboxCounts.duplicate', { count: forceSyncResult.outbox.duplicate })}</p>
+                        <p>{t('sync.outboxCounts.retryable', { count: forceSyncResult.outbox.retryable })}</p>
+                        <p>{t('sync.outboxCounts.rejected', { count: forceSyncResult.outbox.rejected })}</p>
+                        <p>{t('sync.outboxCounts.protocolErrors', { count: forceSyncResult.outbox.protocolErrors })}</p>
+                        <p>{t('sync.outboxCounts.pendingAfter', { count: forceSyncResult.outbox.pendingAfter })}</p>
+                        {Object.entries(forceSyncResult.outbox.rejectedByCode || {})
+                          .sort(([left], [right]) => left.localeCompare(right))
+                          .map(([code, count]) => (
+                            <p key={code}>{t('sync.outboxCounts.rejectedCode', { code, count })}</p>
+                          ))}
+                      </div>
                       <p>
                         {t('sync.pending', {
                           fetched: forceSyncResult.pendingCommands.fetchedCount,

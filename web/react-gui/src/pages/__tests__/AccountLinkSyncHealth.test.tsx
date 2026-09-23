@@ -132,6 +132,54 @@ describe('AccountLink sync health', () => {
     expect(screen.queryByText('reauth.title')).toBeNull();
   });
 
+  it('shows the seven recovery counts and rejected code groups after force sync', async () => {
+    mocks.forceSync.mockResolvedValue({
+      success: false,
+      forcedAt: '2026-09-23T12:00:00.000Z',
+      refresh: { attempted: true, succeeded: true },
+      bootstrap: { attempted: true, succeeded: true, applied: 1, skipped: 0 },
+      outbox: {
+        attempted: true,
+        succeeded: true,
+        selected: 7,
+        applied: 2,
+        duplicate: 1,
+        retryable: 1,
+        rejected: 2,
+        protocolErrors: 1,
+        pendingAfter: 4,
+        rejectedByCode: { stale_sync_version: 2 },
+        beforeCount: 7,
+        deliveredCount: 3,
+        afterCount: 4,
+        appliedLegacy: 2,
+        skipped: 5,
+      },
+      pendingCommands: {
+        attempted: true,
+        succeeded: true,
+        fetchedCount: 0,
+        queuedCount: 0,
+        appliesAfterResponse: false,
+        applyPhase: 'NO_PENDING_COMMANDS',
+      },
+      lastError: null,
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'sync.button' }));
+
+    const result = await screen.findByTestId('force-sync-result');
+    expect(result).toHaveTextContent('sync.outboxCounts.selected:{"count":7}');
+    expect(result).toHaveTextContent('sync.outboxCounts.applied:{"count":2}');
+    expect(result).toHaveTextContent('sync.outboxCounts.duplicate:{"count":1}');
+    expect(result).toHaveTextContent('sync.outboxCounts.retryable:{"count":1}');
+    expect(result).toHaveTextContent('sync.outboxCounts.rejected:{"count":2}');
+    expect(result).toHaveTextContent('sync.outboxCounts.protocolErrors:{"count":1}');
+    expect(result).toHaveTextContent('sync.outboxCounts.pendingAfter:{"count":4}');
+    expect(result).toHaveTextContent('sync.outboxCounts.rejectedCode:{"code":"stale_sync_version","count":2}');
+  });
+
   it('re-authenticating with the stored server identity clears the expired-token state', async () => {
     mocks.getSyncState
       .mockResolvedValueOnce({

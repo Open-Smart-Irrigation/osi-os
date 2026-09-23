@@ -53,6 +53,17 @@
     "usedCurrentToken": "A usar o token de sincronização atual.",
     "bootstrap": "Bootstrap aplicado: {{applied}}, ignorado: {{skipped}}",
     "outbox": "{{delivered}} atualizaç(ões) enviada(s) para a OSI Server ({{after}} pendentes)",
+    "outboxCounts": {
+      "title": "Resultado da caixa de saída",
+      "selected": "Selecionadas: {{count}}",
+      "applied": "Aplicadas: {{count}}",
+      "duplicate": "Duplicadas: {{count}}",
+      "retryable": "Repetíveis: {{count}}",
+      "rejected": "Rejeitadas: {{count}}",
+      "protocolErrors": "Erros de protocolo: {{count}}",
+      "pendingAfter": "Pendentes após a sincronização: {{count}}",
+      "rejectedCode": "Rejeitadas por {{code}}: {{count}}"
+    },
     "pending": "Comandos pendentes obtidos: {{fetched}}, em fila para aplicação local: {{queued}}",
     "pendingAfterResponse": "A aplicação local continua após esta resposta retornar.",
     "lastError": "Último erro de {{source}}: {{message}}"
