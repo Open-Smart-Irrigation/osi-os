@@ -293,9 +293,9 @@ expectIncludes('deploy.sh', deploySource,
   'retains paired payload activation and its already-active no-op');
 expectIncludes('deploy.sh', deploySource, 'if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then\n            echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2', 'retains the verified paired rollback');
 expectCondition(countMatches(deploySource, /\/etc\/init\.d\/node-red restart/g) === 1 &&
-  countMatches(deploySource, /\"\$NODE_RED_INIT\" restart/g) === 1,
-  'deploy.sh: payload flip and rollback each restart Node-RED once',
-  'deploy.sh: expected one direct and one lifecycle-configured Node-RED restart');
+  countMatches(deploySource, /\"\$NODE_RED_INIT\" restart/g) === 2,
+  'deploy.sh: forward activation and both verified rollback paths restart Node-RED',
+  'deploy.sh: expected two direct and one lifecycle-configured Node-RED restart');
 
 const flowRelativePaths = profiles.map((profile) => `${profile}/files/usr/share/flows.json`);
 const identityGateIds = [

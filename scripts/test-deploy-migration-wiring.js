@@ -154,6 +154,22 @@ test('deploy migration wiring uses persistent backup path and lifecycle-aware cl
   assert.doesNotMatch(rc3Block, /identityd_service start/);
 });
 
+test('migration committed follows the migrate CLI applied count', () => {
+  const migrateSuccessIdx = indexOf(
+    'if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"'
+  );
+  const migrationFailureIdx = indexOf('migration_rc=$?');
+  const successBlock = deploy.slice(migrateSuccessIdx, migrationFailureIdx);
+  const appliedCountIdx = successBlock.search(/migration_[a-z_]*applied[a-z_]*count/);
+  const committedIdx = successBlock.indexOf('DB_MIGRATION_COMMITTED=1');
+
+  assert.ok(appliedCountIdx >= 0, 'migration success must expose the applied migration count to shell');
+  assert.ok(committedIdx > appliedCountIdx, 'commit flag must be set only after the applied count is parsed');
+  assert.match(successBlock, /\[migrate\] applied:/, 'success path must consume the CLI applied list');
+  assert.match(successBlock, /if \[ "\$[^" ]*applied[^" ]*count" -gt 0 \]; then[\s\S]*DB_MIGRATION_COMMITTED=1/,
+    'a no-op migration must leave DB_MIGRATION_COMMITTED unset');
+});
+
 test('deploy migration wiring probes for a foreign-numbered ledger only after SKIP, before the second checkpoint', () => {
   const skipIdx = indexOf('SKIP: schema_migrations ledger already has rows');
   const beginMarkerIdx = indexOf('# reconcile probe begin');
@@ -224,7 +240,7 @@ test('deploy migration wiring flips the payload BEFORE restarting Node-RED on mi
   // schema. The fix: flip the staged payload first, so any restart from this
   // point on is always on the migration-target flows.
   const migrateSuccessIdx = indexOf(
-    'if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then'
+    'if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"'
   );
   const migrateFailureIdx = indexOf('migration_rc=$?');
   assert.ok(migrateFailureIdx > migrateSuccessIdx, 'must find the failure branch of the migrate-cli conditional');
@@ -263,7 +279,7 @@ test('deploy migration wiring flips the payload BEFORE restarting Node-RED on mi
 
 test('deploy migration wiring verifies the post-migration ledger/fingerprint head before flipping the payload (PR-L / external consult Q1)', () => {
   const migrateSuccessIdx = indexOf(
-    'if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then'
+    'if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"'
   );
   const migrateFailureIdx = indexOf('migration_rc=$?');
   const successBlock = deploy.slice(migrateSuccessIdx, migrateFailureIdx);
@@ -320,6 +336,32 @@ test('migration failure after commit keeps Node-RED stopped without restarting a
   assert.match(deploy, /hold_node_red_stopped/);
   assert.match(deploy, /hold_identityd_stopped/);
   assert.match(deploy, /DEPLOY_HOLD_SERVICES=1/);
+});
+
+test('committed migration hold branch proves the previous pair before deciding to hold', () => {
+  const holdIdx = indexOf('migrated database has no proven compatible active payload; keeping Node-RED stopped');
+  const handlerIdx = deploy.lastIndexOf('deploy_exit_handler() {', holdIdx);
+  const holdBlock = deploy.slice(handlerIdx, holdIdx);
+  const restoreIdx = indexOf('restart_previous_payload()');
+  const restoreEndIdx = indexOf('\n}\ncleanup_failed_first_payload', restoreIdx);
+  const restoreBlock = deploy.slice(restoreIdx, restoreEndIdx);
+  assert.match(holdBlock, /restart_previous_payload; then/,
+    'hold branch must attempt the retained pair before deciding to hold');
+  assert.match(restoreBlock, /verify_payload_db_compatibility "\$PREV_STAMP" retained/,
+    'retained pair must be proved against the current schema metadata');
+  assert.match(restoreBlock, /swap_call flipTo "\$PREV_STAMP"/,
+    'retained pair must be activated when compatibility passes');
+});
+
+test('rollback waits for the same Node-RED readiness used by forward activation', () => {
+  const rollbackStart = indexOf('    # payload rollback begin');
+  const rollbackEnd = indexOf('    # payload rollback end', rollbackStart);
+  const rollback = deploy.slice(rollbackStart, rollbackEnd);
+  const restartIdx = rollback.indexOf('NODE_RED_INIT" restart');
+  const readinessIdx = rollback.indexOf('wait_for_node_red_health');
+  assert.ok(restartIdx >= 0, 'rollback must restart Node-RED after restoring the pair');
+  assert.ok(readinessIdx > restartIdx, 'rollback must wait for Node-RED readiness after restart');
+  assert.match(rollback, /NODE_RED_HEALTH_TIMEOUT/, 'rollback readiness must use the forward health timeout');
 });
 
 test('retry EXIT path proves retained payload compatibility before any fallback restart', () => {

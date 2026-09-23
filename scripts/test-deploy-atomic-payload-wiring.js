@@ -165,12 +165,15 @@ test('deploy.sh captures the previous payload before flip and rolls back to it o
   const migrationIdx = indexOf('run_schema_migration || exit 1');
   const prevIdx = indexOf('PREV_STAMP="$(swap_call currentStamp || true)"');
   const flipIdx = deploy.indexOf('swap_call flipTo "$DEPLOY_STAMP"', migrationIdx);
-  const rollbackIdx = indexOf('swap_call flipTo "$PREV_STAMP"');
+  const rollbackStart = indexOf('# payload rollback begin');
+  const rollbackIdx = deploy.indexOf('swap_call flipTo "$PREV_STAMP"', rollbackStart);
   const restartIdx = deploy.indexOf('"$NODE_RED_INIT" restart', rollbackIdx);
+  const discardIdx = deploy.indexOf('discardPayload "$DEPLOY_STAMP"', rollbackStart);
 
   assert.ok(prevIdx < flipIdx, 'previous payload must be captured before the new flip');
   assert.ok(flipIdx < rollbackIdx, 'rollback must happen only after the new payload was tried');
   assert.notEqual(restartIdx, -1, 'rollback must restart Node-RED after flipping back');
+  assert.ok(restartIdx < discardIdx, 'failed activated payload must be discarded after rollback restart');
   assert.match(deploy, /AUTO-ROLLING-BACK the flows payload/);
   assert.match(deploy, /committed DB migration is NOT auto-undone/);
   assert.match(deploy, /verify_payload_db_compatibility "\$PREV_STAMP"/);
@@ -203,7 +206,8 @@ test('deploy.sh uses a local self-check on the Pi and leaves cloud canary gate t
 test('deploy.sh prunes retained payloads only after the flipped payload passes the local self-check', () => {
   const passIdx = indexOf('if [ "$PROBE_OK" = "0" ]; then');
   const pruneIdx = indexOf('swap_call prunePayloads "$PAYLOAD_KEEP_N"');
-  const rollbackIdx = indexOf('swap_call flipTo "$PREV_STAMP"');
+  const rollbackStart = indexOf('# payload rollback begin');
+  const rollbackIdx = deploy.indexOf('swap_call flipTo "$PREV_STAMP"', rollbackStart);
 
   assert.ok(passIdx < pruneIdx, 'prune must be inside the passing post-check branch');
   assert.ok(pruneIdx < rollbackIdx, 'rollback branch must still have the retained previous payload');

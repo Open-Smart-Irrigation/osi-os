@@ -574,18 +574,22 @@ deploy_exit_handler() {
             echo "ERROR: identityd could not be restored after the verified rollback" >&2
         fi
     elif [ "${DB_MIGRATION_COMMITTED:-0}" = "1" ] && [ "$exit_status" -ne 0 ]; then
-        DEPLOY_HOLD_SERVICES=1
         if [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
             { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
             cleanup_failed_first_payload
+            DEPLOY_HOLD_SERVICES=1
+            hold_identityd_stopped || true
+        elif restart_previous_payload; then
+            :
         else
             echo "ERROR: migrated database has no proven compatible active payload; keeping Node-RED stopped" >&2
+            DEPLOY_HOLD_SERVICES=1
             hold_node_red_stopped || true
             if [ -n "${DEPLOY_STAMP:-}" ] && [ "${PAYLOAD_FLIPPED:-0}" != "1" ]; then
                 swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
             fi
+            hold_identityd_stopped || true
         fi
-        hold_identityd_stopped || true
     elif [ "$exit_status" -ne 0 ] && [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
         { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
         cleanup_failed_first_payload
@@ -596,11 +600,13 @@ deploy_exit_handler() {
             swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
         fi
         if [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ] && \
-            ! verify_payload_db_compatibility "$PREV_STAMP" retained; then
+            ! restart_previous_payload; then
             echo "ERROR: fallback payload is not proven compatible with the current database; keeping services stopped" >&2
             DEPLOY_HOLD_SERVICES=1
             hold_node_red_stopped || true
             hold_identityd_stopped || true
+        elif [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ]; then
+            :
         elif ! restart_node_red; then
             [ "$exit_status" -ne 0 ] || exit_status=1
         fi
@@ -791,6 +797,46 @@ verify_payload_db_compatibility() {
         echo "ERROR: unknown payload compatibility verification mode: $compatibility_mode" >&2
         return 1
     fi
+    return 0
+}
+
+restart_previous_payload() {
+    if [ -z "${PREV_STAMP:-}" ]; then
+        echo "ERROR: no previous payload is available for a safe restart" >&2
+        return 1
+    fi
+    if ! verify_payload_db_compatibility "$PREV_STAMP" retained; then
+        return 1
+    fi
+    if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
+        echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
+        return 1
+    fi
+    if ! swap_call verifyPair "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
+        echo "ERROR: restored payload pair could not be verified after activation; Node-RED remains stopped" >&2
+        return 1
+    fi
+    if ! "$NODE_RED_INIT" restart; then
+        echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2
+        return 1
+    fi
+    rollback_health_timeout="${NODE_RED_HEALTH_TIMEOUT:-30}"
+    case "$rollback_health_timeout" in
+        ''|*[!0-9]*|0) rollback_health_timeout=30 ;;
+    esac
+    if ! wait_for_node_red_health "$rollback_health_timeout"; then
+        echo "ERROR: Node-RED was not ready after restoring the retained payload pair; leaving it stopped" >&2
+        return 1
+    fi
+    if [ -n "${DEPLOY_STAMP:-}" ] && [ "$DEPLOY_STAMP" != "$PREV_STAMP" ] && \
+        ! swap_call discardPayload "$DEPLOY_STAMP" >/dev/null; then
+        echo "ERROR: failed activated payload could not be discarded after verified rollback" >&2
+        return 1
+    fi
+    node_red_restart_needed=0
+    ROLLBACK_RESTORED=1
+    PAYLOAD_FLIPPED=0
+    echo "OK: rollback Node-RED readiness confirmed after ${probe_elapsed:-0}s"
     return 0
 }
 cleanup_failed_first_payload() {
@@ -1079,8 +1125,34 @@ run_schema_migration() {
         return 1
     fi
 
-    if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then
-        DB_MIGRATION_COMMITTED=1
+    migration_output="$TMP_DIR/migrate-cli-output.log"
+    if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir" >"$migration_output" 2>&1; then
+        cat "$migration_output"
+        if ! migration_applied_count="$(node -e '
+const fs = require("fs");
+const output = fs.readFileSync(process.argv[1], "utf8");
+const lines = output.split(/\r?\n/).filter((line) => line.startsWith("[migrate] applied: "));
+if (lines.length !== 1) throw new Error("expected exactly one [migrate] applied line");
+const applied = JSON.parse(lines[0].slice("[migrate] applied: ".length));
+if (!Array.isArray(applied) || applied.some((version) => !Number.isInteger(version) || version < 0)) {
+  throw new Error("[migrate] applied line did not contain a valid migration version array");
+}
+process.stdout.write(String(applied.length));
+' "$migration_output")"; then
+            echo "ERROR: could not safely parse the migration CLI applied list" >&2
+            return 1
+        fi
+        case "$migration_applied_count" in
+            ''|*[!0-9]*)
+                echo "ERROR: migration CLI returned an invalid applied count: $migration_applied_count" >&2
+                return 1
+                ;;
+        esac
+        if [ "$migration_applied_count" -gt 0 ]; then
+            DB_MIGRATION_COMMITTED=1
+        else
+            DB_MIGRATION_COMMITTED=0
+        fi
         # osi-os stabilization program, PR-L / external consult Q1: verify the
         # post-migration ledger AND schema fingerprints agree with what main
         # expects, BEFORE flipping to the new flows payload or restarting
@@ -1137,6 +1209,7 @@ run_schema_migration() {
         return 0
     else
         migration_rc=$?
+        cat "$migration_output"
     fi
     # schema decision end
 
@@ -1975,7 +2048,22 @@ else
             echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2
             exit 1
         fi
+        rollback_health_timeout="${NODE_RED_HEALTH_TIMEOUT:-30}"
+        case "$rollback_health_timeout" in
+            ''|*[!0-9]*|0) rollback_health_timeout=30 ;;
+        esac
+        if ! wait_for_node_red_health "$rollback_health_timeout"; then
+            node_red_restart_needed=0
+            hold_node_red_stopped || true
+            echo "ERROR: Node-RED was not ready after rollback; leaving it stopped" >&2
+            exit 1
+        fi
         ROLLBACK_RESTORED=1
+        if ! swap_call discardPayload "$DEPLOY_STAMP" >/dev/null; then
+            node_red_restart_needed=0
+            echo "ERROR: failed activated payload could not be discarded after verified rollback" >&2
+            exit 1
+        fi
         PAYLOAD_FLIPPED=0
         echo "ROLLED BACK: flows+GUI -> payloads/$PREV_STAMP; Node-RED restarted on last-known-good pair" >&2
         echo "NOTE: any committed DB migration is NOT auto-undone (DD10); restore is an operator call via 1.B1 backup." >&2

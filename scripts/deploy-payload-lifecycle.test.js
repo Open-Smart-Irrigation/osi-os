@@ -225,10 +225,13 @@ NODE_RED_INIT=${JSON.stringify(nodeInit)}
 IDENTITYD_LOCK_PATH=${JSON.stringify(path.join(root, 'identityd.lock'))}
 SERVICE_STATE_FILE=${JSON.stringify(path.join(root, 'identityd.state'))}
 NODE_RED_STATE_FILE=${JSON.stringify(path.join(root, 'node-red.state'))}
+ROLLBACK_READINESS_LOG=${JSON.stringify(path.join(root, 'rollback-readiness.log'))}
+NODE_RED_HEALTH_TIMEOUT=1
 export SWAP_ROOT SWAP_JS NODE_RED_STATE_FILE
 ${swapCallFunction()}
 ${identity}
 ${payload}
+wait_for_node_red_health() { printf '%s\\n' ready >> "$ROLLBACK_READINESS_LOG"; echo 'OK: rollback Node-RED readiness confirmed' >&2; return 0; }
 cleanup() { :; }
 restart_node_red() { return 0; }
 node_red_service_state() { [ "$(cat "$NODE_RED_STATE_FILE" 2>/dev/null || echo 0)" = 1 ] && echo running || echo stopped; }
@@ -295,8 +298,12 @@ esac
   try {
     assert.equal(result.status, 1, `rollback lifecycle unexpectedly succeeded: stdout=${result.stdout}\nstderr=${result.stderr}`);
     assert.match(result.stderr, /preserving the verified rollback pair/);
+    assert.match(result.stderr, /rollback Node-RED readiness confirmed/);
+    assert.equal(fs.readFileSync(path.join(root, 'rollback-readiness.log'), 'utf8').trim(), 'ready');
     assert.equal(fs.readFileSync(path.join(root, 'identityd.state'), 'utf8').trim(), '1');
     assert.equal(fs.readFileSync(path.join(root, 'node-red.state'), 'utf8').trim(), '1');
+    assert.equal(fs.existsSync(path.join(root, 'payloads', 'new')), false,
+      'failed activated payload must be discarded after rollback');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -393,6 +400,65 @@ test('recoverable old-schema fallback verifies saved metadata without incoming m
   try {
     assert.equal(result.status, 0, `retained fallback verification failed: stdout=${result.stdout}\nstderr=${result.stderr}`);
     assert.match(result.stdout, /retained-fallback-proven/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function noOpMigrationFailureScript(root, dbPath, guiRoot) {
+  const payload = fragment('# deploy payload lifecycle begin\n', '# deploy payload lifecycle end');
+  const restart = path.join(root, 'node-init');
+  return `set -eu
+SWAP_ROOT=${JSON.stringify(root)}
+SWAP_JS=${JSON.stringify(SWAP_JS)}
+DB_PATH=${JSON.stringify(dbPath)}
+GUI_ROOT=${JSON.stringify(guiRoot)}
+TMP_DIR=${JSON.stringify(root)}
+NODE_RED_INIT=${JSON.stringify(restart)}
+NODE_RED_HEALTH_TIMEOUT=1
+export SWAP_ROOT SWAP_JS
+${swapCallFunction()}
+${payload}
+cleanup() { :; }
+wait_for_node_red_health() { echo ready > ${JSON.stringify(path.join(root, 'ready'))}; return 0; }
+cat > "$NODE_RED_INIT" <<'NODEINIT'
+#!/bin/sh
+echo restart > ${JSON.stringify(path.join(root, 'restart'))}
+NODEINIT
+chmod 755 "$NODE_RED_INIT"
+mkdir -p ${JSON.stringify(path.join(root, 'src-gui'))}
+printf '%s\\n' old > ${JSON.stringify(path.join(root, 'old-flows.json'))}
+printf '%s\\n' new > ${JSON.stringify(path.join(root, 'new-flows.json'))}
+printf '%s\\n' old > ${JSON.stringify(path.join(root, 'src-gui', 'index.html'))}
+swap_call stagePayload old ${JSON.stringify(path.join(root, 'old-flows.json'))} ${JSON.stringify(path.join(root, 'src-gui'))} >/dev/null
+swap_call stagePayload new ${JSON.stringify(path.join(root, 'new-flows.json'))} ${JSON.stringify(path.join(root, 'src-gui'))} >/dev/null
+sqlite3 "$DB_PATH" "CREATE TABLE schema_migrations(version INTEGER, checksum TEXT, status TEXT); INSERT INTO schema_migrations VALUES (12, 'old', 'applied');"
+swap_call writeCompatibility old 12 12:old >/dev/null
+swap_call writeCompatibility new 12 12:old >/dev/null
+swap_call flipTo new "$GUI_ROOT" >/dev/null
+PREV_STAMP=old
+DEPLOY_STAMP=new
+PAYLOAD_FLIPPED=1
+node_red_restart_needed=1
+restart_previous_payload
+[ "$(swap_call currentStamp)" = old ]
+[ -f ${JSON.stringify(path.join(root, 'ready'))} ]
+printf '%s\\n' no-op-fallback-proven
+`;
+}
+
+test('failure after a no-op migration restores and restarts the previous compatible pair', () => {
+  const root = fakeRoot();
+  const dbPath = path.join(root, 'farming.db');
+  const guiRoot = path.join(root, 'gui');
+  fs.mkdirSync(guiRoot);
+  const result = spawnSync('sh', ['-c', noOpMigrationFailureScript(root, dbPath, guiRoot)], {
+    encoding: 'utf8',
+    env: { ...process.env },
+  });
+  try {
+    assert.equal(result.status, 0, `no-op fallback failed: stdout=${result.stdout}\nstderr=${result.stderr}`);
+    assert.match(result.stdout, /no-op-fallback-proven/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
