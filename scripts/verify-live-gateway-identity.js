@@ -1120,13 +1120,10 @@ if (sizeAllowances) {
     // POST. Re-measured fresh: origin/main 21367 -> HEAD 23362 = +1995.
     'sync-outbox-build': 1995,
     'sync-pending-build': 1344,
-    // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 5786 to +1466 for the
-    // same capFreeTextFields() addition (this node carries both sanitizeSyncRow and
-    // normalizeOutboxPayload, like sync-bootstrap-build and sync-outbox-build combined,
-    // plus the valve_actuations.map(sanitizeSyncRow) wiring). The prior 5786 is already
-    // fully baked into origin/main's own measured size for this node. Re-measured fresh:
-    // origin/main 65125 -> HEAD 66591 = +1466.
-    'sync-force-build': 1466,
+    // W58 Stop 16 Force Sync recovery response classification and summary counts. The
+    // maintained profiles remain byte-identical; re-measured fresh against origin/main:
+    // origin/main 66618 -> HEAD 69883 = +3265.
+    'sync-force-build': 3265,
     'command-ack-build-batch': 975,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
     // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded

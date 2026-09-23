@@ -1359,10 +1359,18 @@ export interface ForceSyncResult {
   outbox: {
     attempted: boolean;
     succeeded: boolean;
+    selected: number;
+    applied: number;
+    duplicate: number;
+    retryable: number;
+    rejected: number;
+    protocolErrors: number;
+    pendingAfter: number;
+    rejectedByCode: Record<string, number>;
     beforeCount: number;
     deliveredCount: number;
     afterCount: number;
-    applied: number;
+    appliedLegacy?: number;
     skipped: number;
     statusCode?: number | null;
     error?: string | null;

@@ -87,6 +87,15 @@ const PENDING_HUMAN_TRANSLATION: Partial<Record<Locale, ReadonlySet<string>>> = 
     'rejected.count',
     'rejected.lastReason',
     'reauth.detected',
+    'sync.outboxCounts.title',
+    'sync.outboxCounts.selected',
+    'sync.outboxCounts.applied',
+    'sync.outboxCounts.duplicate',
+    'sync.outboxCounts.retryable',
+    'sync.outboxCounts.rejected',
+    'sync.outboxCounts.protocolErrors',
+    'sync.outboxCounts.pendingAfter',
+    'sync.outboxCounts.rejectedCode',
   ]),
 };
 

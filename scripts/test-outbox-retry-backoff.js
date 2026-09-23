@@ -17,6 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
+const rejectionRecovery = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rejection-recovery');
 
 const REPO = path.resolve(__dirname, '..');
 const SEED = path.join(REPO, 'database/seed-blank.sql');
@@ -288,10 +289,14 @@ test('transport failure (batch-level, msg.statusCode simulated) never bumps retr
 function makeOsiDbShim(db) {
   class ShimDatabase {
     constructor(_filename) {}
-    run(sql, callback) {
+    run(sql, params, callback) {
+      if (typeof params === 'function') {
+        callback = params;
+        params = [];
+      }
       try {
-        db.exec(sql);
-        if (typeof callback === 'function') callback.call({ changes: 1 }, null);
+        const result = params && params.length ? db.prepare(sql).run(...params) : (db.exec(sql), { changes: 1 });
+        if (typeof callback === 'function') callback.call({ changes: Number(result.changes || 0) }, null);
       } catch (error) {
         if (typeof callback === 'function') callback(error);
         else throw error;
@@ -309,6 +314,11 @@ async function runOutboxMarkFunc(func, msg, db) {
   const sandbox = {
     Buffer, console, require, process, setTimeout, clearTimeout,
     osiDb: makeOsiDbShim(db),
+    osiLib: {
+      require: (name) => name === 'rejection-recovery'
+        ? { ok: true, value: rejectionRecovery }
+        : { ok: false, error: `unexpected helper ${name}` },
+    },
   };
   const script = new vm.Script(`(async function(msg,node,flow,env){${func}\n})`);
   const fn = script.runInNewContext(sandbox);

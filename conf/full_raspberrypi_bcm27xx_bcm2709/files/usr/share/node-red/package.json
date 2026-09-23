@@ -41,6 +41,7 @@
     "osi-system-settings": "file:osi-system-settings",
     "osi-scope-helper": "file:osi-scope-helper",
     "osi-installation-location-helper": "file:osi-installation-location-helper",
-    "osi-network-api": "file:osi-network-api"
+    "osi-network-api": "file:osi-network-api",
+    "osi-rejection-recovery": "file:osi-rejection-recovery"
   }
 }

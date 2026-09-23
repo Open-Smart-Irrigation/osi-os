@@ -36,6 +36,7 @@ const NAME_TO_PATH = {
   // Authorization cache must have one module instance. Flow consumers load it
   // only through osiLib.require('scope'), never with a bare/relative require.
   'scope': 'osi-scope-helper',
+  'rejection-recovery': 'osi-rejection-recovery',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'device-writer': 'osi-device-writer',

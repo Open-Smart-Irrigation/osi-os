@@ -143,6 +143,16 @@ jobs:
       - run: node --test scripts/test-gateway-health-persistence.js
       - run: node --test scripts/deploy-canary-gate.test.js
       - run: node scripts/test-contract-schemas.js
+      - run: node scripts/test-rejection-recovery-contract.js
+      - name: Rejection recovery tests
+        run: >
+          node --test
+          scripts/test-sync-rejection-recovery.js
+          scripts/test-sync-outbox-recovery-route.js
+          scripts/test-rejection-recovery-transaction-queue.js
+          scripts/requeue-rejected-outbox-policy.test.js
+          scripts/requeue-rejected-outbox.test.js
+          scripts/test-force-sync-pending-after.js
       - name: Verify edge/cloud sync operation parity against the checked-out server revision
         run: |
           set -euo pipefail

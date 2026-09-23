@@ -1,0 +1,31 @@
+{
+  "contract_version": "rejection-recovery-v1",
+  "reason_classes": {
+    "ownership_precondition_missing": "REPAIRABLE",
+    "parent_missing": "RETRYABLE",
+    "ownership_mismatch": "PERMANENT",
+    "missing_event_uuid": "PERMANENT",
+    "unknown_op": "PERMANENT",
+    "invalid_payload": "PERMANENT",
+    "integrity_violation": "PERMANENT",
+    "stale_sync_version": "PERMANENT",
+    "equal_version_payload_conflict": "PERMANENT",
+    "irrigation_event_identity_collision": "PERMANENT"
+  },
+  "result_statuses": [
+    "APPLIED",
+    "ALREADY_APPLIED",
+    "STILL_REJECTED",
+    "RETRYABLE_ERROR"
+  ],
+  "event_result_statuses": [
+    "APPLIED",
+    "DUPLICATE",
+    "REJECTED",
+    "RETRYABLE_ERROR"
+  ],
+  "rejection_result_fields": {
+    "code": "rejectionCode",
+    "class": "rejectionClass"
+  }
+}

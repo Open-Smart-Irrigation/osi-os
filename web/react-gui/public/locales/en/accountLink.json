@@ -53,6 +53,17 @@
     "usedCurrentToken": "Using current sync token.",
     "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
     "outbox": "Sent {{delivered}} update(s) to OSI Server ({{after}} still waiting)",
+    "outboxCounts": {
+      "title": "Outbox result",
+      "selected": "Selected: {{count}}",
+      "applied": "Applied: {{count}}",
+      "duplicate": "Duplicate: {{count}}",
+      "retryable": "Retryable: {{count}}",
+      "rejected": "Rejected: {{count}}",
+      "protocolErrors": "Protocol errors: {{count}}",
+      "pendingAfter": "Pending after sync: {{count}}",
+      "rejectedCode": "Rejected {{code}}: {{count}}"
+    },
     "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
     "pendingAfterResponse": "Local apply continues after this response returns.",
     "lastError": "Last error from {{source}}: {{message}}"
