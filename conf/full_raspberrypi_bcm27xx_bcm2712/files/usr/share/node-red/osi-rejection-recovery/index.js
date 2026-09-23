@@ -177,14 +177,14 @@ async function recoverOutbox({ Database, dbPath = '/data/db/farming.db', eventUu
     throw new Error('receipts must exactly cover the selected event UUIDs');
   }
   const db = new Database(dbPath);
-  const all = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows || [])));
-  const run = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function onRun(error) { error ? reject(error) : resolve(this); }));
+  const all = (client, sql, params = []) => client === db
+    ? new Promise((resolve, reject) => db.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows || [])))
+    : client.all(sql, params);
   const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
-  let committed = false;
-  try {
-    await run('BEGIN IMMEDIATE');
+
+  const validateSelectedRows = async (client) => {
     const placeholders = eventUuids.map(() => '?').join(',');
-    const rows = await all('SELECT event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, gateway_device_eui, delivered_at, rejected_at, rejection_reason, rejection_code, rejection_class, recovery_generation FROM sync_outbox WHERE event_uuid IN (' + placeholders + ')', eventUuids);
+    const rows = await all(client, 'SELECT event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, gateway_device_eui, delivered_at, rejected_at, rejection_reason, rejection_code, rejection_class, recovery_generation FROM sync_outbox WHERE event_uuid IN (' + placeholders + ')', eventUuids);
     const byUuid = new Map(rows.map((row) => [String(row.event_uuid), row]));
     const validated = [];
     for (const eventUuid of eventUuids) {
@@ -196,28 +196,30 @@ async function recoverOutbox({ Database, dbPath = '/data/db/farming.db', eventUu
       validateEnvelopeSha256(envelopeSha256);
       validated.push({ eventUuid, row, receipt, envelopeSha256 });
     }
-    const summaryRows = validated.map(({ eventUuid, row }) => ({ eventUuid, generationBefore: Number(row.recovery_generation || 0), eligible: true }));
+    return validated;
+  };
+
+  try {
     if (!execute) {
-      await run('ROLLBACK');
-      await close();
+      const validated = await validateSelectedRows(db);
+      const summaryRows = validated.map(({ eventUuid, row }) => ({ eventUuid, generationBefore: Number(row.recovery_generation || 0), eligible: true }));
       return { dryRun: true, execute: false, selected: validated.length, changed: 0, rows: summaryRows };
     }
-    const attemptedAt = new Date().toISOString();
-    for (const item of validated) {
-      await run('INSERT INTO sync_outbox_recovery_audit (event_uuid, generation, actor, attempted_at, previous_rejection_code, previous_rejection_class, previous_rejection_reason, envelope_sha256, receipt_json) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)', [item.eventUuid, actor, attemptedAt, item.row.rejection_code, item.row.rejection_class, item.row.rejection_reason, item.envelopeSha256, JSON.stringify(item.receipt)]);
-      const result = await run('UPDATE sync_outbox SET rejected_at = NULL, rejection_reason = NULL, rejection_code = NULL, rejection_class = NULL, last_retryable_failure_at = NULL, retry_count = 0, recovery_generation = 1 WHERE event_uuid = ? AND delivered_at IS NULL AND rejected_at IS NOT NULL AND rejection_code = ? AND rejection_class = ? AND COALESCE(recovery_generation, 0) = 0', [item.eventUuid, REPAIRABLE_REJECTION_CODE, REPAIRABLE_REJECTION_CLASS]);
-      if (!result || Number(result.changes || 0) !== 1) throw new Error('event changed while recovery was running: ' + item.eventUuid);
-    }
-    await run('COMMIT');
-    committed = true;
-    await close();
-    return { dryRun: false, execute: true, selected: validated.length, changed: validated.length, rows: summaryRows };
-  } catch (error) {
-    if (!committed) {
-      try { await run('ROLLBACK'); } catch (rollbackError) { warn('rejection recovery rollback failed: ' + String(rollbackError && rollbackError.message || rollbackError)); }
-    }
+    if (typeof db.transaction !== 'function') throw new Error('database helper transaction unavailable');
+    return await db.transaction(async (tx) => {
+      const validated = await validateSelectedRows(tx);
+      const summaryRows = validated.map(({ eventUuid, row }) => ({ eventUuid, generationBefore: Number(row.recovery_generation || 0), eligible: true }));
+      const attemptedAt = new Date().toISOString();
+      for (const item of validated) {
+        await tx.run('INSERT INTO sync_outbox_recovery_audit (event_uuid, generation, actor, attempted_at, previous_rejection_code, previous_rejection_class, previous_rejection_reason, envelope_sha256, receipt_json) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)', [item.eventUuid, actor, attemptedAt, item.row.rejection_code, item.row.rejection_class, item.row.rejection_reason, item.envelopeSha256, JSON.stringify(item.receipt)]);
+        await tx.run('UPDATE sync_outbox SET rejected_at = NULL, rejection_reason = NULL, rejection_code = NULL, rejection_class = NULL, last_retryable_failure_at = NULL, retry_count = 0, recovery_generation = 1 WHERE event_uuid = ? AND delivered_at IS NULL AND rejected_at IS NOT NULL AND rejection_code = ? AND rejection_class = ? AND COALESCE(recovery_generation, 0) = 0', [item.eventUuid, REPAIRABLE_REJECTION_CODE, REPAIRABLE_REJECTION_CLASS]);
+        const updated = await tx.get('SELECT recovery_generation, rejected_at FROM sync_outbox WHERE event_uuid = ?', [item.eventUuid]);
+        if (!updated || Number(updated.recovery_generation) !== 1 || updated.rejected_at !== null) throw new Error('event changed while recovery was running: ' + item.eventUuid);
+      }
+      return { dryRun: false, execute: true, selected: validated.length, changed: validated.length, rows: summaryRows };
+    });
+  } finally {
     try { await close(); } catch (closeError) { warn('rejection recovery close failed: ' + String(closeError && closeError.message || closeError)); }
-    throw error;
   }
 }
 

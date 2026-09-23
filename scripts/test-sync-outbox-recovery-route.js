@@ -53,6 +53,22 @@ class CallbackDatabase {
   constructor(_path) { this.db = CallbackDatabase.db; }
   all(sql, params, callback) { try { callback(null, this.db.prepare(sql).all(...(params || []))); } catch (error) { callback(error); } }
   run(sql, params, callback) { try { const result = this.db.prepare(sql).run(...(params || [])); callback.call(result, null); } catch (error) { callback(error); } }
+  async transaction(executor) {
+    this.db.exec('BEGIN IMMEDIATE');
+    const tx = {
+      all: async (sql, params = []) => this.db.prepare(sql).all(...params),
+      get: async (sql, params = []) => this.db.prepare(sql).get(...params),
+      run: async (sql, params = []) => this.db.prepare(sql).run(...params),
+    };
+    try {
+      const result = await executor(tx);
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
   close(callback) { callback(); }
 }
 
