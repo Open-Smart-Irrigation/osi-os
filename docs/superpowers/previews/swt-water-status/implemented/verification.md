@@ -1,6 +1,6 @@
 # Soil water status implementation verification
 
-Implemented on `feat/swt-water-status` in `.worktrees/swt-water-status`. Product revision: `e5375747e`; reviewed feature base: `723903425`.
+Implemented on `feat/swt-water-status` in `.worktrees/swt-water-status`. Product revision: `2dee79592`; reviewed feature base: `723903425`. The external-review follow-up starts at `d7b81d9ab`.
 
 The Water, KIWI, LSN50 Chameleon, and SDI-12 SWT readings use neutral numbers beside the approved colored dot and translated label. The shared indicator reads the existing history namespace. All seven locales and runtime language switching are tested; no English status fallback was introduced. Classification uses unrounded kPa, including when pF is displayed.
 
@@ -9,10 +9,10 @@ The Water, KIWI, LSN50 Chameleon, and SDI-12 SWT readings use neutral numbers be
 | Check | Result |
 |---|---|
 | `npm run typecheck` | Passed |
-| `npm run test:unit` | Node: 193 passed; Vitest: 205 files, 2,098 tests passed |
+| `npm run test:unit` | Node: 193 passed; Vitest: 205 files, 2,114 tests passed |
 | `npm run build` | Passed; existing large-chunk and browser-data advisories remain |
 | Base-relative `git diff --check` | Passed |
-| Implemented-mode browser matrix | [23 cases passed](checks.json) |
+| Default-mode browser matrix | [23 implemented-mode cases passed](checks.json), with `SWT_PREVIEW_MODE` unset on both commands |
 | Phone interactions | [Four cases passed](interactions.json): 320/390 px, light/dark |
 
 Browser captures use real components with the design transform disabled. Local fixture responses isolate them from gateway writes. The matrix covers English, Swiss German, French, kPa/pF, stale readings, global Chameleon faults, zero, and a clock one year ahead. There were no page errors, external requests, document or badge overflow, nested buttons, or status live regions.
@@ -32,7 +32,15 @@ Inspected full-page captures at 1440, 390, and 320 px, plus dark Water/device de
 
 A fresh Astra review inspected all 16 feature files at `d02783e03`. It found no critical or important issue and suggested two minor improvements. The executor re-graded the historical timestamp finding as important: rejected future dates could contribute to a value described as Last valid. Six new regressions first failed, then passed after limiting historical contributors to parseable timestamps older than three hours. The full suite, typecheck, build, and 23 browser cases passed again at `e5375747e`.
 
-Deferred minor: add unit-test mixtures containing finite global-fault values alongside unaffected contributors. The implementation filters them, and the browser fault scenario already exercises finite faulted readings. This is additional regression coverage, not a known remaining product defect.
+The external-review follow-up closes that deferred test gap. Both global-fault flags are tested with finite readings beside a healthy current device and alone. Further cases cover an open channel beside a healthy channel and a healthy historical value beside a currently faulted device. The global-fault card tests now use finite values.
+
+The follow-up also separates timestamp eligibility from measurement validity. A valid value with a future, missing, or malformed timestamp leaves its value and observation time unavailable and renders the existing localized No reading yet copy. An actual measurement fault still sets invalid when no eligible value exists. Ten timestamp and copy regressions failed before the correction; all 83 focused summary, Water, and Chameleon tests then passed.
+
+KIWI keeps the SWT history button for unavailable values, using the existing translated unavailable label. Three missing-button regressions failed before the correction; all nine KIWI tests passed afterward, including opening the first and second channel histories. Other measurement controls retain their previous behavior.
+
+The preview server and capture script now default to implemented mode. The old default was reproduced failing on the removed KIWI source anchor. The future-scenario browser assertion now checks No reading yet and rejects Invalid reading, No reading since, and Last valid text for an untrusted timestamp.
+
+A fresh follow-up review found no required or optional changes. The reviewer independently ran all four focused suites (92 tests) and 5,418 combinations of timestamps, values, faults, companions, and requested channels. The executor separately completed typecheck, the full 2,114-test GUI suite and 193-test Node suite, production build, the 23-case browser matrix, and all four phone interaction cases. The future-timestamp capture was visually inspected and replaced; captures of unchanged views were retained to avoid binary churn.
 
 Existing card-header controls can truncate names at 320 px. Existing non-status device copy remains English in some translated views, and legacy device footers can display negative age for future timestamps. These behaviors predate this feature.
 
