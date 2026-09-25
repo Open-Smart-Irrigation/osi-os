@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IrrigationZoneCard } from '../IrrigationZoneCard';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 
+import enHistory from '../../../../public/locales/en/history.json';
+import frHistory from '../../../../public/locales/fr/history.json';
+
 import enCommon from '../../../../public/locales/en/common.json';
 import enDashboard from '../../../../public/locales/en/dashboard.json';
 import enDevices from '../../../../public/locales/en/devices.json';
@@ -129,13 +132,13 @@ async function buildI18n(language: string): Promise<I18n> {
   await instance.use(initReactI18next).init({
     lng: language,
     fallbackLng: 'en',
-    ns: ['devices', 'dashboard', 'common'],
+    ns: ['devices', 'dashboard', 'common', 'history'],
     defaultNS: 'common',
     interpolation: { escapeValue: false },
     react: { useSuspense: false },
     resources: {
-      en: { devices: enDevices, dashboard: enDashboard, common: enCommon },
-      fr: { devices: frDevices, dashboard: frDashboard, common: frCommon },
+      en: { devices: enDevices, dashboard: enDashboard, common: enCommon, history: enHistory },
+      fr: { devices: frDevices, dashboard: frDashboard, common: frCommon, history: frHistory },
     },
   });
   return instance;
@@ -192,12 +195,14 @@ async function renderIn(language: string) {
 }
 
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-08T12:00:00.000Z'));
   window.localStorage.clear();
   apiMocks.getZoneRecommendations.mockReset().mockResolvedValue([]);
   apiMocks.getSummary.mockReset().mockResolvedValue(summary);
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   vi.clearAllMocks();
 });
@@ -212,6 +217,9 @@ describe('IrrigationZoneCard locale coverage', () => {
 
   it('leaks no English from the water card or the zone chips in French', async () => {
     await renderIn('fr');
+    const soilTile = within(screen.getByTestId('water-soil-tile'));
+    expect(soilTile.getByText('Humide')).toBeInTheDocument();
+    expect(soilTile.queryByText('Moist')).not.toBeInTheDocument();
     const text = renderedStrings();
     const leaked = PREVIOUSLY_HARDCODED.filter((phrase) => occurs(text, phrase));
     expect(leaked, 'untranslated English still rendered under fr').toEqual([]);

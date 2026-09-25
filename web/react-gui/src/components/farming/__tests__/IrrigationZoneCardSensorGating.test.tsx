@@ -36,6 +36,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     i18n: { language: 'en' },
     t: (key: string, options?: unknown) => {
+      const statusLabel = ({
+        'history.soil.state.wet': 'Wet',
+        'history.soil.state.moist': 'Moist',
+        'history.soil.state.dry': 'Dry',
+      } as Record<string, string>)[key];
+      if (statusLabel) return statusLabel;
       if (typeof options === 'string') return options;
       const values = (options ?? {}) as Record<string, unknown>;
       const template = typeof values.defaultValue === 'string' ? values.defaultValue : key;
@@ -136,7 +142,7 @@ describe('water card sensor gating', () => {
     // The channel it came from, not the 45.0 kPa mean of two burial depths.
     expect(tile).toHaveTextContent('Soil now · Sensor 1');
     expect(tile).toHaveTextContent('45.2 kPa');
-    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Moist');
     expect(tile).not.toHaveTextContent('No reading since');
   });
 
@@ -408,14 +414,12 @@ describe('soil tile channel and verdict', () => {
     expect(tile).toHaveTextContent('56.5 kPa');
   });
 
-  it('judges the reading against the zone trigger, not a global bucket', async () => {
-    // 56.5 kPa against a 30 kPa trigger: the valve opens tonight, and the card
-    // used to call the same reading "Moderate".
+  it('shows fixed status alongside the zone trigger comparison', async () => {
     await openScheduled([sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
     expect(tile).toHaveTextContent('At or past the trigger');
-    expect(tile).not.toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Dry');
   });
 
   it('says a reading is approaching the trigger within 20 percent of it', async () => {
@@ -434,7 +438,7 @@ describe('soil tile channel and verdict', () => {
     await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Dry');
     expect(tile).not.toHaveTextContent('trigger');
   });
 
@@ -454,7 +458,29 @@ describe('soil tile channel and verdict', () => {
     await screen.findByTestId('water-today-card');
 
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Dry');
     expect(tile).not.toHaveTextContent('trigger');
   });
+  it('shows SDI-12 Tensiomark as moist tension', async () => {
+    await openCard([sensor({
+      type_id: 'DRAGINO_SDI12',
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest_data: { swt_1: 30.2, soil_temp_1: 21.5 },
+    })]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('30.2 kPa');
+    expect(tile).toHaveTextContent('Moist');
+    expect(tile).not.toHaveTextContent('Volumetric water content');
+  });
+
+  it('does not apply an absent scheduled channel threshold to a fallback channel', async () => {
+    await openScheduled([sensor({ last_seen: FRESH, latest_data: { swt_2: 56.5 } })]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Dry');
+    expect(tile).not.toHaveTextContent('At or past the trigger');
+    expect(tile).not.toHaveTextContent('Approaching the trigger');
+    expect(tile).not.toHaveTextContent('Below the trigger');
+  });
+
 });
