@@ -1,3 +1,5 @@
+> Screenshots referenced below are not in the repository; the full capture set stays on the development branch `feat/swt-water-status`.
+
 # Soil water status preview review
 
 The approved design is now implemented. See [implementation verification](implemented/verification.md) for the actual-source captures, test results, and final review. The notes below record the earlier design review.

@@ -58,3 +58,7 @@ Existing card-header controls can truncate names at 320 px. Existing non-status 
 - Final: Ruling: leave per-input validation of unused summarizeSwtValues outside this change; no production consumer exists and displayed aggregates validate each input; a future consumer must establish its input contract.
 
 The branch remains local with its worktree preserved. The original checkout retains its prior state. No locale JSON, shared UI core, backend, database, scheduler, or cloud code changed.
+
+## Main-based gate run (2026-09-25)
+
+The ten feature commits were lifted onto `origin/main` `72e25b5ca` as branch `feat/swt-water-status-main` (no conflicts; the feature files are byte-identical to the reviewed branch, whose field-tester block is absent on main). Gates on that head: `git diff --check` clean, `npm run typecheck` exit 0, Vitest 198 files / 2,063 tests passed, node runner 178 / 178 passed (0 skipped once `build/` existed), `npm run build` exit 0. The browser matrix was not repeated on the main-based head; the checked files are unchanged. Commit hashes cited above (`2dee79592`, `723903425`, `d7b81d9ab`, `d02783e03`, `e5375747e`, `975a40434`) belong to the development branch `feat/swt-water-status`, which is not merged; they are kept for traceability only. Only the six screenshots linked from this record are kept in the repository; the full capture set stays on that development branch.
