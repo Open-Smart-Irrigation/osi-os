@@ -2771,7 +2771,7 @@ expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Awaiting basel
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Chameleon SWT', 'renders Chameleon SWT on the LSN50 card');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "field: 'swt_3'", 'opens history for Chameleon SWT3');
 expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'ADC INPUT', 'removes generic ADC card when dendrometer is disabled');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "formatSwtValue(channel.value, swtUnit) ?? '—'", 'keeps Chameleon SWT formatting null-safe through the shared formatter');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "formatSwtCardValue(channel.value, swtUnit) ?? '—'", 'keeps Chameleon SWT formatting null-safe through the shared card formatter');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'No valid Chameleon sample', 'surfaces invalid Chameleon sample state on the LSN50 card');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1', 'treats Chameleon missing and timeout flags as invalid samples');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Current ratio', 'shows ratio in the dendrometer calibration section instead of on the device card');
