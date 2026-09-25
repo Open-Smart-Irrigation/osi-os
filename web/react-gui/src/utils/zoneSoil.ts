@@ -263,6 +263,10 @@ function summarizeTension(
   for (const device of devices) {
     const row = device.latest_data as Record<string, unknown> | null | undefined;
     const fresh = isSensorObservationFresh(device.last_seen, nowMs);
+    const observedMs = device.last_seen ? new Date(device.last_seen).getTime() : Number.NaN;
+    const isHistorical = Number.isFinite(nowMs)
+      && Number.isFinite(observedMs)
+      && nowMs - observedMs > SENSOR_FRESHNESS_WINDOW_MS;
     for (const channel of TENSION_CHANNELS) {
       const legacy = LEGACY_ALIAS[channel];
       const raw = row?.[channel] ?? (legacy ? row?.[legacy] : undefined);
@@ -271,6 +275,7 @@ function summarizeTension(
       reportedCount += 1;
       anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
       if (faulted) continue;
+      if (!fresh && !isHistorical) continue;
       if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) continue;
       appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel));
     }

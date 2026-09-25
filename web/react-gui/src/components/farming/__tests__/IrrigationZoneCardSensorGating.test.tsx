@@ -386,6 +386,18 @@ describe('water card reason line', () => {
 });
 
 describe('soil tile channel and verdict', () => {
+  it('keeps future-dated samples out of the last-valid value and timestamp', async () => {
+    await openCard([
+      sensor({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 10 } }),
+      sensor({ deveui: 'FUTURE', last_seen: '2027-07-08T12:00:00.000Z', latest_data: { swt_1: 90 } }),
+    ]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Last valid 10.0 kPa');
+    expect(tile).not.toHaveTextContent('50.0 kPa');
+    expect(tile).not.toHaveTextContent('2027');
+    expect(tile.querySelector('[data-swt-status]')).toBeNull();
+  });
+
   const scheduledZone = {
     ...zone,
     schedule: { irrigation_zone_id: 12, trigger_metric: 'SWT_1', threshold_kpa: 30, enabled: true },

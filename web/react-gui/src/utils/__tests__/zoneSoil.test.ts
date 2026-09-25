@@ -259,6 +259,29 @@ it('retains stale values only when no current contributor exists', () => {
   expect(status).toMatchObject({ value: 70, observedAt: STALE, stale: true });
 });
 
+it.each([
+  new Date(NOW + 5 * 60_000 + 1).toISOString(),
+  new Date(NOW + 365 * 24 * 60 * 60_000).toISOString(),
+  'not-a-date',
+  null,
+])('excludes rejected timestamps from last-valid historical values: %s', (lastSeen) => {
+  const status = summarizeZoneSoil([
+    device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 10 } }),
+    device({ deveui: 'UNTRUSTED', last_seen: lastSeen, latest_data: { swt_1: 90 } }),
+  ], NOW, 'swt_1');
+  expect(status).toMatchObject({ value: 10, observedAt: STALE, stale: true, invalid: false });
+  const rejectedOnly = summarizeZoneSoil([
+    device({ last_seen: lastSeen, latest_data: { swt_1: 90 } }),
+  ], NOW);
+  expect(rejectedOnly).toMatchObject({ value: null, stale: true });
+});
+
+it('does not establish a last-valid historical value with a non-finite clock', () => {
+  expect(summarizeZoneSoil([
+    device({ last_seen: STALE, latest_data: { swt_1: 10 } }),
+  ], Number.NaN)).toMatchObject({ value: null, stale: true });
+});
+
 it('does not use a stale contributor to choose or label a current channel depth', () => {
   const status = summarizeZoneSoil([
     device({
