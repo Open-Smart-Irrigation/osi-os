@@ -16,6 +16,18 @@ import type { Device } from '../types/farming';
  */
 export const SENSOR_FRESHNESS_WINDOW_MS = 3 * 60 * 60 * 1000;
 
+export function isSensorObservationFresh(
+  observedAt: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!observedAt || !Number.isFinite(nowMs)) return false;
+  const observedMs = new Date(observedAt).getTime();
+  const ageMs = nowMs - observedMs;
+  return Number.isFinite(observedMs)
+    && ageMs >= -5 * 60_000
+    && ageMs <= SENSOR_FRESHNESS_WINDOW_MS;
+}
+
 /** Chameleon's resistance→kPa conversion clamps to [0, 300]; readings outside it are a fault, not a dry soil. */
 const SWT_KPA_RANGE: readonly [number, number] = [0, 300];
 const VWC_PCT_RANGE: readonly [number, number] = [0, 100];
@@ -48,7 +60,7 @@ export interface ZoneSoilStatus {
   observedAt: string | null;
   /** Configured and reporting, but the newest uplink predates the freshness window. */
   stale: boolean;
-  /** Configured and reporting, but no channel value is finite and in range. */
+  /** No eligible value is available, and at least one measurement is invalid or faulted. */
   invalid: boolean;
 }
 
@@ -92,13 +104,14 @@ export function probeDepthCm(device: Device, channel: string): number | null {
   return null;
 }
 
-function isTensionSensor(device: Pick<Device, 'type_id' | 'chameleon_enabled'>): boolean {
+function isTensionSensor(device: Pick<Device, 'type_id' | 'chameleon_enabled' | 'sdi12_probe_profile'>): boolean {
   if (device.type_id === 'KIWI_SENSOR' || device.type_id === 'TEKTELIC_CLOVER') return true;
-  return device.type_id === 'DRAGINO_LSN50' && device.chameleon_enabled === 1;
+  if (device.type_id === 'DRAGINO_LSN50') return device.chameleon_enabled === 1;
+  return device.type_id === 'DRAGINO_SDI12' && device.sdi12_probe_profile === 'TENSIOMARK';
 }
 
-function isVolumetricSensor(device: Pick<Device, 'type_id'>): boolean {
-  return device.type_id === 'DRAGINO_SDI12';
+function isVolumetricSensor(device: Pick<Device, 'type_id' | 'sdi12_probe_profile'>): boolean {
+  return device.type_id === 'DRAGINO_SDI12' && device.sdi12_probe_profile !== 'TENSIOMARK';
 }
 
 function volumetricChannels(data: Device['latest_data'] | null | undefined): unknown[] {
@@ -199,48 +212,91 @@ function summarizeVolumetric(devices: Device[], nowMs: number): ZoneSoilStatus {
  * crop feels. One channel is reported, and it is the one the zone's own
  * scheduler compares when the zone has a schedule.
  */
+interface TensionBucket {
+  values: Map<SoilChannel, number[]>;
+  observedAt: Map<SoilChannel, string | null>;
+  depths: Map<SoilChannel, number | null>;
+}
+
+function emptyTensionBucket(): TensionBucket {
+  return { values: new Map(), observedAt: new Map(), depths: new Map() };
+}
+
+function chameleonChannelFaulted(device: Device, channel: SoilChannel): boolean {
+  if (device.type_id !== 'DRAGINO_LSN50') return false;
+  const data = device.latest_data;
+  if (data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1) return true;
+  const openByChannel: Record<SoilChannel, number | null | undefined> = {
+    swt_1: data?.chameleon_ch1_open,
+    swt_2: data?.chameleon_ch2_open,
+    swt_3: data?.chameleon_ch3_open,
+  };
+  return openByChannel[channel] === 1;
+}
+
+function appendTension(
+  bucket: TensionBucket,
+  channel: SoilChannel,
+  value: number,
+  observedAt: string | null | undefined,
+  depth: number | null,
+) {
+  bucket.values.set(channel, [...(bucket.values.get(channel) ?? []), value]);
+  bucket.observedAt.set(channel, newerInstant(bucket.observedAt.get(channel) ?? null, observedAt));
+  if (depth != null) {
+    const known = bucket.depths.get(channel);
+    bucket.depths.set(channel, known == null ? depth : Math.min(known, depth));
+  }
+}
+
 function summarizeTension(
   devices: Device[],
   nowMs: number,
   requested: SoilChannelSelection | null,
 ): ZoneSoilStatus {
   const [min, max] = SWT_KPA_RANGE;
-  const values = new Map<SoilChannel, number[]>();
-  const observedAtByChannel = new Map<SoilChannel, string | null>();
-  const depths = new Map<SoilChannel, number | null>();
-  let reportedCount = 0;
+  const current = emptyTensionBucket();
+  const historical = emptyTensionBucket();
+  let hasInvalidReading = false;
   let anyObservedAt: string | null = null;
 
   for (const device of devices) {
     const row = device.latest_data as Record<string, unknown> | null | undefined;
+    const fresh = isSensorObservationFresh(device.last_seen, nowMs);
+    const observedMs = device.last_seen ? new Date(device.last_seen).getTime() : Number.NaN;
+    const isHistorical = Number.isFinite(nowMs)
+      && Number.isFinite(observedMs)
+      && nowMs - observedMs > SENSOR_FRESHNESS_WINDOW_MS;
     for (const channel of TENSION_CHANNELS) {
       const legacy = LEGACY_ALIAS[channel];
       const raw = row?.[channel] ?? (legacy ? row?.[legacy] : undefined);
-      if (raw === null || raw === undefined) continue;
-      reportedCount += 1;
-      anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
-      if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) continue;
-      values.set(channel, [...(values.get(channel) ?? []), raw]);
-      observedAtByChannel.set(channel, newerInstant(observedAtByChannel.get(channel) ?? null, device.last_seen));
-      const depth = probeDepthCm(device, channel);
-      if (depth != null) {
-        const known = depths.get(channel);
-        depths.set(channel, known == null ? depth : Math.min(known, depth));
+      const faulted = chameleonChannelFaulted(device, channel);
+      if ((raw === null || raw === undefined) && !faulted) continue;
+      if (fresh || isHistorical) anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
+      if (faulted || typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) {
+        hasInvalidReading = true;
+        continue;
       }
+      if (!fresh && !isHistorical) continue;
+      appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel));
     }
   }
 
-  const available = TENSION_CHANNELS.filter((channel) => (values.get(channel)?.length ?? 0) > 0);
-  const channel = selectChannel(available, depths, requested);
-  const pooled = available.flatMap((name) => values.get(name) ?? []);
-  const value = channel === 'mean' ? mean(pooled) : channel ? mean(values.get(channel) ?? []) : null;
+  const currentAvailable = TENSION_CHANNELS.filter((channel) => (current.values.get(channel)?.length ?? 0) > 0);
+  const historicalAvailable = TENSION_CHANNELS.filter((channel) => (historical.values.get(channel)?.length ?? 0) > 0);
+  const usingCurrent = currentAvailable.length > 0;
+  const bucket = usingCurrent ? current : historical;
+  const available = usingCurrent ? currentAvailable : historicalAvailable;
+
+  const channel = selectChannel(available, bucket.depths, requested);
+  const pooled = available.flatMap((name) => bucket.values.get(name) ?? []);
+  const value = channel === 'mean' ? mean(pooled) : channel ? mean(bucket.values.get(channel) ?? []) : null;
   const observedAt = channel === 'mean'
-    ? available.reduce<string | null>((newest, name) => newerInstant(newest, observedAtByChannel.get(name) ?? null), null)
+    ? available.reduce<string | null>((newest, name) => newerInstant(newest, bucket.observedAt.get(name) ?? null), null)
     : channel
-      ? observedAtByChannel.get(channel) ?? null
+      ? bucket.observedAt.get(channel) ?? null
       : anyObservedAt;
   const resolvedObservedAt = observedAt ?? anyObservedAt;
-  const observedMs = resolvedObservedAt ? new Date(resolvedObservedAt).getTime() : Number.NaN;
 
   return {
     hasSensor: true,
@@ -248,10 +304,10 @@ function summarizeTension(
     sensorCount: devices.length,
     value,
     channel,
-    depthCm: channel && channel !== 'mean' ? depths.get(channel) ?? null : null,
+    depthCm: channel && channel !== 'mean' ? bucket.depths.get(channel) ?? null : null,
     observedAt: resolvedObservedAt,
-    stale: !Number.isFinite(observedMs) || nowMs - observedMs > SENSOR_FRESHNESS_WINDOW_MS,
-    invalid: reportedCount > 0 && pooled.length === 0,
+    stale: !usingCurrent,
+    invalid: hasInvalidReading && currentAvailable.length === 0 && historicalAvailable.length === 0,
   };
 }
 

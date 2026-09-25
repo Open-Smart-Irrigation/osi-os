@@ -10,7 +10,9 @@ import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
-import { formatSwtValue } from '../../utils/swt';
+import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
+import { isSensorObservationFresh } from '../../utils/zoneSoil';
+import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 
 function formatCounterInterval(seconds: number | null | undefined): string | null {
   const value = Number(seconds);
@@ -135,10 +137,11 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
     && (dendroHasStemChange || dendroAwaitingBaseline || dendroNeedsCalibration || dendroSensorError || dendroSaturated);
   const chameleonEnabled = device.chameleon_enabled === 1;
   const chameleonDataInvalid = data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1;
+  const chameleonIsCurrent = isSensorObservationFresh(device.last_seen);
   const chameleonChannels = [
-    { field: 'swt_1', label: 'SWT1', value: data?.swt_1, depth: device.chameleon_swt1_depth_cm, color: '#0f766e' },
-    { field: 'swt_2', label: 'SWT2', value: data?.swt_2, depth: device.chameleon_swt2_depth_cm, color: '#2563eb' },
-    { field: 'swt_3', label: 'SWT3', value: data?.swt_3, depth: device.chameleon_swt3_depth_cm, color: '#7c3aed' },
+    { field: 'swt_1', label: 'SWT1', value: data?.swt_1, depth: device.chameleon_swt1_depth_cm, color: '#0f766e', open: data?.chameleon_ch1_open === 1 },
+    { field: 'swt_2', label: 'SWT2', value: data?.swt_2, depth: device.chameleon_swt2_depth_cm, color: '#2563eb', open: data?.chameleon_ch2_open === 1 },
+    { field: 'swt_3', label: 'SWT3', value: data?.swt_3, depth: device.chameleon_swt3_depth_cm, color: '#7c3aed', open: data?.chameleon_ch3_open === 1 },
   ] as const;
 
   const [showConfig, setShowConfig] = useState(false);
@@ -276,14 +279,23 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                         decimals: 1,
                       })),
                     })}
-                    className={`flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left transition-colors hover:border-[var(--focus)] ${FOCUS_VISIBLE_RING}`}
+                    className={`flex flex-wrap gap-2 items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left transition-colors hover:border-[var(--focus)] ${FOCUS_VISIBLE_RING}`}
                     title="View SWT history"
                   >
                     <span>
                       <span className="block text-sm font-semibold text-[var(--text)]">{channel.label}</span>
                       <span className="block text-xs text-[var(--text-tertiary)]">{formatDepthLabel(channel.depth) || 'Depth unset'}</span>
                     </span>
-                    <span className="text-lg font-bold tabular-nums text-[var(--text)]">{formatSwtValue(channel.value, swtUnit) ?? '—'}</span>
+                    <span className="flex flex-wrap items-center justify-end gap-2">
+                      <span className="text-lg font-bold tabular-nums text-[var(--text)]">
+                        {formatSwtCardValue(channel.value, swtUnit) ?? '—'}
+                      </span>
+                      <SwtStatusIndicator
+                        status={chameleonIsCurrent && !chameleonDataInvalid && !channel.open
+                          ? classifySwtWaterStatus(channel.value)
+                          : null}
+                      />
+                    </span>
                   </button>
                 ))}
               </div>

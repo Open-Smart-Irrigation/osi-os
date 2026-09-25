@@ -1,6 +1,42 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatSwtValue, kpaToPf, pfToKpa } from '../swt';
+import { classifySwtWaterStatus, formatSwtCardValue, formatSwtValue, kpaToPf, pfToKpa, summarizeSwtValues } from '../swt';
+
+describe('classifySwtWaterStatus', () => {
+  it.each([
+    [0, 'wet'], [19.999, 'wet'], [20, 'moist'], [50, 'moist'], [50.001, 'dry'], [300, 'dry'],
+  ] as const)('classifies %s kPa as %s', (value, status) => {
+    expect(classifySwtWaterStatus(value)).toBe(status);
+  });
+
+  it.each([-1, 301, null, undefined, NaN, -Infinity, Infinity, '20'])('rejects %s', value => {
+    expect(classifySwtWaterStatus(value)).toBeNull();
+  });
+});
+
+describe('formatSwtCardValue', () => {
+  it('uses the selected unit for positive tension', () => {
+    expect(formatSwtCardValue(30, 'kPa')).toBe('30.0 kPa');
+    expect(formatSwtCardValue(30, 'pF')).toBe('2.48 pF');
+  });
+  it('keeps a measured zero visible without inventing zero pF', () => {
+    expect(formatSwtCardValue(0, 'pF')).toBe('0.0 kPa');
+  });
+  it.each([-1, 301, null, undefined, NaN, Infinity, '30'])('keeps %s unavailable in both units', value => {
+    expect(formatSwtCardValue(value, 'pF')).toBeNull();
+    expect(formatSwtCardValue(value, 'kPa')).toBeNull();
+  });
+});
+
+describe('summarizeSwtValues', () => {
+  it('returns status codes for callers to translate using the same VIA bands', () => {
+    expect(summarizeSwtValues([0, 10])).toEqual({ status: 'wet', swt: 5 });
+    expect(summarizeSwtValues([20, 50])).toEqual({ status: 'moist', swt: 35 });
+    expect(summarizeSwtValues([51, 59])).toEqual({ status: 'dry', swt: 55 });
+    expect(summarizeSwtValues([])).toEqual({ status: null, swt: null });
+    expect(summarizeSwtValues([301])).toEqual({ status: null, swt: null });
+  });
+});
 
 describe('kpaToPf golden vectors', () => {
   it('matches the contract-pinned vectors', () => {

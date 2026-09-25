@@ -1,0 +1,118 @@
+[
+  {
+    "width": 390,
+    "theme": "light",
+    "containersChecked": 39,
+    "controls": [
+      {
+        "name": "kiwi",
+        "focus": {
+          "visible": true,
+          "outline": "auto",
+          "outlineWidth": "1px",
+          "boxShadow": "none"
+        },
+        "opened": 1
+      },
+      {
+        "name": "chameleon",
+        "focus": {
+          "visible": true,
+          "outline": "none",
+          "outlineWidth": "1px",
+          "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgb(232, 237, 242) 0px 0px 0px 2px, rgb(37, 99, 235) 0px 0px 0px 4px, rgba(0, 0, 0, 0) 0px 0px 0px 0px"
+        },
+        "opened": 1
+      }
+    ],
+    "unitInvariant": true,
+    "browserErrors": []
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "containersChecked": 39,
+    "controls": [
+      {
+        "name": "kiwi",
+        "focus": {
+          "visible": true,
+          "outline": "auto",
+          "outlineWidth": "1px",
+          "boxShadow": "none"
+        },
+        "opened": 1
+      },
+      {
+        "name": "chameleon",
+        "focus": {
+          "visible": true,
+          "outline": "none",
+          "outlineWidth": "1px",
+          "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgb(23, 29, 27) 0px 0px 0px 2px, rgb(45, 212, 191) 0px 0px 0px 4px, rgba(0, 0, 0, 0) 0px 0px 0px 0px"
+        },
+        "opened": 1
+      }
+    ],
+    "unitInvariant": true,
+    "browserErrors": []
+  },
+  {
+    "width": 320,
+    "theme": "light",
+    "containersChecked": 39,
+    "controls": [
+      {
+        "name": "kiwi",
+        "focus": {
+          "visible": true,
+          "outline": "auto",
+          "outlineWidth": "1px",
+          "boxShadow": "none"
+        },
+        "opened": 1
+      },
+      {
+        "name": "chameleon",
+        "focus": {
+          "visible": true,
+          "outline": "none",
+          "outlineWidth": "1px",
+          "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgb(232, 237, 242) 0px 0px 0px 2px, rgb(37, 99, 235) 0px 0px 0px 4px, rgba(0, 0, 0, 0) 0px 0px 0px 0px"
+        },
+        "opened": 1
+      }
+    ],
+    "unitInvariant": true,
+    "browserErrors": []
+  },
+  {
+    "width": 320,
+    "theme": "dark",
+    "containersChecked": 39,
+    "controls": [
+      {
+        "name": "kiwi",
+        "focus": {
+          "visible": true,
+          "outline": "auto",
+          "outlineWidth": "1px",
+          "boxShadow": "none"
+        },
+        "opened": 1
+      },
+      {
+        "name": "chameleon",
+        "focus": {
+          "visible": true,
+          "outline": "none",
+          "outlineWidth": "1px",
+          "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgb(23, 29, 27) 0px 0px 0px 2px, rgb(45, 212, 191) 0px 0px 0px 4px, rgba(0, 0, 0, 0) 0px 0px 0px 0px"
+        },
+        "opened": 1
+      }
+    ],
+    "unitInvariant": true,
+    "browserErrors": []
+  }
+]

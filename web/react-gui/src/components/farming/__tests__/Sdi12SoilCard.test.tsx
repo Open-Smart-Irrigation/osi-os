@@ -1,15 +1,29 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
 import { devicesAPI } from '../../../services/api';
 import { Sdi12SoilCard } from '../Sdi12SoilCard';
 
-// t() returns the key itself, matching this codebase's convention.
+const STATUS_LABELS: Record<string, string> = {
+  'history.soil.state.wet': 'Wet',
+  'history.soil.state.moist': 'Moist',
+  'history.soil.state.dry': 'Dry',
+};
+
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: (key: string) => STATUS_LABELS[key] ?? key }),
 }));
+
+const NOW = Date.parse('2026-09-24T08:00:00.000Z');
+const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
+const STALE = new Date(NOW - 4 * 60 * 60 * 1000).toISOString();
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(NOW);
+  window.localStorage.clear();
+});
+afterEach(() => vi.restoreAllMocks());
 
 vi.mock('../../../services/api', () => ({
   devicesAPI: {
@@ -158,4 +172,44 @@ describe('Sdi12SoilCard', () => {
     render(<Sdi12SoilCard device={makeDevice()} readOnly removeContext="farm" />);
     expect(screen.queryByTitle('rename.device')).not.toBeInTheDocument();
   });
+  it('adds VIA status only to current SDI-12 SWT rows', () => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest: { swt_1: 30.2, soil_temp_1: 21.5 },
+    })} />);
+    expect(screen.getByText('30.2 kPa · 2.48 pF')).toBeInTheDocument();
+    expect(screen.getByText('Moist')).toBeInTheDocument();
+    expect(screen.getAllByText(/Soil temperature/)).toHaveLength(1);
+  });
+
+  it('withholds stale and out-of-range SDI-12 status without hiding the row', () => {
+    const { rerender } = render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: STALE,
+      latest: { swt_1: 30.2 },
+    })} />);
+    expect(screen.queryByText('Moist')).not.toBeInTheDocument();
+
+    rerender(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest: { swt_1: 301 },
+    })} />);
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.queryByText('Dry')).not.toBeInTheDocument();
+  });
+
+  it('renders zero once as kPa in pF mode and marks it Wet', () => {
+    window.localStorage.setItem('osi.display.swtUnit', 'pF');
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest: { swt_1: 0 },
+    })} />);
+    expect(screen.getAllByText('0.0 kPa')).toHaveLength(1);
+    expect(screen.queryByText('0.00 pF')).not.toBeInTheDocument();
+    expect(screen.getByText('Wet')).toBeInTheDocument();
+  });
+
 });

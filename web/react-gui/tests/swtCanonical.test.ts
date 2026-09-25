@@ -17,7 +17,7 @@ test('uses canonical SWT channels from Chameleon-only devices', () => {
   ]);
 
   assert.deepEqual(values, [12, 18, 30]);
-  assert.deepEqual(summarizeSwtValues(values), { label: 'Moderate', swt: 20 });
+  assert.deepEqual(summarizeSwtValues(values), { status: 'moist', swt: 20 });
 });
 
 test('uses legacy Kiwi SWT fields only as fallback aliases', () => {
@@ -27,5 +27,5 @@ test('uses legacy Kiwi SWT fields only as fallback aliases', () => {
   ]);
 
   assert.deepEqual(values, [11, 22, 30, 40]);
-  assert.deepEqual(summarizeSwtValues(values), { label: 'Moderate', swt: 25.75 });
+  assert.deepEqual(summarizeSwtValues(values), { status: 'moist', swt: 25.75 });
 });

@@ -21,7 +21,8 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { useGatewayModules } from '../../hooks/useGatewayModules';
-import { formatSwtValue } from '../../utils/swt';
+import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
+import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge, type SoilChannelSelection } from '../../utils/zoneSoil';
 import { useDateFormat } from '../../utils/datetime';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
@@ -315,7 +316,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const soilValue = soilNow.value === null
     ? null
     : soilNow.quantity === 'tension'
-      ? formatSwtValue(soilNow.value, swtUnit)
+      ? formatSwtCardValue(soilNow.value, swtUnit)
       : `${soilNow.value.toFixed(1)} %`;
   // Which channel the number came from: its depth when the installation
   // recorded one, otherwise the channel's own name. A cross-depth mean names
@@ -331,26 +332,26 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           defaultValue: 'Soil now · {{channel}}',
         })
       : t('zone.water.soil.title', { defaultValue: 'Soil now' });
-  // Judged against the zone's own trigger where there is one. The absolute
-  // Wet/Moderate/Dry bucketing (utils/swt.ts) is identical for every crop and
-  // every soil, and it called a reading "Moderate" that would open the valve
-  // the same night. There is no reviewed equivalent for volumetric water
-  // content, so that path names the quantity instead of inventing thresholds.
+  // Fixed soil status and the zone-specific trigger comparison are separate facts.
+  const soilWaterStatus = soilNow.quantity === 'tension'
+    && soilNow.value !== null
+    && !soilNow.stale
+    && !soilNow.invalid
+    ? classifySwtWaterStatus(soilNow.value)
+    : null;
+  const displayedChannelMatchesTrigger = triggerChannel !== null && soilNow.channel === triggerChannel;
   const soilDescriptor = soilNow.quantity === 'volumetric'
     ? t('zone.water.soil.volumetric', { defaultValue: 'Volumetric water content' })
-    : soilNow.value === null
-      ? null
-      : Number.isFinite(triggerThresholdKpa) && triggerThresholdKpa > 0
-        ? soilNow.value >= triggerThresholdKpa
-          ? t('zone.water.soil.atTrigger', { defaultValue: 'At or past the trigger' })
-          : soilNow.value >= triggerThresholdKpa * 0.8
-            ? t('zone.water.soil.nearTrigger', { defaultValue: 'Approaching the trigger' })
-            : t('zone.water.soil.belowTrigger', { defaultValue: 'Below the trigger' })
-        : soilNow.value < 20
-          ? t('zone.water.soil.wet', { defaultValue: 'Wet' })
-          : soilNow.value < 60
-            ? t('zone.water.soil.moderate', { defaultValue: 'Moderate' })
-            : t('zone.water.soil.dry', { defaultValue: 'Dry' });
+    : soilNow.value !== null
+      && displayedChannelMatchesTrigger
+      && Number.isFinite(triggerThresholdKpa)
+      && triggerThresholdKpa > 0
+      ? soilNow.value >= triggerThresholdKpa
+        ? t('zone.water.soil.atTrigger', { defaultValue: 'At or past the trigger' })
+        : soilNow.value >= triggerThresholdKpa * 0.8
+          ? t('zone.water.soil.nearTrigger', { defaultValue: 'Approaching the trigger' })
+          : t('zone.water.soil.belowTrigger', { defaultValue: 'Below the trigger' })
+      : null;
   const soilObservedRelative = dateFormat.relativeToNow(soilNow.observedAt);
   const soilStatusLine = soilNow.invalid
     ? t('zone.water.soil.invalidReading', { defaultValue: 'Invalid reading' })
@@ -640,9 +641,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
                   {soilTitle}
                 </p>
-                <p className="mt-1 text-lg font-semibold text-[var(--text)]">
-                  {soilStatusLine === null ? soilValue ?? '—' : '—'}
-                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="text-lg font-semibold text-[var(--text)]">
+                    {soilStatusLine === null ? soilValue ?? '—' : '—'}
+                  </p>
+                  {soilStatusLine === null && <SwtStatusIndicator status={soilWaterStatus} />}
+                </div>
                 {soilDescriptor && soilStatusLine === null && (
                   <p className="text-sm text-[var(--text-secondary)]">{soilDescriptor}</p>
                 )}

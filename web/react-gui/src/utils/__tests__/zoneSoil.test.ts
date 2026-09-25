@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Device } from '../../types/farming';
-import { SENSOR_FRESHNESS_WINDOW_MS, summarizeZoneSoil, zoneHasFlowMeter } from '../zoneSoil';
+import { SENSOR_FRESHNESS_WINDOW_MS, isSensorObservationFresh, summarizeZoneSoil, zoneHasFlowMeter } from '../zoneSoil';
 
 const NOW = Date.parse('2026-07-08T12:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
@@ -212,4 +212,172 @@ describe('summarizeZoneSoil channel selection', () => {
     expect(status.value).toBe(35);
     expect(status.channel).toBe('swt_1');
   });
+});
+
+it('treats an SDI-12 Tensiomark as tension before and after its first sample', () => {
+  const waiting = summarizeZoneSoil([device({
+    type_id: 'DRAGINO_SDI12',
+    sdi12_probe_profile: 'TENSIOMARK',
+    last_seen: null,
+    latest_data: {},
+  })], NOW);
+  expect(waiting).toMatchObject({ hasSensor: true, quantity: 'tension', value: null, stale: true });
+
+  const reporting = summarizeZoneSoil([device({
+    type_id: 'DRAGINO_SDI12',
+    sdi12_probe_profile: 'TENSIOMARK',
+    last_seen: FRESH,
+    latest_data: { swt_1: 30.2, soil_temp_1: 21.5 },
+  })], NOW);
+  expect(reporting).toMatchObject({ quantity: 'tension', value: 30.2, channel: 'swt_1', stale: false });
+});
+
+it('keeps a non-Tensiomark SDI-12 probe volumetric', () => {
+  const status = summarizeZoneSoil([device({
+    type_id: 'DRAGINO_SDI12',
+    sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
+    last_seen: FRESH,
+    latest_data: { vwc_1: 28, vwc_2: 32 },
+  })], NOW);
+  expect(status).toMatchObject({ quantity: 'volumetric', value: 30 });
+});
+
+it('excludes stale contributors when a current reading exists', () => {
+  const status = summarizeZoneSoil([
+    device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+    device({ deveui: 'STALE', last_seen: STALE, latest_data: { swt_1: 90 } }),
+  ], NOW, 'swt_1');
+  expect(status).toMatchObject({ value: 30, observedAt: FRESH, stale: false });
+});
+
+it('retains stale values only when no current contributor exists', () => {
+  const older = new Date(Date.parse(STALE) - 60_000).toISOString();
+  const status = summarizeZoneSoil([
+    device({ deveui: 'OLD-1', last_seen: STALE, latest_data: { swt_1: 60 } }),
+    device({ deveui: 'OLD-2', last_seen: older, latest_data: { swt_1: 80 } }),
+  ], NOW, 'swt_1');
+  expect(status).toMatchObject({ value: 70, observedAt: STALE, stale: true });
+});
+
+it.each([
+  new Date(NOW + 5 * 60_000 + 1).toISOString(),
+  new Date(NOW + 365 * 24 * 60 * 60_000).toISOString(),
+  'not-a-date',
+  null,
+])('excludes rejected timestamps from last-valid historical values: %s', (lastSeen) => {
+  const status = summarizeZoneSoil([
+    device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 10 } }),
+    device({ deveui: 'UNTRUSTED', last_seen: lastSeen, latest_data: { swt_1: 90 } }),
+  ], NOW, 'swt_1');
+  expect(status).toMatchObject({ value: 10, observedAt: STALE, stale: true, invalid: false });
+  const rejectedOnly = summarizeZoneSoil([
+    device({ last_seen: lastSeen, latest_data: { swt_1: 90 } }),
+  ], NOW);
+  expect(rejectedOnly).toMatchObject({ value: null, observedAt: null, stale: true, invalid: false });
+});
+
+it('does not establish a last-valid historical value with a non-finite clock', () => {
+  expect(summarizeZoneSoil([
+    device({ last_seen: STALE, latest_data: { swt_1: 10 } }),
+  ], Number.NaN)).toMatchObject({ value: null, observedAt: null, stale: true, invalid: false });
+});
+
+it.each([{ swt_1: 301 }, { swt_1: 45, chameleon_timeout: 1 }])(
+  'retains actual measurement faults even with an untrusted timestamp: %o', (latestData) => {
+    expect(summarizeZoneSoil([device({
+      type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+      last_seen: new Date(NOW + 24 * 60 * 60_000).toISOString(), latest_data: latestData,
+    })], NOW)).toMatchObject({ value: null, observedAt: null, stale: true, invalid: true });
+  },
+);
+
+describe('finite Chameleon fault values', () => {
+  it.each(['chameleon_i2c_missing', 'chameleon_timeout'] as const)(
+    'excludes %s readings beside a healthy current device', (flag) => {
+      const status = summarizeZoneSoil([
+        device({ deveui: 'FAULT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+          last_seen: FRESH, latest_data: { swt_1: 45, swt_2: 60, [flag]: 1 } }),
+        device({ deveui: 'HEALTHY', last_seen: FRESH, latest_data: { swt_1: 80 } }),
+      ], NOW, 'mean');
+      expect(status).toMatchObject({ value: 80, observedAt: FRESH, stale: false, invalid: false });
+    },
+  );
+
+  it('excludes an open channel from the mean without excluding its healthy sibling', () => {
+    const status = summarizeZoneSoil([device({ type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+      last_seen: FRESH, latest_data: { swt_1: 30, swt_2: 0, chameleon_ch2_open: 1 },
+    })], NOW, 'mean');
+    expect(status).toMatchObject({ value: 30, stale: false, invalid: false });
+  });
+
+  it.each(['chameleon_i2c_missing', 'chameleon_timeout'] as const)(
+    'marks %s invalid when no healthy value is available', (flag) => {
+      const status = summarizeZoneSoil([device({ type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+        last_seen: FRESH, latest_data: { swt_1: 45, swt_2: 60, [flag]: 1 },
+      })], NOW);
+      expect(status).toMatchObject({ value: null, observedAt: FRESH, invalid: true });
+    },
+  );
+
+  it('retains a healthy historical value while another device reports a current fault', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'FAULT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+        last_seen: FRESH, latest_data: { swt_1: 45, chameleon_timeout: 1 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 30 } }),
+    ], NOW);
+    expect(status).toMatchObject({ value: 30, observedAt: STALE, stale: true, invalid: false });
+  });
+});
+
+it('does not use a stale contributor to choose or label a current channel depth', () => {
+  const status = summarizeZoneSoil([
+    device({
+      deveui: 'CURRENT',
+      last_seen: FRESH,
+      soilMoistureProbeDepths: { swt_1: 60, swt_2: 30 },
+      latest_data: { swt_1: 60, swt_2: 30 },
+    }),
+    device({
+      deveui: 'STALE',
+      last_seen: STALE,
+      soilMoistureProbeDepths: { swt_1: 10 },
+      latest_data: { swt_1: 10 },
+    }),
+  ], NOW);
+  expect(status).toMatchObject({ value: 30, channel: 'swt_2', depthCm: 30, stale: false });
+});
+
+it.each([
+  { swt_1: null, chameleon_i2c_missing: 1 },
+  { swt_1: null, chameleon_timeout: 1 },
+  { swt_1: null, chameleon_ch1_open: 1 },
+  { swt_2: null, chameleon_ch2_open: 1 },
+  { swt_3: null, chameleon_ch3_open: 1 },
+])('rejects a faulted LSN50 sample even when its SWT value is null: %o', (latestData) => {
+  const status = summarizeZoneSoil([device({
+    type_id: 'DRAGINO_LSN50',
+    chameleon_enabled: 1,
+    last_seen: FRESH,
+    latest_data: latestData,
+  })], NOW);
+  expect(status).toMatchObject({ value: null, invalid: true });
+});
+
+
+it('accepts the three-hour age and five-minute skew boundaries only', () => {
+  const oldestCurrent = new Date(NOW - SENSOR_FRESHNESS_WINDOW_MS).toISOString();
+  const oneMsTooOld = new Date(NOW - SENSOR_FRESHNESS_WINDOW_MS - 1).toISOString();
+  const furthestCurrent = new Date(NOW + 5 * 60_000).toISOString();
+  const oneMsTooFarAhead = new Date(NOW + 5 * 60_000 + 1).toISOString();
+  const farFuture = new Date(NOW + 24 * 60 * 60_000).toISOString();
+  expect(isSensorObservationFresh(FRESH, NOW)).toBe(true);
+  expect(isSensorObservationFresh(oldestCurrent, NOW)).toBe(true);
+  expect(isSensorObservationFresh(oneMsTooOld, NOW)).toBe(false);
+  expect(isSensorObservationFresh(furthestCurrent, NOW)).toBe(true);
+  expect(isSensorObservationFresh(oneMsTooFarAhead, NOW)).toBe(false);
+  expect(isSensorObservationFresh(farFuture, NOW)).toBe(false);
+  expect(isSensorObservationFresh(null, NOW)).toBe(false);
+  expect(isSensorObservationFresh('not-a-date', NOW)).toBe(false);
+  expect(isSensorObservationFresh(FRESH, Number.NaN)).toBe(false);
+  expect(isSensorObservationFresh(FRESH, Number.POSITIVE_INFINITY)).toBe(false);
 });

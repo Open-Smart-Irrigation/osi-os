@@ -36,6 +36,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     i18n: { language: 'en' },
     t: (key: string, options?: unknown) => {
+      const statusLabel = ({
+        'history.soil.state.wet': 'Wet',
+        'history.soil.state.moist': 'Moist',
+        'history.soil.state.dry': 'Dry',
+      } as Record<string, string>)[key];
+      if (statusLabel) return statusLabel;
       if (typeof options === 'string') return options;
       const values = (options ?? {}) as Record<string, unknown>;
       const template = typeof values.defaultValue === 'string' ? values.defaultValue : key;
@@ -122,6 +128,32 @@ afterEach(() => {
 });
 
 describe('water card sensor gating', () => {
+  it.each([new Date(NOW + 24 * 60 * 60_000).toISOString(), null, 'not-a-date'])(
+    'shows unavailable timing without blaming a valid measurement: %s', async (lastSeen) => {
+      await openCard([sensor({ last_seen: lastSeen, latest_data: { swt_1: 90 } })]);
+      const tile = screen.getByTestId('water-soil-tile');
+      expect(tile).toHaveTextContent('No reading yet');
+      expect(tile).not.toHaveTextContent('Invalid reading');
+      expect(tile).not.toHaveTextContent('No reading since');
+      expect(tile).not.toHaveTextContent('Last valid');
+      expect(tile).not.toHaveTextContent('90.0 kPa');
+      expect(tile.querySelector('[data-swt-status]')).toBeNull();
+    },
+  );
+
+  it('shows the last healthy snapshot when a different device reports a current fault', async () => {
+    await openCard([
+      sensor({ deveui: 'FAULT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+        last_seen: FRESH, latest_data: { swt_1: 45, chameleon_timeout: 1 } }),
+      sensor({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 30 } }),
+    ]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('No reading since 4 hours ago');
+    expect(tile).toHaveTextContent('Last valid 30.0 kPa');
+    expect(tile).not.toHaveTextContent('Invalid reading');
+    expect(tile.querySelector('[data-swt-status]')).toBeNull();
+  });
+
   it('hides the soil tile when the zone has no soil sensor', async () => {
     await openCard([sensor({ type_id: 'STREGA_VALVE', name: 'Valve 1' })]);
 
@@ -136,7 +168,7 @@ describe('water card sensor gating', () => {
     // The channel it came from, not the 45.0 kPa mean of two burial depths.
     expect(tile).toHaveTextContent('Soil now · Sensor 1');
     expect(tile).toHaveTextContent('45.2 kPa');
-    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Moist');
     expect(tile).not.toHaveTextContent('No reading since');
   });
 
@@ -380,6 +412,18 @@ describe('water card reason line', () => {
 });
 
 describe('soil tile channel and verdict', () => {
+  it('keeps future-dated samples out of the last-valid value and timestamp', async () => {
+    await openCard([
+      sensor({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 10 } }),
+      sensor({ deveui: 'FUTURE', last_seen: '2027-07-08T12:00:00.000Z', latest_data: { swt_1: 90 } }),
+    ]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Last valid 10.0 kPa');
+    expect(tile).not.toHaveTextContent('50.0 kPa');
+    expect(tile).not.toHaveTextContent('2027');
+    expect(tile.querySelector('[data-swt-status]')).toBeNull();
+  });
+
   const scheduledZone = {
     ...zone,
     schedule: { irrigation_zone_id: 12, trigger_metric: 'SWT_1', threshold_kpa: 30, enabled: true },
@@ -408,14 +452,12 @@ describe('soil tile channel and verdict', () => {
     expect(tile).toHaveTextContent('56.5 kPa');
   });
 
-  it('judges the reading against the zone trigger, not a global bucket', async () => {
-    // 56.5 kPa against a 30 kPa trigger: the valve opens tonight, and the card
-    // used to call the same reading "Moderate".
+  it('shows fixed status alongside the zone trigger comparison', async () => {
     await openScheduled([sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
     expect(tile).toHaveTextContent('At or past the trigger');
-    expect(tile).not.toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Dry');
   });
 
   it('says a reading is approaching the trigger within 20 percent of it', async () => {
@@ -434,7 +476,7 @@ describe('soil tile channel and verdict', () => {
     await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 56.5 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Dry');
     expect(tile).not.toHaveTextContent('trigger');
   });
 
@@ -454,7 +496,29 @@ describe('soil tile channel and verdict', () => {
     await screen.findByTestId('water-today-card');
 
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('Moderate');
+    expect(tile).toHaveTextContent('Dry');
     expect(tile).not.toHaveTextContent('trigger');
   });
+  it('shows SDI-12 Tensiomark as moist tension', async () => {
+    await openCard([sensor({
+      type_id: 'DRAGINO_SDI12',
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest_data: { swt_1: 30.2, soil_temp_1: 21.5 },
+    })]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('30.2 kPa');
+    expect(tile).toHaveTextContent('Moist');
+    expect(tile).not.toHaveTextContent('Volumetric water content');
+  });
+
+  it('does not apply an absent scheduled channel threshold to a fallback channel', async () => {
+    await openScheduled([sensor({ last_seen: FRESH, latest_data: { swt_2: 56.5 } })]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Dry');
+    expect(tile).not.toHaveTextContent('At or past the trigger');
+    expect(tile).not.toHaveTextContent('Approaching the trigger');
+    expect(tile).not.toHaveTextContent('Below the trigger');
+  });
+
 });
