@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soil water status — reviewed preview</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#18232f;font:15px/1.55 system-ui,sans-serif}main{max-width:1400px;margin:auto;padding:32px 24px}h1{font-size:28px;margin:0 0 8px}h2{font-size:18px;margin:28px 0 12px}p{max-width:850px;color:#4a5968}nav{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:20px 0}button,a{font:inherit}button{padding:8px 16px;border:1px solid #8295a8;border-radius:8px;background:white;cursor:pointer}button[aria-pressed=true]{background:#183b55;color:white}a{color:#125d91}img{display:block;width:100%;height:auto;border-radius:12px}figure{margin:0}figcaption{margin:8px 0 14px;color:#4a5968}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;align-items:start}.full{display:flex;gap:24px;align-items:flex-start}.full figure:first-child{flex:1}.full figure:last-child{width:300px}details{margin:28px 0}summary{cursor:pointer;font-weight:600}@media(max-width:700px){main{padding:20px 12px}.cards{grid-template-columns:1fr}.full{display:block}.full figure:last-child{width:100%}}
+</style>
+<main>
+  <h1>Soil water status</h1>
+  <p>Browser captures of the existing OSI cards with the proposed status pills. Numeric readings keep their neutral color. The dot and translated label share the same meaning in both themes.</p>
+  <nav aria-label="Screenshot theme"><button type="button" data-theme="light" aria-pressed="true">Light</button><button type="button" data-theme="dark" aria-pressed="false">Dark</button><a href="http://127.0.0.1:4178/gui/design-preview/">Open interactive preview</a></nav>
+  <h2>Water card</h2>
+  <figure><img data-capture="water" src="1440-light-en-kPa-fresh-water.png" alt="Existing Water card with rain, forecast, action and Soil now tiles. Soil now shows 34.9 kPa, Moist, and At or past the trigger."><figcaption>“Moist” describes the soil band; “At or past the trigger” describes this zone’s separate 30 kPa setting.</figcaption></figure>
+  <h2>Device cards</h2>
+  <div class="cards">
+    <figure><img data-capture="kiwi" src="1440-light-en-kPa-fresh-kiwi.png" alt="KIWI card with Wet and Moist indicators alongside its soil readings, retaining light, temperature and humidity readings."><figcaption>KIWI: one indicator per soil channel, beside the history button.</figcaption></figure>
+    <figure><img data-capture="chameleon" src="1440-light-en-kPa-fresh-chameleon.png" alt="LSN50 Chameleon card with Wet, Moist and Dry at three depths; each row remains a history control."><figcaption>LSN50: each depth retains its own status. The row is still one history button.</figcaption></figure>
+    <figure><img data-capture="sdi12" src="1440-light-en-kPa-fresh-sdi12.png" alt="SDI-12 Tensiomark card with a Moist indicator after 30.2 kPa and 2.48 pF."><figcaption>SDI-12: kPa and pF stay together; the pill follows the measurement.</figcaption></figure>
+  </div>
+  <details><summary>See the full desktop and mobile layouts</summary><div class="full"><figure><img data-full="1440" src="1440-light-en-kPa-fresh.png" alt="Full existing desktop zone layout with proposed indicators."><figcaption>Desktop, 1440 px.</figcaption></figure><figure><img data-full="390" src="390-light-en-kPa-fresh.png" alt="Full mobile zone layout with proposed indicators."><figcaption>Mobile, 390 px.</figcaption></figure></div></details>
+  <p>Sample data only. These screenshots validate the proposed layout; production implementation is still pending. At 320 px, existing device-header controls can hide names. That inherited issue is recorded in the review notes.</p>
+</main>
+<script>
+for (const button of document.querySelectorAll('[data-theme]')) button.addEventListener('click', () => {
+  const theme = button.dataset.theme;
+  for (const candidate of document.querySelectorAll('[data-theme]')) candidate.setAttribute('aria-pressed', String(candidate === button));
+  for (const image of document.querySelectorAll('[data-capture]')) image.src = `1440-${theme}-en-kPa-fresh-${image.dataset.capture}.png`;
+  for (const image of document.querySelectorAll('[data-full]')) image.src = `${image.dataset.full}-${theme}-en-kPa-fresh.png`;
+});
+</script>
+</html>

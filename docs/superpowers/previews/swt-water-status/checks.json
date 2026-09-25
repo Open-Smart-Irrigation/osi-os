@@ -1,0 +1,305 @@
+{
+  "mode": "proposed",
+  "cases": [
+    {
+      "width": 1440,
+      "theme": "light",
+      "lang": "en",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      },
+      "keyboardHistory": "KIWI and LSN50 opened with Tab/Enter"
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "lang": "de-CH",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "lang": "fr",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "lang": "en",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "lang": "de-CH",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "lang": "fr",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "lang": "en",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "lang": "de-CH",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "lang": "fr",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "lang": "en",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "lang": "de-CH",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "lang": "fr",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 320,
+      "theme": "light",
+      "lang": "en",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 320,
+      "theme": "light",
+      "lang": "de-CH",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 320,
+      "theme": "light",
+      "lang": "fr",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 320,
+      "theme": "dark",
+      "lang": "en",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 320,
+      "theme": "dark",
+      "lang": "de-CH",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 320,
+      "theme": "dark",
+      "lang": "fr",
+      "unit": "kPa",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "lang": "en",
+      "unit": "pF",
+      "scenario": "stale",
+      "badges": 0,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "lang": "en",
+      "unit": "pF",
+      "scenario": "fault",
+      "badges": 4,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "lang": "en",
+      "unit": "pF",
+      "scenario": "zero",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "lang": "en",
+      "unit": "pF",
+      "scenario": "future",
+      "badges": 0,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "lang": "de-CH",
+      "unit": "pF",
+      "scenario": "fresh",
+      "badges": 7,
+      "browserErrors": [],
+      "overflow": {
+        "document": false,
+        "badges": []
+      }
+    }
+  ]
+}
