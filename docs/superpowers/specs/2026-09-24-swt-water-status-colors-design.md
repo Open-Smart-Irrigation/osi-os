@@ -114,6 +114,8 @@ For LSN50 Chameleon channels, `chameleon_i2c_missing`, `chameleon_timeout`, and 
 
 Historical contributors must have parseable observation timestamps older than the three-hour window. Missing, invalid, and future-dated timestamps do not supply a last-valid value or affect its mean. This rule applies per channel. An `SWT_AVG` schedule averages eligible current channels; it does not create a new device-card average. The selected channel and depth behavior stays unchanged.
 
+An otherwise valid measurement with an untrusted timestamp leaves both the value and observation time unavailable. It does not count as an invalid measurement; the Water card uses the existing localized No reading yet copy. An actual measurement fault still sets invalid when no eligible value is available. A healthy historical value takes precedence over faults on other devices in the zone summary, while each faulted device retains its own fault display.
+
 ## Device-card behavior
 
 ### KIWI
@@ -121,6 +123,8 @@ Historical contributors must have parseable observation timestamps older than th
 Each visible SWT tile gets one indicator beside its formatted value. `swt_1` and `swt_2` classify independently. Legacy `swt_wm1` and `swt_wm2` remain compatibility inputs through `canonicalSwtChannels()`.
 
 The numeric value remains the existing history button. The status pill sits beside the button rather than inside a second interactive element. A stale KIWI continues to show its last value and footer timestamp but receives no current-status pill.
+
+An unavailable SWT value uses the existing translated unavailable label inside the history button. History remains accessible for a displayed channel even when its latest measurement is missing or outside the valid range. Other KIWI measurement controls keep their existing behavior.
 
 ### LSN50 Chameleon
 

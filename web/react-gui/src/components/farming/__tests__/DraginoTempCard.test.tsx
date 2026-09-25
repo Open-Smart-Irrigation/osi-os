@@ -89,7 +89,7 @@ describe('DraginoTempCard SWT unit preference', () => {
     render(<DraginoTempCard removeContext="farm" device={{
       ...chameleonDevice,
       last_seen: FRESH,
-      latest_data: { swt_1: null, swt_2: null, ...fault },
+      latest_data: { swt_1: 10, swt_2: 30, ...fault },
     }} />);
     expect(screen.queryByText('Wet')).not.toBeInTheDocument();
     expect(screen.queryByText('Moist')).not.toBeInTheDocument();

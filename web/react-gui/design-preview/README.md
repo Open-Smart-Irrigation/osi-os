@@ -1,11 +1,11 @@
 # Soil water status preview
 
-This fixture renders the implemented zone and device components with fixed sample data. Run it in implemented mode to use the product source directly.
+This fixture renders the implemented zone and device components with fixed sample data. Implemented mode is the default and uses the product source directly.
 
 From `web/react-gui`:
 
 ```bash
-SWT_PREVIEW_MODE=implemented npx vite --config design-preview/vite.config.mjs --host 127.0.0.1 --port 4178
+npx vite --config design-preview/vite.config.mjs --host 127.0.0.1 --port 4178
 ```
 
 Open <http://127.0.0.1:4178/gui/design-preview/>. Expand Zone B, then its device section. The toolbar changes theme, language, display unit, and sample scenario. This fixture disables the optional environment and schedule panels, preserving the full Water card and device sections. Its local API returns only fixed responses; write requests return 405 and no proxy contacts Node-RED.
@@ -13,7 +13,7 @@ Open <http://127.0.0.1:4178/gui/design-preview/>. Expand Zone B, then its device
 Run browser checks with a locally installed Playwright:
 
 ```bash
-SWT_PREVIEW_MODE=implemented node design-preview/capture.mjs
+node design-preview/capture.mjs
 ```
 
 Set `PLAYWRIGHT_MODULE` to an existing Playwright `index.mjs` path if it is installed elsewhere. Otherwise `npm install --no-save --package-lock=false playwright` and `npx playwright install chromium` supply local tooling without changing product dependency declarations. Captures go to `docs/superpowers/previews/swt-water-status/implemented/`. The parent directory's `index.html` preserves the approved design gallery.
@@ -22,7 +22,7 @@ The script checks 23 viewport/theme/locale/scenario combinations, badge and page
 
 ## Final implementation gate
 
-Set `SWT_PREVIEW_MODE=implemented` on both the server and capture commands. That mode disables every source transform and requires the real implemented badges to pass the same checks. Its default output goes to `swt-water-status/implemented/`, keeping proposed-mode evidence intact. A proposed-mode pass cannot establish final implementation correctness.
+Both commands default to implemented mode, which disables every source transform and requires the real implemented badges to pass the checks. `SWT_PREVIEW_MODE=implemented` may also be set explicitly. Its output goes to `swt-water-status/implemented/`, keeping proposed-mode evidence intact. A proposed-mode pass cannot establish final implementation correctness.
 
 ## Historical design preview and limits
 

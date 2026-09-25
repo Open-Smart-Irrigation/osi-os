@@ -1223,3 +1223,23 @@ git commit -m "test(gui): close SWT status verification gap"
 ```
 
 Hand the branch to a fresh reviewer for a hunk-by-hunk check against the spec before merge.
+
+## Approved review follow-up
+
+The user approved the consolidated external-review findings on 2026-09-25. Continue inline in the existing worktree from `d7b81d9ab`.
+
+- [x] Separate measurement validity from timestamp eligibility in `web/react-gui/src/utils/zoneSoil.ts`. Track actual invalid/faulted readings; a valid value with an untrusted timestamp does not set `invalid`. Only current or historical observation times may populate `observedAt`. Preserve invalid status when actual faults exist and no eligible value exists.
+- [x] Extend `src/utils/__tests__/zoneSoil.test.ts` and `src/components/farming/__tests__/IrrigationZoneCardSensorGating.test.tsx`: future, missing, and malformed timestamps produce unavailable values, no badge, and localized No reading yet copy. Actual invalid measurements remain invalid. Add both global-fault flags with finite readings beside a healthy current device, an open channel beside a healthy channel, fault-only readings, and the documented healthy historical fallback.
+- [x] Preserve the KIWI history action for unavailable SWT values in `src/components/farming/KiwiSensorCard.tsx`. Use the existing translated unavailable label and history title. Keep other measurement controls unchanged. Test an out-of-range channel opening its history, and retain the existing status and zero tests.
+- [x] Default `design-preview/vite.config.mjs` and `design-preview/capture.mjs` to implemented mode. Preserve explicit proposed mode for historical checkouts. Run the fixture and capture with `SWT_PREVIEW_MODE` unset to verify the defaults together.
+- [x] Update the design contract and implementation verification report with timestamp/fault precedence, history availability, and final results. Preserve the approved screenshot evidence and refresh affected captures.
+
+For each product fix, first run its regression tests against the old code and confirm the intended failure, then apply the scoped correction and run the same tests. Fault mixtures pin existing behavior and are expected to pass before the correction.
+
+Focused gate, from `web/react-gui`:
+
+```bash
+npx vitest run src/utils/__tests__/zoneSoil.test.ts src/components/farming/__tests__/IrrigationZoneCardSensorGating.test.tsx src/components/farming/__tests__/KiwiSensorCard.test.tsx src/components/farming/__tests__/DraginoTempCard.test.tsx
+```
+
+Final gates are `npm run typecheck`, `npm run test:unit`, `npm run build`, the 23-case browser capture, phone interaction checks, base-relative `git diff --check`, and the repository prose check. A fresh reviewer checks the follow-up diff before completion. Record each root cause and its verification in the existing implementation report.

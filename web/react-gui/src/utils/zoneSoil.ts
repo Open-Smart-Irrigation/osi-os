@@ -60,7 +60,7 @@ export interface ZoneSoilStatus {
   observedAt: string | null;
   /** Configured and reporting, but the newest uplink predates the freshness window. */
   stale: boolean;
-  /** Configured and reporting, but no channel value is finite and in range. */
+  /** No eligible value is available, and at least one measurement is invalid or faulted. */
   invalid: boolean;
 }
 
@@ -257,7 +257,7 @@ function summarizeTension(
   const [min, max] = SWT_KPA_RANGE;
   const current = emptyTensionBucket();
   const historical = emptyTensionBucket();
-  let reportedCount = 0;
+  let hasInvalidReading = false;
   let anyObservedAt: string | null = null;
 
   for (const device of devices) {
@@ -272,11 +272,12 @@ function summarizeTension(
       const raw = row?.[channel] ?? (legacy ? row?.[legacy] : undefined);
       const faulted = chameleonChannelFaulted(device, channel);
       if ((raw === null || raw === undefined) && !faulted) continue;
-      reportedCount += 1;
-      anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
-      if (faulted) continue;
+      if (fresh || isHistorical) anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
+      if (faulted || typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) {
+        hasInvalidReading = true;
+        continue;
+      }
       if (!fresh && !isHistorical) continue;
-      if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) continue;
       appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel));
     }
   }
@@ -306,7 +307,7 @@ function summarizeTension(
     depthCm: channel && channel !== 'mean' ? bucket.depths.get(channel) ?? null : null,
     observedAt: resolvedObservedAt,
     stale: !usingCurrent,
-    invalid: reportedCount > 0 && currentAvailable.length === 0 && historicalAvailable.length === 0,
+    invalid: hasInvalidReading && currentAvailable.length === 0 && historicalAvailable.length === 0,
   };
 }
 

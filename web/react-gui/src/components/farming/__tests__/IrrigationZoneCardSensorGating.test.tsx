@@ -128,6 +128,32 @@ afterEach(() => {
 });
 
 describe('water card sensor gating', () => {
+  it.each([new Date(NOW + 24 * 60 * 60_000).toISOString(), null, 'not-a-date'])(
+    'shows unavailable timing without blaming a valid measurement: %s', async (lastSeen) => {
+      await openCard([sensor({ last_seen: lastSeen, latest_data: { swt_1: 90 } })]);
+      const tile = screen.getByTestId('water-soil-tile');
+      expect(tile).toHaveTextContent('No reading yet');
+      expect(tile).not.toHaveTextContent('Invalid reading');
+      expect(tile).not.toHaveTextContent('No reading since');
+      expect(tile).not.toHaveTextContent('Last valid');
+      expect(tile).not.toHaveTextContent('90.0 kPa');
+      expect(tile.querySelector('[data-swt-status]')).toBeNull();
+    },
+  );
+
+  it('shows the last healthy snapshot when a different device reports a current fault', async () => {
+    await openCard([
+      sensor({ deveui: 'FAULT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+        last_seen: FRESH, latest_data: { swt_1: 45, chameleon_timeout: 1 } }),
+      sensor({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 30 } }),
+    ]);
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('No reading since 4 hours ago');
+    expect(tile).toHaveTextContent('Last valid 30.0 kPa');
+    expect(tile).not.toHaveTextContent('Invalid reading');
+    expect(tile.querySelector('[data-swt-status]')).toBeNull();
+  });
+
   it('hides the soil tile when the zone has no soil sensor', async () => {
     await openCard([sensor({ type_id: 'STREGA_VALVE', name: 'Valve 1' })]);
 

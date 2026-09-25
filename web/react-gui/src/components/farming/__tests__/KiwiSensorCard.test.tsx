@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
@@ -31,6 +31,7 @@ vi.mock('../../../services/api', () => ({
     setUplinkInterval: vi.fn().mockResolvedValue(undefined),
     enableTemperatureHumidity: vi.fn().mockResolvedValue(undefined),
   },
+  sensorAPI: { getHistory: vi.fn().mockResolvedValue([]) },
   getApiErrorMessage: (_err: unknown, fallback: string) => fallback,
 }));
 
@@ -108,6 +109,28 @@ describe('KiwiSensorCard SWT unit preference', () => {
     expect(badge?.closest('button')).toBeNull();
     expect(badge?.parentElement).toHaveClass('flex', 'flex-wrap');
     expect(screen.getByTitle('View history')).toBeInTheDocument();
+  });
+
+  it.each([-1, 301, null])('opens history even when the SWT value is unavailable: %s', async (value) => {
+    render(<KiwiSensorCard removeContext="farm" device={{
+      ...kiwiDevice, last_seen: FRESH, latest_data: { swt_1: value },
+    }} />);
+    const history = screen.getByTitle('View history');
+    expect(history).toHaveTextContent('na');
+    expect(screen.queryByText('Wet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dry')).not.toBeInTheDocument();
+    fireEvent.click(history);
+    expect(screen.getByRole('heading', { name: 'Soil Water Tension 1' })).toBeInTheDocument();
+    expect(await screen.findByText('No soil water tension 1 data in the last 24 hours.')).toBeInTheDocument();
+  });
+
+  it('opens the second channel history when only that channel is invalid', async () => {
+    render(<KiwiSensorCard removeContext="farm" device={{
+      ...kiwiDevice, last_seen: FRESH, latest_data: { swt_1: 30, swt_2: 301 },
+    }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'na' }));
+    expect(screen.getByRole('heading', { name: 'Soil Water Tension 2' })).toBeInTheDocument();
+    expect(await screen.findByText('No soil water tension 2 data in the last 24 hours.')).toBeInTheDocument();
   });
 
 });

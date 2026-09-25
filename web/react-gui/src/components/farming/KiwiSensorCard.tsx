@@ -342,7 +342,8 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
 
   const renderValue = (field: string, formatted: string | null) => {
     const sensor = SENSOR_BY_FIELD[field];
-    if (!formatted || !sensor) {
+    const isSwt = field === 'swt_1' || field === 'swt_2';
+    if (!sensor || (!formatted && !isSwt)) {
       return <p className="text-2xl font-bold text-[var(--text)] tabular-nums">{formatted ?? tc('na')}</p>;
     }
     return (
@@ -351,7 +352,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
         className="text-2xl font-bold tabular-nums text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
         title={t('common.viewHistory', { defaultValue: 'View history' })}
       >
-        {formatted}
+        {formatted ?? tc('na')}
       </button>
     );
   };

@@ -273,13 +273,60 @@ it.each([
   const rejectedOnly = summarizeZoneSoil([
     device({ last_seen: lastSeen, latest_data: { swt_1: 90 } }),
   ], NOW);
-  expect(rejectedOnly).toMatchObject({ value: null, stale: true });
+  expect(rejectedOnly).toMatchObject({ value: null, observedAt: null, stale: true, invalid: false });
 });
 
 it('does not establish a last-valid historical value with a non-finite clock', () => {
   expect(summarizeZoneSoil([
     device({ last_seen: STALE, latest_data: { swt_1: 10 } }),
-  ], Number.NaN)).toMatchObject({ value: null, stale: true });
+  ], Number.NaN)).toMatchObject({ value: null, observedAt: null, stale: true, invalid: false });
+});
+
+it.each([{ swt_1: 301 }, { swt_1: 45, chameleon_timeout: 1 }])(
+  'retains actual measurement faults even with an untrusted timestamp: %o', (latestData) => {
+    expect(summarizeZoneSoil([device({
+      type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+      last_seen: new Date(NOW + 24 * 60 * 60_000).toISOString(), latest_data: latestData,
+    })], NOW)).toMatchObject({ value: null, observedAt: null, stale: true, invalid: true });
+  },
+);
+
+describe('finite Chameleon fault values', () => {
+  it.each(['chameleon_i2c_missing', 'chameleon_timeout'] as const)(
+    'excludes %s readings beside a healthy current device', (flag) => {
+      const status = summarizeZoneSoil([
+        device({ deveui: 'FAULT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+          last_seen: FRESH, latest_data: { swt_1: 45, swt_2: 60, [flag]: 1 } }),
+        device({ deveui: 'HEALTHY', last_seen: FRESH, latest_data: { swt_1: 80 } }),
+      ], NOW, 'mean');
+      expect(status).toMatchObject({ value: 80, observedAt: FRESH, stale: false, invalid: false });
+    },
+  );
+
+  it('excludes an open channel from the mean without excluding its healthy sibling', () => {
+    const status = summarizeZoneSoil([device({ type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+      last_seen: FRESH, latest_data: { swt_1: 30, swt_2: 0, chameleon_ch2_open: 1 },
+    })], NOW, 'mean');
+    expect(status).toMatchObject({ value: 30, stale: false, invalid: false });
+  });
+
+  it.each(['chameleon_i2c_missing', 'chameleon_timeout'] as const)(
+    'marks %s invalid when no healthy value is available', (flag) => {
+      const status = summarizeZoneSoil([device({ type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+        last_seen: FRESH, latest_data: { swt_1: 45, swt_2: 60, [flag]: 1 },
+      })], NOW);
+      expect(status).toMatchObject({ value: null, observedAt: FRESH, invalid: true });
+    },
+  );
+
+  it('retains a healthy historical value while another device reports a current fault', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'FAULT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
+        last_seen: FRESH, latest_data: { swt_1: 45, chameleon_timeout: 1 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 30 } }),
+    ], NOW);
+    expect(status).toMatchObject({ value: 30, observedAt: STALE, stale: true, invalid: false });
+  });
 });
 
 it('does not use a stale contributor to choose or label a current channel depth', () => {

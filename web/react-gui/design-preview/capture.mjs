@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // Use an existing Playwright installation without adding a product dependency.
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.SWT_PREVIEW_URL || 'http://127.0.0.1:4178/gui/design-preview/';
-const expectedMode = process.env.SWT_PREVIEW_MODE || 'proposed';
+const expectedMode = process.env.SWT_PREVIEW_MODE || 'implemented';
 const output = process.env.SWT_PREVIEW_OUTPUT || fileURLToPath(new URL(`../../../docs/superpowers/previews/swt-water-status/${expectedMode === 'implemented' ? 'implemented/' : ''}`, import.meta.url));
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
@@ -58,6 +58,11 @@ try {
     }
     if (item.scenario === 'fault') {
       assert.match(await page.getByTestId('water-soil-tile').innerText(), /2\.52 pF/, 'faulted Chameleon excluded from Soil now');
+    }
+    if (item.scenario === 'future') {
+      const soilText = await page.getByTestId('water-soil-tile').innerText();
+      assert.match(soilText, /No reading yet/, 'untrusted timestamp leaves observation time unavailable');
+      assert.doesNotMatch(soilText, /Invalid reading|No reading since|Last valid/, 'clock uncertainty is not a measurement fault');
     }
     assert.equal(await page.locator('button button').count(), 0, 'no nested buttons');
     assert.equal(await page.locator('[data-swt-status][role="status"], [data-swt-status] [role="status"]').count(), 0, 'no live regions');

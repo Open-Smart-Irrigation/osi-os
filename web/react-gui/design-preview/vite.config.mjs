@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { environment } from './fixtures.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const implemented = process.env.SWT_PREVIEW_MODE === 'implemented';
+const implemented = (process.env.SWT_PREVIEW_MODE || 'implemented') === 'implemented';
 
 // Fail on source drift: a preview must never silently omit an intended change.
 function replaceOnce(source, before, after, file) {
