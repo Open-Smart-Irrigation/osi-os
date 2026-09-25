@@ -73,7 +73,7 @@ null   otherwise
 
 Classification happens before rounding and before `kpaToPf()`. Thus `19.999` is Wet, `20` is Moist, `50` is Moist, and `50.001` is Dry. A numeric string is invalid. Zero is valid Wet even though its pF representation is undefined; when pF mode cannot format zero, the card displays `0.0 kPa` rather than an em dash so a real reading is not hidden.
 
-`summarizeSwtValues()` must delegate to this classifier if it remains exported. It may not retain a competing 60 kPa boundary or the label Moderate.
+`summarizeSwtValues()` must delegate to this classifier if it remains exported. It returns a language-neutral status code, with user-visible labels resolved from the existing locale resources. It may not retain a competing 60 kPa boundary or hardcoded English labels.
 
 VIA status is descriptive, not an irrigation command. The UI must not translate the states into “safe,” “overwatered,” or “irrigate now.” Crop, depth, salinity, and the farm's configured trigger still affect the operator's decision.
 
@@ -112,7 +112,7 @@ For LSN50 Chameleon channels, `chameleon_i2c_missing`, `chameleon_timeout`, and 
 
 `summarizeZoneSoil()` must build a current tension value from current, valid contributors only. If at least one eligible current contributor exists, stale or faulted devices do not enter its mean. If none is current but valid historical snapshots exist, the function retains the last-valid value and timestamp for the existing stale display, which receives no indicator. If reported values exist but all are invalid or faulted, the result remains invalid.
 
-This rule applies per channel. An `SWT_AVG` schedule averages eligible current channels; it does not create a new device-card average. The selected channel and depth behavior stays unchanged.
+Historical contributors must have parseable observation timestamps older than the three-hour window. Missing, invalid, and future-dated timestamps do not supply a last-valid value or affect its mean. This rule applies per channel. An `SWT_AVG` schedule averages eligible current channels; it does not create a new device-card average. The selected channel and depth behavior stays unchanged.
 
 ## Device-card behavior
 

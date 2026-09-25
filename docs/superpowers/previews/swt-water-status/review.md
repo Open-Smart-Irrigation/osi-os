@@ -1,5 +1,7 @@
 # Soil water status preview review
 
+The approved design is now implemented. See [implementation verification](implemented/verification.md) for the actual-source captures, test results, and final review. The notes below record the earlier design review.
+
 The September 25 revision replaces the generated mockup with browser captures of the existing React cards. Open [the gallery](index.html) or run the [interactive fixture](../../../../web/react-gui/design-preview/README.md).
 
 The chosen treatment remains a small dot-and-label pill beside neutral numeric readings. The Water card retains its rain, forecast, action, and soil tiles. KIWI retains light, temperature, and humidity; LSN50 retains temperature, battery, depth labels, and whole-row history controls. SDI-12 retains its combined kPa/pF display.

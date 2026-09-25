@@ -82,6 +82,7 @@ The `.git` marker is local repository metadata and is never staged.
 
 - Modify: `web/react-gui/src/utils/swt.ts`
 - Modify: `web/react-gui/src/utils/__tests__/swt.test.ts`
+- Modify: `web/react-gui/tests/swtCanonical.test.ts`
 
 **Interfaces:**
 
@@ -90,7 +91,7 @@ The `.git` marker is local repository metadata and is never staged.
 - Produces: `formatSwtCardValue(kpa: unknown, unit: SwtUnit): string | null`
 - Preserves: `formatSwtValue()` as the strict unit formatter used by export and conversion tests
 
-- [ ] **Step 1: Write failing classifier and display tests**
+- [x] **Step 1: Write failing classifier and display tests**
 
 Extend the import and add these cases to `src/utils/__tests__/swt.test.ts`:
 
@@ -146,7 +147,7 @@ describe('formatSwtCardValue', () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and confirm the missing exports fail**
+- [x] **Step 2: Run the focused test and confirm the missing exports fail**
 
 Run:
 
@@ -156,7 +157,7 @@ Run:
 
 Expected: FAIL because `classifySwtWaterStatus` and `formatSwtCardValue` are not exported.
 
-- [ ] **Step 3: Add the classifier and card-display formatter**
+- [x] **Step 3: Add the classifier and card-display formatter**
 
 Add beside `SwtUnit` in `src/utils/swt.ts`:
 
@@ -182,23 +183,24 @@ export function formatSwtCardValue(kpa: unknown, unit: SwtUnit): string | null {
 }
 ```
 
-Replace the 20/60 branches in `summarizeSwtValues()` with a delegation so no second threshold rule survives:
+Return a language-neutral status from `summarizeSwtValues()` so neither a competing threshold nor English labels survive in the utility. Update the Node runner's two summary assertions to the `status` property; repository search found no production consumer of the old `label` property.
 
 ```ts
+export function summarizeSwtValues(values: number[]): { status: SwtWaterStatus | null; swt: number | null } {
+  if (!values.length) return { status: null, swt: null };
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const status = classifySwtWaterStatus(mean);
-  if (status === null) return { label: 'No soil sensor reading', swt: null };
-  const label: Record<SwtWaterStatus, string> = { wet: 'Wet', moist: 'Moist', dry: 'Dry' };
-  return { label: label[status], swt: mean };
+  return { status, swt: status === null ? null : mean };
+}
 ```
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 Run: `(cd web/react-gui && npx vitest run src/utils/__tests__/swt.test.ts)`
 
 Expected: PASS, including strict `formatSwtValue(0, 'pF') === null` and card-only zero fallback.
 
-- [ ] **Step 5: Commit the domain contract**
+- [x] **Step 5: Commit the domain contract**
 
 ```bash
 git add web/react-gui/src/utils/swt.ts web/react-gui/src/utils/__tests__/swt.test.ts
@@ -218,7 +220,7 @@ git commit -m "feat(gui): classify SWT with VIA water-status bands"
 - Produces: `SwtStatusIndicator({ status, className? })`
 - Depends on: existing `history.history.soil.state.{wet,moist,dry}` locale entries and `--soil-*` CSS variables
 
-- [ ] **Step 1: Write the component tests with real English and German resources**
+- [x] **Step 1: Write the component tests with real English and German resources**
 
 Create `components/farming/__tests__/SwtStatusIndicator.test.tsx` so the existing `npm run test:unit:vitest` directory list includes it:
 
@@ -283,13 +285,13 @@ describe('SwtStatusIndicator', () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and confirm the missing module fails**
+- [x] **Step 2: Run the focused test and confirm the missing module fails**
 
 Run: `(cd web/react-gui && npx vitest run src/components/farming/__tests__/SwtStatusIndicator.test.tsx)`
 
 Expected: FAIL because `SwtStatusIndicator.tsx` does not exist.
 
-- [ ] **Step 3: Implement the presentation-only component**
+- [x] **Step 3: Implement the presentation-only component**
 
 Create `shared/SwtStatusIndicator.tsx`:
 
@@ -337,7 +339,7 @@ export function SwtStatusIndicator({ status, className = '' }: SwtStatusIndicato
 }
 ```
 
-- [ ] **Step 4: Run the component and locale tests**
+- [x] **Step 4: Run the component and locale tests**
 
 Run:
 
@@ -347,7 +349,7 @@ Run:
 
 Expected: PASS with Wet and Feucht rendered from real resources.
 
-- [ ] **Step 5: Commit the shared visual**
+- [x] **Step 5: Commit the shared visual**
 
 ```bash
 git add web/react-gui/src/components/farming/shared/SwtStatusIndicator.tsx web/react-gui/src/components/farming/__tests__/SwtStatusIndicator.test.tsx
@@ -367,7 +369,7 @@ git commit -m "feat(gui): add accessible SWT status indicator"
 - Changes: `summarizeZoneSoil()` treats `DRAGINO_SDI12/TENSIOMARK` as tension and excludes stale or faulted contributors from a current value
 - Preserves: `ZoneSoilStatus`, channel selection, depth labels, last-valid stale state, and VWC behavior for non-Tensiomark profiles
 
-- [ ] **Step 1: Add failing tests for freshness, Tensiomark, and Chameleon faults**
+- [x] **Step 1: Add failing tests for freshness, Tensiomark, and Chameleon faults**
 
 Add to `src/utils/__tests__/zoneSoil.test.ts`:
 
@@ -474,13 +476,13 @@ it('accepts the three-hour age and five-minute skew boundaries only', () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and confirm semantic failures**
+- [x] **Step 2: Run the focused test and confirm semantic failures**
 
 Run: `(cd web/react-gui && npx vitest run src/utils/__tests__/zoneSoil.test.ts)`
 
 Expected: FAIL because Tensiomark is volumetric, stale values enter the mean, fault flags are ignored, and the freshness predicate is absent.
 
-- [ ] **Step 3: Add the shared freshness predicate and profile-aware quantity checks**
+- [x] **Step 3: Add the shared freshness predicate and profile-aware quantity checks**
 
 Export beside the constant:
 
@@ -512,7 +514,7 @@ function isVolumetricSensor(device: Pick<Device, 'type_id' | 'sdi12_probe_profil
 }
 ```
 
-- [ ] **Step 4: Split current and stale tension contributors and reject Chameleon faults**
+- [x] **Step 4: Split current and stale tension contributors and reject Chameleon faults**
 
 Add these helpers above `summarizeTension()`:
 
@@ -566,6 +568,10 @@ Refactor the `summarizeTension()` loop to fill `current` or `historical`:
   for (const device of devices) {
     const row = device.latest_data as Record<string, unknown> | null | undefined;
     const fresh = isSensorObservationFresh(device.last_seen, nowMs);
+    const observedMs = device.last_seen ? new Date(device.last_seen).getTime() : Number.NaN;
+    const isHistorical = Number.isFinite(nowMs)
+      && Number.isFinite(observedMs)
+      && nowMs - observedMs > SENSOR_FRESHNESS_WINDOW_MS;
     for (const channel of TENSION_CHANNELS) {
       const legacy = LEGACY_ALIAS[channel];
       const raw = row?.[channel] ?? (legacy ? row?.[legacy] : undefined);
@@ -574,6 +580,7 @@ Refactor the `summarizeTension()` loop to fill `current` or `historical`:
       reportedCount += 1;
       anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
       if (faulted) continue;
+      if (!fresh && !isHistorical) continue;
       if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) continue;
       appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel));
     }
@@ -590,13 +597,13 @@ Use `bucket.values`, `bucket.observedAt`, and `bucket.depths` in the existing se
 
 Do not change `selectChannel()` fallback. Task 5 prevents a fallback channel from receiving the requested channel's trigger message.
 
-- [ ] **Step 5: Run the zone-soil tests**
+- [x] **Step 5: Run the zone-soil tests**
 
 Run: `(cd web/react-gui && npx vitest run src/utils/__tests__/zoneSoil.test.ts)`
 
 Expected: PASS, including all pre-existing depth and alias cases.
 
-- [ ] **Step 6: Commit the summary correction**
+- [x] **Step 6: Commit the summary correction**
 
 ```bash
 git add web/react-gui/src/utils/zoneSoil.ts web/react-gui/src/utils/__tests__/zoneSoil.test.ts
@@ -620,7 +627,7 @@ git commit -m "fix(gui): classify current zone SWT contributors honestly"
 - Produces: one status per current valid displayed SWT channel
 - Preserves: all existing device actions, history controls, units, configuration, removal, and footer behavior
 
-- [ ] **Step 1: Add failing device-card integration tests**
+- [x] **Step 1: Add failing device-card integration tests**
 
 Freeze time in each suite so freshness is deterministic while Testing Library's async polling can still advance. Use:
 
@@ -800,7 +807,7 @@ it('renders zero once as kPa in pF mode and marks it Wet', () => {
 });
 ```
 
-- [ ] **Step 2: Run the three suites and confirm missing indicators**
+- [x] **Step 2: Run the three suites and confirm missing indicators**
 
 Run:
 
@@ -813,7 +820,7 @@ Run:
 
 Expected: FAIL because no card renders `SwtStatusIndicator`.
 
-- [ ] **Step 3: Integrate KIWI without nesting controls**
+- [x] **Step 3: Integrate KIWI without nesting controls**
 
 Import the classifier, card formatter, freshness predicate, and indicator. Compute:
 
@@ -841,7 +848,7 @@ Replace the `swt_2` value with its exact sibling wrapper too:
 
 Leave non-SWT calls on their existing formatters. Each indicator is a sibling of the history button, never a button inside it.
 
-- [ ] **Step 4: Integrate LSN50 inside each existing history row**
+- [x] **Step 4: Integrate LSN50 inside each existing history row**
 
 Replace `chameleonChannels` with these exact entries:
 
@@ -870,7 +877,7 @@ Compute `chameleonIsCurrent` from `last_seen`. In the existing outer history but
 
 Keep the entire channel row as the one history button and retain its focus class and title.
 
-- [ ] **Step 5: Integrate SDI-12 only for `kind === 'swt'`**
+- [x] **Step 5: Integrate SDI-12 only for `kind === 'swt'`**
 
 Import both `formatSwtCardValue()` and the strict `formatSwtValue()`. Change the helper's return type and SWT branch exactly as follows; the strict pF formatter prevents a zero value from appearing twice, while the nullable return keeps invalid SWT visibly unavailable:
 
@@ -903,7 +910,7 @@ Compute `swtIsCurrent` once from `last_seen`. Render the row entry as:
 
 Do not alter configured Sentek rows, which currently enumerate only VWC and VIC.
 
-- [ ] **Step 6: Run the device-card tests and typecheck**
+- [x] **Step 6: Run the device-card tests and typecheck**
 
 Run:
 
@@ -917,7 +924,7 @@ Run:
 
 Expected: PASS. No nested-interactive-element warning appears in test output.
 
-- [ ] **Step 7: Commit the card integrations**
+- [x] **Step 7: Commit the card integrations**
 
 ```bash
 git add \
@@ -944,7 +951,7 @@ git commit -m "feat(gui): show VIA status on SWT device readings"
 - Produces: fixed VIA status next to a current tension value; trigger-relative text only when the displayed channel matches the configured channel
 - Preserves: VWC wording, stale/invalid warnings, last-valid timestamps, DENDRO exclusion, and Water-card gating
 
-- [ ] **Step 1: Update and extend the Water-card tests first**
+- [x] **Step 1: Update and extend the Water-card tests first**
 
 In `IrrigationZoneCardSensorGating.test.tsx`:
 
@@ -1021,7 +1028,7 @@ expect(soilTile.getByText('Humide')).toBeInTheDocument();
 expect(soilTile.queryByText('Moist')).not.toBeInTheDocument();
 ```
 
-- [ ] **Step 2: Run the two suites and confirm old labels/fallback behavior fail**
+- [x] **Step 2: Run the two suites and confirm old labels/fallback behavior fail**
 
 Run:
 
@@ -1033,7 +1040,7 @@ Run:
 
 Expected: FAIL because the card still emits Moderate, has no status pill, and compares a fallback channel to `SWT_1`'s trigger. Task 3 already makes Tensiomark a tension source; this task proves the Water-card presentation of that source.
 
-- [ ] **Step 3: Derive fixed status and independently gated trigger copy**
+- [x] **Step 3: Derive fixed status and independently gated trigger copy**
 
 Import `SwtStatusIndicator`, `classifySwtWaterStatus`, and `formatSwtCardValue`. Change tension formatting to `formatSwtCardValue()`.
 
@@ -1063,7 +1070,7 @@ Replace the old `soilDescriptor` branch with:
 
 This deletes the duplicated 20/60 branch. `triggerChannelOf()` already returns null for DENDRO.
 
-- [ ] **Step 4: Render the indicator beside the current value**
+- [x] **Step 4: Render the indicator beside the current value**
 
 Replace the value paragraph with:
 
@@ -1078,7 +1085,7 @@ Replace the value paragraph with:
 
 Keep `soilDescriptor`, `soilStatusLine`, and `soilLastValid` below it. VWC gets no indicator because `soilWaterStatus` is null.
 
-- [ ] **Step 5: Run Water-card, locale, and zone utility tests**
+- [x] **Step 5: Run Water-card, locale, and zone utility tests**
 
 Run:
 
@@ -1091,7 +1098,7 @@ Run:
 
 Expected: PASS with French Humide, Tensiomark tension, no stale badge, and no false fallback trigger comparison.
 
-- [ ] **Step 6: Commit the Water-card behavior**
+- [x] **Step 6: Commit the Water-card behavior**
 
 ```bash
 git add \
@@ -1112,7 +1119,7 @@ git commit -m "feat(gui): show VIA status in the Water card"
 - Consumes: all task outputs
 - Produces: current verification evidence for type safety, both unit-test runners, production build, prose quality, real browser layout and interaction, and change-scope containment
 
-- [ ] **Step 1: Run the full static and unit gates without piping output**
+- [x] **Step 1: Run the full static and unit gates without piping output**
 
 ```bash
 (cd web/react-gui && npm run typecheck)
@@ -1121,13 +1128,13 @@ git commit -m "feat(gui): show VIA status in the Water card"
 
 Expected: both commands exit 0. `test:unit` must run the tsx Node runner and Vitest; do not substitute one sub-runner.
 
-- [ ] **Step 2: Build the production GUI**
+- [x] **Step 2: Build the production GUI**
 
 Run: `(cd web/react-gui && npm run build)`
 
 Expected: Vite exits 0 and writes the configured `build/` bundle without unresolved history-namespace imports or Tailwind class warnings.
 
-- [ ] **Step 3: Run repository formatting and prose gates**
+- [x] **Step 3: Run repository formatting and prose gates**
 
 ```bash
 node .claude/skills/anti-slop-writing/slop-check.js \
@@ -1137,7 +1144,7 @@ node .claude/skills/anti-slop-writing/slop-check.js \
 
 Expected: the prose checker prints `slop-check: PASS (no tier-1 findings)`.
 
-- [ ] **Step 4: Run the deterministic fixture against the implemented cards**
+- [x] **Step 4: Run the deterministic fixture against the implemented cards**
 
 The design preview uses `web/react-gui/design-preview/vite.config.mjs` to serve real React cards with local fixture API responses. Its default `SWT_PREVIEW_MODE=proposed` transforms source in memory to draw the proposed badge before implementation. That mode is design evidence only. Start the final browser gate with the transform disabled:
 
@@ -1148,7 +1155,7 @@ The design preview uses `web/react-gui/design-preview/vite.config.mjs` to serve 
 
 Open `http://127.0.0.1:4178/gui/design-preview/` in a browser. Its toolbar must say `implementation under test`; URL controls include `?theme=dark&lang=de-CH&unit=pF&scenario=fresh`. The fixture keeps the same zone and device data as the proposed-mode preview; only the source transform changes. If the implementation badge is absent in this mode, the gate fails.
 
-- [ ] **Step 5: Capture and inspect the browser matrix**
+- [x] **Step 5: Capture and inspect the browser matrix**
 
 With the server from Step 4 still running, run the capture gate from `web/react-gui`:
 
@@ -1166,7 +1173,7 @@ Inspect the saved full-page screenshots at all three widths. Verify neutral numb
 
 The script checks document and badge overflow. In the browser, also inspect the relevant card containers' `scrollWidth <= clientWidth` and tab through KIWI's history control and the LSN50 row control at 390 and 320 px. Verify visible focus, one activation per row with Enter, and no badge tab stop. Existing device-header controls may truncate at 320 px independently of this feature; record that separately, and do not count it as badge overflow without evidence. Record the results alongside `checks.json`. A `flex-wrap` class assertion or screenshot alone cannot prove these interaction checks. The feature is not ready for product use until this actual-source implemented-mode gate passes.
 
-- [ ] **Step 6: Review the committed feature diff and enforce its allowlist**
+- [x] **Step 6: Review the committed feature diff and enforce its allowlist**
 
 ```bash
 SWT_STATUS_GIT_DIR=$(git rev-parse --git-dir)
@@ -1184,6 +1191,7 @@ while IFS= read -r SWT_STATUS_PATH; do
   case "$SWT_STATUS_PATH" in
     web/react-gui/src/utils/swt.ts|\
     web/react-gui/src/utils/__tests__/swt.test.ts|\
+    web/react-gui/tests/swtCanonical.test.ts|\
     web/react-gui/src/utils/zoneSoil.ts|\
     web/react-gui/src/utils/__tests__/zoneSoil.test.ts|\
     web/react-gui/src/components/farming/shared/SwtStatusIndicator.tsx|\
@@ -1206,7 +1214,7 @@ git status --short
 
 Expected: base-relative whitespace validation exits 0, the reviewed diff contains all committed Tasks 1–5, and the allowlist prints no unexpected feature path. Inspect `git status --short` for unstaged feature edits and untracked browser artifacts; do not call the checkout clean merely because tracked paths are clean. The committed feature diff must not change `ui-core`, locale JSON, Node-RED, database, scheduler, history backend, or cloud files. Unrelated untracked artifacts in a shared checkout do not belong in this feature commit.
 
-- [ ] **Step 7: Commit any verification-only test correction, then stop for review**
+- [x] **Step 7: Commit any verification-only test correction, then stop for review**
 
 If Steps 1–6 required no source change, make no empty commit. If a defect requires a correction, return to the owning task's red/green test, stage only its listed feature files, commit it, and then repeat the affected checks plus the full browser matrix. Use this message only for that correction:
 
