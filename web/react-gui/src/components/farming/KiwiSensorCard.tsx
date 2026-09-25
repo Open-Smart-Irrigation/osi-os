@@ -9,7 +9,9 @@ import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
-import { canonicalSwtChannels, formatSwtValue } from '../../utils/swt';
+import { canonicalSwtChannels, classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
+import { isSensorObservationFresh } from '../../utils/zoneSoil';
+import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 
 interface KiwiSensorCardProps {
   device: Device;
@@ -328,6 +330,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
   const { light_lux, ambient_temperature, relative_humidity } = device.latest_data;
   const [swt1, swt2] = canonicalSwtChannels(device.latest_data);
   const { swtUnit } = useDisplayPreferences();
+  const swtIsCurrent = isSensorObservationFresh(device.last_seen);
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -419,7 +422,10 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
             {sensorLabel(device, 'swt_1', t('kiwiSensor.soilWaterTension1'))}
           </p>
-          {renderValue('swt_1', formatSwtValue(swt1, swtUnit))}
+          <div className="flex flex-wrap items-center gap-2">
+            {renderValue('swt_1', formatSwtCardValue(swt1, swtUnit))}
+            <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(swt1) : null} />
+          </div>
         </div>
 
         {swt2 != null && (
@@ -427,7 +433,10 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
               {sensorLabel(device, 'swt_2', t('kiwiSensor.soilWaterTension2'))}
             </p>
-            {renderValue('swt_2', formatSwtValue(swt2, swtUnit))}
+            <div className="flex flex-wrap items-center gap-2">
+              {renderValue('swt_2', formatSwtCardValue(swt2, swtUnit))}
+              <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(swt2) : null} />
+            </div>
           </div>
         )}
 

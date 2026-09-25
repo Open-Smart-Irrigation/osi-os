@@ -7,7 +7,9 @@ import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
-import { formatSwtValue, kpaToPf } from '../../utils/swt';
+import { classifySwtWaterStatus, formatSwtCardValue, formatSwtValue } from '../../utils/swt';
+import { isSensorObservationFresh } from '../../utils/zoneSoil';
+import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 
 // Larger than the device's slowest plausible TX interval -- must match
 // Sdi12SettingsModal.tsx's SDI12_IDENTIFY_TIMEOUT_MINUTES. Client-derived
@@ -60,12 +62,12 @@ function channelLabel(kind: SoilChannel): string {
   }
 }
 
-function formatChannelValue(kind: SoilChannel, value: number): string {
+function formatChannelValue(kind: SoilChannel, value: number): string | null {
   if (kind === 'swt') {
-    const kpa = formatSwtValue(value, 'kPa');
-    const pf = kpaToPf(value);
-    const pfLabel = pf == null ? null : formatSwtValue(value, 'pF');
-    return [kpa, pfLabel].filter(Boolean).join(' · ');
+    const kpa = formatSwtCardValue(value, 'kPa');
+    if (kpa === null) return null;
+    const pf = formatSwtValue(value, 'pF');
+    return pf ? `${kpa} · ${pf}` : kpa;
   }
   const channel = CHANNELS.find(({ kind: candidate }) => candidate === kind);
   return `${formatNumber(value, channel?.decimals ?? 1)} ${channel?.unit ?? ''}`.trim();
@@ -87,6 +89,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   removeContext,
 }) => {
   const { t } = useTranslation('devices');
+  const swtIsCurrent = isSensorObservationFresh(device.last_seen);
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -220,9 +223,14 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
               </p>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text)]">
                 {values.map(({ kind, value }) => (
-                  <span key={kind}>
-                    <span className="text-[var(--text-tertiary)]">{channelLabel(kind)}: </span>
-                    <span className="tabular-nums">{value == null ? '—' : formatChannelValue(kind, value)}</span>
+                  <span key={kind} className="inline-flex flex-wrap items-center gap-2">
+                    <span>
+                      <span className="text-[var(--text-tertiary)]">{channelLabel(kind)}: </span>
+                      <span className="tabular-nums">{value == null ? '—' : formatChannelValue(kind, value) ?? '—'}</span>
+                    </span>
+                    {kind === 'swt' && value != null && (
+                      <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(value) : null} />
+                    )}
                   </span>
                 ))}
               </div>
