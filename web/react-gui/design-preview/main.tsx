@@ -15,6 +15,11 @@ const lang = ['en', 'de-CH', 'fr'].includes(params.get('lang') ?? '') ? params.g
 const scenario = (['fresh', 'stale', 'fault', 'zero', 'future'].includes(params.get('scenario') ?? '')
   ? params.get('scenario') : 'fresh') as Scenario;
 const unit = params.get('unit') === 'pF' ? 'pF' : 'kPa';
+const nameCase = params.get('names');
+const devices = previewDevices(scenario).map(device => ({ ...device,
+  name: nameCase === 'long' ? `${device.name} · Upper irrigation field beside the northern boundary`
+    : nameCase === 'unbroken' ? `${device.name.split(' ')[0]}${'N'.repeat(90)}` : device.name,
+}));
 // Freeze only this isolated preview page, including the real cards' age labels.
 Date.now = () => NOW;
 document.documentElement.lang = lang;
@@ -44,7 +49,7 @@ function App() {
       <main className="preview-page">
         <p className="preview-note">The existing Zone B card and device sections. Expand the zone and its devices to inspect the indicators. Settings and history retain their existing controls; gateway writes are disabled in this preview.</p>
         <MemoryRouter>
-          <IrrigationZoneCard zone={zone} devices={previewDevices(scenario)} unassignedDevices={[]} onUpdate={() => {}} />
+          <IrrigationZoneCard zone={zone} devices={devices} unassignedDevices={[]} canWrite={params.get('readonly') !== 'true'} onUpdate={() => {}} />
         </MemoryRouter>
       </main>
     </>

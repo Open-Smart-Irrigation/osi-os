@@ -359,17 +359,17 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
 
   return (
     <div className="rounded-xl p-4 border shadow-sm transition-colors bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
-      <div className="flex items-center justify-between gap-2 mb-0.5">
+      <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
           canEdit={!readOnly}
           onSave={handleRename}
           renameLabel={t('rename.device')}
           inputLabel={t('rename.deviceInputLabel')}
-          headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
+          headingClassName="flex-1 text-base font-semibold text-[var(--text)] leading-snug [overflow-wrap:anywhere]"
         />
-        <div className="flex items-center gap-1.5 shrink-0 relative">
-          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
+        <div className="relative flex flex-wrap items-center gap-1.5">
+          <span className="mr-auto bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             {t('kiwiSensor.badge')}
           </span>
           {!readOnly && <button

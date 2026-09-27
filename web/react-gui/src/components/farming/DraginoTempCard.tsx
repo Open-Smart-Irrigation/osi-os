@@ -165,17 +165,17 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
-      <div className="flex items-center justify-between gap-2 mb-0.5">
+      <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
           canEdit={!readOnly}
           onSave={handleRename}
           renameLabel={t('rename.device')}
           inputLabel={t('rename.deviceInputLabel')}
-          headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
+          headingClassName="flex-1 text-base font-semibold text-[var(--text)] leading-snug [overflow-wrap:anywhere]"
         />
-        <div className="relative flex items-center gap-1.5 shrink-0">
-          <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
+        <div className="relative flex flex-wrap items-center gap-1.5">
+          <span className="mr-auto bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             LSN50
           </span>
           {!readOnly && <button

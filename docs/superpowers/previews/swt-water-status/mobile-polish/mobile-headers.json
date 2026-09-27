@@ -1,0 +1,482 @@
+[
+  {
+    "width": 320,
+    "theme": "light",
+    "names": "long",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 156,
+        "height": 88,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 156,
+        "height": 88,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 156,
+        "height": 88,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 320,
+    "theme": "light",
+    "names": "long",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 210,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 210,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 210,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 320,
+    "theme": "light",
+    "names": "unbroken",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 156,
+        "height": 176,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 156,
+        "height": 198,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 156,
+        "height": 198,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 320,
+    "theme": "light",
+    "names": "unbroken",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 210,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 210,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 210,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 320,
+    "theme": "dark",
+    "names": "long",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 156,
+        "height": 88,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 156,
+        "height": 88,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 156,
+        "height": 88,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 320,
+    "theme": "dark",
+    "names": "long",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 210,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 210,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 210,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 320,
+    "theme": "dark",
+    "names": "unbroken",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 156,
+        "height": 176,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 156,
+        "height": 198,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 156,
+        "height": 198,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 320,
+    "theme": "dark",
+    "names": "unbroken",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 210,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 210,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 210,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "light",
+    "names": "long",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 226,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 226,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 226,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "light",
+    "names": "long",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 280,
+        "height": 44,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 280,
+        "height": 44,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 280,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "light",
+    "names": "unbroken",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 226,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 226,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 226,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "light",
+    "names": "unbroken",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 280,
+        "height": 110,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 280,
+        "height": 110,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 280,
+        "height": 110,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "names": "long",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 226,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 226,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 226,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "names": "long",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "Kiwi · north bed · Upper irrigation field beside the northern boundary",
+        "width": 280,
+        "height": 44,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Chameleon · orchard · Upper irrigation field beside the northern boundary",
+        "width": 280,
+        "height": 44,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "Tensiomark · south bed · Upper irrigation field beside the northern boundary",
+        "width": 280,
+        "height": 66,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "names": "unbroken",
+    "readonly": "false",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 226,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 226,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 226,
+        "height": 132,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "names": "unbroken",
+    "readonly": "true",
+    "lang": "de-CH",
+    "headings": [
+      {
+        "name": "KiwiNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 280,
+        "height": 110,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "ChameleonNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 280,
+        "height": 110,
+        "clipped": false,
+        "contained": true
+      },
+      {
+        "name": "TensiomarkNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+        "width": 280,
+        "height": 110,
+        "clipped": false,
+        "contained": true
+      }
+    ]
+  }
+]

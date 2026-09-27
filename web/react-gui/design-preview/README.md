@@ -28,4 +28,12 @@ Both commands default to implemented mode, which disables every source transform
 
 The original proposed-mode overlay is preserved at commit `723903425`. It depends on source anchors from before implementation and must be run from that revision. It demonstrates the visual treatment but does not provide complete zone aggregation. Mixed-age selection, per-channel open circuits, and Tensiomark-only zones are covered by production tests in the implementation.
 
-The inherited card headers can truncate names to zero visible width at 320 px because their controls consume the row. Some existing device copy remains English in German and French. The new status labels use the shipped locale resources. Neither inherited issue is evidence of a badge-layout failure.
+Some existing device copy remains English in German and French. The status labels use the shipped locale resources.
+
+## Mobile polish
+
+Device headers give names a separate row and wrap long names. Water tiles use one column below 640 px. The capture script checks heading clipping and full-width Water actions on phones.
+
+Run `node design-preview/mobile-headers.mjs` for 16 additional cases at 320 and 390 px: both themes, long and unbroken names, editable and read-only cards. It checks containment, 48 px header controls, and rename/cancel focus restoration. The script defaults to port 4179; set `SWT_PREVIEW_URL` to match your server. Both scripts accept `SWT_PREVIEW_OUTPUT` for a separate evidence directory.
+
+For manual checks, append `?names=long` or `?names=unbroken`, optionally with `&readonly=true`. Saved mobile evidence is under `docs/superpowers/previews/swt-water-status/mobile-polish/`.
