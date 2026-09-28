@@ -110,8 +110,11 @@ The seed defines ~30 triggers, small automatic reactions inside SQLite:
   a synced table gains or changes a row, a matching event is dropped into
   `sync_outbox` automatically. The flows never have to remember to do it.
   (Caveat that has bitten before: the `device_data` trigger fires on *insert*,
-  not on historical *updates*; repairs of old rows must enqueue events
-  explicitly.)
+  not on historical *updates*. That's not a gap, though — an update to an old
+  row is still carried, by a separate dirty-key trigger into the history
+  correction phase below. Never hand-enqueue an event for such a repair: it
+  would land at `sync_version` 0 and the cloud rejects it as
+  `equal_version_payload_conflict`. Repairs update by row `id` instead.)
 - **Dirty-key triggers** (`trg_sync_*_dirty_*`): they mark which history rows changed
   so the shadow sync knows what to re-ship.
 - **Defaults/UUID triggers** (`trg_sync_*_defaults_ai`, `trg_sync_users_uuid_ai`,

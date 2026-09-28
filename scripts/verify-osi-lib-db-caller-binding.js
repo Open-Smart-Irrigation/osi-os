@@ -47,7 +47,9 @@ const MODULE_DB_CALLER_POLICIES = Object.freeze({
     // verification carrying the identical unawaited-facade-call bug as
     // UC512/SDI12, even though it was not named in that task's original
     // caller list -- it is a live, wired DRAGINO_LSN50 ingest node.
-    reviewedCallerNodeIds: Object.freeze(['460e0bfd95f89e67', '6b28e0d879808dd9', 'sdi12-write-fn']),
+    // 'watermark-ingest-fn': WATERMARK profile 3 ingest; writes device_data
+    // through the helper's transaction scope via an awaited callback.
+    reviewedCallerNodeIds: Object.freeze(['460e0bfd95f89e67', '6b28e0d879808dd9', 'sdi12-write-fn', 'watermark-ingest-fn']),
     // The facade-contract test must actually touch these exported
     // functions through the facade, or it isn't proving the real contract.
     requiredFacadeExports: Object.freeze(['writeDeviceData', 'quarantineOnly']),

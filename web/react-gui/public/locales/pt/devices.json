@@ -754,5 +754,61 @@
     "requiredModeGeneric": "{{label}} requer {{mode}}. Aplique o {{mode}} antes de ativar este sensor.",
     "rainGaugeNeedsMod9": "O pluviómetro e o medidor de caudal só podem ser ativados depois de o MOD9 estar ativo.",
     "chameleonNeedsMod3": "O Chameleon SWT só pode ser ativado depois de o MOD3 estar ativo."
+  },
+  "watermark": {
+    "sectionTitle": "Tensão hídrica do solo WATERMARK",
+    "probe": "Sonda {{n}}",
+    "depthUnset": "Profundidade não definida",
+    "wet": "Húmido",
+    "wetUpTo": "≤ {{value}}",
+    "resistance": "Resistência {{value}}",
+    "resistanceUpTo": "Resistência ≤ {{value}}",
+    "offset": "Desvio {{value}} mV",
+    "soilTemp": "Solo {{value}} °C",
+    "soilTempNotMeasured": "Temperatura do solo não medida",
+    "dieTemp": "Placa {{value}} °C",
+    "supply": "Alimentação {{value}} V",
+    "status": {
+      "ok": "OK",
+      "saturated": "Saturado",
+      "wet_offset_clipped": "Leitura limitada: tensão hídrica no máximo o valor mostrado",
+      "wet_offset_clipped_unbounded": "Leitura limitada: limite da tensão hídrica não disponível",
+      "short": "Curto-circuito",
+      "short_suspected": "Possível curto-circuito",
+      "open": "Demasiado seco para o intervalo ou desconectado",
+      "unsettled": "Leitura ainda não estável",
+      "invalid_sample": "Amostra inválida",
+      "calibration_required": "Calibração necessária",
+      "temperature_missing": "Sem temperatura do solo",
+      "temperature_out_of_range": "Temperatura do solo fora do intervalo",
+      "outside_200ss_range": "Fora do intervalo do sensor"
+    },
+    "depths": {
+      "title": "Profundidades das sondas",
+      "depth": "Profundidade sonda {{n}} (cm)",
+      "save": "Guardar profundidades",
+      "saved": "Profundidades guardadas.",
+      "invalid": "As profundidades têm de ser centímetros inteiros entre 1 e 1000, ou ficar em branco."
+    },
+    "calibration": {
+      "title": "Calibração WATERMARK",
+      "description": "Resistências pull e em série por canal, do varrimento de resistências em bancada. As leituras convertem-se em kPa depois de estes valores serem guardados.",
+      "channel": "Canal {{n}}",
+      "pullup": "Pull-up (Ω)",
+      "pulldown": "Pull-down (Ω)",
+      "seriesFwd": "Série, direta (Ω)",
+      "seriesRev": "Série, inversa (Ω)",
+      "preview": "Pré-visualização",
+      "save": "Guardar calibração",
+      "delete": "Eliminar calibração",
+      "confirmDelete": "Eliminar esta calibração? As novas leituras voltarão a aguardar uma calibração.",
+      "previewEmpty": "Ainda não há nenhuma leitura WATERMARK para a pré-visualização.",
+      "previewResult": "Última leitura: sonda 1 {{p1}}, sonda 2 {{p2}}",
+      "saved": "Calibração guardada. {{count}} leituras em espera convertidas.",
+      "deleted": "Calibração eliminada.",
+      "conflict": "A calibração foi alterada noutro local. Os valores atuais estão carregados; verifique-os e guarde novamente.",
+      "invalidField": "Verifique {{field}}: fora do intervalo.",
+      "loadFailed": "Não foi possível carregar a calibração."
+    }
   }
 }

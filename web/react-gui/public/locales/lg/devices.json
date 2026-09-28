@@ -754,5 +754,61 @@
     "requiredModeGeneric": "{{label}} requires {{mode}}. Apply {{mode}} before enabling this sensor.",
     "rainGaugeNeedsMod9": "Rain gauge and flow meter can only be enabled after MOD9 is active.",
     "chameleonNeedsMod3": "Chameleon SWT can only be enabled after MOD3 is active."
+  },
+  "watermark": {
+    "sectionTitle": "WATERMARK soil tension",
+    "probe": "Probe {{n}}",
+    "depthUnset": "Depth unset",
+    "wet": "Wet",
+    "wetUpTo": "≤ {{value}}",
+    "resistance": "Resistance {{value}}",
+    "resistanceUpTo": "Resistance ≤ {{value}}",
+    "offset": "Offset {{value}} mV",
+    "soilTemp": "Soil {{value}} °C",
+    "soilTempNotMeasured": "Soil temperature not measured",
+    "dieTemp": "Board {{value}} °C",
+    "supply": "Supply {{value}} V",
+    "status": {
+      "ok": "OK",
+      "saturated": "Saturated",
+      "wet_offset_clipped": "Reading clipped: tension at most the value shown",
+      "wet_offset_clipped_unbounded": "Reading clipped; tension bound not available",
+      "short": "Short circuit",
+      "short_suspected": "Possible short circuit",
+      "open": "Dry beyond range or disconnected",
+      "unsettled": "Reading not settled",
+      "invalid_sample": "Invalid sample",
+      "calibration_required": "Calibration needed",
+      "temperature_missing": "No soil temperature",
+      "temperature_out_of_range": "Soil temperature out of range",
+      "outside_200ss_range": "Outside the sensor's range"
+    },
+    "depths": {
+      "title": "Probe depths",
+      "depth": "Probe {{n}} depth (cm)",
+      "save": "Save depths",
+      "saved": "Depths saved.",
+      "invalid": "Depths must be whole centimetres between 1 and 1000, or blank."
+    },
+    "calibration": {
+      "title": "WATERMARK calibration",
+      "description": "Pull and series resistances per channel, from the bench resistor sweep. Readings convert to kPa once these are saved.",
+      "channel": "Channel {{n}}",
+      "pullup": "Pull-up (Ω)",
+      "pulldown": "Pull-down (Ω)",
+      "seriesFwd": "Series, forward (Ω)",
+      "seriesRev": "Series, reverse (Ω)",
+      "preview": "Preview",
+      "save": "Save calibration",
+      "delete": "Delete calibration",
+      "confirmDelete": "Delete this calibration? New readings will wait for a calibration again.",
+      "previewEmpty": "No WATERMARK reading yet to preview.",
+      "previewResult": "Latest reading: probe 1 {{p1}}, probe 2 {{p2}}",
+      "saved": "Calibration saved. {{count}} waiting readings converted.",
+      "deleted": "Calibration deleted.",
+      "conflict": "The calibration changed elsewhere. The current values are loaded; check them and save again.",
+      "invalidField": "Check {{field}}: out of range.",
+      "loadFailed": "Could not load the calibration."
+    }
   }
 }

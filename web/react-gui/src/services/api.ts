@@ -75,6 +75,9 @@ import type {
   ValveSchedulerStatus,
   ValvePlanError,
   AdminUser,
+  WatermarkCalibrationState,
+  WatermarkCalibrationValues,
+  WatermarkPreviewChannel,
 } from '../types/farming';
 
 type ApiErrorPayload = {
@@ -1010,6 +1013,29 @@ export const lsn50API = {
     chameleonSwt3DepthCm?: number | null;
   }): Promise<void> => {
     await api.put(`/api/devices/${deveui}/chameleon/depth`, payload);
+  },
+  getWatermarkCalibration: async (deveui: string): Promise<WatermarkCalibrationState> => {
+    const res = await api.get(`/api/devices/${deveui}/watermark/calibration`);
+    return res.data;
+  },
+  saveWatermarkCalibration: async (
+    deveui: string,
+    values: WatermarkCalibrationValues & { measured_at?: string | null; method?: string | null; notes?: string | null },
+    expectedSyncVersion: number,
+  ): Promise<WatermarkCalibrationState & { backfilled: number }> => {
+    const res = await api.put(`/api/devices/${deveui}/watermark/calibration`, { ...values, expected_sync_version: expectedSyncVersion });
+    return res.data;
+  },
+  previewWatermarkCalibration: async (
+    deveui: string,
+    values: WatermarkCalibrationValues,
+  ): Promise<{ preview: { recorded_at: string; channels: WatermarkPreviewChannel[] } | null }> => {
+    const res = await api.put(`/api/devices/${deveui}/watermark/calibration`, { ...values, dry_run: true });
+    return res.data;
+  },
+  deleteWatermarkCalibration: async (deveui: string, expectedSyncVersion: number): Promise<WatermarkCalibrationState> => {
+    const res = await api.delete(`/api/devices/${deveui}/watermark/calibration`, { params: { expected_sync_version: expectedSyncVersion } });
+    return res.data;
   },
 };
 

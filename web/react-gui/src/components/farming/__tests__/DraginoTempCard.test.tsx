@@ -118,3 +118,59 @@ describe('DraginoTempCard SWT unit preference', () => {
   });
 
 });
+
+const watermarkDevice: Device = {
+  deveui: 'AA00000000000002',
+  name: 'Watermark 1',
+  type_id: 'DRAGINO_LSN50',
+  last_seen: FRESH,
+  latest_data: {
+    watermark: {
+      recorded_at: FRESH,
+      supply_mv: 3300,
+      soil_temp_c: 19.9,
+      soil_temp_source: 2,
+      die_temp_c: 21.5,
+      channels: [
+        { status: 'ok', kpa: 56.4, kpa_upper_bound: null, r_solved: 9977, r_upper_bound: null, offset_mv: 0.6 },
+        { status: 'saturated', kpa: 0, kpa_upper_bound: null, r_solved: null, r_upper_bound: null, offset_mv: null },
+      ],
+    },
+  },
+} as Device;
+
+describe('DraginoTempCard WATERMARK probe section', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it('renders the WATERMARK section and its values when latest_data.watermark is present', () => {
+    render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
+    expect(screen.getByText('watermark.sectionTitle')).toBeInTheDocument();
+    expect(screen.getByText('56.4 kPa')).toBeInTheDocument();
+    expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
+  });
+
+  it('renders no WATERMARK section when latest_data.watermark is absent', () => {
+    render(<DraginoTempCard removeContext="farm" device={chameleonDevice} />);
+    expect(screen.queryByText('watermark.sectionTitle')).not.toBeInTheDocument();
+  });
+
+  it('hides the Chameleon SWT block on a board reflashed to WATERMARK that still has chameleon_enabled set', () => {
+    render(<DraginoTempCard removeContext="farm" device={{
+      ...watermarkDevice,
+      chameleon_enabled: 1,
+      chameleon_swt1_depth_cm: 5,
+      chameleon_swt2_depth_cm: 15,
+      chameleon_swt3_depth_cm: 30,
+    }} />);
+    expect(screen.queryByText('Chameleon SWT')).not.toBeInTheDocument();
+    expect(screen.getByText('watermark.sectionTitle')).toBeInTheDocument();
+  });
+
+  it('still shows the Chameleon SWT block for a Chameleon device without watermark', () => {
+    render(<DraginoTempCard removeContext="farm" device={chameleonDevice} />);
+    expect(screen.getByText('Chameleon SWT')).toBeInTheDocument();
+  });
+});

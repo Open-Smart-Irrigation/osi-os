@@ -41,9 +41,12 @@ use this card to catch the repeated mistakes before committing or reporting.
 8. **Never hardcode ChirpStack UUIDs.** MQTT IN topic is always
    `application/+/device/+/event/up`; discriminate device type downstream.
 
-9. **`device_data` sync trigger is INSERT-only.** Historical repairs through
-   `UPDATE` need explicit `DEVICE_DATA_APPENDED` outbox events or cloud stays
-   stale.
+9. **`device_data` sync trigger is INSERT-only, but UPDATE is still carried.**
+   `trg_sync_device_data_dirty_au` marks a historical repair's row in
+   `sync_history_dirty_keys` for the history correction phase. Never enqueue
+   an explicit `DEVICE_DATA_APPENDED` event for the repair — it lands at
+   `sync_version` 0 and the cloud rejects it as `equal_version_payload_conflict`.
+   Update by row `id`.
 
 10. **STREGA normal operation is `OPEN_FOR_DURATION`.** A bare `CLOSE` is not
     the normal close path, even in tests; use cancel for operator cancellation.

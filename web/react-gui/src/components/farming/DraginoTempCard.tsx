@@ -13,6 +13,7 @@ import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
 import { isSensorObservationFresh } from '../../utils/zoneSoil';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
+import { WatermarkProbeSection } from './shared/WatermarkProbeSection';
 
 function formatCounterInterval(seconds: number | null | undefined): string | null {
   const value = Number(seconds);
@@ -143,6 +144,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
     { field: 'swt_2', label: 'SWT2', value: data?.swt_2, depth: device.chameleon_swt2_depth_cm, color: '#2563eb', open: data?.chameleon_ch2_open === 1 },
     { field: 'swt_3', label: 'SWT3', value: data?.swt_3, depth: device.chameleon_swt3_depth_cm, color: '#7c3aed', open: data?.chameleon_ch3_open === 1 },
   ] as const;
+  const watermark = data?.watermark ?? null;
+  const watermarkDepths = device.soil_moisture_probe_depths_json ?? {};
 
   const [showConfig, setShowConfig] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
@@ -253,7 +256,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
           </div>
         )}
 
-        {chameleonEnabled && (
+        {chameleonEnabled && !watermark && (
           <div className="rounded-lg bg-[var(--card)] p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Chameleon SWT</p>
             {chameleonDataInvalid ? (
@@ -300,6 +303,31 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {watermark && (
+          <div className="rounded-lg bg-[var(--card)] p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('watermark.sectionTitle')}</p>
+            <WatermarkProbeSection
+              isCurrent={isSensorObservationFresh(watermark.recorded_at)}
+              swtUnit={swtUnit}
+              soilTempC={watermark.soil_temp_c}
+              soilTempMeasured={watermark.soil_temp_source === 2}
+              dieTempC={watermark.die_temp_c}
+              supplyMv={watermark.supply_mv}
+              probes={[1, 2].map((n) => ({
+                key: `swt_${n}`,
+                label: t('watermark.probe', { n }),
+                depthLabel: formatDepthLabel(watermarkDepths[`swt_${n}`]),
+                channel: watermark.channels[n - 1] ?? null,
+              }))}
+              onOpenHistory={(field) => setSensorMonitor({
+                field, initialField: field, label: t('watermark.probe', { n: field === 'swt_1' ? 1 : 2 }),
+                unit: 'kPa', color: field === 'swt_1' ? '#0f766e' : '#2563eb', decimals: 1,
+                seriesOptions: [1, 2].map((n) => ({ field: `swt_${n}`, label: t('watermark.probe', { n }), unit: 'kPa', color: n === 1 ? '#0f766e' : '#2563eb', decimals: 1 })),
+              })}
+            />
           </div>
         )}
 

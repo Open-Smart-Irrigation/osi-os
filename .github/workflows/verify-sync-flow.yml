@@ -31,6 +31,15 @@ jobs:
       - run: node scripts/verify-sync-flow.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js
+      # WATERMARK LSN50 profile 3: FPort 11 dispatch in lsn50-decode-fn, the
+      # config-query drop and watermark-ingest-fn, run against the real
+      # osi-db-helper facade; FPort 2 formattedData pinned to origin/main; Build
+      # Telemetry drops FPort 11 before its raw decoder.
+      - run: node scripts/test-watermark-ingest-flow.js
+      # WATERMARK calibration GET/PUT/DELETE through the whole chain (http in ->
+      # scoped-device-config-guard -> watermark-cal-fn), flag off and scoped,
+      # plus the soil-depth PUT (-> put-soil-depth-fn) the depth form uses.
+      - run: node scripts/test-watermark-calibration-routes.js
       # Standalone inventory: each command passed locally within the 60 s cap
       # and is not invoked by another workflow step or npm script.
       - name: Standalone script inventory pass set

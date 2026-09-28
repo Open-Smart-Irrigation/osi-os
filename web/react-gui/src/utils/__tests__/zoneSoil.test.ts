@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Device } from '../../types/farming';
-import { SENSOR_FRESHNESS_WINDOW_MS, isSensorObservationFresh, summarizeZoneSoil, zoneHasFlowMeter } from '../zoneSoil';
+import type { Device, WatermarkChannelLatest, WatermarkLatest } from '../../types/farming';
+import { SENSOR_FRESHNESS_WINDOW_MS, isSensorObservationFresh, probeDepthCm, summarizeZoneSoil, zoneHasFlowMeter } from '../zoneSoil';
 
 const NOW = Date.parse('2026-07-08T12:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
@@ -15,6 +15,33 @@ function device(overrides: Partial<Device>): Device {
     latest_data: {},
     ...overrides,
   } as Device;
+}
+
+function watermarkChannel(
+  overrides: Partial<WatermarkChannelLatest> & { status: WatermarkChannelLatest['status'] },
+): WatermarkChannelLatest {
+  return {
+    status: overrides.status,
+    kpa: overrides.kpa ?? null,
+    kpa_upper_bound: overrides.kpa_upper_bound ?? null,
+    r_solved: overrides.r_solved ?? null,
+    r_upper_bound: overrides.r_upper_bound ?? null,
+    offset_mv: overrides.offset_mv ?? null,
+  };
+}
+
+function watermarkLatest(
+  channel1: Partial<WatermarkChannelLatest> & { status: WatermarkChannelLatest['status'] },
+  channel2: Partial<WatermarkChannelLatest> & { status: WatermarkChannelLatest['status'] },
+): WatermarkLatest {
+  return {
+    recorded_at: FRESH,
+    supply_mv: null,
+    soil_temp_c: null,
+    soil_temp_source: null,
+    die_temp_c: null,
+    channels: [watermarkChannel(channel1), watermarkChannel(channel2)],
+  };
 }
 
 describe('summarizeZoneSoil', () => {
@@ -363,6 +390,175 @@ it.each([
   expect(status).toMatchObject({ value: null, invalid: true });
 });
 
+
+describe('summarizeZoneSoil WATERMARK channels', () => {
+  it('counts a WATERMARK LSN50 as a tension sensor and reports its one valid channel', () => {
+    const zone = [device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 0,
+      last_seen: FRESH,
+      latest_data: {
+        swt_1: 30,
+        swt_2: null,
+        watermark: watermarkLatest({ status: 'ok', kpa: 30 }, { status: 'open', kpa: null }),
+      },
+    })];
+    const status = summarizeZoneSoil(zone, NOW);
+    expect(status.hasSensor).toBe(true);
+    expect(status.quantity).toBe('tension');
+    expect(status.value).toBe(30);
+    // One valid channel: the invalid-reading flag stays false, matching the
+    // Chameleon semantics pinned at line 306 (an open sibling channel does
+    // not invalidate a healthy one).
+    expect(status.invalid).toBe(false);
+  });
+
+  it('flags every-channel-faulted WATERMARK as invalid, as an all-open Chameleon device is', () => {
+    const zone = [device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 0,
+      last_seen: FRESH,
+      latest_data: {
+        watermark: watermarkLatest({ status: 'open', kpa: null }, { status: 'short', kpa: null }),
+      },
+    })];
+    const status = summarizeZoneSoil(zone, NOW);
+    expect(status.value).toBeNull();
+    expect(status.invalid).toBe(true);
+  });
+
+  it('does not count an LSN50 with neither Chameleon enabled nor a WATERMARK reading', () => {
+    const zone = [device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 0,
+      last_seen: FRESH,
+      latest_data: {},
+    })];
+    expect(summarizeZoneSoil(zone, NOW).hasSensor).toBe(false);
+  });
+
+  it('ignores a stale Chameleon fault flag once the latest observation is a WATERMARK reading', () => {
+    // After a Chameleon->WATERMARK board swap, the device row still carries
+    // its last Chameleon fault flags (chameleon_i2c_missing here) alongside
+    // the new watermark observation. Those stale flags must not fault a
+    // healthy current WATERMARK channel.
+    const zone = [device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 1,
+      last_seen: FRESH,
+      latest_data: {
+        swt_1: 30,
+        swt_2: null,
+        chameleon_i2c_missing: 1,
+        watermark: watermarkLatest({ status: 'ok', kpa: 30 }, { status: 'open', kpa: null }),
+      },
+    })];
+    const status = summarizeZoneSoil(zone, NOW);
+    expect(status.value).toBe(30);
+    expect(status.invalid).toBe(false);
+  });
+});
+
+describe('channel depth after a Chameleon/WATERMARK board swap', () => {
+  const watermarkNow = watermarkLatest({ status: 'ok', kpa: 100 }, { status: 'ok', kpa: 5 });
+
+  it('picks the reading at the recorded shallow depth, not the one a stale Chameleon depth points at', () => {
+    // The external review's reproduction: a WATERMARK board with only swt_1's
+    // depth recorded, on a device row that still carries the Chameleon array's
+    // swt_2 depth. Mixing the two made swt_2 "shallowest" and reported 5 kPa
+    // instead of the 100 kPa at the one depth the operator recorded.
+    const zone = [device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 1,
+      last_seen: FRESH,
+      soil_moisture_probe_depths_json: { swt_1: 20 },
+      chameleon_swt1_depth_cm: 60,
+      chameleon_swt2_depth_cm: 10,
+      latest_data: { swt_1: 100, swt_2: 5, watermark: watermarkNow },
+    })];
+    const status = summarizeZoneSoil(zone, NOW);
+    expect(status.value).toBe(100);
+    expect(status.channel).toBe('swt_1');
+    expect(status.depthCm).toBe(20);
+  });
+
+  it('ignores stale Chameleon depths on a WATERMARK board with blank depths', () => {
+    const board = device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 0,
+      last_seen: FRESH,
+      soil_moisture_probe_depths_json: {},
+      chameleon_swt1_depth_cm: 60,
+      chameleon_swt2_depth_cm: 10,
+      latest_data: { swt_1: 100, swt_2: 5, watermark: watermarkNow },
+    });
+    expect(probeDepthCm(board, 'swt_1')).toBeNull();
+    expect(probeDepthCm(board, 'swt_2')).toBeNull();
+    const status = summarizeZoneSoil([board], NOW);
+    // No depth on either channel: channel order decides, and no depth is shown.
+    expect(status.channel).toBe('swt_1');
+    expect(status.value).toBe(100);
+    expect(status.depthCm).toBeNull();
+  });
+
+  it('shows no depth once the WATERMARK depths are cleared', () => {
+    const board = device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 1,
+      last_seen: FRESH,
+      soil_moisture_probe_depths_json: null,
+      soilMoistureProbeDepths: undefined,
+      chameleon_swt1_depth_cm: 30,
+      chameleon_swt2_depth_cm: 15,
+      latest_data: { swt_1: 100, swt_2: 5, watermark: watermarkNow },
+    });
+    expect(probeDepthCm(board, 'swt_1')).toBeNull();
+    expect(probeDepthCm(board, 'swt_2')).toBeNull();
+    expect(summarizeZoneSoil([board], NOW).depthCm).toBeNull();
+  });
+
+  it('lets the Chameleon columns win over depths a WATERMARK board left behind', () => {
+    // Swapped back to a Chameleon array: the generic map still says swt_1 is
+    // the shallow one, but the array's own columns put swt_2 at 20 cm.
+    const board = device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 1,
+      last_seen: FRESH,
+      soil_moisture_probe_depths_json: { swt_1: 10, swt_2: 80 },
+      chameleon_swt1_depth_cm: 60,
+      chameleon_swt2_depth_cm: 20,
+      latest_data: { swt_1: 5, swt_2: 100 },
+    });
+    expect(probeDepthCm(board, 'swt_1')).toBe(60);
+    expect(probeDepthCm(board, 'swt_2')).toBe(20);
+    const status = summarizeZoneSoil([board], NOW);
+    expect(status.value).toBe(100);
+    expect(status.channel).toBe('swt_2');
+    expect(status.depthCm).toBe(20);
+  });
+
+  it('falls back to the generic map for a Chameleon channel without its own depth', () => {
+    const board = device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 1,
+      soil_moisture_probe_depths_json: { swt_3: 45 },
+      chameleon_swt3_depth_cm: null,
+      latest_data: { swt_3: 30 },
+    });
+    expect(probeDepthCm(board, 'swt_3')).toBe(45);
+  });
+
+  it('keeps the generic-first order for every other device', () => {
+    const kiwi = device({
+      type_id: 'KIWI_SENSOR',
+      soilMoistureProbeDepths: { swt_wm1: 25 },
+      chameleon_swt1_depth_cm: 70,
+    });
+    expect(probeDepthCm(kiwi, 'swt_1')).toBe(25);
+    const kiwiNoMap = device({ type_id: 'KIWI_SENSOR', chameleon_swt1_depth_cm: 70 });
+    expect(probeDepthCm(kiwiNoMap, 'swt_1')).toBe(70);
+  });
+});
 
 it('accepts the three-hour age and five-minute skew boundaries only', () => {
   const oldestCurrent = new Date(NOW - SENSOR_FRESHNESS_WINDOW_MS).toISOString();

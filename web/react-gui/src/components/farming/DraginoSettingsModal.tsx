@@ -5,6 +5,8 @@ import type { Device, Lsn50Mode } from '../../types/farming';
 import { lsn50API } from '../../services/api';
 import { DraginoChameleonSwtSection } from './DraginoChameleonSwtSection';
 import { DraginoDendroCalibrationSection } from './DraginoDendroCalibrationSection';
+import { WatermarkCalibrationSection } from './WatermarkCalibrationSection';
+import { WatermarkDepthSection } from './WatermarkDepthSection';
 import { useDateFormat } from '../../utils/datetime';
 import { HelpTip } from './shared/HelpTip';
 
@@ -624,6 +626,21 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
               onUpdate={onUpdate}
             />
           </SettingsSection>
+
+          {device.latest_data?.watermark != null && (
+            <>
+              <SettingsSection title={t('watermark.depths.title')} className="mt-3">
+                <WatermarkDepthSection device={device} onUpdate={onUpdate} />
+              </SettingsSection>
+              <SettingsSection
+                title={t('watermark.calibration.title')}
+                description={t('watermark.calibration.description')}
+                className="mt-3"
+              >
+                <WatermarkCalibrationSection device={device} onUpdate={onUpdate} />
+              </SettingsSection>
+            </>
+          )}
 
           <SettingsSection
             title="Dendrometer calibration"

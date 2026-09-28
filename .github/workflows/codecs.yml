@@ -18,6 +18,7 @@ jobs:
           node-version: '22'
       - run: node scripts/verify-strega-gen1.js
       - run: node scripts/verify-lsn50-chameleon-codec.js
+      - run: node scripts/verify-lsn50-watermark-codec.js
       - run: node scripts/verify-lorain-codec.js
       - run: node scripts/verify-s2120-codec.js
       - run: node scripts/verify-sdi12-codec.js

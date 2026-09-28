@@ -99,6 +99,19 @@ English wording drift since the Luganda was authored, but the drift does not
 change meaning — both are paraphrases of the same fact. They are not tracked
 here.
 
+## `devices.json` — WATERMARK soil tension
+
+| Keys | Reason |
+|---|---|
+| `watermark.*` (48 keys in `devices.json`: section title, probe labels, resistance/offset/temperature/supply readouts, the thirteen status codes, the probe-depth editor and the calibration form) | New keys added for the IRROMETER WATERMARK 200SS soil-tension probes on the LSN50 card — the probe section, the depth editor and the calibration form (`WatermarkProbeSection.tsx`, `WatermarkDepthSection.tsx`, `WatermarkCalibrationSection.tsx`, `DraginoTempCard.tsx`, `DraginoSettingsModal.tsx`). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; "WATERMARK" stays untranslated as the product name, and `status.ok`, `wetUpTo`, and the two Ω-suffixed calibration field labels that are established electronics loanwords (`pullup`, `pulldown`) may legitimately match English since they are units, symbols, or "OK". `seriesFwd`/`seriesRev` ("Series, forward"/"Series, reverse") are plain English prose rather than loanwords and are translated in all five European locales, not exempted. |
+
+Tracked in code at `web/react-gui/tests/watermarkLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which collects every leaf key under `devices.json`
+→ `watermark` dynamically and asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism the sections above use. A human
+Luganda pass must drop the key from that set and from the table above in the
+same change; the test fails otherwise, so the two cannot drift apart.
+
 ## `settings.json` — module visibility switches
 
 | Keys | Reason |
