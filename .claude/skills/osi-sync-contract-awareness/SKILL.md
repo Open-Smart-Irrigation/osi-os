@@ -78,8 +78,12 @@ not edit v1 semantics in place and hope both runtimes update atomically.
 ## Trigger Gotcha
 
 The live `device_data -> sync_outbox` trigger fires on `INSERT`, not `UPDATE`.
-Historical repairs that update old rows must explicitly enqueue corrected
-`DEVICE_DATA_APPENDED` events or the cloud mirror remains stale.
+Historical repairs that UPDATE `device_data` rows are carried by the
+`trg_sync_device_data_dirty_au` trigger → `sync_history_dirty_keys` → history
+correction phase. Do not enqueue explicit `DEVICE_DATA_APPENDED` events for
+them: every such event has `sync_version` 0, and the cloud rejects a changed
+payload at an equal version as `equal_version_payload_conflict`. Update by
+row `id`: `device_data` has no UNIQUE(deveui, recorded_at).
 
 ## Canonicalization
 
@@ -130,7 +134,9 @@ one repo into the other. Each PR must state:
 - Adding a cloud-to-edge MQTT path because it looks simpler than pending
   commands.
 - Editing v1 contract semantics in place for a breaking change.
-- Updating `device_data` history without explicit outbox backfill events.
+- Hand-enqueueing `DEVICE_DATA_APPENDED` events for a historical `device_data`
+  UPDATE: the dirty-key path already carries it (while the gateway is linked),
+  and explicit events are rejected as `equal_version_payload_conflict`.
 - Changing pF, timestamp, UUID, EUI, or number canonicalization in one runtime
   only.
 - Reporting `verify-sync-flow.js | tail` instead of the verifier's own exit

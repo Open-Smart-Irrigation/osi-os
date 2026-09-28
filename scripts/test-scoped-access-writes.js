@@ -1530,6 +1530,8 @@ const DEVICE_CONFIG_ROUTES = [
   ['PUT', '/chameleon/depth'],
   ['POST', '/sdi12/identify'],
   ['PUT', '/sdi12/config'],
+  ['PUT', '/watermark/calibration'],
+  ['DELETE', '/watermark/calibration'],
 ];
 
 test('W5: every device-config route fresh-checks write scope', async () => {
@@ -1625,10 +1627,10 @@ test('IB1: denied SDI-12 config cannot write, authorized config does write', asy
     // bug fixed alongside this guard extension (AgroLink 853c1b3584): a stray
     // duplicate output branch that let a denied request's msg still reach
     // sdi12-config-auth-fn on some other output index.
-    const denialWireTarget = guard.wires[25] && guard.wires[25][0];
+    const denialWireTarget = guard.wires[27] && guard.wires[27][0];
     if (denialWireTarget === 'sdi12-config-auth-fn') {
       const bypass = await executeFunction(configAuth, {
-        msg: denied.result[25],
+        msg: denied.result[27],
         env: ENV,
         db,
       });

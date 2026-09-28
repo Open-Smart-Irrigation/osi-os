@@ -84,19 +84,36 @@ const LEGACY_ALIAS: Partial<Record<SoilChannel, string>> = { swt_1: 'swt_wm1', s
 /**
  * A channel's recorded burial depth, from either place the schema keeps one:
  * `devices.chameleon_swt{n}_depth_cm` for a Chameleon array, and the
- * `soil_moisture_probe_depths_json` map for a soil-moisture probe. Depth is
- * installation geometry, not calibration, which is why it is device-local.
+ * `soil_moisture_probe_depths_json` map for a soil-moisture probe or a
+ * WATERMARK board. Depth is installation geometry, not calibration, which is
+ * why it is device-local.
+ *
+ * An LSN50 can be reflashed between the Chameleon and WATERMARK firmwares, and
+ * the other family's depths stay on the device row after a swap. The depth is
+ * therefore read from the family the latest observation belongs to, never
+ * mixed: a stale depth from the previous board would otherwise choose the
+ * wrong channel as the shallowest one.
  */
 export function probeDepthCm(device: Device, channel: string): number | null {
   const legacy = LEGACY_ALIAS[channel as SoilChannel];
   const record = device as unknown as Record<string, unknown>;
-  const candidates: unknown[] = [
+  const generic: unknown[] = [
     device.soilMoistureProbeDepths?.[channel],
     device.soil_moisture_probe_depths_json?.[channel],
     legacy ? device.soilMoistureProbeDepths?.[legacy] : undefined,
     legacy ? device.soil_moisture_probe_depths_json?.[legacy] : undefined,
-    record[`chameleon_${channel.replace('swt_', 'swt')}_depth_cm`],
   ];
+  const chameleon = record[`chameleon_${channel.replace('swt_', 'swt')}_depth_cm`];
+  let candidates: unknown[];
+  if (device.latest_data?.watermark != null) {
+    // A WATERMARK board keeps its depths in the generic map only.
+    candidates = generic;
+  } else if (device.type_id === 'DRAGINO_LSN50' && device.chameleon_enabled === 1) {
+    // A Chameleon array's own columns win over a map a WATERMARK board left behind.
+    candidates = [chameleon, ...generic];
+  } else {
+    candidates = [...generic, chameleon];
+  }
   for (const candidate of candidates) {
     const depth = Number(candidate);
     if (candidate != null && Number.isFinite(depth) && depth > 0) return depth;
@@ -104,9 +121,9 @@ export function probeDepthCm(device: Device, channel: string): number | null {
   return null;
 }
 
-function isTensionSensor(device: Pick<Device, 'type_id' | 'chameleon_enabled' | 'sdi12_probe_profile'>): boolean {
+function isTensionSensor(device: Pick<Device, 'type_id' | 'chameleon_enabled' | 'sdi12_probe_profile' | 'latest_data'>): boolean {
   if (device.type_id === 'KIWI_SENSOR' || device.type_id === 'TEKTELIC_CLOVER') return true;
-  if (device.type_id === 'DRAGINO_LSN50') return device.chameleon_enabled === 1;
+  if (device.type_id === 'DRAGINO_LSN50') return device.chameleon_enabled === 1 || device.latest_data?.watermark != null;
   return device.type_id === 'DRAGINO_SDI12' && device.sdi12_probe_profile === 'TENSIOMARK';
 }
 
@@ -224,6 +241,13 @@ function emptyTensionBucket(): TensionBucket {
 
 function chameleonChannelFaulted(device: Device, channel: SoilChannel): boolean {
   if (device.type_id !== 'DRAGINO_LSN50') return false;
+  // The device list joins each device's newest Chameleon reading regardless
+  // of the latest observation, so after a Chameleon->WATERMARK board swap,
+  // stale chameleon_i2c_missing/chameleon_timeout/chameleon_chN_open values
+  // remain in latest_data. `latest_data.watermark` only exists when the
+  // latest observation is a WATERMARK one, so its presence means these
+  // Chameleon flags are stale and must not fault a healthy current channel.
+  if (device.latest_data?.watermark != null) return false;
   const data = device.latest_data;
   if (data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1) return true;
   const openByChannel: Record<SoilChannel, number | null | undefined> = {
@@ -232,6 +256,20 @@ function chameleonChannelFaulted(device: Device, channel: SoilChannel): boolean 
     swt_3: data?.chameleon_ch3_open,
   };
   return openByChannel[channel] === 1;
+}
+
+const WATERMARK_FAULT_STATUSES = new Set(['open', 'short', 'short_suspected', 'invalid_sample']);
+
+/** A WATERMARK channel whose latest reading is electrically faulty is an invalid reading, not a dry soil. */
+function watermarkChannelFaulted(device: Device, channel: SoilChannel): boolean {
+  if (device.type_id !== 'DRAGINO_LSN50') return false;
+  const channels = device.latest_data?.watermark?.channels;
+  if (!channels) return false;
+  // channels is a fixed [ch1, ch2] tuple; swt_3 has no WATERMARK channel, so
+  // it is never faulted by this check (indexing the tuple with -1 does not
+  // typecheck).
+  const status = channel === 'swt_1' ? channels[0]?.status : channel === 'swt_2' ? channels[1]?.status : null;
+  return status != null && WATERMARK_FAULT_STATUSES.has(status);
 }
 
 function appendTension(
@@ -270,7 +308,7 @@ function summarizeTension(
     for (const channel of TENSION_CHANNELS) {
       const legacy = LEGACY_ALIAS[channel];
       const raw = row?.[channel] ?? (legacy ? row?.[legacy] : undefined);
-      const faulted = chameleonChannelFaulted(device, channel);
+      const faulted = chameleonChannelFaulted(device, channel) || watermarkChannelFaulted(device, channel);
       if ((raw === null || raw === undefined) && !faulted) continue;
       if (fresh || isHistorical) anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
       if (faulted || typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) {

@@ -34,6 +34,59 @@ export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'M
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
 
+export type WatermarkChannelStatus =
+  | 'ok' | 'saturated' | 'wet_offset_clipped' | 'short' | 'short_suspected' | 'open'
+  | 'unsettled' | 'invalid_sample' | 'calibration_required' | 'temperature_missing'
+  | 'temperature_out_of_range' | 'outside_200ss_range';
+
+export interface WatermarkChannelLatest {
+  status: WatermarkChannelStatus | null;
+  kpa: number | null;
+  kpa_upper_bound: number | null;
+  r_solved: number | null;
+  r_upper_bound: number | null;
+  offset_mv: number | null;
+}
+
+export interface WatermarkLatest {
+  recorded_at: string;
+  supply_mv: number | null;
+  soil_temp_c: number | null;
+  soil_temp_source: number | null;
+  die_temp_c: number | null;
+  channels: [WatermarkChannelLatest, WatermarkChannelLatest];
+}
+
+export interface WatermarkCalibrationValues {
+  pullup_1_ohm: number;
+  pulldown_1_ohm: number;
+  series_fwd_1_ohm: number;
+  series_rev_1_ohm: number;
+  pullup_2_ohm: number;
+  pulldown_2_ohm: number;
+  series_fwd_2_ohm: number;
+  series_rev_2_ohm: number;
+}
+
+export interface WatermarkCalibration extends WatermarkCalibrationValues {
+  measured_at: string | null;
+  method: string | null;
+  worst_residual_pct: number | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export interface WatermarkCalibrationState {
+  deveui: string;
+  sync_version: number;
+  calibration: WatermarkCalibration | null;
+}
+
+export interface WatermarkPreviewChannel extends WatermarkChannelLatest {
+  r_fwd: number | null;
+  r_rev: number | null;
+}
+
 export interface Device {
   deveui: string;       // Unique LoRaWAN ID
   name: string;         // User-given name (e.g., "North Field")
@@ -152,6 +205,8 @@ export interface Device {
     chameleon_r2_ohm_raw?: number | null;
     chameleon_r3_ohm_raw?: number | null;
     chameleon_array_id?: string | null;
+    // WATERMARK 200SS soil tension probes via LSN50 (profile 3)
+    watermark?: WatermarkLatest | null;
     // SenseCAP S2120 weather station fields
     barometric_pressure_hpa?: number | null;
     wind_speed_mps?: number | null;

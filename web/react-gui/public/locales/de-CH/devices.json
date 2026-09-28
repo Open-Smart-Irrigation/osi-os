@@ -754,5 +754,61 @@
     "requiredModeGeneric": "{{label}} benötigt {{mode}}. Wenden Sie {{mode}} an, bevor Sie diesen Sensor aktivieren.",
     "rainGaugeNeedsMod9": "Regenmesser und Durchflussmesser können erst aktiviert werden, wenn MOD9 aktiv ist.",
     "chameleonNeedsMod3": "Chameleon SWT kann erst aktiviert werden, wenn MOD3 aktiv ist."
+  },
+  "watermark": {
+    "sectionTitle": "WATERMARK-Bodenwasserspannung",
+    "probe": "Sonde {{n}}",
+    "depthUnset": "Tiefe nicht festgelegt",
+    "wet": "Feucht",
+    "wetUpTo": "≤ {{value}}",
+    "resistance": "Widerstand {{value}}",
+    "resistanceUpTo": "Widerstand ≤ {{value}}",
+    "offset": "Sensor-Offset {{value}} mV",
+    "soilTemp": "Boden {{value}} °C",
+    "soilTempNotMeasured": "Bodentemperatur nicht gemessen",
+    "dieTemp": "Platine {{value}} °C",
+    "supply": "Versorgung {{value}} V",
+    "status": {
+      "ok": "OK",
+      "saturated": "Gesättigt",
+      "wet_offset_clipped": "Messwert begrenzt: Bodenwasserspannung höchstens der angezeigte Wert",
+      "wet_offset_clipped_unbounded": "Messwert begrenzt: Grenzwert der Bodenwasserspannung nicht verfügbar",
+      "short": "Kurzschluss",
+      "short_suspected": "Möglicher Kurzschluss",
+      "open": "Zu trocken für den Messbereich oder nicht angeschlossen",
+      "unsettled": "Messwert noch nicht stabil",
+      "invalid_sample": "Ungültige Messung",
+      "calibration_required": "Kalibrierung erforderlich",
+      "temperature_missing": "Keine Bodentemperatur",
+      "temperature_out_of_range": "Bodentemperatur ausserhalb des Bereichs",
+      "outside_200ss_range": "Ausserhalb des Sensorbereichs"
+    },
+    "depths": {
+      "title": "Sondentiefen",
+      "depth": "Tiefe Sonde {{n}} (cm)",
+      "save": "Tiefen speichern",
+      "saved": "Tiefen gespeichert.",
+      "invalid": "Tiefen müssen ganze Zentimeter zwischen 1 und 1000 sein oder leer bleiben."
+    },
+    "calibration": {
+      "title": "WATERMARK-Kalibrierung",
+      "description": "Pull- und Serienwiderstände pro Kanal, aus der Widerstandsreihe auf der Werkbank. Messwerte werden erst nach dem Speichern in kPa umgerechnet.",
+      "channel": "Kanal {{n}}",
+      "pullup": "Pull-up (Ω)",
+      "pulldown": "Pull-down (Ω)",
+      "seriesFwd": "Serienwiderstand, vorwärts (Ω)",
+      "seriesRev": "Serienwiderstand, rückwärts (Ω)",
+      "preview": "Vorschau",
+      "save": "Kalibrierung speichern",
+      "delete": "Kalibrierung löschen",
+      "confirmDelete": "Diese Kalibrierung löschen? Neue Messwerte warten dann wieder auf eine Kalibrierung.",
+      "previewEmpty": "Noch kein WATERMARK-Messwert für die Vorschau vorhanden.",
+      "previewResult": "Letzter Messwert: Sonde 1 {{p1}}, Sonde 2 {{p2}}",
+      "saved": "Kalibrierung gespeichert. {{count}} wartende Messwerte umgerechnet.",
+      "deleted": "Kalibrierung gelöscht.",
+      "conflict": "Die Kalibrierung wurde anderswo geändert. Die aktuellen Werte sind geladen; prüfen Sie sie und speichern Sie erneut.",
+      "invalidField": "Prüfen Sie {{field}}: ausserhalb des Bereichs.",
+      "loadFailed": "Die Kalibrierung konnte nicht geladen werden."
+    }
   }
 }

@@ -754,5 +754,61 @@
     "requiredModeGeneric": "{{label}} nécessite {{mode}}. Appliquez {{mode}} avant d'activer ce capteur.",
     "rainGaugeNeedsMod9": "Le pluviomètre et le débitmètre ne peuvent être activés qu'une fois MOD9 actif.",
     "chameleonNeedsMod3": "Chameleon SWT ne peut être activé qu'une fois MOD3 actif."
+  },
+  "watermark": {
+    "sectionTitle": "Tension de l'eau du sol WATERMARK",
+    "probe": "Sonde {{n}}",
+    "depthUnset": "Profondeur non définie",
+    "wet": "Humide",
+    "wetUpTo": "≤ {{value}}",
+    "resistance": "Résistance {{value}}",
+    "resistanceUpTo": "Résistance ≤ {{value}}",
+    "offset": "Décalage {{value}} mV",
+    "soilTemp": "Sol {{value}} °C",
+    "soilTempNotMeasured": "Température du sol non mesurée",
+    "dieTemp": "Carte {{value}} °C",
+    "supply": "Alimentation {{value}} V",
+    "status": {
+      "ok": "OK",
+      "saturated": "Saturé",
+      "wet_offset_clipped": "Lecture limitée : tension de l'eau du sol au plus égale à la valeur affichée",
+      "wet_offset_clipped_unbounded": "Lecture limitée : limite de la tension de l'eau du sol non disponible",
+      "short": "Court-circuit",
+      "short_suspected": "Court-circuit possible",
+      "open": "Trop sec pour la plage ou débranché",
+      "unsettled": "Lecture pas encore stabilisée",
+      "invalid_sample": "Échantillon invalide",
+      "calibration_required": "Étalonnage requis",
+      "temperature_missing": "Aucune température du sol",
+      "temperature_out_of_range": "Température du sol hors plage",
+      "outside_200ss_range": "Hors de la plage du capteur"
+    },
+    "depths": {
+      "title": "Profondeurs des sondes",
+      "depth": "Profondeur sonde {{n}} (cm)",
+      "save": "Enregistrer les profondeurs",
+      "saved": "Profondeurs enregistrées.",
+      "invalid": "Les profondeurs doivent être des centimètres entiers entre 1 et 1000, ou rester vides."
+    },
+    "calibration": {
+      "title": "Étalonnage WATERMARK",
+      "description": "Résistances pull et série par canal, issues du balayage de résistances au banc. Les mesures sont converties en kPa une fois ces valeurs enregistrées.",
+      "channel": "Canal {{n}}",
+      "pullup": "Pull-up (Ω)",
+      "pulldown": "Pull-down (Ω)",
+      "seriesFwd": "Série, sens direct (Ω)",
+      "seriesRev": "Série, sens inverse (Ω)",
+      "preview": "Aperçu",
+      "save": "Enregistrer l'étalonnage",
+      "delete": "Supprimer l'étalonnage",
+      "confirmDelete": "Supprimer cet étalonnage ? Les nouvelles mesures attendront de nouveau un étalonnage.",
+      "previewEmpty": "Aucune mesure WATERMARK encore disponible pour l'aperçu.",
+      "previewResult": "Dernière mesure : sonde 1 {{p1}}, sonde 2 {{p2}}",
+      "saved": "Étalonnage enregistré. {{count}} mesures en attente converties.",
+      "deleted": "Étalonnage supprimé.",
+      "conflict": "L'étalonnage a été modifié ailleurs. Les valeurs actuelles sont chargées ; vérifiez-les et enregistrez à nouveau.",
+      "invalidField": "Vérifiez {{field}} : hors plage.",
+      "loadFailed": "Impossible de charger l'étalonnage."
+    }
   }
 }

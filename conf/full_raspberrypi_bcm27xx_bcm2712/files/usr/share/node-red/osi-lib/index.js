@@ -51,6 +51,7 @@ const NAME_TO_PATH = {
   'sdi12-reassemble': 'osi-sdi12-reassemble',
   'osi-valve-control': 'osi-valve-control',
   'osi-system-settings': 'osi-system-settings',
+  'watermark-helper': 'osi-watermark-helper',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
   // F83 (2026-09-17 overnight): bounded in-memory idempotency guard shared by
   // every device_data-writing decode function, so a redelivered/retried

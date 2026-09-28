@@ -212,9 +212,21 @@ compensated resistances, status flags, array ID, calibration_status) —
 useful for protocol debugging. `device_data.swt_1/swt_2/swt_3` are the
 canonical application values that scheduler, GUI, and cloud sync all read.
 If you repair history from `chameleon_readings` + `chameleon_calibrations`,
-you must also update `device_data` and enqueue `DEVICE_DATA_APPENDED` sync
-events, because the live sync trigger fires on `INSERT`, not historical
-`UPDATE` (AGENTS.md, "Chameleon calibration global table").
+you must also update `device_data`. The live `INSERT`-only sync trigger does
+not fire on that `UPDATE`, but it is still carried: `trg_sync_device_data_dirty_au`
+marks the row in `sync_history_dirty_keys`, which the history correction
+phase picks up. Do not enqueue explicit `DEVICE_DATA_APPENDED` events for
+the repair — every such event has `sync_version` 0, and the cloud rejects a
+changed payload at an equal version as `equal_version_payload_conflict`.
+Update by row `id`: `device_data` has no UNIQUE(deveui, recorded_at)
+(AGENTS.md, "Chameleon calibration global table").
+
+**A `DRAGINO_LSN50` may be a WATERMARK node, not a Chameleon board.** FPort 11
++ profile 3 uplinks decode to soil-tension resistance readings stored in
+`watermark_readings` and surfaced as `latest_data.watermark`; the two firmware
+variants are mutually exclusive on one board. Before troubleshooting SWT on a
+`DRAGINO_LSN50` as a Chameleon I2C fault, check whether the device is a
+WATERMARK node instead.
 
 **Wiring rule (one line; full analysis lives elsewhere):** power the VIA
 Chameleon I2C reader from the LSN50's own `VDD` rail (3.3-3.6 V) when SDA/SCL

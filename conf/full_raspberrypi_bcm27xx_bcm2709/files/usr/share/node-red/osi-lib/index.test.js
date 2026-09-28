@@ -50,6 +50,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'sdi12-recipe',
     'uc512-normalize',
     'uplink-dedup',
+    'watermark-helper',
     'zone-commands',
     'zone-env',
   ]);
@@ -62,6 +63,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['entity-name'], 'osi-entity-name');
   assert.equal(osiLib.NAME_TO_PATH['uc512-normalize'], 'osi-uc512-normalize');
   assert.equal(osiLib.NAME_TO_PATH['osi-valve-control'], 'osi-valve-control');
+  assert.equal(osiLib.NAME_TO_PATH['watermark-helper'], 'osi-watermark-helper');
   assert.equal(osiLib.NAME_TO_PATH['rejection-recovery'], 'osi-rejection-recovery');
   assert.equal(osiLib.NAME_TO_PATH['scope'], 'osi-scope-helper');
   assert.equal(osiLib.NAME_TO_PATH['scoped-access-commands'], 'osi-scoped-access-commands');

@@ -754,5 +754,61 @@
     "requiredModeGeneric": "{{label}} requiere {{mode}}. Aplique {{mode}} antes de activar este sensor.",
     "rainGaugeNeedsMod9": "El pluviómetro y el caudalímetro solo pueden activarse cuando MOD9 esté activo.",
     "chameleonNeedsMod3": "Chameleon SWT solo puede activarse cuando MOD3 esté activo."
+  },
+  "watermark": {
+    "sectionTitle": "Tensión hídrica del suelo WATERMARK",
+    "probe": "Sonda {{n}}",
+    "depthUnset": "Profundidad no definida",
+    "wet": "Húmedo",
+    "wetUpTo": "≤ {{value}}",
+    "resistance": "Resistencia {{value}}",
+    "resistanceUpTo": "Resistencia ≤ {{value}}",
+    "offset": "Desplazamiento {{value}} mV",
+    "soilTemp": "Suelo {{value}} °C",
+    "soilTempNotMeasured": "Temperatura del suelo no medida",
+    "dieTemp": "Placa {{value}} °C",
+    "supply": "Alimentación {{value}} V",
+    "status": {
+      "ok": "OK",
+      "saturated": "Saturado",
+      "wet_offset_clipped": "Lectura limitada: tensión hídrica como máximo el valor mostrado",
+      "wet_offset_clipped_unbounded": "Lectura limitada: límite de la tensión hídrica no disponible",
+      "short": "Cortocircuito",
+      "short_suspected": "Posible cortocircuito",
+      "open": "Demasiado seco para el rango o desconectado",
+      "unsettled": "Lectura aún no estable",
+      "invalid_sample": "Muestra no válida",
+      "calibration_required": "Calibración requerida",
+      "temperature_missing": "Sin temperatura del suelo",
+      "temperature_out_of_range": "Temperatura del suelo fuera de rango",
+      "outside_200ss_range": "Fuera del rango del sensor"
+    },
+    "depths": {
+      "title": "Profundidades de las sondas",
+      "depth": "Profundidad sonda {{n}} (cm)",
+      "save": "Guardar profundidades",
+      "saved": "Profundidades guardadas.",
+      "invalid": "Las profundidades deben ser centímetros enteros entre 1 y 1000, o quedar en blanco."
+    },
+    "calibration": {
+      "title": "Calibración WATERMARK",
+      "description": "Resistencias pull y en serie por canal, del barrido de resistencias en el banco. Las lecturas se convierten a kPa una vez guardados estos valores.",
+      "channel": "Canal {{n}}",
+      "pullup": "Pull-up (Ω)",
+      "pulldown": "Pull-down (Ω)",
+      "seriesFwd": "Serie, directa (Ω)",
+      "seriesRev": "Serie, inversa (Ω)",
+      "preview": "Vista previa",
+      "save": "Guardar calibración",
+      "delete": "Eliminar calibración",
+      "confirmDelete": "¿Eliminar esta calibración? Las nuevas lecturas volverán a esperar una calibración.",
+      "previewEmpty": "Todavía no hay ninguna lectura WATERMARK para la vista previa.",
+      "previewResult": "Última lectura: sonda 1 {{p1}}, sonda 2 {{p2}}",
+      "saved": "Calibración guardada. {{count}} lecturas en espera convertidas.",
+      "deleted": "Calibración eliminada.",
+      "conflict": "La calibración cambió en otro lugar. Se han cargado los valores actuales; revíselos y guarde de nuevo.",
+      "invalidField": "Revise {{field}}: fuera de rango.",
+      "loadFailed": "No se pudo cargar la calibración."
+    }
   }
 }

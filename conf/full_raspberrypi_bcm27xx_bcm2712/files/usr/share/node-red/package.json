@@ -38,6 +38,7 @@
     "osi-sdi12-commissioning": "file:osi-sdi12-commissioning",
     "osi-sdi12-reassemble": "file:osi-sdi12-reassemble",
     "osi-valve-control": "file:osi-valve-control",
+    "osi-watermark-helper": "file:osi-watermark-helper",
     "osi-system-settings": "file:osi-system-settings",
     "osi-scope-helper": "file:osi-scope-helper",
     "osi-installation-location-helper": "file:osi-installation-location-helper",

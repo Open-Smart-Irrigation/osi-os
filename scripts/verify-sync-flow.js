@@ -210,6 +210,7 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/chameleon',
   '/api/devices/:deveui/chameleon/refresh-calibration',
   '/api/devices/:deveui/chameleon/depth',
+  '/api/devices/:deveui/watermark/calibration',
   '/api/devices/:deveui/dendro-config',
   '/api/devices/:deveui/dendro-baseline/reset',
   '/api/devices/:deveui/zone-assignments',

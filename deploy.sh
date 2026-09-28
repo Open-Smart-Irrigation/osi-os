@@ -1639,6 +1639,26 @@ fetch_required "osi-lsn50-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.js" \
     "/srv/node-red/osi-lsn50-normalize/index.js"
 
+fetch_required "osi-watermark-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/package.json" \
+    "/srv/node-red/osi-watermark-helper/package.json"
+
+fetch_required "osi-watermark-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/index.js" \
+    "/srv/node-red/osi-watermark-helper/index.js"
+
+fetch_required "osi-watermark-helper conversion.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/conversion.js" \
+    "/srv/node-red/osi-watermark-helper/conversion.js"
+
+fetch_required "osi-watermark-helper calibration.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/calibration.js" \
+    "/srv/node-red/osi-watermark-helper/calibration.js"
+
+fetch_required "osi-watermark-helper ingest.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/ingest.js" \
+    "/srv/node-red/osi-watermark-helper/ingest.js"
+
 fetch_required "osi-uc512-normalize package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/package.json" \
     "/srv/node-red/osi-uc512-normalize/package.json"

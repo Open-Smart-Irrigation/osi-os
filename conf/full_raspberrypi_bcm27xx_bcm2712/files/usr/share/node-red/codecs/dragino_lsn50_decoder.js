@@ -109,6 +109,42 @@ function decodeChameleonV2(decode, bytes) {
   decode.Chameleon_Array_ID = (decode.Chameleon_Data_Invalid || decode.Chameleon_ID_Fault) ? "NULL" : bytesToHex(bytes, 24, 8);
 }
 
+// WATERMARK profile 3 (FPort 11): raw fields only, for ChirpStack's event view.
+// The edge decodes these bytes itself (osi-watermark-helper parseProfile3);
+// scripts/verify-lsn50-watermark-codec.js pins the two to the same answers.
+function decodeWatermarkProfile3(bytes) {
+  if (!bytes || bytes.length != 27) return { Watermark_Error: "length" };
+  if (bytes[0] != 0xA2) return { Watermark_Error: "tag" };
+  if (bytes[1] != 3) return { Watermark_Error: "profile" };
+  var status = bytes[8];
+  if (status & 0xF0) return { Watermark_Error: "reserved_status_bits" };
+  if ((status & 0x03) == 0x03) return { Watermark_Error: "reserved_source" };
+  if ((bytes[9] & 0xC0) || (bytes[18] & 0xC0)) return { Watermark_Error: "reserved_flag_bits" };
+  var soil = readInt16BE(bytes, 4);
+  var die = readInt16BE(bytes, 6);
+  function probe(o) {
+    return {
+      flags: bytes[o],
+      fwd_early: readUInt16BE(bytes, o + 1),
+      fwd: readUInt16BE(bytes, o + 3),
+      rev_early: readUInt16BE(bytes, o + 5),
+      rev: readUInt16BE(bytes, o + 7)
+    };
+  }
+  return {
+    Node_type: "LSN50_WATERMARK",
+    Watermark_Profile: 3,
+    Supply_mV: readUInt16BE(bytes, 2),
+    Soil_Temp_C: soil == -32768 ? "NULL" : soil / 100,
+    Soil_Temp_Source: status & 0x03,
+    DS18B20_Failed: (status & 0x04) ? 1 : 0,
+    Die_Temp_C: die == -32768 ? "NULL" : die / 100,
+    Die_Temp_Valid: (status & 0x08) ? 0 : 1,
+    Probe_1: probe(9),
+    Probe_2: probe(18)
+  };
+}
+
 function Decode(fPort, bytes, variables) {
 //LSN50 Decode   
 if(fPort==0x02)
@@ -311,5 +347,10 @@ if(fPort==0x02)
       SUB_BAND:sub_band,
       TDC_sec:tdc_time,
   	}
+  }
+
+  else if(fPort==11)
+  {
+    return decodeWatermarkProfile3(bytes);
   }
 }

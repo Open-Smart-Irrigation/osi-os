@@ -38,8 +38,11 @@ The seed defines ~30 triggers in three groups:
 
 - Outbox enqueue (`trg_dp_*_outbox_ai/au`, `trg_sync_*_outbox_au`): synced
   tables emit `sync_outbox` events on insert/update. The `device_data`
-  trigger fires on INSERT only; historical UPDATE repairs must enqueue
-  `DEVICE_DATA_APPENDED` events explicitly or the mirror stays stale.
+  trigger fires on INSERT only; a historical UPDATE repair is instead carried
+  by `trg_sync_device_data_dirty_au` → `sync_history_dirty_keys` → the
+  history correction phase. Do not enqueue an explicit `DEVICE_DATA_APPENDED`
+  event for such a repair — it lands at `sync_version` 0 and the cloud
+  rejects it as `equal_version_payload_conflict`; update by row `id`.
 - Dirty-key marking (`trg_sync_*_dirty_ai/au`): feeds history shadow sync.
 - Defaults (`trg_sync_*_defaults_ai`, `*_uuid_ai`): stamps UUIDs and sync
   defaults on insert; `sync_dendro_to_readings` bridges live and history

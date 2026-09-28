@@ -1417,10 +1417,21 @@ if (sizeAllowances) {
   // origin/main-relative check still does not bind; the committed-baseline check is what
   // this delta actually funds. Merging origin/main still requires re-measuring both this
   // total and the baseline doc, as every entry above warned.
-  expectCondition(sizeAllowances.total_allowance?.delta === 6731,
-    'size total allowance: exact cumulative delta 6731',
-    'size total allowance: expected exact cumulative delta 6731');
+  // 17778: 2026-09-29 integration of watermark-lsn50 (WATERMARK phase 1, spec 2026-09-25) onto
+  // rak10701-coverage (76ac95755). Takes the standing 6731 from 76ac95755 and adds the
+  // WATERMARK side measured on the merged tree, not the branch's own pre-merge 82322:
+  // verify-flows-size-ratchet totalChars in each byte-identical profile, 76ac95755 1587149 ->
+  // HEAD 1598196 = +11047 (lsn50-decode-fn, lsn50-config-query-fn, d0b2b1c1a937e16d scheduler
+  // interlock, format-devices, merge-device-data, 8809bb5239dfb3d4 FPort 11 guard,
+  // put-soil-depth-fn, scoped-device-config-guard, new nodes watermark-ingest-fn and
+  // watermark-cal-fn). 6731 + 11047 = 17778 = origin/main 1580418 -> HEAD 1598196. Build
+  // Telemetry grew on both sides; its node allowance is the merged measurement, 13850 -> 14621
+  // (+771). The committed baseline doc is re-written from the same tree (1598196).
+  expectCondition(sizeAllowances.total_allowance?.delta === 17778,
+    'size total allowance: exact cumulative delta 17778',
+    'size total allowance: expected exact cumulative delta 17778');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',

@@ -1,0 +1,72 @@
+-- risk: additive
+-- 0061: WATERMARK 200SS on the Dragino LSN50 (profile 3, FPort 11), phase 1.
+-- Edge-local calibration and raw readings; no sync triggers in this phase.
+
+CREATE TABLE watermark_calibrations (
+  deveui              TEXT PRIMARY KEY,
+  pullup_1_ohm        REAL NOT NULL CHECK (pullup_1_ohm BETWEEN 25000 AND 65000),
+  pulldown_1_ohm      REAL NOT NULL CHECK (pulldown_1_ohm BETWEEN 25000 AND 65000),
+  series_fwd_1_ohm    REAL NOT NULL CHECK (series_fwd_1_ohm BETWEEN 0 AND 500),
+  series_rev_1_ohm    REAL NOT NULL CHECK (series_rev_1_ohm BETWEEN 0 AND 500),
+  pullup_2_ohm        REAL NOT NULL CHECK (pullup_2_ohm BETWEEN 25000 AND 65000),
+  pulldown_2_ohm      REAL NOT NULL CHECK (pulldown_2_ohm BETWEEN 25000 AND 65000),
+  series_fwd_2_ohm    REAL NOT NULL CHECK (series_fwd_2_ohm BETWEEN 0 AND 500),
+  series_rev_2_ohm    REAL NOT NULL CHECK (series_rev_2_ohm BETWEEN 0 AND 500),
+  measured_at         TEXT,
+  method              TEXT,
+  worst_residual_pct  REAL,
+  notes               TEXT,
+  sync_version        INTEGER NOT NULL DEFAULT 1,
+  updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  deleted_at          TEXT,
+  FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
+);
+
+CREATE TABLE watermark_readings (
+  id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+  deveui                   TEXT NOT NULL,
+  recorded_at              TEXT NOT NULL,
+  f_cnt                    INTEGER,
+  device_data_id           INTEGER,
+  payload_hex              TEXT NOT NULL,
+  frame_status             TEXT NOT NULL CHECK (frame_status IN ('accepted','frame_rejected')),
+  reject_reason            TEXT,
+  tag                      INTEGER,
+  profile                  INTEGER,
+  supply_mv                INTEGER,
+  soil_temp_c              REAL,
+  soil_temp_source         INTEGER,
+  die_temp_c               REAL,
+  status_byte              INTEGER,
+  ch1_flags                INTEGER,
+  ch1_fwd_early            INTEGER,
+  ch1_fwd                  INTEGER,
+  ch1_rev_early            INTEGER,
+  ch1_rev                  INTEGER,
+  ch1_r_fwd                REAL,
+  ch1_r_rev                REAL,
+  ch1_r_solved             REAL,
+  ch1_offset_mv            REAL,
+  ch1_r_upper_bound        REAL,
+  ch1_kpa_upper_bound      REAL,
+  ch1_status               TEXT,
+  ch1_kpa                  REAL,
+  ch2_flags                INTEGER,
+  ch2_fwd_early            INTEGER,
+  ch2_fwd                  INTEGER,
+  ch2_rev_early            INTEGER,
+  ch2_rev                  INTEGER,
+  ch2_r_fwd                REAL,
+  ch2_r_rev                REAL,
+  ch2_r_solved             REAL,
+  ch2_offset_mv            REAL,
+  ch2_r_upper_bound        REAL,
+  ch2_kpa_upper_bound      REAL,
+  ch2_status               TEXT,
+  ch2_kpa                  REAL,
+  calibration_sync_version INTEGER,
+  conversion_version       TEXT NOT NULL,
+  created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_watermark_readings_deveui_time ON watermark_readings(deveui, recorded_at);
+CREATE INDEX idx_watermark_readings_device_data ON watermark_readings(device_data_id);
