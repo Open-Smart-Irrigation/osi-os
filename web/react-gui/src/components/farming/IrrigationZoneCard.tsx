@@ -556,7 +556,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {fallbackReasonText}
             </div>
           )}
-          <div className={`mt-4 grid grid-cols-2 gap-2 ${WATER_TILE_GRID[waterTileCount]}`}>
+          <div className={`mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 ${WATER_TILE_GRID[waterTileCount]}`}>
             {/* The daily aggregation writes 0 mm for a day with no sample, so
                 this tile needs a gauge behind it before it can call anything a
                 measurement. */}

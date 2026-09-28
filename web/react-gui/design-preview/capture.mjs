@@ -45,6 +45,19 @@ try {
     await page.locator('button[aria-expanded="false"]').click();
     await page.getByText('Tensiomark · south bed', { exact: true }).waitFor({ state: 'attached' });
     await page.evaluate(() => document.fonts.ready);
+    const headers = await page.locator('h3').evaluateAll(elements => elements
+      .filter(el => ['Kiwi · north bed', 'Chameleon · orchard', 'Tensiomark · south bed'].includes(el.textContent))
+      .map(el => ({ name: el.textContent, width: el.clientWidth,
+        clipped: el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1 })));
+    assert.equal(headers.length, 3, `${name}: all device headings found`);
+    assert.deepEqual(headers.filter(header => header.width <= 0 || header.clipped), [], `${name}: clipped device names`);
+    if (item.width < 640) {
+      const actionFits = await page.getByTestId('water-today-card').locator('div.mt-4.grid').evaluate(grid => {
+        const action = grid.lastElementChild;
+        return Math.abs(action.getBoundingClientRect().width - grid.getBoundingClientRect().width) <= 1;
+      });
+      assert(actionFits, `${name}: Water action needs full phone width`);
+    }
     assert.equal(await page.getByText(expectedMode === 'proposed'
       ? /proposed indicators/ : /implementation under test/).count(), 1, 'preview mode');
 

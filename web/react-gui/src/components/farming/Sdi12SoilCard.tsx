@@ -133,17 +133,17 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
-      <div className="flex items-center justify-between gap-2 mb-0.5">
+      <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
           canEdit={!readOnly}
           onSave={handleRename}
           renameLabel={t('rename.device')}
           inputLabel={t('rename.deviceInputLabel')}
-          headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
+          headingClassName="flex-1 text-base font-semibold text-[var(--text)] leading-snug [overflow-wrap:anywhere]"
         />
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-auto bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             SDI-12
           </span>
           {!readOnly && (
