@@ -30,6 +30,25 @@
     "mapEvidence": "Positions et liaisons enregistrées uniquement ; la couverture de la zone n’est pas déduite.",
     "unknownDevices": "Positions inconnues",
     "loadingMore": "Chargement…",
-    "loadMore": "Charger plus"
+    "loadMore": "Charger plus",
+    "showAllObservations": "Afficher tout",
+    "showFewerObservations": "Afficher moins",
+    "coverage": {
+      "title": "Puissance du signal (dBm)",
+      "window": "Période",
+      "windowLastHour": "Dernière heure",
+      "windowHours": "Dernières {{count}} heures",
+      "windowDays": "Derniers {{count}} jours",
+      "export": "Exporter",
+      "points_one": "{{count}} point géolocalisé",
+      "points_many": "{{count}} points géolocalisés",
+      "points_other": "{{count}} points géolocalisés",
+      "gateway": "Passerelle",
+      "legendStrong": "Fort",
+      "legendWeak": "Faible",
+      "noPosition": "Aucune position de passerelle n’est enregistrée ; le parcours est tracé sans point de référence.",
+      "noPoints": "Aucune observation de cette période n’est géolocalisée.",
+      "captureOff": "La capture radio est désactivée sur cette passerelle ; aucun point de couverture n’est enregistré."
+    }
   }
 }

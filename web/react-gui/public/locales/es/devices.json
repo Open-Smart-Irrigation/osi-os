@@ -192,6 +192,12 @@
     "intervalPlaceholder": "ej. 10",
     "intervalNote": "OSI establece el intervalo normal de caja cerrada en FPort 11. El intervalo de caja abierta permanece fijo en 2 minutos y la protección antimanipulación permanece activada."
   },
+  "fieldTester": {
+    "badge": "MEDIDOR",
+    "sectionHeading": "Medidores de cobertura",
+    "openCoverageMap": "Abrir el mapa de la red",
+    "readingsOnMap": "Las mediciones aparecen en el mapa de la red."
+  },
   "zone": {
     "configure": "Configurar",
     "chips": {

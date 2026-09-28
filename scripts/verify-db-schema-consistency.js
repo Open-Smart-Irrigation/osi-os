@@ -1574,6 +1574,15 @@ function compareSet(label, actualValues, expectedValues) {
   }
 }
 
+// devices.type_id CHECK members this contract pins by name. AQUASCOPE_LORAIN is the
+// PR #79 regression guard: the boot rebuild once recreated devices with that member
+// missing on every restart. RAK10701_FIELD_TESTER (migration 0060; numbered 0059 at
+// authoring time, renumbered before merge to avoid colliding with main's own
+// 0059__sync_rejection_recovery.sql, #351) is pinned the same
+// way because the boot node's REQUIRED_TYPES guard compares by set equality, so a seed
+// or bundled image that lost it would be silently rebuilt back and forth on every boot.
+const requiredDeviceTypes = ['AQUASCOPE_LORAIN', 'RAK10701_FIELD_TESTER'];
+
 function verifyDb(dbPath) {
   if (!fs.existsSync(dbPath)) {
     throw new Error(`database not found: ${dbPath}`);
@@ -1585,8 +1594,11 @@ function verifyDb(dbPath) {
   for (const [tableName, expectedColumns] of Object.entries(schemaContract)) {
     compareSet(`${dbPath}:${tableName} columns`, columnNames(dbPath, tableName), expectedColumns);
   }
-  if (!tableSql(dbPath, 'devices').includes("'AQUASCOPE_LORAIN'")) {
-    throw new Error(`${dbPath}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
+  const devicesSql = tableSql(dbPath, 'devices');
+  for (const deviceType of requiredDeviceTypes) {
+    if (!devicesSql.includes(`'${deviceType}'`)) {
+      throw new Error(`${dbPath}: devices.type_id CHECK is missing ${deviceType}`);
+    }
   }
   const scheduleSql = tableSql(dbPath, 'irrigation_schedules');
   for (const metric of ["'SWT_1'", "'SWT_2'", "'SWT_3'", "'DENDRO'"]) {
@@ -1640,8 +1652,10 @@ const dbPaths = explicitPaths.length ? explicitPaths.map((entry) => path.resolve
 
 const seedSqlPath = path.join(repoRoot, 'database', 'seed-blank.sql');
 const seedSql = fs.readFileSync(seedSqlPath, 'utf8');
-if (!seedSql.includes("'AQUASCOPE_LORAIN'")) {
-  throw new Error(`${path.relative(repoRoot, seedSqlPath)}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
+for (const deviceType of requiredDeviceTypes) {
+  if (!seedSql.includes(`'${deviceType}'`)) {
+    throw new Error(`${path.relative(repoRoot, seedSqlPath)}: devices.type_id CHECK is missing ${deviceType}`);
+  }
 }
 if (!seedSql.includes("CHECK (trigger_metric IN ('SWT_WM1','SWT_WM2','SWT_AVG','SWT_1','SWT_2','SWT_3','DENDRO'))")) {
   throw new Error(`${path.relative(repoRoot, seedSqlPath)}: irrigation_schedules.trigger_metric CHECK does not match the canonical 7-value vocabulary`);

@@ -30,6 +30,24 @@
     "mapEvidence": "Recorded positions and links only; area coverage is not inferred.",
     "unknownDevices": "Unknown positions",
     "loadingMore": "Loading…",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "showAllObservations": "Show all",
+    "showFewerObservations": "Show fewer",
+    "coverage": {
+      "title": "Signal strength (dBm)",
+      "window": "Time window",
+      "windowLastHour": "Last hour",
+      "windowHours": "Last {{count}} hours",
+      "windowDays": "Last {{count}} days",
+      "export": "Export",
+      "points_one": "{{count}} positioned point",
+      "points_other": "{{count}} positioned points",
+      "gateway": "Gateway",
+      "legendStrong": "Strong",
+      "legendWeak": "Weak",
+      "noPosition": "No gateway position is recorded, so the walk is drawn without a reference marker.",
+      "noPoints": "No observation in this window carries a position.",
+      "captureOff": "Radio capture is switched off on this gateway, so no coverage points are being recorded."
+    }
   }
 }

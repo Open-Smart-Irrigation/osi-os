@@ -5,7 +5,7 @@ import { HeaderMenu } from './HeaderMenu';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 import { useGatewayModules } from '../hooks/useGatewayModules';
 
-type TabKey = 'zones' | 'data' | 'journal';
+type TabKey = 'zones' | 'data' | 'journal' | 'network';
 
 interface AppHeaderProps {
   /** Page title shown in the header H1. */
@@ -77,6 +77,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         label: t('tabs.journal'),
         to: '/journal',
         active: activeTab === 'journal' || pathname.startsWith('/journal'),
+      }]
+      : []),
+    // Same gate as DashboardHeader's own Network link (2026-09-17 module
+    // visibility): a desktop browser with the module switched on for this
+    // gateway. Without this tab the Network page was the only page with no
+    // "way back" and no "where am I" -- a lone Zones pill next to it.
+    ...(isDesktopBrowser() && modules?.network === true
+      ? [{
+        key: 'network' as const,
+        label: t('network', { defaultValue: 'Network' }),
+        to: '/network',
+        active: activeTab === 'network' || pathname.startsWith('/network'),
       }]
       : []),
   ];

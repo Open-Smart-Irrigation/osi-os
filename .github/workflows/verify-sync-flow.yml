@@ -66,6 +66,14 @@ jobs:
           node scripts/verify-lsn50-chameleon-persistence.js
           node scripts/verify-module-file-deploy-coverage.js
           node scripts/verify-s2120-gust-fix.js
+      # RAK10701 field-tester downlink encoder (fPort 2, six-byte reply): sequence
+      # id modulo, both RSSI clamps, the 250 m/32 km distance quantisation, and
+      # both directions of position-unknown degradation. This is a node:test file
+      # under osi-radio-helper/, not a scripts/ wrapper, so it needs its own step.
+      # bcm2712 only: verify-profile-parity.js, chained by verify-sync-flow.js
+      # above, already proves the bcm2709 copy is byte-identical.
+      - name: Field tester reply encoder
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester.test.js
       # Parse-checks every function node's func/initialize/finalize in all
       # shipped flows.json profiles. Added after issue #6: dendro-raw-fn
       # shipped with a corrupted regex Node-RED could not compile, so its

@@ -144,6 +144,46 @@ function ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions = {}) 
   return run;
 }
 
+// "reference(n)" means "a DB with every migration whose version <= n
+// applied" (see bb3bda079, which fixed the same class of bug on reconcile's
+// side) - NOT "the migration file literally numbered n". On a tree with a
+// version gap (e.g. this branch's own missing 0059, renumbered to 0060
+// because main owns 0059, #351) there is no file at version n itself, so
+// byVersion - keyed only by versions that exist as files - has no entry for
+// n.
+//
+// referenceSnapshot()/buildReference() do NOT resolve n down to the nearest
+// present version themselves - they stay STRICT and throw (via
+// byVersion.get(n) being undefined) for any n with no migration file,
+// whether an interior gap or n > the last present version. That strictness
+// is load-bearing for a THIRD caller neither bb3bda079 nor 5c8470e94 (which
+// added gap resolution here and then removed it again, see git history)
+// accounted for: lib/osi-migrate/runner.js's isBootOwnedTriggerBodyDrift
+// (reached from the live runner's drift-grace path in applyPending and
+// verifyHead) calls buildReference with the DEVICE's highest *applied*
+// ledger version, not a version this tree's migration files necessarily
+// have - a gap on this branch, or n > head on a downgrade/rollback (on main
+// too), both throw a plain TypeError before this comment's fix, which that
+// caller's try/catch turns into a safe refusal (fail closed on an
+// unprovable state - a version the device ran but this reference chain
+// cannot build is not proof the live schema is safe to bless). Resolving
+// the gap down here would instead silently compare the live schema against
+// a reference that is missing a migration the device actually applied.
+//
+// Callers that legitimately need "the highest present version <= n" must
+// resolve it themselves, at the call site, before calling in:
+// - reconcile-ledger-numbering.js's buildReferenceAt (bb3bda079): n there is
+//   target.version-1, a tree-relative offset, not a device-applied version -
+//   resolving down to the nearest present file is exactly correct there.
+// - runBaseline() below: the default candidate scan only ever walks real
+//   migration-file versions (5c8470e94), and an explicit --version is
+//   validated against the migration list before it ever reaches here (see
+//   runBaseline's version checks) - so runBaseline never passes a gap
+//   version in the first place.
+//
+// On a contiguous tree (main) every version has a file, so none of this
+// changes behaviour there either way.
+
 // Reference(N) snapshot, built (or reused) via the shared incremental chain.
 async function referenceSnapshot(migrationsDir, n, scratchRoot, runnerOptions = {}) {
   await ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions);
@@ -175,7 +215,17 @@ function assertManifestMatchesDisk(migrations, manifest) {
 // Backed by the shared incremental chain, so repeat calls for a version
 // already reached (by this call or an earlier one, e.g. while computing
 // head) are a cache hit, not a rebuild. External contract unchanged: still
-// takes (migrationsDir, n, scratchRoot) and returns a dbPath.
+// takes (migrationsDir, n, scratchRoot) and returns a dbPath. STRICT: throws
+// if n has no migration file (interior gap, or n > the last present
+// version) - see the comment above referenceSnapshot() for why (the live
+// runner's drift-grace path depends on this).
+//
+// Callers: reconcile-ledger-numbering.js's buildReferenceAt, runBaseline()
+// below, and lib/osi-migrate/runner.js's isBootOwnedTriggerBodyDrift (the
+// live runner's drift-grace path, reached from applyPending/verifyHead) -
+// the only one of the three that can hand this a version with no file, and
+// the reason this function must stay strict rather than resolve gaps
+// itself.
 async function buildReference(migrationsDir, n, scratchRoot, runnerOptions = {}) {
   await ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions);
   return getChainState(migrationsDir, scratchRoot, runnerOptions).byVersion.get(n).dbPath;
@@ -219,13 +269,29 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
   if (version !== null && (!Number.isInteger(version) || version < 1 || version > head)) {
     throw new Error(`--version must be an integer in 1..${head}`);
   }
+  // buildReference/referenceSnapshot are strict (see their comments): every
+  // version reaching them must be a real migration file. head, above, always
+  // is (it's a migration's own .version). An explicit --version must be
+  // checked too - the range check alone accepts a gap number (e.g. this
+  // branch's own missing 0059) that has no file behind it.
+  if (version !== null && !migrations.some((m) => m.version === version)) {
+    throw new Error(`--version ${version} has no migration file at that version (gap in ${migrationsDir})`);
+  }
 
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-baseline-'));
   const liveSnap = await snapshotSchema(cliRunner(dbPath));
   const runnerOptions = { runnerFactory };
   const headSnap = await referenceSnapshot(migrationsDir, head, scratchRoot, runnerOptions);
 
-  const candidates = version !== null ? [version] : Array.from({ length: head }, (_, i) => head - i);
+  // Only scan versions that actually have a migration file. Walking every
+  // bare integer down from head (the old behaviour) hit referenceSnapshot()
+  // with version numbers that fall in a gap (e.g. this branch's own missing
+  // 0059) and, before the resolvePresentVersion() fix above existed, threw;
+  // scanning real versions only also avoids reporting a "matched" version
+  // number that isn't backed by any file, and avoids redundant duplicate
+  // comparisons against the same resolved snapshot. On a contiguous tree
+  // (main) this is exactly [head, head-1, ..., 1] - identical to before.
+  const candidates = version !== null ? [version] : migrations.map((m) => m.version).slice().reverse();
   const tried = [];
   let matched = null;
   for (const n of candidates) {
@@ -283,4 +349,4 @@ if (require.main === module) {
   })().catch((e) => { console.error(`[baseline] FAILED: ${e.message}`); process.exit(2); });
 }
 
-module.exports = { runBaseline, buildReference, parseArgs, APP_VERSION };
+module.exports = { runBaseline, buildReference, referenceSnapshot, parseArgs, APP_VERSION };

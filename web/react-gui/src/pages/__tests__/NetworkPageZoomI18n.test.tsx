@@ -31,6 +31,12 @@ vi.mock('../../services/api', () => ({
     saveLocation: mocks.saveLocation, saveRadio: mocks.saveRadio,
   },
 }));
+// AppHeader calls useTranslation(['dashboard', 'settings']) and useGatewayModules
+// (SWR against systemSettingsAPI, not mocked here), neither of which this
+// file's French i18n instance carries; replaced with a minimal stand-in that
+// still renders the title as an h1, matching this page's own tests.
+vi.mock('../../components/AppHeader', () => ({ AppHeader: ({ title }: { title: string }) => <header><h1>{title}</h1></header> }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ username: 'field-admin', logout: vi.fn() }) }));
 
 async function frenchI18n() {
   const instance = i18next.createInstance();

@@ -192,6 +192,12 @@
     "intervalPlaceholder": "ex. 10",
     "intervalNote": "OSI définit l'intervalle normal en boîtier fermé sur le FPort 11. L'intervalle en boîtier ouvert reste fixé à 2 minutes et la détection d'intrusion reste activée."
   },
+  "fieldTester": {
+    "badge": "TESTEUR",
+    "sectionHeading": "Testeurs de couverture",
+    "openCoverageMap": "Voir la carte du réseau",
+    "readingsOnMap": "Les relevés s'affichent sur la carte du réseau."
+  },
   "zone": {
     "configure": "Configurer",
     "chips": {

@@ -301,6 +301,17 @@ function getReferenceScratchRoot() {
   return referenceScratchRoot;
 }
 
+// "reference(n)" means "a DB with every migration whose version <= n
+// applied" — NOT "the DB as of the migration file literally numbered n".
+// On a tree with a version gap (e.g. this branch's own missing 0059,
+// renumbered to 0060 because main owns 0059, #351) there is no migration
+// file AT version n itself, so buildReference's chain — keyed only by the
+// versions that actually exist as files (baseline-existing-db.js's
+// byVersion map) — has no entry for n and .dbPath throws. The set of
+// migrations with version <= n is unchanged by the gap (a version number
+// with no file simply contributes nothing), so resolving n down to the
+// highest migration version actually present at or below n yields the
+// exact same applied set and is safe to substitute.
 async function buildReferenceAt(migrationsDir, n) {
   const refRoot = getReferenceScratchRoot();
   if (n <= 0) {
@@ -308,7 +319,16 @@ async function buildReferenceAt(migrationsDir, n) {
     await cliRunner(dbPath).exec('PRAGMA user_version=0;');
     return dbPath;
   }
-  return buildReference(migrationsDir, n, refRoot);
+  const presentAtOrBelow = loadMigrations(migrationsDir)
+    .map((m) => m.version)
+    .filter((v) => v <= n);
+  if (presentAtOrBelow.length === 0) {
+    const dbPath = path.join(fs.mkdtempSync(path.join(refRoot, 'ref-empty-')), 'empty.db');
+    await cliRunner(dbPath).exec('PRAGMA user_version=0;');
+    return dbPath;
+  }
+  const resolvedN = Math.max(...presentAtOrBelow);
+  return buildReference(migrationsDir, resolvedN, refRoot);
 }
 
 // Resolves every 'pending-proof' row in place (mutates decision/proof/reason)

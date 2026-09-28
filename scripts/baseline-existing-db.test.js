@@ -10,7 +10,7 @@ const path = require('node:path');
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 const { applyPending, verifyHead } = require('../lib/osi-migrate');
 const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
-const { runBaseline, buildReference } = require('./baseline-existing-db');
+const { runBaseline, buildReference, referenceSnapshot } = require('./baseline-existing-db');
 
 const REPO = path.resolve(__dirname, '..');
 const MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
@@ -87,12 +87,18 @@ test('gate failure stamps NOTHING (no ledger tables created)', async () => {
 });
 
 test('clean head-shaped device baselines at head, idempotently, distinguishably tagged', async () => {
-  const head = loadMigrations(MIGRATIONS_DIR).at(-1).version;
+  const allMigrations = loadMigrations(MIGRATIONS_DIR);
+  const head = allMigrations.at(-1).version;
   const db = await makePreLedgerDeviceAt(head);
   assert.equal((await runBaseline({ dbPath: db, log: () => {} })).matched, head);
   assert.equal((await runBaseline({ dbPath: db, log: () => {} })).matched, head);
   const rows = await cliRunner(db).all('SELECT version, status, app_version FROM schema_migrations ORDER BY version');
-  assert.equal(rows.length, head);
+  // One ledger row per migration FILE, not per version number up to head -
+  // on a tree with a version gap (this branch's own missing 0059,
+  // renumbered to 0060 because main owns 0059, #351) those differ: head=60
+  // but only 59 migration files exist. On a contiguous tree this is the
+  // same value as `head`.
+  assert.equal(rows.length, allMigrations.length);
   assert.ok(rows.every((r) => r.status === 'applied' && r.app_version === 'baseline-existing-db'));
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MIGRATIONS_DIR }), { ok: true });
 });
@@ -179,4 +185,74 @@ test('reference chain defaults to cliRunner when no persistent runner opt-in is 
   delete env.OSI_BASELINE_RUNNER;
   const out = execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', env });
   assert.notEqual(out, '0');
+});
+
+// --- regression: candidate scan across a migrations-dir version gap, and --
+// --- strict reference resolution -------------------------------------------
+// Mirrors this branch's own real gap (renumbered field-tester migration
+// 0059 -> 0060 because main owns 0059, #351): database/migrations/ordered/
+// goes ...0057, 0058, 0060 with no 0059 file. Before the fix, runBaseline's
+// default candidate scan walked every bare integer down from head
+// (Array.from({length: head}, ...)), so it called referenceSnapshot(dir, 59,
+// ...) directly - and byVersion, keyed only by versions that exist as
+// files, had no entry for 59, so `.snap` on undefined threw a TypeError and
+// the whole scan crashed before ever reaching a real, lower matching
+// version. A synthetic tiny gap (no 0003, only 0001/0002/0004) reproduces
+// the same crash cheaply without needing this repo's real ~60-migration
+// chain.
+//
+// The fix keeps the candidate SCAN safe by only ever walking versions that
+// exist as migration files (runBaseline never asks referenceSnapshot/
+// buildReference for a gap version, including for an explicit --version -
+// see the "--version has no migration file" checks in runBaseline).
+// referenceSnapshot()/buildReference() themselves stay STRICT and throw for
+// any n with no migration file, whether an interior gap or n > the last
+// present version: the third caller of buildReference,
+// lib/osi-migrate/runner.js's isBootOwnedTriggerBodyDrift (the live
+// runner's drift-grace path, reached from applyPending/verifyHead), calls
+// it with the DEVICE's highest *applied* version - which this tree's files
+// may not cover at all - and relies on that throw to fail closed instead of
+// silently comparing against a reference missing a migration the device
+// actually ran.
+test('candidate scan across a migrations-dir version gap matches at the highest present version below the gap, without crashing; buildReference/referenceSnapshot stay strict for a gap version and for n > head', async () => {
+  const dir = path.join(scratch(), 'gapped-migrations');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, '0001__base.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  fs.writeFileSync(path.join(dir, '0002__widget.sql'), '-- risk: additive\nCREATE TABLE widget (id INTEGER PRIMARY KEY, name TEXT);\n');
+  // Deliberate gap: no 0003 file on disk. Head is 0004.
+  fs.writeFileSync(path.join(dir, '0004__gadget.sql'), '-- risk: additive\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT);\n');
+  const manifest = {};
+  for (const m of loadMigrations(dir)) manifest[m.name] = m.checksum;
+  fs.writeFileSync(path.join(dir, 'CHECKSUMS.json'), JSON.stringify(manifest));
+
+  // Pre-ledger device DB shaped exactly like reference(2): only migrations
+  // 1-2 applied, nothing at or past the gap.
+  const refDb2 = await buildReference(dir, 2, scratch());
+  const db = path.join(scratch(), 'device.db');
+  fs.copyFileSync(refDb2, db);
+  await cliRunner(db).exec('DROP TABLE IF EXISTS schema_migrations;\nDROP TABLE IF EXISTS schema_object_fingerprints;');
+
+  const logs = [];
+  const { matched } = await runBaseline({ dbPath: db, migrationsDir: dir, log: (l) => logs.push(l) });
+  assert.equal(matched, 2, logs.join('\n'));
+  // The reported match is a real migration version - not a phantom "3".
+  assert.ok(loadMigrations(dir).some((m) => m.version === matched));
+
+  // buildReference/referenceSnapshot must THROW for a version with no
+  // migration file - both the interior gap (3) and past head (5, head=4) -
+  // not silently resolve down to reference(2)/reference(4). This is the
+  // exact behaviour lib/osi-migrate/runner.js's isBootOwnedTriggerBodyDrift
+  // depends on to fail closed on a device-applied version this tree cannot
+  // account for.
+  await assert.rejects(() => buildReference(dir, 3, scratch()));
+  await assert.rejects(() => buildReference(dir, 5, scratch()));
+  await assert.rejects(() => referenceSnapshot(dir, 3, scratch()));
+  await assert.rejects(() => referenceSnapshot(dir, 5, scratch()));
+
+  // An explicit --version request for a gap version must also refuse, up
+  // front, rather than reaching referenceSnapshot at all.
+  await assert.rejects(
+    () => runBaseline({ dbPath: db, migrationsDir: dir, version: 3, log: () => {} }),
+    /--version 3 has no migration file/,
+  );
 });

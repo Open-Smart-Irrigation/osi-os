@@ -192,6 +192,12 @@
     "intervalPlaceholder": "eg. 10",
     "intervalNote": "OSI eteekawo ebbanga ery'obulijjo ery'okuggala akasanduuko ku FPort 11. Ebbanga ery'okuggulawo akasanduuko lisigala ku dakiika 2, era 'tamper' esigala nga ekola."
   },
+  "fieldTester": {
+    "badge": "FIELD TESTER",
+    "sectionHeading": "Field Testers",
+    "openCoverageMap": "Open network map",
+    "readingsOnMap": "Readings appear on the network map."
+  },
   "zone": {
     "configure": "Configure",
     "chips": {

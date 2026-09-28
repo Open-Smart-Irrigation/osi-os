@@ -1,9 +1,9 @@
 'use strict';
 const assert=require('node:assert/strict'), crypto=require('node:crypto'), fs=require('node:fs'), os=require('node:os'), path=require('node:path'), test=require('node:test'), sqlite3=require('sqlite3');
 const api=require('./index'), scope=require('../osi-scope-helper'), secret='network-api-test-secret';
-const ids={r:'11111111-1111-4111-8111-111111111111',v:'22222222-2222-4222-8222-222222222222',d:'33333333-3333-4333-8333-333333333333'};
+const ids={r:'11111111-1111-4111-8111-111111111111',v:'22222222-2222-4222-8222-222222222222',d:'33333333-3333-4333-8333-333333333333',a:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'};
 function jwt(id,name){const p=Buffer.from(JSON.stringify({userId:id,username:name,exp:Date.now()+600000})).toString('base64url');return 'Bearer '+p+'.'+crypto.createHmac('sha256',secret).update(p).digest('base64url');}
-function openDb(){const f=path.join(fs.mkdtempSync(path.join(os.tmpdir(),'netapi-')),'x.db');return new Promise((ok,no)=>new sqlite3.Database(f,e=>{if(e)return no(e);const x=new sqlite3.Database(f),d={exec:s=>new Promise((r,j)=>x.exec(s,e2=>e2?j(e2):r())),run:(s,p=[])=>new Promise((r,j)=>x.run(s,p,e2=>e2?j(e2):r())),get:(s,p=[])=>new Promise((r,j)=>x.get(s,p,(e2,v)=>e2?j(e2):r(v))),all:(s,p=[])=>new Promise((r,j)=>x.all(s,p,(e2,v)=>e2?j(e2):r(v))),transaction(fn){return this.exec('BEGIN IMMEDIATE').then(()=>fn(this).then(v=>this.exec('COMMIT').then(()=>v),e2=>this.exec('ROLLBACK').then(()=>{throw e2;})));},close:()=>new Promise(r=>x.close(r))};const m=fs.readFileSync(path.join(__dirname,'../../../../../../../database/migrations/ordered/0054__installation_location_revisions.sql'),'utf8');d.exec(m+"CREATE TABLE users(id INTEGER PRIMARY KEY,user_uuid TEXT,username TEXT,role TEXT,disabled_at TEXT);CREATE TABLE devices(deveui TEXT PRIMARY KEY,type_id TEXT,irrigation_zone_id INTEGER,gateway_device_eui TEXT,deleted_at TEXT);CREATE TABLE irrigation_zones(id INTEGER PRIMARY KEY,zone_uuid TEXT,user_id INTEGER,deleted_at TEXT);CREATE TABLE user_zone_assignments(user_uuid TEXT,zone_uuid TEXT,deleted_at TEXT);CREATE TABLE journal_plots(plot_uuid TEXT,owner_user_uuid TEXT,deleted_at TEXT);CREATE TABLE user_plot_assignments(user_uuid TEXT,plot_uuid TEXT,deleted_at TEXT);CREATE TABLE radio_uplinks(id INTEGER PRIMARY KEY,deveui TEXT,recorded_at TEXT,rssi REAL,installation_uuid TEXT NOT NULL DEFAULT '44444444-4444-4444-8444-444444444444');CREATE TABLE installation_identity(singleton_id INTEGER PRIMARY KEY,installation_uuid TEXT,recovery_state TEXT,current_gateway_device_eui TEXT);").then(()=>d.run("INSERT INTO users VALUES(1,?,?,?,NULL),(2,?,?,?,NULL),(3,?,?,?,?)",[ids.r,'alice','researcher',ids.v,'viewer','viewer',ids.d,'disabled','disabled',new Date().toISOString()])).then(()=>d.run("INSERT INTO irrigation_zones VALUES(1,'zone-r',1,NULL),(2,'zone-v',2,NULL)")).then(()=>d.run("INSERT INTO devices VALUES('0016C001F1000001','KIWI_SENSOR',1,'0016C001F1000009',NULL),('0016C001F1000002','KIWI_SENSOR',2,'0016C001F1000009',NULL)")).then(()=>d.run("INSERT INTO installation_identity VALUES(1,'44444444-4444-4444-8444-444444444444','ACTIVE','0016C001F1000009')")).then(()=>ok(d),no)}));}
+function openDb(){const f=path.join(fs.mkdtempSync(path.join(os.tmpdir(),'netapi-')),'x.db');return new Promise((ok,no)=>new sqlite3.Database(f,e=>{if(e)return no(e);const x=new sqlite3.Database(f),d={exec:s=>new Promise((r,j)=>x.exec(s,e2=>e2?j(e2):r())),run:(s,p=[])=>new Promise((r,j)=>x.run(s,p,e2=>e2?j(e2):r())),get:(s,p=[])=>new Promise((r,j)=>x.get(s,p,(e2,v)=>e2?j(e2):r(v))),all:(s,p=[])=>new Promise((r,j)=>x.all(s,p,(e2,v)=>e2?j(e2):r(v))),transaction(fn){return this.exec('BEGIN IMMEDIATE').then(()=>fn(this).then(v=>this.exec('COMMIT').then(()=>v),e2=>this.exec('ROLLBACK').then(()=>{throw e2;})));},close:()=>new Promise(r=>x.close(r))};const m=fs.readFileSync(path.join(__dirname,'../../../../../../../database/migrations/ordered/0054__installation_location_revisions.sql'),'utf8');d.exec(m+"CREATE TABLE users(id INTEGER PRIMARY KEY,user_uuid TEXT,username TEXT,role TEXT,disabled_at TEXT);CREATE TABLE devices(deveui TEXT PRIMARY KEY,type_id TEXT,irrigation_zone_id INTEGER,gateway_device_eui TEXT,deleted_at TEXT);CREATE TABLE irrigation_zones(id INTEGER PRIMARY KEY,zone_uuid TEXT,user_id INTEGER,deleted_at TEXT);CREATE TABLE user_zone_assignments(user_uuid TEXT,zone_uuid TEXT,deleted_at TEXT);CREATE TABLE journal_plots(plot_uuid TEXT,owner_user_uuid TEXT,deleted_at TEXT);CREATE TABLE user_plot_assignments(user_uuid TEXT,plot_uuid TEXT,deleted_at TEXT);CREATE TABLE radio_uplinks(id INTEGER PRIMARY KEY,deveui TEXT,recorded_at TEXT,rssi REAL,installation_uuid TEXT NOT NULL DEFAULT '44444444-4444-4444-8444-444444444444');CREATE TABLE installation_identity(singleton_id INTEGER PRIMARY KEY,installation_uuid TEXT,recovery_state TEXT,current_gateway_device_eui TEXT);CREATE TABLE gateway_locations(gateway_device_eui TEXT PRIMARY KEY,latitude REAL,longitude REAL,altitude_m REAL,accuracy_m REAL,hdop REAL,satellites INTEGER,fix_mode INTEGER,status TEXT NOT NULL DEFAULT 'no_fix',source TEXT NOT NULL DEFAULT 'gpsd',native_concentratord_status TEXT,chirpstack_mirror_status TEXT,last_fix_at TEXT,last_good_fix_at TEXT,sync_version INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL);").then(()=>d.run("INSERT INTO users VALUES(1,?,?,?,NULL),(2,?,?,?,NULL),(3,?,?,?,?),(4,?,?,?,NULL)",[ids.r,'alice','researcher',ids.v,'viewer','viewer',ids.d,'disabled','disabled',new Date().toISOString(),ids.a,'admin','admin'])).then(()=>d.run("INSERT INTO irrigation_zones VALUES(1,'zone-r',1,NULL),(2,'zone-v',2,NULL)")).then(()=>d.run("INSERT INTO devices VALUES('0016C001F1000001','KIWI_SENSOR',1,'0016C001F1000009',NULL),('0016C001F1000002','KIWI_SENSOR',2,'0016C001F1000009',NULL)")).then(()=>d.run("INSERT INTO installation_identity VALUES(1,'44444444-4444-4444-8444-444444444444','ACTIVE','0016C001F1000009')")).then(()=>ok(d),no)}));}
 test.beforeEach(()=>scope._resetForTests());
 test('scoped JWT PUT/read/CAS and role failures',async()=>{const db=await openDb(),base={db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/devices/0016C001F1000001/installation-location',now:'2026-09-10T10:00:00Z'};let r=await api.handleRequest({...base,authorization:jwt(1,'alice'),body:{revision_uuid:'55555555-5555-4555-8555-555555555555',values:{latitude:47,longitude:8,effectiveFrom:'2026-09-10T10:00:00Z',coordinateSource:'manual'}}});assert.equal(r.statusCode,201);r=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,authorization:jwt(1,'alice'),method:'GET',path:'/api/devices/0016C001F1000001/installation-location',at:'2026-09-10T11:00:00Z'});assert.equal(r.payload.latitude,47);r=await api.handleRequest({...base,authorization:jwt(1,'alice'),body:{base_revision_uuid:'66666666-6666-4666-8666-666666666666',revision_uuid:'77777777-7777-4777-8777-777777777777',values:{latitude:48,longitude:8,effectiveFrom:'2026-09-10T11:00:00Z',coordinateSource:'manual'}}});assert.equal(r.statusCode,409);for(const [id,n] of [[2,'viewer'],[3,'disabled']]){r=await api.handleRequest({...base,authorization:jwt(id,n),body:{revision_uuid:'88888888-8888-4888-8888-888888888888',values:{latitude:47,longitude:8,effectiveFrom:'2026-09-10T12:00:00Z',coordinateSource:'manual'}}});assert.equal(r.statusCode,403);}await db.close();});
 test('observations read from radio source and cap limit',async()=>{const db=await openDb(),radio=await openDb();await radio.run('INSERT INTO radio_uplinks(id,deveui,recorded_at,rssi) VALUES(1,?,?,?)',( ['0016C001F1000001','2026-09-10T10:00:00Z',-70]));const r=await api.handleRequest({db,radioDb:radio,scope,scopedMode:true,authSecret:secret,authorization:jwt(1,'alice'),method:'GET',path:'/api/network/observations',now:'2026-09-10T11:00:00.000Z',query:{limit:999}});assert.equal(r.statusCode,200);assert.equal(r.payload.rows.length,1);assert.equal(r.payload.rows[0].deveui,'0016C001F1000001');await db.close();await radio.close();});
@@ -29,4 +29,86 @@ test('observation pages retain their window and exclude previous installation hi
   assert.equal(result.statusCode,200);assert.deepEqual(result.payload.rows.map(row=>row.id),[1]);
   assert.equal(result.payload.to,'2026-09-10T11:00:00.000Z');
   await db.close();await radio.close();
+});
+
+test('PUT /api/gateway/location stores an operator-asserted static fix',async()=>{
+  const db=await openDb();
+  const res=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),body:{latitude:46.5,longitude:6.5}});
+  assert.equal(res.statusCode,200);
+  const row=await db.get("SELECT source,status,latitude FROM gateway_locations WHERE gateway_device_eui='0016C001F1000009'");
+  assert.equal(row.source,'static');
+  assert.equal(row.status,'static');
+  assert.equal(row.latitude,46.5);
+  await db.close();
+});
+
+test('PUT /api/gateway/location rejects an out-of-range coordinate',async()=>{
+  const db=await openDb();
+  const res=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),body:{latitude:200,longitude:6.5}});
+  assert.equal(res.statusCode,400);
+  await db.close();
+});
+
+test('PUT /api/gateway/location is restricted to the admin role in scoped mode',async()=>{
+  const db=await openDb();
+  for(const [id,n] of [[1,'alice'],[2,'viewer'],[3,'disabled']]){
+    const res=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(id,n),body:{latitude:46.5,longitude:6.5}});
+    assert.equal(res.statusCode,403);
+  }
+  await db.close();
+});
+
+test('PUT /api/gateway/location is available to any enabled account outside scoped mode',async()=>{
+  const db=await openDb();
+  const res=await api.handleRequest({db,scope,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(1,'alice'),body:{latitude:46.5,longitude:6.5}});
+  assert.equal(res.statusCode,200);
+  await db.close();
+});
+
+test('PUT /api/gateway/location refuses a static write while a live gpsd fix exists',async()=>{
+  const db=await openDb();
+  await db.run("INSERT INTO gateway_locations(gateway_device_eui,latitude,longitude,status,source,last_fix_at,last_good_fix_at,sync_version,updated_at) VALUES('0016C001F1000009',47,8,'fix','gpsd','2026-09-10T10:04:50.000Z','2026-09-10T10:04:50.000Z',3,'2026-09-10T10:04:50.000Z')");
+  const res=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),now:'2026-09-10T10:05:00.000Z',body:{latitude:46.5,longitude:6.5}});
+  assert.equal(res.statusCode,409);
+  const row=await db.get("SELECT source,latitude FROM gateway_locations WHERE gateway_device_eui='0016C001F1000009'");
+  assert.equal(row.source,'gpsd');
+  assert.equal(row.latitude,47);
+  await db.close();
+});
+
+test('PUT /api/gateway/location proceeds over a stale gpsd row',async()=>{
+  const db=await openDb();
+  await db.run("INSERT INTO gateway_locations(gateway_device_eui,latitude,longitude,status,source,last_fix_at,last_good_fix_at,sync_version,updated_at) VALUES('0016C001F1000009',47,8,'fix','gpsd','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',3,'2026-01-01T00:00:00.000Z')");
+  const res=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),now:'2026-09-10T10:05:00.000Z',body:{latitude:46.5,longitude:6.5}});
+  assert.equal(res.statusCode,200);
+  const row=await db.get("SELECT source,latitude FROM gateway_locations WHERE gateway_device_eui='0016C001F1000009'");
+  assert.equal(row.source,'static');
+  assert.equal(row.latitude,46.5);
+  await db.close();
+});
+
+test('a second PUT bumps sync_version and preserves an omitted altitude/accuracy',async()=>{
+  const db=await openDb();
+  const first=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),now:'2026-09-10T10:00:00.000Z',body:{latitude:46.5,longitude:6.5,altitude_m:400,accuracy_m:5}});
+  assert.equal(first.statusCode,200);
+  const second=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),now:'2026-09-10T10:10:00.000Z',body:{latitude:46.6,longitude:6.6}});
+  assert.equal(second.statusCode,200);
+  const row=await db.get("SELECT latitude,longitude,altitude_m,accuracy_m,sync_version FROM gateway_locations WHERE gateway_device_eui='0016C001F1000009'");
+  assert.equal(row.latitude,46.6);
+  assert.equal(row.longitude,6.6);
+  assert.equal(row.altitude_m,400);
+  assert.equal(row.accuracy_m,5);
+  assert.equal(row.sync_version,2);
+  await db.close();
+});
+
+test('PUT /api/gateway/location rejects a non-finite altitude and a negative accuracy',async()=>{
+  const db=await openDb();
+  const badAltitude=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),body:{latitude:46.5,longitude:6.5,altitude_m:'abc'}});
+  assert.equal(badAltitude.statusCode,400);
+  const badAccuracy=await api.handleRequest({db,scope,scopedMode:true,authSecret:secret,method:'PUT',path:'/api/gateway/location',authorization:jwt(4,'admin'),body:{latitude:46.5,longitude:6.5,accuracy_m:-5}});
+  assert.equal(badAccuracy.statusCode,400);
+  const row=await db.get("SELECT gateway_device_eui FROM gateway_locations WHERE gateway_device_eui='0016C001F1000009'");
+  assert.equal(row,undefined);
+  await db.close();
 });

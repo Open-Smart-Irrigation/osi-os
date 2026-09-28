@@ -110,3 +110,39 @@ Tracked in code at `web/react-gui/tests/moduleVisibilityLocales.test.ts`
 byte-identical to `en`, the same mechanism the sections above use. A human
 Luganda pass must drop the key from that set and from the table above in the
 same change; the test fails otherwise, so the two cannot drift apart.
+
+## `network.json` — the coverage walk view
+
+| Keys | Reason |
+|---|---|
+| `coverage.title`, `coverage.window`, `coverage.windowLastHour`, `coverage.windowHours`, `coverage.windowDays`, `coverage.export`, `coverage.points_one`, `coverage.points_other`, `coverage.gateway`, `coverage.legendStrong`, `coverage.legendWeak`, `coverage.noPosition`, `coverage.noPoints`, `coverage.captureOff` (14 keys in `network.json`) | New keys for the coverage view NetworkPage gained for the RAK10701 field-test walk: the RSSI legend, the time-window picker, the GeoJSON/CSV export, and the three honest empty states (capture switched off, no gateway position, no positioned observation). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; `coverage.gateway` deliberately stays "Gateway" in de-CH/it/pt, matching the loanword those bundles already use, and is "Passerelle" in fr and "Pasarela" in es, matching `network.noDevices` in that bundle. `coverage.points` carries plural forms, so Luganda holds English's two categories (`_one`, `_other`); fr/es/it/pt additionally carry `_many`, which their CLDR rules have and English does not, and which is therefore outside this list. |
+
+Tracked in code at `web/react-gui/tests/coverageLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism the sections above use. A human
+Luganda pass must drop the key from that set and from the table above in the
+same change; the test fails otherwise, so the two cannot drift apart.
+
+## `network.json` — the observations show-all/show-fewer toggle
+
+| Keys | Reason |
+|---|---|
+| `showAllObservations`, `showFewerObservations` (2 keys in `network.json`) | NetworkPage's Observations list rendered every fetched row (~500 on a coverage walk, ~20,000px tall) with no way to collapse it; these two keys drive a toggle that shows the most recent 20 by default. No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received natural human-quality translations in the same change. |
+
+Tracked in code at `web/react-gui/tests/coverageLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA_TOP_LEVEL`), which asserts each key's `lg` value is
+still byte-identical to `en`, the same mechanism the sections above use. A
+human Luganda pass must drop the key from that set and from the table above in
+the same change; the test fails otherwise, so the two cannot drift apart.
+
+## `devices.json` — the field tester card
+
+| Keys | Reason |
+|---|---|
+| `fieldTester.badge`, `fieldTester.sectionHeading`, `fieldTester.openCoverageMap`, `fieldTester.readingsOnMap` (4 keys in `devices.json`) | New keys for `FieldTesterCard.tsx`: a registered RAK10701 field tester (type `RAK10701_FIELD_TESTER`) matched no `type_id` filter on the dashboard or an irrigation zone's device grid, so the "Unassigned Devices" section rendered its dashed box and subtitle with nothing inside and no way to see or remove the device — verified on real hardware ahead of the 2026-09-25 demo. A second finding on the same rehearsal: the edge never gives a field tester's uplinks a `last_seen` (they land in the radio store, not `device_data`, which is where `GET /api/devices` derives `last_seen` from), so the card's original last-seen line and online/offline pill were dropped before ship — `fieldTester.online`, `offline`, `lastSeen` and `neverSeen` no longer exist. The card is identity-only (name, badge, DevEUI, a link to the network map at `/network` shown only when the gateway's Network module is on, and a neutral footer line pointing at that map instead of a claimed recency). No native Luganda speaker has translated these yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change. |
+
+Tracked in code at `web/react-gui/tests/fieldTesterLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`, the same mechanism the sections above use. A human
+Luganda pass must drop the key from that set and from the table above in the
+same change; the test fails otherwise, so the two cannot drift apart.

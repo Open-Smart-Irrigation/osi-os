@@ -398,9 +398,25 @@ const protectedNodeHashes = {
   // IIFE's success path -- no schema/DDL/rebuild logic touched. Hash re-derived
   // on this branch.
   // Previous pin: 878ef2417b5ec01e46acf05b160ebbb409b979d9ba7474955b3a35b328202978
+  // Re-pinned #6 (migration 0060, RAK10701_FIELD_TESTER; numbered 0059 at authoring
+  // time and renumbered before merge to avoid colliding with main's own
+  // 0059__sync_rejection_recovery.sql, #351): the ninth devices.type_id
+  // member. Same sanctioned class as re-pins #3/#4 and the 0027/0028 literal
+  // extensions before them -- the guarded devices CHECK rebuild, changed in the same
+  // commit as the migration that adds the type. The node has to move with 0060 and
+  // cannot lag it: the rebuild guard compares the live CHECK against REQUIRED_TYPES by
+  // SET EQUALITY, so an eight-type boot node facing a nine-type migrated database
+  // rebuilds devices back down on every restart, and once a field-tester row exists the
+  // rebuild's plain INSERT violates the reverted CHECK, aborts and logs every boot.
+  // Exactly two 24-char additions, +48 chars total, measured: 'RAK10701_FIELD_TESTER'
+  // appended to the REQUIRED_TYPES literal, and the same member appended to the type_id
+  // CHECK inside DEVICES_COLUMNS -- the latter not hand-edited but regenerated from
+  // database/seed-blank.sql by scripts/gen-devices-columns.js. No rebuild, DDL, copy or
+  // fence logic touched. Hash re-derived on this branch, identical in both profiles.
+  // Previous pin: 27155b48af0292ab035f0f038ce10abb7b06b0aede552b5e23466138da01a615
   // PR1's generator owns the trigger array. Hash this node with that generated
   // region replaced by a sentinel so unrelated frozen-node edits still fail.
-  'sync-init-fn': '27155b48af0292ab035f0f038ce10abb7b06b0aede552b5e23466138da01a615',
+  'sync-init-fn': 'cad9151ca0763b94ce310d55b20dadd7a21e61b02a1dc2ec03da4d1db2b54519',
 };
 const migrationPreflightHashes = {
   'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
@@ -1316,11 +1332,95 @@ if (sizeAllowances) {
   // nodes that grew (cs-reg-cloud-fn +1197, post-zone-auth +917, post-devices-auth +999,
   // scoped-zone-create-router +967, 4f4a765f36cee6f3 +731 = 4811) -- verify-flows-size-ratchet
   // totalChars over both byte-identical profiles: origin/main 1539627 -> HEAD 1569699 = +30072.
-  expectCondition(sizeAllowances.total_allowance?.delta === 71275,
-    'size total allowance: exact cumulative delta 71275',
-    'size total allowance: expected exact cumulative delta 71275');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'wave3-edge-durable', 'declares this port branch\'s provenance within the re-measured total');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-device-rename-stage-1', 'declares Task 6\'s provenance within the re-measured total');
+  // 3533: 2026-09-23 rak10701-coverage final whole-branch review, Finding 4. The 71275
+  // above is origin/main's number, and this branch carried it unchanged while adding
+  // roughly 3.5k characters -- leaving about 67700 characters of unearned headroom, so
+  // the total ratchet constrained nothing for the whole programme. Both components of
+  // 71275 (wave3-edge-durable and zone-device-rename-stage-1) are merged and already
+  // reflected in scripts/verify-flows-size-ratchet-baseline.json, so they are no longer
+  // provenance OF this number and the two expectIncludes above them are replaced by one
+  // naming this branch. Re-baselined to this branch's own measured growth:
+  // verify-flows-size-ratchet totalChars over both byte-identical profiles, committed
+  // baseline 1571684 (= merge base 997683664) -> HEAD 1575217 = +3533, of which
+  // radio-capture-fn +1755 (Finding 2's application-id fence on the reply block),
+  // post-devices-insert +172 and catalog-response +66 (Finding 3's registration path),
+  // with the rest from the Task 3 telemetry fences. Exactly tight: 3532 fails the
+  // committed-baseline gate. origin/main has since advanced to 72e25b5ca (#351), which is
+  // +8734 per profile over the same baseline and is deliberately NOT pre-funded here;
+  // merging it requires re-measuring this total, as Tasks 4b and 7b did after theirs.
+  // 4131: 2026-09-23 LoRaWAN consultant review (Findings 1-3, same day, same branch).
+  // Finding 1 removed radio-capture-fn's pre-enqueue flushDeviceQueue call and moved the
+  // field-tester reply build+enqueue to before both the recovery-state identity check and
+  // store.capture, so a capture failure or a recovery window can no longer silence the
+  // handheld. Findings 2/3 (fCnt & 0xFF, the hdop/satellite GPS quality gate) live in
+  // fieldtester.js/chirpstack.js, which are plain required modules, not embedded flow
+  // function bodies, so neither adds to this total. radio-capture-fn alone: 3678 -> 4276
+  // (+598). Re-measured fresh: committed baseline 1571684 -> HEAD 1575815 = +4131 (the
+  // prior +3533 plus this +598). origin/main (72e25b5ca, total 1580418 per profile) is
+  // still above HEAD's 1575815, so the origin/main-relative check does not bind today;
+  // the committed-baseline check is what this delta actually funds. Merging origin/main
+  // still requires re-measuring both this total and the baseline doc, as the 3533 entry
+  // above warned.
+  // 5688: 2026-09-23 live-rehearsal fix, same branch, next commit. radio-capture-fn's
+  // field-tester reply was gated only on application id, not on uplink port; the
+  // RAK10701 emits LoRaWAN MAC-command frames (fPort 0) a few seconds after any
+  // downlink, and this ungated fence answered those too, producing a self-sustaining
+  // downlink loop at SF12 discovered live on the rehearsal gateway (radio.db 16:22:11
+  // onward). Fix adds a port/length gate (classifyUplinkFrame, fieldtester.js) matching
+  // RAK's own reference server (field-tester-server/server/server.js) exactly: only
+  // fPort 1 with a 10-byte payload is answered; fPort 11 (the vendor's extended format,
+  // a different reply port AND length) is recognized and explicitly rejected rather than
+  // implemented, since it cannot be bench-tested before the deadline; every other port,
+  // including fPort 0, is silently not answered. classifyUplinkFrame itself lives in
+  // fieldtester.js, a plain required module, so only radio-capture-fn's own func grew:
+  // 4276 -> 5833 (+1557). Re-measured fresh: committed baseline 1571684 -> HEAD 1577372
+  // = +5688 (the prior +4131 plus this +1557). origin/main (72e25b5ca, total 1580418 per
+  // profile) remains above HEAD's 1577372, so the origin/main-relative check still does
+  // not bind; the committed-baseline check is what this delta actually funds. Merging
+  // origin/main still requires re-measuring both this total and the baseline doc.
+  // 6381: 2026-09-23 post-deploy hardening, same branch, next commit. The port gate above
+  // went live on the rehearsal gateway and was verified working (a single fPort-0 frame
+  // produced no reply and no cascade; field-test frames kept getting theirs). Review then
+  // found the gate's own `Buffer.from(msg.payload.data, 'base64')` was unguarded and ran
+  // before the reply's try/catch: ChirpStack v4's contract for data is a base64 string,
+  // but Buffer.from throws TypeError [ERR_INVALID_ARG_TYPE] for a truthy non-string (a
+  // bare number, a plain object) -- confirmed interactively. Unguarded, that throw would
+  // reach radio-capture-fn's OUTER catch, pausing radio_capture_status and skipping
+  // store.capture entirely: a malformed reply payload would silently lose the whole
+  // observation, on the same code path that caused the original incident. Fix wraps the
+  // byte-length computation in its own try/catch, defaulting to -1 (never a valid length)
+  // on failure, so classifyUplinkFrame degrades to not-field-test instead of throwing;
+  // capture proceeds normally. radio-capture-fn alone: 5833 -> 6526 (+693). Re-measured
+  // fresh: committed baseline 1571684 -> HEAD 1578065 = +6381 (the prior +5688 plus this
+  // +693). origin/main (72e25b5ca, total 1580418 per profile) remains above HEAD's
+  // 1578065, so the origin/main-relative check still does not bind; the committed-baseline
+  // check is what this delta actually funds. Merging origin/main still requires
+  // re-measuring both this total and the baseline doc, as every entry above warned.
+  // 6731: 2026-09-23 type-allowlist fix, same branch, next commit. A live registration
+  // attempt (POST /api/devices, type_id RAK10701_FIELD_TESTER) 400'd with "Invalid
+  // type_id" from post-devices-auth's own hardcoded allowlist -- the fourth of four
+  // device-type lists in flows.json, the only one an earlier fix (catalog-response,
+  // post-devices-insert) had missed. Fixed, then guarded: a new structural audit in
+  // scripts/test-flows-wiring.js discovers every function node that enumerates the
+  // devices.type_id vocabulary (deriving the expected set from database/seed-blank.sql's
+  // CHECK constraint, the schema's own authority) and asserts each covers the full set.
+  // That guard's own first run found a fifth, previously unknown list: cs-reg-cloud-fn's
+  // appMap/profileMap (the cloud-issued REGISTER_DEVICE command's copy of
+  // post-devices-insert's per-type ChirpStack lookup) was missing both MILESIGHT_UC512
+  // and RAK10701_FIELD_TESTER -- a defect predating this branch, unrelated to the RAK10701
+  // field test, that had been silently 503ing cloud-issued UC512 registrations. Both nodes
+  // fixed by mirroring post-devices-insert's existing entries verbatim; only these two
+  // nodes' func grew, no other node or module touched: post-devices-auth 7217 -> 7241
+  // (+24), cs-reg-cloud-fn 21035 -> 21361 (+326). Re-measured fresh: committed baseline
+  // 1571684 -> HEAD 1578415 = +6731 (the prior +6381 plus this +350). origin/main
+  // (72e25b5ca, total 1580418 per profile) remains above HEAD's 1578415, so the
+  // origin/main-relative check still does not bind; the committed-baseline check is what
+  // this delta actually funds. Merging origin/main still requires re-measuring both this
+  // total and the baseline doc, as every entry above warned.
+  expectCondition(sizeAllowances.total_allowance?.delta === 6731,
+    'size total allowance: exact cumulative delta 6731',
+    'size total allowance: expected exact cumulative delta 6731');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',

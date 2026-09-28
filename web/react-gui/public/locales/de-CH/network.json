@@ -30,6 +30,24 @@
     "mapEvidence": "Nur erfasste Positionen und Verbindungen; keine abgeleitete Flächenabdeckung.",
     "unknownDevices": "Unbekannte Positionen",
     "loadingMore": "Wird geladen…",
-    "loadMore": "Mehr laden"
+    "loadMore": "Mehr laden",
+    "showAllObservations": "Alles anzeigen",
+    "showFewerObservations": "Weniger anzeigen",
+    "coverage": {
+      "title": "Signalstärke (dBm)",
+      "window": "Zeitfenster",
+      "windowLastHour": "Letzte Stunde",
+      "windowHours": "Letzte {{count}} Stunden",
+      "windowDays": "Letzte {{count}} Tage",
+      "export": "Exportieren",
+      "points_one": "{{count}} Punkt mit Position",
+      "points_other": "{{count}} Punkte mit Position",
+      "gateway": "Gateway",
+      "legendStrong": "Stark",
+      "legendWeak": "Schwach",
+      "noPosition": "Für das Gateway ist keine Position erfasst; der Rundgang wird ohne Bezugspunkt gezeichnet.",
+      "noPoints": "Keine Beobachtung in diesem Zeitfenster trägt eine Position.",
+      "captureOff": "Die Funkaufzeichnung ist auf diesem Gateway ausgeschaltet; es werden keine Abdeckungspunkte erfasst."
+    }
   }
 }

@@ -1784,6 +1784,141 @@ if (!deviceRenameGuardNode || JSON.stringify(deviceRenameGuardNode.wires) !== JS
     console.log('OK  device-rename-scope-guard routes output 0 (authorized) to device-rename-fn and output 1 (refused) to device-rename-resp');
 }
 
+// --- Device-type vocabulary audit ---
+// 2026-09-22/23 RAK10701 coverage field test: a live registration attempt 400'd
+// with "Invalid type_id" from post-devices-auth's own hardcoded allowlist -- a
+// fourth copy of the devices.type_id vocabulary that an earlier fix (this guard's
+// prior form, "Final review, Finding 3") never looked at, because it hardcoded
+// exactly two known surfaces (catalog-response, post-devices-insert) and explicitly
+// carved cs-reg-cloud-fn out by name ("deliberately NOT checked here"). That is the
+// failure mode this replacement exists to close: a hand-maintained list of "the
+// nodes that list device types" is itself a fifth vocabulary that can go stale, and
+// two successive reviews each verified only the lists they had been told about.
+//
+// Instead of naming nodes, this scans every function node's source for the concrete
+// literal shapes this codebase actually uses to enumerate the device-type
+// vocabulary, and flags a node as "in scope" only when it matches one of those
+// shapes AND names at least two distinct authority tokens together (so a node that
+// legitimately branches on one or two specific types -- a narrow family check, a
+// domain-scoped SQL filter -- is never mistaken for a restated vocabulary; see the
+// detector comments below for the real nodes each guards against misclassifying).
+// The expected set itself is derived fresh from database/seed-blank.sql's own
+// devices.type_id CHECK constraint -- the schema's own definition of what a valid
+// type is, and the same authority the prior guard already trusted -- so adding a
+// tenth type never requires touching this file; it only requires every in-scope
+// node's list to grow with it.
+const seedSql = fs.readFileSync(path.resolve(__dirname, '../database/seed-blank.sql'), 'utf8');
+const typeCheckMatch = /type_id\s+TEXT NOT NULL CHECK\(type_id IN \(([^)]*)\)\)/.exec(seedSql);
+if (!typeCheckMatch) {
+    failures.push('could not read the devices.type_id CHECK constraint from database/seed-blank.sql; this guard cannot run');
+} else {
+    const schemaTypes = typeCheckMatch[1].match(/'([A-Z0-9_]+)'/g).map((q) => q.slice(1, -1));
+    if (schemaTypes.length < 2) {
+        failures.push('parsed suspiciously few device types (' + schemaTypes.length + ') from the devices.type_id CHECK constraint; this guard cannot run');
+    } else {
+        const detectDeviceTypeCollections = (func) => {
+            const collections = [];
+            // D1: a quoted array literal gating the raw type_id field itself via
+            // .includes(type_id) -- an exhaustiveness/validation check on the
+            // untrusted input (post-devices-auth). The argument must be the bare
+            // identifier type_id, not a wrapped expression: put-kiwi-interval-
+            // authorize-fn and post-kiwi-enable-authorize-fn both gate
+            // .includes(String(row.type_id || '')) against a deliberate two-type
+            // "is this a Tektelic Kiwi" family check, not the full vocabulary, and
+            // must not be flagged.
+            {
+                const re = /\[\s*('[A-Z][A-Z0-9_]*'(?:\s*,\s*'[A-Z][A-Z0-9_]*')*)\s*\]\s*\.\s*includes\(\s*type_id\s*\)/g;
+                let m;
+                while ((m = re.exec(func))) {
+                    collections.push(m[1].split(',').map((s) => s.trim().replace(/^'/, '').replace(/'$/, '')));
+                }
+            }
+            // D2: the devices.type_id CHECK(...) DDL mirror (sync-init-fn's frozen
+            // boot node carries its own copy of the schema for the rebuild path).
+            // Anchored on the literal "CHECK(type_id IN (" so it cannot match an
+            // ordinary "<col>.type_id IN (...)" SQL filter elsewhere (e.g.
+            // dendro-compute-fn's dendro-relevant subset, d0b2b1c1a937e16d's
+            // history-card subset), which use a column-qualified type_id and are
+            // deliberately non-exhaustive by design.
+            {
+                const re = /CHECK\(type_id IN \(([\s\S]*?)\)\)/g;
+                let m;
+                while ((m = re.exec(func))) {
+                    const tokens = Array.from(m[1].matchAll(/'([A-Z][A-Z0-9_]*)'/g)).map((x) => x[1]);
+                    if (tokens.length) collections.push(tokens);
+                }
+            }
+            // D3: catalog rows shaped { id: 'TOKEN', name: '...' } (catalog-response,
+            // the literal list the add-device modal renders).
+            {
+                const re = /\{\s*id:\s*'([A-Z][A-Z0-9_]*)'\s*,\s*name:\s*'[^']*'\s*\}/g;
+                const tokens = Array.from(func.matchAll(re)).map((m) => m[1]);
+                if (tokens.length) collections.push(tokens);
+            }
+            // D4: bare TOKEN: object-literal keys -- per-type lookup maps such as
+            // post-devices-insert's and cs-reg-cloud-fn's appMap/profileMap. The
+            // token must be immediately followed by a colon (a real object key),
+            // which is what separates this from the same token appearing as a
+            // quoted return value in an unrelated per-type dispatcher (Build
+            // Telemetry's/strega-process-fn's getProfileKind: each `return
+            // 'STREGA_VALVE';` is a single isolated branch body, never a `TOKEN:`
+            // key, so those dispatchers never qualify here even though they name
+            // several types across the function).
+            {
+                const re = /\b([A-Z][A-Z0-9_]{2,}):/g;
+                const tokens = Array.from(func.matchAll(re)).map((m) => m[1]);
+                if (tokens.length) collections.push(tokens);
+            }
+            return collections;
+        };
+
+        const schemaTypeSet = new Set(schemaTypes);
+        const inScopeNodes = [];
+        for (const node of flows) {
+            if (node.type !== 'function' || typeof node.func !== 'string') continue;
+            const collections = detectDeviceTypeCollections(node.func);
+            const covered = new Set();
+            let qualifies = false;
+            for (const tokens of collections) {
+                const distinctAuthorityTokens = new Set(tokens.filter((t) => schemaTypeSet.has(t)));
+                if (distinctAuthorityTokens.size >= 2) {
+                    qualifies = true;
+                    for (const t of distinctAuthorityTokens) covered.add(t);
+                }
+            }
+            if (qualifies) inScopeNodes.push({ id: node.id, name: node.name, covered });
+        }
+        if (inScopeNodes.length === 0) {
+            failures.push('device-type vocabulary audit found zero function nodes enumerating device types -- the detectors themselves have regressed (expected at least catalog-response, post-devices-auth, post-devices-insert, sync-init-fn, cs-reg-cloud-fn)');
+        }
+        for (const { id, name, covered } of inScopeNodes) {
+            const missing = schemaTypes.filter((t) => !covered.has(t));
+            if (missing.length > 0) {
+                failures.push('device-type vocabulary: ' + id + ' (' + name + ') does not cover device type(s) ' + missing.join(', ')
+                    + ' -- a type in the devices.type_id CHECK constraint that this node\'s list has fallen behind on');
+            } else {
+                console.log('OK  device-type vocabulary: ' + id + ' (' + name + ') covers all ' + schemaTypes.length + ' device types in the devices CHECK constraint');
+            }
+        }
+    }
+}
+
+// The RAK10701_FIELD_TESTER application/profile mapping matters beyond mere
+// presence: radio-capture-fn fences the handheld reply on that same application
+// id, so registering the tester into any other application would silently
+// disable the reply. This is a specific value assertion, not a vocabulary-
+// coverage one, so it stays separate from the generic audit above.
+{
+    const insertFn = (byId['post-devices-insert'] || {}).func || '';
+    if (!/RAK10701_FIELD_TESTER: String\(env\.get\('CHIRPSTACK_APP_FIELD_TESTER'\)/.test(insertFn)) {
+        failures.push("post-devices-insert must map RAK10701_FIELD_TESTER to CHIRPSTACK_APP_FIELD_TESTER; the reply fence in radio-capture-fn matches on that same application id, so registering the tester into any other application silently disables the handheld reply");
+    } else if (!/RAK10701_FIELD_TESTER: String\(env\.get\('CHIRPSTACK_PROFILE_RAK10701'\)/.test(insertFn)) {
+        failures.push('post-devices-insert must map RAK10701_FIELD_TESTER to CHIRPSTACK_PROFILE_RAK10701');
+    } else {
+        console.log('OK  post-devices-insert points RAK10701_FIELD_TESTER at CHIRPSTACK_APP_FIELD_TESTER / CHIRPSTACK_PROFILE_RAK10701');
+    }
+}
+
 runJournalHelperFailureMatrix()
     .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {

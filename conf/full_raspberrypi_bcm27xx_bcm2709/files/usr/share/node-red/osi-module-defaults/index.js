@@ -21,12 +21,21 @@
 // A stored app_settings row always wins over the default; these values only
 // decide what a gateway does before the switch has ever been written (and when
 // the row cannot be read at all -- see interpretStoredValue).
+//
+// `defaultEnabled` is normally a boolean. Network's is the string 'auto': the
+// Network header link only earns its place once a RAK10701 field tester is
+// registered on the gateway, so there is no single boolean to ship. The
+// caller (osi-system-settings/api.js) supplies that fact as
+// `context.fieldTesterPresent` -- this package stays dependency-free and never
+// queries a database itself. A context-less caller (or 'auto' with no
+// fieldTesterPresent) resolves to `false`, never `true`: an unproven field
+// tester must not show the tab. See moduleDefaultForKey.
 
 const MODULE_SETTINGS = Object.freeze([
   // The Data header link and the Data tab (/analysis, /history).
   Object.freeze({ field: 'dataModuleEnabled', key: 'data_module_enabled', defaultEnabled: true }),
-  // The Network header link (/network).
-  Object.freeze({ field: 'networkModuleEnabled', key: 'network_module_enabled', defaultEnabled: true }),
+  // The Network header link (/network). 'auto': see the header comment above.
+  Object.freeze({ field: 'networkModuleEnabled', key: 'network_module_enabled', defaultEnabled: 'auto' }),
   // The gateway hub card on the dashboard.
   Object.freeze({ field: 'gatewayHubModuleEnabled', key: 'gateway_hub_module_enabled', defaultEnabled: true }),
   // Field Journal entry points -- and the journal-v2 replication worker, which
@@ -43,15 +52,30 @@ const SETTING_BY_KEY = new Map(MODULE_SETTINGS.map((module) => [module.key, modu
 const SETTING_BY_FIELD = new Map(MODULE_SETTINGS.map((module) => [module.field, module]));
 
 // { dataModuleEnabled: true, ... } -- the shape GET /api/system/settings reports
-// as `moduleDefaults` and the shape every test compares against.
+// as `moduleDefaults` and the shape every test compares against. Boolean-valued
+// ONLY: Network's 'auto' entry contributes `false` here. This object is a
+// static, per-process constant (no gateway facts in scope to derive from), and
+// every consumer treats it as a plain boolean map -- an 'auto' string would be
+// truthy everywhere it is read as a flag, which is the exact bug this feature
+// exists to prevent. The route reports the resolved (possibly derived) value
+// separately, alongside this fixed table -- see osi-system-settings/api.js.
 const MODULE_DEFAULTS = Object.freeze(MODULE_SETTINGS.reduce(function (acc, module) {
-  acc[module.field] = module.defaultEnabled;
+  acc[module.field] = module.defaultEnabled === 'auto' ? false : module.defaultEnabled;
   return acc;
 }, {}));
 
-function moduleDefaultForKey(key) {
+// The one place 'auto' is resolved. `context` carries whatever fact a derived
+// default needs -- today just `{ fieldTesterPresent }` for Network -- supplied
+// by the caller, since this package must stay dependency-free (no DB query of
+// its own; see the header comment). No context (or a context missing the fact)
+// resolves 'auto' to `false`: a context-less caller predating this change, or
+// one that legitimately has no such fact, gets a safe, defined answer rather
+// than a crash or an accidental `true`. A boolean default ignores `context`
+// entirely, so the other three modules are unaffected either way.
+function moduleDefaultForKey(key, context) {
   const module = SETTING_BY_KEY.get(key);
   if (!module) throw new Error('unknown module setting key: ' + key);
+  if (module.defaultEnabled === 'auto') return Boolean(context && context.fieldTesterPresent);
   return module.defaultEnabled;
 }
 
@@ -65,17 +89,23 @@ function settingForField(field) {
   return module;
 }
 
-function moduleDefaultForField(field) {
-  return settingForField(field).defaultEnabled;
+// Coherent with moduleDefaultForKey (and so with interpretStoredValue): routed
+// through the same 'auto' resolution rather than returning `module.defaultEnabled`
+// verbatim, so this entry point can never hand a caller the literal string
+// 'auto' where every existing caller expects a boolean.
+function moduleDefaultForField(field, context) {
+  return moduleDefaultForKey(settingForField(field).key, context);
 }
 
 // One reading of a stored app_settings value, used by both the route and the
 // worker. `rawValue` is whatever the row held; pass undefined/null for "no row",
 // which includes the read having failed outright. Both callers fail to the
-// shipped default rather than to a hardcoded "on": a gateway whose DB predates
-// app_settings then behaves exactly like a fresh one on the same firmware.
-function interpretStoredValue(key, rawValue) {
-  if (rawValue === null || rawValue === undefined) return moduleDefaultForKey(key);
+// shipped (or derived) default rather than to a hardcoded "on": a gateway whose
+// DB predates app_settings then behaves exactly like a fresh one on the same
+// firmware. `context` is forwarded to moduleDefaultForKey untouched -- see
+// there for what an absent/partial context resolves to.
+function interpretStoredValue(key, rawValue, context) {
+  if (rawValue === null || rawValue === undefined) return moduleDefaultForKey(key, context);
   return !MODULE_OFF_VALUES.has(String(rawValue).trim().toLowerCase());
 }
 

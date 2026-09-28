@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizeUplink } = require('./index');
+const { normalizeUplink, fromChirpStack } = require('./index');
 const uuid = '00000000-0000-4000-8000-000000000000';
 test('normalizes and bounds receiver metadata', () => {
   const row = normalizeUplink({ deveui: '0011223344556677', recorded_at: '2026-09-10T00:00:00Z', metadata: { receivers: [{ gateway_id: '000000000000000B', uplink_id_num: 2 }, { gateway_id: '000000000000000A', uplink_id_num: null }] } }, { installationUuid: uuid });
@@ -31,4 +31,60 @@ test('preserves GPS and confirmed location provenance while dropping unknown fie
   const metadata = JSON.parse(row.metadata_json);
   assert.equal(metadata.deduplication_uncertain, true); assert.equal(metadata.reported_position.hdop, 1.2); assert.equal(metadata.receivers[0].position.sync_version, 3); assert.equal(metadata.device_location.coordinate_source, 'confirmed');
   assert.equal(Object.hasOwn(metadata, 'ignored'), false); assert.equal(Object.hasOwn(metadata.reported_position, 'ignored'), false);
+});
+
+test('decodes the tester position from a gateway-realistic environment', () => {
+  const frame = {
+    time: '2026-09-22T15:36:28.199Z',
+    deviceInfo: { devEui: 'ac1f09fffe000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
+      deviceProfileName: 'OSI RAK Field Tester', applicationId: 'app-field-tester' },
+    fPort: 1, fCnt: 4, data: 'INlJhJz1BdwMCA==',
+    rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
+    txInfo: { frequency: 868100000, modulation: { lora: { spreadingFactor: 12, bandwidth: 125000, codeRate: 'CR_4_5' } } }
+  };
+  // The gateway exports CHIRPSTACK_PROFILE_RAK10701, never CHIRPSTACK_PROFILE_FIELD_TESTER.
+  const byId = fromChirpStack(frame, { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
+  assert.equal(byId.metadata.reported_position.latitude, 46.4999993);
+  assert.equal(byId.metadata.reported_position.longitude, 6.4999982);
+
+  // Name fallback must match the provisioned name, which is not equal to 'Field Tester'.
+  const byName = fromChirpStack(frame, { gatewayPositions: {}, testerProfileNamePattern: 'field tester' });
+  assert.equal(byName.metadata.reported_position.satellites, 8);
+
+  // A non-tester profile must still decode nothing.
+  const other = fromChirpStack({ ...frame, deviceInfo: { ...frame.deviceInfo, deviceProfileId: 'other', deviceProfileName: 'OSI KIWI Sensor' } },
+    { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
+  assert.equal(other.metadata.reported_position, null);
+});
+
+test('a genuine all-zero ten-byte frame (no GPS fix yet) decodes to no position, not the Gulf of Guinea', () => {
+  // Cold GPS start: every byte zero, including hdop (byte 8) and satellites
+  // (byte 9). Without the quality gate this decodes to a valid-looking point
+  // (~5.3e-6 lat, ~1.07e-5 lon) instead of null -- see chirpstack.js
+  // decodeTesterGps for RAK's own has_gps = (hdop <= 2) && (sats >= 5) gate.
+  const zeroFrame = {
+    time: '2026-09-22T15:36:28.199Z',
+    deviceInfo: { devEui: 'ac1f09fffe000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
+      deviceProfileName: 'OSI RAK Field Tester', applicationId: 'app-field-tester' },
+    fPort: 1, fCnt: 1, data: Buffer.alloc(10).toString('base64'),
+    rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
+    txInfo: { frequency: 868100000, modulation: { lora: { spreadingFactor: 12, bandwidth: 125000, codeRate: 'CR_4_5' } } }
+  };
+  const row = fromChirpStack(zeroFrame, { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
+  assert.equal(row.metadata.reported_position, null);
+  // RSSI and receivers must still be captured -- only the position is dropped,
+  // exactly as for any non-tester uplink.
+  assert.equal(row.metadata.receivers.length, 1);
+  assert.equal(row.metadata.receivers[0].rssi_dbm, -93);
+  assert.equal(row.metadata.receivers[0].gateway_id, '0016C001F1000002');
+});
+
+test('a static gateway position is not subject to the gpsd freshness window', () => {
+  const frame = { time: '2026-09-22T15:36:28.199Z', deviceInfo: { devEui: 'ac1f09fffe000001' }, fPort: 1,
+    data: 'INlJhJz1BdwMCA==', rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }], txInfo: {} };
+  const positions = { '0016C001F1000002': { latitude: 46.5, longitude: 6.5, altitude_m: null,
+    source: 'static', last_good_fix_at: '2026-01-01T00:00:00.000Z' } };
+  const row = fromChirpStack(frame, { gatewayPositions: positions });
+  assert.equal(row.metadata.receivers[0].position.source, 'static');
+  assert.equal(row.metadata.receivers[0].position.latitude, 46.5);
 });

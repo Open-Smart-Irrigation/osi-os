@@ -30,6 +30,25 @@
     "mapEvidence": "Solo posiciones y enlaces registrados; no se infiere la cobertura del área.",
     "unknownDevices": "Posiciones desconocidas",
     "loadingMore": "Cargando…",
-    "loadMore": "Cargar más"
+    "loadMore": "Cargar más",
+    "showAllObservations": "Mostrar todo",
+    "showFewerObservations": "Mostrar menos",
+    "coverage": {
+      "title": "Intensidad de señal (dBm)",
+      "window": "Intervalo de tiempo",
+      "windowLastHour": "Última hora",
+      "windowHours": "Últimas {{count}} horas",
+      "windowDays": "Últimos {{count}} días",
+      "export": "Exportar",
+      "points_one": "{{count}} punto con posición",
+      "points_many": "{{count}} puntos con posición",
+      "points_other": "{{count}} puntos con posición",
+      "gateway": "Pasarela",
+      "legendStrong": "Fuerte",
+      "legendWeak": "Débil",
+      "noPosition": "No hay ninguna posición registrada de la pasarela; el recorrido se dibuja sin punto de referencia.",
+      "noPoints": "Ninguna observación de este intervalo tiene posición.",
+      "captureOff": "La captura de radio está desactivada en esta pasarela; no se registra ningún punto de cobertura."
+    }
   }
 }

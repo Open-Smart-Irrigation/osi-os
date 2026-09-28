@@ -624,6 +624,40 @@ class ChirpStackClient {
       method: 'DeviceService.FlushQueue'
     };
   }
+
+  // Enqueues one item on the device's downlink queue. `data` is bytes for the
+  // queue item's `data` field: DeviceQueueItem.setData accepts either a
+  // Uint8Array or a base64 string (jspb's own bytes-field convention, the
+  // same convention getData_asB64()/getData_asU8() read back with), so a
+  // caller may pass either -- every call site in this repo so far passes the
+  // base64 string a Buffer#toString('base64') already produced.
+  async enqueueDownlink({ devEui, fPort, data, confirmed }) {
+    const normalizedDevEui = normalizeDevEui(devEui);
+    if (!normalizedDevEui) {
+      throw annotateError(new Error('DevEUI is required'), 'enqueueDownlink');
+    }
+    const port = Number(fPort);
+    if (!Number.isInteger(port) || port < 1 || port > 255) {
+      throw annotateError(new Error('fPort must be an integer between 1 and 255'), 'enqueueDownlink');
+    }
+    if (data === undefined || data === null) {
+      throw annotateError(new Error('data is required'), 'enqueueDownlink');
+    }
+    const queueItem = new devicePb.DeviceQueueItem();
+    queueItem.setDevEui(normalizedDevEui);
+    queueItem.setFPort(port);
+    queueItem.setConfirmed(Boolean(confirmed));
+    queueItem.setData(data);
+    const request = new devicePb.EnqueueDeviceQueueItemRequest();
+    request.setQueueItem(queueItem);
+    const response = await grpcInvoke(this.deviceClient, 'enqueue', request, this.metadata, 'enqueueDownlink');
+    return {
+      devEui: normalizedDevEui,
+      fPort: port,
+      id: response.getId(),
+      method: 'DeviceService.Enqueue'
+    };
+  }
 }
 
 // One promise chain per DevEUI. Two renames of one device in quick succession

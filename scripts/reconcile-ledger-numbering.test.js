@@ -16,6 +16,7 @@ const {
   buildLineageRegistry,
   classifyRow,
   refuseVersionSlotCollisions,
+  resolveStructuralProofs,
   classifyLedger,
   applyRemap,
   verifyReconciliationConsistency,
@@ -313,6 +314,107 @@ test('structural proof: identical schema effect from the same pre-state passes a
   assert.equal(summary.remapHeaderStripped, 1);
 });
 
+// --- unit: structural proof across a migrations-dir version gap ------------
+// Regression coverage for the buildReferenceAt crash: reference(target.version
+// - 1) must resolve even when no migration file exists AT that exact version
+// number (this branch's own real gap: renumbered field-tester migration
+// 0059 -> 0060 because main owns 0059, #351 — see the customer-lineage fixture
+// tests below for the real gap's shape). A synthetic tiny gap (no 0003, only
+// 0001/0002/0004) reproduces the same crash cheaply.
+
+function gappedMainDir(root) {
+  const dir = path.join(root, 'gapped-main');
+  fs.mkdirSync(dir);
+  writeMigration(dir, '0001__base.sql', '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  writeMigration(dir, '0002__widget.sql', '-- risk: additive\n-- 0002: widget table\nCREATE TABLE widget (id INTEGER PRIMARY KEY, name TEXT);\n');
+  // Deliberate gap: no 0003 file on disk, mirroring this branch's missing
+  // 0059 (renumbered to 0060; 0059 is main's own migration, #351).
+  writeMigration(dir, '0004__gadget.sql', '-- risk: additive\n-- 0004: gadget table\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT);\n');
+  return dir;
+}
+
+test('reconcile across a migrations-dir version gap: header-stripped match, structural proof passes, apply rewrites the row, nothing left pending', { timeout: 120_000 }, async () => {
+  const root = scratch();
+  const dir = gappedMainDir(root);
+  const fixturesDir = path.join(root, 'fixtures');
+  const lineageDir = path.join(fixturesDir, 'field-tester-prerenumber');
+  fs.mkdirSync(lineageDir, { recursive: true });
+  // Byte-identical BODY to main's 0004__gadget.sql, header says 0003 —
+  // exactly the renumber-only diff the real device's ledger row 59 has
+  // against main's 0060 (line 2 is the only difference).
+  const oldHeaderSql = '-- risk: additive\n-- 0003: gadget table (pre-renumber)\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT);\n';
+  fs.writeFileSync(path.join(lineageDir, '0003__gadget.sql'), oldHeaderSql);
+  const manifest = { '0003__gadget.sql': sha(Buffer.from(oldHeaderSql)) };
+  fs.writeFileSync(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify(manifest));
+
+  // Device DB: only 0001/0002 actually applied through the real runner, then
+  // hand-plant ledger row 3 with the OLD file's checksum — the same shape as
+  // a gateway that applied the pre-renumber migration before the renumber
+  // landed on main.
+  const deviceDir = path.join(root, 'device');
+  fs.mkdirSync(deviceDir);
+  fs.copyFileSync(path.join(dir, '0001__base.sql'), path.join(deviceDir, '0001__base.sql'));
+  fs.copyFileSync(path.join(dir, '0002__widget.sql'), path.join(deviceDir, '0002__widget.sql'));
+  const db = path.join(root, 'device.db');
+  await bootstrapFresh(cliRunner(db), { migrationsDir: deviceDir, appVersion: 'gap-fixture' });
+  await cliRunner(db).exec(
+    `INSERT INTO schema_migrations (version, name, checksum, status) VALUES (3, '0003__gadget.sql', '${manifest['0003__gadget.sql']}', 'applied');`
+  );
+
+  const before = fs.readFileSync(db);
+  const reportRes = await runReconcile({ dbPath: db, migrationsDir: dir, fixturesDir, apply: false });
+  assert.equal(reportRes.refused, false, JSON.stringify(reportRes.summary));
+  const row3 = reportRes.rows.find((r) => r.version === 3);
+  assert.equal(row3.decision, 'remap');
+  assert.equal(row3.matchType, 'header-stripped');
+  assert.equal(row3.target.version, 4);
+  assert.deepEqual(row3.proof, { ok: true, diffs: [] });
+  assert.ok(fs.readFileSync(db).equals(before), 'report mode must not touch the DB');
+
+  const backupDir = path.join(root, 'backups');
+  const applyRes = await runReconcile({ dbPath: db, migrationsDir: dir, fixturesDir, apply: true, writersStopped: true, backupDir });
+  assert.equal(applyRes.applied, true, JSON.stringify(applyRes.summary));
+  const ledgerAfter = await cliRunner(db).all('SELECT version, name, status FROM schema_migrations ORDER BY version');
+  assert.deepEqual(ledgerAfter.map((r) => r.version), [1, 2, 4]);
+  assert.equal(ledgerAfter.find((r) => r.version === 4).name, '0004__gadget.sql');
+
+  // applyPending has nothing left to run: the remapped ledger now matches
+  // main's file set (1, 2, 4) exactly.
+  const carry = await applyPending(cliRunner(db), { migrationsDir: dir, appVersion: 'post-reconcile', writersStopped: true });
+  assert.deepEqual(carry.applied, []);
+});
+
+test('resolveStructuralProofs across the same version gap: a genuinely differing body still fails structural proof and refuses (fix did not loosen classification)', async () => {
+  const root = scratch();
+  const dir = gappedMainDir(root);
+  const target = loadMigrations(dir).find((m) => m.version === 4);
+  // NOT a header-only diff: the body itself differs (extra column) — a real
+  // classifyRow would never route this into 'pending-proof' (its
+  // header-stripped hash would not match any main candidate), so this test
+  // calls resolveStructuralProofs directly to prove the exact function the
+  // fix touched — buildReferenceAt's gap resolution — still lets a genuine
+  // mismatch fail proof rather than silently remapping it.
+  const differingForeignSql = '-- risk: additive\n-- 0003: gadget table (pre-renumber, mutated on purpose)\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT, extra_column TEXT);\n';
+  const scratchRoot = scratch();
+  const rows = [{
+    version: 3,
+    name: '0003__gadget.sql',
+    decision: 'pending-proof',
+    matchType: 'header-stripped',
+    target,
+    foreignLineage: 'field-tester-prerenumber',
+    foreignName: '0003__gadget.sql',
+    foreignText: differingForeignSql,
+    foreignRisk: 'additive',
+    reason: 'header-only diff from main; structural proof required',
+  }];
+  const result = await resolveStructuralProofs(rows, { migrationsDir: dir, scratchRoot });
+  assert.equal(result[0].decision, 'refuse');
+  assert.match(result[0].reason, /structural proof failed/);
+  assert.equal(result[0].proof.ok, false);
+  assert.ok(result[0].proof.diffs.length > 0);
+});
+
 // --- unit: runReconcile guardrails ------------------------------------------
 
 test('runReconcile refuses a missing DB path', async () => {
@@ -543,18 +645,21 @@ test('AgroLink-lineage fixture: reconcile classifies all 28 foreign rows, applie
   // with no interleaving; the verified renumber blocks — +9/+11/-1/-19 —
   // actually interleave AgroLink's content BEFORE and AROUND main's own
   // 0022-0025, covering 0026-0053 contiguously). Main's head has since moved
-  // past this device fixture's throughVersion (49): 0054-0059 (network
-  // coverage v1, land/network-observations-v1) are also genuinely new to
-  // this device, so pending is {22,23,24,25,54,55,56,57,58,59}.
+  // past this device fixture's throughVersion (49): 0054-0060 (network
+  // coverage v1, land/network-observations-v1, and the RAK10701 field-tester
+  // device type) are also genuinely new to this device, so pending is
+  // {22,23,24,25,54,55,56,57,58,59,60}.
+  // This list is exact on purpose: extend it when a migration lands, never
+  // relax it to a prefix or subset check.
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59]);
+  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60]);
 
   // The real applyPending can now carry the device the rest of the way home.
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
-  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59]);
+  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60]);
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
 });
 
@@ -593,14 +698,14 @@ test('Bovey-lineage fixture: reconcile classifies all 4 foreign rows, applies cl
   // Bovey never ran ANY AgroLink-derived content — pending is main's
   // 0026-0053 tail, matching the stabilization plan's estimate exactly
   // (this is the one of the two lineage estimates that verified correct),
-  // plus 0054-0059 (network coverage v1, land/network-observations-v1,
-  // durable valve dispatch intents),
+  // plus 0054-0060 (network coverage v1, land/network-observations-v1,
+  // durable valve dispatch intents, and the RAK10701 field-tester device type),
   // which landed on main after this device fixture's throughVersion (25).
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59]);
+  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59, 60]);
 
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
   assert.deepEqual(carryRes.applied, pending);

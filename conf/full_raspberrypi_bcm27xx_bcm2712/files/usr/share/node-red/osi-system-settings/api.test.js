@@ -612,3 +612,105 @@ test('the journal module default matches the one the replication worker applies'
   assert.equal(workerDefault, MODULE_DEFAULTS.journalModuleEnabled,
     'the worker must start from the same shipped default the route reports');
 });
+
+// ---------------------------------------------------------------------------
+// Network module: derived default from field-tester presence (Task 8,
+// 2026-09-22 field-test program)
+// ---------------------------------------------------------------------------
+// The Network header link and coverage map only earn their place once a
+// RAK10701 field tester is registered on this gateway -- osi-module-defaults'
+// networkModuleEnabled entry is 'auto', and this route is what supplies the
+// fact (context.fieldTesterPresent) that resolves it. An administrator can
+// still force the module on or off with an explicit boolean PUT, or hand
+// control back to the derivation with the literal string 'auto'.
+
+function insertFieldTester(dbPath, { deveui, deletedAt } = {}) {
+  const raw = new DatabaseSync(dbPath);
+  const now = new Date().toISOString();
+  raw.prepare(
+    "INSERT INTO devices(deveui, name, type_id, created_at, updated_at, deleted_at) VALUES (?, 'Field Tester', 'RAK10701_FIELD_TESTER', ?, ?, ?)"
+  ).run(deveui || '00000000FT000001', now, now, deletedAt || null);
+  raw.close();
+}
+
+test('GET /api/system/settings: no field tester registered -> Network stays off by default', async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('GET'));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.networkModuleEnabled, false);
+  // The static export stays boolean and false -- it never flips just because
+  // a gateway happens to have (or lack) a field tester.
+  assert.equal(out.payload.moduleDefaults.networkModuleEnabled, false);
+});
+
+test('GET /api/system/settings: a registered field tester turns Network on by default', async () => {
+  const dbPath = await tempDb();
+  insertFieldTester(dbPath);
+  const out = await call(dbPath, req('GET'));
+  assert.equal(out.statusCode, 200);
+  assert.equal(out.payload.networkModuleEnabled, true, 'the effective (derived) value must be true');
+  // moduleDefaults is the fixed, per-process table -- it must NOT follow the
+  // derivation, or a browser could no longer tell "shipped off" from
+  // "switched off here" (see the GET handler's own comment).
+  assert.equal(out.payload.moduleDefaults.networkModuleEnabled, false, 'the static default must stay false');
+});
+
+test('GET /api/system/settings: a soft-deleted field tester does not count as registered', async () => {
+  const dbPath = await tempDb();
+  insertFieldTester(dbPath, { deletedAt: new Date().toISOString() });
+  const out = await call(dbPath, req('GET'));
+  assert.equal(out.payload.networkModuleEnabled, false);
+});
+
+test('PUT /api/system/settings: an explicit false wins over a registered field tester', async () => {
+  const dbPath = await tempDb();
+  insertFieldTester(dbPath);
+  const put = await call(dbPath, req('PUT', { networkModuleEnabled: false }));
+  assert.equal(put.statusCode, 200);
+  assert.equal(put.payload.networkModuleEnabled, false);
+  assert.equal((await call(dbPath, req('GET'))).payload.networkModuleEnabled, false);
+});
+
+test('PUT /api/system/settings: an explicit true wins with no field tester registered', async () => {
+  const dbPath = await tempDb();
+  const put = await call(dbPath, req('PUT', { networkModuleEnabled: true }));
+  assert.equal(put.statusCode, 200);
+  assert.equal(put.payload.networkModuleEnabled, true);
+  assert.equal((await call(dbPath, req('GET'))).payload.networkModuleEnabled, true);
+});
+
+test("PUT /api/system/settings: 'auto' deletes the override and hands Network back to the derivation", async () => {
+  const dbPath = await tempDb();
+  insertFieldTester(dbPath);
+  // Force it off first, overriding the field tester.
+  await call(dbPath, req('PUT', { networkModuleEnabled: false }));
+  assert.equal((await call(dbPath, req('GET'))).payload.networkModuleEnabled, false);
+
+  const put = await call(dbPath, req('PUT', { networkModuleEnabled: 'auto' }));
+  assert.equal(put.statusCode, 200);
+  assert.equal(put.payload.networkModuleEnabled, true, 'back to derived: a field tester is registered');
+
+  const raw = new DatabaseSync(dbPath);
+  const row = raw.prepare("SELECT value FROM app_settings WHERE key='network_module_enabled'").get();
+  raw.close();
+  assert.equal(row, undefined, "'auto' must delete the row, not store the literal string");
+
+  assert.equal((await call(dbPath, req('GET'))).payload.networkModuleEnabled, true);
+});
+
+test("PUT /api/system/settings: 'auto' is rejected for a module whose default is not itself 'auto'", async () => {
+  const dbPath = await tempDb();
+  const out = await call(dbPath, req('PUT', { dataModuleEnabled: 'auto' }));
+  assert.equal(out.statusCode, 422);
+  assert.equal(out.payload.error, 'invalid_request');
+  assert.equal((await call(dbPath, req('GET'))).payload.dataModuleEnabled, MODULE_DEFAULTS.dataModuleEnabled);
+});
+
+test('GET /api/system/settings: field-tester presence does not affect the other three modules', async () => {
+  const dbPath = await tempDb();
+  insertFieldTester(dbPath);
+  const out = await call(dbPath, req('GET'));
+  assert.equal(out.payload.dataModuleEnabled, MODULE_DEFAULTS.dataModuleEnabled);
+  assert.equal(out.payload.gatewayHubModuleEnabled, MODULE_DEFAULTS.gatewayHubModuleEnabled);
+  assert.equal(out.payload.journalModuleEnabled, MODULE_DEFAULTS.journalModuleEnabled);
+});
