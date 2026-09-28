@@ -1535,6 +1535,10 @@ fetch_required "osi-radio-helper chirpstack.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/chirpstack.js" \
     "/srv/node-red/osi-radio-helper/chirpstack.js"
 
+fetch_required "osi-radio-helper fieldtester.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester.js" \
+    "/srv/node-red/osi-radio-helper/fieldtester.js"
+
 fetch_required "osi-radio-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.js" \
     "/srv/node-red/osi-radio-helper/index.js"

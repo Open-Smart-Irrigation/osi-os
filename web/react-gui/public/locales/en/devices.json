@@ -189,6 +189,12 @@
     "failedFlush": "Failed to queue anti-sediment flushing",
     "invalidOpenDuration": "Enter an open duration between 1 and 255 minutes."
   },
+  "fieldTester": {
+    "badge": "FIELD TESTER",
+    "sectionHeading": "Field Testers",
+    "openCoverageMap": "Open network map",
+    "readingsOnMap": "Readings appear on the network map."
+  },
   "zone": {
     "configure": "Configure",
     "chips": {

@@ -10,6 +10,7 @@ import { SenseCapWeatherCard } from './SenseCapWeatherCard';
 import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { Sdi12SoilCard } from './Sdi12SoilCard';
 import { Sdi12SettingsModal } from './Sdi12SettingsModal';
+import { FieldTesterCard } from './FieldTesterCard';
 import { ScheduleSection, normalizeTriggerMetric } from './ScheduleSection';
 import { ZoneDeviceModal } from './ZoneDeviceModal';
 import { EditableName } from './shared/EditableName';
@@ -282,6 +283,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const s2120Stations = devices.filter((d) => d.type_id === 'SENSECAP_S2120');
   const loRainGauges = devices.filter((d) => d.type_id === 'AQUASCOPE_LORAIN');
   const sdi12Nodes = devices.filter((d) => d.type_id === 'DRAGINO_SDI12');
+  const fieldTesters = devices.filter((d) => d.type_id === 'RAK10701_FIELD_TESTER');
 
   const hasDendroDevices = lsn50Nodes.some(d => d.dendro_enabled === 1);
   const schedMetric = zone.schedule?.triggerMetric ?? zone.schedule?.trigger_metric;
@@ -897,6 +899,31 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                     {loRainGauges.map((device) => (
                       <div key={device.deveui} className="relative">
                         <LoRainGaugeCard
+                          device={device}
+                          onRemove={() => handleRemoveDevice(device.deveui)}
+                          onUpdate={onUpdate}
+                          readOnly={!canWrite}
+                          removeContext="zone"
+                        />
+                        {removingDevice === device.deveui && (
+                          <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                            <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Field Testers */}
+              {fieldTesters.length > 0 && (
+                <div className="mb-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('fieldTester.sectionHeading')}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {fieldTesters.map((device) => (
+                      <div key={device.deveui} className="relative">
+                        <FieldTesterCard
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           onUpdate={onUpdate}

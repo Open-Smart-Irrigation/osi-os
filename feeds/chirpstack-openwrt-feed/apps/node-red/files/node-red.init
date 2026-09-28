@@ -312,6 +312,7 @@ start_service() {
     local cs_profile_clover=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_clover CHIRPSTACK_PROFILE_CLOVER)
     local cs_profile_rak10701=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_rak10701 CHIRPSTACK_PROFILE_RAK10701)
     local cs_profile_s2120=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_s2120 CHIRPSTACK_PROFILE_S2120)
+    local osi_radio_capture=$(resolve_chirpstack_value osi-server.cloud.radio_capture_enabled OSI_RADIO_CAPTURE_ENABLED)
     local agroscope_forward_enabled=$(resolve_chirpstack_value osi-server.cloud.agroscope_forward_enabled AGROSCOPE_FORWARD_ENABLED)
     local agroscope_mqtt_host=$(resolve_chirpstack_value osi-server.cloud.agroscope_mqtt_host AGROSCOPE_MQTT_HOST)
     local agroscope_mqtt_port=$(resolve_chirpstack_value osi-server.cloud.agroscope_mqtt_port AGROSCOPE_MQTT_PORT)
@@ -462,6 +463,7 @@ NODE
         CHIRPSTACK_PROFILE_CLOVER="$cs_profile_clover" \
         CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701" \
         CHIRPSTACK_PROFILE_S2120="$cs_profile_s2120" \
+        OSI_RADIO_CAPTURE_ENABLED="$osi_radio_capture" \
         AGROSCOPE_FORWARD_ENABLED="$agroscope_forward_enabled" \
         AGROSCOPE_MQTT_HOST="$agroscope_runtime_mqtt_host" \
         AGROSCOPE_MQTT_PORT="$agroscope_runtime_mqtt_port"

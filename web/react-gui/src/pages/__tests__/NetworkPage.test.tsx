@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkPage, parseObservation } from '../NetworkPage';
@@ -14,6 +14,13 @@ vi.mock('../../services/api', () => ({ devicesAPI: { getAll: mocks.getAll }, net
 } }));
 const translate = (key: string, options?: Record<string, unknown>) => String(options?.defaultValue ?? key).replace('{{count}}', String(options?.count ?? ''));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }));
+// AppHeader carries the app-wide chrome (brand header, tabs, account menu) and
+// pulls in useGatewayModules/SWR of its own; NetworkPage's tests care about the
+// page body, so AppHeader is replaced with a minimal stand-in that still
+// renders the title as an h1 -- the same shape JournalPage.test.tsx uses for
+// the real header.
+vi.mock('../../components/AppHeader', () => ({ AppHeader: ({ title }: { title: string }) => <header><h1>{title}</h1></header> }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ username: 'field-admin', logout: vi.fn() }) }));
 
 const device = { deveui: 'ABCDEF0123456789', name: 'Gateway radio', type_id: 'KIWI_SENSOR' } as any;
 const emptyPage = { rows: [], truncated: false, nextOffset: null, from: '', to: '' };
@@ -101,5 +108,49 @@ describe('NetworkPage', () => {
       .format(new Date('2026-09-10T08:30:00.000Z'));
     expect(await screen.findByText(new RegExp(formatted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument();
     expect(screen.queryByText(/2026-09-10T08:30:00\.000Z/)).not.toBeInTheDocument();
+  });
+
+  it('shows the installed-location and radio-configuration panels for a fixed installation', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Network observations', level: 1 });
+    expect(screen.getByText('Installed location')).toBeInTheDocument();
+    expect(screen.getByText('Radio configuration')).toBeInTheDocument();
+  });
+
+  it('shows only the most recent 20 observations until "Show all" is pressed', async () => {
+    const rows = Array.from({ length: 25 }, (_, index) => ({
+      id: `row-${index}`,
+      deveui: device.deveui,
+      recorded_at: new Date(2026, 8, 25, 9, 0, -index).toISOString(),
+      rssi: -90,
+      metadata_json: '{}',
+    }));
+    mocks.observations.mockResolvedValue({ rows, truncated: false, nextOffset: null, from: '', to: '' });
+    renderPage();
+
+    await screen.findByText('25 observations');
+    const list = screen.getByText('Observations').closest('section')!;
+    // Rows show the device name (from the known device list), not the raw
+    // EUI -- see NetworkPage.tsx's `nameOf`.
+    expect(within(list).getAllByText(device.name)).toHaveLength(20);
+    const toggle = screen.getByRole('button', { name: 'Show all' });
+
+    fireEvent.click(toggle);
+    expect(within(list).getAllByText(device.name)).toHaveLength(25);
+    expect(screen.getByText('25 observations')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }));
+    expect(within(list).getAllByText(device.name)).toHaveLength(20);
+  });
+
+  it('offers no show-all toggle when every observation already fits', async () => {
+    mocks.observations.mockResolvedValue({
+      rows: [{ id: 'one', deveui: device.deveui, recorded_at: '2026-09-25T09:00:00Z', rssi: -90, metadata_json: '{}' }],
+      truncated: false, nextOffset: null, from: '', to: '',
+    });
+    renderPage();
+
+    await screen.findByText('1 observations');
+    expect(screen.queryByRole('button', { name: 'Show all' })).not.toBeInTheDocument();
   });
 });

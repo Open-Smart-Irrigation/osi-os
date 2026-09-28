@@ -451,7 +451,9 @@ const normaliseLocation = (value: unknown): InstallationLocationRevision | null 
 export const networkAPI = {
   location: async (deveui: string): Promise<InstallationLocationRevision | null> => normaliseLocation((await api.get(`/api/devices/${encodeURIComponent(deveui)}/installation-location`)).data),
   radio: async (deveui: string): Promise<RadioConfigurationRevision | null> => (await api.get(`/api/devices/${encodeURIComponent(deveui)}/radio-configuration`)).data,
-  observations: async (limit = 500, offset = 0, window?: { from: string; to: string }): Promise<NetworkObservationPage> => (await api.get<NetworkObservationPage>('/api/network/observations', { params: { limit: Math.min(500, Math.max(1, limit)), offset: Math.max(0, Math.floor(offset)), ...window } })).data,
+  // `hours` opens the first page of a window; the reply's from/to then pin every
+  // later page of it, so paging cannot slide while the operator reads.
+  observations: async (limit = 500, offset = 0, window?: { from?: string; to?: string; hours?: number }): Promise<NetworkObservationPage> => (await api.get<NetworkObservationPage>('/api/network/observations', { params: { limit: Math.min(500, Math.max(1, limit)), offset: Math.max(0, Math.floor(offset)), ...window } })).data,
   saveLocation: async (deveui: string, body: { revision_uuid: string; base_revision_uuid?: string | null; values: Record<string, unknown> }): Promise<InstallationLocationRevision> => (await api.put(`/api/devices/${encodeURIComponent(deveui)}/installation-location`, body)).data,
   saveRadio: async (deveui: string, body: { revision_uuid: string; base_revision_uuid?: string | null; values: Record<string, unknown> }): Promise<RadioConfigurationRevision> => (await api.put(`/api/devices/${encodeURIComponent(deveui)}/radio-configuration`, body)).data,
 };

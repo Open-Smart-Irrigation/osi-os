@@ -192,6 +192,12 @@
     "intervalPlaceholder": "ex. 10",
     "intervalNote": "A OSI define o intervalo normal de caixa fechada no FPort 11. O intervalo de caixa aberta permanece fixo em 2 minutos e a deteção de adulteração permanece ativada."
   },
+  "fieldTester": {
+    "badge": "TESTADOR",
+    "sectionHeading": "Testadores de cobertura",
+    "openCoverageMap": "Abrir o mapa da rede",
+    "readingsOnMap": "As medições aparecem no mapa da rede."
+  },
   "zone": {
     "configure": "Configurar",
     "chips": {

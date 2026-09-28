@@ -18,6 +18,7 @@ import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
 import { ValveControlPanel } from '../components/farming/valves/ValveControlPanel';
 import { Sdi12SoilCard } from '../components/farming/Sdi12SoilCard';
 import { Sdi12SettingsModal } from '../components/farming/Sdi12SettingsModal';
+import { FieldTesterCard } from '../components/farming/FieldTesterCard';
 import {
   IrrigationOutcomesPanel,
   type IrrigationOutcomeZoneContext,
@@ -38,6 +39,7 @@ export const FarmingDashboard: React.FC = () => {
   const { canWrite, isAdmin, loading: scopeLoading } = useScope();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
+  const { t: td } = useTranslation('devices');
   const { modules } = useDisplayPreferences();
   // Gateway-level module switches (the hub card), separate from the per-browser
   // display preferences above.
@@ -125,14 +127,15 @@ export const FarmingDashboard: React.FC = () => {
   };
 
   // Group devices by zone
-  const { devicesByZone, unassignedDevices } = useMemo(() => {
+  const { devicesByZone, unassignedDevices, unassignedFieldTesters } = useMemo(() => {
     if (!devices || !zones) {
-      return { devicesByZone: new Map(), unassignedDevices: [] };
+      return { devicesByZone: new Map(), unassignedDevices: [], unassignedFieldTesters: [] };
     }
 
     const zoneIds = new Set(zones.map((zone) => zone.id));
     const byZone = new Map<number, Device[]>();
     const unassigned: Device[] = [];
+    const unassignedTesters: Device[] = [];
 
     devices.forEach((device) => {
       // Write-only scoping (W1) removed the visible-zone term from this branch.
@@ -145,12 +148,18 @@ export const FarmingDashboard: React.FC = () => {
         const zoneDevices = byZone.get(device.irrigation_zone_id) || [];
         zoneDevices.push(device);
         byZone.set(device.irrigation_zone_id, zoneDevices);
+      } else if (device.type_id === 'RAK10701_FIELD_TESTER') {
+        // N5: a field tester never belongs to an irrigation zone. Keep it out
+        // of unassignedDevices entirely, so it never triggers -- or sits
+        // inside -- the dashed "Unassigned Devices" box built for sensors
+        // waiting to be assigned to one. It gets its own section below.
+        unassignedTesters.push(device);
       } else {
         unassigned.push(device);
       }
     });
 
-    return { devicesByZone: byZone, unassignedDevices: unassigned };
+    return { devicesByZone: byZone, unassignedDevices: unassigned, unassignedFieldTesters: unassignedTesters };
   }, [devices, zones]);
 
   const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
@@ -423,6 +432,34 @@ export const FarmingDashboard: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                </div>
+              </div>
+            )}
+
+            {/* Field Testers -- outside the dashed "Unassigned Devices" box
+                (N5): a field tester never belongs to an irrigation zone, so it
+                is never "waiting to be assigned" the way an unassigned sensor
+                is, and it must not make an otherwise-empty gateway show that
+                box at all. Verified on real hardware ahead of the 2026-09-25
+                demo: a registered field tester matched none of the type_id
+                filters above, so it used to sit invisible inside that box. */}
+            {unassignedFieldTesters.length > 0 && (
+              <div className="mt-8">
+                <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">
+                  {td('fieldTester.sectionHeading')}
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {unassignedFieldTesters.map((device) => (
+                    <FieldTesterCard
+                      key={device.deveui}
+                      device={device}
+                      onRemove={handleUpdate}
+                      onUpdate={handleUpdate}
+                      readOnly={!canWrite}
+                      removeContext="farm"
+                    />
+                  ))}
                 </div>
               </div>
             )}

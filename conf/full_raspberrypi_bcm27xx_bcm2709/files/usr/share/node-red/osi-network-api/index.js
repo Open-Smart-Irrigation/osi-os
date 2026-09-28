@@ -72,6 +72,59 @@ async function handleRequest(request = {}) {
       catch (saveError) { throw error(/stale|mismatch|supersed|base revision/i.test(String(saveError.message)) ? 409 : 400, saveError.message); }
       return response(saved.replayed ? 200 : 201, saved);
     }
+    if (path === '/api/gateway/location') {
+      const user = await actor(db, auth, scoped);
+      if (method !== 'PUT') throw error(405, 'method not allowed');
+      // Gateway-wide fact, not device-scoped: restricted to admin regardless of
+      // researcher's usual canMutate write access to their own zones' devices.
+      if (!scope.canMutate(user.role) || user.role !== 'admin') throw error(403, 'insufficient role');
+      const identity = await activeInstallation(db);
+      const input = bodyOf(request);
+      const lat = Number(input.latitude), lon = Number(input.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+        throw error(400, 'invalid coordinate');
+      }
+      const altitude = input.altitude_m == null ? null : Number(input.altitude_m);
+      if (altitude != null && !Number.isFinite(altitude)) throw error(400, 'invalid altitude');
+      const accuracy = input.accuracy_m == null ? null : Number(input.accuracy_m);
+      if (accuracy != null && (!Number.isFinite(accuracy) || accuracy < 0)) throw error(400, 'invalid accuracy');
+      const now = request.now || new Date().toISOString();
+      // gpsd keeps precedence whenever it has a live fix (2026-09-10 review, blocker
+      // B3: no new manual writer competes with gpsd). "Live" mirrors receiverPosition's
+      // own freshness window (osi-radio-helper/chirpstack.js) so read and write agree
+      // on what counts as current: a gpsd row whose last_good_fix_at (falling back to
+      // last_fix_at) is within 300s of now. gpsd absent, stale, or never-written means
+      // the static write proceeds -- the whole point of this endpoint.
+      const existing = await db.get('SELECT source,last_fix_at,last_good_fix_at FROM gateway_locations WHERE gateway_device_eui=?', [identity.current_gateway_device_eui]);
+      if (existing && existing.source === 'gpsd') {
+        const fixTime = existing.last_good_fix_at || existing.last_fix_at;
+        const delta = Date.parse(now) - Date.parse(fixTime);
+        if (Number.isFinite(delta) && delta >= 0 && delta <= 300000) {
+          throw error(409, 'a live gpsd fix is current; static position refused');
+        }
+      }
+      // sync_version bumps on every write (COALESCE(...,0)+1), matching every sibling
+      // writer that feeds a sync trigger (see osi-system-settings/api.js's timezone
+      // write): the cloud applier only enforces staleness ordering when sync_version
+      // is greater than zero.
+      //
+      // altitude_m/accuracy_m are optional: an omitted (or explicitly null) field on
+      // an update preserves whatever was already stored, via COALESCE(excluded.*, ...)
+      // -- a coordinate refinement is an ordinary operator action and must not silently
+      // erase a previously-recorded altitude. latitude/longitude have no such fallback:
+      // they're required on every call (rejected above when missing), so a write always
+      // supplies both and a full replace is correct there.
+      await db.run(
+        "INSERT INTO gateway_locations (gateway_device_eui,latitude,longitude,altitude_m,accuracy_m,status,source,last_fix_at,last_good_fix_at,sync_version,updated_at) " +
+        "VALUES (?,?,?,?,?,'static','static',?,?,1,?) ON CONFLICT(gateway_device_eui) DO UPDATE SET " +
+        "latitude=excluded.latitude,longitude=excluded.longitude," +
+        "altitude_m=COALESCE(excluded.altitude_m,gateway_locations.altitude_m)," +
+        "accuracy_m=COALESCE(excluded.accuracy_m,gateway_locations.accuracy_m)," +
+        "status='static',source='static',last_fix_at=excluded.last_fix_at," +
+        "last_good_fix_at=excluded.last_good_fix_at,sync_version=COALESCE(gateway_locations.sync_version,0)+1,updated_at=excluded.updated_at",
+        [identity.current_gateway_device_eui, lat, lon, altitude, accuracy, now, now, now]);
+      return response(200, { gateway_device_eui: identity.current_gateway_device_eui, latitude: lat, longitude: lon, source: 'static' });
+    }
     if (method === 'GET' && path === '/api/network/observations') {
       await actor(db, auth, scoped);
       const identity = await activeInstallation(db);

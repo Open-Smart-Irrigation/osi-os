@@ -192,6 +192,12 @@
     "intervalPlaceholder": "es. 10",
     "intervalNote": "OSI imposta l'intervallo normale a scatola chiusa sulla FPort 11. L'intervallo a scatola aperta rimane fisso a 2 minuti e il rilevamento manomissioni resta attivo."
   },
+  "fieldTester": {
+    "badge": "TESTER",
+    "sectionHeading": "Tester di copertura",
+    "openCoverageMap": "Apri la mappa della rete",
+    "readingsOnMap": "Le misure compaiono sulla mappa della rete."
+  },
   "zone": {
     "configure": "Configura",
     "chips": {

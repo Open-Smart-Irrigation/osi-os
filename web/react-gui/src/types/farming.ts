@@ -1,5 +1,5 @@
 // The specific supported hardware types
-export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512' | 'DRAGINO_SDI12';
+export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120' | 'AQUASCOPE_LORAIN' | 'MILESIGHT_UC512' | 'DRAGINO_SDI12' | 'RAK10701_FIELD_TESTER';
 export type Sdi12ProbeStatus = 'pending_identify' | 'identified' | 'unmatched' | 'manual';
 export type SentekSensorType = 'ENVIROSCAN' | 'TRISCAN';
 export type Sdi12RecipeDeploymentStatus =

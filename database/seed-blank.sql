@@ -99,7 +99,7 @@ CREATE TABLE devices (
   type_id                               TEXT NOT NULL CHECK(type_id IN (
                                           'KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50',
                                           'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN',
-                                          'MILESIGHT_UC512','DRAGINO_SDI12')),
+                                          'MILESIGHT_UC512','DRAGINO_SDI12','RAK10701_FIELD_TESTER')),
   user_id                               INTEGER NULL,
   farm_id                               TEXT NULL,
   current_state                         TEXT CHECK(current_state IN ('OPEN','CLOSED')),

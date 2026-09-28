@@ -73,9 +73,18 @@ function namespacesFor(text: string): string[] {
   return [...new Set(found)];
 }
 
-/** Every `t('literal', { ... defaultValue ... })` call in one file. */
-function defaultedKeys(text: string): string[] {
-  const keys: string[] = [];
+/**
+ * Every `t('literal', { ... defaultValue ... })` call in one file, with whether
+ * that call also passes `count`.
+ *
+ * `count` decides where i18next looks: without it there is no plural-suffix
+ * resolution at all, so a call on a pluralised path resolves nothing and ships
+ * its defaultValue in every language. The options text has its `{{…}}`
+ * placeholders stripped before the check, or the literal `{{count}}` inside a
+ * defaultValue would answer for a `count` option that was never passed.
+ */
+function defaultedKeys(text: string): Array<{ key: string; hasCount: boolean }> {
+  const keys: Array<{ key: string; hasCount: boolean }> = [];
   for (const call of text.matchAll(/\bt\(\s*(['"`])([^'"`]*)\1\s*,\s*\{/g)) {
     const key = call[2];
     // A template literal with an interpolation builds its key at runtime and
@@ -92,10 +101,36 @@ function defaultedKeys(text: string): string[] {
       }
     }
     if (end === -1) continue;
-    if (!/\bdefaultValue\b/.test(text.slice(braceStart, end + 1))) continue;
-    keys.push(key);
+    const options = text.slice(braceStart, end + 1).replace(/\{\{[^}]*\}\}/g, '');
+    if (!/\bdefaultValue\b/.test(options)) continue;
+    keys.push({ key, hasCount: /\bcount\b/.test(options) });
   }
   return keys;
+}
+
+/**
+ * True when English really does carry this key, so the defaultValue is a
+ * fallback rather than the shipped string.
+ *
+ * A count-bearing key does not live at its own path: i18next stores it under
+ * one entry per CLDR plural category, and English has `one` and `other`. The
+ * promise a defaultValue makes is kept when both of those exist, and a lookup
+ * of the bare path alone would report the key missing and send whoever added
+ * it to the forbidden allowlist. Bundles that also carry `_many` (fr, es, it,
+ * pt) are checked per locale by their own feature test; this file only ever
+ * reads English.
+ *
+ * The plural pair only counts when the call site passes `count`, because that
+ * is what makes i18next look under the suffixes at all. A call that reuses a
+ * pluralised path without `count` resolves nothing and renders its English
+ * defaultValue in all seven languages — the exact leak this file exists to
+ * stop, and one that accepting the pair unconditionally would wave through.
+ */
+function englishHasKey(namespace: string, keyPath: string, hasCount: boolean): boolean {
+  if (typeof lookup(namespace, keyPath) === 'string') return true;
+  return hasCount
+    && typeof lookup(namespace, `${keyPath}_one`) === 'string'
+    && typeof lookup(namespace, `${keyPath}_other`) === 'string';
 }
 
 function missingDefaultedKeys(): Map<string, string[]> {
@@ -103,12 +138,12 @@ function missingDefaultedKeys(): Map<string, string[]> {
   for (const file of sourceFiles(srcRoot)) {
     const text = fs.readFileSync(file, 'utf8');
     const namespaces = namespacesFor(text);
-    for (const key of defaultedKeys(text)) {
+    for (const { key, hasCount } of defaultedKeys(text)) {
       // `t('settings:foo.bar')` names its namespace inline.
       const prefixed = key.match(/^([A-Za-z][A-Za-z0-9]*):(.+)$/);
       const candidates = prefixed ? [prefixed[1]] : namespaces;
       const keyPath = prefixed ? prefixed[2] : key;
-      if (candidates.some((ns) => typeof lookup(ns, keyPath) === 'string')) continue;
+      if (candidates.some((ns) => englishHasKey(ns, keyPath, hasCount))) continue;
       const id = `${candidates[0]}:${keyPath}`;
       const rel = path.relative(guiRoot, file);
       const seen = missing.get(id) ?? [];

@@ -144,12 +144,41 @@ async function readGatewayTimezone(db, warn) {
 // The table itself lives in osi-module-defaults (see the require above): adding
 // a module, or changing what a gateway ships with, is an edit there and nothing
 // here. GET, PUT validation and the response shape are all driven off it.
+//
+// Task 8 (2026-09-22 field-test program): Network's default is no longer a
+// constant. It ships hidden until a RAK10701 field tester is registered on
+// this gateway, then shows itself -- an administrator can still force it on
+// or off with an explicit true/false PUT, and can send the literal string
+// 'auto' to hand control back to that derivation (moduleContext below,
+// deleted-row handling in the PUT write loop).
+
+// Whether a RAK10701 field tester is registered on this gateway -- the one
+// fact the Network module's 'auto' default (osi-module-defaults) needs, and
+// the only reason this route queries `devices` for module purposes at all.
+// Table-missing-safe like every other read in this file: `devices` predates
+// app_settings and is never expected to be absent, but a read failure here
+// must fall back to "not present" rather than 500 the whole settings route --
+// the same contract readGatewayTimezone and readModuleSettings already keep.
+async function readFieldTesterPresent(db, warn) {
+  try {
+    const row = await db.get(
+      "SELECT 1 AS present FROM devices WHERE type_id='RAK10701_FIELD_TESTER' AND deleted_at IS NULL LIMIT 1"
+    );
+    return Boolean(row && row.present);
+  } catch (error) {
+    warn('[sys-settings] field tester presence read failed: ' + String(error && error.message ? error.message : error));
+    return false;
+  }
+}
 
 // Table-missing-safe, same contract as readGatewayTimezone: a pre-migration DB
-// and an absent key both resolve to the module's shipped default, so a gateway
-// mid-deploy behaves like a fresh gateway on the same firmware rather than
-// showing a view its own settings page says is off.
-async function readModuleSettings(db, warn) {
+// and an absent key both resolve to the module's shipped (or, for Network,
+// derived) default, so a gateway mid-deploy behaves like a fresh gateway on
+// the same firmware rather than showing a view its own settings page says is
+// off. `moduleContext` is forwarded to interpretStoredValue for every module,
+// not only Network's -- the other three ignore it (their defaultEnabled is a
+// boolean, not 'auto'), so this is a no-op for them.
+async function readModuleSettings(db, warn, moduleContext) {
   const settings = {};
   for (const module of MODULE_SETTINGS) {
     let row = null;
@@ -160,23 +189,26 @@ async function readModuleSettings(db, warn) {
       if (!/no such table:\s*app_settings\b/i.test(detail)) {
         warn('[sys-settings] ' + module.key + ' read failed: ' + detail);
       }
-      settings[module.field] = interpretStoredValue(module.key, null);
+      settings[module.field] = interpretStoredValue(module.key, null, moduleContext);
       continue;
     }
-    settings[module.field] = interpretStoredValue(module.key, row ? row.value : null);
+    settings[module.field] = interpretStoredValue(module.key, row ? row.value : null, moduleContext);
   }
   return settings;
 }
 
-// Strict boolean only. Accepting 'false'/0 would make a typo read as "on"
-// (every non-empty string is truthy), which is exactly the failure these
-// switches exist to prevent -- most sharply for the journal module, where "on"
-// means the replication worker keeps calling the cloud.
-function validateModuleEnabled(rawValue, fieldName) {
-  if (rawValue !== true && rawValue !== false) {
-    throw apiError(422, 'invalid_request', fieldName + ' must be a boolean');
-  }
-  return rawValue;
+// Strict boolean only, with one escape hatch: the literal string 'auto', and
+// only for a module whose own defaultEnabled is 'auto' (today, only Network).
+// Sending it back to "let the gateway decide" is otherwise indistinguishable
+// from any other typo -- 'false'/0 must still 422, not read as "on" (every
+// non-empty string is truthy), which is exactly the failure these switches
+// exist to prevent, most sharply for the journal module, where "on" means the
+// replication worker keeps calling the cloud. `module` is optional so a
+// pre-existing 2-arg caller keeps the strict-boolean-only contract.
+function validateModuleEnabled(rawValue, fieldName, module) {
+  if (rawValue === true || rawValue === false) return rawValue;
+  if (rawValue === 'auto' && module && module.defaultEnabled === 'auto') return 'auto';
+  throw apiError(422, 'invalid_request', fieldName + ' must be a boolean');
 }
 
 // Collects every module field present on the body, validating all of them
@@ -190,7 +222,7 @@ function collectModuleWrites(body) {
     writes.push({
       key: module.key,
       field: module.field,
-      value: validateModuleEnabled(body[module.field], module.field),
+      value: validateModuleEnabled(body[module.field], module.field, module),
     });
   }
   return writes;
@@ -228,9 +260,15 @@ async function handleHttpRequest(options) {
       await scope.assertAuthenticatedRole(db, auth, 'admin', { scopedMode: true });
     }
 
+    // The one gateway fact osi-module-defaults' 'auto' default needs (see
+    // MODULE_SETTINGS there: Network is the only 'auto' entry). Read once per
+    // request, after auth, and handed to every readModuleSettings call below
+    // so GET and PUT resolve Network's derived default identically.
+    const moduleContext = { fieldTesterPresent: await readFieldTesterPresent(db, warn) };
+
     if (method === 'GET') {
       const gatewayTimezone = await readGatewayTimezone(db, warn);
-      const modules = await readModuleSettings(db, warn);
+      const modules = await readModuleSettings(db, warn, moduleContext);
       // moduleDefaults alongside the effective values: the GUI keeps no copy of
       // them, so this is how a browser learns what THIS gateway ships with --
       // which is what it falls back to when a later poll fails, and what tells
@@ -260,6 +298,13 @@ async function handleHttpRequest(options) {
           );
         }
         for (const write of moduleWrites) {
+          // 'auto' means "go back to letting the gateway derive this module's
+          // default" -- deleting the row is how that reverts, rather than
+          // persisting the literal string 'auto' as if it were an on/off value.
+          if (write.value === 'auto') {
+            await db.run('DELETE FROM app_settings WHERE key = ?', [write.key]);
+            continue;
+          }
           await db.run(
             'INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at',
             [write.key, write.value ? '1' : '0', now]
@@ -301,8 +346,10 @@ async function handleHttpRequest(options) {
         });
       }
       // Read back rather than echo: the response then reflects what is actually
-      // stored, including modules this request did not touch.
-      const modules = await readModuleSettings(db, warn);
+      // stored, including modules this request did not touch. If this PUT just
+      // deleted Network's stored row (an 'auto' write), this is also what
+      // re-derives its effective value from moduleContext.
+      const modules = await readModuleSettings(db, warn, moduleContext);
       // Same shape as GET, defaults included, so the GUI can fold this response
       // straight into its settings cache without dropping them.
       return respond(200, Object.assign({ gatewayTimezone, zonesUpdated, moduleDefaults: MODULE_DEFAULTS }, modules));

@@ -94,7 +94,8 @@
                         "SENSECAP_S2120",
                         "AQUASCOPE_LORAIN",
                         "MILESIGHT_UC512",
-                        "DRAGINO_SDI12"
+                        "DRAGINO_SDI12",
+                        "RAK10701_FIELD_TESTER"
                     ]
                 },
                 "name": {"type": ["string", "null"]},

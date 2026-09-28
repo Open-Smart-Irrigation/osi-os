@@ -30,6 +30,25 @@
     "mapEvidence": "Apenas posições e ligações registadas; a cobertura da área não é inferida.",
     "unknownDevices": "Posições desconhecidas",
     "loadingMore": "A carregar…",
-    "loadMore": "Carregar mais"
+    "loadMore": "Carregar mais",
+    "showAllObservations": "Mostrar tudo",
+    "showFewerObservations": "Mostrar menos",
+    "coverage": {
+      "title": "Intensidade do sinal (dBm)",
+      "window": "Intervalo de tempo",
+      "windowLastHour": "Última hora",
+      "windowHours": "Últimas {{count}} horas",
+      "windowDays": "Últimos {{count}} dias",
+      "export": "Exportar",
+      "points_one": "{{count}} ponto com posição",
+      "points_many": "{{count}} pontos com posição",
+      "points_other": "{{count}} pontos com posição",
+      "gateway": "Gateway",
+      "legendStrong": "Forte",
+      "legendWeak": "Fraco",
+      "noPosition": "Não há nenhuma posição registada do gateway; o percurso é desenhado sem ponto de referência.",
+      "noPoints": "Nenhuma observação deste intervalo tem posição.",
+      "captureOff": "A captura de rádio está desligada neste gateway; não são registados pontos de cobertura."
+    }
   }
 }

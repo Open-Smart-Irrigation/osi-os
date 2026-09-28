@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppHeader } from '../AppHeader';
+import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
 // Module visibility (2026-09-17): the Data view is switchable off in Settings.
 // AppHeader carries the primary tab bar (Zones / Data / Journal), so it is the
@@ -18,6 +19,7 @@ vi.mock('react-i18next', () => ({
         'tabs.zones': 'Zones',
         'tabs.data': 'Data',
         'tabs.journal': 'Journal',
+        network: 'Network',
         admin: 'Admin',
         'adminMenu.users': 'Users',
         'adminMenu.grants': 'Grants',
@@ -58,9 +60,18 @@ function renderAppHeader() {
   );
 }
 
+function renderAppHeaderOnNetwork() {
+  render(
+    <MemoryRouter initialEntries={['/network']}>
+      <AppHeader title="Network observations" activeTab="network" username="farmer" onLogout={vi.fn()} />
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   gatewayModules.flags = { data: true, network: true, gatewayHub: true, journal: true };
+  vi.mocked(isDesktopBrowser).mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -123,5 +134,50 @@ describe('AppHeader module visibility', () => {
 
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
+  });
+});
+
+// Coverage walk (2026-09-25): NetworkPage had no "way back" and no "where am
+// I" -- a lone Zones pill next to it. Same gate as DashboardHeader's own
+// Network link: desktop browser, module switched on for this gateway.
+describe('AppHeader Network tab', () => {
+  it('shows the Network tab, active, when the module is on and it is on the Network page', () => {
+    renderAppHeaderOnNetwork();
+
+    const link = screen.getByRole('link', { name: 'Network' });
+    expect(link).toHaveAttribute('href', '/network');
+    expect(link).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('hides the Network tab when the network module is off and keeps the others', () => {
+    gatewayModules.flags!.network = false;
+    renderAppHeaderOnNetwork();
+
+    expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Zones' })).toBeInTheDocument();
+  });
+
+  it('renders no Network tab while the gateway has not answered yet', () => {
+    gatewayModules.flags = null;
+    renderAppHeaderOnNetwork();
+
+    expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
+  });
+
+  it('hides the Network tab on a mobile browser even when the module is on', () => {
+    vi.mocked(isDesktopBrowser).mockReturnValue(false);
+    renderAppHeaderOnNetwork();
+
+    expect(screen.queryByRole('link', { name: 'Network' })).not.toBeInTheDocument();
+  });
+
+  it('does not mark Network active on another page', () => {
+    render(
+      <MemoryRouter initialEntries={['/journal']}>
+        <AppHeader title="Field Journal" activeTab="journal" username="farmer" onLogout={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: 'Network' })).not.toHaveAttribute('aria-current');
   });
 });
