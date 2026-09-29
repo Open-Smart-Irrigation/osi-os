@@ -2,6 +2,10 @@
   "schemaVersion": 1,
   "cases": [
     "local-openmeteo-water",
-    "provider-unavailable"
+    "provider-unavailable",
+    "crop-table-kc",
+    "crop-curve-kc",
+    "shared-server",
+    "shared-server-stale"
   ]
 }

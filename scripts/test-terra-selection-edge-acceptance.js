@@ -829,3 +829,27 @@ test('does not replay across a Terra effect key whose bound zone/base/target dis
     db.raw.close();
   }
 });
+
+// Daily agronomy parity (spec B5; controller ruling on plan review E2 I2): the Terra
+// shape carries no start date, so a change to another set stage starts it on the
+// zone-local today, the same stage keeps it and a change to unset clears it.
+test('a Terra stage change starts the stage on the zone-local date; the same stage keeps it; unset clears it', async () => {
+  const commands = loadCommands();
+  if (typeof commands._resetForTests === 'function') commands._resetForTests();
+  const db = database();
+  try {
+    const startedOn = () => db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on;
+    // 22:30 UTC on 3 August is 00:30 on 4 August in the zone's Europe/Zurich.
+    const first = await withFixedClock('2026-08-03T22:30:00.000Z', () => apply(commands, db, envelope(9401, 42, 43)));
+    assert.equal(first.ack.result, 'APPLIED');
+    assert.equal(startedOn(), '2026-08-04', 'flowering (unset) to development starts the stage on the zone-local date');
+    await withFixedClock('2026-08-10T10:00:00.000Z', () => apply(commands, db, envelope(9402, 43, 44)));
+    assert.equal(startedOn(), '2026-08-04', 'development again keeps the date');
+    await withFixedClock('2026-08-20T10:00:00.000Z', () => apply(commands, db, envelope(9403, 44, 45, { phenologicalStage: 'late_season' })));
+    assert.equal(startedOn(), '2026-08-20');
+    await withFixedClock('2026-08-21T10:00:00.000Z', () => apply(commands, db, envelope(9404, 45, 46, { phenologicalStage: 'default' })));
+    assert.equal(startedOn(), null, 'a change to unset clears the date');
+  } finally {
+    db.raw.close();
+  }
+});

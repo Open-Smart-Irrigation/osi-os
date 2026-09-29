@@ -89,10 +89,10 @@ vi.mock('../../analysis/useAnalysisSeries', () => ({
 
 function loadedCatalogState() {
   const channels: AnalysisCatalogEntry[] = [
-    { seriesId: 's1', hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1', displayName: 'SWT 1', unit: 'kPa', availability: 'available', deviceName: null, depthCm: null },
-    { seriesId: 's2', hubEui: 'HUB-2', zoneId: 2, zoneName: 'South', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1', displayName: 'SWT 1 East', unit: 'kPa', availability: 'available', deviceName: null, depthCm: null },
-    { seriesId: ambientTemperatureSeriesId, hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'environment', sourceKey: 'microclimate', channelKey: 'ambient_temperature', displayName: 'Air temperature', unit: 'C', availability: 'available', deviceName: null, depthCm: null },
-    { seriesId: 's4', hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_2', displayName: 'SWT 2', unit: 'kPa', availability: 'unsupported', deviceName: null, depthCm: null },
+    { seriesId: 's1', hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1', displayName: 'SWT 1', unit: 'kPa', availability: 'available', deviceName: null, depthCm: null, sourceKind: 'device' },
+    { seriesId: 's2', hubEui: 'HUB-2', zoneId: 2, zoneName: 'South', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1', displayName: 'SWT 1 East', unit: 'kPa', availability: 'available', deviceName: null, depthCm: null, sourceKind: 'device' },
+    { seriesId: ambientTemperatureSeriesId, hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'environment', sourceKey: 'microclimate', channelKey: 'ambient_temperature', displayName: 'Air temperature', unit: 'C', availability: 'available', deviceName: null, depthCm: null, sourceKind: 'device' },
+    { seriesId: 's4', hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_2', displayName: 'SWT 2', unit: 'kPa', availability: 'unsupported', deviceName: null, depthCm: null, sourceKind: 'device' },
   ];
   return {
     catalog: { generatedAt: 'now', channels },
@@ -357,5 +357,43 @@ describe('CrossZoneAnalysisPage', () => {
         labelOverrides: { [ambientTemperatureSeriesId]: 'Greenhouse air' },
       }),
     );
+  });
+
+  it('selects device series only when two zones on one location list provider temperatures', () => {
+    const base = loadedCatalogState();
+    const provider = (seriesId: string, zoneId: number, zoneName: string, channelKey: string, unit: string): AnalysisCatalogEntry => ({
+      seriesId, hubEui: 'HUB-1', zoneId, zoneName, cardType: 'environment', sourceKey: 'weather-src-0123456789ab', channelKey,
+      displayName: `Open-Meteo 46.80°N 6.95°E - ${channelKey}`, unit, availability: 'available',
+      deviceName: 'Open-Meteo 46.80°N 6.95°E', depthCm: null, sourceKind: 'weather_provider',
+    });
+    catalogState = {
+      ...base,
+      catalog: {
+        generatedAt: 'now',
+        channels: [
+          ...base.catalog.channels,
+          provider('p1', 1, 'North', 'ambient_temperature', '°C'),
+          provider('p2', 2, 'South', 'ambient_temperature', '°C'),
+          provider('p3', 1, 'North', 'et0_mm', 'mm'),
+        ],
+      },
+    };
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.layout.overlaid' }));
+    const preset = screen.getByRole('region', { name: 'analysis.preset.metricLabel' });
+    expect(within(preset).queryByRole('button', { name: /et0_mm/ })).not.toBeInTheDocument();
+    fireEvent.click(within(preset).getByRole('button', { name: /^Air temperature/ }));
+    expect(getSeries).toHaveBeenLastCalledWith(
+      expect.objectContaining({ selectors: [{ seriesId: ambientTemperatureSeriesId }] }),
+    );
+  });
+
+  it('explains the aggregation in a HelpTip beside the badge', () => {
+    catalogState = loadedCatalogState();
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+    fireEvent.click(screen.getByText('SWT 1'));
+    expect(screen.queryByText('analysis.aggregation.help')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.aggregation.helpLabel' }));
+    expect(screen.getByText('analysis.aggregation.help')).toBeInTheDocument();
   });
 });

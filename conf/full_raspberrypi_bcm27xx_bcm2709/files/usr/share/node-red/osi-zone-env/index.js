@@ -1,5 +1,7 @@
 'use strict';
 
+const { resolveKc } = require('../osi-crop-kc');
+
 const LOCAL_METRICS = [
   { key: 'air_temperature_c', label: 'Air Temperature', unit: '°C', decimals: 2, aliases: ['ambient_temperature', 'air_temperature_c', 'temperature_2m', 'temp_c', 'temperature'] },
   { key: 'relative_humidity_pct', label: 'Relative Humidity', unit: '%', decimals: 1, aliases: ['relative_humidity', 'ambient_humidity', 'relative_humidity_pct', 'relative_humidity_2m', 'humidity'] },
@@ -14,15 +16,6 @@ const LOCAL_METRICS = [
 const DEVICE_ONLY_METRICS = [
   { key: 'wind_direction_deg', label: 'Wind Direction', unit: '°', decimals: 1, aliases: ['wind_direction_deg', 'wind_direction', 'wind_direction_10m'] }
 ];
-const KC_BY_STAGE = {
-  dormancy: 0.25,
-  bud_break: 0.45,
-  cell_division: 0.70,
-  cell_expansion: 0.90,
-  fruit_maturation: 0.85,
-  post_harvest: 0.60,
-  default: 0.75
-};
 
 function trimToNull(value) {
   const trimmed = String(value == null ? '' : value).trim();
@@ -426,12 +419,6 @@ function findMetric(local, key) {
   return (local && Array.isArray(local.metrics) ? local.metrics : []).find(metric => metric && metric.key === key) || null;
 }
 
-function deriveCropCoefficient(stage) {
-  const normalized = trimToNull(stage);
-  if (!normalized) return KC_BY_STAGE.default;
-  return KC_BY_STAGE[String(normalized).toLowerCase()] || KC_BY_STAGE.default;
-}
-
 function estimateStepHours(hours) {
   const diffs = [];
   for (let i = 1; i < (hours || []).length; i++) {
@@ -454,7 +441,7 @@ function sumRain(hours, nowMs, horizonHours) {
   }, 0), 2) || 0;
 }
 
-function buildForecastSection(forecastData, cacheState, expiresAt, stage, nowIso) {
+function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso) {
   if (!forecastData) {
     return {
       available: false,
@@ -480,7 +467,8 @@ function buildForecastSection(forecastData, cacheState, expiresAt, stage, nowIso
     return Number.isFinite(timestamp) && timestamp >= nowMs && Number(hour.rainMm || 0) > 0.05;
   }) || null;
   const stepHours = estimateStepHours(hours);
-  const kc = deriveCropCoefficient(stage);
+  // Each forecast day takes its own place on the FAO-56 curve (contract v2 A5).
+  const kcOn = (date) => resolveKc({ ...(crop || {}), date }).kc;
   return {
     available: true,
     source: forecastData.source || 'open_meteo',
@@ -503,8 +491,8 @@ function buildForecastSection(forecastData, cacheState, expiresAt, stage, nowIso
         rainMm: day.rainMm ?? null,
         rainProbabilityPct: day.rainProbabilityPct ?? day.precipitationProbabilityPct ?? null,
         et0MmDay: day.et0MmDay ?? null,
-        cropCoefficientKc: round(kc, 2),
-        etcMmDay: day.et0MmDay != null ? round(day.et0MmDay * kc, 2) : null
+        cropCoefficientKc: round(kcOn(day.date), 2),
+        etcMmDay: day.et0MmDay != null ? round(day.et0MmDay * kcOn(day.date), 2) : null
       })),
       hourly: next24Hours.map(hour => ({
         time: hour.time,
@@ -516,22 +504,30 @@ function buildForecastSection(forecastData, cacheState, expiresAt, stage, nowIso
   };
 }
 
-function buildAgronomic(local, online, forecast, stage) {
+function buildAgronomic(local, online, forecast, { cropType = null, phenologicalStage = null, stageStartedOn = null, todayIso = null, forecastFetchedAt = null, timezone = 'UTC' } = {}) {
   const localTemperature = findMetric(local, 'air_temperature_c');
   const localHumidity = findMetric(local, 'relative_humidity_pct');
   const usingLocal = localTemperature && localHumidity && localTemperature.median != null && localHumidity.median != null;
   const effectiveTemperature = usingLocal ? localTemperature.median : online && online.current ? online.current.airTemperatureC : null;
   const effectiveHumidity = usingLocal ? localHumidity.median : online && online.current ? online.current.relativeHumidityPct : null;
-  const et0 = forecast && forecast.rainFocus && Array.isArray(forecast.rainFocus.daily) && forecast.rainFocus.daily.length
-    ? toFiniteNumber(forecast.rainFocus.daily[0].et0MmDay)
-    : null;
-  const kc = deriveCropCoefficient(stage);
+  // Today's ET0 is the forecast day dated today, and only from a forecast that
+  // is live or was fetched today in the zone's timezone: offline across
+  // midnight, today is unknown, never yesterday's value.
+  const fresh = !!forecast && (forecast.cacheStatus === 'live' || (forecastFetchedAt != null && localDateIso(forecastFetchedAt, timezone) === todayIso));
+  const days = fresh && forecast.rainFocus && Array.isArray(forecast.rainFocus.daily) ? forecast.rainFocus.daily : [];
+  const todayRow = todayIso ? days.find((d) => d && d.date === todayIso) : null;
+  const et0 = todayRow ? toFiniteNumber(todayRow.et0MmDay) : null;
+  const resolved = resolveKc({ cropType, phenologicalStage, stageStartedOn, date: todayIso });
+  const kc = resolved.kc;
   return {
     preferredSource: usingLocal ? 'local' : (online && online.current ? online.source : 'unavailable'),
     current: {
       thermodynamicSource: effectiveTemperature != null && effectiveHumidity != null ? (usingLocal ? 'local' : (online ? online.source : 'unavailable')) : 'unavailable',
       evapotranspirationSource: et0 != null ? 'open_meteo' : 'unavailable',
-      cropCoefficientSource: kc != null ? 'heuristic_phenology' : 'unavailable',
+      cropCoefficientSource: kc != null ? resolved.kcSource : 'unavailable',
+      cropId: resolved.cropId,
+      stage: resolved.stage,
+      stageOverrun: resolved.stageOverrun,
       airTemperatureC: effectiveTemperature != null ? round(effectiveTemperature, 2) : null,
       relativeHumidityPct: effectiveHumidity != null ? round(effectiveHumidity, 1) : null,
       vpdKpa: round(computeVPD(effectiveTemperature, effectiveHumidity), 3),
@@ -577,6 +573,79 @@ function toEffectiveIrrigationMm(irrigationLiters, areaM2, irrigationEfficiencyP
   const efficiency = toFiniteNumber(irrigationEfficiencyPct);
   if (liters == null || area == null || efficiency == null || area <= 0 || efficiency <= 0) return null;
   return round(liters * (efficiency / 100) / area, 2);
+}
+
+/**
+ * The Water tab's seven day rows, oldest first, ending today. The node queries
+ * the rows; this turns them into the day shape. A day without a rain row is
+ * null, never 0 (the cloud's F115 rule). Past days carry the stored
+ * zone_daily_agronomy snapshot ('calculated'); today carries the forecast
+ * demand, with ET0, Kc, crop and stage from the agronomic block
+ * (`todayAgronomic`, i.e. `agronomic.current`), and `nullReason
+ * 'demand_unknown'` when there is no forecast demand. A station name is the
+ * devices.name of a deveui; a MeteoSwiss id has no devices row and shows as
+ * itself.
+ */
+function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIso, waterNeededTodayMm, kcSourceToday, todayAgronomic, stationNames }) {
+  const startIso = addUtcDays(todayIso, -6) || todayIso;
+  const byDate = {};
+  for (const row of envRows || []) if (row && row.date) byDate[String(row.date)] = row;
+  const agronomyByDate = {};
+  for (const row of agronomyRows || []) if (row && row.date) agronomyByDate[String(row.date)] = row;
+  const names = stationNames || {};
+  const estimated = estimatedByDate || {};
+  const daily = [];
+  for (let dateIso = startIso; dateIso && dateIso <= todayIso; dateIso = addUtcDays(dateIso, 1)) {
+    const row = byDate[dateIso] || null;
+    const rainMm = row && row.rainfall_mm != null ? round(row.rainfall_mm, 2) : null;
+    const measuredIrrigationLiters = round(row ? row.flow_liters : 0, 2) || 0;
+    const estimatedIrrigationLiters = round(estimated[dateIso] || 0, 2) || 0;
+    const measuredIrrigationNetMm = toEffectiveIrrigationMm(measuredIrrigationLiters, zone && zone.area_m2, zone && zone.irrigation_efficiency_pct);
+    const estimatedIrrigationNetMm = toEffectiveIrrigationMm(estimatedIrrigationLiters, zone && zone.area_m2, zone && zone.irrigation_efficiency_pct);
+    const day = {
+      date: dateIso,
+      rainMm,
+      irrigationLiters: measuredIrrigationLiters,
+      irrigationNetMm: measuredIrrigationNetMm,
+      measuredIrrigationLiters,
+      estimatedIrrigationLiters,
+      measuredIrrigationNetMm,
+      estimatedIrrigationNetMm,
+      totalWaterMm: measuredIrrigationNetMm != null && rainMm != null ? round(rainMm + measuredIrrigationNetMm, 2) : null,
+      estimatedTotalWaterMm: estimatedIrrigationNetMm != null && rainMm != null ? round(rainMm + estimatedIrrigationNetMm, 2) : null
+    };
+    const a = agronomyByDate[dateIso] || null;
+    if (dateIso === todayIso) {
+      const cur = todayAgronomic && typeof todayAgronomic === 'object' ? todayAgronomic : {};
+      const todayEt0 = toFiniteNumber(cur.referenceEt0MmDay);
+      const todayKc = toFiniteNumber(cur.cropCoefficientKc);
+      Object.assign(day, {
+        demandMm: waterNeededTodayMm != null ? round(waterNeededTodayMm, 2) : null,
+        demandSource: waterNeededTodayMm != null ? 'forecast' : null,
+        et0Mm: todayEt0 != null ? round(todayEt0, 2) : null, et0Source: null, et0Tier: null, et0StationId: null, et0StationName: null,
+        kc: todayKc != null ? round(todayKc, 2) : null, kcSource: kcSourceToday || trimToNull(cur.cropCoefficientSource),
+        cropType: trimToNull(cur.cropId), phenologicalStage: trimToNull(cur.stage),
+        stageOverrun: typeof cur.stageOverrun === 'boolean' ? cur.stageOverrun : null, demandComputedBy: null,
+        hoursPresent: null, expectedHours: null, nullReason: waterNeededTodayMm != null ? null : 'demand_unknown'
+      });
+    } else {
+      const stationId = a ? a.et0_station_id || null : null;
+      Object.assign(day, {
+        demandMm: a && a.etc_mm != null ? a.etc_mm : null,
+        demandSource: a && a.etc_mm != null ? 'calculated' : null,
+        et0Mm: a ? a.et0_mm : null, et0Source: a ? a.et0_source : null, et0Tier: a ? a.et0_tier : null,
+        et0StationId: stationId, et0StationName: stationId ? (names[stationId] || stationId) : null,
+        kc: a ? a.kc : null, kcSource: a ? a.kc_source : null, cropType: a ? a.crop_type : null, phenologicalStage: a ? a.phenological_stage : null,
+        stageOverrun: a && a.stage_overrun != null ? Number(a.stage_overrun) === 1 : null,
+        // 'edge' when the gateway stored a demand for the day (spec 2026-09-27-daily-agronomy-parity B7).
+        demandComputedBy: a && a.etc_mm != null ? 'edge' : null,
+        hoursPresent: a ? a.hours_present : null, expectedHours: a ? a.expected_hours : null, nullReason: a ? a.null_reason : null
+      });
+    }
+    daily.push(day);
+    if (dateIso === todayIso) break;
+  }
+  return daily;
 }
 
 function addCounterWarning(warnings, rawStatus, label) {
@@ -647,7 +716,7 @@ function buildSensorHealth(deviceRows, local) {
  * The reason travels as a code rather than as an English sentence: the GUI
  * serves seven languages and cannot translate prose the edge invented.
  */
-function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24hRainMm) {
+function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24hRainMm, waterNeededTodayMm) {
   if (recommendationRow) {
     return {
       code: trimToNull(recommendationRow.irrigation_action),
@@ -671,6 +740,10 @@ function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24h
   });
 
   const balance = toFiniteNumber(balanceTodayMm);
+  // No demand for today is the cloud's demand_unknown; balance_unknown stays
+  // for the missing zone area or efficiency ("set up the zone"). A caller
+  // that does not pass the demand keeps the old code.
+  if (balance == null && waterNeededTodayMm !== undefined && toFiniteNumber(waterNeededTodayMm) == null) return insufficient('demand_unknown');
   if (balance == null) return insufficient('balance_unknown');
   // A non-negative balance settles the verdict on its own; the forecast only
   // matters when today's supply falls short.
@@ -684,35 +757,64 @@ function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24h
   return heuristic('monitor_today', 'balance_neutral');
 }
 
-function mergeDailyIrrigationSplit(sharedDaily, localDaily) {
+const DEMAND_FIELDS = ['demandMm', 'demandSource', 'demandComputedBy', 'et0Mm', 'et0Source', 'et0Tier', 'et0StationId', 'et0StationName', 'kc', 'kcSource', 'cropType', 'phenologicalStage', 'stageOverrun', 'hoursPresent', 'expectedHours', 'nullReason'];
+const SPLIT_FIELDS = ['irrigationLiters', 'irrigationNetMm', 'measuredIrrigationLiters', 'estimatedIrrigationLiters', 'measuredIrrigationNetMm', 'estimatedIrrigationNetMm', 'estimatedTotalWaterMm'];
+
+function pick(row, fields) {
+  const out = {};
+  for (const f of fields) if (row[f] !== undefined) out[f] = row[f];
+  return out;
+}
+
+function mergeDailyIrrigationSplit(sharedDaily, localDaily, todayIso) {
   const localRows = Array.isArray(localDaily) ? localDaily : [];
-  const localByDate = {};
-  for (const row of localRows) {
-    if (row && row.date) localByDate[String(row.date)] = row;
-  }
   if (!Array.isArray(sharedDaily)) return localRows;
-  return sharedDaily.map((row) => {
+  const localByDate = {};
+  for (const row of localRows) if (row && row.date) localByDate[String(row.date)] = row;
+  const merged = sharedDaily.map((row) => {
     if (!row || !row.date) return row;
     const local = localByDate[String(row.date)];
     if (!local) return row;
-    return {
-      ...row,
-      irrigationLiters: local.irrigationLiters,
-      irrigationNetMm: local.irrigationNetMm,
-      measuredIrrigationLiters: local.measuredIrrigationLiters,
-      estimatedIrrigationLiters: local.estimatedIrrigationLiters,
-      measuredIrrigationNetMm: local.measuredIrrigationNetMm,
-      estimatedIrrigationNetMm: local.estimatedIrrigationNetMm,
-      estimatedTotalWaterMm: local.estimatedTotalWaterMm
-    };
+    // The gateway's demand replaces the cloud's for every day the gateway
+    // computed, and today; a past day the gateway has no value for keeps the
+    // cloud's own row (demandComputedBy 'cloud'). A cloud that sends no
+    // demandComputedBy predates sub-project 4 and has no daily record: the
+    // gateway's fields fill the day as before.
+    const gatewayDay = local.demandComputedBy === 'edge' || String(row.date) === todayIso || row.demandComputedBy === undefined;
+    return { ...row, ...pick(local, SPLIT_FIELDS), ...(gatewayDay ? pick(local, DEMAND_FIELDS) : {}) };
   });
+  // A bundle that ends before today (stale across midnight) gets the local today row.
+  if (todayIso && !merged.some((row) => row && row.date === todayIso) && localByDate[todayIso]) merged.push(localByDate[todayIso]);
+  return merged.slice(-7);
 }
 
-function overlayLocalWaterIrrigationSplit(sharedWater, localWater) {
+function overlayLocalWaterIrrigationSplit(sharedWater, localWater, todayIso) {
   if (!sharedWater || typeof sharedWater !== 'object') return localWater;
   if (!localWater || typeof localWater !== 'object') return sharedWater;
+  const sharedDaily = Array.isArray(sharedWater.daily) ? sharedWater.daily : [];
+  const last = sharedDaily.length ? sharedDaily[sharedDaily.length - 1] : null;
+  const bundleCurrent = !!last && last.date === todayIso;
+  const sharedToday = toFiniteNumber(sharedWater.waterNeededTodayMm);
+  // A current bundle's demand is the cloud's: the gateway's own ET0 and Kc
+  // for today would describe a number it did not compute, so they are dropped.
+  const daily = mergeDailyIrrigationSplit(sharedWater.daily, localWater.daily, todayIso).map((row) => {
+    if (!row || row.date !== todayIso) return row;
+    return bundleCurrent
+      ? { ...row, demandMm: sharedToday, demandSource: sharedToday != null ? 'forecast' : null, kcSource: 'server', et0Mm: null, kc: null, nullReason: sharedToday != null ? null : 'demand_unknown' }
+      : { ...row, kcSource: 'local' };
+  });
+  // A bundle that ends before today describes yesterday: every "today" field
+  // of the tile comes from the gateway, so the tile shows one day.
+  const today = bundleCurrent || !todayIso ? {} : {
+    rainTodayMm: localWater.rainTodayMm,
+    rainSource: localWater.rainSource != null ? localWater.rainSource : null,
+    balanceTodayMm: localWater.balanceTodayMm,
+    next24hRainMm: localWater.next24hRainMm,
+    action: localWater.action
+  };
   return {
     ...sharedWater,
+    ...today,
     available: sharedWater.available || localWater.available,
     irrigationTodayLiters: localWater.irrigationTodayLiters,
     irrigationTodayNetMm: localWater.irrigationTodayNetMm,
@@ -720,7 +822,9 @@ function overlayLocalWaterIrrigationSplit(sharedWater, localWater) {
     irrigationTodayEstimatedLiters: localWater.irrigationTodayEstimatedLiters,
     measuredIrrigationNetMm: localWater.measuredIrrigationNetMm,
     estimatedIrrigationNetMm: localWater.estimatedIrrigationNetMm,
-    daily: mergeDailyIrrigationSplit(sharedWater.daily, localWater.daily)
+    waterNeededTodayMm: bundleCurrent ? sharedWater.waterNeededTodayMm : localWater.waterNeededTodayMm,
+    todayDate: todayIso,
+    daily
   };
 }
 
@@ -758,7 +862,6 @@ module.exports = {
   parseOpenAgriForecast,
   mergeForecasts,
   findMetric,
-  deriveCropCoefficient,
   estimateStepHours,
   sumRain,
   buildForecastSection,
@@ -766,6 +869,7 @@ module.exports = {
   localDateIso,
   addUtcDays,
   toEffectiveIrrigationMm,
+  buildWaterDaily,
   buildSensorHealth,
   resolveWaterAction,
   mergeDailyIrrigationSplit,

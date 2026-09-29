@@ -8,6 +8,8 @@ export interface ChannelManifestEntry {
   exportable?: boolean;
   deprecated?: boolean;
   legacyAliases?: string[];
+  edgeField?: string | null;
+  serverField?: string | null;
 }
 
 interface ChannelRegistry {
@@ -22,6 +24,15 @@ export interface ChannelSourceContext {
   deviceType?: string | null;
   chameleonEnabled?: boolean;
   tempEnabled?: boolean;
+}
+
+// A manifest entry with neither an edge nor a server column (global_radiation_wm2,
+// et0_mm and etc_mm live only in the weather tables) has nothing a card export can
+// read, so no card channel list offers it. An entry without the fields (older
+// callers, tests) counts as stored. Spec
+// docs/superpowers/specs/2026-09-27-weather-data-view-design.md, plan review.
+function hasStoredColumn(channel: ChannelManifestEntry): boolean {
+  return !(channel.edgeField === null && channel.serverField === null);
 }
 
 export function createChannelRegistry(channels: ChannelManifestEntry[]): ChannelRegistry {
@@ -44,6 +55,7 @@ export function createChannelRegistry(channels: ChannelManifestEntry[]): Channel
       .filter((channel) => channel.cardType === cardType
         && channel.exportable !== false
         && channel.deprecated !== true
+        && hasStoredColumn(channel)
         && (cardType !== 'soil' || legacySoilDefaults.has(channel.key)))
       .map((channel) => channel.key);
   }

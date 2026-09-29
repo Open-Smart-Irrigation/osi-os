@@ -1,6 +1,6 @@
-import { lazy, Suspense, useMemo, useState, type Ref } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState, type Ref } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AnalysisSeries, AnalysisWorkspaceMode, TimelineLayout } from '../../analysis/types';
+import { DAILY_AGRONOMY_SOURCE_KEY, type AnalysisPoint, type AnalysisSeries, type AnalysisWorkspaceMode, type TimelineLayout } from '../../analysis/types';
 import { groupByUnit } from '../../analysis/unitGrouping';
 import { buildSmallMultiplesOption, buildTimeSeriesOption } from '../../analysis/echartsOptions';
 import type { ChannelMeta } from '../../analysis/channelLabels';
@@ -53,6 +53,14 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
     setEditing(null);
   };
 
+  // A summed weather bucket with missing rows: " (23 of 24 h)", or days for
+  // a weekly bucket of daily agronomy.
+  const formatPartial = useCallback((point: AnalysisPoint, item: AnalysisSeries) => {
+    if (point.quality !== 'partial' || point.expected == null) return '';
+    const key = item.resolved.sourceKey === DAILY_AGRONOMY_SOURCE_KEY ? 'analysis.tooltip.partialDays' : 'analysis.tooltip.partialHours';
+    return t(key, { count: point.count, expected: point.expected });
+  }, [t]);
+
   const timeSeriesPanels = useMemo(() => {
     if (series.length === 0 || mode === 'correlation' || layout === 'small-multiples') return [];
     return groupByUnit(series);
@@ -60,15 +68,16 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
 
   const option = useMemo(() => {
     if (series.length === 0 || mode === 'correlation') return null;
-    if (layout === 'small-multiples') return buildSmallMultiplesOption(series, toggles.normalize, resolveAxisLabel);
+    if (layout === 'small-multiples') return buildSmallMultiplesOption(series, toggles.normalize, resolveAxisLabel, formatPartial);
     return buildTimeSeriesOption({
       panels: timeSeriesPanels,
       series,
       normalize: toggles.normalize,
       multiAxis: layout === 'overlaid',
       resolveAxisLabel,
+      formatPartial,
     });
-  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel]);
+  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial]);
 
   const exportOption = useMemo(() => {
     if (series.length === 0 || mode === 'correlation' || layout === 'small-multiples') return undefined;
@@ -79,8 +88,9 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
       multiAxis: layout === 'overlaid',
       includeLegend: true,
       resolveAxisLabel,
+      formatPartial,
     });
-  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel]);
+  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial]);
 
   const heightPanelCount = layout === 'small-multiples'
     ? series.length

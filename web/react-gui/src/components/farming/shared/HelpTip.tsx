@@ -1,7 +1,7 @@
 import React, { useId, useState } from 'react';
 
 interface HelpTipProps {
-  /** Tip text. One or two sentences; anything longer belongs inline. */
+  /** Tip text. Short; the spec decides the length; anything longer belongs inline. */
   children: React.ReactNode;
   /** Accessible name for the toggle, e.g. "About 5 V warm-up time". */
   label: string;

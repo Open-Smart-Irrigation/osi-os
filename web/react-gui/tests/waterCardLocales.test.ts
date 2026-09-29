@@ -109,7 +109,6 @@ const DEVICES_KEYS = [
   'environment.water.waterNeededToday',
   'environment.water.balance',
   'environment.water.setupRequired',
-  'environment.water.weeklyTrend',
   'environment.water.trendNote',
   'environment.water.nextRain',
   'environment.soil.moistureSwtVwc',
@@ -138,6 +137,67 @@ const DEVICES_KEYS = [
   'kiwiSensor.saveDepths',
   'environment.loading',
   'environment.loadFailed',
+  // The Kc source line under the crop coefficient (AgronomicTab.tsx) and the
+  // daily agronomy record's source labels.
+  'environment.water.kcSource.fao56_crop',
+  'environment.water.kcSource.fao56_crop_stage_unset',
+  'environment.water.kcSource.heuristic_phenology',
+  'environment.water.kcSource.server',
+  'environment.water.kcSource.local',
+  'environment.water.stageNotSet',
+  // The Water tab's "Last 7 days" plot with per-day crop demand, its tooltips
+  // and HelpTips, the rain-source labels on the tile and the zone card, and the
+  // Weather tab's provider credit (2026-09-26). The first nine reuse the
+  // cloud's strings.
+  'environment.water.lastSevenDays',
+  'environment.water.tooltipDemand',
+  'environment.water.stationCredit',
+  'zone.water.rainFromStation',
+  'zone.water.rainFromWeather',
+  'zone.water.drivenByWaterBalanceFromWeather',
+  'zone.water.drivenByWaterBalanceFromStation',
+  'zone.water.reason.rain_unknown',
+  'zone.water.reason.demand_unknown',
+  'environment.water.today',
+  'environment.water.legendDemand',
+  'environment.water.legendDemandTodayForecast',
+  'environment.water.demandCalculated',
+  'environment.water.demandForecast',
+  'environment.water.demandNoData',
+  'environment.water.demandNoLocation',
+  'environment.water.demandPending',
+  'environment.water.tooltipTodayNote',
+  'environment.water.kcLine',
+  'environment.water.et0Tier.station_fao56',
+  'environment.water.et0Tier.hargreaves_station',
+  'environment.water.et0Tier.provider_open_meteo',
+  'environment.water.et0Tier.provider_meteoswiss',
+  'environment.water.et0Tier.forecast',
+  'environment.water.attribution.open_meteo',
+  'environment.water.attributionHelpLabel',
+  'environment.water.neededTodayHelpLabel',
+  'environment.water.neededTodayHelp',
+  'environment.water.lastSevenDaysHelpLabel',
+  'environment.water.setupRequiredHelpLabel',
+  'environment.water.rainSourceHelpLabel',
+  // The daily agronomy final fix wave (2026-09-26): the reasons a day has no
+  // demand, the day's ET0 in the source line, and the crop beside a demand
+  // computed by the cloud or by this gateway.
+  'environment.water.demandNoSource',
+  'environment.water.demandMixedStation',
+  'environment.water.demandUnknownStation',
+  'environment.water.demandUnknownToday',
+  'environment.water.et0Line',
+  'environment.water.kcSourceByCrop',
+  // Daily agronomy parity (plan E2b): the FAO-56 curve, the overrun flag and a
+  // shared-mode day OSI Cloud computed; the values are the cloud's translations.
+  'environment.water.kcSource.fao56_curve',
+  'environment.water.stageOverrun',
+  'environment.water.et0Tier.open_meteo_daily',
+  'environment.water.computedBy.edge',
+  'environment.water.computedBy.cloud',
+  'environment.water.modelAccuracyNote',
+  'environment.water.meteoswissCloudNote',
 ];
 
 const NETWORK_KEYS = [
@@ -165,6 +225,42 @@ const REVIEWED_IDENTICAL = new Set<string>([
   'it:zone.water.source.shared_server',
   'pt:zone.water.source.shared_server',
   'fr:zone.water.actionTitle',
+  // A pure placeholder string and a product name.
+  'de-CH:environment.water.kcSource.fao56_crop',
+  'es:environment.water.kcSource.fao56_crop',
+  'fr:environment.water.kcSource.fao56_crop',
+  'it:environment.water.kcSource.fao56_crop',
+  'pt:environment.water.kcSource.fao56_crop',
+  'de-CH:environment.water.kcSource.server',
+  'es:environment.water.kcSource.server',
+  'fr:environment.water.kcSource.server',
+  'it:environment.water.kcSource.server',
+  'pt:environment.water.kcSource.server',
+  // "Kc (...)" is a symbol and a placeholder; "Station" is the same word in
+  // German and French; Spanish and Portuguese keep the product name MeteoSwiss.
+  'de-CH:environment.water.kcLine',
+  'es:environment.water.kcLine',
+  'fr:environment.water.kcLine',
+  'it:environment.water.kcLine',
+  'pt:environment.water.kcLine',
+  'de-CH:environment.water.et0Tier.station_fao56',
+  'fr:environment.water.et0Tier.station_fao56',
+  'de-CH:environment.water.et0Tier.hargreaves_station',
+  'fr:environment.water.et0Tier.hargreaves_station',
+  'es:environment.water.et0Tier.provider_meteoswiss',
+  'pt:environment.water.et0Tier.provider_meteoswiss',
+  // "ET0 {{et0}} mm" is a symbol, a placeholder and a unit; "{{source}},
+  // {{crop}}" is two placeholders.
+  'de-CH:environment.water.et0Line',
+  'es:environment.water.et0Line',
+  'fr:environment.water.et0Line',
+  'it:environment.water.et0Line',
+  'pt:environment.water.et0Line',
+  'de-CH:environment.water.kcSourceByCrop',
+  'es:environment.water.kcSourceByCrop',
+  'fr:environment.water.kcSourceByCrop',
+  'it:environment.water.kcSourceByCrop',
+  'pt:environment.water.kcSourceByCrop',
 ]);
 
 test('water-card and date-format keys exist in every shipped locale', () => {

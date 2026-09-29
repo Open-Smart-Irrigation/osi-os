@@ -10,6 +10,7 @@ import { formatForecastHighLow } from '../../../utils/forecastFormat';
 import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
 import { useDateFormat, type DateFormatter } from '../../../utils/datetime';
+import { HelpTip } from '../shared/HelpTip';
 
 interface Props {
   online: OnlineEnvironment;
@@ -141,10 +142,17 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
 
 interface ChartPoint { hour: string; rain: number; prob: number }
 
-const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
+const HourlyChart: React.FC<{ hourly: HourlyForecast[]; source?: string | null }> = ({ hourly, source }) => {
   const { t } = useTranslation('devices');
   const fmt = useDateFormat();
-  if (hourly.length === 0) return null;
+  // The provider's licence (CC BY) asks for the credit, with or without a chart.
+  const credit = String(source ?? '').includes('open_meteo') ? (
+    <HelpTip label={t('environment.water.attributionHelpLabel', { defaultValue: 'About the weather data' })}>
+      {t('environment.water.attribution.open_meteo', { defaultValue: 'Weather data by Open-Meteo.com, CC BY 4.0' })}
+    </HelpTip>
+  ) : null;
+  const creditOnly = credit ? <div className="flex justify-end">{credit}</div> : null;
+  if (hourly.length === 0) return creditOnly;
 
   const cutoff = Date.now() + 24 * 60 * 60 * 1000;
   const points: ChartPoint[] = hourly
@@ -155,15 +163,18 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
       prob: h.rainProbabilityPct ?? 0,
     }));
 
-  if (points.length === 0) return null;
+  if (points.length === 0) return creditOnly;
 
   const maxRain = Math.max(...points.map(p => p.rain), 1);
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">
-        {t('environment.forecast.hourlyTitle', { defaultValue: 'Hourly rain (next 24 h)' })}
-      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">
+          {t('environment.forecast.hourlyTitle', { defaultValue: 'Hourly rain (next 24 h)' })}
+        </p>
+        {credit}
+      </div>
       <ResponsiveContainer width="100%" height={130}>
         <ComposedChart data={points} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -285,7 +296,7 @@ export const WeatherTab: React.FC<Props> = ({ online, forecast, location }) => {
           )}
 
           {/* Hourly chart */}
-          <HourlyChart hourly={rf.hourly} />
+          <HourlyChart hourly={rf.hourly} source={forecast.source} />
         </>
       )}
     </div>

@@ -23,5 +23,8 @@
   "httpStubs": {
     "provider": "open-meteo",
     "behaviour": "503-all-requests"
+  },
+  "seedRows": {
+    "rows": {}
   }
 }

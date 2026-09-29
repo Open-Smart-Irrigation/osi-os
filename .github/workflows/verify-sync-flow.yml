@@ -138,5 +138,18 @@ jobs:
       # the bundled farming.db and its real triggers.
       - name: Zone write routes emit at a new sync version
         run: node --test scripts/test-zone-update-sync-version.js
+      # Weather data view: the zone weather_source round trip -- the 0065 zone
+      # trigger on the seven bundled databases, the zone route and list, and the
+      # legacy command path, each against the shipped source.
+      - name: Zone weather provider round trip
+        run: node --test scripts/test-zone-weather-source.js
+      # Daily agronomy parity: the zone stage start date -- the 0066 zone trigger on
+      # the seven bundled databases and the legacy command path, against the shipped source.
+      - name: Zone stage start date round trip
+        run: node --test scripts/test-stage-started-on-migration.js scripts/test-legacy-upsert-zone-config.js
+      # Daily agronomy parity: the daily record's migration-owned outbox triggers
+      # (0067), the writer's versions and retraction, and the bootstrap list.
+      - name: Daily agronomy record sync
+        run: node --test scripts/test-zone-agronomy-sync-triggers.js
       - name: Guard against silent upgrade-leg skip
         run: node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out && grep -q "base seed + history migration" /tmp/schema.out

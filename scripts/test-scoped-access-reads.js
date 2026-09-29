@@ -1159,6 +1159,12 @@ test('F7: scoped analysis catalog uses an explicit account-wide array', async ()
   const db = seedScopedDb();
   try {
     seedAnalysisDevices(db);
+    // Both zones resolve to one Open-Meteo location (weather data view spec).
+    db.exec(`
+      UPDATE irrigation_zones SET latitude = 46.8, longitude = 6.95, weather_source = 'open_meteo';
+      INSERT INTO weather_locations (location_key, provider, latitude, longitude)
+        VALUES ('open_meteo:46.80:6.95', 'open_meteo', 46.8, 6.95);
+    `);
     const response = await executeFunction(loadNode('analysis-api-router-fn'), {
       msg: historyRequest(3, 'view1', 'GET', '/api/analysis/channels'),
       env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
@@ -1170,6 +1176,14 @@ test('F7: scoped analysis catalog uses an explicit account-wide array', async ()
     );
     assert.ok(zoneIds.has('1'), 'zone 1 channels must be present');
     assert.ok(zoneIds.has('2'), 'zone 2 channels must be present for a viewer (W1)');
+    for (const zoneId of [1, 2]) {
+      assert.ok(
+        (response.result.payload.channels || []).some((channel) => channel.zoneId === zoneId
+          && channel.sourceKind === 'weather_provider'
+          && channel.deviceName === 'Open-Meteo 46.80°N 6.95°E'),
+        `zone ${zoneId} lists the provider source`
+      );
+    }
   } finally {
     db.close();
     scopeHelper._resetForTests();

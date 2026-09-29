@@ -110,6 +110,9 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
             sync_version_path: 'payload.sync_version',
         }])
     ),
+    // The key is the composite zone_uuid|date, which no single payload path
+    // holds, so only the version is bound (spec 2026-09-27-daily-agronomy-parity B6).
+    ZONE_AGRONOMY_UPSERTED: {sync_version_path: 'payload.sync_version'},
 };
 
 function loadSchema(name) {
@@ -123,7 +126,8 @@ const SUPPORTED_SCHEMA_KEYWORDS = new Set([
     'minLength', 'maxLength', 'pattern', 'format', 'minimum', 'maximum',
     'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else',
 ]);
-const SUPPORTED_FORMATS = new Set(['date-time']);
+const SUPPORTED_FORMATS = new Set(['date-time', 'date']);
+const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 function isPlainObject(value) {
@@ -156,6 +160,14 @@ function daysInMonth(year, month) {
         return leap ? 29 : 28;
     }
     return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isValidDate(value) {
+    const match = DATE.exec(value);
+    if (!match) return false;
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(Number(match[1]), month);
 }
 
 function isValidDateTime(value) {
@@ -384,6 +396,8 @@ function validationErrors(schema, value, rootSchema, location) {
         }
         if (schema.format === 'date-time' && !isValidDateTime(value)) {
             errors.push(`${at}: string does not match format date-time`);
+        } else if (schema.format === 'date' && !isValidDate(value)) {
+            errors.push(`${at}: string does not match format date`);
         } else if (schema.format && !SUPPORTED_FORMATS.has(schema.format)) {
             errors.push(`${at}: unsupported schema format ${schema.format}`);
         }
@@ -2068,6 +2082,69 @@ expectValid(
     { deveui: '0016C001F11715E2', type_id: 'DRAGINO_LSN50', name: 'a'.repeat(101) },
     resourcesSchema
 );
+
+// Weather data view: a zone may carry the provider key; the cloud's set is
+// wider than the edge's, so the contract checks the shape, not an enum.
+expectValid(
+    'a Zone resource with a cloud-only weather_source stays valid',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'North', weather_source: 'agromonitoring' },
+    resourcesSchema
+);
+expectInvalid(
+    'a Zone resource with a malformed weather_source',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'North', weather_source: 'Meteo-Blue!' },
+    /does not match/,
+    resourcesSchema
+);
+expectInvalid(
+    'a Zone resource with a 21-character weather_source',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'North', weather_source: 'a'.repeat(21) },
+    null,
+    resourcesSchema
+);
+
+// Daily agronomy parity (plan E2a): a zone may carry its stage start date, a
+// calendar date or null.
+expectValid(
+    'a Zone resource with a stage start date',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'North', stage_started_on: '2026-05-01' },
+    resourcesSchema
+);
+expectValid(
+    'a Zone resource with a cleared stage start date',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'North', stage_started_on: null },
+    resourcesSchema
+);
+expectInvalid(
+    'a Zone resource with an impossible stage start date',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'North', stage_started_on: '2026-02-30' },
+    /format date/,
+    resourcesSchema
+);
+expectInvalid(
+    'a Zone resource with a stage start date in another notation',
+    resourcesSchema.definitions.Zone,
+    { zone_id: 1, name: 'North', stage_started_on: '05/01/2026' },
+    /format date/,
+    resourcesSchema
+);
+
+// Daily agronomy parity (plan E4): a ZONE_AGRONOMY_UPSERTED event binds its
+// version to the payload; the composite key zone_uuid|date is not bound.
+const zoneAgronomyEvent = {
+    eventUuid: 'evt-zone-agronomy', aggregateType: 'ZONE_AGRONOMY', aggregateKey: '306fa8ef-20f8-4911-b9c4-f99f60252579|2026-09-20',
+    op: 'ZONE_AGRONOMY_UPSERTED', syncVersion: 2, occurredAt: '2026-09-21T00:30:02.114Z',
+    payload: { contract_version: 1, zone_uuid: '306fa8ef-20f8-4911-b9c4-f99f60252579', date: '2026-09-20', et0_mm: 3.12, sync_version: 2 },
+};
+expectValid('a ZONE_AGRONOMY_UPSERTED event with a composite key', eventsSchema, zoneAgronomyEvent, eventsSchema);
+expectInvalid('a ZONE_AGRONOMY_UPSERTED event whose version differs from its payload', eventsSchema,
+    { ...zoneAgronomyEvent, syncVersion: 3 }, /syncVersion: must equal payload\.sync_version/, eventsSchema);
 
 if (!ok) process.exit(1);
 console.log('PASS: contract schema checks pass');

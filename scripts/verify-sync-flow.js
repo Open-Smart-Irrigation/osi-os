@@ -1406,7 +1406,7 @@ if (!refreshInject) {
 
 const bootstrapNode = findNodeByName('Build Cloud Bootstrap');
 if (bootstrapNode) {
-  for (const key of ['sensorData', 'dendroReadings', 'chameleonReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents']) {
+  for (const key of ['sensorData', 'dendroReadings', 'chameleonReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'zoneAgronomy', 'gatewayLocations', 'irrigationEvents']) {
     if (!bootstrapNode.func.includes(`${key}:`) && !bootstrapNode.func.includes(`${key},`) && !bootstrapNode.func.includes(`const ${key} =`)) {
       fail(`bootstrap payload missing ${key}`);
     } else {
@@ -1546,6 +1546,21 @@ expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors
 expectIncludes('Sync Init Schema + Triggers', "'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct", 'mirrors irrigation efficiency changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'prediction_card_enabled', COALESCE(NEW.prediction_card_enabled, 0)", 'mirrors prediction-card changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0)', 'queues outbox events when the prediction-card flag changes');
+expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.weather_source,'auto') <> COALESCE(OLD.weather_source,'auto')", 'queues a zone config event when only the weather provider changes (0065)');
+expectIncludes('Sync Init Schema + Triggers', "CASE WHEN COALESCE(NEW.weather_source,'auto') <> 'auto' OR OLD.weather_source IS NOT NEW.weather_source THEN json_patch(", 'includes the zone weather provider in the payload only when it is not auto or changed in this update, never null otherwise (0065, review I1)');
+expectIncludes('Sync Init Schema + Triggers', "json_object('weather_source', COALESCE(NEW.weather_source,'auto'))", 'carries the zone weather provider by patching it into the payload under that rule (0065, review I1)');
+expectIncludes('Sync Init Schema + Triggers', "'stage_started_on', NEW.stage_started_on", 'carries the stage start date in every zone sync event (0066)');
+expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.stage_started_on,'') <> COALESCE(OLD.stage_started_on,'')", 'queues a zone config event when only the stage start date changes (0066)');
+expectTriggerIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_zones_outbox_au', "'stage_started_on', NEW.stage_started_on", 'stage start date in the zone payload (0066)');
+expectTriggerIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_zones_outbox_au', "COALESCE(NEW.stage_started_on,'') <> COALESCE(OLD.stage_started_on,'')", 'stage start date change detection (0066)');
+expectIncludesById('get-zones-query', 'iz.stage_started_on', 'the zone list reads the stage start date');
+expectIncludesById('get-zones-response', 'stage_started_on: r.stage_started_on || null', 'the zone list returns the stage start date');
+expectIncludesById('zone-config-fn', 'stageStartedOn must be YYYY-MM-DD or null', 'refuses a start date that is not a calendar date');
+expectIncludesById('zone-config-fn', 'SELECT id,name,timezone FROM irrigation_zones', 'reads the zone timezone for the zone-local today');
+expectIncludesById('zone-config-fn', 'THEN stage_started_on ELSE', 'starts a changed stage on the zone-local today (plan review E2 I2)');
+expectIncludesById('get-zones-query', 'iz.weather_source', 'the zone list reads the zone weather provider');
+expectIncludesById('get-zones-response', "weather_source: r.weather_source || 'auto'", 'the zone list returns the zone weather provider');
+expectIncludesById('get-zones-response', 'weather_source_default: weatherSourceDefault', 'the zone list returns the provider auto resolves to on this gateway');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS sync_link_state', 'creates sync link state table at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'UPDATE irrigation_events SET event_uuid =', 'backfills stable irrigation event UUIDs at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TRIGGER trg_sync_irrigation_events_uuid_ai', 'creates stable irrigation event UUID trigger at runtime');
@@ -1564,6 +1579,17 @@ for (const triggerName of [
   expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
 }
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'sync_link_state', 'link-gates sync triggers');
+// 0067 (daily agronomy parity, plan E4): migration-owned, so the seed carries them and
+// the boot node does not; they stay out of the runtime-trigger loop below.
+for (const triggerName of ['trg_dp_zone_agronomy_outbox_ai', 'trg_dp_zone_agronomy_outbox_au']) {
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, 'WHERE id = NEW.zone_id AND deleted_at IS NULL AND zone_uuid IS NOT NULL', 'zone UUID guard');
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "'ZONE_AGRONOMY_UPSERTED'", 'emits ZONE_AGRONOMY_UPSERTED');
+  expectExcludes('Sync Init Schema + Triggers', triggerName, `leaves the migration-owned ${triggerName} to 0067`);
+}
+expectIncludes('Build Cloud Bootstrap', 'FROM zone_daily_agronomy za', 'includes the daily agronomy record in bootstrap snapshots');
+expectIncludes('Build Cloud Bootstrap', "'LIMIT 1000'", 'bounds the daily agronomy snapshot at 1,000 rows');
 for (const triggerName of [
   'trg_dp_device_data_outbox_ai',
   'trg_dp_chameleon_readings_outbox_ai',
@@ -1669,6 +1695,7 @@ expectIncludes('Build Cloud Bootstrap', "'  dd.dendro_stem_change_um,'", 'includ
 expectIncludes('Build Cloud Bootstrap', 'iz.area_m2', 'includes zone area in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'iz.irrigation_efficiency_pct', 'includes zone irrigation efficiency in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(iz.prediction_card_enabled, 0) AS prediction_card_enabled', 'includes the prediction-card flag in bootstrap snapshots');
+expectIncludes('Build Cloud Bootstrap', 'iz.weather_source', 'includes the zone weather provider in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', "'  dd.rain_mm_per_10min,'", 'includes normalized rain telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for bootstrap snapshots');
@@ -2071,6 +2098,16 @@ expectIncludesForEach(
   "'entity_name_commands_v1'",
   'advertises the entity-name command capability to the cloud'
 );
+expectIncludesForEach(
+  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
+  "'zone_config_weather_source_v1'",
+  'advertises that zone commands may carry weather_source'
+);
+expectIncludesForEach(
+  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
+  "'zone_config_stage_started_on_v1'",
+  'advertises that zone commands may carry stage_started_on'
+);
 expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped device_eui payloads for device-scoped SQL commands');
 expectLibById('4f4a765f36cee6f3', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
 expectOrderedIncludesById('4f4a765f36cee6f3', [
@@ -2083,6 +2120,12 @@ expectOrderedIncludesById('4f4a765f36cee6f3', [
 ], 'runs a legacy UPSERT_ZONE name through the rule and keeps the stored name when it fails');
 expectExcludesById('4f4a765f36cee6f3', "s(cmd.name || 'Zone')", 'the unguarded legacy zone-name fallback that renamed a zone to "Zone"');
 expectIncludesById('4f4a765f36cee6f3', 'keeping the stored zone name', 'warns instead of silently discarding an invalid legacy zone name');
+expectIncludesById('4f4a765f36cee6f3', "sets.push('weather_source = '", 'stores weather_source from a legacy UPSERT_ZONE_CONFIG');
+expectIncludesById('4f4a765f36cee6f3', 'weather_source=excluded.weather_source', 'stores weather_source from a legacy UPSERT_ZONE and keeps the stored value when absent');
+expectIncludesById('4f4a765f36cee6f3', "sets.push('stage_started_on = ' + configStageStartedOn.sql)", 'stores stage_started_on from a legacy UPSERT_ZONE_CONFIG');
+expectIncludesById('4f4a765f36cee6f3', "stageStartedOnRuleSql('irrigation_zones.phenological_stage'", 'applies the stage-date rules to a legacy UPSERT_ZONE of a stored zone');
+expectIncludesById('4f4a765f36cee6f3', 'function stageStartedOnRuleSql(', 'clears on unset and starts a changed stage on the zone-local today, inside the statement');
+expectIncludesById('4f4a765f36cee6f3', 'carried an invalid stage_started_on for', 'warns once, naming the zone, instead of storing an invalid start date');
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
@@ -2141,6 +2184,9 @@ expectIncludes('Build Cloud Bootstrap', 'const dendroReadings = dendroReadingsRo
 expectIncludes('Build Cloud Bootstrap', 'function normalizeIsoTimestamp(value)', 'normalizes malformed edge timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in bootstrap payloads');
+expectIncludes('Build Cloud Bootstrap', "...(z.weather_source && z.weather_source !== 'auto' ? { weather_source: z.weather_source } : {})", 'exports the zone weather provider in bootstrap payloads only when it is not auto, never as a default (review I1)');
+expectIncludes('Build Cloud Bootstrap', 'iz.stage_started_on', 'includes the stage start date in bootstrap snapshots');
+expectIncludes('Build Cloud Bootstrap', 'stage_started_on: z.stage_started_on || null', 'exports the stage start date in bootstrap payloads');
 expectIncludes('Build Cloud Bootstrap', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap sensor history');
@@ -2212,6 +2258,7 @@ expectIncludes('Run Force Sync', "'  dd.dendro_stem_change_um,'", 'includes base
 expectIncludes('Run Force Sync', 'iz.area_m2', 'includes zone area in force-sync snapshots');
 expectIncludes('Run Force Sync', 'iz.irrigation_efficiency_pct', 'includes zone irrigation efficiency in force-sync snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(iz.prediction_card_enabled, 0) AS prediction_card_enabled', 'includes the prediction-card flag in force-sync snapshots');
+expectIncludes('Run Force Sync', 'iz.weather_source', 'includes the zone weather provider in force-sync snapshots');
 expectIncludes('Run Force Sync', "'  dd.rain_mm_per_10min,'", 'includes normalized rain telemetry in force-sync sensor data');
 expectIncludes('Run Force Sync', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in force-sync sensor data');
 expectIncludes('Run Force Sync', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for forced bootstrap snapshots');
@@ -2225,6 +2272,9 @@ expectIncludes('Run Force Sync', 'const dendroReadings = dendroReadingsRows.slic
 expectIncludes('Run Force Sync', 'function normalizeIsoTimestamp(value)', 'normalizes malformed edge timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in forced bootstrap payloads');
+expectIncludes('Run Force Sync', "...(z.weather_source && z.weather_source !== 'auto' ? { weather_source: z.weather_source } : {})", 'exports the zone weather provider in forced bootstrap payloads only when it is not auto, never as a default (review I1)');
+expectIncludes('Run Force Sync', 'iz.stage_started_on', 'includes the stage start date in force-sync snapshots');
+expectIncludes('Run Force Sync', 'stage_started_on: z.stage_started_on || null', 'exports the stage start date in forced bootstrap payloads');
 expectIncludes('Run Force Sync', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting force-sync sensor history');
@@ -2267,7 +2317,7 @@ expectIncludes('Get Zone Environment Summary', 'irrigationTodayMeasuredLiters', 
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayEstimatedLiters', 'returns estimated valve-time liters under an honest field name');
 expectIncludes('Get Zone Environment Summary', 'measuredIrrigationNetMm', 'computes effective mm for measured irrigation separately');
 expectIncludes('Get Zone Environment Summary', 'estimatedIrrigationNetMm', 'computes effective mm for estimated irrigation separately');
-expectIncludes('Get Zone Environment Summary', 'ZE.overlayLocalWaterIrrigationSplit(sharedSummary.water, water)', 'preserves local measured/estimated irrigation split when shared server water is displayed');
+expectIncludes('Get Zone Environment Summary', 'ZE.overlayLocalWaterIrrigationSplit(sharedSummary.water, water, water.todayDate)', 'preserves local measured/estimated irrigation split when shared server water is displayed');
 expectIncludes('Get Zone Environment Summary', 'water: displayWater,', 'returns the irrigation-split overlay instead of raw shared server water');
 expectIncludes('Save Zone Irrigation Calibration', 'INSERT INTO zone_irrigation_calibration', 'upserts zone irrigation calibration through the local API');
 expectIncludes('Save Zone Irrigation Calibration', 'measured_flow_rate_lpm', 'writes the measured flow rate to the calibration table');

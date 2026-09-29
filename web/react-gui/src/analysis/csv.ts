@@ -14,6 +14,22 @@ const HEADER = [
   'value',
 ];
 
+// A daily-cadence point stands for one zone-local day, so its row carries
+// that date; an invalid zone timezone falls back to UTC as the backend does.
+function localDate(t: string, timeZone: string | null): string {
+  const format = (zone: string) => {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .formatToParts(new Date(t));
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+    return `${part('year')}-${part('month')}-${part('day')}`;
+  };
+  try {
+    return format(timeZone || 'UTC');
+  } catch {
+    return format('UTC');
+  }
+}
+
 function escape(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
@@ -30,7 +46,7 @@ export function toTidyCsv(
     const label = entry?.displayName ?? item.label;
     for (const point of item.points) {
       const row = [
-        point.t,
+        item.cadence === 'daily' ? localDate(point.t, item.timezone) : point.t,
         site,
         zone,
         label,

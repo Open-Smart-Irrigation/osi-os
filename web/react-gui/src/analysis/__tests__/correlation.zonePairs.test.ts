@@ -15,7 +15,7 @@ function series(zoneId: number, channelKey: string, values: (number | null)[]): 
       count: v === null ? 0 : 1,
       quality: v === null ? 'gap' : 'ok',
     })),
-    truncated: false,
+    truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 

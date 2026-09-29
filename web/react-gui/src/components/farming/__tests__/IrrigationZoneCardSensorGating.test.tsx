@@ -369,6 +369,82 @@ describe('water card source gating', () => {
   });
 });
 
+/**
+ * A linked gateway can carry rain for a zone without a gauge: measured at the nearest
+ * MeteoSwiss station, or the weather service's rain for the hours of today that have
+ * passed. The tile shows it and says where it comes from behind a HelpTip; the zone's own
+ * gauge always wins the label.
+ */
+describe('water card rain source', () => {
+  const RAIN_HELP = { name: 'Where this rain value comes from' };
+  const payerne = { id: 'PAY', name: 'Payerne', distanceKm: 1.2, network: 'ogd-smn' };
+  const soil = () => sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } });
+
+  it('shows station rain for a zone without a gauge and names the station behind a HelpTip', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: { ...summary.water, rainSource: 'meteoswiss_station', rainStation: payerne },
+    });
+    await openCard([soil()]);
+
+    const tile = screen.getByTestId('water-rain-tile');
+    expect(tile).toHaveTextContent('4.2 mm');
+    expect(tile).not.toHaveTextContent('Measured at MeteoSwiss');
+    fireEvent.click(screen.getByRole('button', RAIN_HELP));
+    expect(screen.getByText('Measured at MeteoSwiss Payerne (1.2 km away)')).toBeInTheDocument();
+    expect(screen.getByTestId('water-action-tile')).toHaveTextContent('Driven by water balance · rain measured at MeteoSwiss Payerne');
+  });
+
+  it('shows weather-service rain as not measured', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: { ...summary.water, rainSource: 'weather_service', rainStation: null },
+    });
+    await openCard([soil()]);
+
+    expect(screen.getByTestId('water-rain-tile')).toHaveTextContent('4.2 mm');
+    fireEvent.click(screen.getByRole('button', RAIN_HELP));
+    expect(screen.getByText('From weather data (not measured)')).toBeInTheDocument();
+    expect(screen.getByTestId('water-action-tile')).toHaveTextContent('Driven by water balance · rain from weather data');
+  });
+
+  it('lets the zone gauge win the label: no source HelpTip, no station named', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: { ...summary.water, rainSource: 'gauge', rainStation: payerne },
+    });
+    await openCard([sensor({ type_id: 'SENSECAP_S2120', name: 'Station', last_seen: FRESH })]);
+
+    expect(screen.getByTestId('water-rain-tile')).toHaveTextContent('4.2 mm');
+    expect(screen.queryByRole('button', RAIN_HELP)).not.toBeInTheDocument();
+    expect(screen.queryByText(/MeteoSwiss/)).not.toBeInTheDocument();
+    const action = screen.getByTestId('water-action-tile');
+    expect(action).toHaveTextContent('Driven by water balance');
+    expect(action).not.toHaveTextContent('rain from weather data');
+  });
+
+  it('shows no rain for a weather-service source that has no value', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: { ...summary.water, rainSource: 'weather_service', rainTodayMm: null },
+    });
+    await openCard([soil()]);
+
+    expect(screen.queryByTestId('water-rain-tile')).not.toBeInTheDocument();
+  });
+
+  it('names no station when the source is not the station', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: { ...summary.water, rainSource: 'weather_service', rainStation: payerne },
+    });
+    await openCard([soil()]);
+
+    fireEvent.click(screen.getByRole('button', RAIN_HELP));
+    expect(screen.queryByText(/Payerne/)).not.toBeInTheDocument();
+  });
+});
+
 describe('water card reason line', () => {
   it('translates the edge reason code instead of printing its prose', async () => {
     apiMocks.getSummary.mockResolvedValue({

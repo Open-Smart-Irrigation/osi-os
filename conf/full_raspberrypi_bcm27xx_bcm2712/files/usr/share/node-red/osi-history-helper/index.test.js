@@ -280,6 +280,7 @@ test('aggregateRows bucketed mode returns per-bucket stats and coverage', () => 
     median: 15,
     latest: 20,
     sampleCount: 2,
+    sum: 30,
     unit: 'kPa',
   });
   assert.equal(result.buckets[0].coveragePct, 100);
@@ -291,11 +292,86 @@ test('aggregateRows bucketed mode returns per-bucket stats and coverage', () => 
     median: 40,
     latest: 40,
     sampleCount: 1,
+    sum: 40,
     unit: 'kPa',
   });
   assert.equal(result.buckets[1].coveragePct, 50);
   assert.equal(result.coveragePct, 75);
   assert.equal(result.coverageConfidence, 'configured');
+});
+
+test('buildZoneExportCsv accepts et0_mm but never queries it and exports no rows for it', async () => {
+  const queries = [];
+  const db = {
+    all: async (sql) => {
+      queries.push(sql);
+      if (sql.includes('FROM irrigation_zones')) return [{ id: 12, name: 'Zone B', zone_uuid: 'zb', timezone: 'UTC' }];
+      if (sql.includes('FROM devices')) return [{ deveui: 'AA00000000000001', name: 'Kiwi', type_id: 'KIWI_SENSOR', irrigation_zone_id: 12 }];
+      if (sql.includes('FROM device_data')) {
+        return [{ deveui: 'AA00000000000001', recorded_at: '2026-06-01T06:00:00.000Z', swt_1: 12.5 }];
+      }
+      return [];
+    },
+  };
+  const result = await hh.buildZoneExportCsv(db, {
+    zoneId: 12,
+    from: '2026-06-01',
+    to: '2026-06-01',
+    granularity: 'raw',
+    // et0_mm has no edgeField (weather-only channel); swt_1 alongside it
+    // forces a real device_data query to run, so "no SQL names et0_mm"
+    // below is a meaningful check, not vacuously true because the query
+    // never ran (final fix A5, review T1 nit).
+    channels: 'et0_mm,swt_1',
+    nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+  });
+  assert.deepEqual(result.columns, hh.RAW_CSV_COLUMNS);
+  assert.ok(result.rows.some((row) => row.channel_key === 'swt_1' && row.value === 12.5));
+  assert.ok(!result.rows.some((row) => row.channel_key === 'et0_mm'));
+  const deviceDataQueries = queries.filter((sql) => sql.includes('FROM device_data'));
+  assert.ok(deviceDataQueries.length > 0, 'a real device_data query ran, not skipped entirely');
+  assert.deepEqual(queries.filter((sql) => /et0_mm/.test(sql)), []);
+});
+
+test('aggregateRows reports the bucket sum beside the mean, null for an empty bucket', () => {
+  const rows = [
+    { recorded_at: '2026-07-10T00:00:00.000Z', rain: 0.1 },
+    { recorded_at: '2026-07-10T00:30:00.000Z', rain: 0.2 },
+    { recorded_at: '2026-07-10T01:00:00.000Z', rain: 0.4 },
+  ];
+  const hourly = hh.aggregateRows(rows, {
+    aggregation: 'hourly',
+    start: '2026-07-10T00:00:00.000Z',
+    end: '2026-07-10T03:00:00.000Z',
+    channels: [{ id: 'rain', field: 'rain', unit: 'mm' }],
+  });
+  assert.deepEqual(hourly.buckets.map((bucket) => [bucket.series.rain.sum, bucket.series.rain.mean]), [
+    [0.3, 0.15],
+    [0.4, 0.4],
+    [null, null],
+  ]);
+  const daily = hh.aggregateRows(rows, {
+    aggregation: 'daily',
+    start: '2026-07-10T00:00:00.000Z',
+    end: '2026-07-11T00:00:00.000Z',
+    channels: [{ id: 'rain', field: 'rain', unit: 'mm' }],
+  });
+  assert.equal(daily.buckets[0].series.rain.sum, 0.7);
+});
+
+test('aggregateRows with a timezone ends a daily bucket at local midnight', () => {
+  const result = hh.aggregateRows([
+    { recorded_at: '2026-09-24T21:30:00.000Z', rain: 1 },
+    { recorded_at: '2026-09-24T22:30:00.000Z', rain: 2 },
+  ], {
+    aggregation: 'daily',
+    start: '2026-09-24T00:00:00.000Z',
+    end: '2026-09-26T00:00:00.000Z',
+    timezone: 'Europe/Zurich',
+    channels: [{ id: 'rain', field: 'rain', unit: 'mm' }],
+  });
+  assert.equal(result.buckets[0].bucketEnd, '2026-09-24T22:00:00.000Z');
+  assert.deepEqual(result.buckets.map((bucket) => bucket.series.rain.sum), [1, 2, null]);
 });
 
 test('aggregateRows requires at least one channel', () => {

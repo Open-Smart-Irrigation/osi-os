@@ -9,7 +9,7 @@ function series(id: string): AnalysisSeries {
     resolved: { hubEui: null, zoneId: 1, cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1' },
     label: id, unit: 'kPa', coveragePct: 100,
     points: [{ t: '2026-06-18T00:00:00Z', value: 1, count: 1, quality: 'ok' }],
-    truncated: false,
+    truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 

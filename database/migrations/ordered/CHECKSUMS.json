@@ -59,5 +59,11 @@
   "0058__gateway_eui_fallback.sql": "eae7f36423f693d0a5dfd239ce750b0b361a510d5b48a693fc08edb031f235b7",
   "0059__sync_rejection_recovery.sql": "e44c234f5176dc22a006cd31360e793524b17ded3e66019bcc3b5d01e8e97a88",
   "0060__add_rak10701_field_tester_type.sql": "7cfeca9dd1ccbea65db0d4ef06d80073f16fe851e61bd7cd83b85e20221d2f18",
-  "0061__watermark_lsn50.sql": "ecc3c74238d62b693a3630a8e24c1bbe8fe36c0e47b89779d41552cc5e3355e5"
+  "0061__watermark_lsn50.sql": "ecc3c74238d62b693a3630a8e24c1bbe8fe36c0e47b89779d41552cc5e3355e5",
+  "0062__weather_provider_store.sql": "4d3b4d79e27c1286966f3b621601952d3c762c8b22927c9f695b7e9f54bbab9a",
+  "0063__daily_agronomy.sql": "8c6e66c5b19b3bac7a93ae4b8fecb347c155d7864f5c819851f43cae1ec24478",
+  "0064__fao56_stage_keys.sql": "d72cb602556bfd94dd497c8cfd179ba414bfe2b0305f73fb8cd3dbd6c409749f",
+  "0065__zone_weather_source_sync.sql": "29049551aee6b77a0d34b5d090a22bd93593f481f80f7f66353a786fb5310ba7",
+  "0066__stage_started_on.sql": "d477953100ff661316e359c8c4a58eb3ef375acf57fcd7f4cd1e76749dd953b4",
+  "0067__zone_daily_agronomy_sync.sql": "f007051f72dd0ba5f8e967625b21c39293b271902a77817a9940095932f4c610"
 }

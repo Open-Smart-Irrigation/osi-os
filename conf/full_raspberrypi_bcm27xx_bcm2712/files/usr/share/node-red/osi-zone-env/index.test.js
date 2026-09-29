@@ -149,7 +149,7 @@ test('forecast helpers preserve deterministic provider normalization', () => {
   assert.equal(merged.hours.length, 1);
   assert.equal(ZE.normalizePrecipitationProbability(0.72), 72);
   assert.deepEqual(ZE.findMetric({ metrics: [{ key: 'rainMm', mean: 1.2 }] }, 'rainMm'), { key: 'rainMm', mean: 1.2 });
-  assert.equal(ZE.deriveCropCoefficient('fruit_maturation'), 0.85);
+  assert.equal(ZE.deriveCropCoefficient, undefined);
   assert.equal(ZE.estimateStepHours([
     { time: '2026-07-11T12:00:00.000Z' },
     { time: '2026-07-11T18:00:00.000Z' },
@@ -158,11 +158,11 @@ test('forecast helpers preserve deterministic provider normalization', () => {
   assert.equal(ZE.localDateIso(null, 'UTC', NOW_MS), '2026-07-11');
   assert.equal(ZE.addUtcDays('2026-07-11', 2), '2026-07-13');
 
-  const section = ZE.buildForecastSection(merged, 'live', '2026-07-11T10:15:00.000Z', 'fruit_maturation', '2026-07-11T10:00:00.000Z');
+  const section = ZE.buildForecastSection(merged, 'live', '2026-07-11T10:15:00.000Z', { cropType: null, phenologicalStage: 'fruit_maturation' }, '2026-07-11T10:00:00.000Z');
   assert.equal(section.available, true);
   assert.equal(section.cacheStatus, 'live');
   assert.equal(section.rainFocus.totalNext24hMm, 1.2);
-  assert.equal(section.rainFocus.daily[0].cropCoefficientKc, 0.85);
+  assert.equal(section.rainFocus.daily[0].cropCoefficientKc, 0.9);
 });
 
 test('agronomic and water helpers preserve current assembly behavior', () => {
@@ -180,12 +180,13 @@ test('agronomic and water helpers preserve current assembly behavior', () => {
   };
   const forecast = {
     available: true,
-    rainFocus: { totalNext24hMm: 4.2, totalNext72hMm: 12.3, daily: [{ et0MmDay: 5 }] },
+    cacheStatus: 'live',
+    rainFocus: { totalNext24hMm: 4.2, totalNext72hMm: 12.3, daily: [{ date: '2026-07-11', et0MmDay: 5 }] },
   };
-  const agronomic = ZE.buildAgronomic(local, online, forecast, 'fruit_maturation');
+  const agronomic = ZE.buildAgronomic(local, online, forecast, { cropType: null, phenologicalStage: 'fruit_maturation', todayIso: '2026-07-11', forecastFetchedAt: null, timezone: 'UTC' });
   assert.equal(agronomic.current.vpdKpa, 1.843);
-  assert.equal(agronomic.current.cropCoefficientKc, 0.85);
-  assert.equal(agronomic.current.etcMmDay, 4.25);
+  assert.equal(agronomic.current.cropCoefficientKc, 0.9);
+  assert.equal(agronomic.current.etcMmDay, 4.5);
 
   assert.equal(ZE.toEffectiveIrrigationMm(100, 50, 75), 1.5);
   assert.deepEqual(ZE.resolveWaterAction('2026-07-11', null, -8, 0), {
@@ -340,4 +341,151 @@ test('a weather station and a LoRain gauge count as rain sources', () => {
   assert.equal(health([{ type_id: 'DRAGINO_LSN50', rain_gauge_enabled: 1 }]).rainGaugePresent, true);
   assert.equal(health([{ type_id: 'DRAGINO_LSN50', rain_gauge_enabled: 0 }]).rainGaugePresent, false);
   assert.equal(health([{ type_id: 'KIWI_SENSOR' }]).rainGaugePresent, false);
+});
+
+const kcRows = (overrides = {}) => ({ date: '2026-09-24', et0_mm: 4, et0_source: 'station_fao56', et0_tier: 'station_fao56', et0_station_id: 'S2120AAAA00000001', kc: 1.2, kc_source: 'fao56_crop', crop_type: 'maize', phenological_stage: 'mid_season', etc_mm: 4.8, hours_present: 24, expected_hours: 24, null_reason: null, ...overrides });
+const forecastFor = (dates, cacheStatus = 'live') => ({ available: true, cacheStatus, rainFocus: { daily: dates.map((date, i) => ({ date, et0MmDay: 3 + i })) } });
+
+test('KC_BY_STAGE and deriveCropCoefficient are gone', () => {
+  assert.equal(ZE.KC_BY_STAGE, undefined);
+  assert.equal(ZE.deriveCropCoefficient, undefined);
+});
+
+test('buildAgronomic takes the forecast day dated today and the FAO-56 Kc', () => {
+  const a = ZE.buildAgronomic(null, null, forecastFor(['2026-09-24', '2026-09-25']), { cropType: 'maize', phenologicalStage: 'mid_season', todayIso: '2026-09-25', forecastFetchedAt: '2026-09-25T05:00:00Z', timezone: 'Europe/Zurich' });
+  assert.deepEqual([a.current.referenceEt0MmDay, a.current.cropCoefficientKc, a.current.cropCoefficientSource, a.current.etcMmDay, a.current.cropId, a.current.stage], [4, 1.2, 'fao56_crop', 4.8, 'maize', 'mid_season']);
+});
+
+test('offline across midnight: a stale forecast fetched yesterday gives no demand for today', () => {
+  const a = ZE.buildAgronomic(null, null, forecastFor(['2026-09-24', '2026-09-25'], 'stale'), { cropType: 'maize', phenologicalStage: 'mid_season', todayIso: '2026-09-25', forecastFetchedAt: '2026-09-24T20:00:00Z', timezone: 'Europe/Zurich' });
+  assert.equal(a.current.etcMmDay, null);
+  assert.equal(a.current.evapotranspirationSource, 'unavailable');
+  const fetchedToday = ZE.buildAgronomic(null, null, forecastFor(['2026-09-25'], 'stale'), { cropType: 'maize', phenologicalStage: 'mid_season', todayIso: '2026-09-25', forecastFetchedAt: '2026-09-24T22:30:00Z', timezone: 'Europe/Zurich' });
+  assert.equal(fetchedToday.current.referenceEt0MmDay, 3, '22:30Z is 00:30 local on the 25th');
+});
+
+test('buildForecastSection: every day carries the resolved Kc', () => {
+  const f = ZE.buildForecastSection({ days: [{ date: '2026-09-25', et0MmDay: 5 }], hours: [] }, 'live', null, { cropType: 'grapevine', phenologicalStage: 'veraison' }, '2026-09-25T08:00:00Z');
+  assert.deepEqual([f.rainFocus.daily[0].cropCoefficientKc, f.rainFocus.daily[0].etcMmDay], [0.7, 3.5]);
+});
+
+test('buildWaterDaily: seven rows, null rain for a day without a row, calculated days, today as forecast', () => {
+  const daily = ZE.buildWaterDaily({
+    envRows: [{ date: '2026-09-24', rainfall_mm: 1.2, flow_liters: 0 }],
+    estimatedByDate: {},
+    agronomyRows: [kcRows(), kcRows({ date: '2026-09-23', et0_mm: null, etc_mm: null, kc: null, kc_source: null, crop_type: null, phenological_stage: null, et0_tier: null, et0_source: null, et0_station_id: null, hours_present: 20, null_reason: 'partial_day' }), kcRows({ date: '2026-09-22', et0_tier: 'provider_hourly_sum', et0_source: 'meteoswiss_hourly_sum', et0_station_id: 'PAY' })],
+    zone: { area_m2: 100, irrigation_efficiency_pct: 80 },
+    todayIso: '2026-09-25', waterNeededTodayMm: 4.1, kcSourceToday: 'fao56_crop',
+    stationNames: { S2120AAAA00000001: 'demo-s2120' },
+  });
+  assert.equal(daily.length, 7);
+  assert.equal(daily[0].date, '2026-09-19');
+  const byDate = Object.fromEntries(daily.map((d) => [d.date, d]));
+  assert.equal(byDate['2026-09-23'].rainMm, null);
+  assert.equal(byDate['2026-09-24'].rainMm, 1.2);
+  assert.deepEqual([byDate['2026-09-24'].demandMm, byDate['2026-09-24'].demandSource, byDate['2026-09-24'].et0StationId, byDate['2026-09-24'].et0StationName, byDate['2026-09-24'].kc], [4.8, 'calculated', 'S2120AAAA00000001', 'demo-s2120', 1.2]);
+  assert.deepEqual([byDate['2026-09-22'].et0StationId, byDate['2026-09-22'].et0StationName], ['PAY', 'PAY']);
+  assert.deepEqual([byDate['2026-09-23'].demandMm, byDate['2026-09-23'].demandSource, byDate['2026-09-23'].nullReason, byDate['2026-09-23'].hoursPresent], [null, null, 'partial_day', 20]);
+  assert.deepEqual([byDate['2026-09-21'].demandMm, byDate['2026-09-21'].demandSource, byDate['2026-09-21'].nullReason], [null, null, null]);
+  assert.deepEqual([byDate['2026-09-25'].demandMm, byDate['2026-09-25'].demandSource, byDate['2026-09-25'].kcSource], [4.1, 'forecast', 'fao56_crop']);
+});
+
+test('overlay: past days take the local demand fields; today keeps the cloud value only while the bundle is current', () => {
+  const local = { available: true, waterNeededTodayMm: 4.1, todayDate: '2026-09-25', daily: ZE.buildWaterDaily({ envRows: [], estimatedByDate: {}, agronomyRows: [kcRows()], zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: 4.1, kcSourceToday: 'fao56_crop', stationNames: {} }) };
+  const cloudDays = (last) => Array.from({ length: 7 }, (_, i) => ({ date: new Date(Date.parse(last + 'T00:00:00Z') - (6 - i) * 86400000).toISOString().slice(0, 10), rainMm: 0.5 }));
+  const current = ZE.overlayLocalWaterIrrigationSplit({ available: true, waterNeededTodayMm: 3.3, daily: cloudDays('2026-09-25') }, local, '2026-09-25');
+  const today = current.daily.find((d) => d.date === '2026-09-25');
+  assert.deepEqual([today.demandMm, today.demandSource, today.kcSource, current.waterNeededTodayMm, current.todayDate], [3.3, 'forecast', 'server', 3.3, '2026-09-25']);
+  assert.equal(current.daily.find((d) => d.date === '2026-09-24').demandMm, 4.8);
+  assert.equal(current.daily.find((d) => d.date === '2026-09-24').rainMm, 0.5);
+  const stale = ZE.overlayLocalWaterIrrigationSplit({ available: true, waterNeededTodayMm: 3.3, daily: cloudDays('2026-09-24') }, local, '2026-09-25');
+  assert.equal(stale.daily.length, 7);
+  assert.equal(stale.daily.at(-1).date, '2026-09-25');
+  assert.deepEqual([stale.daily.at(-1).demandMm, stale.daily.at(-1).demandSource, stale.daily.at(-1).kcSource, stale.waterNeededTodayMm], [4.1, 'forecast', 'local', 4.1]);
+});
+
+test('resolveWaterAction: no demand for today is demand_unknown; a missing zone setup stays balance_unknown', () => {
+  assert.equal(ZE.resolveWaterAction('2026-09-25', null, null, 2, null).reasonCode, 'demand_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-09-25', null, null, 2, null).source, 'insufficient_data');
+  assert.equal(ZE.resolveWaterAction('2026-09-25', null, null, 2, 4.1).reasonCode, 'balance_unknown');
+  // A caller that does not pass the demand keeps the old code.
+  assert.equal(ZE.resolveWaterAction('2026-09-25', null, null, 2).reasonCode, 'balance_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-09-25', null, 0.5, 2, 4.1).reasonCode, 'supply_covers_demand');
+});
+
+test('buildWaterDaily: today carries ET0, Kc, crop and stage from the agronomic block, and demand_unknown without a forecast', () => {
+  const todayAgronomic = { referenceEt0MmDay: 3.42, cropCoefficientKc: 1.2, cropCoefficientSource: 'fao56_crop', cropId: 'maize', stage: 'mid_season' };
+  const withDemand = ZE.buildWaterDaily({ envRows: [], estimatedByDate: {}, agronomyRows: [], zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: 4.1, todayAgronomic, stationNames: {} }).at(-1);
+  assert.deepEqual(
+    [withDemand.et0Mm, withDemand.kc, withDemand.kcSource, withDemand.cropType, withDemand.phenologicalStage, withDemand.nullReason],
+    [3.42, 1.2, 'fao56_crop', 'maize', 'mid_season', null],
+  );
+  const noDemand = ZE.buildWaterDaily({ envRows: [], estimatedByDate: {}, agronomyRows: [], zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: null, todayAgronomic: { ...todayAgronomic, referenceEt0MmDay: null }, stationNames: {} }).at(-1);
+  assert.deepEqual([noDemand.demandMm, noDemand.demandSource, noDemand.et0Mm, noDemand.kc, noDemand.nullReason], [null, null, null, 1.2, 'demand_unknown']);
+});
+
+test('overlay: a stale bundle takes every "today" field from the gateway, so the tile shows one day', () => {
+  const localAction = { code: null, source: 'insufficient_data', reasonCode: 'demand_unknown', recommendationDate: '2026-09-25' };
+  const local = {
+    available: true, waterNeededTodayMm: null, rainTodayMm: 0, balanceTodayMm: null, next24hRainMm: 1.4, action: localAction, todayDate: '2026-09-25',
+    daily: ZE.buildWaterDaily({ envRows: [], estimatedByDate: {}, agronomyRows: [kcRows()], zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: null, stationNames: {} }),
+  };
+  const cloudDays = (last) => Array.from({ length: 7 }, (_, i) => ({ date: new Date(Date.parse(last + 'T00:00:00Z') - (6 - i) * 86400000).toISOString().slice(0, 10), rainMm: 0.5 }));
+  const cloudAction = { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'supply_covers_demand', recommendationDate: '2026-09-24' };
+  const bundle = (last) => ({ available: true, waterNeededTodayMm: 3.3, rainTodayMm: 6.2, rainSource: 'meteoswiss_station', balanceTodayMm: 2.9, next24hRainMm: 0, action: cloudAction, daily: cloudDays(last) });
+  const stale = ZE.overlayLocalWaterIrrigationSplit(bundle('2026-09-24'), local, '2026-09-25');
+  assert.deepEqual(
+    [stale.rainTodayMm, stale.rainSource, stale.balanceTodayMm, stale.next24hRainMm, stale.action, stale.waterNeededTodayMm],
+    [0, null, null, 1.4, localAction, null],
+  );
+  assert.equal(stale.daily.at(-1).nullReason, 'demand_unknown');
+  const current = ZE.overlayLocalWaterIrrigationSplit(bundle('2026-09-25'), local, '2026-09-25');
+  assert.deepEqual(
+    [current.rainTodayMm, current.rainSource, current.balanceTodayMm, current.next24hRainMm, current.action, current.waterNeededTodayMm],
+    [6.2, 'meteoswiss_station', 2.9, 0, cloudAction, 3.3],
+  );
+  const today = current.daily.at(-1);
+  assert.deepEqual([today.demandMm, today.kcSource, today.kc, today.et0Mm, today.nullReason], [3.3, 'server', null, null, null]);
+});
+
+// Contract v2 in the Water tab (spec 2026-09-27-daily-agronomy-parity B7).
+test('buildAgronomic: a dated development zone takes today\'s place on the FAO-56 curve', () => {
+  const a = ZE.buildAgronomic(null, null, forecastFor(['2026-09-25']), { cropType: 'maize', phenologicalStage: 'development', stageStartedOn: '2026-09-05', todayIso: '2026-09-25', forecastFetchedAt: '2026-09-25T05:00:00Z', timezone: 'Europe/Zurich' });
+  assert.deepEqual([a.current.cropCoefficientKc, a.current.cropCoefficientSource, a.current.stageOverrun, a.current.etcMmDay], [0.77, 'fao56_curve', false, 2.31]);
+  const undated = ZE.buildAgronomic(null, null, forecastFor(['2026-09-25']), { cropType: 'maize', phenologicalStage: 'development', todayIso: '2026-09-25', forecastFetchedAt: '2026-09-25T05:00:00Z', timezone: 'Europe/Zurich' });
+  assert.deepEqual([undated.current.cropCoefficientKc, undated.current.cropCoefficientSource, undated.current.stageOverrun], [1.2, 'fao56_crop', null]);
+});
+
+test('buildForecastSection: each forecast day resolves Kc for its own date', () => {
+  const f = ZE.buildForecastSection({ days: [{ date: '2026-09-25', et0MmDay: 5 }, { date: '2026-09-26', et0MmDay: 5 }, { date: '2026-09-27', et0MmDay: 5 }], hours: [] }, 'live', null, { cropType: 'maize', phenologicalStage: 'development', stageStartedOn: '2026-09-05' }, '2026-09-25T08:00:00Z');
+  assert.deepEqual(f.rainFocus.daily.map((d) => d.cropCoefficientKc), [0.77, 0.8, 0.82]);
+  assert.deepEqual(f.rainFocus.daily.map((d) => d.etcMmDay), [3.85, 4, 4.1]);
+});
+
+test('buildWaterDaily: stageOverrun from the stored row or today\'s resolution; demandComputedBy is edge for a stored demand', () => {
+  const daily = ZE.buildWaterDaily({
+    envRows: [], estimatedByDate: {},
+    agronomyRows: [kcRows({ stage_overrun: 1 }), kcRows({ date: '2026-09-23', stage_overrun: 0 }), kcRows({ date: '2026-09-22', et0_mm: null, etc_mm: null, kc: null, null_reason: 'partial_day', stage_overrun: null })],
+    zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: 4.1,
+    todayAgronomic: { referenceEt0MmDay: 3.42, cropCoefficientKc: 0.77, cropCoefficientSource: 'fao56_curve', cropId: 'maize', stage: 'development', stageOverrun: false },
+    stationNames: {},
+  });
+  const byDate = Object.fromEntries(daily.map((d) => [d.date, d]));
+  assert.deepEqual([byDate['2026-09-24'].stageOverrun, byDate['2026-09-24'].demandComputedBy], [true, 'edge']);
+  assert.deepEqual([byDate['2026-09-23'].stageOverrun, byDate['2026-09-23'].demandComputedBy], [false, 'edge']);
+  assert.deepEqual([byDate['2026-09-22'].stageOverrun, byDate['2026-09-22'].demandComputedBy], [null, null]);
+  assert.deepEqual([byDate['2026-09-21'].stageOverrun, byDate['2026-09-21'].demandComputedBy], [null, null]);
+  assert.deepEqual([byDate['2026-09-25'].stageOverrun, byDate['2026-09-25'].demandComputedBy, byDate['2026-09-25'].kcSource], [false, null, 'fao56_curve']);
+});
+
+test('shared mode: the gateway\'s day replaces the cloud\'s where it has a demand; a cloud day fills a day it has none for; an older cloud still gets the gateway\'s fields', () => {
+  const local = { available: true, waterNeededTodayMm: 4.1, todayDate: '2026-09-25', daily: ZE.buildWaterDaily({ envRows: [], estimatedByDate: {}, agronomyRows: [kcRows()], zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: 4.1, stationNames: {} }) };
+  const cloudDay = (date) => ({ date, rainMm: 0.5, demandMm: 2.2, demandSource: 'calculated', demandComputedBy: 'cloud', et0Mm: 3.1, et0Tier: 'open_meteo_daily', et0Source: 'provider_native', kc: 0.71, kcSource: 'fao56_crop', stageOverrun: null, nullReason: null });
+  const days = Array.from({ length: 7 }, (_, i) => cloudDay(new Date(Date.parse('2026-09-19T00:00:00Z') + i * 86400000).toISOString().slice(0, 10)));
+  const merged = ZE.overlayLocalWaterIrrigationSplit({ available: true, waterNeededTodayMm: 3.3, daily: days }, local, '2026-09-25');
+  const byDate = Object.fromEntries(merged.daily.map((d) => [d.date, d]));
+  assert.deepEqual([byDate['2026-09-24'].demandMm, byDate['2026-09-24'].demandComputedBy, byDate['2026-09-24'].et0Tier], [4.8, 'edge', 'station_fao56']);
+  assert.deepEqual([byDate['2026-09-23'].demandMm, byDate['2026-09-23'].demandComputedBy, byDate['2026-09-23'].et0Tier], [2.2, 'cloud', 'open_meteo_daily']);
+  const older = ZE.overlayLocalWaterIrrigationSplit({ available: true, waterNeededTodayMm: 3.3, daily: days.map((d) => ({ date: d.date, rainMm: d.rainMm })) }, local, '2026-09-25');
+  assert.deepEqual([older.daily.find((d) => d.date === '2026-09-23').demandMm, older.daily.find((d) => d.date === '2026-09-23').demandComputedBy], [null, null]);
 });

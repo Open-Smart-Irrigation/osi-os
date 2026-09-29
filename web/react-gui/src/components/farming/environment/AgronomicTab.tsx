@@ -1,7 +1,9 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgronomicEnvironment } from '../../../types/farming';
-import { getCropKc, getCropEntry } from '../cropKc';
+import { cropById, resolveKc } from '../../../agronomy/cropKc';
+import { STAGE_FALLBACK } from '../../../agronomy/stageLabels';
+import { HelpTip } from '../shared/HelpTip';
 
 interface Props {
   agronomic: AgronomicEnvironment;
@@ -72,23 +74,15 @@ const ETSection: React.FC<ETSectionProps> = ({
 }) => {
   const { t } = useTranslation('devices');
 
-  // Resolve Kc: server value first, then FAO lookup
-  let kc: number | null = serverKc;
-  let kcSource = serverKcSource;
-  let etc: number | null = serverEtc;
-
-  const faoKc = getCropKc(cropType, phenologicalStage);
-  if (kc == null && faoKc != null) {
-    kc = faoKc;
-    kcSource = 'fao56_estimate';
-  }
-
-  // Client-side ETc if server didn't provide it
-  if (etc == null && et0 != null && kc != null) {
-    etc = et0 * kc;
-  }
-
-  const cropEntry = getCropEntry(cropType);
+  // Server value first, then the FAO-56 resolver (the edge helper's twin).
+  const resolved = resolveKc({ cropType, phenologicalStage });
+  const kc = serverKc ?? resolved.kc;
+  const serverProvided = serverKc != null;
+  const etc = serverEtc ?? (et0 != null ? et0 * kc : null);
+  const crop = cropById(cropType);
+  const stageLabel = resolved.stage
+    ? t(`zoneConfig.stage.${resolved.stage}`, { defaultValue: STAGE_FALLBACK[resolved.stage] })
+    : t('environment.water.stageNotSet', { defaultValue: 'stage not set' });
 
   return (
     <div className="flex flex-col gap-2">
@@ -103,19 +97,37 @@ const ETSection: React.FC<ETSectionProps> = ({
           color="#0ea5e9"
         />
         <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)] flex flex-col gap-1">
-          <span className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide font-medium">
-            {t('environment.agronomic.kc', { defaultValue: 'Crop coeff. Kc' })}
-          </span>
-          <span className="text-xl font-bold tabular-nums" style={{ color: '#8b5cf6' }}>
-            {kc != null ? kc.toFixed(2) : '—'}
-          </span>
-          {kcSource === 'fao56_estimate' && cropEntry ? (
-            <span className="text-[10px] text-[var(--text-tertiary)]">
-              FAO-56 · {cropEntry.label}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide font-medium">
+              {t('environment.agronomic.kc', { defaultValue: 'Crop coeff. Kc' })}
             </span>
-          ) : kcSource ? (
-            <SourceLabel source={kcSource} />
-          ) : null}
+            {crop && (
+              <HelpTip label={t('environment.agronomic.kcHelpLabel', { defaultValue: 'About the crop coefficient' })}>
+                {t('environment.agronomic.kcHelp', {
+                  crop: crop.label,
+                  ini: crop.kc_ini.toFixed(2),
+                  mid: crop.kc_mid.toFixed(2),
+                  end: crop.kc_end.toFixed(2),
+                  stage: stageLabel,
+                  defaultValue: 'FAO-56 Kc for {{crop}}: initial {{ini}}, mid-season {{mid}}, end {{end}}. Current stage: {{stage}}.',
+                })}
+              </HelpTip>
+            )}
+          </div>
+          <span className="text-xl font-bold tabular-nums" style={{ color: '#8b5cf6' }}>
+            {kc.toFixed(2)}
+          </span>
+          {serverProvided ? (
+            serverKcSource ? <SourceLabel source={serverKcSource} /> : null
+          ) : (
+            <span className="text-[10px] text-[var(--text-tertiary)]">
+              {t(`environment.water.kcSource.${resolved.kcSource}`, {
+                crop: crop?.label ?? '',
+                stage: stageLabel,
+                defaultValue: resolved.kcSource,
+              })}
+            </span>
+          )}
         </div>
         <StatCell
           label={t('environment.agronomic.etc', { defaultValue: 'Crop ET' })}
@@ -124,14 +136,6 @@ const ETSection: React.FC<ETSectionProps> = ({
           color="#16a34a"
         />
       </div>
-      {kcSource === 'fao56_estimate' && cropEntry && (
-        <p className="text-xs text-[var(--text-tertiary)]">
-          Kc is an FAO-56 estimate for {cropEntry.label} at the{' '}
-          <span className="font-medium">{phenologicalStage ?? 'default'}</span> stage
-          (ini={cropEntry.kc_ini}, mid={cropEntry.kc_mid}, end={cropEntry.kc_end}).
-          The server will use a measured value once available.
-        </p>
-      )}
     </div>
   );
 };

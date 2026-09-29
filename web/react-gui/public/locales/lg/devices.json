@@ -246,7 +246,9 @@
         "forecast_rain_covers_demand": "Forecast rain covers today's shortfall",
         "demand_exceeds_supply": "Demand exceeds today's rain and irrigation",
         "balance_neutral": "Water balance is close to neutral",
-        "default": "Waiting for more data"
+        "default": "Waiting for more data",
+        "rain_unknown": "No rain measurement for today",
+        "demand_unknown": "No water demand estimate for today"
       },
       "action": {
         "delay_irrigation": "Delay irrigation",
@@ -286,7 +288,11 @@
         "noReadingYet": "No reading yet",
         "invalidReading": "Invalid reading",
         "lastValid": "Last valid {{value}} · {{time}}"
-      }
+      },
+      "rainFromStation": "Measured at MeteoSwiss {{station}} ({{distance}} km away)",
+      "rainFromWeather": "From weather data (not measured)",
+      "drivenByWaterBalanceFromWeather": "Driven by water balance · rain from weather data",
+      "drivenByWaterBalanceFromStation": "Driven by water balance · rain measured at MeteoSwiss {{station}}"
     },
     "deviceCount_one": "ekyuma {{count}}",
     "deviceCount_other": "ebyuma {{count}}",
@@ -383,7 +389,6 @@
       "waterNeededToday": "Water needed today",
       "balance": "Balance",
       "setupRequired": "Add zone area and irrigation efficiency in zone settings to calculate effective irrigation and water balance.",
-      "weeklyTrend": "7-day water trend",
       "trendNote": "Compare rainfall against measured and estimated effective irrigation over the last week.",
       "nextRain": "Next 24 h rain",
       "effective": "{{value}} effective",
@@ -391,7 +396,59 @@
       "flowMeterReporting": "Flow meter reporting",
       "tooltipRain": "Rain",
       "tooltipMeasuredEffective": "Measured effective",
-      "tooltipEstimatedEffective": "Estimated effective"
+      "tooltipEstimatedEffective": "Estimated effective",
+      "kcSource": {
+        "fao56_crop": "{{crop}}, {{stage}}",
+        "fao56_crop_stage_unset": "{{crop}}, stage not set",
+        "heuristic_phenology": "no crop from the FAO-56 list, {{stage}}",
+        "server": "OSI Cloud",
+        "local": "this gateway",
+        "fao56_curve": "{{crop}}, {{stage}} (FAO-56 curve)"
+      },
+      "stageNotSet": "stage not set",
+      "lastSevenDays": "Last 7 days",
+      "tooltipDemand": "Crop demand",
+      "stationCredit": "Source: MeteoSwiss",
+      "today": "Today",
+      "legendDemand": "Crop demand (calculated)",
+      "legendDemandTodayForecast": "Crop demand today (forecast)",
+      "demandCalculated": "{{value}} mm (calculated)",
+      "demandForecast": "{{value}} mm (forecast)",
+      "demandNoData": "no data (weather record incomplete)",
+      "demandNoLocation": "no data (zone has no location)",
+      "demandPending": "pending",
+      "tooltipTodayNote": "Rain and irrigation so far; demand is the forecast for the whole day",
+      "kcLine": "Kc {{kc}} ({{source}})",
+      "et0Tier": {
+        "station_fao56": "Station {{station}} · FAO-56",
+        "hargreaves_station": "Station {{station}} · Hargreaves",
+        "provider_open_meteo": "Open-Meteo model",
+        "provider_meteoswiss": "MeteoSwiss {{station}}",
+        "forecast": "Weather forecast",
+        "open_meteo_daily": "Open-Meteo weather model, daily FAO-56"
+      },
+      "attribution": {
+        "open_meteo": "Weather data by Open-Meteo.com, CC BY 4.0"
+      },
+      "attributionHelpLabel": "About the weather data",
+      "neededTodayHelpLabel": "About water needed today",
+      "neededTodayHelp": "Forecast for the whole day · {{source}}",
+      "lastSevenDaysHelpLabel": "About the last 7 days",
+      "setupRequiredHelpLabel": "Why effective irrigation is missing",
+      "rainSourceHelpLabel": "Where this rain value comes from",
+      "demandNoSource": "no weather source for this day",
+      "demandMixedStation": "hours from two MeteoSwiss stations",
+      "demandUnknownStation": "MeteoSwiss station unknown for these hours",
+      "demandUnknownToday": "no estimate for today",
+      "et0Line": "ET0 {{et0}} mm",
+      "kcSourceByCrop": "{{source}}, {{crop}}",
+      "stageOverrun": "Past this stage's typical length ({{days}} days, FAO-56 Table 11): the stage may be out of date; choose the next stage when the crop reaches it.",
+      "computedBy": {
+        "edge": "Calculated on the gateway",
+        "cloud": "ET0 from the Open-Meteo weather model (not measured at this farm); OSI Cloud applies the crop coefficient"
+      },
+      "modelAccuracyNote": "Model-based ET0 can differ from a local station by 10-20 % on a single day, most on cloudy, windy or mountain days; weekly totals agree better.",
+      "meteoswissCloudNote": "This zone uses MeteoSwiss on the gateway; OSI Cloud's own history uses Open-Meteo until MeteoSwiss history is available in the cloud."
     },
     "generatedAt": "Generated {{time}}",
     "sectionTitle": "Environment & weather forecast",
@@ -445,7 +502,9 @@
       "kc": "Kc eby'ebimera",
       "etc": "ET eby'ebimera",
       "noData": "Tewali makulu ag'okulima",
-      "fromSource": "okuva {{source}}"
+      "fromSource": "okuva {{source}}",
+      "kcHelpLabel": "About the crop coefficient",
+      "kcHelp": "FAO-56 Kc for {{crop}}: initial {{ini}}, mid-season {{mid}}, end {{end}}. Current stage: {{stage}}."
     },
     "forecast": {
       "dayToday": "Today",
@@ -481,7 +540,7 @@
   "zoneConfig": {
     "title": "Configure zone — {{zone}}",
     "crop": "Crop",
-    "selectCrop": "— Select prediction crop —",
+    "selectCrop": "— Select crop —",
     "variety": "Variety",
     "varietyPlaceholder": "Variety (optional)",
     "soilType": "Soil type",
@@ -540,12 +599,50 @@
       "olive": "Olive"
     },
     "stage": {
-      "default": "Default",
-      "dormancy": "Dormancy",
-      "budbreak": "Bud break / flowering",
-      "fruitset": "Fruit set",
-      "veraison": "Veraison / ripening",
-      "harvest": "Harvest / post-harvest"
+      "unset": "Not set",
+      "initial": "Initial",
+      "development": "Crop development",
+      "mid_season": "Mid-season",
+      "late_season": "Late season",
+      "dormancy": "Dormancy"
+    },
+    "stageLabel": {
+      "woody": {
+        "initial": "Initial (bud break)",
+        "development": "Development (flowering, fruit set)",
+        "mid_season": "Mid-season (fruit growth, ripening)",
+        "late_season": "Late season (after harvest, until leaf fall)",
+        "dormancy": "Dormancy (winter rest)"
+      },
+      "annual": {
+        "initial": "Initial (sowing, emergence)",
+        "development": "Development (canopy closing)",
+        "mid_season": "Mid-season (full cover, flowering)",
+        "late_season": "Late season (ripening, harvest)",
+        "dormancy": "Dormancy (no crop)"
+      }
+    },
+    "stageHelpLabel": "About growth stages",
+    "stageHelp": "FAO-56 growth stages set the crop coefficient Kc: initial until about 10 % ground cover, development until full cover, mid-season until maturity starts, late season until harvest or leaf fall. Dormancy (Kc 0.25) is for deciduous crops and annual rest periods; evergreens such as citrus, olive, coffee and banana keep their late-season Kc instead.",
+    "cropHelpLabel": "About the crop list",
+    "cropHelp": "Crop coefficients follow FAO-56 Table 12. The prediction advisor supports {{crops}} only.",
+    "cropOther": "Other crop",
+    "cropGroup": {
+      "small_vegetables": "Small vegetables",
+      "vegetables_solanum": "Tomato family",
+      "vegetables_cucumber": "Cucumber family",
+      "roots_tubers": "Roots and tubers",
+      "legumes": "Legumes",
+      "perennial_vegetables": "Perennial vegetables",
+      "fibre": "Fibre crops",
+      "oil_crops": "Oil crops",
+      "cereals": "Cereals",
+      "forages": "Forages",
+      "sugar_cane": "Sugarcane",
+      "tropical_fruits": "Tropical fruits and trees",
+      "grapes_berries": "Grapes and berries",
+      "fruit_trees": "Fruit trees",
+      "wetlands": "Wetlands"
     },
     "gps": {
       "available": "Available",
@@ -560,7 +657,21 @@
       "flowRateRequired": "Flow rate (L/min) is required to save irrigation calibration.",
       "flowRatePositive": "Flow rate (L/min) must be greater than 0.",
       "saveFailed": "Failed to save"
-    }
+    },
+    "weatherProvider": "Weather provider",
+    "weatherProviderHelpLabel": "About the weather provider",
+    "weatherProviderHelp": "Sets where this zone's hourly weather history comes from, and its daily ET0 unless an assigned weather station has a complete day, which takes precedence. MeteoSwiss covers Switzerland. With Local weather station only, the gateway downloads no weather history for this zone, so without an assigned station it gets no ET0. The weather forecast does not change.",
+    "weatherProviderOption": {
+      "auto": "Gateway default ({{provider}})",
+      "open_meteo": "Open-Meteo",
+      "meteoswiss": "MeteoSwiss",
+      "local": "Local weather station only"
+    },
+    "weatherProviderCloud": "{{value}} (cloud provider)",
+    "stageStartedOn": "Stage started on",
+    "stageStartedOnHelpLabel": "About the stage start date",
+    "stageStartedOnHelp": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop ({{days}} days) Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value.",
+    "stageStartedOnHelpNoLength": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value."
   },
   "irrigationOutcomes": {
     "title": "Okusukkulirira okusembayo",

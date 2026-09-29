@@ -500,6 +500,7 @@ type RawIrrigationZone = Omit<Partial<IrrigationZone>, 'schedule'> & {
   updated_at: string;
   schedule: RawIrrigationSchedule | null;
   variety_compat?: string | null;
+  weather_source_default?: 'open_meteo' | 'meteoswiss' | null;
 };
 
 function normaliseZone(z: RawIrrigationZone): IrrigationZone {
@@ -527,6 +528,9 @@ function normaliseZone(z: RawIrrigationZone): IrrigationZone {
     timezone:          z.timezone                                  ?? null,
     phenologicalStage: z.phenologicalStage ?? z.phenological_stage ?? null,
     calibrationKey:    z.calibrationKey    ?? z.calibration_key    ?? null,
+    stageStartedOn:    z.stageStartedOn    ?? z.stage_started_on   ?? null,
+    weatherSource:     z.weatherSource     ?? z.weather_source     ?? 'auto',
+    weatherSourceDefault: z.weatherSourceDefault ?? z.weather_source_default ?? 'open_meteo',
     predictionCardEnabled: z.predictionCardEnabled ?? z.prediction_card_enabled ?? false,
     gatewayDeviceEui:  z.gatewayDeviceEui  ?? z.gateway_device_eui ?? null,
     varietyCompat:     z.varietyCompat      ?? z.variety_compat       ?? z.variety ?? null,
@@ -624,6 +628,8 @@ export const irrigationZonesAPI = {
     phenologicalStage?: string | null;
     calibrationKey?: string | null;
     predictionCardEnabled?: boolean;
+    weatherSource?: string;
+    stageStartedOn?: string | null;
   }): Promise<IrrigationZone> => {
     const response = await api.put<IrrigationZone>(
       `/api/irrigation-zones/${zoneId}/config`,

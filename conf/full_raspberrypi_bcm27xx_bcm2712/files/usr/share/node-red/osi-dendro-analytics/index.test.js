@@ -178,3 +178,19 @@ test('irrigation decision helpers preserve schedule gating and rain suppression 
   assert.equal(suppressState.rain_suppression_active, 0);
   assert.deepEqual(logs, ['Zone: rain suppression exited — TWD responded']);
 });
+
+test('PHENO_MOD: FAO-56 stage keys, legacy keys through normalizeStage, and 1.0 for unset or unknown', () => {
+  const DA = require('./index');
+  const fao = { initial: 0.8, development: 0.8, mid_season: 1.0, late_season: 1.3, dormancy: 1.5 };
+  for (const [stage, mod] of Object.entries(fao)) assert.equal(DA.PHENO_MOD[stage], mod, stage);
+  const legacy = { budbreak: 0.8, bud_break: 0.8, fruitset: 0.8, cell_division: 0.8, cell_expansion: 0.8, veraison: 1.0, fruit_maturation: 1.0, harvest: 1.3, post_harvest: 1.3, dormancy: 1.5 };
+  for (const [stage, mod] of Object.entries(legacy)) assert.equal(DA.PHENO_MOD[stage], mod, stage);
+  for (const unset of ['default', 'null', 'undefined', '', 'flowering', 'unset']) assert.equal(DA.PHENO_MOD[unset], 1.0, unset);
+  assert.equal(DA.phenoModFor(null), 1.0);
+  assert.equal(DA.phenoModFor(undefined), 1.0);
+  assert.equal(DA.phenoModFor(' Mid_Season '), 1.0);
+  assert.equal(DA.phenoModFor(' Late_Season '), 1.3);
+  // The flow node's exact expression, for a zone upgraded by migration 0064.
+  const stored = 'late_season';
+  assert.equal(DA.PHENO_MOD[stored] || 1.0, 1.3);
+});

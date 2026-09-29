@@ -188,6 +188,8 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // land/network-observations-v1), DeviceRevisionMirrorApplier.
   'DEVICE_INSTALLATION_LOCATION_REVISED',
   'DEVICE_RADIO_CONFIGURATION_REVISED',
+  // Emitted by 0065__zone_daily_agronomy_sync.sql's trg_dp_zone_agronomy_outbox_* triggers, not by flows.json.
+  'ZONE_AGRONOMY_UPSERTED',
 ]);
 // Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
 // "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living
@@ -596,14 +598,43 @@ function parseSqlStringLiteral(source) {
   return null;
 }
 
+// The result expressions of a top-level CASE ... END (every THEN branch and the ELSE
+// branch), or null when the expression is not one. A CASE without ELSE can yield NULL,
+// so it returns no branches and the payload counts as missing contract_version.
+function caseResultExpressions(expression) {
+  const source = expression.trim();
+  if (!/^CASE\b/i.test(source) || !/\bEND$/i.test(source)) return null;
+  const body = source.slice(4, source.length - 3);
+  const elseAt = findTopLevelKeyword(body, 'ELSE', 0);
+  if (elseAt < 0) return [];
+  const results = [];
+  let at = 0;
+  for (;;) {
+    const thenAt = findTopLevelKeyword(body, 'THEN', at);
+    if (thenAt < 0 || thenAt > elseAt) break;
+    const nextWhen = findTopLevelKeyword(body, 'WHEN', thenAt + 4);
+    const stop = nextWhen >= 0 && nextWhen < elseAt ? nextWhen : elseAt;
+    results.push(body.slice(thenAt + 4, stop).trim());
+    at = stop;
+  }
+  results.push(body.slice(elseAt + 4).trim());
+  return results;
+}
+
 function payloadHasTopLevelContractVersion(payloadExpression) {
+  // 0065's zone update trigger picks its payload with CASE WHEN <weather_source rule>
+  // THEN json_patch(json_object(...), json_object('weather_source', ...)) ELSE
+  // json_object(...) END: every branch must carry contract_version.
+  const branches = caseResultExpressions(payloadExpression);
+  if (branches !== null) return branches.length > 0 && branches.every(payloadHasTopLevelContractVersion);
   let argsSource = readTopLevelFunctionArgs(payloadExpression, 'json_object');
   if (argsSource === null) {
     // The sqlite-arg-limit gate mandates splitting over-limit payloads as
     // json_insert(json_object(...), '$.k', v, ...) (see verify-sqlite-cli-limits.js
     // and lib/osi-migrate/runner-iface.js). contract_version stays in the inner
     // json_object, so unwrap one json_insert/json_set layer and check there.
-    for (const wrapper of ['json_insert', 'json_set']) {
+    // json_patch(target, patch) keeps the target's members, so it reads the same way.
+    for (const wrapper of ['json_insert', 'json_set', 'json_patch']) {
       const wrapped = readTopLevelFunctionArgs(payloadExpression, wrapper);
       if (wrapped !== null) {
         const inner = splitTopLevelComma(wrapped)[0];

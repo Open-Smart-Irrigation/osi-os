@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { IrrigationZone, ZoneRecommendation } from '../../types/farming';
 import { dendroAnalyticsAPI, irrigationZonesAPI } from '../../services/api';
+import { STAGES, normalizeStage } from '../../agronomy/cropKc';
+import { stageOptionLabel } from '../../agronomy/stageLabels';
+import { HelpTip } from './shared/HelpTip';
 
 interface Props {
   isOpen: boolean;
@@ -22,15 +25,6 @@ const CALIBRATION_KEYS = [
   { value: 'apple',     label: 'Apple' },
   { value: 'grapevine', label: 'Grapevine' },
   { value: 'olive',     label: 'Olive' },
-];
-
-const PHENOLOGICAL_STAGES = [
-  { value: 'default',   label: 'Default' },
-  { value: 'dormancy',  label: 'Dormancy' },
-  { value: 'budbreak',  label: 'Bud break / flowering' },
-  { value: 'fruitset',  label: 'Fruit set' },
-  { value: 'veraison',  label: 'Veraison / ripening' },
-  { value: 'harvest',   label: 'Harvest / post-harvest' },
 ];
 
 const RESPONSE_MODES = [
@@ -85,7 +79,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
   const isDendro = (sched?.triggerMetric ?? sched?.trigger_metric) === 'DENDRO';
 
   // Phenology & calibration — saved via updateConfig
-  const [phenoStage, setPhenoStage] = useState(zone.phenologicalStage ?? 'default');
+  const [phenoStage, setPhenoStage] = useState<string>(normalizeStage(zone.phenologicalStage) ?? '');
   const [calibKey, setCalibKey]     = useState(zone.calibrationKey ?? 'default');
   const [configSaving, setConfigSaving] = useState(false);
 
@@ -97,7 +91,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
   const [schedSuccess, setSchedSuccess] = useState('');
 
   useEffect(() => {
-    setPhenoStage(zone.phenologicalStage ?? 'default');
+    setPhenoStage(normalizeStage(zone.phenologicalStage) ?? '');
     setCalibKey(zone.calibrationKey ?? 'default');
     setDuration(sched?.durationMinutes ?? sched?.duration_minutes ?? 20);
     setResponseMode(sched?.responseMode ?? sched?.response_mode ?? 'proportional');
@@ -151,14 +145,25 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
       <Section title={t('advancedSchedule.sectionPhenology', 'Phenology')}>
         <div className="py-2 space-y-2">
           <div>
-            <p className="text-xs text-[var(--text-secondary)] mb-1">Phenological stage</p>
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-[var(--text-secondary)]">{t('zoneConfig.phenologicalStage', { defaultValue: 'Phenological stage' })}</p>
+              <HelpTip label={t('zoneConfig.stageHelpLabel', { defaultValue: 'About growth stages' })}>
+                {t('zoneConfig.stageHelp', {
+                  defaultValue: 'FAO-56 growth stages set the crop coefficient Kc: initial until about 10 % ground cover, development until full cover, mid-season until maturity starts, late season until harvest or leaf fall. Dormancy (Kc 0.25) is for deciduous crops and annual rest periods; evergreens such as citrus, olive, coffee and banana keep their late-season Kc instead.',
+                })}
+              </HelpTip>
+            </div>
             <select
+              aria-label={t('zoneConfig.phenologicalStage', { defaultValue: 'Phenological stage' })}
               value={phenoStage}
               disabled={configSaving}
-              onChange={e => { setPhenoStage(e.target.value); handleConfigSave('phenologicalStage', e.target.value); }}
+              onChange={e => { setPhenoStage(e.target.value); handleConfigSave('phenologicalStage', e.target.value || 'default'); }}
               className="w-full bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-1.5 text-xs"
             >
-              {PHENOLOGICAL_STAGES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              <option value="">{t('zoneConfig.stage.unset', { defaultValue: 'Not set' })}</option>
+              {STAGES.map(stage => (
+                <option key={stage} value={stage}>{stageOptionLabel(t, zone.cropType, stage)}</option>
+              ))}
             </select>
           </div>
           <div>

@@ -39,7 +39,9 @@
       "fifteenMinute": "15 minutes",
       "hourly": "Horaire",
       "daily": "Quotidienne",
-      "weekly": "Hebdomadaire"
+      "weekly": "Hebdomadaire",
+      "helpLabel": "À propos de l'agrégation",
+      "help": "En agrégation brute, chaque point est à l'heure de la mesure ; en agrégation de 15 minutes, horaire, quotidienne ou hebdomadaire, il est au début de sa période, et pour les sources météo un jour est le jour local de la zone. La pluie, l'ET0 et l'ETc d'un fournisseur météo, des valeurs horaires d'une station ou de « daily agronomy » sont des totaux pour cette période ; les autres valeurs sont des moyennes. La température, l'humidité et le vent horaires d'Open-Meteo sont des valeurs à l'heure affichée. Les sources météo ont une résolution d'une heure au mieux, d'un jour pour « daily agronomy »."
     },
     "preset": {
       "metricLabel": "Métrique entre zones"
@@ -102,6 +104,10 @@
       "droppedPairs": "Ignorés",
       "insufficient": "insuffisant (n={{n}})",
       "exploratory": "Exploratoire uniquement — r de Pearson sur des buckets alignés ; pas un test de signification."
+    },
+    "tooltip": {
+      "partialHours": " ({{count}} sur {{expected}} h)",
+      "partialDays": " ({{count}} sur {{expected}} j)"
     }
   },
   "restart": {

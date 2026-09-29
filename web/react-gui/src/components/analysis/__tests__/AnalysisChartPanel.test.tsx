@@ -24,14 +24,14 @@ import type { AnalysisSeries } from '../../../analysis/types';
 function s(id: string, unit: string): AnalysisSeries {
   return {
     seriesId: id, resolved: { hubEui: null, zoneId: 1, cardType: 'soil', sourceKey: 'root-zone', channelKey: id },
-    label: id, unit, coveragePct: 100, points: [{ t: '2026-06-18T00:00:00Z', value: 1, count: 1, quality: 'ok' }], truncated: false,
+    label: id, unit, coveragePct: 100, points: [{ t: '2026-06-18T00:00:00Z', value: 1, count: 1, quality: 'ok' }], truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
 function mkSeries(id: string, channelKey: string, unit: string): AnalysisSeries {
   return {
     seriesId: id, resolved: { hubEui: null, zoneId: 1, cardType: 'soil', sourceKey: 'root-zone', channelKey },
-    label: id, unit, coveragePct: 100, points: [{ t: '2026-06-18T00:00:00Z', value: 1, count: 1, quality: 'ok' }], truncated: false,
+    label: id, unit, coveragePct: 100, points: [{ t: '2026-06-18T00:00:00Z', value: 1, count: 1, quality: 'ok' }], truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
@@ -70,7 +70,7 @@ describe('AnalysisChartPanel', () => {
   it('routes small-multiples layout to the small-multiples builder with normalize', () => {
     const series = [mkSeries('a', 'swt_1', 'kPa')];
     render(<AnalysisChartPanel series={series} mode="timeline" layout="small-multiples" toggles={{ normalize: true }} channelMeta={new Map()} resolveAxisLabel={(k) => k} />);
-    expect(buildSmallMultiplesOption).toHaveBeenCalledWith(series, true, expect.any(Function));
+    expect(buildSmallMultiplesOption).toHaveBeenCalledWith(series, true, expect.any(Function), expect.any(Function));
     expect(buildTimeSeriesOption).not.toHaveBeenCalled();
   });
 
@@ -109,5 +109,16 @@ describe('AnalysisChartPanel', () => {
     fireEvent.change(input, { target: { value: 'Soil tension' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onAxisRename).toHaveBeenCalledWith('swt_1', 'Soil tension');
+  });
+
+  it('hands the builders a partial formatter that counts hours, or days for daily agronomy', () => {
+    const rain: AnalysisSeries = { ...s('rain', 'mm/d'), cadence: 'daily' };
+    render(<AnalysisChartPanel series={[rain]} mode="timeline" layout="stacked" toggles={{ normalize: false }} channelMeta={new Map()} />);
+    const { formatPartial } = vi.mocked(buildTimeSeriesOption).mock.calls[0][0];
+    const partial = { t: '2026-09-24T22:00:00.000Z', value: 2.3, count: 23, expected: 24, quality: 'partial' };
+    expect(formatPartial?.(partial, rain)).toBe('analysis.tooltip.partialHours');
+    const agronomy: AnalysisSeries = { ...rain, resolved: { ...rain.resolved, sourceKey: 'agronomy-src-zone' } };
+    expect(formatPartial?.({ ...partial, count: 6, expected: 7 }, agronomy)).toBe('analysis.tooltip.partialDays');
+    expect(formatPartial?.({ ...partial, quality: null }, rain)).toBe('');
   });
 });

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "case": "shared-server",
+  "fixedNow": "2026-07-11T10:00:00.000Z",
+  "request": {
+    "zone_id": 1,
+    "userId": 1
+  },
+  "seed": {
+    "user": "fixture-user",
+    "zone": "Vector Zone",
+    "devices": [
+      "S2120VECTOR0001",
+      "KIWIVECTOR00001"
+    ],
+    "waterDates": [
+      "2026-07-09",
+      "2026-07-10",
+      "2026-07-11"
+    ],
+    "estimatedValveLiters": 12
+  },
+  "httpStubs": {
+    "provider": "open-meteo",
+    "currentTime": "2026-07-11T10:00",
+    "forecastHours": [
+      "2026-07-11T10:00",
+      "2026-07-11T13:00",
+      "2026-07-11T16:00"
+    ]
+  },
+  "seedRows": {
+    "userUpdate": {
+      "auth_mode": "server",
+      "server_url": "https://cloud.example.test",
+      "server_sync_token": "vector-token"
+    },
+    "rows": {
+      "zone_daily_agronomy": [
+        {
+          "zone_id": 1,
+          "date": "2026-07-08",
+          "et0_mm": 5,
+          "et0_source": "station_fao56",
+          "et0_tier": "station_fao56",
+          "et0_station_id": "S2120VECTOR0001",
+          "location_key": null,
+          "kc": 1.2,
+          "kc_source": "fao56_crop",
+          "crop_type": "maize",
+          "phenological_stage": "mid_season",
+          "etc_mm": 6,
+          "hours_present": 24,
+          "expected_hours": 24,
+          "null_reason": null,
+          "computed_at": "2026-07-11T08:00:00.000Z"
+        }
+      ],
+      "zone_shared_environment": [
+        {
+          "zone_uuid": "zone-env-vector-zone",
+          "zone_id": 1,
+          "gateway_device_eui": "0016C001F1000001",
+          "summary_json": "{\"zoneId\":1,\"zoneName\":\"Vector Zone\",\"water\":{\"available\":true,\"waterNeededTodayMm\":3.1,\"rainTodayMm\":0.8,\"rainSource\":\"gauge\",\"daily\":[{\"date\":\"2026-07-05\",\"rainMm\":0.4,\"irrigationLiters\":0,\"irrigationNetMm\":0,\"totalWaterMm\":0.4},{\"date\":\"2026-07-06\",\"rainMm\":0.4,\"irrigationLiters\":0,\"irrigationNetMm\":0,\"totalWaterMm\":0.4},{\"date\":\"2026-07-07\",\"rainMm\":0.4,\"irrigationLiters\":0,\"irrigationNetMm\":0,\"totalWaterMm\":0.4},{\"date\":\"2026-07-08\",\"rainMm\":0.4,\"irrigationLiters\":0,\"irrigationNetMm\":0,\"totalWaterMm\":0.4},{\"date\":\"2026-07-09\",\"rainMm\":0.4,\"irrigationLiters\":0,\"irrigationNetMm\":0,\"totalWaterMm\":0.4},{\"date\":\"2026-07-10\",\"rainMm\":0.4,\"irrigationLiters\":0,\"irrigationNetMm\":0,\"totalWaterMm\":0.4},{\"date\":\"2026-07-11\",\"rainMm\":0.4,\"irrigationLiters\":0,\"irrigationNetMm\":0,\"totalWaterMm\":0.4}]}}",
+          "shared_generated_at": "2026-07-11T09:57:00.000Z",
+          "shared_observed_at": "2026-07-11T09:57:00.000Z",
+          "last_received_at": "2026-07-11T09:58:00.000Z"
+        }
+      ]
+    },
+    "cloudBundle": {
+      "zoneId": 1,
+      "zoneName": "Vector Zone",
+      "water": {
+        "available": true,
+        "waterNeededTodayMm": 3.1,
+        "rainTodayMm": 0.8,
+        "rainSource": "gauge",
+        "daily": [
+          {
+            "date": "2026-07-05",
+            "rainMm": 0.4,
+            "irrigationLiters": 0,
+            "irrigationNetMm": 0,
+            "totalWaterMm": 0.4
+          },
+          {
+            "date": "2026-07-06",
+            "rainMm": 0.4,
+            "irrigationLiters": 0,
+            "irrigationNetMm": 0,
+            "totalWaterMm": 0.4
+          },
+          {
+            "date": "2026-07-07",
+            "rainMm": 0.4,
+            "irrigationLiters": 0,
+            "irrigationNetMm": 0,
+            "totalWaterMm": 0.4
+          },
+          {
+            "date": "2026-07-08",
+            "rainMm": 0.4,
+            "irrigationLiters": 0,
+            "irrigationNetMm": 0,
+            "totalWaterMm": 0.4
+          },
+          {
+            "date": "2026-07-09",
+            "rainMm": 0.4,
+            "irrigationLiters": 0,
+            "irrigationNetMm": 0,
+            "totalWaterMm": 0.4
+          },
+          {
+            "date": "2026-07-10",
+            "rainMm": 0.4,
+            "irrigationLiters": 0,
+            "irrigationNetMm": 0,
+            "totalWaterMm": 0.4
+          },
+          {
+            "date": "2026-07-11",
+            "rainMm": 0.4,
+            "irrigationLiters": 0,
+            "irrigationNetMm": 0,
+            "totalWaterMm": 0.4
+          }
+        ]
+      }
+    }
+  }
+}

@@ -6,7 +6,7 @@ function s(seriesId: string, unit: string | null): AnalysisSeries {
   return {
     seriesId,
     resolved: { hubEui: null, zoneId: 1, cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1' },
-    label: seriesId, unit, coveragePct: 100, points: [], truncated: false,
+    label: seriesId, unit, coveragePct: 100, points: [], truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
@@ -23,6 +23,12 @@ describe('unitGrouping', () => {
     expect(panels.map((p) => p.unit)).toEqual(['kPa', 'C']);
     expect(panels[0].seriesIds).toEqual(['a', 'c']);
     expect(panels[1].seriesIds).toEqual(['b']);
+    expect(isOverlay(panels)).toBe(false);
+  });
+
+  it('keeps daily totals and hourly rain on separate panels', () => {
+    const panels = groupByUnit([s('daily-rain', 'mm/d'), s('hourly-rain', 'mm/h')]);
+    expect(panels.map((p) => p.unit)).toEqual(['mm/d', 'mm/h']);
     expect(isOverlay(panels)).toBe(false);
   });
 });

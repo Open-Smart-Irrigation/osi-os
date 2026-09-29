@@ -183,3 +183,191 @@ test('the shipped profiles issue the same zone UPDATE statements', () => {
       `${nodeId} must build the same statement in both profiles`);
   }
 });
+
+// Stage start date on the zone write route and the zone list (spec
+// docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md, B5). The
+// shipped zone-config-fn source runs through scripts/lib/scoped-access-harness.js
+// against an in-memory seed, so the assertions are about the stored row.
+const { executeFunction, loadNode, makeAuthHeader } = require('./lib/scoped-access-harness');
+const SEED_SQL = fs.readFileSync(path.join(REPO, 'database/seed-blank.sql'), 'utf8');
+const ROUTE_SECRET = 'zone-stage-started-on-secret';
+
+function routeDb({ stage = 'development', startedOn = '2026-05-01' } = {}) {
+  const db = new DatabaseSync(':memory:');
+  db.exec(SEED_SQL);
+  db.exec("INSERT INTO users(id, username, password_hash, created_at) VALUES (7, 'grower', 'x', '2026-01-01')");
+  db.prepare('INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, gateway_device_eui, sync_version, timezone, '
+    + "phenological_stage, stage_started_on, created_at, updated_at) VALUES (11, 'North', 7, ?, ?, 3, 'UTC', ?, ?, '2026-01-01', '2026-01-01')")
+    .run(ZONE_UUID, GATEWAY, stage, startedOn);
+  return db;
+}
+
+async function putConfig(db, body) {
+  const run = await executeFunction(loadNode('zone-config-fn'), {
+    msg: {
+      req: { headers: { authorization: makeAuthHeader({ userId: 7, username: 'grower', secret: ROUTE_SECRET }) }, params: { zone_id: '11' }, body },
+      payload: {},
+    },
+    env: { AUTH_TOKEN_SECRET: ROUTE_SECRET },
+    db,
+  });
+  return run.result;
+}
+
+function storedZone(db) {
+  return { ...db.prepare('SELECT phenological_stage, stage_started_on, sync_version FROM irrigation_zones WHERE id = 11').get() };
+}
+
+// Today in a timezone, read the way the node reads it. A test reads it before and
+// after a call and accepts either, so a midnight during the run cannot fail it.
+function localToday(timezone) {
+  const p = {};
+  for (const part of new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())) p[part.type] = part.value;
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+test('zone-config-fn sets a valid start date, bumps sync_version and returns it; the snake-case key works too', async () => {
+  const db = routeDb({ startedOn: null });
+  try {
+    const response = await putConfig(db, { stageStartedOn: '2026-05-01' });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(storedZone(db), { phenological_stage: 'development', stage_started_on: '2026-05-01', sync_version: 4 });
+    assert.equal(response.payload.stage_started_on, '2026-05-01');
+    assert.equal((await putConfig(db, { stage_started_on: '2026-06-02' })).statusCode, 200);
+    assert.equal(storedZone(db).stage_started_on, '2026-06-02');
+  } finally {
+    db.close();
+  }
+});
+
+test('zone-config-fn clears the date for null and empty, and refuses anything that is not a calendar date', async () => {
+  const db = routeDb();
+  try {
+    assert.equal((await putConfig(db, { stageStartedOn: null })).statusCode, 200);
+    assert.equal(storedZone(db).stage_started_on, null);
+    db.exec("UPDATE irrigation_zones SET stage_started_on = '2026-05-01' WHERE id = 11");
+    assert.equal((await putConfig(db, { stageStartedOn: '' })).statusCode, 200);
+    assert.equal(storedZone(db).stage_started_on, null);
+    db.exec("UPDATE irrigation_zones SET stage_started_on = '2026-05-01', sync_version = 3 WHERE id = 11");
+    for (const bad of ['2026-02-30', '05/01/2026', '2026-5-1', 'yesterday', 20260501]) {
+      const response = await putConfig(db, { stageStartedOn: bad, notes: 'not saved' });
+      assert.equal(response.statusCode, 400, String(bad));
+      assert.deepEqual(response.payload, { error: 'stageStartedOn must be YYYY-MM-DD or null' });
+    }
+    assert.deepEqual(storedZone(db), { phenological_stage: 'development', stage_started_on: '2026-05-01', sync_version: 3 });
+  } finally {
+    db.close();
+  }
+});
+
+test('zone-config-fn: a change from a set stage to unset clears the date, whatever the request says about it', async () => {
+  const db = routeDb();
+  try {
+    assert.equal((await putConfig(db, { phenologicalStage: 'default', stageStartedOn: '2026-05-01' })).statusCode, 200);
+    assert.deepEqual(storedZone(db), { phenological_stage: 'default', stage_started_on: null, sync_version: 4 });
+  } finally {
+    db.close();
+  }
+  const legacy = routeDb({ stage: 'veraison' });
+  try {
+    assert.equal((await putConfig(legacy, { phenologicalStage: null })).statusCode, 200);
+    assert.equal(storedZone(legacy).stage_started_on, null, 'a legacy stored key counts as set');
+  } finally {
+    legacy.close();
+  }
+});
+
+test('zone-config-fn: an unrelated save keeps the date, also when it repeats the stored stage or an unset stage', async () => {
+  const db = routeDb();
+  try {
+    assert.equal((await putConfig(db, { notes: 'north block' })).statusCode, 200);
+    assert.equal(storedZone(db).stage_started_on, '2026-05-01');
+    assert.equal((await putConfig(db, { phenologicalStage: 'development', notes: 'same stage' })).statusCode, 200);
+    assert.deepEqual(storedZone(db), { phenological_stage: 'development', stage_started_on: '2026-05-01', sync_version: 5 });
+  } finally {
+    db.close();
+  }
+  const unset = routeDb({ stage: 'default', startedOn: '2026-04-01' });
+  try {
+    assert.equal((await putConfig(unset, { phenologicalStage: 'default', notes: 'x' })).statusCode, 200);
+    assert.equal(storedZone(unset).stage_started_on, '2026-04-01', 'the stored stage was already unset: nothing to clear');
+  } finally {
+    unset.close();
+  }
+});
+
+test('zone-config-fn: another set stage without a date starts on the zone-local today; the same stage keeps it; a supplied date wins', async () => {
+  // Controller ruling on plan review E2 I2. A UTC+14 zone: its date, not the gateway's.
+  const db = routeDb();
+  try {
+    db.exec("UPDATE irrigation_zones SET timezone = 'Pacific/Kiritimati' WHERE id = 11");
+    const before = localToday('Pacific/Kiritimati');
+    assert.equal((await putConfig(db, { phenologicalStage: 'late_season' })).statusCode, 200);
+    assert.ok([before, localToday('Pacific/Kiritimati')].includes(storedZone(db).stage_started_on), storedZone(db).stage_started_on);
+    db.exec("UPDATE irrigation_zones SET stage_started_on = '2026-08-01' WHERE id = 11");
+    assert.equal((await putConfig(db, { phenologicalStage: 'harvest', notes: 'harvest is late season' })).statusCode, 200);
+    assert.equal(storedZone(db).stage_started_on, '2026-08-01', 'a legacy key of the same stage keeps the date');
+    assert.equal((await putConfig(db, { phenologicalStage: 'mid_season', stageStartedOn: '2026-07-15' })).statusCode, 200);
+    assert.equal(storedZone(db).stage_started_on, '2026-07-15', 'a supplied date wins');
+  } finally {
+    db.close();
+  }
+  // Unset to a set stage is a change too; the request's timezone wins over the stored one.
+  const unset = routeDb({ stage: 'default', startedOn: null });
+  try {
+    const before = localToday('Pacific/Kiritimati');
+    assert.equal((await putConfig(unset, { phenologicalStage: 'initial', timezone: 'Pacific/Kiritimati' })).statusCode, 200);
+    assert.ok([before, localToday('Pacific/Kiritimati')].includes(storedZone(unset).stage_started_on), storedZone(unset).stage_started_on);
+  } finally {
+    unset.close();
+  }
+});
+
+test('the zone list returns stage_started_on', async () => {
+  const db = routeDb();
+  try {
+    const query = await executeFunction(loadNode('get-zones-query'), { msg: { payload: [{ id: 7 }] }, env: {}, db });
+    const response = await executeFunction(loadNode('get-zones-response'), { msg: query.result[0], env: {}, db });
+    assert.equal(response.result.payload[0].stage_started_on, '2026-05-01');
+    db.exec('UPDATE irrigation_zones SET stage_started_on = NULL WHERE id = 11');
+    const again = await executeFunction(loadNode('get-zones-query'), { msg: { payload: [{ id: 7 }] }, env: {}, db });
+    assert.equal((await executeFunction(loadNode('get-zones-response'), { msg: again.result[0], env: {}, db })).result.payload[0].stage_started_on, null);
+  } finally {
+    db.close();
+  }
+});
+
+// The scheduled bootstrap snapshot carries the zone's stage start date, so a
+// cloud that missed the event learns it within one bootstrap (spec B5).
+async function bootstrapPayload(db) {
+  // The bootstrap is built only for a cloud-linked account.
+  db.exec("UPDATE users SET auth_mode = 'server', server_url = 'https://cloud.example.test', server_sync_token = 'fixture-token', user_uuid = COALESCE(user_uuid, '55555555-5555-4555-8555-555555555555') WHERE id = 7");
+  const run = await executeFunction(loadNode('sync-bootstrap-build'), {
+    msg: {},
+    env: { DEVICE_EUI: GATEWAY, DEVICE_EUI_SOURCE: 'fixture', DEVICE_EUI_CONFIDENCE: 'authoritative' },
+    db,
+    osiLibModules: { installation: require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper') },
+    globals: { fs: { existsSync: () => false, readFileSync: () => { const error = new Error('ENOENT'); error.code = 'ENOENT'; throw error; } } },
+  });
+  assert.ok(run.result && run.result.payload, 'the bootstrap node must build a payload: ' + run.warnings.join('; '));
+  return run.result.payload;
+}
+
+test('the bootstrap snapshot carries stage_started_on and advertises zone_config_stage_started_on_v1', async () => {
+  const db = routeDb();
+  try {
+    db.exec(`INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '${GATEWAY}', '2026-01-01')`);
+    const payload = await bootstrapPayload(db);
+    assert.equal(payload.zones.find((z) => z.zone_uuid === ZONE_UUID).stage_started_on, '2026-05-01');
+    assert.ok(payload.gatewayIdentity.syncCapabilities.includes('zone_config_weather_source_v1'));
+    assert.ok(payload.gatewayIdentity.syncCapabilities.includes('zone_config_stage_started_on_v1'));
+    // An ordinary field: present on every zone, null when unset. weather_source keeps
+    // sub-project 3's rule (absent while the zone is on 'auto').
+    db.exec('UPDATE irrigation_zones SET stage_started_on = NULL WHERE id = 11');
+    const unset = (await bootstrapPayload(db)).zones.find((z) => z.zone_uuid === ZONE_UUID);
+    assert.ok(Object.prototype.hasOwnProperty.call(unset, 'stage_started_on') && unset.stage_started_on === null);
+    assert.ok(!Object.prototype.hasOwnProperty.call(unset, 'weather_source'));
+  } finally {
+    db.close();
+  }
+});

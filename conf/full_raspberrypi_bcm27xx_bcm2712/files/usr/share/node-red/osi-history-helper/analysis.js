@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { SOURCE_KINDS, providerSourceName, createWeatherSources } = require('./analysis-sources');
 
 const CHANNELS = [
   { key: 'swt_1', unit: 'kPa', label: 'Soil tension (S1)', cardType: 'soil', edgeField: 'swt_1', exportable: true, deprecated: false },
@@ -64,6 +65,9 @@ const CHANNELS = [
   { key: 'flow_pulses_delta', unit: 'count', label: 'Flow pulses', cardType: 'environment', edgeField: 'flow_pulses_delta', exportable: true, deprecated: false },
   { key: 'wind_direction_deg', unit: '°', label: 'Wind direction', cardType: 'environment', edgeField: 'wind_direction_deg', exportable: true, deprecated: false },
   { key: 'pipe_pressure_kpa', unit: 'kPa', label: 'Pipe pressure', cardType: 'environment', edgeField: 'pipe_pressure_kpa', exportable: true, deprecated: false },
+  { key: 'global_radiation_wm2', unit: 'W/m²', label: 'Global radiation', cardType: 'environment', edgeField: null, exportable: true, deprecated: false },
+  { key: 'et0_mm', unit: 'mm', label: 'Reference ET (ET0)', cardType: 'environment', edgeField: null, exportable: true, deprecated: false },
+  { key: 'etc_mm', unit: 'mm', label: 'Crop water demand (ETc)', cardType: 'environment', edgeField: null, exportable: true, deprecated: false },
 ];
 
 const CHANNELS_BY_KEY = new Map(CHANNELS.map((channel) => [channel.key, channel]));
@@ -72,6 +76,11 @@ const MAX_SELECTED_SERIES = 25;
 const MAX_RAW_ROWS = 30000;
 const MAX_RANGE_DAYS = 400;
 const MAX_VIEW_NAME_LENGTH = 120;
+
+// SOURCE_KINDS (the per-table/channel shape used by the weather path) and
+// the weather-table reader functions live in analysis-sources.js (final fix
+// A7, queue T3 advice): this file crossed 800 lines once the final fix
+// wave's items landed. See that file for the shape and its spec reference.
 
 const ANALYSIS_VIEWS_SCHEMA = `CREATE TABLE IF NOT EXISTS analysis_views (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,6 +102,48 @@ function analysisSeriesId(zoneId, cardType, sourceKey, channelKey) {
     .slice(0, 16);
 }
 
+// One catalogue entry literal, shared by the device path and every
+// addWeatherSource() channel (final review, queue T3 N2): both built the
+// same twelve-field shape by hand.
+function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta, deviceName, availability, depthCm, sourceKind }) {
+  return {
+    seriesId: analysisSeriesId(zone.id, cardType, sourceKey, channelKey),
+    hubEui,
+    zoneId: zone.id,
+    zoneName: zone.name || null,
+    cardType,
+    sourceKey,
+    channelKey,
+    displayName: [deviceName, meta.label].filter(Boolean).join(' - '),
+    unit: meta.unit,
+    availability,
+    deviceName,
+    depthCm,
+    sourceKind,
+  };
+}
+
+// One series envelope, shared by the device path and weatherSeries() (final
+// review, queue T3 N2): both built the same seven-field response shape.
+function buildSeriesEnvelope(entry, { unit, points, cadence }) {
+  return {
+    seriesId: entry.seriesId,
+    resolved: {
+      hubEui: entry.hubEui,
+      zoneId: entry.zoneId,
+      cardType: entry.cardType,
+      sourceKey: entry.sourceKey,
+      channelKey: entry.channelKey,
+    },
+    label: entry.displayName,
+    unit,
+    points,
+    truncated: false,
+    cadence,
+    timezone: entry.timezone,
+  };
+}
+
 function normalizeCardType(value) {
   const cardType = String(value || '').trim().toLowerCase();
   return cardType === 'env' ? 'environment' : cardType;
@@ -102,10 +153,17 @@ function boolFlag(value) {
   return value === true || value === 1 || String(value || '').toLowerCase() === 'true';
 }
 
+// Spec docs/superpowers/specs/2026-09-27-weather-data-view-design.md
+// ("Catalogue entries"): these channels exist only in the weather tables, so
+// no device source lists them. vwc (edgeField null) stays listed as an
+// unsupported soil row, so the rule is this named set and not "edgeField".
+const DEVICE_EXCLUDED_CHANNELS = new Set(['global_radiation_wm2', 'et0_mm', 'etc_mm']);
+
 function cardChannels(cardType) {
   const normalized = normalizeCardType(cardType);
   return CHANNELS
     .filter((channel) => channel.cardType === normalized && channel.exportable !== false && channel.deprecated !== true)
+    .filter((channel) => !DEVICE_EXCLUDED_CHANNELS.has(channel.key))
     .map((channel) => channel.key);
 }
 
@@ -229,7 +287,13 @@ function normalizeRange(range = {}) {
   };
 }
 
-function aggToPoints(aggregate, channelKey) {
+// Without `spec` this is the device path, unchanged: the bucket mean, the
+// bucket's sample count and the cadence confidence. With `spec` (the weather
+// kinds) a 'sum' channel reports the bucket total, a 'mean' channel the
+// bucket mean, and EVERY channel -- final review I2 -- is marked partial
+// when the bucket holds fewer rows than `expected` (a daily mean of 9 of 24
+// hours is a partial mean, not a full day's mean).
+function aggToPoints(aggregate, channelKey, spec) {
   const rawPoints = aggregate && aggregate.series && aggregate.series[channelKey] && aggregate.series[channelKey].points;
   if (Array.isArray(rawPoints)) {
     return rawPoints.map((point) => ({
@@ -241,13 +305,28 @@ function aggToPoints(aggregate, channelKey) {
   }
   return (aggregate && aggregate.buckets || []).map((bucket) => {
     const stats = bucket.series && bucket.series[channelKey] || {};
+    if (!spec) {
+      return {
+        t: bucket.bucketStart,
+        value: stats.mean ?? null,
+        count: Number(stats.sampleCount || 0),
+        quality: bucket.coverageConfidence || null,
+      };
+    }
+    const count = Number(stats.sampleCount || 0);
+    const expected = Number.isInteger(spec.expected) ? spec.expected : null;
     return {
       t: bucket.bucketStart,
-      value: stats.mean ?? null,
-      count: Number(stats.sampleCount || 0),
-      quality: bucket.coverageConfidence || null,
+      value: (spec.stat === 'sum' ? stats.sum : stats.mean) ?? null,
+      count,
+      expected,
+      quality: expected !== null && count > 0 && count < expected ? 'partial' : null,
     };
   });
+}
+
+function sha256Hex(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
 function userIdFor(input = {}) {
@@ -337,12 +416,31 @@ function createAnalysis(deps) {
     dbAll,
     deriveCardsForZone,
     displayDeviceName,
+    localDateKey,
     normalizeDeveui,
+    normalizeTimezone,
     resolveAggregation,
     soilDepthCm,
     sourceDevicesForCard,
     sourceKeyForCsv,
+    zoneDateStartIso,
+    zoneLocations,
   } = deps || {};
+
+  // One warning for the life of this createAnalysis() instance (index.js
+  // builds exactly one in a running gateway process, final fix A4).
+  let weatherTablesMissingWarned = false;
+
+  // The weather-table readers (final fix A7, analysis-sources.js): they use
+  // the two response builders above, so those are passed in as deps rather
+  // than duplicated.
+  const {
+    weatherTablesPresent,
+    loadZoneWeather,
+    loadZoneStations,
+    readWeatherRows,
+    weatherSeries,
+  } = createWeatherSources({ dbAll, zoneLocations, localDateKey, zoneDateStartIso, aggregateRows, buildSeriesEnvelope, aggToPoints });
 
   async function buildAnalysisCatalog(db, options = {}) {
     const hubEui = String(options.deviceEui || options.device_eui || '').trim().toUpperCase();
@@ -363,8 +461,28 @@ function createAnalysis(deps) {
         : [];
     const channels = [];
     const entriesById = new Map();
+    const deploymentDefault = options.weatherProviderDefault !== undefined
+      ? options.weatherProviderDefault
+      : process.env.OSI_WEATHER_PROVIDER_DEFAULT;
+    // Final fix A4 (review T3 M1): a gateway that has not yet run the
+    // schema migration, or a database missing a table for any other reason,
+    // gets a device-only catalogue and one warning instead of a 500 for
+    // every analysis request. Any other error (a real query failure) still
+    // propagates and still answers 500.
+    const weatherAvailable = zones.length ? await weatherTablesPresent(db) : true;
+    if (!weatherAvailable && !weatherTablesMissingWarned) {
+      weatherTablesMissingWarned = true;
+      console.warn('osi-history-helper analysis: weather tables missing (deploy the schema migration); the catalogue lists device sources only');
+    }
+    const weather = zones.length && weatherAvailable
+      ? await loadZoneWeather(db, deploymentDefault)
+      : { byZoneId: new Map(), rowsByKey: new Map() };
+    const stationsByZoneId = zones.length && weatherAvailable
+      ? await loadZoneStations(db, zones.map((zone) => zone.id), userId, zoneUuids === null)
+      : new Map();
 
     for (const zone of zones) {
+      const timezone = normalizeTimezone(zone.timezone);
       const devices = zoneUuids === null
         ? await dbAll(
           db,
@@ -390,29 +508,78 @@ function createAnalysis(deps) {
           const deviceName = displayDeviceName(device, index);
           for (const channelKey of cardChannelsForSource(card.cardType, displaySafeDeviceContext(device))) {
             const meta = channelMeta(channelKey);
-            const seriesId = analysisSeriesId(zone.id, card.cardType, sourceKey, channelKey);
-            const entry = {
-              seriesId,
+            const entry = buildCatalogEntry({
+              zone,
               hubEui,
-              zoneId: zone.id,
-              zoneName: zone.name || null,
               cardType: card.cardType,
               sourceKey,
               channelKey,
-              displayName: [deviceName, meta.label].filter(Boolean).join(' - '),
-              unit: meta.unit,
-              availability: meta.edgeField ? 'available' : 'unsupported',
+              meta,
               deviceName,
+              availability: meta.edgeField ? 'available' : 'unsupported',
               depthCm: soilDepthCm(device, channelKey),
-            };
+              sourceKind: 'device',
+            });
             channels.push(entry);
-            entriesById.set(seriesId, { ...entry, deveui });
+            entriesById.set(entry.seriesId, { ...entry, deveui, owner: deveui, timezone, provider: null });
           }
         });
       }
+
+      if (!weatherAvailable) continue;
+
+      const addWeatherSource = (sourceKind, sourceKey, deviceName, owner, provider) => {
+        for (const channelKey of Object.keys(SOURCE_KINDS[sourceKind].channels)) {
+          const meta = channelMeta(channelKey);
+          const entry = buildCatalogEntry({
+            zone,
+            hubEui,
+            cardType: 'environment',
+            sourceKey,
+            channelKey,
+            meta,
+            deviceName,
+            availability: 'available',
+            depthCm: null,
+            sourceKind,
+          });
+          channels.push(entry);
+          entriesById.set(entry.seriesId, { ...entry, owner, timezone, provider });
+        }
+      };
+
+      const located = weather.byZoneId.get(Number(zone.id));
+      const locationRow = located && located.locationKey ? weather.rowsByKey.get(located.locationKey) : null;
+      if (locationRow) {
+        addWeatherSource(
+          'weather_provider',
+          `weather-src-${sha256Hex(located.locationKey).slice(0, 12)}`,
+          providerSourceName(locationRow),
+          located.locationKey,
+          locationRow.provider
+        );
+      }
+      const stations = stationsByZoneId.get(Number(zone.id)) || [];
+      stations.forEach((device, index) => {
+        addWeatherSource(
+          'weather_station',
+          `station-src-${sha256Hex(normalizeDeveui(device.deveui)).slice(0, 12)}`,
+          `${displayDeviceName(device, index)} (hourly)`,
+          device.deveui,
+          null
+        );
+      });
+      const zoneName = String(zone.name || '').trim();
+      addWeatherSource(
+        'zone_daily_agronomy',
+        'agronomy-src-zone',
+        `${zoneName || `Zone ${zone.id}`} daily agronomy`,
+        zone.id,
+        null
+      );
     }
 
-    return { generatedAt: new Date().toISOString(), channels, entriesById };
+    return { generatedAt: new Date().toISOString(), channels, entriesById, weatherAvailable };
   }
 
   async function resolveAnalysisSeries(db, options = {}) {
@@ -429,44 +596,59 @@ function createAnalysis(deps) {
       from: range.from,
       to: range.to,
     });
-    const { entriesById } = await buildAnalysisCatalog(db, options);
+    const { entriesById, weatherAvailable } = await buildAnalysisCatalog(db, options);
     const series = [];
     const dropped = [];
-    const byDeveui = new Map();
+    const groups = new Map();
+    // Scoped to this one resolveAnalysisSeries call: aggregateRows clones a
+    // cached bucket skeleton per (range, level, timezone) key instead of
+    // recomputing it once per selected weather channel (final fix A1).
+    const bucketSkeletonCache = new Map();
 
     for (const id of ids) {
       const entry = entriesById.get(id);
       if (!entry) {
-        dropped.push({ seriesId: id, reason: 'unknown' });
+        // A weather selector that no longer resolves because the weather
+        // tables are absent is reported distinctly from a genuinely unknown
+        // id (final fix A4, review T3 M1): the degraded catalogue cannot
+        // tell the two apart by id alone, so every miss while the tables
+        // are down is reported as a dropped source, not an unknown one.
+        dropped.push({ seriesId: id, reason: weatherAvailable ? 'unknown' : 'source_unavailable' });
         continue;
       }
+      const kind = entry.sourceKind || 'device';
       const meta = channelMeta(entry.channelKey);
-      if (!meta.edgeField) {
+      if (kind === 'device' && !meta.edgeField) {
         dropped.push({ seriesId: id, reason: 'unsupported' });
         continue;
       }
-      const key = entry.deveui;
-      if (!byDeveui.has(key)) byDeveui.set(key, []);
-      byDeveui.get(key).push({ entry, meta });
+      const key = `${kind}|${entry.owner}`;
+      if (!groups.has(key)) groups.set(key, { kind, owner: entry.owner, entries: [] });
+      groups.get(key).entries.push({ entry, meta });
     }
 
     let rawRowsScanned = 0;
-    for (const [deveui, entries] of byDeveui) {
-      const fields = unique(entries.map(({ meta }) => meta.edgeField)).map(sqlIdent);
+    for (const group of groups.values()) {
       const remaining = MAX_RAW_ROWS - rawRowsScanned;
       if (remaining <= 0) {
         throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
       }
-      const rows = await dbAll(
-        db,
-        `SELECT deveui, recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC LIMIT ?`,
-        [deveui, range.from, range.to, remaining + 1]
-      );
+      const rows = group.kind === 'device'
+        ? await dbAll(
+          db,
+          `SELECT deveui, recorded_at, ${unique(group.entries.map(({ meta }) => meta.edgeField)).map(sqlIdent).join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC LIMIT ?`,
+          [group.owner, range.from, range.to, remaining + 1]
+        )
+        : await readWeatherRows(db, { kind: group.kind, owner: group.owner, entries: group.entries.map(({ entry }) => entry) }, range, remaining + 1);
       if (rows.length > remaining) {
         throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
       }
       rawRowsScanned += rows.length;
-      for (const { entry, meta } of entries) {
+      for (const { entry, meta } of group.entries) {
+        if (group.kind !== 'device') {
+          series.push(weatherSeries(entry, rows, range, aggregationInfo, bucketSkeletonCache));
+          continue;
+        }
         const aggregate = aggregateRows(rows, {
           aggregation: options.aggregation,
           aggregationRequested: aggregationInfo.requested,
@@ -474,20 +656,11 @@ function createAnalysis(deps) {
           from: range.from,
           to: range.to,
         });
-        series.push({
-          seriesId: entry.seriesId,
-          resolved: {
-            hubEui: entry.hubEui,
-            zoneId: entry.zoneId,
-            cardType: entry.cardType,
-            sourceKey: entry.sourceKey,
-            channelKey: entry.channelKey,
-          },
-          label: entry.displayName,
+        series.push(buildSeriesEnvelope(entry, {
           unit: entry.unit,
           points: aggToPoints(aggregate, entry.channelKey),
-          truncated: false,
-        });
+          cadence: 'hourly',
+        }));
       }
     }
 
@@ -565,6 +738,8 @@ function createAnalysis(deps) {
 
 module.exports = {
   ANALYSIS_VIEWS_SCHEMA,
+  DEVICE_EXCLUDED_CHANNELS,
+  SOURCE_KINDS,
   analysisSeriesId,
   createAnalysis,
 };

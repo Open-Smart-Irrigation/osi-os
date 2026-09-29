@@ -32,7 +32,7 @@ function catalogEntry(overrides: Partial<AnalysisCatalogEntry> = {}): AnalysisCa
     unit: overrides.unit ?? 'C',
     availability: overrides.availability ?? 'available',
     deviceName: null,
-    depthCm: null,
+    depthCm: null, sourceKind: 'device',
   };
 }
 

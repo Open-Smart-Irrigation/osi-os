@@ -8,7 +8,7 @@
 // source. These pin the same honesty rules IrrigationZoneCardLocale.test.tsx
 // pins for the zone card's own water-balance subtitle and action tile.
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
@@ -25,6 +25,8 @@ vi.mock('recharts', () => {
     Bar: Leaf,
     BarChart: Leaf,
     CartesianGrid: Leaf,
+    Legend: Leaf,
+    ReferenceLine: Leaf,
     ResponsiveContainer: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
     Tooltip: Leaf,
     XAxis: Leaf,
@@ -80,6 +82,10 @@ async function renderTrend(action: WaterAction | null, language: string) {
       <WaterTab water={water(action)} />
     </I18nextProvider>,
   );
+  // The verdict sentence sits behind the HelpTip beside the "Last 7 days" title
+  // (tooltips only, 2026-09-26); open it so every assertion below, the
+  // negative ones included, reads what a user who opens it would read.
+  fireEvent.click(screen.getByRole('button', { name: instance.t('devices:environment.water.lastSevenDaysHelpLabel') }));
 }
 
 describe('WaterTab reason-code honesty (F100/X-01)', () => {

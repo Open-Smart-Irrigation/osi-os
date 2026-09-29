@@ -33,6 +33,7 @@ import { AnalysisChartLegend } from '../components/analysis/AnalysisChartLegend'
 import { MetricAcrossZonesPicker } from '../components/analysis/MetricAcrossZonesPicker';
 import type { EChartHandle } from '../components/analysis/EChart';
 import { AppHeader } from '../components/AppHeader';
+import { HelpTip } from '../components/farming/shared/HelpTip';
 import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
 
@@ -121,7 +122,8 @@ export function CrossZoneAnalysisPage() {
     const canonicalChannelKey = canonicalize(channelKey);
     const selectors = (catalog?.channels ?? [])
       .filter((channel) => (
-        channel.availability === 'available'
+        channel.sourceKind === 'device'
+        && channel.availability === 'available'
         && canonicalize(channel.channelKey) === canonicalChannelKey
       ))
       .map((channel) => ({ seriesId: channel.seriesId }));
@@ -202,11 +204,16 @@ export function CrossZoneAnalysisPage() {
                 onToggle={(key, value) => updateWorkspace((currentWorkspace) => setToggle(currentWorkspace, key, value))}
               />
               {data?.aggregation.applied ? (
-                <div className="inline-flex w-fit items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs text-[var(--text-secondary)]">
-                  <span className="font-medium">{t('analysis.aggregation.label')}</span>
-                  <span>
-                    {aggregationLabel(data.aggregation.applied)}
-                  </span>
+                <div className="flex max-w-xl flex-wrap items-center gap-1.5">
+                  <div className="inline-flex w-fit items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs text-[var(--text-secondary)]">
+                    <span className="font-medium">{t('analysis.aggregation.label')}</span>
+                    <span>
+                      {aggregationLabel(data.aggregation.applied)}
+                    </span>
+                  </div>
+                  <HelpTip label={t('analysis.aggregation.helpLabel')}>
+                    {t('analysis.aggregation.help')}
+                  </HelpTip>
                 </div>
               ) : null}
               {activeWorkspace.mode === 'timeline' && activeWorkspace.layout === 'overlaid' ? (

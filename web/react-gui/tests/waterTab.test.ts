@@ -181,7 +181,32 @@ test('WaterTab keeps a measured zero when the zone has the sensor behind it', as
 test('WaterTab hides the seven-day chart when no source feeds it', async () => {
   const html = await renderWaterTab({ water: BASE_WATER, devices: [] });
 
-  assert.doesNotMatch(html, /7-day water trend/);
+  assert.doesNotMatch(html, /Last 7 days/);
+});
+
+test('WaterTab draws the chart with demand only', async () => {
+  // No gauge, no meter, no valve: a calculated day of crop demand is enough,
+  // and demand needs no zone area.
+  const html = await renderWaterTab({
+    water: {
+      ...BASE_WATER,
+      areaM2: null,
+      todayDate: '2026-05-29',
+      daily: [{ date: '2026-05-28', rainMm: null, irrigationLiters: 0, irrigationNetMm: null, totalWaterMm: null, demandMm: 3.2, demandSource: 'calculated' }],
+    },
+    devices: [],
+  });
+
+  assert.match(html, /Last 7 days/);
+});
+
+test('WaterTab draws no chart for a valve with no estimated amount and no demand', async () => {
+  const html = await renderWaterTab({
+    water: { ...BASE_WATER, estimatedIrrigationNetMm: null },
+    devices: [{ deveui: 'A2', type_id: 'STREGA_VALVE' }],
+  });
+
+  assert.doesNotMatch(html, /Last 7 days/);
 });
 
 test('WaterTab hides the demand and balance tiles until they can be computed', async () => {
@@ -216,6 +241,7 @@ async function buildSentinelI18n() {
               tooltipRain: 'XX_TIP_RAIN',
               tooltipMeasuredEffective: 'XX_TIP_MEASURED_EFF',
               tooltipEstimatedEffective: 'XX_TIP_ESTIMATED_EFF',
+              lastSevenDays: 'XX_LAST7',
             },
           },
           zone: { water: { action: { delay_irrigation: 'XX_DELAY' } } },
@@ -249,9 +275,11 @@ test('WaterTab renders no English literal of its own', async () => {
   assert.match(html, /XX_GAUGE_OK/);
   assert.match(html, /XX_METER_OK/);
   assert.match(html, /XX_DELAY/);
+  assert.match(html, /XX_LAST7/);
   // The labels the tab used to hardcode, in the language it was serving.
   assert.doesNotMatch(html, /Rain gauge reporting/);
   assert.doesNotMatch(html, /Flow meter reporting/);
   assert.doesNotMatch(html, /Delay irrigation/);
+  assert.doesNotMatch(html, /Last 7 days/);
   assert.doesNotMatch(html, /effective</);
 });

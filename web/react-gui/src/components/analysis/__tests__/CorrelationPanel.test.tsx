@@ -24,7 +24,7 @@ function series(zoneId: number, channelKey: string, n: number): AnalysisSeries {
     unit: 'x',
     coveragePct: 100,
     points: Array.from({ length: n }, (_, i) => ({ t: `t${i}`, value: i, count: 1, quality: 'ok' })),
-    truncated: false,
+    truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
@@ -63,7 +63,7 @@ describe('CorrelationPanel', () => {
         count: i < 3 ? 0 : 1,
         quality: i < 3 ? 'gap' : 'ok',
       })),
-      truncated: false,
+      truncated: false, cadence: 'hourly', timezone: null,
     };
     render(<CorrelationPanel series={[x, series(1, 'dendro', 40)]} channelMeta={channelMeta} />);
     const row = screen.getByText('Zone 1').closest('tr') as HTMLElement;

@@ -8,7 +8,7 @@ describe('analysis types', () => {
       seriesId: 'abc', hubEui: 'HUB-1', zoneId: 12, zoneName: 'Zone A',
       cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1',
       displayName: 'SWT 1', unit: 'kPa', availability: 'available',
-      deviceName: null, depthCm: null,
+      deviceName: null, depthCm: null, sourceKind: 'device',
     };
     const series: AnalysisSeries = {
       seriesId: 'abc',
@@ -18,7 +18,7 @@ describe('analysis types', () => {
         { t: '2026-06-18T00:00:00Z', value: 41.2, count: 4, quality: 'ok' },
         { t: '2026-06-18T01:00:00Z', value: null, count: 0, quality: 'gap' },
       ],
-      truncated: false,
+      truncated: false, cadence: 'hourly', timezone: null,
     };
     const resp: AnalysisSeriesResponse = {
       generatedAt: '2026-06-18T10:00:00Z',

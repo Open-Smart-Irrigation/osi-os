@@ -1,6 +1,17 @@
 'use strict';
 const RANK={none:0,mild:1,moderate:2,significant:3,severe:4,unknown:0};
-const PHENO_MOD={"bud_break":0.8,"cell_division":0.7,"cell_expansion":0.8,"fruit_maturation":1.0,"post_harvest":1.3,"dormancy":1.5,"default":1.0};
+const { normalizeStage } = require('../osi-crop-kc');
+// Stage modifier on the stress thresholds, keyed by the FAO-56 stages that
+// migration 0064 writes. A stored value resolves through osi-crop-kc's
+// normalizeStage, so the legacy keys (bud_break, cell_expansion, veraison, ...)
+// still map; 'default', null and anything unknown are unset (1.0).
+// development takes the former cell_expansion 0.8, the longer sub-phase; the
+// former cell_division 0.7 is retired.
+const PHENO_MOD_BY_STAGE=Object.freeze({initial:0.8,development:0.8,mid_season:1.0,late_season:1.3,dormancy:1.5,unset:1.0});
+function phenoModFor(stage){return PHENO_MOD_BY_STAGE[normalizeStage(stage)||'unset'];}
+// dendro-compute-fn reads DA.PHENO_MOD[storedStage]: every string key goes
+// through phenoModFor, so the flow node needs no change.
+const PHENO_MOD=new Proxy(PHENO_MOD_BY_STAGE,{get:(table,key)=>(typeof key==='string'?phenoModFor(key):table[key])});
 const LEVELS=['none','mild','moderate','significant','severe'];
 const MIN_SAMPLES_DAY=5;
 const MIN_SAMPLES_WINDOW=2;
@@ -413,6 +424,7 @@ module.exports = {
   dendroThresholdStressLevel,
   decisionEscalationStress,
   applyDendroSchedulePolicy,
+  phenoModFor,
   RANK,
   PHENO_MOD,
   LEVELS,
