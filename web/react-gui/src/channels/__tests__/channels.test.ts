@@ -16,7 +16,7 @@ describe('channel manifest', () => {
       expect(CARD_TYPES.has(c.cardType)).toBe(true);
       expect(typeof c.category).toBe('string');
       expect(c.edgeField === null || typeof c.edgeField === 'string').toBe(true);
-      expect(typeof c.serverField).toBe('string');
+      expect(c.serverField === null || typeof c.serverField === 'string').toBe(true);
       expect(typeof c.exportable).toBe('boolean');
       expect(c.deprecated).toBe(false);
       expect(Array.isArray(c.legacyAliases)).toBe(true);
@@ -46,5 +46,23 @@ describe('channel manifest', () => {
       expect(bat.exportable).toBe(false);
       expect(bat.cardType).toBe('gateway');
     }
+  });
+
+  it('keeps the weather-only channels off device_data and the cloud history columns', () => {
+    for (const key of ['global_radiation_wm2', 'et0_mm', 'etc_mm']) {
+      const entry = (manifest as any[]).find((c) => c.key === key);
+      expect(entry).toMatchObject({ cardType: 'environment', category: 'weather', edgeField: null, serverField: null, exportable: true });
+    }
+  });
+
+  it('pins the exact set of channels with a null serverField', () => {
+    // serverField === null is allowed by the "required fields" test above for
+    // any entry; this test catches a new channel picking up a null serverField
+    // by accident instead of a real cloud column.
+    const nullServerFieldKeys = (manifest as any[])
+      .filter((c) => c.serverField === null)
+      .map((c) => c.key)
+      .sort();
+    expect(nullServerFieldKeys).toEqual(['et0_mm', 'etc_mm', 'global_radiation_wm2']);
   });
 });

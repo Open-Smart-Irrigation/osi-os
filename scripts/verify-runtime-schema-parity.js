@@ -86,6 +86,11 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
   ['trg_sync_irrigation_events_dirty_au', '0051__durable_history_batch.sql'],
   ['trg_sync_valve_actuation_dirty_ai', '0051__durable_history_batch.sql'],
   ['trg_sync_valve_actuation_dirty_au', '0051__durable_history_batch.sql'],
+  // 0067__zone_daily_agronomy_sync.sql (daily agronomy parity, plan E4) emits
+  // ZONE_AGRONOMY_UPSERTED for the daily agronomy record. Seed DB + deploy-time
+  // migration runner delivery, not the frozen sync-init-fn boot DDL.
+  ['trg_dp_zone_agronomy_outbox_ai', '0067__zone_daily_agronomy_sync.sql'],
+  ['trg_dp_zone_agronomy_outbox_au', '0067__zone_daily_agronomy_sync.sql'],
 ]);
 
 function q(db, sql) {

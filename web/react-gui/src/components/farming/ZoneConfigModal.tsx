@@ -11,10 +11,38 @@ import {
   type DeviceLocationCapture,
   type DeviceLocationSupport,
 } from '../../services/deviceLocation';
-import { CROP_GROUPS } from './cropKc';
+import {
+  CROP_OPTION_GROUPS,
+  PREDICTION_CROP_NAMES,
+  STAGES,
+  cropById,
+  formCropValue,
+  normalizeStage,
+  stageLengths,
+  type StageId,
+} from '../../agronomy/cropKc';
+import { stageOptionLabel } from '../../agronomy/stageLabels';
+import { HelpTip } from './shared/HelpTip';
 import { DataExportSection } from './DataExportSection';
 import { TimezoneInput } from './TimezoneInput';
 import { useDateFormat } from '../../utils/datetime';
+
+/** Today in the browser's local time as YYYY-MM-DD (the stage start date pre-fill). */
+export function localTodayIso(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * The zone's stored stage-started-on date, or '' when the zone's stored stage itself does not
+ * resolve to a real stage (unset/legacy). Used both to seed/reset the form and as the baseline
+ * for the "send only when changed" diff, so the two never disagree (F3).
+ */
+function storedStageStartedOn(zone: IrrigationZone): string {
+  return normalizeStage(zone.phenologicalStage) ? (zone.stageStartedOn ?? '') : '';
+}
+
+const STAGE_STARTED_ON_HELP = "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop ({{days}} days) Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value.";
 
 interface Props {
   isOpen: boolean;
@@ -60,14 +88,16 @@ const CALIBRATION_KEYS: Option[] = [
   { value: 'olive', key: 'calibration.olive', fallback: 'Olive' },
 ];
 
-const PHENOLOGICAL_STAGES: Option[] = [
-  { value: 'default', key: 'stage.default', fallback: 'Default' },
-  { value: 'dormancy', key: 'stage.dormancy', fallback: 'Dormancy' },
-  { value: 'budbreak', key: 'stage.budbreak', fallback: 'Bud break / flowering' },
-  { value: 'fruitset', key: 'stage.fruitset', fallback: 'Fruit set' },
-  { value: 'veraison', key: 'stage.veraison', fallback: 'Veraison / ripening' },
-  { value: 'harvest', key: 'stage.harvest', fallback: 'Harvest / post-harvest' },
-];
+/** The providers the edge implements (osi-weather-provider resolveProvider). */
+const WEATHER_SOURCES = ['auto', 'open_meteo', 'meteoswiss', 'local'];
+const WEATHER_SOURCE_FALLBACK: Record<string, string> = {
+  open_meteo: 'Open-Meteo',
+  meteoswiss: 'MeteoSwiss',
+  local: 'Local weather station only',
+};
+
+/** A variant sits under its default crop, indented and marked with an en dash. */
+const VARIANT_PREFIX = '\u00A0\u00A0\u2013 ';
 
 function optionLabel(t: Translate, option: Option): string {
   return t(`zoneConfig.${option.key}`, { defaultValue: option.fallback });
@@ -81,7 +111,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const dateFormat = useDateFormat();
   const fieldId = useId();
   const id = (name: string) => `zone-config-${name}-${fieldId}`;
-  const [cropType, setCropType] = useState(zone.cropType ?? '');
+  const [cropType, setCropType] = useState(formCropValue(zone.cropType));
   const [variety, setVariety] = useState(zone.variety ?? '');
   const [soilType, setSoilType] = useState(zone.soilType ?? '');
   const [irrigationMethod, setIrrigationMethod] = useState(zone.irrigationMethod ?? '');
@@ -95,8 +125,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [measurementMethod, setMeasurementMethod] = useState(zone.measurementMethod ?? '');
   const [notes, setNotes] = useState(zone.notes ?? '');
   const [timezone, setTimezone] = useState(zone.timezone ?? 'UTC');
-  const [phenologicalStage, setPhenologicalStage] = useState(zone.phenologicalStage ?? 'default');
+  const [phenologicalStage, setPhenologicalStage] = useState<string>(normalizeStage(zone.phenologicalStage) ?? '');
+  const [stageStartedOn, setStageStartedOn] = useState(storedStageStartedOn(zone));
   const [calibrationKey, setCalibrationKey] = useState(zone.calibrationKey ?? 'default');
+  const [weatherSource, setWeatherSource] = useState(zone.weatherSource ?? 'auto');
   const [latitude, setLatitude] = useState(zone.latitude != null ? String(zone.latitude) : '');
   const [longitude, setLongitude] = useState(zone.longitude != null ? String(zone.longitude) : '');
   const [saving, setSaving] = useState(false);
@@ -107,12 +139,12 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [deviceLocationError, setDeviceLocationError] = useState<string | null>(null);
   const [deviceLocationMeta, setDeviceLocationMeta] = useState<DeviceLocationCapture | null>(null);
   const hasLegacyCrop = Boolean(
-    cropType && !CROP_GROUPS.some(group => group.crops.some(crop => crop.value === cropType))
+    cropType && cropType !== 'other' && !cropById(cropType)
   );
 
   // Sync when zone prop changes (e.g. after onSaved refresh)
   useEffect(() => {
-    setCropType(zone.cropType ?? '');
+    setCropType(formCropValue(zone.cropType));
     setVariety(zone.variety ?? '');
     setSoilType(zone.soilType ?? '');
     setIrrigationMethod(zone.irrigationMethod ?? '');
@@ -122,8 +154,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setMeasurementMethod(zone.measurementMethod ?? '');
     setNotes(zone.notes ?? '');
     setTimezone(zone.timezone ?? 'UTC');
-    setPhenologicalStage(zone.phenologicalStage ?? 'default');
+    setPhenologicalStage(normalizeStage(zone.phenologicalStage) ?? '');
+    setStageStartedOn(storedStageStartedOn(zone));
     setCalibrationKey(zone.calibrationKey ?? 'default');
+    setWeatherSource(zone.weatherSource ?? 'auto');
     setLatitude(zone.latitude != null ? String(zone.latitude) : '');
     setLongitude(zone.longitude != null ? String(zone.longitude) : '');
     setDeviceLocationError(null);
@@ -166,10 +200,14 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       notes?: string | null;
       timezone?: string | null;
       phenologicalStage?: string | null;
+      stageStartedOn?: string | null;
       calibrationKey?: string | null;
+      weatherSource?: string;
     } = {};
 
-    if ((zone.cropType ?? '') !== cropType) payload.cropType = cropType || null;
+    // Compared in the form's normalised value, so a stored 'Maize' the user
+    // did not touch is not written back as 'maize'.
+    if (formCropValue(zone.cropType) !== cropType) payload.cropType = cropType || null;
     if ((zone.variety ?? '') !== variety) payload.variety = variety || null;
     if ((zone.soilType ?? '') !== soilType) payload.soilType = soilType || null;
     if ((zone.irrigationMethod ?? '') !== irrigationMethod) payload.irrigationMethod = irrigationMethod || null;
@@ -179,8 +217,27 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     }
     if ((zone.notes ?? '') !== notes) payload.notes = notes || null;
     if ((zone.timezone ?? 'UTC') !== timezone) payload.timezone = timezone;
-    if ((zone.phenologicalStage ?? 'default') !== phenologicalStage) payload.phenologicalStage = phenologicalStage;
+    // The stored stage is compared in its normalised form, so a legacy value
+    // (`veraison`) or 'default' the user did not touch is never written back.
+    // A cleared stage goes out as 'default', not null: the cloud mirror drops
+    // a null stage and would keep the old one.
+    const stageChanged = (normalizeStage(zone.phenologicalStage) ?? '') !== phenologicalStage;
+    if (stageChanged) payload.phenologicalStage = phenologicalStage || 'default';
+    // Sent whenever the stage changes (even to the same date the field already
+    // shows, e.g. a second stage change on the same day) or the date itself
+    // differs from the stored one; empty clears it. A payload that carries
+    // phenologicalStage must carry stageStartedOn too, also as an empty value,
+    // so the backend's date rule -- not a stale pre-filled date -- decides it
+    // (final review E-I2/E-M-queue; cloud form osi-server 070b3f88). Baselined
+    // through storedStageStartedOn, the same empty-when-unset rule the form
+    // itself uses to seed and reset the field (F3), so an unset stage's
+    // leftover stored date is never read as "changed" just because the raw
+    // zone field is not empty.
+    if (stageChanged || storedStageStartedOn(zone) !== stageStartedOn) payload.stageStartedOn = stageStartedOn || null;
     if ((zone.calibrationKey ?? 'default') !== calibrationKey) payload.calibrationKey = calibrationKey;
+    // Sent only when the user picked another provider, so a save of other
+    // fields never rewrites a stored value, including a cloud-only one.
+    if ((zone.weatherSource ?? 'auto') !== weatherSource) payload.weatherSource = weatherSource;
 
     return payload;
   };
@@ -278,6 +335,19 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     }
   };
 
+  const storedWeatherSource = zone.weatherSource ?? 'auto';
+  const weatherSourceLabel = (value: string) => t(`zoneConfig.weatherProviderOption.${value}`, { defaultValue: WEATHER_SOURCE_FALLBACK[value] ?? value });
+  const weatherSourceOptionLabel = (value: string) => (value === 'auto'
+    ? t('zoneConfig.weatherProviderOption.auto', {
+      provider: weatherSourceLabel(zone.weatherSourceDefault === 'meteoswiss' ? 'meteoswiss' : 'open_meteo'),
+      defaultValue: 'Gateway default ({{provider}})',
+    })
+    : weatherSourceLabel(value));
+
+  const stageLengthDays = phenologicalStage && phenologicalStage !== 'dormancy'
+    ? stageLengths(cropType)?.[phenologicalStage as Exclude<StageId, 'dormancy'>] ?? null
+    : null;
+
   const canRequestDeviceLocation = Boolean(deviceLocationSupport?.available && !deviceLocationLoading);
   const todayIso = new Date().toISOString().slice(0, 10);
   const deviceLocationStatusClass = deviceLocationSupport?.available
@@ -319,9 +389,17 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
           {/* Crop & Variety */}
           <div>
-            <label htmlFor={id('crop')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
-              {t('zoneConfig.crop', { defaultValue: 'Crop' })}
-            </label>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <label htmlFor={id('crop')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
+                {t('zoneConfig.crop', { defaultValue: 'Crop' })}
+              </label>
+              <HelpTip label={t('zoneConfig.cropHelpLabel', { defaultValue: 'About the crop list' })}>
+                {t('zoneConfig.cropHelp', {
+                  crops: PREDICTION_CROP_NAMES.join(', '),
+                  defaultValue: 'Crop coefficients follow FAO-56 Table 12. The prediction advisor supports {{crops}} only.',
+                })}
+              </HelpTip>
+            </div>
             <div className="flex gap-2">
               <select
                 id={id('crop')}
@@ -329,13 +407,19 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 onChange={e => setCropType(e.target.value)}
                 className="flex-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
               >
-                <option value="">{t('zoneConfig.selectCrop', { defaultValue: '— Select prediction crop —' })}</option>
+                <option value="">{t('zoneConfig.selectCrop', { defaultValue: '— Select crop —' })}</option>
                 {hasLegacyCrop && <option value={cropType}>{cropType}</option>}
-                {CROP_GROUPS.map(g => (
-                  <optgroup key={g.groupLabel} label={g.groupLabel}>
-                    {g.crops.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                {CROP_OPTION_GROUPS.map(({ group, crops }) => (
+                  <optgroup key={group.id} label={t(`zoneConfig.cropGroup.${group.id}`, { defaultValue: group.label })}>
+                    {crops.flatMap(({ crop, variants }) => [
+                      <option key={crop.id} value={crop.id}>{crop.label}</option>,
+                      ...variants.map((variant) => (
+                        <option key={variant.id} value={variant.id}>{VARIANT_PREFIX + variant.label}</option>
+                      )),
+                    ])}
                   </optgroup>
                 ))}
+                <option value="other">{t('zoneConfig.cropOther', { defaultValue: 'Other crop' })}</option>
               </select>
               <input
                 id={id('variety')}
@@ -468,17 +552,60 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
           {/* Phenological stage */}
           <div>
-            <label htmlFor={id('stage')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
-              {t('zoneConfig.phenologicalStage', { defaultValue: 'Phenological stage' })}
-            </label>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <label htmlFor={id('stage')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
+                {t('zoneConfig.phenologicalStage', { defaultValue: 'Phenological stage' })}
+              </label>
+              <HelpTip label={t('zoneConfig.stageHelpLabel', { defaultValue: 'About growth stages' })}>
+                {t('zoneConfig.stageHelp', {
+                  defaultValue: 'FAO-56 growth stages set the crop coefficient Kc: initial until about 10 % ground cover, development until full cover, mid-season until maturity starts, late season until harvest or leaf fall. Dormancy (Kc 0.25) is for deciduous crops and annual rest periods; evergreens such as citrus, olive, coffee and banana keep their late-season Kc instead.',
+                })}
+              </HelpTip>
+            </div>
             <select
               id={id('stage')}
               value={phenologicalStage}
-              onChange={e => setPhenologicalStage(e.target.value)}
+              onChange={e => {
+                const next = e.target.value;
+                // A new stage starts today unless the user says otherwise; landing back on the
+                // zone's stored stage restores its stored date instead of re-stamping today
+                // (F1); "Not set" has no start date. Compared against the STORED stage, not the
+                // live form value, so browsing away and back does not leave a stale today's-date
+                // behind a stage that never actually changed.
+                if (!next) setStageStartedOn('');
+                else if (next === (normalizeStage(zone.phenologicalStage) ?? '')) setStageStartedOn(storedStageStartedOn(zone));
+                else setStageStartedOn(localTodayIso());
+                setPhenologicalStage(next);
+              }}
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
             >
-              {PHENOLOGICAL_STAGES.map(o => <option key={o.value} value={o.value}>{optionLabel(t, o)}</option>)}
+              <option value="">{t('zoneConfig.stage.unset', { defaultValue: 'Not set' })}</option>
+              {STAGES.map(stage => (
+                <option key={stage} value={stage}>{stageOptionLabel(t, cropType, stage)}</option>
+              ))}
             </select>
+          </div>
+
+          {/* Stage start date: FAO-56 Kc curve (spec 2026-09-27-daily-agronomy-parity B5) */}
+          <div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <label htmlFor={id('stageStartedOn')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
+                {t('zoneConfig.stageStartedOn', { defaultValue: 'Stage started on' })}
+              </label>
+              <HelpTip label={t('zoneConfig.stageStartedOnHelpLabel', { defaultValue: 'About the stage start date' })}>
+                {stageLengthDays != null
+                  ? t('zoneConfig.stageStartedOnHelp', { days: stageLengthDays, defaultValue: STAGE_STARTED_ON_HELP })
+                  : t('zoneConfig.stageStartedOnHelpNoLength', { defaultValue: STAGE_STARTED_ON_HELP.replace(' ({{days}} days)', '') })}
+              </HelpTip>
+            </div>
+            <input
+              id={id('stageStartedOn')}
+              type="date"
+              value={stageStartedOn}
+              disabled={!phenologicalStage}
+              onChange={e => setStageStartedOn(e.target.value)}
+              className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+            />
           </div>
 
           {/* Timezone */}
@@ -588,6 +715,37 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
             {deviceLocationError && (
               <p className="mt-3 text-xs text-red-700">{deviceLocationError}</p>
             )}
+          </div>
+
+          {/* Weather provider */}
+          <div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <label htmlFor={id('weatherSource')} className="block text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
+                {t('zoneConfig.weatherProvider', { defaultValue: 'Weather provider' })}
+              </label>
+              <HelpTip label={t('zoneConfig.weatherProviderHelpLabel', { defaultValue: 'About the weather provider' })}>
+                {t('zoneConfig.weatherProviderHelp', {
+                  defaultValue: 'Sets where this zone\'s hourly weather history comes from, and its daily ET0 unless an assigned weather station has a complete day, which takes precedence. MeteoSwiss covers Switzerland. With Local weather station only, the gateway downloads no weather history for this zone, so without an assigned station it gets no ET0. The weather forecast does not change.',
+                })}
+              </HelpTip>
+            </div>
+            <select
+              id={id('weatherSource')}
+              value={weatherSource}
+              onChange={e => setWeatherSource(e.target.value)}
+              className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+            >
+              {WEATHER_SOURCES.map(value => (
+                <option key={value} value={value}>{weatherSourceOptionLabel(value)}</option>
+              ))}
+              {/* A value only the cloud implements stays visible and selected;
+                  once the user picks another it cannot be chosen again here. */}
+              {!WEATHER_SOURCES.includes(storedWeatherSource) && (
+                <option value={storedWeatherSource} disabled>
+                  {t('zoneConfig.weatherProviderCloud', { value: storedWeatherSource, defaultValue: '{{value}} (cloud provider)' })}
+                </option>
+              )}
+            </select>
           </div>
 
           <hr className="border-[var(--border)]" />

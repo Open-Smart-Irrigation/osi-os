@@ -76,6 +76,8 @@
                 "irrigation_method": {"type": ["string", "null"]},
                 "scheduling_mode": {"type": "string", "enum": ["local", "cloud"]},
                 "prediction_card": {"type": "boolean"},
+                "weather_source": {"type": "string", "minLength": 1, "maxLength": 20, "pattern": "^[a-z_]{1,20}$"},
+                "stage_started_on": {"type": ["string", "null"], "format": "date"},
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
         },

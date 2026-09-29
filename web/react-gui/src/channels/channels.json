@@ -1126,5 +1126,44 @@
     "exportable": true,
     "deprecated": false,
     "legacyAliases": []
+  },
+  {
+    "key": "global_radiation_wm2",
+    "unit": "W/m²",
+    "label": "Global radiation",
+    "displayName": "Global radiation",
+    "cardType": "environment",
+    "category": "weather",
+    "edgeField": null,
+    "serverField": null,
+    "exportable": true,
+    "deprecated": false,
+    "legacyAliases": []
+  },
+  {
+    "key": "et0_mm",
+    "unit": "mm",
+    "label": "Reference ET (ET0)",
+    "displayName": "Reference evapotranspiration",
+    "cardType": "environment",
+    "category": "weather",
+    "edgeField": null,
+    "serverField": null,
+    "exportable": true,
+    "deprecated": false,
+    "legacyAliases": []
+  },
+  {
+    "key": "etc_mm",
+    "unit": "mm",
+    "label": "Crop water demand (ETc)",
+    "displayName": "Crop water demand",
+    "cardType": "environment",
+    "category": "weather",
+    "edgeField": null,
+    "serverField": null,
+    "exportable": true,
+    "deprecated": false,
+    "legacyAliases": []
   }
 ]

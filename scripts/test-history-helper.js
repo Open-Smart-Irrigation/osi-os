@@ -240,9 +240,10 @@ test('buildAnalysisCatalog scopes zones and devices to the authenticated user', 
   try {
     const { channels } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7', userId: 1 });
     const zoneNames = Array.from(new Set(channels.map((entry) => entry.zoneName))).sort();
-    const deviceNames = Array.from(new Set(channels.map((entry) => entry.deviceName))).sort();
+    const deviceNames = Array.from(new Set(channels.filter((entry) => entry.sourceKind === 'device').map((entry) => entry.deviceName))).sort();
     assert.deepStrictEqual(zoneNames, ['User One Zone']);
     assert.deepStrictEqual(deviceNames, ['Kiwi One']);
+    assert.ok(channels.some((entry) => entry.sourceKind === 'zone_daily_agronomy' && entry.deviceName === 'User One Zone daily agronomy'));
   } finally {
     db.close();
   }
@@ -2212,6 +2213,10 @@ test('rollupRowsToResult builds buckets from single-key rows', () => {
   const result = helper.rollupRowsToResult(rows, { aggregation: 'daily' }, [{ id: 'swt_1', field: 'swt_1', fields: ['swt_1'], unit: 'kPa' }]);
   assert.strictEqual(result.buckets.length, 1);
   assert.strictEqual(result.buckets[0].series.swt_1.mean, 10);
+  // history_channel_rollups has no sum column (final fix A5): a rolled-up
+  // bucket never reports a channel total, only a live aggregateRows call
+  // over device_data can.
+  assert.strictEqual(result.buckets[0].series.swt_1.sum, null);
   assert.strictEqual(result.buckets[0].sampleCount, 4);
 });
 

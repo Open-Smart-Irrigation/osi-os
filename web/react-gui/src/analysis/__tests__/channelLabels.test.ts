@@ -62,4 +62,9 @@ describe('axisQuantityLabel', () => {
   it('omits parens when unit is null', () => {
     expect(axisQuantityLabel('uv_index', null)).toBe('UV index');
   });
+
+  it('names the ET0 axis from the manifest with the series period unit', () => {
+    expect(axisQuantityLabel('et0_mm', 'mm/d')).toBe('Reference evapotranspiration (mm/d)');
+    expect(axisQuantityLabel('global_radiation_wm2', 'W/m²')).toBe('Global radiation (W/m²)');
+  });
 });

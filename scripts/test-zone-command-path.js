@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { mock } = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const commands = require(
   '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands'
@@ -464,14 +465,14 @@ test('missing owner, wrong gateway, malformed numeric fields, and shape drift re
       'REJECTED_PERMANENT'
     );
 
-    const cloudOnlyField = envelope(12, 'UPSERT_ZONE', 0, {
-      weather_source: 'meteoblue',
+    const malformedProvider = envelope(12, 'UPSERT_ZONE', 0, {
+      weather_source: 'Meteo-Blue!',
     });
     assert.equal(
       (
         await commands.applyZoneCommand(
           db.facade,
-          cloudOnlyField,
+          malformedProvider,
           runtime()
         )
       ).ack.result,
@@ -483,6 +484,112 @@ test('missing owner, wrong gateway, malformed numeric fields, and shape drift re
       ).get(ZONE_UUID).n,
       0
     );
+
+    // A provider only the cloud implements is stored as sent (zone
+    // weather_source is edge-owned after sub-project 4; the capability
+    // zone_config_weather_source_v1 tells the cloud this gateway accepts it).
+    const cloudOnlyProvider = envelope(13, 'UPSERT_ZONE', 0, {
+      weather_source: 'meteoblue',
+    });
+    assert.equal(
+      (
+        await commands.applyZoneCommand(
+          db.facade,
+          cloudOnlyProvider,
+          runtime()
+        )
+      ).ack.result,
+      'APPLIED'
+    );
+    assert.equal(
+      db.raw.prepare(
+        'SELECT weather_source FROM irrigation_zones WHERE zone_uuid=?'
+      ).get(ZONE_UUID).weather_source,
+      'meteoblue'
+    );
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('a full UPSERT_ZONE without weather_source keeps the stored provider', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.prepare(
+      "UPDATE irrigation_zones SET weather_source='meteoswiss' WHERE zone_uuid=?"
+    ).run(ZONE_UUID);
+    db.raw.exec('DELETE FROM sync_outbox');
+    const full = await commands.applyZoneCommand(
+      db.facade,
+      envelope(14, 'UPSERT_ZONE', 1, { name: 'North orchard' }),
+      runtime()
+    );
+    assert.equal(full.ack.result, 'APPLIED');
+    const zone = db.raw.prepare(
+      'SELECT name, weather_source FROM irrigation_zones WHERE zone_uuid=?'
+    ).get(ZONE_UUID);
+    assert.equal(zone.name, 'North orchard');
+    assert.equal(zone.weather_source, 'meteoswiss');
+    const event = JSON.parse(db.raw.prepare(
+      "SELECT payload_json FROM sync_outbox WHERE aggregate_type='ZONE' ORDER BY rowid DESC LIMIT 1"
+    ).get().payload_json);
+    assert.equal(event.weather_source, 'meteoswiss');
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('a full UPSERT_ZONE writes a present weather_source, null keeps it, and UPSERT_ZONE_LOCATION ignores it', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.exec('DELETE FROM sync_outbox');
+    const provider = () => db.raw.prepare(
+      'SELECT weather_source FROM irrigation_zones WHERE zone_uuid=?'
+    ).get(ZONE_UUID).weather_source;
+
+    // Present: trimmed, lower-cased and written by updateFullZone.
+    const written = await commands.applyZoneCommand(
+      db.facade,
+      envelope(15, 'UPSERT_ZONE', 1, { weather_source: ' MeteoSwiss ' }),
+      runtime()
+    );
+    assert.equal(written.ack.result, 'APPLIED');
+    assert.equal(provider(), 'meteoswiss');
+    const event = JSON.parse(db.raw.prepare(
+      "SELECT payload_json FROM sync_outbox WHERE aggregate_type='ZONE' ORDER BY rowid DESC LIMIT 1"
+    ).get().payload_json);
+    assert.equal(event.weather_source, 'meteoswiss');
+
+    // null means absent: the stored provider stays.
+    const cleared = await commands.applyZoneCommand(
+      db.facade,
+      envelope(16, 'UPSERT_ZONE', 2, { weather_source: null }),
+      runtime()
+    );
+    assert.equal(cleared.ack.result, 'APPLIED');
+    assert.equal(provider(), 'meteoswiss');
+
+    // A location command parses the field (a malformed value fails closed) and
+    // updateLocation does not write it.
+    const location = await commands.applyZoneCommand(
+      db.facade,
+      envelope(17, 'UPSERT_ZONE_LOCATION', 3, {
+        latitude: 46.9,
+        longitude: 7.4,
+        weather_source: 'local',
+      }),
+      runtime()
+    );
+    assert.equal(location.ack.result, 'APPLIED');
+    const zone = db.raw.prepare(
+      'SELECT latitude, weather_source FROM irrigation_zones WHERE zone_uuid=?'
+    ).get(ZONE_UUID);
+    assert.equal(zone.latitude, 46.9);
+    assert.equal(zone.weather_source, 'meteoswiss');
   } finally {
     db.raw.close();
   }
@@ -638,6 +745,180 @@ test('an UPSERT_ZONE_LOCATION carrying a legacy 110-character name still applies
     assert.equal(zone.name, legacyName);
     assert.equal(zone.latitude, 46.9);
     assert.equal(zone.longitude, 7.4);
+  } finally {
+    db.raw.close();
+  }
+});
+
+// Stage start date on the protected zone command (spec
+// docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md, B5).
+test('a full UPSERT_ZONE sets stage_started_on, null clears it, and a command without the key keeps it', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.prepare("UPDATE irrigation_zones SET stage_started_on='2026-04-01' WHERE zone_uuid=?").run(ZONE_UUID);
+    const stored = () => db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on;
+    const set = await commands.applyZoneCommand(db.facade, envelope(21, 'UPSERT_ZONE', 1, { stage_started_on: '2026-05-01' }), runtime());
+    assert.equal(set.ack.result, 'APPLIED');
+    assert.equal(stored(), '2026-05-01');
+    const event = JSON.parse(db.raw.prepare(
+      "SELECT payload_json FROM sync_outbox WHERE aggregate_type='ZONE' ORDER BY rowid DESC LIMIT 1"
+    ).get().payload_json);
+    assert.equal(event.stage_started_on, '2026-05-01');
+    assert.equal((await commands.applyZoneCommand(db.facade, envelope(22, 'UPSERT_ZONE', 2, { notes: 'kept' }), runtime())).ack.result, 'APPLIED');
+    assert.equal(stored(), '2026-05-01', 'the key absent keeps the stored value');
+    assert.equal((await commands.applyZoneCommand(db.facade, envelope(23, 'UPSERT_ZONE', 3, { stage_started_on: null }), runtime())).ack.result, 'APPLIED');
+    assert.equal(stored(), null);
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('a protected create writes stage_started_on; a malformed date or a location command carrying it is refused', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    const created = await commands.applyZoneCommand(db.facade, envelope(31, 'UPSERT_ZONE', 0, { stage_started_on: '2026-05-01' }), runtime());
+    assert.equal(created.ack.result, 'APPLIED');
+    assert.equal(db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on, '2026-05-01');
+    let id = 32;
+    for (const bad of ['05/01/2026', '2026-02-30', '2026-5-1', 20260501]) {
+      const refused = await commands.applyZoneCommand(db.facade, envelope(id, 'UPSERT_ZONE', 1, { stage_started_on: bad }), runtime());
+      assert.equal(refused.ack.result, 'REJECTED_PERMANENT', String(bad));
+      id += 1;
+    }
+    const location = await commands.applyZoneCommand(db.facade, envelope(id, 'UPSERT_ZONE_LOCATION', 1, { stage_started_on: '2026-05-01' }), runtime());
+    assert.equal(location.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(db.raw.prepare('SELECT stage_started_on, sync_version FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).sync_version, 1);
+  } finally {
+    db.raw.close();
+  }
+});
+
+// Residual fix item E: an empty string on the protected UPSERT_ZONE means the
+// same "no date" as null on the other three write paths, not a permanent
+// rejection -- the cloud never sends one, but a permanently rejected zone
+// update would cost the user the whole command for a value that means the
+// same thing as one it does send.
+test('an empty (or blank) stage_started_on on the protected UPSERT_ZONE reads as null, not REJECTED_PERMANENT', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.prepare("UPDATE irrigation_zones SET stage_started_on='2026-04-01' WHERE zone_uuid=?").run(ZONE_UUID);
+    const stored = () => db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on;
+    const cleared = await commands.applyZoneCommand(db.facade, envelope(41, 'UPSERT_ZONE', 1, { stage_started_on: '' }), runtime());
+    assert.equal(cleared.ack.result, 'APPLIED');
+    assert.equal(stored(), null, 'an empty string clears the date like null');
+    db.raw.prepare("UPDATE irrigation_zones SET stage_started_on='2026-04-01' WHERE zone_uuid=?").run(ZONE_UUID);
+    const trimmed = await commands.applyZoneCommand(db.facade, envelope(42, 'UPSERT_ZONE', 2, { stage_started_on: '   ' }), runtime());
+    assert.equal(trimmed.ack.result, 'APPLIED');
+    assert.equal(stored(), null, 'a whitespace-only string trims to empty and clears the date too');
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('a protected create with an empty stage_started_on stores no date', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    const created = await commands.applyZoneCommand(db.facade, envelope(43, 'UPSERT_ZONE', 0, { stage_started_on: '' }), runtime());
+    assert.equal(created.ack.result, 'APPLIED');
+    assert.equal(db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on, null);
+  } finally {
+    db.raw.close();
+  }
+});
+
+// --- Final review E-I2: updateFullZone applies the stage-date rule when a --
+// --- protected UPSERT_ZONE carries no stage_started_on key -----------------
+
+test('a full UPSERT_ZONE without the key stamps the zone-local next day when the stage changes at a UTC-evening clock', async () => {
+  commands._resetForTests();
+  mock.timers.enable({ apis: ['Date'] });
+  // 2026-09-29T22:30:00Z is already 2026-09-30 in Europe/Zurich (CEST,
+  // UTC+2) -- the boundary this test pins.
+  mock.timers.setTime(Date.UTC(2026, 8, 29, 22, 30, 0));
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.prepare(
+      "UPDATE irrigation_zones SET phenological_stage='development', stage_started_on='2026-04-01' WHERE zone_uuid=?"
+    ).run(ZONE_UUID);
+    const stored = () => db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on;
+    const result = await commands.applyZoneCommand(
+      db.facade,
+      envelope(51, 'UPSERT_ZONE', 1, { phenological_stage: 'late_season' }),
+      runtime()
+    );
+    assert.equal(result.ack.result, 'APPLIED');
+    assert.equal(stored(), '2026-09-30', 'a command without stage_started_on that changes the stage stamps the zone-local today');
+  } finally {
+    db.raw.close();
+    mock.timers.reset();
+  }
+});
+
+test('a full UPSERT_ZONE without the key keeps the stored date when the stage is unchanged', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.prepare(
+      "UPDATE irrigation_zones SET phenological_stage='development', stage_started_on='2026-04-01' WHERE zone_uuid=?"
+    ).run(ZONE_UUID);
+    const stored = () => db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on;
+    const result = await commands.applyZoneCommand(
+      db.facade,
+      envelope(52, 'UPSERT_ZONE', 1, { phenological_stage: 'development', notes: 'irrigation check' }),
+      runtime()
+    );
+    assert.equal(result.ack.result, 'APPLIED');
+    assert.equal(stored(), '2026-04-01', 'the same stage keeps the stored date');
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('a full UPSERT_ZONE without the key clears the date when the stage becomes unset (stage default)', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.prepare(
+      "UPDATE irrigation_zones SET phenological_stage='development', stage_started_on='2026-04-01' WHERE zone_uuid=?"
+    ).run(ZONE_UUID);
+    const stored = () => db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on;
+    const result = await commands.applyZoneCommand(
+      db.facade,
+      envelope(53, 'UPSERT_ZONE', 1, { phenological_stage: null }),
+      runtime()
+    );
+    assert.equal(result.ack.result, 'APPLIED');
+    assert.equal(stored(), null, 'a change to unset clears the date even though the command carries no stage_started_on key');
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('a full UPSERT_ZONE carrying a date still clears it once the stage becomes unset (stage default)', async () => {
+  commands._resetForTests();
+  const db = database();
+  try {
+    seedZone(db.raw);
+    db.raw.prepare(
+      "UPDATE irrigation_zones SET phenological_stage='development', stage_started_on='2026-04-01' WHERE zone_uuid=?"
+    ).run(ZONE_UUID);
+    const stored = () => db.raw.prepare('SELECT stage_started_on FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).stage_started_on;
+    const result = await commands.applyZoneCommand(
+      db.facade,
+      envelope(54, 'UPSERT_ZONE', 1, { phenological_stage: null, stage_started_on: '2026-05-01' }),
+      runtime()
+    );
+    assert.equal(result.ack.result, 'APPLIED');
+    assert.equal(stored(), null, 'the rule overrides a sent date whatever the key says once the stage becomes unset');
   } finally {
     db.raw.close();
   }

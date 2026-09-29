@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildCorrelationOption, buildSmallMultiplesOption, buildTimeSeriesOption } from '../echartsOptions';
 import { groupByUnit } from '../unitGrouping';
 import { SERIES_PALETTE, seriesColor } from '../seriesColors';
-import type { AnalysisSeries } from '../types';
+import type { AnalysisPoint, AnalysisSeries } from '../types';
 
 function series(id: string, unit: string, values: (number | null)[]): AnalysisSeries {
   return {
@@ -15,7 +15,7 @@ function series(id: string, unit: string, values: (number | null)[]): AnalysisSe
       count: v === null ? 0 : 1,
       quality: v === null ? 'gap' : 'ok',
     })),
-    truncated: false,
+    truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
@@ -94,7 +94,7 @@ describe('time axis date labels', () => {
   const series = [{
     seriesId: 'a', resolved: { hubEui: null, zoneId: 1, cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1' },
     label: 'A', unit: 'kPa', coveragePct: 100,
-    points: [{ t: '2026-06-21T00:00:00Z', value: 1, count: 1, quality: 'ok' }], truncated: false,
+    points: [{ t: '2026-06-21T00:00:00Z', value: 1, count: 1, quality: 'ok' }], truncated: false, cadence: 'hourly', timezone: null,
   }] as never;
 
   it('formats day-boundary ticks as DD.MM.', () => {
@@ -108,7 +108,7 @@ describe('time axis date labels', () => {
 describe('export legend', () => {
   const series = [{
     seriesId: 'a', resolved: { hubEui: null, zoneId: 1, cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1' },
-    label: 'A', unit: 'kPa', coveragePct: 100, points: [], truncated: false,
+    label: 'A', unit: 'kPa', coveragePct: 100, points: [], truncated: false, cadence: 'hourly', timezone: null,
   }] as never;
   const panels = [{ unit: 'kPa', seriesIds: ['a'] }];
 
@@ -131,7 +131,7 @@ function mkSeries(seriesId: string, channelKey: string, unit: string | null, ext
     unit,
     coveragePct: null,
     points: [],
-    truncated: false,
+    truncated: false, cadence: 'hourly', timezone: null,
     ...extra,
   } as AnalysisSeries;
 }
@@ -197,5 +197,55 @@ describe('axisNameSpec via buildSmallMultiplesOption', () => {
     expect(y.nameRotate).toBe(90);
     expect(y.id).toBe('swt_1#0');
     expect(y.triggerEvent).toBe(true);
+  });
+});
+
+describe('weather series', () => {
+  const hoursPartial = (point: AnalysisPoint) => (point.quality === 'partial' ? ` (${point.count} of ${point.expected} h)` : '');
+  const tooltipFormatter = (option: Record<string, unknown>) => (option.tooltip as { formatter: (params: unknown) => string }).formatter;
+  const visibleText = (html: string) => html.replace(/<[^>]*>/g, '');
+
+  it('draws symbols for a daily-cadence series so a lone valid day stays visible', () => {
+    const daily: AnalysisSeries = { ...series('et0', 'mm/d', [null, 1.2, null]), cadence: 'daily' };
+    const hourly = series('rain', 'mm/h', [0.1, 0.2, 0.3]);
+    const option = buildTimeSeriesOption({ panels: groupByUnit([daily, hourly]), series: [daily, hourly], normalize: false, multiAxis: false });
+    const drawn = option.series as Array<{ name: string; showSymbol: boolean; symbolSize?: number }>;
+    expect(drawn.find((s) => s.name === 'et0')).toMatchObject({ showSymbol: true, symbolSize: 4 });
+    expect(drawn.find((s) => s.name === 'rain')?.showSymbol).toBe(false);
+    const multiples = buildSmallMultiplesOption([daily], false);
+    expect((multiples.series as Array<{ showSymbol: boolean }>)[0].showSymbol).toBe(true);
+  });
+
+  it('ends the tooltip row of a partial point with its count, in the default tooltip layout', () => {
+    const rain: AnalysisSeries = { ...series('rain', 'mm/d', [4.2, 3.1]), cadence: 'daily' };
+    rain.points[0] = { ...rain.points[0], count: 23, expected: 24, quality: 'partial' };
+    const option = buildTimeSeriesOption({ panels: groupByUnit([rain]), series: [rain], normalize: false, multiAxis: false, formatPartial: hoursPartial });
+    const formatter = tooltipFormatter(option);
+    const partial = formatter([{ seriesIndex: 0, dataIndex: 0, marker: '', seriesName: 'rain', value: [rain.points[0].t, 4.2], axisValueLabel: '2026-06-18 00:00' }]);
+    expect(visibleText(partial)).toBe('2026-06-18 00:00rain4.2 (23 of 24 h)');
+    expect(partial).toContain('float:right');
+    expect(partial).toContain('font-weight:900');
+    expect(visibleText(formatter([{ seriesIndex: 0, dataIndex: 1, marker: '', seriesName: 'rain', value: [rain.points[1].t, 3.1] }]))).toBe('rain3.1');
+    const escaped = formatter([{ seriesIndex: 0, dataIndex: 1, marker: '', seriesName: '<b>x</b>', value: [rain.points[1].t, 3.1] }]);
+    expect(escaped).toContain('&lt;b&gt;x&lt;/b&gt;');
+    expect(escaped).not.toContain('<b>');
+  });
+
+  it('finds the hovered point in ECharts series order in the stacked layout', () => {
+    // Stacked is the workspace default; ECharts draws the panels' series in
+    // panel order, [a, c, b] here, not in the order of `series`.
+    const a = series('a', 'kPa', [10, 11]);
+    const b: AnalysisSeries = { ...series('b', 'mm/d', [4.2, 3.1]), cadence: 'daily' };
+    b.points[0] = { ...b.points[0], count: 23, expected: 24, quality: 'partial' };
+    const c = series('c', 'kPa', [12, 13]);
+    const input = [a, b, c];
+    const option = buildTimeSeriesOption({ panels: groupByUnit(input), series: input, normalize: false, multiAxis: false, formatPartial: hoursPartial });
+    expect((option.series as Array<{ name: string }>).map((s) => s.name)).toEqual(['a', 'c', 'b']);
+    const formatter = tooltipFormatter(option);
+    const hover = (seriesIndex: number, seriesName: string, value: number) => visibleText(
+      formatter([{ seriesIndex, dataIndex: 0, marker: '', seriesName, value: ['2026-06-18T00:00:00Z', value] }]),
+    );
+    expect(hover(2, 'b', 4.2)).toBe('b4.2 (23 of 24 h)');
+    expect(hover(1, 'c', 12)).toBe('c12.0');
   });
 });

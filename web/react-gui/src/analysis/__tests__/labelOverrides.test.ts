@@ -9,7 +9,7 @@ const base: AnalysisSeries = {
   unit: 'kPa',
   coveragePct: 100,
   points: [],
-  truncated: false,
+  truncated: false, cadence: 'hourly', timezone: null,
 };
 
 describe('applyLabelOverrides', () => {

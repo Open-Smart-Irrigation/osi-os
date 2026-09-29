@@ -1399,6 +1399,46 @@ fetch_required "osi-zone-env index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/index.js" \
     "/srv/node-red/osi-zone-env/index.js"
 
+fetch_required "osi-weather-provider package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/package.json" \
+    "/srv/node-red/osi-weather-provider/package.json"
+
+fetch_required "osi-weather-provider index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/index.js" \
+    "/srv/node-red/osi-weather-provider/index.js"
+
+fetch_required "osi-crop-kc package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-crop-kc/package.json" \
+    "/srv/node-red/osi-crop-kc/package.json"
+
+fetch_required "osi-crop-kc index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-crop-kc/index.js" \
+    "/srv/node-red/osi-crop-kc/index.js"
+
+fetch_required "osi-crop-kc crop-kc.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-crop-kc/crop-kc.json" \
+    "/srv/node-red/osi-crop-kc/crop-kc.json"
+
+fetch_required "osi-station-hours package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-station-hours/package.json" \
+    "/srv/node-red/osi-station-hours/package.json"
+
+fetch_required "osi-station-hours index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-station-hours/index.js" \
+    "/srv/node-red/osi-station-hours/index.js"
+
+fetch_required "osi-agronomy-daily package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/package.json" \
+    "/srv/node-red/osi-agronomy-daily/package.json"
+
+fetch_required "osi-agronomy-daily index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/index.js" \
+    "/srv/node-red/osi-agronomy-daily/index.js"
+
+fetch_required "osi-agronomy-daily et0.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/et0.js" \
+    "/srv/node-red/osi-agronomy-daily/et0.js"
+
 fetch_required "osi-history-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json" \
     "/srv/node-red/osi-history-helper/package.json"
@@ -1410,6 +1450,10 @@ fetch_required "osi-history-helper index.js" \
 fetch_required "osi-history-helper analysis.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.js" \
     "/srv/node-red/osi-history-helper/analysis.js"
+
+fetch_required "osi-history-helper analysis-sources.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis-sources.js" \
+    "/srv/node-red/osi-history-helper/analysis-sources.js"
 
 fetch_required "osi-history-router package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/package.json" \

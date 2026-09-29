@@ -199,3 +199,24 @@ for (const relativeFlowPath of FLOW_PROFILES) {
     assert.match(errors[0], /payload shape mismatch/);
   });
 }
+
+// Daily agronomy parity (spec B5): the Terra shape keeps its exact field list, so
+// a Terra UPSERT_ZONE_CONFIG carrying stageStartedOn is refused before any write.
+test('a Terra UPSERT_ZONE_CONFIG carrying stageStartedOn is refused by the exact field list', async () => {
+  const commands = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands');
+  const envelope = {
+    commandId: 9201, commandType: 'UPSERT_ZONE_CONFIG', eventUuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    aggregateType: 'ZONE', aggregateKey: ZONE_UUID, appliedSyncVersion: 4, effectKey: null,
+    payload: {
+      commandType: 'UPSERT_ZONE_CONFIG', zoneUuid: ZONE_UUID, gatewayDeviceEui: GATEWAY_EUI,
+      ownerUserUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', baseSyncVersion: 3, syncVersion: 4,
+      cropType: 'maize', variety: null, phenologicalStage: 'development', terraConfigurationOperation: true,
+      stageStartedOn: '2026-05-01',
+    },
+  };
+  const noTransaction = { transaction: async () => { throw new Error('the refusal must come before any transaction'); } };
+  await assert.rejects(
+    commands.applyZoneCommand(noTransaction, envelope, { command_type_recognized: true, gateway_device_eui: GATEWAY_EUI }),
+    (error) => error.code === 'malformed_command' && /extra=stageStartedOn/.test(error.message),
+  );
+});

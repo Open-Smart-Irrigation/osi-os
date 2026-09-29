@@ -53,6 +53,33 @@ const MODULE_DB_CALLER_POLICIES = Object.freeze({
     // The facade-contract test must actually touch these exported
     // functions through the facade, or it isn't proving the real contract.
     requiredFacadeExports: Object.freeze(['writeDeviceData', 'quarantineOnly']),
+    // writeDeviceData returns a Promise whenever `db` is the osi-db-helper
+    // facade (the only shape any real flows.json caller ever passes). A
+    // caller that stops awaiting that call silently regresses to exactly the
+    // PR-M bug (result.deadLettered.length throws on a Promise, caught by
+    // the node's own try/catch, no device_data row written).
+    awaitedCall: /await\s+writerRes\.value\.writeDeviceData\s*\(/,
+  }),
+  'weather-provider': Object.freeze({
+    moduleDir: 'osi-weather-provider',
+    facadeTestFile: 'facade-contract.test.js',
+    reviewedCallerNodeIds: Object.freeze(['weather-provider-fn']),
+    requiredFacadeExports: Object.freeze(['runTick']),
+    awaitedCall: /await\s+load\.value\.runTick\s*\(/,
+  }),
+  'station-hours': Object.freeze({
+    moduleDir: 'osi-station-hours',
+    facadeTestFile: 'facade-contract.test.js',
+    reviewedCallerNodeIds: Object.freeze(['station-hours-fn']),
+    requiredFacadeExports: Object.freeze(['aggregateStationHours']),
+    awaitedCall: /await\s+load\.value\.aggregateStationHours\s*\(/,
+  }),
+  'agronomy-daily': Object.freeze({
+    moduleDir: 'osi-agronomy-daily',
+    facadeTestFile: 'facade-contract.test.js',
+    reviewedCallerNodeIds: Object.freeze(['agronomy-daily-fn']),
+    requiredFacadeExports: Object.freeze(['runDaily']),
+    awaitedCall: /await\s+load\.value\.runDaily\s*\(/,
   }),
 });
 
@@ -78,16 +105,17 @@ function findDbCallerNodes(flows, moduleName) {
     .map((n) => n.id);
 }
 
-// writeDeviceData/quarantineOnly return a Promise whenever `db` is the
-// osi-db-helper facade (the only shape any real flows.json caller ever
-// passes). A caller that stops awaiting that call silently regresses to
-// exactly the PR-M bug (result.deadLettered.length throws on a Promise,
-// caught by the node's own try/catch, no device_data row written). Pin the
-// awaited-call substring per reviewed node id so that regression fails
-// this guard instead of shipping silently again.
-function awaitsWriterCall(node) {
+// Every db-caller-shaped osiLib module returns a Promise from its db-touching
+// export whenever `db` is the real osi-db-helper facade (the only shape any
+// real flows.json caller ever passes). A caller that stops awaiting that call
+// silently drops its result -- exactly the PR-M bug, generalized: an
+// unawaited Promise fails a synchronous-shaped read/throws downstream, caught
+// by the node's own try/catch, with no write and no visible error. Pin the
+// awaited-call regex per policy so that regression fails this guard instead
+// of shipping silently again.
+function awaitsPolicyCall(node, policy) {
   if (!node || typeof node.func !== 'string') return false;
-  return /await\s+writerRes\.value\.writeDeviceData\s*\(/.test(node.func);
+  return policy.awaitedCall.test(node.func);
 }
 
 function run() {
@@ -118,11 +146,11 @@ function run() {
       }
       for (const id of actualCallerIds) {
         const node = flows.find((n) => n.id === id);
-        if (!awaitsWriterCall(node)) {
+        if (!awaitsPolicyCall(node, policy)) {
           failures.push(
-            `[${profile}] ${moduleName}: node ${id} (${node && node.name}) calls writerRes.value.writeDeviceData ` +
-            `without awaiting it -- against the real osiDb.Database facade this returns a Promise, so ` +
-            `result.deadLettered throws and the write is silently dropped (the PR-M bug)`
+            `[${profile}] ${moduleName}: node ${id} (${node && node.name}) does not match ${policy.awaitedCall} ` +
+            `-- against the real osiDb.Database facade the call returns a Promise, so an unawaited call drops its ` +
+            `result silently (the PR-M bug)`
           );
         }
       }
@@ -134,8 +162,7 @@ function run() {
     const testPath = path.join(moduleDir, policy.facadeTestFile);
     if (!fs.existsSync(testPath)) {
       failures.push(
-        `${moduleName}: missing facade-contract test at osi-device-writer's sibling path ` +
-        `${policy.moduleDir}/${policy.facadeTestFile}`
+        `${moduleName}: missing facade-contract test at ${policy.moduleDir}/${policy.facadeTestFile}`
       );
     } else {
       const testSource = fs.readFileSync(testPath, 'utf8');

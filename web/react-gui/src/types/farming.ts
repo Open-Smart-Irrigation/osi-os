@@ -397,8 +397,16 @@ export interface IrrigationZone {
   notes?: string | null;
   calibration_key?: string | null;
   prediction_card_enabled?: boolean | null;
+  /** YYYY-MM-DD: the day the current growth stage began (FAO-56 Kc curve), or null. */
+  stage_started_on?: string | null;
+  /** 'auto' | 'open_meteo' | 'meteoswiss' | 'local', or a provider only the cloud implements. */
+  weather_source?: string | null;
 
   // Compat aliases (server uses camelCase)
+  stageStartedOn?: string | null;
+  weatherSource?: string | null;
+  /** The provider 'auto' resolves to on this gateway (GET /api/irrigation-zones). */
+  weatherSourceDefault?: 'open_meteo' | 'meteoswiss' | null;
   phenologicalStage?: string | null;
   calibrationKey?: string | null;
   cropType?: string | null;
@@ -580,6 +588,23 @@ export interface WaterEnvironment {
   action: WaterAction | null;
   daily: WaterDay[];
   sensorHealth: SensorHealth;
+  /** The zone's local calendar day (YYYY-MM-DD); the row with this date is today's. */
+  todayDate?: string | null;
+  /**
+   * Where today's rain comes from. Sent by the cloud bundle on a linked
+   * gateway; absent on an unlinked gateway or an older cloud.
+   */
+  rainSource?: 'gauge' | 'meteoswiss_station' | 'weather_service' | null;
+  rainStation?: RainStation | null;
+  /** Source of the seven daily rain values: measured rain only. */
+  dailyRainSource?: 'gauge' | 'meteoswiss_station' | null;
+}
+
+export interface RainStation {
+  id: string;
+  name: string | null;
+  distanceKm: number | null;
+  network: string | null;
 }
 
 export interface WaterAction {
@@ -605,6 +630,26 @@ export interface WaterDay {
   estimatedIrrigationNetMm?: number | null;
   totalWaterMm: number | null;
   estimatedTotalWaterMm?: number | null;
+  /** Crop demand (ETc): calculated for a completed day, the forecast for today. */
+  demandMm?: number | null;
+  demandSource?: 'calculated' | 'forecast' | null;
+  et0Mm?: number | null;
+  et0Source?: string | null;
+  et0Tier?: 'station_fao56' | 'provider_hourly_sum' | 'hargreaves_station' | 'open_meteo_daily' | null;
+  et0StationId?: string | null;
+  et0StationName?: string | null;
+  kc?: number | null;
+  kcSource?: string | null;
+  cropType?: string | null;
+  phenologicalStage?: string | null;
+  hoursPresent?: number | null;
+  expectedHours?: number | null;
+  /** Why a day has no demand: `pending`, `partial_day`, `no_source`, `no_location`, ... */
+  nullReason?: string | null;
+  /** The day is past its stage's FAO-56 Table 11 length (the stage may be out of date). */
+  stageOverrun?: boolean | null;
+  /** Who computed a past day's demand: this gateway, or OSI Cloud from model ET0 (shared mode). */
+  demandComputedBy?: 'edge' | 'cloud' | null;
 }
 
 export interface SensorHealth {

@@ -13,6 +13,37 @@ const TERRA_EFFECT_KEY =
   /^terra-selection:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(0|[1-9]\d*):(0|[1-9]\d*)$/;
 
 const entityName = require('../osi-entity-name');
+// osi-crop-kc normalizeStage: the five FAO keys and the nine legacy keys; anything else is unset.
+const { normalizeStage } = require('../osi-crop-kc');
+
+// Today in the zone's timezone as YYYY-MM-DD; UTC for a missing or unknown zone id, as
+// osi-agronomy-daily reads it (formatToParts: the Node build has English locale data only).
+function zoneLocalToday(timezone) {
+  let fmt;
+  try {
+    fmt = new Intl.DateTimeFormat('en-US', { timeZone: String(timezone || 'UTC'), year: 'numeric', month: '2-digit', day: '2-digit' });
+  } catch (tzError) {
+    fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' });
+  }
+  const parts = {};
+  for (const part of fmt.formatToParts(new Date())) parts[part.type] = part.value;
+  return parts.year + '-' + parts.month + '-' + parts.day;
+}
+
+// The Terra shape never carries a start date (its field list is exact); a full
+// UPSERT_ZONE command from a cloud that has not yet reported stage_started_on
+// support for this gateway omits the key and falls into the same case
+// (final review E-I2). Both paths apply this rule: a change to unset clears
+// the date, a change to another set stage starts it on the zone-local today,
+// the same stage keeps it (spec 2026-09-27-daily-agronomy-parity B5;
+// controller rulings cloud/sync I7 and plan review E2 I2).
+function ruleStageStartedOn(current, nextStage) {
+  const next = normalizeStage(nextStage);
+  const stored = normalizeStage(current.phenological_stage);
+  const kept = current.stage_started_on == null ? null : current.stage_started_on;
+  if (!next) return stored ? null : kept;
+  return next === stored ? kept : zoneLocalToday(current.timezone);
+}
 
 function commandError(code, message) {
   const error = new Error(message);
@@ -400,10 +431,11 @@ async function applyOnce(db, envelope, runtime) {
 
     await tx.run(
       'UPDATE irrigation_zones SET ' +
-        'crop_type=?,variety=?,phenological_stage=?,sync_version=?,updated_at=? ' +
+        'crop_type=?,variety=?,phenological_stage=?,stage_started_on=?,sync_version=?,updated_at=? ' +
         'WHERE zone_uuid=?',
       [
         command.cropType, command.variety, command.phenologicalStage,
+        ruleStageStartedOn(current, command.phenologicalStage),
         command.target, new Date().toISOString(), command.zoneUuid,
       ]
     );
@@ -728,10 +760,16 @@ function normalizedZone(input, type) {
     'notes',
     'user',
   ];
+  // weather_source is optional: a cloud that has not adopted the field sends
+  // the full zone object without it (spec 2026-09-27-weather-data-view-design).
   const zone = exactObject(
     input,
     'zone',
-    type === 'DELETE_ZONE' ? common : common.concat(portable)
+    type === 'DELETE_ZONE' ? common : common.concat(portable),
+    type === 'DELETE_ZONE' ? [] :
+      // stage_started_on is optional on the full zone command only (spec
+      // 2026-09-27-daily-agronomy-parity B5); a location command never carries it.
+      type === 'UPSERT_ZONE' ? ['weather_source', 'stage_started_on'] : ['weather_source']
   );
   if (zone.contract_version !== 1) {
     throw commandError(
@@ -831,6 +869,38 @@ function normalizedZone(input, type) {
       'zone.prediction_card_enabled'
     );
     result.notes = nullableText(zone.notes, 'zone.notes', 4096);
+    // null or empty means absent: updateFullZone then keeps the stored value.
+    result.weatherSource = null;
+    if (zone.weather_source != null) {
+      const weatherSource = String(zone.weather_source).trim().toLowerCase();
+      if (weatherSource && !/^[a-z_]{1,20}$/.test(weatherSource)) {
+        throw commandError(
+          'malformed_command',
+          'zone.weather_source must be 1 to 20 lower-case letters or underscores'
+        );
+      }
+      result.weatherSource = weatherSource || null;
+    }
+    // Absent: updateFullZone keeps the stored date. null or '' (after trim):
+    // clears, same as the zone route and the two legacy paths -- the cloud
+    // never sends '' here, but the meaning is the same one it does send.
+    // Otherwise a calendar date YYYY-MM-DD, else malformed_command
+    // (REJECTED_PERMANENT).
+    result.hasStageStartedOn = Object.prototype.hasOwnProperty.call(zone, 'stage_started_on');
+    result.stageStartedOn = null;
+    if (result.hasStageStartedOn && zone.stage_started_on !== null) {
+      const startedOn = String(zone.stage_started_on).trim();
+      if (startedOn !== '') {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startedOn);
+        if (!m || new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).toISOString().slice(0, 10) !== startedOn) {
+          throw commandError(
+            'malformed_command',
+            'zone.stage_started_on must be YYYY-MM-DD or null'
+          );
+        }
+        result.stageStartedOn = startedOn;
+      }
+    }
     const user = exactObject(
       zone.user,
       'zone.user',
@@ -898,8 +968,9 @@ async function insertZone(tx, command, zone) {
       'name,user_id,zone_uuid,gateway_device_eui,timezone,latitude,longitude,' +
       'phenological_stage,calibration_key,crop_type,variety,soil_type,' +
       'irrigation_method,area_m2,irrigation_efficiency_pct,scheduling_mode,' +
-      'prediction_card_enabled,notes,sync_version,deleted_at,created_at,updated_at' +
-    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'prediction_card_enabled,notes,sync_version,deleted_at,created_at,updated_at,' +
+      'weather_source,stage_started_on' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [
       zone.name,
       owner.id,
@@ -923,6 +994,8 @@ async function insertZone(tx, command, zone) {
       null,
       now,
       now,
+      zone.weatherSource || 'auto',
+      zone.stageStartedOn,
     ]
   );
 }
@@ -939,12 +1012,36 @@ async function assertExistingOwner(tx, current, zone) {
 
 async function updateFullZone(tx, command, current, zone) {
   await assertExistingOwner(tx, current, zone);
+  // A command without weather_source keeps the stored provider.
+  const weatherSource = zone.weatherSource === null ? [] : [zone.weatherSource];
+  // stage_started_on (final review E-I2): a command that omits the key applies
+  // the stage-date rule from the stored stage instead of leaving a stale date
+  // behind (the cloud omits the key until it learns this gateway supports it).
+  // A command that carries the key keeps its sent value, with one override: a
+  // change from a set stage to unset always clears the date, whatever value
+  // the command sent -- the same rule the Terra path and the legacy node apply
+  // (docs/contracts/sync-schema/README.md, "Zone stage_started_on").
+  const storedStage = normalizeStage(current.phenological_stage);
+  const nextStage = normalizeStage(zone.phenologicalStage);
+  const clearedToUnset = Boolean(storedStage) && !nextStage;
+  let stageStartedOn;
+  if (clearedToUnset) {
+    stageStartedOn = current.stage_started_on == null ? [] : [null];
+  } else if (zone.hasStageStartedOn) {
+    stageStartedOn = [zone.stageStartedOn];
+  } else {
+    const ruled = ruleStageStartedOn(current, zone.phenologicalStage);
+    stageStartedOn = ruled === current.stage_started_on ? [] : [ruled];
+  }
   await tx.run(
     'UPDATE irrigation_zones SET ' +
       'name=?,timezone=?,latitude=?,longitude=?,phenological_stage=?,' +
       'calibration_key=?,crop_type=?,variety=?,soil_type=?,irrigation_method=?,' +
       'area_m2=?,irrigation_efficiency_pct=?,scheduling_mode=?,' +
-      'prediction_card_enabled=?,notes=?,sync_version=?,updated_at=? ' +
+      'prediction_card_enabled=?,notes=?,' +
+      (weatherSource.length ? 'weather_source=?,' : '') +
+      (stageStartedOn.length ? 'stage_started_on=?,' : '') +
+      'sync_version=?,updated_at=? ' +
       'WHERE zone_uuid=?',
     [
       zone.name,
@@ -962,6 +1059,8 @@ async function updateFullZone(tx, command, current, zone) {
       zone.schedulingMode,
       zone.predictionCardEnabled,
       zone.notes,
+      ...weatherSource,
+      ...stageStartedOn,
       command.target,
       new Date().toISOString(),
       command.zoneUuid,

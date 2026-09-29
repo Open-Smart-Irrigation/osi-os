@@ -1,0 +1,929 @@
+{
+  "provenance": "Values from osi-server main 92d96d23 WeatherMath.fao56Et0 and hargreavesEt0, run offline with javac 17 on 2026-09-26 (Dump.java in the plan, Task 1 Step 5); a wind at another height was converted to the 10 m value the Java takes; outputs rounded to 2 decimals. fao56Rejects are contract rules, not Java output. fao56Hourly and fao56HourlyDays: written by docs/contracts/agronomy/sources/hourly_et0.py (stdlib Python, sigma = 4.903e-9 / 24) with the contract chain of spec 2026-09-27-daily-agronomy-parity A7, reproduced by osi-agronomy-daily/et0.js; the two Example 19 entries carry the values FAO-56 prints, with the A8 tolerances.",
+  "fao56": [
+    {
+      "name": "brussels_example_18",
+      "input": {
+        "tMinC": 12.3,
+        "tMaxC": 21.5,
+        "meanRhPct": 73.5,
+        "windSpeedMs": 2.78,
+        "windHeightM": 10,
+        "solarRadMjM2": 22.07,
+        "elevationM": 100,
+        "latDeg": 50.8,
+        "dayOfYear": 187
+      },
+      "et0Mm": 3.79
+    },
+    {
+      "name": "payerne_summer",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 5.29
+    },
+    {
+      "name": "payerne_winter",
+      "input": {
+        "tMinC": -2,
+        "tMaxC": 4,
+        "meanRhPct": 85,
+        "windSpeedMs": 2,
+        "windHeightM": 10,
+        "solarRadMjM2": 3.5,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 15
+      },
+      "et0Mm": 0.39
+    },
+    {
+      "name": "payerne_winter_rs_1",
+      "input": {
+        "tMinC": -2,
+        "tMaxC": 4,
+        "meanRhPct": 85,
+        "windSpeedMs": 2,
+        "windHeightM": 10,
+        "solarRadMjM2": 1,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 15
+      },
+      "et0Mm": 0.27
+    },
+    {
+      "name": "payerne_winter_rs_0",
+      "input": {
+        "tMinC": -2,
+        "tMaxC": 4,
+        "meanRhPct": 85,
+        "windSpeedMs": 2,
+        "windHeightM": 10,
+        "solarRadMjM2": 0,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 15
+      },
+      "et0Mm": 0.17
+    },
+    {
+      "name": "lat70_doy355_rs_0",
+      "input": {
+        "tMinC": -8,
+        "tMaxC": -3,
+        "meanRhPct": 80,
+        "windSpeedMs": 3,
+        "windHeightM": 10,
+        "solarRadMjM2": 0,
+        "elevationM": 50,
+        "latDeg": 70,
+        "dayOfYear": 355
+      },
+      "et0Mm": 0.25
+    },
+    {
+      "name": "kampala",
+      "input": {
+        "tMinC": 18,
+        "tMaxC": 29,
+        "meanRhPct": 70,
+        "windSpeedMs": 1.2,
+        "windHeightM": 2,
+        "solarRadMjM2": 20,
+        "elevationM": 1190,
+        "latDeg": 0.35,
+        "dayOfYear": 100
+      },
+      "et0Mm": 4.18
+    },
+    {
+      "name": "null_elevation",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": null,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 5.23
+    },
+    {
+      "name": "zero_wind",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 0,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 4.59
+    },
+    {
+      "name": "wind_10m",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 3,
+        "windHeightM": 10,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 5.58
+    },
+    {
+      "name": "wind_2m_equivalent",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 2.243853225503832,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 5.58
+    },
+    {
+      "name": "rs_above_rso",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 35,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 6.62
+    },
+    {
+      "name": "tmax_equals_tmin",
+      "input": {
+        "tMinC": 20,
+        "tMaxC": 20,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 15,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 3.48
+    },
+    {
+      "name": "rh_100",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 100,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 4.42
+    },
+    {
+      "name": "rh_100_wind_0",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 100,
+        "windSpeedMs": 0,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 5.07
+    },
+    {
+      "name": "rh_0",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 0,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 5.78
+    }
+  ],
+  "fao56Rejects": [
+    {
+      "name": "tmax_below_tmin",
+      "input": {
+        "tMinC": 20,
+        "tMaxC": 10,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": null
+    },
+    {
+      "name": "rh_101",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 101,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": null
+    },
+    {
+      "name": "negative_wind",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": -1,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": null
+    },
+    {
+      "name": "wind_height_missing",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": null,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": null
+    },
+    {
+      "name": "wind_height_zero",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 0,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": null
+    },
+    {
+      "name": "negative_radiation",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": -1,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": null
+    },
+    {
+      "name": "day_0",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 0
+      },
+      "et0Mm": null
+    },
+    {
+      "name": "day_367",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "meanRhPct": 60,
+        "windSpeedMs": 1.5,
+        "windHeightM": 2,
+        "solarRadMjM2": 27,
+        "elevationM": 490,
+        "latDeg": 46.81,
+        "dayOfYear": 367
+      },
+      "et0Mm": null
+    }
+  ],
+  "hargreaves": [
+    {
+      "name": "payerne_summer",
+      "input": {
+        "tMinC": 14,
+        "tMaxC": 29,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 5.71
+    },
+    {
+      "name": "payerne_winter",
+      "input": {
+        "tMinC": -2,
+        "tMaxC": 4,
+        "latDeg": 46.81,
+        "dayOfYear": 15
+      },
+      "et0Mm": 0.47
+    },
+    {
+      "name": "kampala",
+      "input": {
+        "tMinC": 18,
+        "tMaxC": 29,
+        "latDeg": 0.35,
+        "dayOfYear": 100
+      },
+      "et0Mm": 4.77
+    },
+    {
+      "name": "brussels",
+      "input": {
+        "tMinC": 12.3,
+        "tMaxC": 21.5,
+        "latDeg": 50.8,
+        "dayOfYear": 187
+      },
+      "et0Mm": 4.06
+    },
+    {
+      "name": "tmax_equals_tmin",
+      "input": {
+        "tMinC": 20,
+        "tMaxC": 20,
+        "latDeg": 46.81,
+        "dayOfYear": 200
+      },
+      "et0Mm": 0
+    },
+    {
+      "name": "lat70_doy355",
+      "input": {
+        "tMinC": -8,
+        "tMaxC": -3,
+        "latDeg": 70,
+        "dayOfYear": 355
+      },
+      "et0Mm": 0
+    }
+  ],
+  "luxToRadiation": [
+    {
+      "lux": 0,
+      "wm2": 0
+    },
+    {
+      "lux": 120,
+      "wm2": 1
+    },
+    {
+      "lux": 100000,
+      "wm2": 833.33
+    }
+  ],
+  "elevationFromPressure": [
+    {
+      "pressureKpa": 101.3,
+      "elevationM": 0
+    },
+    {
+      "pressureKpa": 95.64,
+      "elevationM": 490.04
+    },
+    {
+      "pressureKpa": 88.002,
+      "elevationM": 1190.01
+    }
+  ],
+  "fao56Hourly": [
+    {
+      "name": "fao56_example19_0200_0300",
+      "input": {
+        "tMeanC": 28,
+        "rhPct": 90,
+        "windSpeedMs": 1.9,
+        "windHeightM": 2,
+        "solarRadMjM2h": 0,
+        "elevationM": 8,
+        "latDeg": 16.21667,
+        "lonDeg": -16.25,
+        "dayOfYear": 274,
+        "hourStartUtc": "2026-10-01T03:00:00Z",
+        "nightRsRso": 0.8
+      },
+      "et0Mm": 0,
+      "tolerance": 0.005,
+      "terms": {
+        "delta": 0.22,
+        "gamma": 0.0673,
+        "es": 3.78,
+        "ea": 3.402,
+        "omega": -2.46,
+        "ra": 0,
+        "rso": 0,
+        "rns": 0,
+        "rsRso": 0.8,
+        "rnl": 0.1,
+        "rn": -0.1,
+        "g": -0.05,
+        "radTerm": -0.01,
+        "aeroTerm": 0.01
+      },
+      "termTolerance": {
+        "default": 0.001,
+        "radTerm": 0.01,
+        "aeroTerm": 0.01
+      }
+    },
+    {
+      "name": "fao56_example19_1400_1500",
+      "input": {
+        "tMeanC": 38,
+        "rhPct": 52,
+        "windSpeedMs": 3.3,
+        "windHeightM": 2,
+        "solarRadMjM2h": 2.45,
+        "elevationM": 8,
+        "latDeg": 16.21667,
+        "lonDeg": -16.25,
+        "dayOfYear": 274,
+        "hourStartUtc": "2026-10-01T15:00:00Z",
+        "nightRsRso": null
+      },
+      "et0Mm": 0.63,
+      "tolerance": 0.005,
+      "terms": {
+        "delta": 0.358,
+        "gamma": 0.0673,
+        "es": 6.625,
+        "ea": 3.445,
+        "omega": 0.682,
+        "ra": 3.543,
+        "rso": 2.658,
+        "rns": 1.887,
+        "rsRso": 0.922,
+        "rnl": 0.137,
+        "rn": 1.749,
+        "g": 0.175,
+        "radTerm": 0.46,
+        "aeroTerm": 0.17
+      },
+      "termTolerance": {
+        "default": 0.001,
+        "radTerm": 0.005,
+        "aeroTerm": 0.005
+      }
+    },
+    {
+      "name": "payerne_summer_noon",
+      "input": {
+        "tMeanC": 28,
+        "rhPct": 45,
+        "windSpeedMs": 2,
+        "windHeightM": 2,
+        "solarRadMjM2h": 3,
+        "elevationM": 490,
+        "latDeg": 46.8,
+        "lonDeg": 6.95,
+        "dayOfYear": 200,
+        "hourStartUtc": "2026-07-19T11:00:00Z",
+        "nightRsRso": null
+      },
+      "et0Mm": 0.61171,
+      "tolerance": 0.0001,
+      "terms": {
+        "ra": 4.27076,
+        "rso": 3.24492,
+        "rn": 2.07243,
+        "g": 0.20724
+      }
+    },
+    {
+      "name": "payerne_summer_noon_10m",
+      "input": {
+        "tMeanC": 28,
+        "rhPct": 45,
+        "windSpeedMs": 2.6739716893,
+        "windHeightM": 10,
+        "solarRadMjM2h": 3,
+        "elevationM": 490,
+        "latDeg": 46.8,
+        "lonDeg": 6.95,
+        "dayOfYear": 200,
+        "hourStartUtc": "2026-07-19T11:00:00Z",
+        "nightRsRso": null
+      },
+      "et0Mm": 0.61171,
+      "tolerance": 0.0001
+    },
+    {
+      "name": "payerne_winter_night",
+      "input": {
+        "tMeanC": 1,
+        "rhPct": 90,
+        "windSpeedMs": 1,
+        "windHeightM": 2,
+        "solarRadMjM2h": 0,
+        "elevationM": 490,
+        "latDeg": 46.8,
+        "lonDeg": 6.95,
+        "dayOfYear": 355,
+        "hourStartUtc": "2026-12-21T01:00:00Z",
+        "nightRsRso": 0.5
+      },
+      "et0Mm": -0.0021,
+      "tolerance": 0.0001
+    }
+  ],
+  "fao56HourlyDays": [
+    {
+      "name": "payerne_synthetic_2026_07_19",
+      "input": {
+        "hours": [
+          {
+            "hourStartUtc": "2026-07-18T22:00:00Z",
+            "tMeanC": 15.0503,
+            "rhPct": 79.1421,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          },
+          {
+            "hourStartUtc": "2026-07-18T23:00:00Z",
+            "tMeanC": 13.9378,
+            "rhPct": 82.3205,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          },
+          {
+            "hourStartUtc": "2026-07-19T00:00:00Z",
+            "tMeanC": 13.2385,
+            "rhPct": 84.3185,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          },
+          {
+            "hourStartUtc": "2026-07-19T01:00:00Z",
+            "tMeanC": 13,
+            "rhPct": 85,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          },
+          {
+            "hourStartUtc": "2026-07-19T02:00:00Z",
+            "tMeanC": 13.2385,
+            "rhPct": 84.3185,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          },
+          {
+            "hourStartUtc": "2026-07-19T03:00:00Z",
+            "tMeanC": 13.9378,
+            "rhPct": 82.3205,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          },
+          {
+            "hourStartUtc": "2026-07-19T04:00:00Z",
+            "tMeanC": 15.0503,
+            "rhPct": 79.1421,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0.2047
+          },
+          {
+            "hourStartUtc": "2026-07-19T05:00:00Z",
+            "tMeanC": 16.5,
+            "rhPct": 75,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0.674
+          },
+          {
+            "hourStartUtc": "2026-07-19T06:00:00Z",
+            "tMeanC": 18.1883,
+            "rhPct": 70.1764,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 1.1481
+          },
+          {
+            "hourStartUtc": "2026-07-19T07:00:00Z",
+            "tMeanC": 20,
+            "rhPct": 65,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 1.5945
+          },
+          {
+            "hourStartUtc": "2026-07-19T08:00:00Z",
+            "tMeanC": 21.8117,
+            "rhPct": 59.8236,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 1.9824
+          },
+          {
+            "hourStartUtc": "2026-07-19T09:00:00Z",
+            "tMeanC": 23.5,
+            "rhPct": 55,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 2.2857
+          },
+          {
+            "hourStartUtc": "2026-07-19T10:00:00Z",
+            "tMeanC": 24.9497,
+            "rhPct": 50.8579,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 2.4835
+          },
+          {
+            "hourStartUtc": "2026-07-19T11:00:00Z",
+            "tMeanC": 26.0622,
+            "rhPct": 47.6795,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 2.5625
+          },
+          {
+            "hourStartUtc": "2026-07-19T12:00:00Z",
+            "tMeanC": 26.7615,
+            "rhPct": 45.6815,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 2.5171
+          },
+          {
+            "hourStartUtc": "2026-07-19T13:00:00Z",
+            "tMeanC": 27,
+            "rhPct": 45,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 2.3506
+          },
+          {
+            "hourStartUtc": "2026-07-19T14:00:00Z",
+            "tMeanC": 26.7615,
+            "rhPct": 45.6815,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 2.0742
+          },
+          {
+            "hourStartUtc": "2026-07-19T15:00:00Z",
+            "tMeanC": 26.0622,
+            "rhPct": 47.6795,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 1.7068
+          },
+          {
+            "hourStartUtc": "2026-07-19T16:00:00Z",
+            "tMeanC": 24.9497,
+            "rhPct": 50.8579,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 1.2735
+          },
+          {
+            "hourStartUtc": "2026-07-19T17:00:00Z",
+            "tMeanC": 23.5,
+            "rhPct": 55,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0.8037
+          },
+          {
+            "hourStartUtc": "2026-07-19T18:00:00Z",
+            "tMeanC": 21.8117,
+            "rhPct": 59.8236,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0.3295
+          },
+          {
+            "hourStartUtc": "2026-07-19T19:00:00Z",
+            "tMeanC": 20,
+            "rhPct": 65,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0.011
+          },
+          {
+            "hourStartUtc": "2026-07-19T20:00:00Z",
+            "tMeanC": 18.1883,
+            "rhPct": 70.1764,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          },
+          {
+            "hourStartUtc": "2026-07-19T21:00:00Z",
+            "tMeanC": 16.5,
+            "rhPct": 75,
+            "windSpeedMs": 2,
+            "solarRadMjM2h": 0
+          }
+        ],
+        "windHeightM": 2,
+        "elevationM": 490,
+        "latDeg": 46.8,
+        "lonDeg": 6.95,
+        "dayOfYear": 200,
+        "priorRsRso": null
+      },
+      "sumMm": 4.845356,
+      "et0Mm": 4.85,
+      "lastRsRso": 0.7897,
+      "hourly": [
+        {
+          "hourStartUtc": "2026-07-18T22:00:00Z",
+          "et0Mm": 0.01848,
+          "sunUp": false,
+          "rsRsoSource": "default"
+        },
+        {
+          "hourStartUtc": "2026-07-18T23:00:00Z",
+          "et0Mm": 0.01383,
+          "sunUp": false,
+          "rsRsoSource": "default"
+        },
+        {
+          "hourStartUtc": "2026-07-19T00:00:00Z",
+          "et0Mm": 0.01106,
+          "sunUp": false,
+          "rsRsoSource": "default"
+        },
+        {
+          "hourStartUtc": "2026-07-19T01:00:00Z",
+          "et0Mm": 0.01014,
+          "sunUp": false,
+          "rsRsoSource": "default"
+        },
+        {
+          "hourStartUtc": "2026-07-19T02:00:00Z",
+          "et0Mm": 0.01106,
+          "sunUp": false,
+          "rsRsoSource": "default"
+        },
+        {
+          "hourStartUtc": "2026-07-19T03:00:00Z",
+          "et0Mm": 0.01383,
+          "sunUp": false,
+          "rsRsoSource": "default"
+        },
+        {
+          "hourStartUtc": "2026-07-19T04:00:00Z",
+          "et0Mm": 0.02294,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T05:00:00Z",
+          "et0Mm": 0.09959,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T06:00:00Z",
+          "et0Mm": 0.18481,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T07:00:00Z",
+          "et0Mm": 0.27341,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T08:00:00Z",
+          "et0Mm": 0.35845,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T09:00:00Z",
+          "et0Mm": 0.43218,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T10:00:00Z",
+          "et0Mm": 0.487,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T11:00:00Z",
+          "et0Mm": 0.51688,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T12:00:00Z",
+          "et0Mm": 0.51818,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T13:00:00Z",
+          "et0Mm": 0.4903,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T14:00:00Z",
+          "et0Mm": 0.43564,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T15:00:00Z",
+          "et0Mm": 0.35937,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T16:00:00Z",
+          "et0Mm": 0.26878,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T17:00:00Z",
+          "et0Mm": 0.17231,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T18:00:00Z",
+          "et0Mm": 0.07856,
+          "sunUp": true,
+          "rsRsoSource": "measured"
+        },
+        {
+          "hourStartUtc": "2026-07-19T19:00:00Z",
+          "et0Mm": 0.03202,
+          "sunUp": false,
+          "rsRsoSource": "carried"
+        },
+        {
+          "hourStartUtc": "2026-07-19T20:00:00Z",
+          "et0Mm": 0.0221,
+          "sunUp": false,
+          "rsRsoSource": "carried"
+        },
+        {
+          "hourStartUtc": "2026-07-19T21:00:00Z",
+          "et0Mm": 0.01444,
+          "sunUp": false,
+          "rsRsoSource": "carried"
+        }
+      ]
+    }
+  ]
+}

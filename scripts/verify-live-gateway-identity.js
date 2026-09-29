@@ -11,6 +11,15 @@ const profiles = [
   'conf/full_raspberrypi_bcm27xx_bcm2712',
   'conf/full_raspberrypi_bcm27xx_bcm2709',
 ];
+// This script carries no git-show base-ref call of its own: its size/identity
+// pins are cross-checked against scripts/verify-flows-size-ratchet-allowances.json,
+// whose own numbers are git-anchored against --base-ref / OSI_FLOWS_SIZE_BASE_REF
+// (default origin/main; see verify-flows-size-ratchet.js). OSI_IDENTITY_BASE_REF
+// follows that same default-origin/main-with-env-override pattern so the base this
+// file's pins are declared against is nameable and overridable the same way, even
+// though the value below is only ever used in messages, never in a git call.
+const DEFAULT_IDENTITY_BASE_REF = 'origin/main';
+const identityBaseRef = process.env.OSI_IDENTITY_BASE_REF || DEFAULT_IDENTITY_BASE_REF;
 const failures = [];
 
 function fail(message) {
@@ -1122,7 +1131,23 @@ if (sizeAllowances) {
     // bypassed it entirely) -- fixing a 319-char applied_commands.result_detail that 500'd
     // the whole cloud bootstrap against the cloud's varchar(255) ValveActuation mirror
     // columns. Re-measured fresh: origin/main 43556 -> HEAD 44929 = +1373.
-    'sync-bootstrap-build': 1373,
+    // Weather data view: re-pinned from 1373 to +96 (Task 6), then to +150 in the final
+    // fix wave (item B1, final-review-fable.md finding I1). The 1373 is baked into
+    // origin/main (44956 chars); this branch adds iz.weather_source to the zone SELECT,
+    // zone_config_weather_source_v1 to syncCapabilities, and -- as of B1 -- carries
+    // weather_source in the zone map only when the stored value is not 'auto' (an
+    // object-spread ternary, longer than the plain `|| 'auto'` fallback it replaced), so
+    // the edge never pushes a default over a value the cloud already chose. Re-measured
+    // fresh: origin/main 44956 -> HEAD 45106 = +150.
+    // Daily agronomy parity (plan E2a Task 2): re-pinned from 150 to +252. This task adds
+    // iz.stage_started_on to the zone SELECT, stage_started_on to the zone map (every zone,
+    // null when unset) and zone_config_stage_started_on_v1 to syncCapabilities (+102) on top
+    // of the weather data view's +150. Re-measured fresh: origin/main 44956 -> HEAD 45208 = +252.
+    // Daily agronomy parity (plan E4 Task 3): re-pinned from 252 to +1256. The bootstrap
+    // carries zoneAgronomy (the last 30 days of zone_daily_agronomy per live zone with a
+    // UUID, at most 1,000 rows), +1004 on top of plan E2a's +252. Re-measured fresh:
+    // origin/main 44956 -> HEAD 46212 = +1256.
+    'sync-bootstrap-build': 1256,
     // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 1885 to +1426 for the
     // same capFreeTextFields() addition (this node's copy of sanitizeSyncRow/
     // normalizeOutboxPayload). The prior 1885 (F81's normalizeIsoTimestamp/
@@ -1139,7 +1164,13 @@ if (sizeAllowances) {
     // W58 Stop 16 Force Sync recovery response classification and summary counts. The
     // maintained profiles remain byte-identical; re-measured fresh against origin/main:
     // origin/main 66618 -> HEAD 69883 = +3265.
-    'sync-force-build': 3265,
+    // Weather data view: re-pinned from 3265 to +96 (Task 6), then to +150 in the final
+    // fix wave (item B1, final-review-fable.md finding I1) -- the same change as
+    // sync-bootstrap-build. The 3265 is baked into origin/main, 68992 chars. Re-measured
+    // fresh: origin/main 68992 -> HEAD 69142 = +150.
+    // Daily agronomy parity (plan E2a Task 2): re-pinned from 150 to +252, the same three
+    // additions as sync-bootstrap-build. Re-measured fresh: origin/main 68992 -> HEAD 69244 = +252.
+    'sync-force-build': 252,
     'command-ack-build-batch': 975,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
     // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded
@@ -1147,7 +1178,12 @@ if (sizeAllowances) {
     // rejected backlog was invisible to every operator surface. Measured +1144 for this node;
     // the live-identity provenance this guard checks for is carried forward in the reason.
     'sync-state-build': 1144,
-    'al-link-build-req': 2511,
+    // Weather data view: re-pinned from 2511 to +33 (the 2511 is baked into origin/main,
+    // 6709 chars); syncCapabilities gains zone_config_weather_source_v1. Re-measured fresh:
+    // origin/main 6709 -> HEAD 6742 = +33.
+    // Daily agronomy parity (plan E2a Task 2): re-pinned from 33 to +68; syncCapabilities gains
+    // zone_config_stage_started_on_v1. Re-measured fresh: origin/main 6709 -> HEAD 6777 = +68.
+    'al-link-build-req': 68,
     'al-link-restart-node-red': 1761,
     'al-unlink-restart-node-red': 1773,
   };
@@ -1427,11 +1463,141 @@ if (sizeAllowances) {
   // watermark-cal-fn). 6731 + 11047 = 17778 = origin/main 1580418 -> HEAD 1598196. Build
   // Telemetry grew on both sides; its node allowance is the merged measurement, 13850 -> 14621
   // (+771). The committed baseline doc is re-written from the same tree (1598196).
-  expectCondition(sizeAllowances.total_allowance?.delta === 17778,
-    'size total allowance: exact cumulative delta 17778',
-    'size total allowance: expected exact cumulative delta 17778');
+  // 1007: 2026-09-26 weather-provider-store Task 7 (flow nodes) lands on origin/main after the
+  // zone-device-rename-stage-1 branch above has merged, so the 71275 figure is unearned headroom
+  // -- it is entirely baked into origin/main's own measured total already -- and is dropped rather
+  // than carried forward. This slice adds exactly two new nodes on the dendro-analytics tab:
+  // weather-provider-tick (inject, no func, zero chars) and weather-provider-fn (function, 1007
+  // chars) -- verify-flows-size-ratchet totalChars over both byte-identical profiles: origin/main
+  // 1580418 -> HEAD 1581425 = +1007.
+  // 3381: 2026-09-26 daily agronomy record, sub-project 2 Task 8 (flow nodes and caller-binding
+  // policies) carries the sub-project 1 (weather-provider-store) Task 7 nodes above forward
+  // unchanged -- weather-provider-tick + weather-provider-fn are still unmerged to origin/main, so
+  // their +1007 remains this branch's own delta -- and adds two more function nodes chained off
+  // weather-provider-fn on the same dendro-analytics tab: station-hours-fn (calls
+  // osi-station-hours's aggregateStationHours, func 1106 chars) and agronomy-daily-fn (calls
+  // osi-agronomy-daily's runDaily, func 1268 chars), wired weather-provider-fn -> station-hours-fn
+  // -> agronomy-daily-fn. verify-flows-size-ratchet totalChars over both byte-identical profiles:
+  // origin/main 1580418 -> HEAD 1583799 = +3381 (1007 + 1106 + 1268, exactly the three nodes' func
+  // lengths).
+  // 3039: 2026-09-26 daily agronomy record, sub-project 2 Task 9 moves zone-env-fn's per-day water
+  // transform into osi-zone-env's buildWaterDaily (the node keeps the queries and gains the
+  // zone_daily_agronomy and station-name SELECTs), shrinking zone-env-fn from 41848 to 41506 chars
+  // (-342, below its origin/main length, so no node allowance). verify-flows-size-ratchet totalChars
+  // over both byte-identical profiles: origin/main 1580418 -> HEAD 1583457 = +3039 (3381 - 342).
+  // 3012: daily agronomy final fix wave. zone-env-fn passes today's demand to resolveWaterAction
+  // (demand_unknown) and agronomic.current to buildWaterDaily (today's ET0, Kc, crop and stage),
+  // 41506 -> 41479 chars (-27). verify-flows-size-ratchet totalChars over both byte-identical
+  // profiles: origin/main 1580418 -> HEAD 1583430 = +3012.
+  // 4138: daily agronomy final fix wave. weather-provider-fn forwards on a thrown error with
+  // payload { weatherFailed: true } and sets a status (1007 -> 1467), station-hours-fn forwards a
+  // clock skip as payload.stationSkipped and sets a status (1106 -> 1525), agronomy-daily-fn sets
+  // its status from summary.latestNull and turns red on failure (1268 -> 1515); zone-env-fn stays
+  // at 41479. verify-flows-size-ratchet totalChars over both byte-identical profiles: origin/main
+  // 1580418 -> HEAD 1584556 = +4138 (1467 + 1525 + 1515 - 369).
+  // 4350: weather data view (sub-project 3) Task 5, stacked on the daily agronomy branch
+  // whose +4138 above is still unmerged and carried forward. sync-init-fn grows by the
+  // generated trg_sync_zones_outbox_au body of migration 0065 (81736 -> 81948, +212).
+  // verify-flows-size-ratchet totalChars over both byte-identical profiles: origin/main
+  // 1580418 -> HEAD 1584768 = +4350 (4138 + 212).
+  // 5668: weather data view Task 6 adds zone-config-fn (+737), get-zones-query (+19),
+  // get-zones-response (+337), sync-bootstrap-build (+96), sync-force-build (+96) and
+  // al-link-build-req (+33) to Task 5's 4350. verify-flows-size-ratchet totalChars over both
+  // byte-identical profiles: origin/main 1580418 -> HEAD 1586086 = +5668.
+  // 7155: weather data view Task 7 adds 4f4a765f36cee6f3 (+1487, legacy UPSERT_ZONE_CONFIG
+  // and UPSERT_ZONE store weather_source) to Task 6's 5668. verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1580418 -> HEAD 1587573 = +7155.
+  // 8445: final fix wave item B1 (final-review-fable.md finding I1) re-measures sync-init-fn
+  // (+212 -> +1394), sync-bootstrap-build (+96 -> +150) and sync-force-build (+96 -> +150)
+  // after the zone update trigger and both snapshots stopped sending weather_source
+  // unconditionally: the trigger now wraps its payload in CASE ... json_patch(...) ELSE ...
+  // END (the json_object argument list is duplicated once, for the two branches) and both
+  // snapshots use an object-spread ternary in place of the plain `|| 'auto'` fallback. The
+  // other five node deltas (zone-config-fn, get-zones-query, get-zones-response,
+  // al-link-build-req, 4f4a765f36cee6f3) are unchanged. verify-flows-size-ratchet totalChars
+  // over both byte-identical profiles: origin/main 1580418 -> HEAD 1588863 = +8445
+  // (7155 - 212 - 96 - 96 + 1394 + 150 + 150).
+  // 1946: daily agronomy parity (plan E2a Task 1) adds sync-init-fn +232 (the generated
+  // trg_sync_zones_outbox_au body of migration 0066: the date comparison twice and the
+  // stage_started_on pair in both branches of 0065's weather_source CASE) to the weather
+  // data view's pre-task HEAD total of 1588863 (measured above as +8445 against origin/main
+  // 1580418), giving a pre-task-relative total of 1589095 either way. origin/main moved after
+  // this plan was written and now also carries another branch's own migration 0060 (a
+  // numbering collision with this lineage's own 0060, resolved at the merge by renumbering this
+  // lineage's six migrations to 0062-0067): its total
+  // grew from 1580418 to 1587149 and its sync-init-fn from 81736 to 81784, which shrinks every
+  // delta measured against it from here on (the plan's own anchor for this step was +8677;
+  // the true delta against the branch that now sits on origin/main is +1946). Both HEAD totals
+  // (1589095) and the task-local growth (+232) match the plan exactly; only the origin/main
+  // baseline moved. verify-flows-size-ratchet totalChars over both byte-identical profiles:
+  // origin/main 1587149 -> HEAD 1589095 = +1946.
+  // -5465: plan E2a Task 2 adds zone-config-fn (+3328), get-zones-query (+21),
+  // get-zones-response (+48), sync-bootstrap-build (+102), sync-force-build (+102) and
+  // al-link-build-req (+35) to Task 1's pre-task HEAD total of 1589095, a task-local growth
+  // of +3636, giving HEAD 1592731 -- exactly the plan's own anchor for this step, confirming
+  // this task's own work matches the plan bit for bit. Between Task 1 and Task 2, origin/main
+  // fast-forwarded again (676a3c801 -> ca08dcc13, "feat(lsn50): WATERMARK soil sensors on the
+  // Dragino LSN50 (#366)"), adding 11047 chars to flows.json that this task never touches;
+  // combined with the 6731 chars RAK10701 (#359) had already added before Task 1 ran, origin/main
+  // has grown by 17778 chars since the plan's own anchor (c5bc18314, 1580418) while this
+  // branch's own HEAD total has grown by exactly what the plan predicted (1592731). The
+  // origin/main-relative delta this ratchet reads is therefore smaller than the plan's own
+  // +12313, and negative: verify-flows-size-ratchet totalChars over both byte-identical
+  // profiles: origin/main 1598196 -> HEAD 1592731 = -5465.
+  // Corrected 2026-09-29: origin/main went on to fast-forward further while this branch sat
+  // unmerged, so a -5465 pin measured against it keeps moving and is not this stack's own
+  // history. This stack of branches (feat/weather-provider-store, feat/daily-agronomy,
+  // feat/daily-agronomy-parity) is pinned against its own fixed cut point c5bc18314 (the
+  // plan's own anchor, 1580418 chars) until the repository owner rebases it: c5bc18314
+  // 1580418 -> HEAD 1592731 = +12313, the plan's own anchor cited above. OSI_IDENTITY_BASE_REF
+  // names that fixed base for this file (defaulting to origin/main, overridable the same way
+  // OSI_FLOWS_SIZE_BASE_REF/OSI_DDL_BASE_REF/OSI_MIGRATIONS_BASE_REF are); set it (and the
+  // other three) to c5bc18314 when checking this branch until then.
+  // 16716: plan E2a Task 3 adds 4f4a765f36cee6f3 (+4403: legacy UPSERT_ZONE_CONFIG and
+  // UPSERT_ZONE store stage_started_on, with both stage-date rules and one warning for an
+  // invalid date) to Task 2's 12313. verify-flows-size-ratchet totalChars over both
+  // byte-identical profiles: origin/main 1580418 -> HEAD 1597134 = +16716.
+  // 16789: plan E2a Task 5 adds zone-env-fn (+73: iz.stage_started_on in the zone query and
+  // stage_overrun in the daily agronomy SELECT) to Task 3's 16716. verify-flows-size-ratchet
+  // totalChars over both byte-identical profiles: origin/main 1580418 -> HEAD 1597207 = +16789.
+  // 17793: plan E4 Task 3 adds sync-bootstrap-build +1004 (the zoneAgronomy bootstrap list)
+  // to plan E2a's 16789. verify-flows-size-ratchet totalChars over both byte-identical
+  // profiles, pinned against this stack's own fixed cut point c5bc18314 (origin/main has
+  // moved past it): c5bc18314 1580418 -> HEAD 1598211 = +17793. Informational, against the
+  // moving origin/main target (has moved since): origin/main 1598196 -> HEAD 1598211 = +15.
+  // 17809: final fix wave item 1 (E-I1) adds 'ZONE_AGRONOMY' to prune-sync-outbox's
+  // TELEMETRY set (+16 across both profiles) on top of plan E4 Task 3's 17793.
+  // verify-flows-size-ratchet totalChars over both byte-identical profiles, same fixed
+  // cut point: c5bc18314 1580418 -> HEAD 1598227 = +17809.
+  // 17823: final fix wave item 4 (E-M1 + E-M5) nets +14 across both profiles:
+  // zone-config-fn +19 (closes its handle on an invalid zone id instead of
+  // leaking it) and 4f4a765f36cee6f3 -5 (a shorter warning message) on top of
+  // item 1's 17809. verify-flows-size-ratchet totalChars over both
+  // byte-identical profiles, same fixed cut point: c5bc18314 1580418 -> HEAD
+  // 1598241 = +17823.
+  // 35601: 2026-09-29 merge of origin/main 2cf6c5836 (field tester + WATERMARK, standing
+  // 17778 above) into the provider-weather stack. The stack's own entries above were measured
+  // against its cut point c5bc18314; from this merge on, every size, DDL, migration and
+  // identity check runs against origin/main again and no OSI_*_BASE_REF override is needed.
+  // Measured on the merged tree, verify-flows-size-ratchet totalChars in each byte-identical
+  // profile: origin/main 1598196 -> HEAD 1616019 = +17823 (the stack's nodes; main's and the
+  // stack's flow changes touch disjoint nodes except sync-init-fn, whose two changes sit on
+  // disjoint lines). Standing 17778 + measured 17823 = 35601. The committed baseline doc is
+  // re-written from the same tree (1616019).
+  expectCondition(sizeAllowances.total_allowance?.delta === 35601,
+    'size total allowance: exact cumulative delta 35601',
+    'size total allowance: expected exact cumulative delta 35601');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'weather-provider-tick', 'declares the weather-provider-store Task 7 inject node id within the re-measured total');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'weather-provider-fn', 'declares the weather-provider-store Task 7 function node id within the re-measured total');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'station-hours-fn', 'declares the daily-agronomy Task 8 station-hours function node id within the re-measured total');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'agronomy-daily-fn', 'declares the daily-agronomy Task 8 agronomy-daily function node id within the re-measured total');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'zone-env-fn', 'declares the daily-agronomy Task 9 zone-env-fn shrink within the re-measured total');
+  for (const nodeId of ['sync-init-fn', 'zone-config-fn', 'get-zones-query', 'get-zones-response', 'sync-bootstrap-build', 'sync-force-build', 'al-link-build-req', '4f4a765f36cee6f3']) {
+    expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), nodeId, `declares the weather data view growth of ${nodeId} within the re-measured total`);
+  }
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',

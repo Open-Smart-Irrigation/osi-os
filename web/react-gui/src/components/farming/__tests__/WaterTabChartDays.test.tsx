@@ -13,17 +13,33 @@ import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { WaterTab } from '../environment/WaterTab';
 import type { WaterEnvironment } from '../../../types/farming';
 
-vi.mock('recharts', () => {
+// The day labels come from the main x axis' tickFormatter (the plot prints
+// "Today" for today's row), so the mock chart hands its rows to the axis and
+// the axis prints what the formatter makes of each row's date.
+vi.mock('recharts', async () => {
+  const React = await import('react');
   const Leaf = () => null;
+  type Row = { date: string };
+  const XAxis = ({ xAxisId, tickFormatter, rows }: { xAxisId?: string; tickFormatter?: (value: string) => string; rows?: Row[] }) => (
+    xAxisId ? null : <div data-testid="water-chart" data-days={JSON.stringify((rows ?? []).map((row) => tickFormatter?.(row.date) ?? row.date))} />
+  );
   return {
     Bar: Leaf,
-    BarChart: ({ data }: { data?: unknown[] }) => (
-      <div data-testid="water-chart" data-rows={JSON.stringify(data ?? [])} />
+    BarChart: ({ data, children }: { data?: Row[]; children?: React.ReactNode }) => (
+      <div>
+        {React.Children.map(children, (child) => (
+          React.isValidElement(child) && child.type === XAxis
+            ? React.cloneElement(child as React.ReactElement<{ rows?: Row[] }>, { rows: data ?? [] })
+            : child
+        ))}
+      </div>
     ),
     CartesianGrid: Leaf,
+    Legend: Leaf,
+    ReferenceLine: Leaf,
     ResponsiveContainer: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
     Tooltip: Leaf,
-    XAxis: Leaf,
+    XAxis,
     YAxis: Leaf,
   };
 });
@@ -61,10 +77,7 @@ async function englishI18n() {
   return instance;
 }
 
-const chartDays = () => {
-  const rows = JSON.parse(screen.getByTestId('water-chart').getAttribute('data-rows') ?? '[]');
-  return rows.map((row: { shortDate: string }) => row.shortDate);
-};
+const chartDays = () => JSON.parse(screen.getByTestId('water-chart').getAttribute('data-days') ?? '[]');
 
 describe('WaterTab chart day labels', () => {
   // Zone-independent once the dates are anchored at local noon: every run,
@@ -76,5 +89,11 @@ describe('WaterTab chart day labels', () => {
     const i18n = await englishI18n();
     render(<I18nextProvider i18n={i18n}><WaterTab water={water()} /></I18nextProvider>);
     expect(chartDays()).toEqual(['May 28', 'May 29']);
+  });
+
+  it("labels today's row \"Today\" and every other row with its calendar day", async () => {
+    const i18n = await englishI18n();
+    render(<I18nextProvider i18n={i18n}><WaterTab water={{ ...water(), todayDate: '2026-05-29' }} /></I18nextProvider>);
+    expect(chartDays()).toEqual(['May 28', 'Today']);
   });
 });

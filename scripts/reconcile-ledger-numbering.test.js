@@ -645,21 +645,23 @@ test('AgroLink-lineage fixture: reconcile classifies all 28 foreign rows, applie
   // with no interleaving; the verified renumber blocks — +9/+11/-1/-19 —
   // actually interleave AgroLink's content BEFORE and AROUND main's own
   // 0022-0025, covering 0026-0053 contiguously). Main's head has since moved
-  // past this device fixture's throughVersion (49): 0054-0061 (network
+  // past this device fixture's throughVersion (49): 0054-0067 (network
   // coverage v1, land/network-observations-v1, the RAK10701 field-tester
-  // device type, and the WATERMARK LSN50 tables) are also genuinely new to
-  // this device, so pending is {22,23,24,25,54,55,56,57,58,59,60,61}.
+  // device type, the WATERMARK LSN50 tables, weather provider store, daily
+  // agronomy, FAO-56 stage keys, zone weather_source sync, zone stage start
+  // date, daily agronomy record sync) are also genuinely new to this device,
+  // so pending is {22,23,24,25,54,...,67}.
   // This list is exact on purpose: extend it when a migration lands, never
   // relax it to a prefix or subset check.
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61]);
+  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67]);
 
   // The real applyPending can now carry the device the rest of the way home.
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
-  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61]);
+  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67]);
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
 });
 
@@ -698,15 +700,17 @@ test('Bovey-lineage fixture: reconcile classifies all 4 foreign rows, applies cl
   // Bovey never ran ANY AgroLink-derived content — pending is main's
   // 0026-0053 tail, matching the stabilization plan's estimate exactly
   // (this is the one of the two lineage estimates that verified correct),
-  // plus 0054-0061 (network coverage v1, land/network-observations-v1,
+  // plus 0054-0067 (network coverage v1, land/network-observations-v1,
   // durable valve dispatch intents, the RAK10701 field-tester device type,
-  // and the WATERMARK LSN50 tables),
-  // which landed on main after this device fixture's throughVersion (25).
+  // the WATERMARK LSN50 tables, weather provider store, daily agronomy,
+  // FAO-56 stage keys, zone weather_source sync, zone stage start date,
+  // daily agronomy record sync), which landed on main after this device
+  // fixture's throughVersion (25).
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59, 60, 61]);
+  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67]);
 
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
   assert.deepEqual(carryRes.applied, pending);

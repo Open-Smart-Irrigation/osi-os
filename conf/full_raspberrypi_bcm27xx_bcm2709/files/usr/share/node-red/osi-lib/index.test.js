@@ -22,8 +22,10 @@ const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
 test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
+    'agronomy-daily',
     'agroscope-uplink-transform',
     'chirpstack',
+    'crop-kc',
     'dendro-analytics',
     'device-commands',
     'device-writer',
@@ -48,9 +50,11 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'sdi12-normalize',
     'sdi12-reassemble',
     'sdi12-recipe',
+    'station-hours',
     'uc512-normalize',
     'uplink-dedup',
     'watermark-helper',
+    'weather-provider',
     'zone-commands',
     'zone-env',
   ]);
@@ -59,6 +63,8 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['chirpstack'], 'osi-chirpstack-helper');
   assert.equal(osiLib.NAME_TO_PATH['dendro-analytics'], 'osi-dendro-analytics');
   assert.equal(osiLib.NAME_TO_PATH['zone-env'], 'osi-zone-env');
+  assert.equal(osiLib.NAME_TO_PATH['weather-provider'], 'osi-weather-provider');
+  assert.equal(osiLib.NAME_TO_PATH['crop-kc'], 'osi-crop-kc');
   assert.equal(osiLib.NAME_TO_PATH['device-writer'], 'osi-device-writer');
   assert.equal(osiLib.NAME_TO_PATH['entity-name'], 'osi-entity-name');
   assert.equal(osiLib.NAME_TO_PATH['uc512-normalize'], 'osi-uc512-normalize');
@@ -70,6 +76,8 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['osi-system-settings'], 'osi-system-settings');
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
   assert.equal(osiLib.NAME_TO_PATH['sdi12-recipe'], 'osi-sdi12-recipe');
+  assert.equal(osiLib.NAME_TO_PATH['station-hours'], 'osi-station-hours');
+  assert.equal(osiLib.NAME_TO_PATH['agronomy-daily'], 'osi-agronomy-daily');
   assert.equal(osiLib.NAME_TO_PATH['sdi12-commissioning'], 'osi-sdi12-commissioning');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');

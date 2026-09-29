@@ -1,4 +1,4 @@
-import type { AnalysisSeries } from './types';
+import type { AnalysisPoint, AnalysisSeries } from './types';
 import type { ZonePairs } from './correlation';
 import type { UnitPanel } from './unitGrouping';
 import { SERIES_PALETTE, seriesColor } from './seriesColors';
@@ -12,7 +12,11 @@ export interface TimeSeriesOptionInput {
   multiAxis: boolean;
   includeLegend?: boolean;
   resolveAxisLabel?: (channelKey: string, unit: string | null) => string;
+  formatPartial?: PartialFormatter;
 }
+
+/** Text appended to a tooltip value, e.g. " (23 of 24 h)" for a partial sum; '' for none. */
+export type PartialFormatter = (point: AnalysisPoint, series: AnalysisSeries) => string;
 
 const tooltipValueFormatter = (value: number | null | undefined) => (
   value == null ? '–' : Number(value).toFixed(1)
@@ -25,6 +29,74 @@ const NAME_STYLE = {
   nameTextStyle: { fontSize: 12, fontWeight: 500 as const, color: '#475569' },
 };
 const Y_AXIS_GRID_LEFT = 80;
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// The markup of ECharts 5.6's default axis tooltip (component/tooltip/tooltipMarkup.js
+// with the default text style): a grey header, then per series the marker, the name
+// on the left and the value in bold on the right. The formatter below replaces the
+// ECharts default for every series of a chart that passes formatPartial — device
+// series do not keep their stock look either, they get the same rebuilt rows. On
+// the stacked layout, `drawn` lists series panel-then-series (see buildTimeSeriesOption
+// below), so a merged tooltip across the linked grids shows one time header and the
+// rows top panel first.
+const TOOLTIP_NAME_STYLE = 'font-size:12px;color:#6e7079;font-weight:400';
+const TOOLTIP_VALUE_STYLE = 'font-size:14px;color:#464646;font-weight:900';
+
+function tooltipBlock(content: string, topGap: number): string {
+  return `<div style="margin: ${topGap}px 0 0;line-height:1;">${content}<div style="clear:both"></div></div>`;
+}
+
+function tooltipRow(marker: string, name: string, value: string, topGap: number): string {
+  return tooltipBlock(
+    `${marker}<span style="${TOOLTIP_NAME_STYLE};margin-left:2px">${escapeHtml(name)}</span>`
+      + `<span style="float:right;margin-left:20px;${TOOLTIP_VALUE_STYLE}">${escapeHtml(value)}</span>`,
+    topGap,
+  );
+}
+
+interface AxisTooltipParam {
+  seriesIndex?: number;
+  dataIndex?: number;
+  marker?: string;
+  seriesName?: string;
+  value?: unknown;
+  axisValueLabel?: string;
+}
+
+// `drawn` lists the series in ECharts series order, so a hovered
+// (seriesIndex, dataIndex) finds its AnalysisPoint and the partial marker.
+function axisTooltip(drawn: AnalysisSeries[], formatPartial?: PartialFormatter): Record<string, unknown> {
+  // Callers without formatPartial (the builder tests) keep ECharts' own tooltip.
+  if (!formatPartial) return { trigger: 'axis', valueFormatter: tooltipValueFormatter };
+  return {
+    trigger: 'axis',
+    valueFormatter: tooltipValueFormatter,
+    formatter: (params: unknown) => {
+      const list = (Array.isArray(params) ? params : [params]) as AxisTooltipParam[];
+      const rows = list.map((param, index) => {
+        const item = drawn[param.seriesIndex ?? -1];
+        const point = item?.points[param.dataIndex ?? -1];
+        const raw = Array.isArray(param.value) ? param.value[1] : param.value;
+        const text = tooltipValueFormatter(typeof raw === 'number' ? raw : null);
+        const suffix = item && point ? formatPartial(point, item) : '';
+        return tooltipRow(param.marker ?? '', param.seriesName ?? '', `${text}${suffix}`, index > 0 ? 10 : 0);
+      }).join('');
+      const header = list[0]?.axisValueLabel;
+      return header
+        ? tooltipBlock(`<div style="${TOOLTIP_NAME_STYLE};line-height:1;">${escapeHtml(header)}</div>${tooltipBlock(rows, 10)}`, 0)
+        : tooltipBlock(rows, 0);
+    },
+  };
+}
+
+// A daily point between two null days has no line to either side; its symbol
+// keeps it visible. Hourly and device series keep today's plain line.
+function symbolSpec(s: AnalysisSeries): Record<string, unknown> {
+  return s.cadence === 'daily' ? { showSymbol: true, symbolSize: 4 } : { showSymbol: false };
+}
 
 function axisNameSpec(
   axisSeries: AnalysisSeries[],
@@ -81,7 +153,7 @@ function lineSeries(
     name: s.label,
     type: 'line',
     color,
-    showSymbol: false,
+    ...symbolSpec(s),
     connectNulls: false,
     xAxisIndex: stacked ? axisIndex : 0,
     yAxisIndex: axisIndex,
@@ -109,7 +181,7 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<stri
     });
     return {
       color: SERIES_PALETTE,
-      tooltip: { trigger: 'axis', valueFormatter: tooltipValueFormatter },
+      tooltip: axisTooltip(series, input.formatPartial),
       ...(includeLegend ? { legend: EXPORT_LEGEND } : {}),
       grid: [{ left: Y_AXIS_GRID_LEFT, right: 56, top: 48, bottom: includeLegend ? 88 : 56 }],
       xAxis: [{ type: 'time', axisLabel: TIME_AXIS_LABEL }],
@@ -141,9 +213,10 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<stri
       seriesColor(indexById.get(id) ?? 0),
     )),
   );
+  const drawn = panels.flatMap((panel) => panel.seriesIds.map((id) => byId.get(id) as AnalysisSeries));
   return {
     color: SERIES_PALETTE,
-    tooltip: { trigger: 'axis', valueFormatter: tooltipValueFormatter },
+    tooltip: axisTooltip(drawn, input.formatPartial),
     ...(includeLegend ? { legend: EXPORT_LEGEND } : {}),
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     grid,
@@ -157,6 +230,7 @@ export function buildSmallMultiplesOption(
   series: AnalysisSeries[],
   normalize: boolean,
   resolveAxisLabel?: (channelKey: string, unit: string | null) => string,
+  formatPartial?: PartialFormatter,
 ): Record<string, unknown> {
   const count = series.length;
   const cols = count === 0 ? 1 : Math.ceil(Math.sqrt(count));
@@ -184,7 +258,7 @@ export function buildSmallMultiplesOption(
     name: s.label,
     type: 'line',
     color: seriesColor(i),
-    showSymbol: false,
+    ...symbolSpec(s),
     connectNulls: false,
     xAxisIndex: i,
     yAxisIndex: i,
@@ -192,7 +266,7 @@ export function buildSmallMultiplesOption(
   }));
   return {
     color: SERIES_PALETTE,
-    tooltip: { trigger: 'axis', valueFormatter: tooltipValueFormatter },
+    tooltip: axisTooltip(series, formatPartial),
     grid,
     xAxis,
     yAxis,

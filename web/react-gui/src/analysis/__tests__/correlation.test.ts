@@ -10,7 +10,7 @@ function series(zoneId: number, channelKey: string, values: (number | null)[]): 
   return {
     seriesId: `${zoneId}-${channelKey}`,
     resolved: { hubEui: null, zoneId, cardType: 'soil', sourceKey: 'root-zone', channelKey },
-    label: `Zone ${zoneId} ${channelKey}`, unit: 'x', coveragePct: 100, points, truncated: false,
+    label: `Zone ${zoneId} ${channelKey}`, unit: 'x', coveragePct: 100, points, truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
@@ -27,7 +27,7 @@ function timestampedSeries(zoneId: number, channelKey: string, values: Array<[st
       count: value === null ? 0 : 1,
       quality: value === null ? 'gap' : 'ok',
     })),
-    truncated: false,
+    truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
@@ -60,7 +60,7 @@ function mkSeries(
       count: 1,
       quality: 'ok',
     })),
-    truncated: false,
+    truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 

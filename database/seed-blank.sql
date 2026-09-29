@@ -82,6 +82,8 @@ CREATE TABLE irrigation_zones (
   irrigation_method           TEXT,
   notes                       TEXT,
   prediction_card_enabled     INTEGER DEFAULT 0,
+  weather_source              TEXT NOT NULL DEFAULT 'auto',
+  stage_started_on            TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -941,6 +943,89 @@ CREATE TABLE zone_daily_environment (
   sync_version INTEGER NOT NULL DEFAULT 0,
   UNIQUE(zone_id, date),
   FOREIGN KEY (zone_id) REFERENCES irrigation_zones(id) ON DELETE CASCADE
+);
+
+-- ---------------------------------------------------------------------------
+-- weather_locations
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS weather_locations (
+  location_key        TEXT PRIMARY KEY,
+  provider            TEXT NOT NULL CHECK (provider IN ('open_meteo', 'meteoswiss')),
+  latitude            REAL NOT NULL,
+  longitude           REAL NOT NULL,
+  timezone            TEXT NOT NULL DEFAULT 'UTC',
+  station_id          TEXT,
+  station_name        TEXT,
+  station_distance_km REAL,
+  station_resolved_at TEXT,
+  last_fetch_at       TEXT,
+  last_success_at     TEXT,
+  last_error          TEXT,
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+-- ---------------------------------------------------------------------------
+-- weather_provider_hours
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS weather_provider_hours (
+  location_key          TEXT NOT NULL REFERENCES weather_locations(location_key) ON DELETE CASCADE,
+  hour_start            TEXT NOT NULL,
+  air_temperature_c     REAL,
+  relative_humidity_pct REAL,
+  rain_mm               REAL,
+  wind_speed_mps        REAL,
+  global_radiation_wm2  REAL,
+  et0_mm                REAL,
+  fetched_at            TEXT NOT NULL,
+  station_id            TEXT,
+  PRIMARY KEY (location_key, hour_start)
+);
+
+-- ---------------------------------------------------------------------------
+-- zone_daily_agronomy
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS zone_daily_agronomy (
+  zone_id              INTEGER NOT NULL REFERENCES irrigation_zones(id) ON DELETE CASCADE,
+  date                 TEXT NOT NULL,
+  et0_mm               REAL,
+  et0_source           TEXT,
+  kc                   REAL,
+  kc_source            TEXT,
+  etc_mm               REAL,
+  computed_at          TEXT NOT NULL,
+  crop_type            TEXT,
+  phenological_stage   TEXT,
+  et0_tier             TEXT,
+  et0_station_id       TEXT,
+  location_key         TEXT,
+  hours_present        INTEGER,
+  expected_hours       INTEGER,
+  null_reason          TEXT,
+  stage_started_on     TEXT,
+  kc_stage_day         INTEGER,
+  stage_overrun        INTEGER,
+  sync_version         INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (zone_id, date)
+);
+
+-- ---------------------------------------------------------------------------
+-- weather_station_hours
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS weather_station_hours (
+  deveui                TEXT NOT NULL REFERENCES devices(deveui) ON DELETE CASCADE,
+  hour_start            TEXT NOT NULL,
+  air_temperature_c     REAL,
+  air_temperature_min_c REAL,
+  air_temperature_max_c REAL,
+  relative_humidity_pct REAL,
+  wind_speed_mps        REAL,
+  pressure_hpa          REAL,
+  light_lux             REAL,
+  global_radiation_wm2  REAL,
+  rain_mm               REAL,
+  sample_count          INTEGER NOT NULL,
+  computed_at           TEXT NOT NULL,
+  PRIMARY KEY (deveui, hour_start)
 );
 
 -- ---------------------------------------------------------------------------
@@ -2269,6 +2354,7 @@ WHEN
     COALESCE(NEW.latitude,'') <> COALESCE(OLD.latitude,'') OR
     COALESCE(NEW.longitude,'') <> COALESCE(OLD.longitude,'') OR
     COALESCE(NEW.phenological_stage,'') <> COALESCE(OLD.phenological_stage,'') OR
+    COALESCE(NEW.stage_started_on,'') <> COALESCE(OLD.stage_started_on,'') OR
     COALESCE(NEW.calibration_key,'') <> COALESCE(OLD.calibration_key,'') OR
     COALESCE(NEW.crop_type,'') <> COALESCE(OLD.crop_type,'') OR
     COALESCE(NEW.variety,'') <> COALESCE(OLD.variety,'') OR
@@ -2279,6 +2365,7 @@ WHEN
     COALESCE(NEW.scheduling_mode,'local') <> COALESCE(OLD.scheduling_mode,'local') OR
     COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0) OR
     COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') OR
+    COALESCE(NEW.weather_source,'auto') <> COALESCE(OLD.weather_source,'auto') OR
     COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
     COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
   )
@@ -2295,6 +2382,7 @@ BEGIN
       WHEN COALESCE(NEW.latitude,'') <> COALESCE(OLD.latitude,'') OR
            COALESCE(NEW.longitude,'') <> COALESCE(OLD.longitude,'') THEN 'ZONE_LOCATION_UPSERTED'
       WHEN COALESCE(NEW.phenological_stage,'') <> COALESCE(OLD.phenological_stage,'') OR
+           COALESCE(NEW.stage_started_on,'') <> COALESCE(OLD.stage_started_on,'') OR
            COALESCE(NEW.calibration_key,'') <> COALESCE(OLD.calibration_key,'') OR
            COALESCE(NEW.crop_type,'') <> COALESCE(OLD.crop_type,'') OR
            COALESCE(NEW.variety,'') <> COALESCE(OLD.variety,'') OR
@@ -2304,36 +2392,74 @@ BEGIN
            COALESCE(NEW.irrigation_efficiency_pct,'') <> COALESCE(OLD.irrigation_efficiency_pct,'') OR
            COALESCE(NEW.scheduling_mode,'local') <> COALESCE(OLD.scheduling_mode,'local') OR
            COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0) OR
-           COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') THEN 'ZONE_CONFIG_UPSERTED'
+           COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') OR
+           COALESCE(NEW.weather_source,'auto') <> COALESCE(OLD.weather_source,'auto') THEN 'ZONE_CONFIG_UPSERTED'
       ELSE 'ZONE_UPSERTED'
     END,
-    json_object(
-      'contract_version', 1,
-      'zone_uuid',                NEW.zone_uuid,
-      'name',                     NEW.name,
-      'gateway_device_eui',       COALESCE(NEW.gateway_device_eui,NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
-      'timezone',                 NEW.timezone,
-      'latitude',                 NEW.latitude,
-      'longitude',                NEW.longitude,
-      'phenological_stage',       NEW.phenological_stage,
-      'calibration_key',          NEW.calibration_key,
-      'crop_type',                NEW.crop_type,
-      'variety',                  NEW.variety,
-      'soil_type',                NEW.soil_type,
-      'irrigation_method',        NEW.irrigation_method,
-      'area_m2',                  NEW.area_m2,
-      'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct,
-      'scheduling_mode',          COALESCE(NEW.scheduling_mode,'local'),
-      'prediction_card_enabled',  COALESCE(NEW.prediction_card_enabled,0),
-      'notes',                    NEW.notes,
-      'sync_version',             NEW.sync_version,
-      'deleted_at',               NEW.deleted_at,
-      'user', json_object(
-        'user_uuid',  (SELECT user_uuid FROM users WHERE id = NEW.user_id),
-        'username',   (SELECT username   FROM users WHERE id = NEW.user_id),
-        'cloudUserId',(SELECT cloud_user_id FROM users WHERE id = NEW.user_id)
-      )
-    ),
+    CASE
+      WHEN COALESCE(NEW.weather_source,'auto') <> 'auto' OR
+           OLD.weather_source IS NOT NEW.weather_source THEN
+        json_patch(
+          json_object(
+            'contract_version', 1,
+            'zone_uuid',                NEW.zone_uuid,
+            'name',                     NEW.name,
+            'gateway_device_eui',       COALESCE(NEW.gateway_device_eui,NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+            'timezone',                 NEW.timezone,
+            'latitude',                 NEW.latitude,
+            'longitude',                NEW.longitude,
+            'phenological_stage',       NEW.phenological_stage,
+            'stage_started_on',         NEW.stage_started_on,
+            'calibration_key',          NEW.calibration_key,
+            'crop_type',                NEW.crop_type,
+            'variety',                  NEW.variety,
+            'soil_type',                NEW.soil_type,
+            'irrigation_method',        NEW.irrigation_method,
+            'area_m2',                  NEW.area_m2,
+            'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct,
+            'scheduling_mode',          COALESCE(NEW.scheduling_mode,'local'),
+            'prediction_card_enabled',  COALESCE(NEW.prediction_card_enabled,0),
+            'notes',                    NEW.notes,
+            'sync_version',             NEW.sync_version,
+            'deleted_at',               NEW.deleted_at,
+            'user', json_object(
+              'user_uuid',  (SELECT user_uuid FROM users WHERE id = NEW.user_id),
+              'username',   (SELECT username   FROM users WHERE id = NEW.user_id),
+              'cloudUserId',(SELECT cloud_user_id FROM users WHERE id = NEW.user_id)
+            )
+          ),
+          json_object('weather_source', COALESCE(NEW.weather_source,'auto'))
+        )
+      ELSE
+        json_object(
+          'contract_version', 1,
+          'zone_uuid',                NEW.zone_uuid,
+          'name',                     NEW.name,
+          'gateway_device_eui',       COALESCE(NEW.gateway_device_eui,NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+          'timezone',                 NEW.timezone,
+          'latitude',                 NEW.latitude,
+          'longitude',                NEW.longitude,
+          'phenological_stage',       NEW.phenological_stage,
+          'stage_started_on',         NEW.stage_started_on,
+          'calibration_key',          NEW.calibration_key,
+          'crop_type',                NEW.crop_type,
+          'variety',                  NEW.variety,
+          'soil_type',                NEW.soil_type,
+          'irrigation_method',        NEW.irrigation_method,
+          'area_m2',                  NEW.area_m2,
+          'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct,
+          'scheduling_mode',          COALESCE(NEW.scheduling_mode,'local'),
+          'prediction_card_enabled',  COALESCE(NEW.prediction_card_enabled,0),
+          'notes',                    NEW.notes,
+          'sync_version',             NEW.sync_version,
+          'deleted_at',               NEW.deleted_at,
+          'user', json_object(
+            'user_uuid',  (SELECT user_uuid FROM users WHERE id = NEW.user_id),
+            'username',   (SELECT username   FROM users WHERE id = NEW.user_id),
+            'cloudUserId',(SELECT cloud_user_id FROM users WHERE id = NEW.user_id)
+          )
+        )
+    END,
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE(NEW.gateway_device_eui,NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
@@ -3288,6 +3414,111 @@ BEGIN
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
+  );
+END;
+
+-- zone_daily_agronomy → sync_outbox (insert; migration 0067, not created by sync-init-fn)
+CREATE TRIGGER trg_dp_zone_agronomy_outbox_ai
+AFTER INSERT ON zone_daily_agronomy
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+ AND EXISTS (
+  SELECT 1 FROM irrigation_zones
+   WHERE id = NEW.zone_id AND deleted_at IS NULL AND zone_uuid IS NOT NULL
+)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'ZONE_AGRONOMY',
+    (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id) || '|' || NEW.date,
+    'ZONE_AGRONOMY_UPSERTED',
+    json_object(
+      'contract_version', 1,
+      'zone_id',            NEW.zone_id,
+      'zone_uuid',          (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id),
+      'date',               NEW.date,
+      'et0_mm',             NEW.et0_mm,
+      'et0_tier',           NEW.et0_tier,
+      'et0_source',         NEW.et0_source,
+      'et0_station_id',     NEW.et0_station_id,
+      'location_key',       NEW.location_key,
+      'kc',                 NEW.kc,
+      'kc_source',          NEW.kc_source,
+      'kc_stage_day',       NEW.kc_stage_day,
+      'stage_overrun',      NEW.stage_overrun,
+      'crop_type',          NEW.crop_type,
+      'phenological_stage', NEW.phenological_stage,
+      'stage_started_on',   NEW.stage_started_on,
+      'etc_mm',             NEW.etc_mm,
+      'hours_present',      NEW.hours_present,
+      'expected_hours',     NEW.expected_hours,
+      'null_reason',        NEW.null_reason,
+      'computed_at',        NEW.computed_at,
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+      'sync_version',       NEW.sync_version
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
+  );
+END;
+
+-- zone_daily_agronomy → sync_outbox (update; migration 0067, not created by sync-init-fn)
+CREATE TRIGGER trg_dp_zone_agronomy_outbox_au
+AFTER UPDATE ON zone_daily_agronomy
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+ AND EXISTS (
+  SELECT 1 FROM irrigation_zones
+   WHERE id = NEW.zone_id AND deleted_at IS NULL AND zone_uuid IS NOT NULL
+)
+ AND COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'ZONE_AGRONOMY',
+    (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id) || '|' || NEW.date,
+    'ZONE_AGRONOMY_UPSERTED',
+    json_object(
+      'contract_version', 1,
+      'zone_id',            NEW.zone_id,
+      'zone_uuid',          (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id),
+      'date',               NEW.date,
+      'et0_mm',             NEW.et0_mm,
+      'et0_tier',           NEW.et0_tier,
+      'et0_source',         NEW.et0_source,
+      'et0_station_id',     NEW.et0_station_id,
+      'location_key',       NEW.location_key,
+      'kc',                 NEW.kc,
+      'kc_source',          NEW.kc_source,
+      'kc_stage_day',       NEW.kc_stage_day,
+      'stage_overrun',      NEW.stage_overrun,
+      'crop_type',          NEW.crop_type,
+      'phenological_stage', NEW.phenological_stage,
+      'stage_started_on',   NEW.stage_started_on,
+      'etc_mm',             NEW.etc_mm,
+      'hours_present',      NEW.hours_present,
+      'expected_hours',     NEW.expected_hours,
+      'null_reason',        NEW.null_reason,
+      'computed_at',        NEW.computed_at,
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+      'sync_version',       NEW.sync_version
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 

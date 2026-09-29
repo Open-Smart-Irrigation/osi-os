@@ -1,0 +1,5209 @@
+{
+  "version": 2,
+  "luxPerWm2": 120,
+  "stationWindHeightM": 2,
+  "stages": [
+    {
+      "id": "initial",
+      "order": 1,
+      "label": "Initial"
+    },
+    {
+      "id": "development",
+      "order": 2,
+      "label": "Crop development"
+    },
+    {
+      "id": "mid_season",
+      "order": 3,
+      "label": "Mid-season"
+    },
+    {
+      "id": "late_season",
+      "order": 4,
+      "label": "Late season"
+    },
+    {
+      "id": "dormancy",
+      "order": 5,
+      "label": "Dormancy"
+    }
+  ],
+  "groups": [
+    {
+      "id": "small_vegetables",
+      "order": 1,
+      "label": "Small vegetables",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "vegetables_solanum",
+      "order": 2,
+      "label": "Tomato family",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "vegetables_cucumber",
+      "order": 3,
+      "label": "Cucumber family",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "roots_tubers",
+      "order": 4,
+      "label": "Roots and tubers",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "legumes",
+      "order": 5,
+      "label": "Legumes",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "perennial_vegetables",
+      "order": 6,
+      "label": "Perennial vegetables",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "fibre",
+      "order": 7,
+      "label": "Fibre crops",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "oil_crops",
+      "order": 8,
+      "label": "Oil crops",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "cereals",
+      "order": 9,
+      "label": "Cereals",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "forages",
+      "order": 10,
+      "label": "Forages",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "sugar_cane",
+      "order": 11,
+      "label": "Sugarcane",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "tropical_fruits",
+      "order": 12,
+      "label": "Tropical fruits and trees",
+      "stageFamily": "annual"
+    },
+    {
+      "id": "grapes_berries",
+      "order": 13,
+      "label": "Grapes and berries",
+      "stageFamily": "woody"
+    },
+    {
+      "id": "fruit_trees",
+      "order": 14,
+      "label": "Fruit trees",
+      "stageFamily": "woody"
+    },
+    {
+      "id": "wetlands",
+      "order": 15,
+      "label": "Wetlands",
+      "stageFamily": "annual"
+    }
+  ],
+  "crops": [
+    {
+      "id": "broccoli",
+      "group": "small_vegetables",
+      "label": "Broccoli",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Broccoli",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 20,
+        "late_season": 10,
+        "table11_row": "Crucifers",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "class row: Table 11 footnote 1 says 'Crucifers include cabbage, cauliflower, broccoli, and Brussel sprouts'; own-named rows (if any) are Calif. Desert winter crops only, so the Mediterranean spring (April) Crucifers row is the default",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 35,
+          "development": 45,
+          "mid_season": 40,
+          "late_season": 15,
+          "table11_row": "Broccoli",
+          "plant_date": "Sept",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Crucifers",
+          "plant_date": "February",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 35,
+          "mid_season": 90,
+          "late_season": 40,
+          "table11_row": "Crucifers",
+          "plant_date": "Oct/Nov",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "brussels_sprouts",
+      "group": "small_vegetables",
+      "label": "Brussels sprouts",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Brussel Sprouts",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 20,
+        "late_season": 10,
+        "table11_row": "Crucifers",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "class row: no own row; Table 11 footnote 1 says 'Crucifers include cabbage, cauliflower, broccoli, and Brussel sprouts'; Mediterranean spring (April) row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Crucifers",
+          "plant_date": "February",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 35,
+          "mid_season": 90,
+          "late_season": 40,
+          "table11_row": "Crucifers",
+          "plant_date": "Oct/Nov",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "cabbage",
+      "group": "small_vegetables",
+      "label": "Cabbage",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Cabbage",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 20,
+        "late_season": 10,
+        "table11_row": "Crucifers",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "class row: Table 11 footnote 1 says 'Crucifers include cabbage, cauliflower, broccoli, and Brussel sprouts'; own-named rows (if any) are Calif. Desert winter crops only, so the Mediterranean spring (April) Crucifers row is the default",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 40,
+          "development": 60,
+          "mid_season": 50,
+          "late_season": 15,
+          "table11_row": "Cabbage",
+          "plant_date": "Sept",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Crucifers",
+          "plant_date": "February",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 35,
+          "mid_season": 90,
+          "late_season": 40,
+          "table11_row": "Crucifers",
+          "plant_date": "Oct/Nov",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "carrot",
+      "group": "small_vegetables",
+      "label": "Carrot",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Carrots",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 40,
+        "mid_season": 60,
+        "late_season": 20,
+        "table11_row": "Carrots",
+        "plant_date": "Feb/Mar",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 30,
+          "late_season": 20,
+          "table11_row": "Carrots",
+          "plant_date": "Oct/Jan",
+          "region": "Arid climate",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 90,
+          "late_season": 30,
+          "table11_row": "Carrots",
+          "plant_date": "Oct",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "cauliflower",
+      "group": "small_vegetables",
+      "label": "Cauliflower",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Cauliflower",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 20,
+        "late_season": 10,
+        "table11_row": "Crucifers",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "class row: Table 11 footnote 1 says 'Crucifers include cabbage, cauliflower, broccoli, and Brussel sprouts'; own-named rows (if any) are Calif. Desert winter crops only, so the Mediterranean spring (April) Crucifers row is the default",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 35,
+          "development": 50,
+          "mid_season": 40,
+          "late_season": 15,
+          "table11_row": "Cauliflower",
+          "plant_date": "Sept",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Crucifers",
+          "plant_date": "February",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 35,
+          "mid_season": 90,
+          "late_season": 40,
+          "table11_row": "Crucifers",
+          "plant_date": "Oct/Nov",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "celery",
+      "group": "small_vegetables",
+      "label": "Celery",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Celery",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 40,
+        "mid_season": 45,
+        "late_season": 15,
+        "table11_row": "Celery",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 40,
+          "mid_season": 95,
+          "late_season": 20,
+          "table11_row": "Celery",
+          "plant_date": "Oct",
+          "region": "(Semi) Arid",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 55,
+          "mid_season": 105,
+          "late_season": 20,
+          "table11_row": "Celery",
+          "plant_date": "Jan",
+          "region": "(Semi) Arid",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "garlic",
+      "group": "small_vegetables",
+      "label": "Garlic",
+      "kc_ini": 0.7,
+      "kc_mid": 1,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Garlic",
+      "stage_lengths_days": {
+        "initial": 15,
+        "development": 25,
+        "mid_season": 70,
+        "late_season": 40,
+        "table11_row": "Onion (dry)",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "reference proposal (UNVERIFIED): bulb allium, 150-day season",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 20,
+          "late_season": 10,
+          "table11_row": "Crucifers",
+          "plant_date": "April",
+          "region": "Mediterranean",
+          "selection_rule": "group default (small_vegetables): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "lettuce",
+      "group": "small_vegetables",
+      "label": "Lettuce",
+      "kc_ini": 0.7,
+      "kc_mid": 1,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Lettuce",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 15,
+        "late_season": 10,
+        "table11_row": "Lettuce",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (no European row; spring planting preferred among Mediterranean rows)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 40,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Lettuce",
+          "plant_date": "Nov/Jan",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 30,
+          "late_season": 10,
+          "table11_row": "Lettuce",
+          "plant_date": "Oct/Nov",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 50,
+          "mid_season": 45,
+          "late_season": 10,
+          "table11_row": "Lettuce",
+          "plant_date": "Feb",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "onion",
+      "group": "small_vegetables",
+      "label": "Onion (dry)",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Onions – dry",
+      "stage_lengths_days": {
+        "initial": 15,
+        "development": 25,
+        "mid_season": 70,
+        "late_season": 40,
+        "table11_row": "Onion (dry)",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 35,
+          "mid_season": 110,
+          "late_season": 45,
+          "table11_row": "Onion (dry)",
+          "plant_date": "Oct; Jan.",
+          "region": "Arid Region; Calif.",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "onion_green",
+      "group": "small_vegetables",
+      "label": "Onion (green)",
+      "kc_ini": 0.7,
+      "kc_mid": 1,
+      "kc_end": 1,
+      "variant_of": "onion",
+      "fao_row": "Onions – green",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 30,
+        "mid_season": 10,
+        "late_season": 5,
+        "table11_row": "Onion (green)",
+        "plant_date": "April/May",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 45,
+          "mid_season": 20,
+          "late_season": 10,
+          "table11_row": "Onion (green)",
+          "plant_date": "October",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 55,
+          "mid_season": 55,
+          "late_season": 40,
+          "table11_row": "Onion (green)",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "onion_seed",
+      "group": "small_vegetables",
+      "label": "Onion (seed)",
+      "kc_ini": 0.7,
+      "kc_mid": 1.05,
+      "kc_end": 0.8,
+      "variant_of": "onion",
+      "fao_row": "Onions – seed",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 45,
+        "mid_season": 165,
+        "late_season": 45,
+        "table11_row": "Onion (seed)",
+        "plant_date": "Sept",
+        "region": "Calif. Desert, USA",
+        "selection_rule": "only row",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "radish",
+      "group": "small_vegetables",
+      "label": "Radish",
+      "kc_ini": 0.7,
+      "kc_mid": 0.9,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": "Radish",
+      "stage_lengths_days": {
+        "initial": 5,
+        "development": 10,
+        "mid_season": 15,
+        "late_season": 5,
+        "table11_row": "Radish",
+        "plant_date": "Mar/Apr",
+        "region": "Medit.; Europe",
+        "selection_rule": "Europe/Mediterranean row ('Medit.; Europe')",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 10,
+          "mid_season": 15,
+          "late_season": 5,
+          "table11_row": "Radish",
+          "plant_date": "Winter",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "spinach",
+      "group": "small_vegetables",
+      "label": "Spinach",
+      "kc_ini": 0.7,
+      "kc_mid": 1,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Spinach",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 20,
+        "mid_season": 15,
+        "late_season": 5,
+        "table11_row": "Spinach",
+        "plant_date": "Apr",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row; April variant of the split 'Apr; Sep/Oct' entry",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 40,
+          "late_season": 10,
+          "table11_row": "Spinach",
+          "plant_date": "November",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "eggplant",
+      "group": "vegetables_solanum",
+      "label": "Eggplant",
+      "kc_ini": 0.6,
+      "kc_mid": 1.05,
+      "kc_end": 0.9,
+      "variant_of": null,
+      "fao_row": "Egg Plant",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 45,
+        "mid_season": 40,
+        "late_season": 25,
+        "table11_row": "Egg plant",
+        "plant_date": "May/June",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 40,
+          "mid_season": 40,
+          "late_season": 20,
+          "table11_row": "Egg plant",
+          "plant_date": "October",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "pepper",
+      "group": "vegetables_solanum",
+      "label": "Sweet pepper",
+      "kc_ini": 0.6,
+      "kc_mid": 1.05,
+      "kc_end": 0.9,
+      "variant_of": null,
+      "fao_row": "Sweet Peppers (bell)",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 35,
+        "mid_season": 40,
+        "late_season": 20,
+        "table11_row": "Sweet peppers (bell)",
+        "plant_date": "April/June",
+        "region": "Europe and Medit.",
+        "selection_rule": "Europe and Mediterranean row ('Europe and Medit.')",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 40,
+          "mid_season": 110,
+          "late_season": 30,
+          "table11_row": "Sweet peppers (bell)",
+          "plant_date": "October",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "tomato",
+      "group": "vegetables_solanum",
+      "label": "Tomato",
+      "kc_ini": 0.6,
+      "kc_mid": 1.15,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Tomato",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 40,
+        "mid_season": 45,
+        "late_season": 30,
+        "table11_row": "Tomato",
+        "plant_date": "April/May",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 40,
+          "mid_season": 40,
+          "late_season": 25,
+          "table11_row": "Tomato",
+          "plant_date": "January",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 40,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Tomato",
+          "plant_date": "Apr/May",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 40,
+          "mid_season": 60,
+          "late_season": 30,
+          "table11_row": "Tomato",
+          "plant_date": "Jan",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 45,
+          "mid_season": 70,
+          "late_season": 30,
+          "table11_row": "Tomato",
+          "plant_date": "Oct/Nov",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "cantaloupe",
+      "group": "vegetables_cucumber",
+      "label": "Cantaloupe",
+      "kc_ini": 0.5,
+      "kc_mid": 0.85,
+      "kc_end": 0.6,
+      "variant_of": null,
+      "fao_row": "Cantaloupe",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 35,
+        "mid_season": 40,
+        "late_season": 20,
+        "table11_row": "Sweet melons",
+        "plant_date": "May",
+        "region": "Mediterranean",
+        "selection_rule": "agronomy review 2026-09-27: the policy's pick (Cantaloupe, Calif., January) is a desert winter planting; Sweet melons, Mediterranean, May fits a European sowing",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 45,
+          "mid_season": 35,
+          "late_season": 10,
+          "table11_row": "Cantaloupe",
+          "plant_date": "Jan",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 10,
+          "development": 60,
+          "mid_season": 25,
+          "late_season": 25,
+          "table11_row": "Cantaloupe",
+          "plant_date": "Aug",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "cucumber",
+      "group": "vegetables_cucumber",
+      "label": "Cucumber (fresh market)",
+      "kc_ini": 0.6,
+      "kc_mid": 1,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Cucumber – Fresh Market",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 40,
+        "late_season": 15,
+        "table11_row": "Cucumber",
+        "plant_date": "June/Aug",
+        "region": "Arid Region",
+        "selection_rule": "first row (no European, Mediterranean or temperate row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 50,
+          "late_season": 20,
+          "table11_row": "Cucumber",
+          "plant_date": "Nov; Feb",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "cucumber_machine_harvest",
+      "group": "vegetables_cucumber",
+      "label": "Cucumber (machine harvest)",
+      "kc_ini": 0.5,
+      "kc_mid": 1,
+      "kc_end": 0.9,
+      "variant_of": "cucumber",
+      "fao_row": "Cucumber – Machine harvest",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 40,
+        "late_season": 15,
+        "table11_row": "Cucumber",
+        "plant_date": "June/Aug",
+        "region": "Arid Region",
+        "selection_rule": "first row (no European, Mediterranean or temperate row); Table 11 has one Cucumber entry for both harvest types",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 50,
+          "late_season": 20,
+          "table11_row": "Cucumber",
+          "plant_date": "Nov; Feb",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "pumpkin",
+      "group": "vegetables_cucumber",
+      "label": "Pumpkin, winter squash",
+      "kc_ini": 0.5,
+      "kc_mid": 1,
+      "kc_end": 0.8,
+      "variant_of": null,
+      "fao_row": "Pumpkin, Winter Squash",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 35,
+        "mid_season": 35,
+        "late_season": 25,
+        "table11_row": "Pumpkin, Winter squash",
+        "plant_date": "June",
+        "region": "Europe",
+        "selection_rule": "European row (preferred: Europe first, then Mediterranean, then temperate, then first row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 30,
+          "late_season": 20,
+          "table11_row": "Pumpkin, Winter squash",
+          "plant_date": "Mar, Aug",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "sweet_melon",
+      "group": "vegetables_cucumber",
+      "label": "Sweet melon",
+      "kc_ini": 0.5,
+      "kc_mid": 1.05,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Sweet Melons",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 35,
+        "mid_season": 40,
+        "late_season": 20,
+        "table11_row": "Sweet melons",
+        "plant_date": "May",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 30,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Sweet melons",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 15,
+          "development": 40,
+          "mid_season": 65,
+          "late_season": 15,
+          "table11_row": "Sweet melons",
+          "plant_date": "Aug",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 45,
+          "mid_season": 65,
+          "late_season": 20,
+          "table11_row": "Sweet melons",
+          "plant_date": "Dec/Jan",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "watermelon",
+      "group": "vegetables_cucumber",
+      "label": "Watermelon",
+      "kc_ini": 0.4,
+      "kc_mid": 1,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Watermelon",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 30,
+        "late_season": 30,
+        "table11_row": "Water melons",
+        "plant_date": "April",
+        "region": "Italy",
+        "selection_rule": "European row (Italy)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 20,
+          "mid_season": 20,
+          "late_season": 30,
+          "table11_row": "Water melons",
+          "plant_date": "Mat/Aug",
+          "region": "Near East (desert)",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "zucchini",
+      "group": "vegetables_cucumber",
+      "label": "Squash, zucchini",
+      "kc_ini": 0.5,
+      "kc_mid": 0.95,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Squash, Zucchini",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 25,
+        "late_season": 15,
+        "table11_row": "Squash, Zucchini",
+        "plant_date": "May/June",
+        "region": "Medit.; Europe",
+        "selection_rule": "Europe/Mediterranean row ('Medit.; Europe') preferred over 'Medit.; Arid Reg.'",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 25,
+          "late_season": 15,
+          "table11_row": "Squash, Zucchini",
+          "plant_date": "Apr; Dec.",
+          "region": "Medit.; Arid Reg.",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "cassava",
+      "group": "roots_tubers",
+      "label": "Cassava (year 1)",
+      "kc_ini": 0.3,
+      "kc_mid": 0.8,
+      "kc_end": 0.3,
+      "variant_of": null,
+      "fao_row": "Cassava – year 1",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 40,
+        "mid_season": 90,
+        "late_season": 60,
+        "table11_row": "Cassava: year 1",
+        "plant_date": "Rainy season",
+        "region": "Tropical regions",
+        "selection_rule": "only row (year 1)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "cassava_year_2",
+      "group": "roots_tubers",
+      "label": "Cassava (year 2)",
+      "kc_ini": 0.3,
+      "kc_mid": 1.1,
+      "kc_end": 0.5,
+      "variant_of": "cassava",
+      "fao_row": "Cassava – year 2",
+      "stage_lengths_days": {
+        "initial": 150,
+        "development": 40,
+        "mid_season": 110,
+        "late_season": 60,
+        "table11_row": "Cassava: year 2",
+        "plant_date": "Rainy season",
+        "region": "Tropical regions",
+        "selection_rule": "only row (year 2)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "parsnip",
+      "group": "roots_tubers",
+      "label": "Parsnip",
+      "kc_ini": 0.5,
+      "kc_mid": 1.05,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Parsnip",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 40,
+        "mid_season": 60,
+        "late_season": 20,
+        "table11_row": "Carrots",
+        "plant_date": "Feb/Mar",
+        "region": "Mediterranean",
+        "selection_rule": "reference proposal (UNVERIFIED): Apiaceae taproot like carrot",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 35,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Potato",
+          "plant_date": "April",
+          "region": "Europe",
+          "selection_rule": "group default (roots_tubers): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "potato",
+      "group": "roots_tubers",
+      "label": "Potato",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Potato",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 35,
+        "mid_season": 50,
+        "late_season": 30,
+        "table11_row": "Potato",
+        "plant_date": "April",
+        "region": "Europe",
+        "selection_rule": "European row (preferred: Europe first, then Mediterranean, then temperate, then first row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 30,
+          "mid_season": 30,
+          "late_season": 30,
+          "table11_row": "Potato",
+          "plant_date": "Jan",
+          "region": "(Semi) Arid Climate",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 30,
+          "mid_season": 45,
+          "late_season": 30,
+          "table11_row": "Potato",
+          "plant_date": "May",
+          "region": "Continental Climate",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 45,
+          "development": 30,
+          "mid_season": 70,
+          "late_season": 20,
+          "table11_row": "Potato",
+          "plant_date": "Apr/May",
+          "region": "Idaho, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 35,
+          "mid_season": 50,
+          "late_season": 25,
+          "table11_row": "Potato",
+          "plant_date": "Dec",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "sugar_beet",
+      "group": "roots_tubers",
+      "label": "Sugar beet",
+      "kc_ini": 0.35,
+      "kc_mid": 1.2,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Sugar Beet",
+      "stage_lengths_days": {
+        "initial": 50,
+        "development": 40,
+        "mid_season": 50,
+        "late_season": 40,
+        "table11_row": "Sugarbeet",
+        "plant_date": "April",
+        "region": "Idaho, USA",
+        "selection_rule": "agronomy review 2026-09-27: Idaho is closer to Swiss sowing (March-April) and lifting (September-November)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 45,
+          "mid_season": 90,
+          "late_season": 15,
+          "table11_row": "Sugarbeet",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 30,
+          "mid_season": 90,
+          "late_season": 10,
+          "table11_row": "Sugarbeet",
+          "plant_date": "June",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 65,
+          "mid_season": 100,
+          "late_season": 65,
+          "table11_row": "Sugarbeet",
+          "plant_date": "Sept",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 50,
+          "late_season": 50,
+          "table11_row": "Sugarbeet",
+          "plant_date": "May",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 45,
+          "development": 75,
+          "mid_season": 80,
+          "late_season": 30,
+          "table11_row": "Sugarbeet",
+          "plant_date": "November",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 60,
+          "mid_season": 70,
+          "late_season": 40,
+          "table11_row": "Sugarbeet",
+          "plant_date": "November",
+          "region": "Arid Regions",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "sweet_potato",
+      "group": "roots_tubers",
+      "label": "Sweet potato",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": "Sweet Potato",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 60,
+        "late_season": 40,
+        "table11_row": "Sweet potato",
+        "plant_date": "April",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 30,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Sweet potato",
+          "plant_date": "Rainy seas.",
+          "region": "Tropical regions",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "table_beet",
+      "group": "roots_tubers",
+      "label": "Table beet",
+      "kc_ini": 0.5,
+      "kc_mid": 1.05,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Beets, table",
+      "stage_lengths_days": {
+        "initial": 15,
+        "development": 25,
+        "mid_season": 20,
+        "late_season": 10,
+        "table11_row": "Beets, table",
+        "plant_date": "Apr/May",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (no European row; spring planting preferred among Mediterranean rows) (Apr/May)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 30,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Beets, table",
+          "plant_date": "Feb/Mar",
+          "region": "Mediterranean & Arid",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "turnip",
+      "group": "roots_tubers",
+      "label": "Turnip, rutabaga",
+      "kc_ini": 0.5,
+      "kc_mid": 1.1,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Turnip (and Rutabaga)",
+      "stage_lengths_days": {
+        "initial": 15,
+        "development": 25,
+        "mid_season": 20,
+        "late_season": 10,
+        "table11_row": "Beets, table",
+        "plant_date": "Apr/May",
+        "region": "Mediterranean",
+        "selection_rule": "reference proposal (UNVERIFIED): fresh root of 60-80 days",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 35,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Potato",
+          "plant_date": "April",
+          "region": "Europe",
+          "selection_rule": "group default (roots_tubers): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "chickpea",
+      "group": "legumes",
+      "label": "Chickpea",
+      "kc_ini": 0.4,
+      "kc_mid": 1,
+      "kc_end": 0.35,
+      "variant_of": null,
+      "fao_row": "Chick pea",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 60,
+        "late_season": 40,
+        "table11_row": "Lentil",
+        "plant_date": "April",
+        "region": "Europe",
+        "selection_rule": "reference proposal (UNVERIFIED): cool-season grain legume harvested dry",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 35,
+          "late_season": 15,
+          "table11_row": "Peas",
+          "plant_date": "May",
+          "region": "Europe",
+          "selection_rule": "group default (legumes): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "dry_bean",
+      "group": "legumes",
+      "label": "Dry bean, pulses",
+      "kc_ini": 0.4,
+      "kc_mid": 1.15,
+      "kc_end": 0.35,
+      "variant_of": null,
+      "fao_row": "Beans, dry and Pulses",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 40,
+        "late_season": 20,
+        "table11_row": "Beans (dry)",
+        "plant_date": "May/June",
+        "region": "Continental Climates",
+        "selection_rule": "temperate row (no European or Mediterranean row) ('Continental Climates'; chapter 6 Box 15 uses this row for Kimberly, Idaho)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 35,
+          "late_season": 20,
+          "table11_row": "Beans (dry)",
+          "plant_date": "June",
+          "region": "Pakistan, Calif.",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 25,
+          "mid_season": 30,
+          "late_season": 20,
+          "table11_row": "Beans (dry)",
+          "plant_date": "June",
+          "region": "Idaho, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "faba_bean",
+      "group": "legumes",
+      "label": "Faba bean (fresh)",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 1.1,
+      "variant_of": null,
+      "fao_row": "Fababean (broad bean) – Fresh",
+      "stage_lengths_days": {
+        "initial": 15,
+        "development": 25,
+        "mid_season": 35,
+        "late_season": 15,
+        "table11_row": "Faba bean, broad bean",
+        "plant_date": "May",
+        "region": "Europe",
+        "selection_rule": "European row (preferred: Europe first, then Mediterranean, then temperate, then first row) (May spring planting)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 35,
+          "late_season": 15,
+          "table11_row": "Faba bean, broad bean",
+          "plant_date": "Mar/Apr",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 90,
+          "development": 45,
+          "mid_season": 40,
+          "late_season": 60,
+          "table11_row": "Faba bean, broad bean - dry",
+          "plant_date": "Nov",
+          "region": "Europe",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 90,
+          "development": 45,
+          "mid_season": 40,
+          "late_season": 0,
+          "table11_row": "Faba bean, broad bean - green",
+          "plant_date": "Nov",
+          "region": "Europe",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "faba_bean_dry",
+      "group": "legumes",
+      "label": "Faba bean (dry, seed)",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 0.3,
+      "variant_of": "faba_bean",
+      "fao_row": "Fababean (broad bean) – Dry/Seed",
+      "stage_lengths_days": {
+        "initial": 90,
+        "development": 45,
+        "mid_season": 40,
+        "late_season": 60,
+        "table11_row": "Faba bean, broad bean - dry",
+        "plant_date": "Nov",
+        "region": "Europe",
+        "selection_rule": "row labelled '- dry' (harvest type matches the catalogue variant), Europe, November planting; the spring rows are alternatives",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 35,
+          "late_season": 15,
+          "table11_row": "Faba bean, broad bean",
+          "plant_date": "May",
+          "region": "Europe",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 35,
+          "late_season": 15,
+          "table11_row": "Faba bean, broad bean",
+          "plant_date": "Mar/Apr",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 90,
+          "development": 45,
+          "mid_season": 40,
+          "late_season": 0,
+          "table11_row": "Faba bean, broad bean - green",
+          "plant_date": "Nov",
+          "region": "Europe",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "garbanzo",
+      "group": "legumes",
+      "label": "Garbanzo",
+      "kc_ini": 0.4,
+      "kc_mid": 1.15,
+      "kc_end": 0.35,
+      "variant_of": null,
+      "fao_row": "Grabanzo",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 60,
+        "late_season": 40,
+        "table11_row": "Lentil",
+        "plant_date": "April",
+        "region": "Europe",
+        "selection_rule": "reference proposal (UNVERIFIED): same species as chickpea",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 35,
+          "late_season": 15,
+          "table11_row": "Peas",
+          "plant_date": "May",
+          "region": "Europe",
+          "selection_rule": "group default (legumes): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "green_bean",
+      "group": "legumes",
+      "label": "Green bean",
+      "kc_ini": 0.5,
+      "kc_mid": 1.05,
+      "kc_end": 0.9,
+      "variant_of": null,
+      "fao_row": "Beans, green",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 30,
+        "late_season": 10,
+        "table11_row": "Beans (green)",
+        "plant_date": "Feb/Mar",
+        "region": "Calif., Mediterranean",
+        "selection_rule": "Mediterranean row ('Calif., Mediterranean')",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Beans (green)",
+          "plant_date": "Aug/Sep",
+          "region": "Calif., Egypt, Lebanon",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "green_gram",
+      "group": "legumes",
+      "label": "Green gram, cowpea",
+      "kc_ini": 0.4,
+      "kc_mid": 1.05,
+      "kc_end": 0.35,
+      "variant_of": null,
+      "fao_row": "Green Gram and Cowpeas",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 30,
+        "late_season": 20,
+        "table11_row": "Green gram, cowpeas",
+        "plant_date": "March",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "groundnut",
+      "group": "legumes",
+      "label": "Groundnut",
+      "kc_ini": 0.4,
+      "kc_mid": 1.15,
+      "kc_end": 0.6,
+      "variant_of": null,
+      "fao_row": "Groundnut (Peanut)",
+      "stage_lengths_days": {
+        "initial": 35,
+        "development": 45,
+        "mid_season": 35,
+        "late_season": 25,
+        "table11_row": "Groundnut",
+        "plant_date": "May/June",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 45,
+          "late_season": 25,
+          "table11_row": "Groundnut",
+          "plant_date": "Dry season",
+          "region": "West Africa",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 35,
+          "mid_season": 35,
+          "late_season": 35,
+          "table11_row": "Groundnut",
+          "plant_date": "May",
+          "region": "High Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "lentil",
+      "group": "legumes",
+      "label": "Lentil",
+      "kc_ini": 0.4,
+      "kc_mid": 1.1,
+      "kc_end": 0.3,
+      "variant_of": null,
+      "fao_row": "Lentil",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 60,
+        "late_season": 40,
+        "table11_row": "Lentil",
+        "plant_date": "April",
+        "region": "Europe",
+        "selection_rule": "European row (preferred: Europe first, then Mediterranean, then temperate, then first row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 70,
+          "late_season": 40,
+          "table11_row": "Lentil",
+          "plant_date": "Oct/Nov",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "peas",
+      "group": "legumes",
+      "label": "Peas (fresh)",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 1.1,
+      "variant_of": null,
+      "fao_row": "Peas – Fresh",
+      "stage_lengths_days": {
+        "initial": 15,
+        "development": 25,
+        "mid_season": 35,
+        "late_season": 15,
+        "table11_row": "Peas",
+        "plant_date": "May",
+        "region": "Europe",
+        "selection_rule": "European row (preferred: Europe first, then Mediterranean, then temperate, then first row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 35,
+          "late_season": 15,
+          "table11_row": "Peas",
+          "plant_date": "Mar/Apr",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 25,
+          "mid_season": 30,
+          "late_season": 20,
+          "table11_row": "Peas",
+          "plant_date": "April",
+          "region": "Idaho, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "peas_dry",
+      "group": "legumes",
+      "label": "Peas (dry, seed)",
+      "kc_ini": 0.4,
+      "kc_mid": 1.15,
+      "kc_end": 0.3,
+      "variant_of": "peas",
+      "fao_row": "Peas – Dry/Seed",
+      "stage_lengths_days": {
+        "initial": 15,
+        "development": 25,
+        "mid_season": 35,
+        "late_season": 15,
+        "table11_row": "Peas",
+        "plant_date": "May",
+        "region": "Europe",
+        "selection_rule": "European row (preferred: Europe first, then Mediterranean, then temperate, then first row); Table 11 has one Peas entry for fresh and dry harvest",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 35,
+          "late_season": 15,
+          "table11_row": "Peas",
+          "plant_date": "Mar/Apr",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 25,
+          "mid_season": 30,
+          "late_season": 20,
+          "table11_row": "Peas",
+          "plant_date": "April",
+          "region": "Idaho, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "soybean",
+      "group": "legumes",
+      "label": "Soybean",
+      "kc_ini": 0.4,
+      "kc_mid": 1.15,
+      "kc_end": 0.5,
+      "variant_of": null,
+      "fao_row": "Soybeans",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 35,
+        "mid_season": 60,
+        "late_season": 25,
+        "table11_row": "Soybeans",
+        "plant_date": "May",
+        "region": "Central USA",
+        "selection_rule": "temperate row (no European or Mediterranean row) (Central USA)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 15,
+          "mid_season": 40,
+          "late_season": 15,
+          "table11_row": "Soybeans",
+          "plant_date": "Dec",
+          "region": "Tropics",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 25,
+          "mid_season": 75,
+          "late_season": 30,
+          "table11_row": "Soybeans",
+          "plant_date": "June",
+          "region": "Japan",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "artichoke",
+      "group": "perennial_vegetables",
+      "label": "Artichoke",
+      "kc_ini": 0.5,
+      "kc_mid": 1,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Artichokes",
+      "stage_lengths_days": {
+        "initial": 40,
+        "development": 40,
+        "mid_season": 250,
+        "late_season": 30,
+        "table11_row": "Artichoke",
+        "plant_date": "Apr (1 st yr)",
+        "region": "California",
+        "selection_rule": "first row (no European, Mediterranean or temperate row) (1st-year stand; the 2nd-year row, cut in May, is the alternative for established stands)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 25,
+          "mid_season": 250,
+          "late_season": 30,
+          "table11_row": "Artichoke",
+          "plant_date": "May (2 nd yr)",
+          "region": "(cut in May)",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "asparagus",
+      "group": "perennial_vegetables",
+      "label": "Asparagus",
+      "kc_ini": 0.5,
+      "kc_mid": 0.95,
+      "kc_end": 0.3,
+      "variant_of": null,
+      "fao_row": "Asparagus",
+      "stage_lengths_days": {
+        "initial": 90,
+        "development": 30,
+        "mid_season": 200,
+        "late_season": 45,
+        "table11_row": "Asparagus",
+        "plant_date": "Feb",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 50,
+          "development": 30,
+          "mid_season": 100,
+          "late_season": 50,
+          "table11_row": "Asparagus",
+          "plant_date": "Feb",
+          "region": "Warm Winter",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "mint",
+      "group": "perennial_vegetables",
+      "label": "Mint",
+      "kc_ini": 0.6,
+      "kc_mid": 1.15,
+      "kc_end": 1.1,
+      "variant_of": null,
+      "fao_row": "Mint",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "group default (perennial_vegetables): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "strawberry",
+      "group": "perennial_vegetables",
+      "label": "Strawberry",
+      "kc_ini": 0.4,
+      "kc_mid": 0.85,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Strawberries",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "group default (perennial_vegetables): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "cotton",
+      "group": "fibre",
+      "label": "Cotton",
+      "kc_ini": 0.35,
+      "kc_mid": 1.15,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Cotton",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 50,
+        "mid_season": 60,
+        "late_season": 55,
+        "table11_row": "Cotton",
+        "plant_date": "Mar-May",
+        "region": "Egypt; Pakistan; Calif.",
+        "selection_rule": "first row (no European, Mediterranean or temperate row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 45,
+          "development": 90,
+          "mid_season": 45,
+          "late_season": 45,
+          "table11_row": "Cotton",
+          "plant_date": "Mar",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 60,
+          "late_season": 55,
+          "table11_row": "Cotton",
+          "plant_date": "Sept",
+          "region": "Yemen",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 55,
+          "late_season": 45,
+          "table11_row": "Cotton",
+          "plant_date": "April",
+          "region": "Texas",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "flax",
+      "group": "fibre",
+      "label": "Flax",
+      "kc_ini": 0.35,
+      "kc_mid": 1.1,
+      "kc_end": 0.25,
+      "variant_of": null,
+      "fao_row": "Flax",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 35,
+        "mid_season": 50,
+        "late_season": 40,
+        "table11_row": "Flax",
+        "plant_date": "April",
+        "region": "Europe",
+        "selection_rule": "European row (preferred: Europe first, then Mediterranean, then temperate, then first row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 40,
+          "mid_season": 100,
+          "late_season": 50,
+          "table11_row": "Flax",
+          "plant_date": "October",
+          "region": "Arizona",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "sisal",
+      "group": "fibre",
+      "label": "Sisal",
+      "kc_ini": 0.35,
+      "kc_mid": 0.4,
+      "kc_end": 0.4,
+      "variant_of": null,
+      "fao_row": "Sisal",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "reference proposal (UNVERIFIED): perennial agave without seasonal stages",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 50,
+          "late_season": 40,
+          "table11_row": "Flax",
+          "plant_date": "April",
+          "region": "Europe",
+          "selection_rule": "group default (fibre): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "castor_bean",
+      "group": "oil_crops",
+      "label": "Castor bean",
+      "kc_ini": 0.35,
+      "kc_mid": 1.15,
+      "kc_end": 0.55,
+      "variant_of": null,
+      "fao_row": "Castorbean (Ricinus)",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 40,
+        "mid_season": 65,
+        "late_season": 50,
+        "table11_row": "Castor beans",
+        "plant_date": "March",
+        "region": "(Semi) Arid Climates",
+        "selection_rule": "first row (no European, Mediterranean or temperate row)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 40,
+          "mid_season": 50,
+          "late_season": 25,
+          "table11_row": "Castor beans",
+          "plant_date": "Nov.",
+          "region": "Indonesia",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "rapeseed",
+      "group": "oil_crops",
+      "label": "Rapeseed, canola",
+      "kc_ini": 0.35,
+      "kc_mid": 1.15,
+      "kc_end": 0.35,
+      "variant_of": null,
+      "fao_row": "Rapeseed, Canola",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 35,
+        "mid_season": 55,
+        "late_season": 30,
+        "table11_row": "Safflower",
+        "plant_date": "Mar",
+        "region": "High Latitudes",
+        "selection_rule": "reference proposal (UNVERIFIED): spring-sown oil crop of the same group",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 45,
+          "late_season": 25,
+          "table11_row": "Sunflower",
+          "plant_date": "April/May",
+          "region": "Medit.; California",
+          "selection_rule": "group default (oil_crops): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "safflower",
+      "group": "oil_crops",
+      "label": "Safflower",
+      "kc_ini": 0.35,
+      "kc_mid": 1.15,
+      "kc_end": 0.25,
+      "variant_of": null,
+      "fao_row": "Safflower",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 35,
+        "mid_season": 55,
+        "late_season": 30,
+        "table11_row": "Safflower",
+        "plant_date": "Mar",
+        "region": "High Latitudes",
+        "selection_rule": "temperate row (no European or Mediterranean row) (High Latitudes)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 35,
+          "mid_season": 45,
+          "late_season": 25,
+          "table11_row": "Safflower",
+          "plant_date": "April",
+          "region": "California, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 55,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Safflower",
+          "plant_date": "Oct/Nov",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "sesame",
+      "group": "oil_crops",
+      "label": "Sesame",
+      "kc_ini": 0.35,
+      "kc_mid": 1.1,
+      "kc_end": 0.25,
+      "variant_of": null,
+      "fao_row": "Sesame",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 40,
+        "late_season": 20,
+        "table11_row": "Sesame",
+        "plant_date": "June",
+        "region": "China",
+        "selection_rule": "only row",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "sunflower",
+      "group": "oil_crops",
+      "label": "Sunflower",
+      "kc_ini": 0.35,
+      "kc_mid": 1.15,
+      "kc_end": 0.35,
+      "variant_of": null,
+      "fao_row": "Sunflower",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 35,
+        "mid_season": 45,
+        "late_season": 25,
+        "table11_row": "Sunflower",
+        "plant_date": "April/May",
+        "region": "Medit.; California",
+        "selection_rule": "only row ('Medit.; California')",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "barley",
+      "group": "cereals",
+      "label": "Barley",
+      "kc_ini": 0.3,
+      "kc_mid": 1.15,
+      "kc_end": 0.25,
+      "variant_of": null,
+      "fao_row": "Barley",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 25,
+        "mid_season": 60,
+        "late_season": 30,
+        "table11_row": "Barley/Oats/Wheat",
+        "plant_date": "March/Apr",
+        "region": "35-45 °L",
+        "selection_rule": "own-named 'Barley/Oats/Wheat' rows contain no European or Mediterranean row; temperate row '35-45 °L' (March/April) chosen. Own-named rows take precedence over the class row 'Grains (small)' (Mediterranean April, kept as alternative)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "November",
+          "region": "Central India",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 15,
+          "development": 30,
+          "mid_season": 65,
+          "late_season": 40,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "July",
+          "region": "East Africa",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 40,
+          "development": 30,
+          "mid_season": 40,
+          "late_season": 20,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Apr",
+          "region": "",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 40,
+          "development": 60,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Nov",
+          "region": "",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 60,
+          "late_season": 30,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Dec",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Grains (small)",
+          "plant_date": "April",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 65,
+          "late_season": 40,
+          "table11_row": "Grains (small)",
+          "plant_date": "Oct/Nov",
+          "region": "Pakistan; Arid Reg.",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "maize",
+      "group": "cereals",
+      "label": "Maize (grain)",
+      "kc_ini": 0.3,
+      "kc_mid": 1.2,
+      "kc_end": 0.35,
+      "variant_of": null,
+      "fao_row": "Maize, Field (grain) (field corn)",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 40,
+        "mid_season": 50,
+        "late_season": 30,
+        "table11_row": "Maize (grain)",
+        "plant_date": "April",
+        "region": "Spain (spr, sum.); Calif.",
+        "selection_rule": "European row ('Spain (spr, sum.); Calif.')",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Maize (grain)",
+          "plant_date": "April",
+          "region": "East Africa (alt.)",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 40,
+          "mid_season": 45,
+          "late_season": 30,
+          "table11_row": "Maize (grain)",
+          "plant_date": "Dec/Jan",
+          "region": "Arid Climate",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 35,
+          "mid_season": 40,
+          "late_season": 30,
+          "table11_row": "Maize (grain)",
+          "plant_date": "June",
+          "region": "Nigeria (humid)",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 35,
+          "mid_season": 40,
+          "late_season": 30,
+          "table11_row": "Maize (grain)",
+          "plant_date": "October",
+          "region": "India (dry, cool)",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 40,
+          "mid_season": 50,
+          "late_season": 50,
+          "table11_row": "Maize (grain)",
+          "plant_date": "April",
+          "region": "Idaho, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "maize_sweet",
+      "group": "cereals",
+      "label": "Sweet corn",
+      "kc_ini": 0.3,
+      "kc_mid": 1.15,
+      "kc_end": 1.05,
+      "variant_of": "maize",
+      "fao_row": "Maize, Sweet (sweet corn)",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 25,
+        "mid_season": 25,
+        "late_season": 10,
+        "table11_row": "Maize (sweet)",
+        "plant_date": "May/June",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (only one)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 20,
+          "mid_season": 30,
+          "late_season": 10,
+          "table11_row": "Maize (sweet)",
+          "plant_date": "March",
+          "region": "Philippines",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 30,
+          "late_season": 10,
+          "table11_row": "Maize (sweet)",
+          "plant_date": "Oct/Dec",
+          "region": "Arid Climate",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 30,
+          "mid_season": 30,
+          "late_season": 10,
+          "table11_row": "Maize (sweet)",
+          "plant_date": "April",
+          "region": "Idaho, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 40,
+          "mid_season": 70,
+          "late_season": 10,
+          "table11_row": "Maize (sweet)",
+          "plant_date": "Jan",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "millet",
+      "group": "cereals",
+      "label": "Millet",
+      "kc_ini": 0.3,
+      "kc_mid": 1,
+      "kc_end": 0.3,
+      "variant_of": null,
+      "fao_row": "Millet",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 30,
+        "mid_season": 55,
+        "late_season": 35,
+        "table11_row": "Millet",
+        "plant_date": "April",
+        "region": "Central USA",
+        "selection_rule": "temperate row (no European or Mediterranean row) (Central USA)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 40,
+          "late_season": 25,
+          "table11_row": "Millet",
+          "plant_date": "June",
+          "region": "Pakistan",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "oats",
+      "group": "cereals",
+      "label": "Oats",
+      "kc_ini": 0.3,
+      "kc_mid": 1.15,
+      "kc_end": 0.25,
+      "variant_of": null,
+      "fao_row": "Oats",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 25,
+        "mid_season": 60,
+        "late_season": 30,
+        "table11_row": "Barley/Oats/Wheat",
+        "plant_date": "March/Apr",
+        "region": "35-45 °L",
+        "selection_rule": "own-named 'Barley/Oats/Wheat' rows contain no European or Mediterranean row; temperate row '35-45 °L' (March/April) chosen. Own-named rows take precedence over the class row 'Grains (small)' (Mediterranean April, kept as alternative)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "November",
+          "region": "Central India",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 15,
+          "development": 30,
+          "mid_season": 65,
+          "late_season": 40,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "July",
+          "region": "East Africa",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 40,
+          "development": 30,
+          "mid_season": 40,
+          "late_season": 20,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Apr",
+          "region": "",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 40,
+          "development": 60,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Nov",
+          "region": "",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 60,
+          "late_season": 30,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Dec",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Grains (small)",
+          "plant_date": "April",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 65,
+          "late_season": 40,
+          "table11_row": "Grains (small)",
+          "plant_date": "Oct/Nov",
+          "region": "Pakistan; Arid Reg.",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "rice",
+      "group": "cereals",
+      "label": "Rice",
+      "kc_ini": 1.05,
+      "kc_mid": 1.2,
+      "kc_end": 0.9,
+      "variant_of": null,
+      "fao_row": "Rice",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 30,
+        "mid_season": 60,
+        "late_season": 30,
+        "table11_row": "Rice",
+        "plant_date": "Dec; May",
+        "region": "Tropics; Mediterranean",
+        "selection_rule": "Mediterranean row ('Tropics; Mediterranean', plant date 'Dec; May')",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 30,
+          "development": 30,
+          "mid_season": 80,
+          "late_season": 40,
+          "table11_row": "Rice",
+          "plant_date": "May",
+          "region": "Tropics",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "sorghum",
+      "group": "cereals",
+      "label": "Sorghum (grain)",
+      "kc_ini": 0.3,
+      "kc_mid": 1,
+      "kc_end": 0.55,
+      "variant_of": null,
+      "fao_row": "Sorghum – grain",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 35,
+        "mid_season": 40,
+        "late_season": 30,
+        "table11_row": "Sorghum",
+        "plant_date": "May/June",
+        "region": "USA, Pakis., Med.",
+        "selection_rule": "row naming the Mediterranean ('USA, Pakis., Med.')",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 35,
+          "mid_season": 45,
+          "late_season": 30,
+          "table11_row": "Sorghum",
+          "plant_date": "Mar/April",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "sorghum_sweet",
+      "group": "cereals",
+      "label": "Sorghum (sweet)",
+      "kc_ini": 0.3,
+      "kc_mid": 1.2,
+      "kc_end": 1.05,
+      "variant_of": "sorghum",
+      "fao_row": "Sorghum – sweet",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 35,
+        "mid_season": 40,
+        "late_season": 30,
+        "table11_row": "Sorghum",
+        "plant_date": "May/June",
+        "region": "USA, Pakis., Med.",
+        "selection_rule": "row naming the Mediterranean ('USA, Pakis., Med.'); Table 11 has one Sorghum entry for grain and sweet",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 35,
+          "mid_season": 45,
+          "late_season": 30,
+          "table11_row": "Sorghum",
+          "plant_date": "Mar/April",
+          "region": "Arid Region",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "wheat",
+      "group": "cereals",
+      "label": "Wheat (spring)",
+      "kc_ini": 0.3,
+      "kc_mid": 1.15,
+      "kc_end": 0.25,
+      "variant_of": null,
+      "fao_row": "Spring Wheat",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 25,
+        "mid_season": 60,
+        "late_season": 30,
+        "table11_row": "Barley/Oats/Wheat",
+        "plant_date": "March/Apr",
+        "region": "35-45 °L",
+        "selection_rule": "own-named 'Barley/Oats/Wheat' rows contain no European or Mediterranean row; temperate row '35-45 °L' (March/April) chosen. Own-named rows take precedence over the class row 'Grains (small)' (Mediterranean April, kept as alternative); spring wheat",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 15,
+          "development": 25,
+          "mid_season": 50,
+          "late_season": 30,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "November",
+          "region": "Central India",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 15,
+          "development": 30,
+          "mid_season": 65,
+          "late_season": 40,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "July",
+          "region": "East Africa",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 40,
+          "development": 30,
+          "mid_season": 40,
+          "late_season": 20,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Apr",
+          "region": "",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 40,
+          "development": 60,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Nov",
+          "region": "",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 60,
+          "late_season": 30,
+          "table11_row": "Barley/Oats/Wheat",
+          "plant_date": "Dec",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 30,
+          "mid_season": 60,
+          "late_season": 40,
+          "table11_row": "Grains (small)",
+          "plant_date": "April",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 35,
+          "mid_season": 65,
+          "late_season": 40,
+          "table11_row": "Grains (small)",
+          "plant_date": "Oct/Nov",
+          "region": "Pakistan; Arid Reg.",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "winter_wheat",
+      "group": "cereals",
+      "label": "Winter wheat (non-frozen soils)",
+      "kc_ini": 0.7,
+      "kc_mid": 1.15,
+      "kc_end": 0.25,
+      "variant_of": "wheat",
+      "fao_row": "Winter Wheat – with non-frozen soils",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 140,
+        "mid_season": 40,
+        "late_season": 30,
+        "table11_row": "Winter Wheat",
+        "plant_date": "November",
+        "region": "Mediterranean",
+        "selection_rule": "Mediterranean row (non-frozen soils)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 60,
+          "mid_season": 70,
+          "late_season": 30,
+          "table11_row": "Winter Wheat",
+          "plant_date": "December",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 160,
+          "development": 75,
+          "mid_season": 75,
+          "late_season": 25,
+          "table11_row": "Winter Wheat",
+          "plant_date": "October",
+          "region": "Idaho, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "winter_wheat_frozen",
+      "group": "cereals",
+      "label": "Winter wheat (frozen soils)",
+      "kc_ini": 0.4,
+      "kc_mid": 1.15,
+      "kc_end": 0.25,
+      "variant_of": "wheat",
+      "fao_row": "Winter Wheat – with frozen soils",
+      "stage_lengths_days": {
+        "initial": 160,
+        "development": 75,
+        "mid_season": 75,
+        "late_season": 25,
+        "table11_row": "Winter Wheat",
+        "plant_date": "October",
+        "region": "Idaho, USA",
+        "selection_rule": "frozen-soil variant: Table 11 footnote 2 says winter wheat periods 'will lengthen in frozen climates according to days having zero growth potential and wheat dormancy'; the Idaho October row (initial 160 d spanning winter) is the only row that includes winter dormancy",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 60,
+          "mid_season": 70,
+          "late_season": 30,
+          "table11_row": "Winter Wheat",
+          "plant_date": "December",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 140,
+          "mid_season": 40,
+          "late_season": 30,
+          "table11_row": "Winter Wheat",
+          "plant_date": "November",
+          "region": "Mediterranean",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "alfalfa",
+      "group": "forages",
+      "label": "Alfalfa hay (per cutting)",
+      "kc_ini": 0.4,
+      "kc_mid": 1.2,
+      "kc_end": 1.15,
+      "variant_of": null,
+      "fao_row": "Alfalfa Hay – individual cutting periods",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": 25,
+        "late_season": 10,
+        "table11_row": "Alfalfa, 1st cutting cycle",
+        "plant_date": "Apr (last -4°C)",
+        "region": "Idaho, USA.",
+        "selection_rule": "temperate row (no European or Mediterranean row) (Idaho) for the first cutting cycle; later cycles use 'other cutting cycles' Idaho 5/20/10/10 (as in chapter 6, Figure 35)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 30,
+          "mid_season": null,
+          "late_season": null,
+          "table11_row": "Alfalfa, total season",
+          "plant_date": "",
+          "region": "last -4°C in spring until first -4°C in fall",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 10,
+          "development": 20,
+          "mid_season": 20,
+          "late_season": 10,
+          "table11_row": "Alfalfa, 1st cutting cycle",
+          "plant_date": "Jan",
+          "region": "Calif., USA.",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 5,
+          "development": 10,
+          "mid_season": 10,
+          "late_season": 5,
+          "table11_row": "Alfalfa, other cutting cycles",
+          "plant_date": "Mar",
+          "region": "Calif., USA.",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 5,
+          "development": 20,
+          "mid_season": 10,
+          "late_season": 10,
+          "table11_row": "Alfalfa, other cutting cycles",
+          "plant_date": "Jun",
+          "region": "Idaho, USA.",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "alfalfa_averaged",
+      "group": "forages",
+      "label": "Alfalfa hay (averaged cuttings)",
+      "kc_ini": 0.4,
+      "kc_mid": 0.95,
+      "kc_end": 0.9,
+      "variant_of": "alfalfa",
+      "fao_row": "Alfalfa Hay – averaged cutting effects",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Alfalfa, total season",
+        "plant_date": "",
+        "region": "last -4°C in spring until first -4°C in fall",
+        "selection_rule": "only row; Table 11 gives no numeric mid/late lengths",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 20,
+          "mid_season": 20,
+          "late_season": 10,
+          "table11_row": "Alfalfa, 1st cutting cycle",
+          "plant_date": "Jan",
+          "region": "Calif., USA.",
+          "selection_rule": "alternative (cutting-cycle rows)",
+          "verified": true
+        },
+        {
+          "initial": 10,
+          "development": 30,
+          "mid_season": 25,
+          "late_season": 10,
+          "table11_row": "Alfalfa, 1st cutting cycle",
+          "plant_date": "Apr (last -4°C)",
+          "region": "Idaho, USA.",
+          "selection_rule": "alternative (cutting-cycle rows)",
+          "verified": true
+        },
+        {
+          "initial": 5,
+          "development": 10,
+          "mid_season": 10,
+          "late_season": 5,
+          "table11_row": "Alfalfa, other cutting cycles",
+          "plant_date": "Mar",
+          "region": "Calif., USA.",
+          "selection_rule": "alternative (cutting-cycle rows)",
+          "verified": true
+        },
+        {
+          "initial": 5,
+          "development": 20,
+          "mid_season": 10,
+          "late_season": 10,
+          "table11_row": "Alfalfa, other cutting cycles",
+          "plant_date": "Jun",
+          "region": "Idaho, USA.",
+          "selection_rule": "alternative (cutting-cycle rows)",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "alfalfa_seed",
+      "group": "forages",
+      "label": "Alfalfa (seed)",
+      "kc_ini": 0.4,
+      "kc_mid": 0.5,
+      "kc_end": 0.5,
+      "variant_of": "alfalfa",
+      "fao_row": "Alfalfa Hay – for seed",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Alfalfa, total season",
+        "plant_date": "",
+        "region": "last -4°C in spring until first -4°C in fall",
+        "selection_rule": "reference proposal (UNVERIFIED): same species",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 20,
+          "mid_season": null,
+          "late_season": null,
+          "table11_row": "Grass Pasture",
+          "plant_date": "",
+          "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+          "selection_rule": "group default (forages): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "bermuda",
+      "group": "forages",
+      "label": "Bermuda grass hay",
+      "kc_ini": 0.55,
+      "kc_mid": 1,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": "Bermuda hay – averaged cutting effects",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 15,
+        "mid_season": 75,
+        "late_season": 35,
+        "table11_row": "Bermuda for hay (several cuttings)",
+        "plant_date": "---",
+        "region": "Calif. Desert, USA",
+        "selection_rule": "only row (hay, several cuttings)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "bermuda_seed",
+      "group": "forages",
+      "label": "Bermuda grass (seed)",
+      "kc_ini": 0.35,
+      "kc_mid": 0.9,
+      "kc_end": 0.65,
+      "variant_of": "bermuda",
+      "fao_row": "Bermuda hay – Spring crop for seed",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 25,
+        "mid_season": 35,
+        "late_season": 35,
+        "table11_row": "Bermuda for seed",
+        "plant_date": "March",
+        "region": "Calif. Desert, USA",
+        "selection_rule": "only row (seed)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "clover_hay",
+      "group": "forages",
+      "label": "Clover hay, berseem (averaged cuttings)",
+      "kc_ini": 0.4,
+      "kc_mid": 0.9,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": "Clover hay, Berseem – averaged cutting effects",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Alfalfa, total season",
+        "plant_date": "",
+        "region": "last -4°C in spring until first -4°C in fall",
+        "selection_rule": "reference proposal (UNVERIFIED): multi-cut legume hay, averaged cuttings",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 20,
+          "mid_season": null,
+          "late_season": null,
+          "table11_row": "Grass Pasture",
+          "plant_date": "",
+          "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+          "selection_rule": "group default (forages): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "clover_hay_cutting",
+      "group": "forages",
+      "label": "Clover hay, berseem (per cutting)",
+      "kc_ini": 0.4,
+      "kc_mid": 1.15,
+      "kc_end": 1.1,
+      "variant_of": "clover_hay",
+      "fao_row": "Clover hay, Berseem – individual cutting periods",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": 25,
+        "late_season": 10,
+        "table11_row": "Alfalfa, 1st cutting cycle",
+        "plant_date": "Apr (last -4°C)",
+        "region": "Idaho, USA.",
+        "selection_rule": "reference proposal (UNVERIFIED): consistent with the alfalfa default",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 20,
+          "mid_season": null,
+          "late_season": null,
+          "table11_row": "Grass Pasture",
+          "plant_date": "",
+          "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+          "selection_rule": "group default (forages): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "grass",
+      "group": "forages",
+      "label": "Grass",
+      "kc_ini": 0.9,
+      "kc_mid": 1,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "only row; Table 11 gives no numeric mid/late lengths",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "pasture_extensive",
+      "group": "forages",
+      "label": "Pasture (extensive grazing)",
+      "kc_ini": 0.3,
+      "kc_mid": 0.75,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Grazing Pasture – Extensive Grazing",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "only row; Table 11 gives no numeric mid/late lengths",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "pasture_rotated",
+      "group": "forages",
+      "label": "Pasture (rotated grazing)",
+      "kc_ini": 0.4,
+      "kc_mid": 0.85,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": "Grazing Pasture – Rotated Grazing",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "only row; Table 11 gives no numeric mid/late lengths",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "ryegrass_hay",
+      "group": "forages",
+      "label": "Ryegrass hay",
+      "kc_ini": 0.95,
+      "kc_mid": 1.05,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Rye Grass hay – averaged cutting effects",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "group default (forages): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "sudan_grass",
+      "group": "forages",
+      "label": "Sudan grass hay (averaged cuttings)",
+      "kc_ini": 0.5,
+      "kc_mid": 0.9,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": "Sudan Grass hay (annual) – averaged cutting effects",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 25,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Sudan, 1st cutting cycle",
+        "plant_date": "Apr",
+        "region": "Calif. Desert, USA",
+        "selection_rule": "reference proposal (UNVERIFIED): averaged cuttings, as alfalfa_averaged",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 20,
+          "mid_season": null,
+          "late_season": null,
+          "table11_row": "Grass Pasture",
+          "plant_date": "",
+          "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+          "selection_rule": "group default (forages): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "sudan_grass_cutting",
+      "group": "forages",
+      "label": "Sudan grass hay (per cutting)",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 1.1,
+      "variant_of": "sudan_grass",
+      "fao_row": "Sudan Grass hay (annual) – individual cutting periods",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 25,
+        "mid_season": 15,
+        "late_season": 10,
+        "table11_row": "Sudan, 1st cutting cycle",
+        "plant_date": "Apr",
+        "region": "Calif. Desert, USA",
+        "selection_rule": "first row (no European, Mediterranean or temperate row) (1st cutting cycle); later cycles use the 'other cutting cycles' row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 3,
+          "development": 15,
+          "mid_season": 12,
+          "late_season": 7,
+          "table11_row": "Sudan, other cutting cycles",
+          "plant_date": "June",
+          "region": "Calif. Desert, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "turf_cool",
+      "group": "forages",
+      "label": "Turf grass (cool season)",
+      "kc_ini": 0.9,
+      "kc_mid": 0.95,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Turf grass – cool season",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "group default (forages): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "turf_warm",
+      "group": "forages",
+      "label": "Turf grass (warm season)",
+      "kc_ini": 0.8,
+      "kc_mid": 0.85,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": "Turf grass – warm season",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 20,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "Grass Pasture",
+        "plant_date": "",
+        "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall",
+        "selection_rule": "group default (forages): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "sugarcane",
+      "group": "sugar_cane",
+      "label": "Sugarcane",
+      "kc_ini": 0.4,
+      "kc_mid": 1.25,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Sugar Cane",
+      "stage_lengths_days": {
+        "initial": 35,
+        "development": 60,
+        "mid_season": 190,
+        "late_season": 120,
+        "table11_row": "Sugarcane, virgin",
+        "plant_date": "",
+        "region": "Low Latitudes",
+        "selection_rule": "first row (no European, Mediterranean or temperate row) (virgin cane, Low Latitudes)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 50,
+          "development": 70,
+          "mid_season": 220,
+          "late_season": 140,
+          "table11_row": "Sugarcane, virgin",
+          "plant_date": "",
+          "region": "Tropics",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 75,
+          "development": 105,
+          "mid_season": 330,
+          "late_season": 210,
+          "table11_row": "Sugarcane, virgin",
+          "plant_date": "",
+          "region": "Hawaii, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 25,
+          "development": 70,
+          "mid_season": 135,
+          "late_season": 50,
+          "table11_row": "Sugarcane, ratoon",
+          "plant_date": "",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 180,
+          "late_season": 60,
+          "table11_row": "Sugarcane, ratoon",
+          "plant_date": "",
+          "region": "Tropics",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 35,
+          "development": 105,
+          "mid_season": 210,
+          "late_season": 70,
+          "table11_row": "Sugarcane, ratoon",
+          "plant_date": "",
+          "region": "Hawaii, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "banana",
+      "group": "tropical_fruits",
+      "label": "Banana (year 1)",
+      "kc_ini": 0.5,
+      "kc_mid": 1.1,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Banana – 1st year",
+      "stage_lengths_days": {
+        "initial": 120,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 60,
+        "table11_row": "Banana, 1st yr",
+        "plant_date": "Mar",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "banana_year_2",
+      "group": "tropical_fruits",
+      "label": "Banana (year 2)",
+      "kc_ini": 1,
+      "kc_mid": 1.2,
+      "kc_end": 1.1,
+      "variant_of": "banana",
+      "fao_row": "Banana – 2nd year",
+      "stage_lengths_days": {
+        "initial": 120,
+        "development": 60,
+        "mid_season": 180,
+        "late_season": 5,
+        "table11_row": "Banana, 2nd yr",
+        "plant_date": "Feb",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "cocoa",
+      "group": "tropical_fruits",
+      "label": "Cocoa",
+      "kc_ini": 1,
+      "kc_mid": 1.05,
+      "kc_end": 1.05,
+      "variant_of": null,
+      "fao_row": "Cacao",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "coffee",
+      "group": "tropical_fruits",
+      "label": "Coffee (bare ground)",
+      "kc_ini": 0.9,
+      "kc_mid": 0.95,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Coffee – bare ground cover",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "coffee_with_weeds",
+      "group": "tropical_fruits",
+      "label": "Coffee (with weeds)",
+      "kc_ini": 1.05,
+      "kc_mid": 1.1,
+      "kc_end": 1.1,
+      "variant_of": "coffee",
+      "fao_row": "Coffee – with weeds",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "date_palm",
+      "group": "tropical_fruits",
+      "label": "Date palm",
+      "kc_ini": 0.9,
+      "kc_mid": 0.95,
+      "kc_end": 0.95,
+      "variant_of": null,
+      "fao_row": "Date Palms",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "mango",
+      "group": "tropical_fruits",
+      "label": "Mango",
+      "kc_ini": 0.6,
+      "kc_mid": 1.05,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "palm",
+      "group": "tropical_fruits",
+      "label": "Palm trees",
+      "kc_ini": 0.95,
+      "kc_mid": 1,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Palm Trees",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "papaya",
+      "group": "tropical_fruits",
+      "label": "Papaya",
+      "kc_ini": 0.6,
+      "kc_mid": 1.05,
+      "kc_end": 0.9,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "pineapple",
+      "group": "tropical_fruits",
+      "label": "Pineapple (bare soil)",
+      "kc_ini": 0.5,
+      "kc_mid": 0.3,
+      "kc_end": 0.3,
+      "variant_of": null,
+      "fao_row": "Pineapple – bare soil",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 120,
+        "mid_season": 600,
+        "late_season": 10,
+        "table11_row": "Pineapple",
+        "plant_date": "",
+        "region": "Hawaii, USA",
+        "selection_rule": "only row",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "pineapple_grass_cover",
+      "group": "tropical_fruits",
+      "label": "Pineapple (grass cover)",
+      "kc_ini": 0.5,
+      "kc_mid": 0.5,
+      "kc_end": 0.5,
+      "variant_of": "pineapple",
+      "fao_row": "Pineapple – with grass cover",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 120,
+        "mid_season": 600,
+        "late_season": 10,
+        "table11_row": "Pineapple",
+        "plant_date": "",
+        "region": "Hawaii, USA",
+        "selection_rule": "only row; Table 11 has one Pineapple entry",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "rubber",
+      "group": "tropical_fruits",
+      "label": "Rubber trees",
+      "kc_ini": 0.95,
+      "kc_mid": 1,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Rubber Trees",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "tea",
+      "group": "tropical_fruits",
+      "label": "Tea (non-shaded)",
+      "kc_ini": 0.95,
+      "kc_mid": 1,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Tea – non-shaded",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "tea_shaded",
+      "group": "tropical_fruits",
+      "label": "Tea (shaded)",
+      "kc_ini": 1.1,
+      "kc_mid": 1.15,
+      "kc_end": 1.15,
+      "variant_of": "tea",
+      "fao_row": "Tea – shaded",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "group default (tropical_fruits): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "berries",
+      "group": "grapes_berries",
+      "label": "Berries (bushes)",
+      "kc_ini": 0.3,
+      "kc_mid": 1.05,
+      "kc_end": 0.5,
+      "variant_of": null,
+      "fao_row": "Berries (bushes)",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "reference proposal (UNVERIFIED): deciduous shrubs leafing out in March-April",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 90,
+          "late_season": 20,
+          "table11_row": "Grapes",
+          "plant_date": "May",
+          "region": "High Latitudes",
+          "selection_rule": "group default (grapes_berries): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "blueberry",
+      "group": "grapes_berries",
+      "label": "Blueberry",
+      "kc_ini": 0.4,
+      "kc_mid": 0.85,
+      "kc_end": 0.6,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "reference proposal (UNVERIFIED): as berries",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 90,
+          "late_season": 20,
+          "table11_row": "Grapes",
+          "plant_date": "May",
+          "region": "High Latitudes",
+          "selection_rule": "group default (grapes_berries): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "grapes_table",
+      "group": "grapes_berries",
+      "label": "Grapes (table, raisin)",
+      "kc_ini": 0.3,
+      "kc_mid": 0.85,
+      "kc_end": 0.45,
+      "variant_of": "grapevine",
+      "fao_row": "Grapes – Table or Raisin",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 50,
+        "mid_season": 90,
+        "late_season": 20,
+        "table11_row": "Grapes",
+        "plant_date": "May",
+        "region": "High Latitudes",
+        "selection_rule": "temperate row (no European or Mediterranean row) (High Latitudes; first temperate row, the Mid Latitudes row is labelled wine)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 40,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Grapes",
+          "plant_date": "April",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 75,
+          "late_season": 60,
+          "table11_row": "Grapes",
+          "plant_date": "Mar",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 60,
+          "mid_season": 40,
+          "late_season": 80,
+          "table11_row": "Grapes",
+          "plant_date": "April",
+          "region": "Mid Latitudes (wine)",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "grapevine",
+      "group": "grapes_berries",
+      "label": "Grapevine (wine)",
+      "kc_ini": 0.3,
+      "kc_mid": 0.7,
+      "kc_end": 0.45,
+      "variant_of": null,
+      "fao_row": "Grapes – Wine",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 60,
+        "mid_season": 40,
+        "late_season": 80,
+        "table11_row": "Grapes",
+        "plant_date": "April",
+        "region": "Mid Latitudes (wine)",
+        "selection_rule": "temperate row labelled for wine ('Mid Latitudes (wine)')",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 40,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Grapes",
+          "plant_date": "April",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 75,
+          "late_season": 60,
+          "table11_row": "Grapes",
+          "plant_date": "Mar",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 90,
+          "late_season": 20,
+          "table11_row": "Grapes",
+          "plant_date": "May",
+          "region": "High Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "hops",
+      "group": "grapes_berries",
+      "label": "Hops",
+      "kc_ini": 0.3,
+      "kc_mid": 1.05,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": "Hops",
+      "stage_lengths_days": {
+        "initial": 25,
+        "development": 40,
+        "mid_season": 80,
+        "late_season": 10,
+        "table11_row": "Hops",
+        "plant_date": "April",
+        "region": "Idaho, USA",
+        "selection_rule": "only row",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "raspberry",
+      "group": "grapes_berries",
+      "label": "Raspberry",
+      "kc_ini": 0.4,
+      "kc_mid": 1.05,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "reference proposal (UNVERIFIED): as berries",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 50,
+          "mid_season": 90,
+          "late_season": 20,
+          "table11_row": "Grapes",
+          "plant_date": "May",
+          "region": "High Latitudes",
+          "selection_rule": "group default (grapes_berries): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "almond",
+      "group": "fruit_trees",
+      "label": "Almond",
+      "kc_ini": 0.4,
+      "kc_mid": 0.9,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": "Almonds, no ground cover",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 50,
+        "mid_season": 130,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "Calif., USA",
+        "selection_rule": "agronomy review 2026-09-27: almonds grow where that row applies",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 90,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "High Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "apple",
+      "group": "fruit_trees",
+      "label": "Apple",
+      "kc_ini": 0.45,
+      "kc_mid": 0.95,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Apples, Cherries, Pears – no ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "apple_cover_frost",
+      "group": "fruit_trees",
+      "label": "Apple (active ground cover, killing frost)",
+      "kc_ini": 0.5,
+      "kc_mid": 1.2,
+      "kc_end": 0.95,
+      "variant_of": "apple",
+      "fao_row": "Apples, Cherries, Pears – active ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "apple_cover_no_frost",
+      "group": "fruit_trees",
+      "label": "Apple (active ground cover, no frost)",
+      "kc_ini": 0.8,
+      "kc_mid": 1.2,
+      "kc_end": 0.85,
+      "variant_of": "apple",
+      "fao_row": "Apples, Cherries, Pears – active ground cover, no frosts",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "apple_no_cover_no_frost",
+      "group": "fruit_trees",
+      "label": "Apple (no ground cover, no frost)",
+      "kc_ini": 0.6,
+      "kc_mid": 0.95,
+      "kc_end": 0.75,
+      "variant_of": "apple",
+      "fao_row": "Apples, Cherries, Pears – no ground cover, no frosts",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "apricot",
+      "group": "fruit_trees",
+      "label": "Apricot",
+      "kc_ini": 0.45,
+      "kc_mid": 0.9,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": "Apricots, Peaches, Stone Fruit – no ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "avocado",
+      "group": "fruit_trees",
+      "label": "Avocado",
+      "kc_ini": 0.6,
+      "kc_mid": 0.85,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": "Avocado, no ground cover",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 95,
+        "table11_row": "Citrus",
+        "plant_date": "Jan",
+        "region": "Mediterranean",
+        "selection_rule": "reference proposal (UNVERIFIED): evergreen subtropical tree, no concerted leaf drop",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 90,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "High Latitudes",
+          "selection_rule": "group default (fruit_trees): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "cherry",
+      "group": "fruit_trees",
+      "label": "Cherry",
+      "kc_ini": 0.45,
+      "kc_mid": 0.95,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Apples, Cherries, Pears – no ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "citrus",
+      "group": "fruit_trees",
+      "label": "Citrus (70 % canopy, no ground cover)",
+      "kc_ini": 0.7,
+      "kc_mid": 0.65,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Citrus, no ground cover – 70% canopy",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 95,
+        "table11_row": "Citrus",
+        "plant_date": "Jan",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "citrus_20_cover",
+      "group": "fruit_trees",
+      "label": "Citrus (20 % canopy, active ground cover)",
+      "kc_ini": 0.85,
+      "kc_mid": 0.85,
+      "kc_end": 0.85,
+      "variant_of": "citrus",
+      "fao_row": "Citrus, with active ground cover or weeds – 20% canopy",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 95,
+        "table11_row": "Citrus",
+        "plant_date": "Jan",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "citrus_20_no_cover",
+      "group": "fruit_trees",
+      "label": "Citrus (20 % canopy, no ground cover)",
+      "kc_ini": 0.5,
+      "kc_mid": 0.45,
+      "kc_end": 0.55,
+      "variant_of": "citrus",
+      "fao_row": "Citrus, no ground cover – 20% canopy",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 95,
+        "table11_row": "Citrus",
+        "plant_date": "Jan",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "citrus_50_cover",
+      "group": "fruit_trees",
+      "label": "Citrus (50 % canopy, active ground cover)",
+      "kc_ini": 0.8,
+      "kc_mid": 0.8,
+      "kc_end": 0.8,
+      "variant_of": "citrus",
+      "fao_row": "Citrus, with active ground cover or weeds – 50% canopy",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 95,
+        "table11_row": "Citrus",
+        "plant_date": "Jan",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "citrus_50_no_cover",
+      "group": "fruit_trees",
+      "label": "Citrus (50 % canopy, no ground cover)",
+      "kc_ini": 0.65,
+      "kc_mid": 0.6,
+      "kc_end": 0.65,
+      "variant_of": "citrus",
+      "fao_row": "Citrus, no ground cover – 50% canopy",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 95,
+        "table11_row": "Citrus",
+        "plant_date": "Jan",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "citrus_70_cover",
+      "group": "fruit_trees",
+      "label": "Citrus (70 % canopy, active ground cover)",
+      "kc_ini": 0.75,
+      "kc_mid": 0.7,
+      "kc_end": 0.75,
+      "variant_of": "citrus",
+      "fao_row": "Citrus, with active ground cover or weeds – 70% canopy",
+      "stage_lengths_days": {
+        "initial": 60,
+        "development": 90,
+        "mid_season": 120,
+        "late_season": 95,
+        "table11_row": "Citrus",
+        "plant_date": "Jan",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "conifer",
+      "group": "fruit_trees",
+      "label": "Conifer trees",
+      "kc_ini": 1,
+      "kc_mid": 1,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Conifer Trees",
+      "stage_lengths_days": {
+        "initial": null,
+        "development": null,
+        "mid_season": null,
+        "late_season": null,
+        "table11_row": "",
+        "plant_date": "",
+        "region": "",
+        "selection_rule": "reference proposal (UNVERIFIED): evergreen with Kc 1.00 in every stage",
+        "verified": false
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 90,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "High Latitudes",
+          "selection_rule": "group default (fruit_trees): no Table 11 row for this crop",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "fig",
+      "group": "fruit_trees",
+      "label": "Fig",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 0.85,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "group default (fruit_trees): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "hazelnut",
+      "group": "fruit_trees",
+      "label": "Hazelnut",
+      "kc_ini": 0.45,
+      "kc_mid": 1.05,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "group default (fruit_trees): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "kiwi",
+      "group": "fruit_trees",
+      "label": "Kiwi",
+      "kc_ini": 0.4,
+      "kc_mid": 1.05,
+      "kc_end": 1.05,
+      "variant_of": null,
+      "fao_row": "Kiwi",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "group default (fruit_trees): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "olive",
+      "group": "fruit_trees",
+      "label": "Olive (40 to 60 % ground cover)",
+      "kc_ini": 0.65,
+      "kc_mid": 0.7,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Olives (40 to 60% ground coverage by canopy)",
+      "stage_lengths_days": {
+        "initial": 30,
+        "development": 90,
+        "mid_season": 60,
+        "late_season": 90,
+        "table11_row": "Olives",
+        "plant_date": "March",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "peach",
+      "group": "fruit_trees",
+      "label": "Peach",
+      "kc_ini": 0.45,
+      "kc_mid": 0.9,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": "Apricots, Peaches, Stone Fruit – no ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "peach_cover_frost",
+      "group": "fruit_trees",
+      "label": "Peach (active ground cover, killing frost)",
+      "kc_ini": 0.5,
+      "kc_mid": 1.15,
+      "kc_end": 0.9,
+      "variant_of": "peach",
+      "fao_row": "Apricots, Peaches, Stone Fruit – active ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "peach_cover_no_frost",
+      "group": "fruit_trees",
+      "label": "Peach (active ground cover, no frost)",
+      "kc_ini": 0.8,
+      "kc_mid": 1.15,
+      "kc_end": 0.85,
+      "variant_of": "peach",
+      "fao_row": "Apricots, Peaches, Stone Fruit – active ground cover, no frosts",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "peach_no_cover_no_frost",
+      "group": "fruit_trees",
+      "label": "Peach (no ground cover, no frost)",
+      "kc_ini": 0.55,
+      "kc_mid": 0.9,
+      "kc_end": 0.65,
+      "variant_of": "peach",
+      "fao_row": "Apricots, Peaches, Stone Fruit – no ground cover, no frosts",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "pear",
+      "group": "fruit_trees",
+      "label": "Pear",
+      "kc_ini": 0.45,
+      "kc_mid": 0.95,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Apples, Cherries, Pears – no ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "pecan",
+      "group": "fruit_trees",
+      "label": "Pecan",
+      "kc_ini": 0.5,
+      "kc_mid": 1.1,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row; Table 12 footnote 20: 'Stone fruit category applies to peaches, apricots, pears, plums and pecans'",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "pistachio",
+      "group": "fruit_trees",
+      "label": "Pistachio",
+      "kc_ini": 0.4,
+      "kc_mid": 1.1,
+      "kc_end": 0.45,
+      "variant_of": null,
+      "fao_row": "Pistachios, no ground cover",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 60,
+        "mid_season": 30,
+        "late_season": 40,
+        "table11_row": "Pistachios",
+        "plant_date": "Feb",
+        "region": "Mediterranean",
+        "selection_rule": "only row (Mediterranean)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "plum",
+      "group": "fruit_trees",
+      "label": "Plum",
+      "kc_ini": 0.45,
+      "kc_mid": 0.9,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": "Apricots, Peaches, Stone Fruit – no ground cover, killing frost",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "class row 'Deciduous Orchard' (Table 11 has no apple/pear/stone-fruit rows; Table 12 groups these as deciduous fruit trees); High Latitudes = temperate row",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 20,
+          "development": 70,
+          "mid_season": 120,
+          "late_season": 60,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Low Latitudes",
+          "selection_rule": "alternative",
+          "verified": true
+        },
+        {
+          "initial": 30,
+          "development": 50,
+          "mid_season": 130,
+          "late_season": 30,
+          "table11_row": "Deciduous Orchard",
+          "plant_date": "March",
+          "region": "Calif., USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "pomegranate",
+      "group": "fruit_trees",
+      "label": "Pomegranate",
+      "kc_ini": 0.5,
+      "kc_mid": 0.9,
+      "kc_end": 0.75,
+      "variant_of": null,
+      "fao_row": null,
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 70,
+        "mid_season": 90,
+        "late_season": 30,
+        "table11_row": "Deciduous Orchard",
+        "plant_date": "March",
+        "region": "High Latitudes",
+        "selection_rule": "group default (fruit_trees): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "walnut",
+      "group": "fruit_trees",
+      "label": "Walnut",
+      "kc_ini": 0.5,
+      "kc_mid": 1.1,
+      "kc_end": 0.65,
+      "variant_of": null,
+      "fao_row": "Walnut Orchard",
+      "stage_lengths_days": {
+        "initial": 20,
+        "development": 10,
+        "mid_season": 130,
+        "late_season": 30,
+        "table11_row": "Walnuts",
+        "plant_date": "April",
+        "region": "Utah, USA",
+        "selection_rule": "only row (Utah, USA)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "cattails_frost",
+      "group": "wetlands",
+      "label": "Cattails, bulrushes (killing frost)",
+      "kc_ini": 0.3,
+      "kc_mid": 1.2,
+      "kc_end": 0.3,
+      "variant_of": null,
+      "fao_row": "Cattails, Bulrushes, killing frost",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": 80,
+        "late_season": 20,
+        "table11_row": "Wetlands (Cattails, Bulrush)",
+        "plant_date": "May",
+        "region": "Utah, USA; killing frost",
+        "selection_rule": "row labelled 'killing frost' (matches the catalogue variant)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 180,
+          "development": 60,
+          "mid_season": 90,
+          "late_season": 35,
+          "table11_row": "Wetlands (Cattails, Bulrush)",
+          "plant_date": "November",
+          "region": "Florida, USA",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "cattails_no_frost",
+      "group": "wetlands",
+      "label": "Cattails, bulrushes (no frost)",
+      "kc_ini": 0.6,
+      "kc_mid": 1.2,
+      "kc_end": 0.6,
+      "variant_of": null,
+      "fao_row": "Cattails, Bulrushes, no frost",
+      "stage_lengths_days": {
+        "initial": 180,
+        "development": 60,
+        "mid_season": 90,
+        "late_season": 35,
+        "table11_row": "Wetlands (Cattails, Bulrush)",
+        "plant_date": "November",
+        "region": "Florida, USA",
+        "selection_rule": "frost-free row (Florida, USA; matches the catalogue variant)",
+        "verified": true
+      },
+      "stage_length_alternatives": [
+        {
+          "initial": 10,
+          "development": 30,
+          "mid_season": 80,
+          "late_season": 20,
+          "table11_row": "Wetlands (Cattails, Bulrush)",
+          "plant_date": "May",
+          "region": "Utah, USA; killing frost",
+          "selection_rule": "alternative",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "id": "reed_swamp_moist_soil",
+      "group": "wetlands",
+      "label": "Reed swamp (moist soil)",
+      "kc_ini": 0.9,
+      "kc_mid": 1.2,
+      "kc_end": 0.7,
+      "variant_of": null,
+      "fao_row": "Reed Swamp, moist soil",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": 80,
+        "late_season": 20,
+        "table11_row": "Wetlands (Cattails, Bulrush)",
+        "plant_date": "May",
+        "region": "Utah, USA; killing frost",
+        "selection_rule": "group default (wetlands): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "reed_swamp_standing_water",
+      "group": "wetlands",
+      "label": "Reed swamp (standing water)",
+      "kc_ini": 1,
+      "kc_mid": 1.2,
+      "kc_end": 1,
+      "variant_of": null,
+      "fao_row": "Reed Swamp, standing water",
+      "stage_lengths_days": {
+        "initial": 10,
+        "development": 30,
+        "mid_season": 80,
+        "late_season": 20,
+        "table11_row": "Wetlands (Cattails, Bulrush)",
+        "plant_date": "May",
+        "region": "Utah, USA; killing frost",
+        "selection_rule": "group default (wetlands): no Table 11 row for this crop",
+        "verified": false
+      },
+      "stage_length_alternatives": []
+    },
+    {
+      "id": "short_vegetation_wetland",
+      "group": "wetlands",
+      "label": "Short vegetation (no frost)",
+      "kc_ini": 1.05,
+      "kc_mid": 1.1,
+      "kc_end": 1.1,
+      "variant_of": null,
+      "fao_row": "Short Veg., no frost",
+      "stage_lengths_days": {
+        "initial": 180,
+        "development": 60,
+        "mid_season": 90,
+        "late_season": 35,
+        "table11_row": "Wetlands (short veg.)",
+        "plant_date": "November",
+        "region": "frost-free climate",
+        "selection_rule": "only row (frost-free climate)",
+        "verified": true
+      },
+      "stage_length_alternatives": []
+    }
+  ]
+}

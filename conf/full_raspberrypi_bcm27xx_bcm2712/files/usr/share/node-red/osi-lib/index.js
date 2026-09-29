@@ -39,6 +39,8 @@ const NAME_TO_PATH = {
   'rejection-recovery': 'osi-rejection-recovery',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
+  'weather-provider': 'osi-weather-provider',
+  'crop-kc': 'osi-crop-kc',
   'device-writer': 'osi-device-writer',
   // Zone and device rename: the name rule, the two writers and the receiver
   // for UPSERT_DEVICE_NAME / UPSERT_ZONE_NAME live in one module.
@@ -49,6 +51,8 @@ const NAME_TO_PATH = {
   'sdi12-recipe': 'osi-sdi12-recipe',
   'sdi12-commissioning': 'osi-sdi12-commissioning',
   'sdi12-reassemble': 'osi-sdi12-reassemble',
+  'station-hours': 'osi-station-hours',
+  'agronomy-daily': 'osi-agronomy-daily',
   'osi-valve-control': 'osi-valve-control',
   'osi-system-settings': 'osi-system-settings',
   'watermark-helper': 'osi-watermark-helper',

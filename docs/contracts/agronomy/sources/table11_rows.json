@@ -1,0 +1,2340 @@
+[
+ {
+  "idx": 0,
+  "group": "a. Small Vegetables",
+  "crop": "Broccoli",
+  "printed": {
+   "init": "35",
+   "dev": "45",
+   "mid": "40",
+   "late": "15",
+   "total": "135",
+   "plant_date": "Sept",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 1,
+  "group": "a. Small Vegetables",
+  "crop": "Cabbage",
+  "printed": {
+   "init": "40",
+   "dev": "60",
+   "mid": "50",
+   "late": "15",
+   "total": "165",
+   "plant_date": "Sept",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 2,
+  "group": "a. Small Vegetables",
+  "crop": "Carrots",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "50/30",
+   "late": "20",
+   "total": "100",
+   "plant_date": "Oct/Jan",
+   "region": "Arid climate"
+  }
+ },
+ {
+  "idx": 3,
+  "group": "a. Small Vegetables",
+  "crop": "Carrots",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "60",
+   "late": "20",
+   "total": "150",
+   "plant_date": "Feb/Mar",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 4,
+  "group": "a. Small Vegetables",
+  "crop": "Carrots",
+  "printed": {
+   "init": "30",
+   "dev": "50",
+   "mid": "90",
+   "late": "30",
+   "total": "200",
+   "plant_date": "Oct",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 5,
+  "group": "a. Small Vegetables",
+  "crop": "Cauliflower",
+  "printed": {
+   "init": "35",
+   "dev": "50",
+   "mid": "40",
+   "late": "15",
+   "total": "140",
+   "plant_date": "Sept",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 6,
+  "group": "a. Small Vegetables",
+  "crop": "Celery",
+  "printed": {
+   "init": "25",
+   "dev": "40",
+   "mid": "95",
+   "late": "20",
+   "total": "180",
+   "plant_date": "Oct",
+   "region": "(Semi) Arid"
+  }
+ },
+ {
+  "idx": 7,
+  "group": "a. Small Vegetables",
+  "crop": "Celery",
+  "printed": {
+   "init": "25",
+   "dev": "40",
+   "mid": "45",
+   "late": "15",
+   "total": "125",
+   "plant_date": "April",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 8,
+  "group": "a. Small Vegetables",
+  "crop": "Celery",
+  "printed": {
+   "init": "30",
+   "dev": "55",
+   "mid": "105",
+   "late": "20",
+   "total": "210",
+   "plant_date": "Jan",
+   "region": "(Semi) Arid"
+  }
+ },
+ {
+  "idx": 9,
+  "group": "a. Small Vegetables",
+  "crop": "Crucifers 1",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "20",
+   "late": "10",
+   "total": "80",
+   "plant_date": "April",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 10,
+  "group": "a. Small Vegetables",
+  "crop": "Crucifers 1",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "25",
+   "late": "10",
+   "total": "95",
+   "plant_date": "February",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 11,
+  "group": "a. Small Vegetables",
+  "crop": "Crucifers 1",
+  "printed": {
+   "init": "30",
+   "dev": "35",
+   "mid": "90",
+   "late": "40",
+   "total": "195",
+   "plant_date": "Oct/Nov",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 12,
+  "group": "a. Small Vegetables",
+  "crop": "Lettuce",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "15",
+   "late": "10",
+   "total": "75",
+   "plant_date": "April",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 13,
+  "group": "a. Small Vegetables",
+  "crop": "Lettuce",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "25",
+   "late": "10",
+   "total": "105",
+   "plant_date": "Nov/Jan",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 14,
+  "group": "a. Small Vegetables",
+  "crop": "Lettuce",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "30",
+   "late": "10",
+   "total": "100",
+   "plant_date": "Oct/Nov",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 15,
+  "group": "a. Small Vegetables",
+  "crop": "Lettuce",
+  "printed": {
+   "init": "35",
+   "dev": "50",
+   "mid": "45",
+   "late": "10",
+   "total": "140",
+   "plant_date": "Feb",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 16,
+  "group": "a. Small Vegetables",
+  "crop": "Onion (dry)",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "70",
+   "late": "40",
+   "total": "150",
+   "plant_date": "April",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 17,
+  "group": "a. Small Vegetables",
+  "crop": "Onion (dry)",
+  "printed": {
+   "init": "20",
+   "dev": "35",
+   "mid": "110",
+   "late": "45",
+   "total": "210",
+   "plant_date": "Oct; Jan.",
+   "region": "Arid Region; Calif."
+  }
+ },
+ {
+  "idx": 18,
+  "group": "a. Small Vegetables",
+  "crop": "Onion (green)",
+  "printed": {
+   "init": "25",
+   "dev": "30",
+   "mid": "10",
+   "late": "5",
+   "total": "70",
+   "plant_date": "April/May",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 19,
+  "group": "a. Small Vegetables",
+  "crop": "Onion (green)",
+  "printed": {
+   "init": "20",
+   "dev": "45",
+   "mid": "20",
+   "late": "10",
+   "total": "95",
+   "plant_date": "October",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 20,
+  "group": "a. Small Vegetables",
+  "crop": "Onion (green)",
+  "printed": {
+   "init": "30",
+   "dev": "55",
+   "mid": "55",
+   "late": "40",
+   "total": "180",
+   "plant_date": "March",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 21,
+  "group": "a. Small Vegetables",
+  "crop": "Onion (seed)",
+  "printed": {
+   "init": "20",
+   "dev": "45",
+   "mid": "165",
+   "late": "45",
+   "total": "275",
+   "plant_date": "Sept",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 22,
+  "group": "a. Small Vegetables",
+  "crop": "Spinach",
+  "printed": {
+   "init": "20",
+   "dev": "20",
+   "mid": "15/25",
+   "late": "5",
+   "total": "60/70",
+   "plant_date": "Apr; Sep/Oct",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 23,
+  "group": "a. Small Vegetables",
+  "crop": "Spinach",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "40",
+   "late": "10",
+   "total": "100",
+   "plant_date": "November",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 24,
+  "group": "a. Small Vegetables",
+  "crop": "Radish",
+  "printed": {
+   "init": "5",
+   "dev": "10",
+   "mid": "15",
+   "late": "5",
+   "total": "35",
+   "plant_date": "Mar/Apr",
+   "region": "Medit.; Europe"
+  }
+ },
+ {
+  "idx": 25,
+  "group": "a. Small Vegetables",
+  "crop": "Radish",
+  "printed": {
+   "init": "10",
+   "dev": "10",
+   "mid": "15",
+   "late": "5",
+   "total": "40",
+   "plant_date": "Winter",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 26,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Egg plant",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "40",
+   "late": "20",
+   "total": "130\\1",
+   "plant_date": "October",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 27,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Egg plant",
+  "printed": {
+   "init": "30",
+   "dev": "45",
+   "mid": "40",
+   "late": "25",
+   "total": "40",
+   "plant_date": "May/June",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 28,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Sweet peppers (bell)",
+  "printed": {
+   "init": "25/30",
+   "dev": "35",
+   "mid": "40",
+   "late": "20",
+   "total": "125",
+   "plant_date": "April/June",
+   "region": "Europe and Medit."
+  }
+ },
+ {
+  "idx": 29,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Sweet peppers (bell)",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "110",
+   "late": "30",
+   "total": "210",
+   "plant_date": "October",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 30,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Tomato",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "40",
+   "late": "25",
+   "total": "135",
+   "plant_date": "January",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 31,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Tomato",
+  "printed": {
+   "init": "35",
+   "dev": "40",
+   "mid": "50",
+   "late": "30",
+   "total": "155",
+   "plant_date": "Apr/May",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 32,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Tomato",
+  "printed": {
+   "init": "25",
+   "dev": "40",
+   "mid": "60",
+   "late": "30",
+   "total": "155",
+   "plant_date": "Jan",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 33,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Tomato",
+  "printed": {
+   "init": "35",
+   "dev": "45",
+   "mid": "70",
+   "late": "30",
+   "total": "180",
+   "plant_date": "Oct/Nov",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 34,
+  "group": "b. Vegetables - Solanum Family (Solanaceae)",
+  "crop": "Tomato",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "45",
+   "late": "30",
+   "total": "145",
+   "plant_date": "April/May",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 35,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Cantaloupe",
+  "printed": {
+   "init": "30",
+   "dev": "45",
+   "mid": "35",
+   "late": "10",
+   "total": "120",
+   "plant_date": "Jan",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 36,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Cantaloupe",
+  "printed": {
+   "init": "10",
+   "dev": "60",
+   "mid": "25",
+   "late": "25",
+   "total": "120",
+   "plant_date": "Aug",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 37,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Cucumber",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "40",
+   "late": "15",
+   "total": "105",
+   "plant_date": "June/Aug",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 38,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Cucumber",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "50",
+   "late": "20",
+   "total": "130",
+   "plant_date": "Nov; Feb",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 39,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Pumpkin, Winter squash",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "30",
+   "late": "20",
+   "total": "100",
+   "plant_date": "Mar, Aug",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 40,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Pumpkin, Winter squash",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "35",
+   "late": "25",
+   "total": "120",
+   "plant_date": "June",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 41,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Squash, Zucchini",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "25",
+   "late": "15",
+   "total": "100",
+   "plant_date": "Apr; Dec.",
+   "region": "Medit.; Arid Reg."
+  }
+ },
+ {
+  "idx": 42,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Squash, Zucchini",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "25",
+   "late": "15",
+   "total": "90",
+   "plant_date": "May/June",
+   "region": "Medit.; Europe"
+  }
+ },
+ {
+  "idx": 43,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Sweet melons",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "40",
+   "late": "20",
+   "total": "120",
+   "plant_date": "May",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 44,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Sweet melons",
+  "printed": {
+   "init": "30",
+   "dev": "30",
+   "mid": "50",
+   "late": "30",
+   "total": "140",
+   "plant_date": "March",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 45,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Sweet melons",
+  "printed": {
+   "init": "15",
+   "dev": "40",
+   "mid": "65",
+   "late": "15",
+   "total": "135",
+   "plant_date": "Aug",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 46,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Sweet melons",
+  "printed": {
+   "init": "30",
+   "dev": "45",
+   "mid": "65",
+   "late": "20",
+   "total": "160",
+   "plant_date": "Dec/Jan",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 47,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Water melons",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "30",
+   "late": "30",
+   "total": "110",
+   "plant_date": "April",
+   "region": "Italy"
+  }
+ },
+ {
+  "idx": 48,
+  "group": "c. Vegetables - Cucumber Family (Cucurbitaceae)",
+  "crop": "Water melons",
+  "printed": {
+   "init": "10",
+   "dev": "20",
+   "mid": "20",
+   "late": "30",
+   "total": "80",
+   "plant_date": "Mat/Aug",
+   "region": "Near East (desert)"
+  }
+ },
+ {
+  "idx": 49,
+  "group": "d. Roots and Tubers",
+  "crop": "Beets, table",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "20",
+   "late": "10",
+   "total": "70",
+   "plant_date": "Apr/May",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 50,
+  "group": "d. Roots and Tubers",
+  "crop": "Beets, table",
+  "printed": {
+   "init": "25",
+   "dev": "30",
+   "mid": "25",
+   "late": "10",
+   "total": "90",
+   "plant_date": "Feb/Mar",
+   "region": "Mediterranean & Arid"
+  }
+ },
+ {
+  "idx": 51,
+  "group": "d. Roots and Tubers",
+  "crop": "Cassava: year 1",
+  "printed": {
+   "init": "20",
+   "dev": "40",
+   "mid": "90",
+   "late": "60",
+   "total": "210",
+   "plant_date": "Rainy",
+   "region": "Tropical regions"
+  }
+ },
+ {
+  "idx": 52,
+  "group": "d. Roots and Tubers",
+  "crop": "year 2",
+  "printed": {
+   "init": "150",
+   "dev": "40",
+   "mid": "110",
+   "late": "60",
+   "total": "360",
+   "plant_date": "season",
+   "region": ""
+  }
+ },
+ {
+  "idx": 53,
+  "group": "d. Roots and Tubers",
+  "crop": "Potato",
+  "printed": {
+   "init": "25",
+   "dev": "30",
+   "mid": "30/45",
+   "late": "30",
+   "total": "115/130",
+   "plant_date": "Jan/Nov",
+   "region": "(Semi) Arid Climate"
+  }
+ },
+ {
+  "idx": 54,
+  "group": "d. Roots and Tubers",
+  "crop": "Potato",
+  "printed": {
+   "init": "25",
+   "dev": "30",
+   "mid": "45",
+   "late": "30",
+   "total": "130",
+   "plant_date": "May",
+   "region": "Continental Climate"
+  }
+ },
+ {
+  "idx": 55,
+  "group": "d. Roots and Tubers",
+  "crop": "Potato",
+  "printed": {
+   "init": "30",
+   "dev": "35",
+   "mid": "50",
+   "late": "30",
+   "total": "145",
+   "plant_date": "April",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 56,
+  "group": "d. Roots and Tubers",
+  "crop": "Potato",
+  "printed": {
+   "init": "45",
+   "dev": "30",
+   "mid": "70",
+   "late": "20",
+   "total": "165",
+   "plant_date": "Apr/May",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 57,
+  "group": "d. Roots and Tubers",
+  "crop": "Potato",
+  "printed": {
+   "init": "30",
+   "dev": "35",
+   "mid": "50",
+   "late": "25",
+   "total": "140",
+   "plant_date": "Dec",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 58,
+  "group": "d. Roots and Tubers",
+  "crop": "Sweet potato",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "60",
+   "late": "40",
+   "total": "150",
+   "plant_date": "April",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 59,
+  "group": "d. Roots and Tubers",
+  "crop": "Sweet potato",
+  "printed": {
+   "init": "15",
+   "dev": "30",
+   "mid": "50",
+   "late": "30",
+   "total": "125",
+   "plant_date": "Rainy seas.",
+   "region": "Tropical regions"
+  }
+ },
+ {
+  "idx": 60,
+  "group": "d. Roots and Tubers",
+  "crop": "Sugarbeet",
+  "printed": {
+   "init": "30",
+   "dev": "45",
+   "mid": "90",
+   "late": "15",
+   "total": "180",
+   "plant_date": "March",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 61,
+  "group": "d. Roots and Tubers",
+  "crop": "Sugarbeet",
+  "printed": {
+   "init": "25",
+   "dev": "30",
+   "mid": "90",
+   "late": "10",
+   "total": "155",
+   "plant_date": "June",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 62,
+  "group": "d. Roots and Tubers",
+  "crop": "Sugarbeet",
+  "printed": {
+   "init": "25",
+   "dev": "65",
+   "mid": "100",
+   "late": "65",
+   "total": "255",
+   "plant_date": "Sept",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 63,
+  "group": "d. Roots and Tubers",
+  "crop": "Sugarbeet",
+  "printed": {
+   "init": "50",
+   "dev": "40",
+   "mid": "50",
+   "late": "40",
+   "total": "180",
+   "plant_date": "April",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 64,
+  "group": "d. Roots and Tubers",
+  "crop": "Sugarbeet",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "50",
+   "late": "50",
+   "total": "160",
+   "plant_date": "May",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 65,
+  "group": "d. Roots and Tubers",
+  "crop": "Sugarbeet",
+  "printed": {
+   "init": "45",
+   "dev": "75",
+   "mid": "80",
+   "late": "30",
+   "total": "230",
+   "plant_date": "November",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 66,
+  "group": "d. Roots and Tubers",
+  "crop": "Sugarbeet",
+  "printed": {
+   "init": "35",
+   "dev": "60",
+   "mid": "70",
+   "late": "40",
+   "total": "205",
+   "plant_date": "November",
+   "region": "Arid Regions"
+  }
+ },
+ {
+  "idx": 67,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Beans (green)",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "30",
+   "late": "10",
+   "total": "90",
+   "plant_date": "Feb/Mar",
+   "region": "Calif., Mediterranean"
+  }
+ },
+ {
+  "idx": 68,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Beans (green)",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "25",
+   "late": "10",
+   "total": "75",
+   "plant_date": "Aug/Sep",
+   "region": "Calif., Egypt, Lebanon"
+  }
+ },
+ {
+  "idx": 69,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Beans (dry)",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "40",
+   "late": "20",
+   "total": "110",
+   "plant_date": "May/June",
+   "region": "Continental Climates"
+  }
+ },
+ {
+  "idx": 70,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Beans (dry)",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "35",
+   "late": "20",
+   "total": "95",
+   "plant_date": "June",
+   "region": "Pakistan, Calif."
+  }
+ },
+ {
+  "idx": 71,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Beans (dry)",
+  "printed": {
+   "init": "25",
+   "dev": "25",
+   "mid": "30",
+   "late": "20",
+   "total": "100",
+   "plant_date": "June",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 72,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Faba bean, broad bean",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "35",
+   "late": "15",
+   "total": "90",
+   "plant_date": "May",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 73,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Faba bean, broad bean",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "35",
+   "late": "15",
+   "total": "100",
+   "plant_date": "Mar/Apr",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 74,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Faba bean, broad bean - dry",
+  "printed": {
+   "init": "90",
+   "dev": "45",
+   "mid": "40",
+   "late": "60",
+   "total": "235",
+   "plant_date": "Nov",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 75,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Faba bean, broad bean - green",
+  "printed": {
+   "init": "90",
+   "dev": "45",
+   "mid": "40",
+   "late": "0",
+   "total": "175",
+   "plant_date": "Nov",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 76,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Green gram, cowpeas",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "30",
+   "late": "20",
+   "total": "110",
+   "plant_date": "March",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 77,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Groundnut",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "45",
+   "late": "25",
+   "total": "130",
+   "plant_date": "Dry",
+   "region": "West Africa"
+  }
+ },
+ {
+  "idx": 78,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Groundnut",
+  "printed": {
+   "init": "35",
+   "dev": "35",
+   "mid": "35",
+   "late": "35",
+   "total": "140",
+   "plant_date": "season",
+   "region": "High Latitudes"
+  }
+ },
+ {
+  "idx": 79,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Groundnut",
+  "printed": {
+   "init": "35",
+   "dev": "45",
+   "mid": "35",
+   "late": "25",
+   "total": "140",
+   "plant_date": "May May/June",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 80,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Lentil",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "60",
+   "late": "40",
+   "total": "150",
+   "plant_date": "April",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 81,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Lentil",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "70",
+   "late": "40",
+   "total": "170",
+   "plant_date": "Oct/Nov",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 82,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Peas",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "35",
+   "late": "15",
+   "total": "90",
+   "plant_date": "May",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 83,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Peas",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "35",
+   "late": "15",
+   "total": "100",
+   "plant_date": "Mar/Apr",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 84,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Peas",
+  "printed": {
+   "init": "35",
+   "dev": "25",
+   "mid": "30",
+   "late": "20",
+   "total": "110",
+   "plant_date": "April",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 85,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Soybeans",
+  "printed": {
+   "init": "15",
+   "dev": "15",
+   "mid": "40",
+   "late": "15",
+   "total": "85",
+   "plant_date": "Dec",
+   "region": "Tropics"
+  }
+ },
+ {
+  "idx": 86,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Soybeans",
+  "printed": {
+   "init": "20",
+   "dev": "30/35",
+   "mid": "60",
+   "late": "25",
+   "total": "140",
+   "plant_date": "May",
+   "region": "Central USA"
+  }
+ },
+ {
+  "idx": 87,
+  "group": "e. Legumes (Leguminosae)",
+  "crop": "Soybeans",
+  "printed": {
+   "init": "20",
+   "dev": "25",
+   "mid": "75",
+   "late": "30",
+   "total": "150",
+   "plant_date": "June",
+   "region": "Japan"
+  }
+ },
+ {
+  "idx": 88,
+  "group": "f. Perennial Vegetables (with winter dormancy and initially bare or mulched soil)",
+  "crop": "Artichoke",
+  "printed": {
+   "init": "40",
+   "dev": "40",
+   "mid": "250",
+   "late": "30",
+   "total": "360",
+   "plant_date": "Apr (1 st yr)",
+   "region": "California"
+  }
+ },
+ {
+  "idx": 89,
+  "group": "f. Perennial Vegetables (with winter dormancy and initially bare or mulched soil)",
+  "crop": "Artichoke",
+  "printed": {
+   "init": "20",
+   "dev": "25",
+   "mid": "250",
+   "late": "30",
+   "total": "325",
+   "plant_date": "May (2 nd yr)",
+   "region": "(cut in May)"
+  }
+ },
+ {
+  "idx": 90,
+  "group": "f. Perennial Vegetables (with winter dormancy and initially bare or mulched soil)",
+  "crop": "Asparagus",
+  "printed": {
+   "init": "50",
+   "dev": "30",
+   "mid": "100",
+   "late": "50",
+   "total": "230",
+   "plant_date": "Feb",
+   "region": "Warm Winter"
+  }
+ },
+ {
+  "idx": 91,
+  "group": "f. Perennial Vegetables (with winter dormancy and initially bare or mulched soil)",
+  "crop": "Asparagus",
+  "printed": {
+   "init": "90",
+   "dev": "30",
+   "mid": "200",
+   "late": "45",
+   "total": "365",
+   "plant_date": "Feb",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 92,
+  "group": "g. Fibre Crops",
+  "crop": "Cotton",
+  "printed": {
+   "init": "30",
+   "dev": "50",
+   "mid": "60",
+   "late": "55",
+   "total": "195",
+   "plant_date": "Mar-May",
+   "region": "Egypt; Pakistan; Calif."
+  }
+ },
+ {
+  "idx": 93,
+  "group": "g. Fibre Crops",
+  "crop": "Cotton",
+  "printed": {
+   "init": "45",
+   "dev": "90",
+   "mid": "45",
+   "late": "45",
+   "total": "225",
+   "plant_date": "Mar",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 94,
+  "group": "g. Fibre Crops",
+  "crop": "Cotton",
+  "printed": {
+   "init": "30",
+   "dev": "50",
+   "mid": "60",
+   "late": "55",
+   "total": "195",
+   "plant_date": "Sept",
+   "region": "Yemen"
+  }
+ },
+ {
+  "idx": 95,
+  "group": "g. Fibre Crops",
+  "crop": "Cotton",
+  "printed": {
+   "init": "30",
+   "dev": "50",
+   "mid": "55",
+   "late": "45",
+   "total": "180",
+   "plant_date": "April",
+   "region": "Texas"
+  }
+ },
+ {
+  "idx": 96,
+  "group": "g. Fibre Crops",
+  "crop": "Flax",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "50",
+   "late": "40",
+   "total": "150",
+   "plant_date": "April",
+   "region": "Europe"
+  }
+ },
+ {
+  "idx": 97,
+  "group": "g. Fibre Crops",
+  "crop": "Flax",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "100",
+   "late": "50",
+   "total": "220",
+   "plant_date": "October",
+   "region": "Arizona"
+  }
+ },
+ {
+  "idx": 98,
+  "group": "h. Oil Crops",
+  "crop": "Castor beans",
+  "printed": {
+   "init": "25",
+   "dev": "40",
+   "mid": "65",
+   "late": "50",
+   "total": "180",
+   "plant_date": "March",
+   "region": "(Semi) Arid Climates"
+  }
+ },
+ {
+  "idx": 99,
+  "group": "h. Oil Crops",
+  "crop": "Castor beans",
+  "printed": {
+   "init": "20",
+   "dev": "40",
+   "mid": "50",
+   "late": "25",
+   "total": "135",
+   "plant_date": "Nov.",
+   "region": "Indonesia"
+  }
+ },
+ {
+  "idx": 100,
+  "group": "h. Oil Crops",
+  "crop": "Safflower",
+  "printed": {
+   "init": "20",
+   "dev": "35",
+   "mid": "45",
+   "late": "25",
+   "total": "125",
+   "plant_date": "April",
+   "region": "California, USA"
+  }
+ },
+ {
+  "idx": 101,
+  "group": "h. Oil Crops",
+  "crop": "Safflower",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "55",
+   "late": "30",
+   "total": "145",
+   "plant_date": "Mar",
+   "region": "High Latitudes"
+  }
+ },
+ {
+  "idx": 102,
+  "group": "h. Oil Crops",
+  "crop": "Safflower",
+  "printed": {
+   "init": "35",
+   "dev": "55",
+   "mid": "60",
+   "late": "40",
+   "total": "190",
+   "plant_date": "Oct/Nov",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 103,
+  "group": "h. Oil Crops",
+  "crop": "Sesame",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "40",
+   "late": "20",
+   "total": "100",
+   "plant_date": "June",
+   "region": "China"
+  }
+ },
+ {
+  "idx": 104,
+  "group": "h. Oil Crops",
+  "crop": "Sunflower",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "45",
+   "late": "25",
+   "total": "130",
+   "plant_date": "April/May",
+   "region": "Medit.; California"
+  }
+ },
+ {
+  "idx": 105,
+  "group": "i. Cereals",
+  "crop": "Barley/Oats/Wheat",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "50",
+   "late": "30",
+   "total": "120",
+   "plant_date": "November",
+   "region": "Central India"
+  }
+ },
+ {
+  "idx": 106,
+  "group": "i. Cereals",
+  "crop": "Barley/Oats/Wheat",
+  "printed": {
+   "init": "20",
+   "dev": "25",
+   "mid": "60",
+   "late": "30",
+   "total": "135",
+   "plant_date": "March/Apr",
+   "region": "35-45 °L"
+  }
+ },
+ {
+  "idx": 107,
+  "group": "i. Cereals",
+  "crop": "Barley/Oats/Wheat",
+  "printed": {
+   "init": "15",
+   "dev": "30",
+   "mid": "65",
+   "late": "40",
+   "total": "150",
+   "plant_date": "July",
+   "region": "East Africa"
+  }
+ },
+ {
+  "idx": 108,
+  "group": "i. Cereals",
+  "crop": "Barley/Oats/Wheat",
+  "printed": {
+   "init": "40",
+   "dev": "30",
+   "mid": "40",
+   "late": "20",
+   "total": "130",
+   "plant_date": "Apr",
+   "region": ""
+  }
+ },
+ {
+  "idx": 109,
+  "group": "i. Cereals",
+  "crop": "Barley/Oats/Wheat",
+  "printed": {
+   "init": "40",
+   "dev": "60",
+   "mid": "60",
+   "late": "40",
+   "total": "200",
+   "plant_date": "Nov",
+   "region": ""
+  }
+ },
+ {
+  "idx": 110,
+  "group": "i. Cereals",
+  "crop": "Barley/Oats/Wheat",
+  "printed": {
+   "init": "20",
+   "dev": "50",
+   "mid": "60",
+   "late": "30",
+   "total": "160",
+   "plant_date": "Dec",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 111,
+  "group": "i. Cereals",
+  "crop": "Winter Wheat",
+  "printed": {
+   "init": "20 2",
+   "dev": "60 2",
+   "mid": "70",
+   "late": "30",
+   "total": "180",
+   "plant_date": "December",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 112,
+  "group": "i. Cereals",
+  "crop": "Winter Wheat",
+  "printed": {
+   "init": "30",
+   "dev": "140",
+   "mid": "40",
+   "late": "30",
+   "total": "240",
+   "plant_date": "November",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 113,
+  "group": "i. Cereals",
+  "crop": "Winter Wheat",
+  "printed": {
+   "init": "160",
+   "dev": "75",
+   "mid": "75",
+   "late": "25",
+   "total": "335",
+   "plant_date": "October",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 114,
+  "group": "i. Cereals",
+  "crop": "Grains (small)",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "60",
+   "late": "40",
+   "total": "150",
+   "plant_date": "April",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 115,
+  "group": "i. Cereals",
+  "crop": "Grains (small)",
+  "printed": {
+   "init": "25",
+   "dev": "35",
+   "mid": "65",
+   "late": "40",
+   "total": "165",
+   "plant_date": "Oct/Nov",
+   "region": "Pakistan; Arid Reg."
+  }
+ },
+ {
+  "idx": 116,
+  "group": "i. Cereals",
+  "crop": "Maize (grain)",
+  "printed": {
+   "init": "30",
+   "dev": "50",
+   "mid": "60",
+   "late": "40",
+   "total": "180",
+   "plant_date": "April",
+   "region": "East Africa (alt.)"
+  }
+ },
+ {
+  "idx": 117,
+  "group": "i. Cereals",
+  "crop": "Maize (grain)",
+  "printed": {
+   "init": "25",
+   "dev": "40",
+   "mid": "45",
+   "late": "30",
+   "total": "140",
+   "plant_date": "Dec/Jan",
+   "region": "Arid Climate"
+  }
+ },
+ {
+  "idx": 118,
+  "group": "i. Cereals",
+  "crop": "Maize (grain)",
+  "printed": {
+   "init": "20",
+   "dev": "35",
+   "mid": "40",
+   "late": "30",
+   "total": "125",
+   "plant_date": "June",
+   "region": "Nigeria (humid)"
+  }
+ },
+ {
+  "idx": 119,
+  "group": "i. Cereals",
+  "crop": "Maize (grain)",
+  "printed": {
+   "init": "20",
+   "dev": "35",
+   "mid": "40",
+   "late": "30",
+   "total": "125",
+   "plant_date": "October",
+   "region": "India (dry, cool)"
+  }
+ },
+ {
+  "idx": 120,
+  "group": "i. Cereals",
+  "crop": "Maize (grain)",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "50",
+   "late": "30",
+   "total": "150",
+   "plant_date": "April",
+   "region": "Spain (spr, sum.); Calif."
+  }
+ },
+ {
+  "idx": 121,
+  "group": "i. Cereals",
+  "crop": "Maize (grain)",
+  "printed": {
+   "init": "30",
+   "dev": "40",
+   "mid": "50",
+   "late": "50",
+   "total": "170",
+   "plant_date": "April",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 122,
+  "group": "i. Cereals",
+  "crop": "Maize (sweet)",
+  "printed": {
+   "init": "20",
+   "dev": "20",
+   "mid": "30",
+   "late": "10",
+   "total": "80",
+   "plant_date": "March",
+   "region": "Philippines"
+  }
+ },
+ {
+  "idx": 123,
+  "group": "i. Cereals",
+  "crop": "Maize (sweet)",
+  "printed": {
+   "init": "20",
+   "dev": "25",
+   "mid": "25",
+   "late": "10",
+   "total": "80",
+   "plant_date": "May/June",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 124,
+  "group": "i. Cereals",
+  "crop": "Maize (sweet)",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "50/30",
+   "late": "10",
+   "total": "90",
+   "plant_date": "Oct/Dec",
+   "region": "Arid Climate"
+  }
+ },
+ {
+  "idx": 125,
+  "group": "i. Cereals",
+  "crop": "Maize (sweet)",
+  "printed": {
+   "init": "30",
+   "dev": "30",
+   "mid": "30",
+   "late": "103",
+   "total": "110",
+   "plant_date": "April",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 126,
+  "group": "i. Cereals",
+  "crop": "Maize (sweet)",
+  "printed": {
+   "init": "20",
+   "dev": "40",
+   "mid": "70",
+   "late": "10",
+   "total": "140",
+   "plant_date": "Jan",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 127,
+  "group": "i. Cereals",
+  "crop": "Millet",
+  "printed": {
+   "init": "15",
+   "dev": "25",
+   "mid": "40",
+   "late": "25",
+   "total": "105",
+   "plant_date": "June",
+   "region": "Pakistan"
+  }
+ },
+ {
+  "idx": 128,
+  "group": "i. Cereals",
+  "crop": "Millet",
+  "printed": {
+   "init": "20",
+   "dev": "30",
+   "mid": "55",
+   "late": "35",
+   "total": "140",
+   "plant_date": "April",
+   "region": "Central USA"
+  }
+ },
+ {
+  "idx": 129,
+  "group": "i. Cereals",
+  "crop": "Sorghum",
+  "printed": {
+   "init": "20",
+   "dev": "35",
+   "mid": "40",
+   "late": "30",
+   "total": "130",
+   "plant_date": "May/June",
+   "region": "USA, Pakis., Med."
+  }
+ },
+ {
+  "idx": 130,
+  "group": "i. Cereals",
+  "crop": "Sorghum",
+  "printed": {
+   "init": "20",
+   "dev": "35",
+   "mid": "45",
+   "late": "30",
+   "total": "140",
+   "plant_date": "Mar/April",
+   "region": "Arid Region"
+  }
+ },
+ {
+  "idx": 131,
+  "group": "i. Cereals",
+  "crop": "Rice",
+  "printed": {
+   "init": "30",
+   "dev": "30",
+   "mid": "60",
+   "late": "30",
+   "total": "150",
+   "plant_date": "Dec; May",
+   "region": "Tropics; Mediterranean"
+  }
+ },
+ {
+  "idx": 132,
+  "group": "i. Cereals",
+  "crop": "Rice",
+  "printed": {
+   "init": "30",
+   "dev": "30.",
+   "mid": "80",
+   "late": "40",
+   "total": "180",
+   "plant_date": "May",
+   "region": "Tropics"
+  }
+ },
+ {
+  "idx": 133,
+  "group": "j. Forages",
+  "crop": "Alfalfa, total season 4",
+  "printed": {
+   "init": "10",
+   "dev": "30",
+   "mid": "var.",
+   "late": "var.",
+   "total": "var.",
+   "plant_date": "",
+   "region": "last -4°C in spring until first -4°C in fall"
+  }
+ },
+ {
+  "idx": 134,
+  "group": "j. Forages",
+  "crop": "Alfalfa 4 1 st cutting cycle",
+  "printed": {
+   "init": "10",
+   "dev": "20",
+   "mid": "20",
+   "late": "10",
+   "total": "60",
+   "plant_date": "Jan Apr (last - 4°C)",
+   "region": "Calif., USA."
+  }
+ },
+ {
+  "idx": 135,
+  "group": "j. Forages",
+  "crop": "Alfalfa 4 1 st cutting cycle",
+  "printed": {
+   "init": "10",
+   "dev": "30",
+   "mid": "25",
+   "late": "10",
+   "total": "75",
+   "plant_date": "",
+   "region": "Idaho, USA."
+  }
+ },
+ {
+  "idx": 136,
+  "group": "j. Forages",
+  "crop": "Alfalfa 4 , other cutting cycles",
+  "printed": {
+   "init": "5",
+   "dev": "10",
+   "mid": "10",
+   "late": "5",
+   "total": "30",
+   "plant_date": "Mar",
+   "region": "Calif., USA."
+  }
+ },
+ {
+  "idx": 137,
+  "group": "j. Forages",
+  "crop": "Alfalfa 4 , other cutting cycles",
+  "printed": {
+   "init": "5",
+   "dev": "20",
+   "mid": "10",
+   "late": "10",
+   "total": "45",
+   "plant_date": "Jun",
+   "region": "Idaho, USA."
+  }
+ },
+ {
+  "idx": 138,
+  "group": "j. Forages",
+  "crop": "Bermuda for seed",
+  "printed": {
+   "init": "10",
+   "dev": "25",
+   "mid": "35",
+   "late": "35",
+   "total": "105",
+   "plant_date": "March",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 139,
+  "group": "j. Forages",
+  "crop": "Bermuda for hay (several cuttings)",
+  "printed": {
+   "init": "10",
+   "dev": "15",
+   "mid": "75",
+   "late": "35",
+   "total": "135",
+   "plant_date": "---",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 140,
+  "group": "j. Forages",
+  "crop": "Grass Pasture 4",
+  "printed": {
+   "init": "10",
+   "dev": "20",
+   "mid": "--",
+   "late": "--",
+   "total": "--",
+   "plant_date": "",
+   "region": "7 days before last -4°C in spring until 7 days after first -4°C in fall"
+  }
+ },
+ {
+  "idx": 141,
+  "group": "j. Forages",
+  "crop": "Sudan, 1 st cutting cycle",
+  "printed": {
+   "init": "25",
+   "dev": "25",
+   "mid": "15",
+   "late": "10",
+   "total": "75",
+   "plant_date": "Apr",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 142,
+  "group": "j. Forages",
+  "crop": "Sudan, other cutting cycles",
+  "printed": {
+   "init": "3",
+   "dev": "15",
+   "mid": "12",
+   "late": "7",
+   "total": "37",
+   "plant_date": "June",
+   "region": "Calif. Desert, USA"
+  }
+ },
+ {
+  "idx": 143,
+  "group": "k. Sugar Cane",
+  "crop": "Sugarcane, virgin",
+  "printed": {
+   "init": "35",
+   "dev": "60",
+   "mid": "190",
+   "late": "120",
+   "total": "405",
+   "plant_date": "",
+   "region": "Low Latitudes"
+  }
+ },
+ {
+  "idx": 144,
+  "group": "k. Sugar Cane",
+  "crop": "Sugarcane, virgin",
+  "printed": {
+   "init": "50",
+   "dev": "70",
+   "mid": "220",
+   "late": "140",
+   "total": "480",
+   "plant_date": "",
+   "region": "Tropics"
+  }
+ },
+ {
+  "idx": 145,
+  "group": "k. Sugar Cane",
+  "crop": "Sugarcane, virgin",
+  "printed": {
+   "init": "75",
+   "dev": "105",
+   "mid": "330",
+   "late": "210",
+   "total": "720",
+   "plant_date": "",
+   "region": "Hawaii, USA"
+  }
+ },
+ {
+  "idx": 146,
+  "group": "k. Sugar Cane",
+  "crop": "Sugarcane, ratoon",
+  "printed": {
+   "init": "25",
+   "dev": "70",
+   "mid": "135",
+   "late": "50",
+   "total": "280",
+   "plant_date": "",
+   "region": "Low Latitudes"
+  }
+ },
+ {
+  "idx": 147,
+  "group": "k. Sugar Cane",
+  "crop": "Sugarcane, ratoon",
+  "printed": {
+   "init": "30",
+   "dev": "50",
+   "mid": "180",
+   "late": "60",
+   "total": "320",
+   "plant_date": "",
+   "region": "Tropics"
+  }
+ },
+ {
+  "idx": 148,
+  "group": "k. Sugar Cane",
+  "crop": "Sugarcane, ratoon",
+  "printed": {
+   "init": "35",
+   "dev": "105",
+   "mid": "210",
+   "late": "70",
+   "total": "420",
+   "plant_date": "",
+   "region": "Hawaii, USA"
+  }
+ },
+ {
+  "idx": 149,
+  "group": "l. Tropical Fruits and Trees",
+  "crop": "Banana, 1 st yr",
+  "printed": {
+   "init": "120",
+   "dev": "90",
+   "mid": "120",
+   "late": "60",
+   "total": "390",
+   "plant_date": "Mar",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 150,
+  "group": "l. Tropical Fruits and Trees",
+  "crop": "Banana, 2 nd yr",
+  "printed": {
+   "init": "120",
+   "dev": "60",
+   "mid": "180",
+   "late": "5",
+   "total": "365",
+   "plant_date": "Feb",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 151,
+  "group": "l. Tropical Fruits and Trees",
+  "crop": "Pineapple",
+  "printed": {
+   "init": "60",
+   "dev": "120",
+   "mid": "600",
+   "late": "10",
+   "total": "790",
+   "plant_date": "",
+   "region": "Hawaii, USA"
+  }
+ },
+ {
+  "idx": 152,
+  "group": "m. Grapes and Berries",
+  "crop": "Grapes",
+  "printed": {
+   "init": "20",
+   "dev": "40",
+   "mid": "120",
+   "late": "60",
+   "total": "240",
+   "plant_date": "April",
+   "region": "Low Latitudes"
+  }
+ },
+ {
+  "idx": 153,
+  "group": "m. Grapes and Berries",
+  "crop": "Grapes",
+  "printed": {
+   "init": "20",
+   "dev": "50",
+   "mid": "75",
+   "late": "60",
+   "total": "205",
+   "plant_date": "Mar",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 154,
+  "group": "m. Grapes and Berries",
+  "crop": "Grapes",
+  "printed": {
+   "init": "20",
+   "dev": "50",
+   "mid": "90",
+   "late": "20",
+   "total": "180",
+   "plant_date": "May",
+   "region": "High Latitudes"
+  }
+ },
+ {
+  "idx": 155,
+  "group": "m. Grapes and Berries",
+  "crop": "Grapes",
+  "printed": {
+   "init": "30",
+   "dev": "60",
+   "mid": "40",
+   "late": "80",
+   "total": "210",
+   "plant_date": "April",
+   "region": "Mid Latitudes (wine)"
+  }
+ },
+ {
+  "idx": 156,
+  "group": "m. Grapes and Berries",
+  "crop": "Hops",
+  "printed": {
+   "init": "25",
+   "dev": "40",
+   "mid": "80",
+   "late": "10",
+   "total": "155",
+   "plant_date": "April",
+   "region": "Idaho, USA"
+  }
+ },
+ {
+  "idx": 157,
+  "group": "n. Fruit Trees",
+  "crop": "Citrus",
+  "printed": {
+   "init": "60",
+   "dev": "90",
+   "mid": "120",
+   "late": "95",
+   "total": "365",
+   "plant_date": "Jan",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 158,
+  "group": "n. Fruit Trees",
+  "crop": "Deciduous Orchard",
+  "printed": {
+   "init": "20",
+   "dev": "70",
+   "mid": "90",
+   "late": "30",
+   "total": "210",
+   "plant_date": "March",
+   "region": "High Latitudes"
+  }
+ },
+ {
+  "idx": 159,
+  "group": "n. Fruit Trees",
+  "crop": "Deciduous Orchard",
+  "printed": {
+   "init": "20",
+   "dev": "70",
+   "mid": "120",
+   "late": "60",
+   "total": "270",
+   "plant_date": "March",
+   "region": "Low Latitudes"
+  }
+ },
+ {
+  "idx": 160,
+  "group": "n. Fruit Trees",
+  "crop": "Deciduous Orchard",
+  "printed": {
+   "init": "30",
+   "dev": "50",
+   "mid": "130",
+   "late": "30",
+   "total": "240",
+   "plant_date": "March",
+   "region": "Calif., USA"
+  }
+ },
+ {
+  "idx": 161,
+  "group": "n. Fruit Trees",
+  "crop": "Olives",
+  "printed": {
+   "init": "30",
+   "dev": "90",
+   "mid": "60",
+   "late": "90",
+   "total": "2705",
+   "plant_date": "March",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 162,
+  "group": "n. Fruit Trees",
+  "crop": "Pistachios",
+  "printed": {
+   "init": "20",
+   "dev": "60",
+   "mid": "30",
+   "late": "40",
+   "total": "150",
+   "plant_date": "Feb",
+   "region": "Mediterranean"
+  }
+ },
+ {
+  "idx": 163,
+  "group": "n. Fruit Trees",
+  "crop": "Walnuts",
+  "printed": {
+   "init": "20",
+   "dev": "10",
+   "mid": "130",
+   "late": "30",
+   "total": "190",
+   "plant_date": "April",
+   "region": "Utah, USA"
+  }
+ },
+ {
+  "idx": 164,
+  "group": "o. Wetlands - Temperate Climate",
+  "crop": "Wetlands (Cattails, Bulrush)",
+  "printed": {
+   "init": "10",
+   "dev": "30",
+   "mid": "80",
+   "late": "20",
+   "total": "140",
+   "plant_date": "May",
+   "region": "Utah, USA; killing frost"
+  }
+ },
+ {
+  "idx": 165,
+  "group": "o. Wetlands - Temperate Climate",
+  "crop": "Wetlands (Cattails, Bulrush)",
+  "printed": {
+   "init": "180",
+   "dev": "60",
+   "mid": "90",
+   "late": "35",
+   "total": "365",
+   "plant_date": "November",
+   "region": "Florida, USA"
+  }
+ },
+ {
+  "idx": 166,
+  "group": "o. Wetlands - Temperate Climate",
+  "crop": "Wetlands (short veg.)",
+  "printed": {
+   "init": "180",
+   "dev": "60",
+   "mid": "90",
+   "late": "35",
+   "total": "365",
+   "plant_date": "November",
+   "region": "frost-free climate"
+  }
+ }
+]

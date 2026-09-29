@@ -1118,6 +1118,19 @@ END;
   assert.equal(result.ok, true, result.message);
 });
 
+// 0065's zone update trigger picks its payload with a CASE (weather_source only when it is
+// not 'auto' or changed): every branch must carry a top-level contract_version.
+test('payloadHasTopLevelContractVersion reads a CASE payload branch by branch, json_patch like json_insert', () => {
+  const { payloadHasTopLevelContractVersion } = require('./verify-sync-op-parity');
+  const both = "CASE WHEN COALESCE(NEW.weather_source,'auto') <> 'auto' OR OLD.weather_source IS NOT NEW.weather_source "
+    + "THEN json_patch(json_object('contract_version', 1, 'zone_uuid', NEW.zone_uuid), json_object('weather_source', COALESCE(NEW.weather_source,'auto'))) "
+    + "ELSE json_object('contract_version', 1, 'zone_uuid', NEW.zone_uuid) END";
+  assert.equal(payloadHasTopLevelContractVersion(both), true);
+  assert.equal(payloadHasTopLevelContractVersion(both.replace("json_patch(json_object('contract_version', 1, ", 'json_patch(json_object(')), false, 'the json_patch branch lacks it');
+  assert.equal(payloadHasTopLevelContractVersion(both.replace("ELSE json_object('contract_version', 1, ", 'ELSE json_object(')), false, 'the ELSE branch lacks it');
+  assert.equal(payloadHasTopLevelContractVersion("CASE WHEN x THEN json_object('contract_version', 1) END"), false, 'no ELSE: the payload can be NULL');
+});
+
 test('parity check rejects seed SQL trigger ops outside the canonical enum union', () => {
   const fixtureRoot = copyFixtureTree();
   const databaseDir = path.join(fixtureRoot, 'database');

@@ -72,9 +72,21 @@ per call.
 **Sync capabilities the edge reports** (built identically by `sync-bootstrap-build`,
 `al-link-build-req` and `sync-force-build`): `linked_auth_sync_v1`,
 `force_edge_sync_v1`, `installation_recovery_v1`, `installation_locations_v1`,
-`entity_name_commands_v1`, and `field_journal_v1` when the journal is enabled.
-The cloud reads the list as `gatewayIdentity.syncCapabilities()` and sends a
-name command only to a gateway that reported `entity_name_commands_v1`.
+`entity_name_commands_v1`, `zone_config_weather_source_v1`,
+`zone_config_stage_started_on_v1`, and `field_journal_v1` when the journal is
+enabled. The cloud reads the list as `gatewayIdentity.syncCapabilities()` and sends
+a name command only to a gateway that reported `entity_name_commands_v1`. From
+sub-project 4 on it will put each zone field into `UPSERT_ZONE` and
+`UPSERT_ZONE_CONFIG` only for a gateway that reported that field's capability:
+`weatherSource` with `zone_config_weather_source_v1`, `stageStartedOn` with
+`zone_config_stage_started_on_v1`; today cloud main sends neither field in zone
+commands. The edge itself, on every zone update event and in the bootstrap and
+force-sync snapshots, sends `weather_source` only when the stored value is not
+`auto` or (update event only) changed in that update, never as an unconditional
+default -- see "Zone weather_source" in `docs/contracts/sync-schema/README.md` and
+the deploy-order note there. `stage_started_on` is an ordinary zone field: every
+zone update event and both snapshots carry it, null when unset (see "Zone
+`stage_started_on`" in the same README).
 
 ---
 
@@ -202,6 +214,8 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 
 **Journal V2 media cache:** `osi-server.cloud.journal_photo_cache_bytes`, `journal_min_free_bytes`, and `journal_media_root` are durable UCI settings. `node-red.init` refuses startup unless the byte values are positive safe integers and the media root is an exact canonical non-symlink directory. The worker creates only UUID-derived files below that root; see `osi-config-and-flags` for the full map.
 
+**Provider weather store:** Provider weather (temperature, humidity, rain, wind, radiation, ET0) is stored per farm location and completed UTC hour in `weather_locations` / `weather_provider_hours` by the `weather-provider-fn` tick (30 min); the provider is UCI `osi-server.cloud.weather_provider_default` (`open_meteo` | `meteoswiss`) unless a zone's `weather_source` overrides it. The hourly tables do not sync and each side fetches for itself; a zone's `weather_source` travels in the zone events and snapshots, and after sub-project 4 the edge owns it. An already-provisioned gateway keeps its value because uci-defaults do not re-run; switch one with `uci set osi-server.cloud.weather_provider_default=meteoswiss && uci commit osi-server && /etc/init.d/node-red restart` (a new location key, so the store backfills again under the new provider). Chained off the same tick, `osi-agronomy-daily` writes one `zone_daily_agronomy` row per zone per completed local day, with ET0 from the first complete of three tiers (the hourly FAO-56 Penman-Monteith sum over a local station's complete hours, `et0_source = 'fao56_hourly'`; the stored provider hours summed; or Hargreaves-Samani from the station's daily min/max) and a Kc from the FAO-56 catalogue in `docs/contracts/agronomy/`, on the FAO-56 curve when the zone has a stage start date. The rows replicate to OSI Server as `ZONE_AGRONOMY_UPSERTED` (migration 0067) and in the bootstrap's `zoneAgronomy` list (the last 30 days of each zone). A SenseCAP S2120 assigned to a zone (`weather_station_zones`) is aggregated into `weather_station_hours` by `osi-station-hours` and gives the station tier its inputs, including radiation from `light_lux / luxPerWm2`.
+
 **Profile parity invariant:** `bcm2712 / DEVICE_rpi-5` is the canonical source-of-truth for all OSI runtime payload files (flows, codecs, DB, bootstrap, helpers). `bcm2709 / DEVICE_rpi-2` mirrors that payload byte-for-byte; `scripts/verify-profile-parity.js` enforces this and is chained from `scripts/verify-sync-flow.js`. Any change to a file under `conf/full_raspberrypi_bcm27xx_bcm2712/files/` must also be propagated to `conf/full_raspberrypi_bcm27xx_bcm2709/files/` — the parity check will fail CI otherwise.
 
 ---
@@ -246,6 +260,26 @@ node --test scripts/test-gateway-health-persistence.js  # gateway health persist
 cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build
 ```
+
+### Base ref for a stacked branch
+
+`scripts/verify-flows-size-ratchet.js`, `scripts/verify-no-stray-ddl.js`, and
+`scripts/verify-migrations.js` each compare HEAD against a base ref that
+defaults to `origin/main`, overridable with `OSI_FLOWS_SIZE_BASE_REF`,
+`OSI_DDL_BASE_REF`, and `OSI_MIGRATIONS_BASE_REF` respectively.
+`scripts/verify-live-gateway-identity.js` carries no `git show` call of its
+own; it cross-checks the same size pins by reading
+`scripts/verify-flows-size-ratchet-allowances.json`, and names its own base
+with `OSI_IDENTITY_BASE_REF` (also defaulting to `origin/main`) for its
+messages.
+
+A branch built as a multi-commit stack can sit unmerged through several
+unrelated merges into `origin/main`. Each merge moves the default base out
+from under the stack's own committed size/DDL/migration pins without the
+stack itself changing, so a pin correct at write time later reads as false
+growth. When that happens, pin the stack against the commit it actually
+branched from and set all four env vars to that commit for every verifier run
+until the stack is rebased onto the current `origin/main`.
 
 ---
 

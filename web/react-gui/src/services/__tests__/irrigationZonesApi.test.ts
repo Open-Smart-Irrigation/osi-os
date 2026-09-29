@@ -211,3 +211,19 @@ describe('devicesAPI.rename', () => {
     expect(caught.reason).toBeUndefined();
   });
 });
+
+describe('irrigationZonesAPI weather provider fields', () => {
+  it('maps the edge snake_case fields and defaults a missing value to auto / open_meteo', async () => {
+    get.mockResolvedValue({
+      data: [
+        { ...baseZone, weather_source: 'meteoswiss', weather_source_default: 'meteoswiss' },
+        { ...baseZone, id: 8 },
+      ],
+    });
+    const [chosen, legacy] = await irrigationZonesAPI.getAll();
+    expect(chosen.weatherSource).toBe('meteoswiss');
+    expect(chosen.weatherSourceDefault).toBe('meteoswiss');
+    expect(legacy.weatherSource).toBe('auto');
+    expect(legacy.weatherSourceDefault).toBe('open_meteo');
+  });
+});

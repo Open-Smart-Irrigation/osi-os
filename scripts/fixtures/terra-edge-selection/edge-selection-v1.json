@@ -25,6 +25,7 @@
         "latitude": null,
         "longitude": null,
         "phenological_stage": "development",
+        "stage_started_on": "2026-08-03",
         "calibration_key": "default",
         "crop_type": "maize",
         "variety": null,
@@ -60,6 +61,7 @@
         "latitude": 47.25,
         "longitude": 8.55,
         "phenological_stage": "development",
+        "stage_started_on": "2026-08-03",
         "calibration_key": "default",
         "crop_type": "maize",
         "variety": null,
@@ -95,6 +97,7 @@
         "latitude": 47.25,
         "longitude": 8.55,
         "phenological_stage": "development",
+        "stage_started_on": "2026-08-03",
         "calibration_key": "default",
         "crop_type": "maize",
         "variety": null,
@@ -129,7 +132,7 @@
     "gatewayDeviceEui": "10AA10AA10AA10AD",
     "appliedAt": "2026-08-03T20:00:00.000Z",
     "resourceUuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-    "payloadHash": "75326bce6122584bfb64c83870dd4d44ccaf9205a620e4dc4f528cb4068ddb1a"
+    "payloadHash": "3c2cd4b2aa4fe6d8a1edd002a04ccfd34c883d8fc4532e52ddd9f545a03a16bf"
   },
   "lateCommandAck": {
     "commandId": 91043001,

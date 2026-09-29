@@ -101,7 +101,7 @@ describe('zone configuration modal', () => {
     expect(screen.getByRole('option', { name: '— Select soil type —' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Sandy loam' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Drip / micro-drip' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Bud break / flowering' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Initial (sowing, emergence)' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Grapevine' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });

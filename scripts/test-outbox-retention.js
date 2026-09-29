@@ -19,7 +19,7 @@ const FLOW_PATHS = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((rel) => path.join(REPO, rel));
 
-const TELEMETRY = ['DEVICE_DATA', 'CHAMELEON_READING', 'DENDRO_READING', 'DENDRO_DAILY', 'ZONE_ENVIRONMENT', 'ZONE_RECOMMENDATION'];
+const TELEMETRY = ['DEVICE_DATA', 'CHAMELEON_READING', 'DENDRO_READING', 'DENDRO_DAILY', 'ZONE_ENVIRONMENT', 'ZONE_RECOMMENDATION', 'ZONE_AGRONOMY'];
 const PROTECTED = ['DEVICE_INSTALLATION_LOCATION', 'DEVICE_RADIO_CONFIGURATION', 'IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION', 'VALVE_SCHEDULE', 'VALVE_SETTINGS', 'USER', 'USER_ZONE_ASSIGNMENT', 'USER_PLOT_ASSIGNMENT', 'IRRIGATION_CALIBRATION', 'WEATHER_STATION_ZONES'];
 
 function nodeById(flowPath, id) {
@@ -104,10 +104,10 @@ function triggerAggregateTypes(seed) {
   return types;
 }
 
-test('declared sets partition exactly the trigger set aggregate_types (33 triggers)', () => {
+test('declared sets partition exactly the trigger set aggregate_types (35 triggers)', () => {
   const seed = fs.readFileSync(SEED, 'utf8');
   const blocks = seed.split(/CREATE TRIGGER/).filter((b) => b.includes('INSERT INTO sync_outbox'));
-  assert.equal(blocks.length, 33, `expected 33 outbox triggers, found ${blocks.length}`);
+  assert.equal(blocks.length, 35, `expected 35 outbox triggers, found ${blocks.length}`);
   const declared = new Set([...TELEMETRY, ...PROTECTED]);
   const types = triggerAggregateTypes(seed);
   // Every aggregate_type a trigger writes MUST be classified (this is what forces a

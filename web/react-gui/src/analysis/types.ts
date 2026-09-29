@@ -13,6 +13,8 @@ export interface AnalysisCatalogEntry {
   availability: AnalysisAvailabilityValue;
   deviceName: string | null;
   depthCm: number | null;
+  /** 'device', 'weather_provider', 'weather_station' or 'zone_daily_agronomy'. */
+  sourceKind: string;
 }
 
 export interface AnalysisCatalogResponse {
@@ -41,6 +43,8 @@ export interface AnalysisPoint {
   t: string;
   value: number | null;
   count: number;
+  /** Rows a summed weather bucket should hold (24, 168 or 7); absent on device points. */
+  expected?: number | null;
   quality: string | null;
 }
 
@@ -60,6 +64,9 @@ export interface AnalysisSeries {
   coveragePct: number | null;
   points: AnalysisPoint[];
   truncated: boolean;
+  /** 'daily' when each point stands for one zone-local day. */
+  cadence: 'hourly' | 'daily';
+  timezone: string | null;
 }
 
 export interface AnalysisDropped {
@@ -125,3 +132,10 @@ export interface AnalysisViewResponse {
   isDefault: boolean;
   updatedAt: string;
 }
+
+/**
+ * sourceKey of every zone's daily agronomy series (osi-history-helper/analysis.js,
+ * SOURCE_KINDS.zone_daily_agronomy). A weekly bucket of this kind counts days, not
+ * hours, and `cadence` cannot tell it apart (weekly spans are 'hourly' for every kind).
+ */
+export const DAILY_AGRONOMY_SOURCE_KEY = 'agronomy-src-zone';

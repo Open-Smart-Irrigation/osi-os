@@ -39,7 +39,9 @@
       "fifteenMinute": "15 minutos",
       "hourly": "Por hora",
       "daily": "Diaria",
-      "weekly": "Semanal"
+      "weekly": "Semanal",
+      "helpLabel": "Acerca de la agregación",
+      "help": "Sin agregación, cada punto está en el momento de la medición; con agregación de 15 minutos, por hora, diaria o semanal, está al inicio de su periodo, y para las fuentes meteorológicas un día es el día local de la zona. La lluvia, la ET0 y la ETc de un proveedor meteorológico, de los valores horarios de una estación o de «daily agronomy» son totales del periodo; los demás valores son medias. La temperatura, la humedad y el viento horarios de Open-Meteo son valores a la hora indicada. Las fuentes meteorológicas tienen como máximo una resolución horaria, y «daily agronomy» diaria."
     },
     "preset": {
       "metricLabel": "Métrica entre zonas"
@@ -102,6 +104,10 @@
       "droppedPairs": "Descartados",
       "insufficient": "insuficiente (n={{n}})",
       "exploratory": "Solo exploratorio — r de Pearson sobre intervalos alineados; no es una prueba de significancia."
+    },
+    "tooltip": {
+      "partialHours": " ({{count}} de {{expected}} h)",
+      "partialDays": " ({{count}} de {{expected}} d)"
     }
   },
   "restart": {

@@ -2,6 +2,9 @@
 
 const crypto = require('crypto');
 const { createAnalysis } = require('./analysis');
+// The sibling module resolves the same way on the gateway (/srv/node-red/<name>)
+// as in the repo; osi-weather-provider requires nothing back, so there is no cycle.
+const { zoneLocations } = require('../osi-weather-provider');
 
 const DEFAULT_SOURCE_KEYS = {
   soil: 'root-zone',
@@ -203,6 +206,9 @@ const VALID_EXPORT_CHANNEL_KEYS = new Set([
   'flow_pulses_delta',
   'wind_direction_deg',
   'pipe_pressure_kpa',
+  'global_radiation_wm2',
+  'et0_mm',
+  'etc_mm',
 ]);
 
 const LEGACY_CHANNEL_ALIASES = {
@@ -744,6 +750,7 @@ function statsForValues(values) {
     median: roundTo(median(onlyValues)),
     latest: roundTo(numeric[numeric.length - 1].value),
     sampleCount: numeric.length,
+    sum: roundTo(sum),
   };
 }
 
@@ -1007,9 +1014,21 @@ function coverageForBucket(bucketRows, channels, sourceCadences, bucketSeconds) 
   };
 }
 
-function aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone) {
+// `localDaysPerBucket` steps buckets by zone-local calendar dates instead of
+// a fixed bucketSeconds span: 1 for a daily bucket (existing behaviour, any
+// timezone) and 7 for a weekly bucket of a kind whose native step is a local
+// day (zone_daily_agronomy). Stepping by local dates keeps a week at exactly
+// seven dates across a clock change (final review I3/T3 I1): a fixed
+// 7*86400s span pulls an eighth date into the window on the short spring day.
+// Every other caller (hourly/15m/weekly of an hourly-native kind, and daily
+// with no override) keeps the two branches as they were.
+function aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone, localDaysPerBucket) {
   const buckets = [];
-  if (aggregation !== 'daily') {
+  const daysPerBucket = aggregation === 'daily'
+    ? 1
+    : (Number.isInteger(localDaysPerBucket) && localDaysPerBucket > 0 ? localDaysPerBucket : null);
+
+  if (daysPerBucket === null) {
     for (let bucketStartMs = startMs; bucketStartMs < endMs; bucketStartMs += bucketSeconds * 1000) {
       const bucketEndMs = Math.min(endMs, bucketStartMs + bucketSeconds * 1000);
       buckets.push({
@@ -1029,7 +1048,8 @@ function aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone
   let bucketStartMs = startMs;
   let dateKey = localDateKey(bucketStartMs, timezone) || new Date(bucketStartMs).toISOString().slice(0, 10);
   while (bucketStartMs < endMs) {
-    const nextDateKey = addIsoDays(dateKey, 1);
+    let nextDateKey = dateKey;
+    for (let step = 0; step < daysPerBucket; step += 1) nextDateKey = addIsoDays(nextDateKey, 1);
     const nextStartMs = Date.parse(zoneDateStartIso(nextDateKey, timezone));
     const bucketEndMs = Math.min(endMs, Number.isFinite(nextStartMs) && nextStartMs > bucketStartMs ? nextStartMs : bucketStartMs + bucketSeconds * 1000);
     buckets.push({
@@ -1046,6 +1066,34 @@ function aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone
     dateKey = nextDateKey;
   }
   return buckets;
+}
+
+// aggregationBuckets recomputes bucket geometry (Intl-heavy for a daily or
+// local-weekly span) from scratch every call; a weather request resolves one
+// series per selected channel and every channel of one group shares the same
+// range/aggregation/timezone, so the geometry is identical across all of
+// them (final review I3, queue T3 I2). `cache`, when given, is a Map scoped
+// to one resolveAnalysisSeries call: the first call for a given key computes
+// the skeleton once, every later call for the same key clones its boundary
+// fields into fresh, independently-mutable bucket objects.
+function bucketSkeletonFor(startMs, endMs, aggregation, bucketSeconds, timezone, localDaysPerBucket, cache) {
+  if (!cache) return aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone, localDaysPerBucket);
+  const key = `${startMs}|${endMs}|${aggregation}|${bucketSeconds}|${timezone || ''}|${localDaysPerBucket || ''}`;
+  let skeleton = cache.get(key);
+  if (!skeleton) {
+    skeleton = aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone, localDaysPerBucket);
+    cache.set(key, skeleton);
+  }
+  return skeleton.map((bucket) => ({
+    bucketStartMs: bucket.bucketStartMs,
+    bucketEndMs: bucket.bucketEndMs,
+    bucketStart: bucket.bucketStart,
+    bucketEnd: bucket.bucketEnd,
+    series: {},
+    sampleCount: 0,
+    eventCount: 0,
+    thresholdCrossingCount: 0,
+  }));
 }
 
 function aggregateRows(rows, options = {}) {
@@ -1096,11 +1144,21 @@ function aggregateRows(rows, options = {}) {
   if (!bucketSeconds) throw new Error(`unsupported aggregation: ${aggregation}`);
   if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateRows requires a valid start/end range for bucketed aggregation');
 
-  const buckets = aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, options.timezone);
+  const buckets = bucketSkeletonFor(startMs, endMs, aggregation, bucketSeconds, options.timezone, options.localDaysPerBucket, options.bucketSkeletonCache);
   const nowMs = toFiniteNumber(options.nowMs) ?? Date.now();
 
+  // sortedRows and buckets are both ascending and buckets are contiguous
+  // over [startMs, endMs) with no gaps or overlaps, so one forward pass
+  // assigns every row to its bucket instead of re-scanning the full row
+  // list per bucket (final review I3, queue T3 I2: buckets x rows
+  // comparisons dominated a multi-hundred-bucket weather request).
+  let rowCursor = 0;
   for (const bucket of buckets) {
-    const bucketRows = sortedRows.filter((entry) => entry.recordedAtMs >= bucket.bucketStartMs && entry.recordedAtMs < bucket.bucketEndMs);
+    const bucketRows = [];
+    while (rowCursor < sortedRows.length && sortedRows[rowCursor].recordedAtMs < bucket.bucketEndMs) {
+      bucketRows.push(sortedRows[rowCursor]);
+      rowCursor += 1;
+    }
     for (const channel of channels) {
       const stats = statsForValues(bucketRows.map((entry) => ({ value: channelValue(entry.row, channel), recordedAtMs: entry.recordedAtMs })));
       bucket.series[channel.id] = stats ? { ...stats, unit: channel.unit || null } : {
@@ -1110,6 +1168,7 @@ function aggregateRows(rows, options = {}) {
         median: null,
         latest: null,
         sampleCount: 0,
+        sum: null,
         unit: channel.unit || null,
       };
       bucket.sampleCount += bucket.series[channel.id].sampleCount;
@@ -1321,6 +1380,10 @@ function rollupRowsToResult(rows, query, channels) {
       mean: toFiniteNumber(row.mean_value),
       median: toFiniteNumber(row.median_value),
       latest: toFiniteNumber(row.latest_value),
+      // history_channel_rollups has no sum column (it predates the sum stat,
+      // final review A5): a rolled-up bucket never reports a channel total,
+      // only a live aggregateRows call over device_data can.
+      sum: null,
       dominantStatus: row.dominant_status || null,
       sampleCount: Number(row.sample_count || 0),
       eventCount: Number(row.event_count || 0),
@@ -1737,7 +1800,7 @@ const RAIN_DAY_MS = 24 * 60 * 60 * 1000;
 // Daily rainfall totals for one device, bucketed by *local* calendar day.
 // tzOffsetMin = minutes to ADD to UTC to get local wall time (JS convention:
 // -new Date().getTimezoneOffset()). Uses SUM over rain_mm_delta because the
-// generic rollup path (statsForValues) has no sum statistic and its
+// stored rollups (history_channel_rollups) keep no sum column and their
 // latest-per-bucket reduction under-reports interval deltas.
 async function legacyRainDailyHistory(db, options = {}) {
   const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
@@ -2344,32 +2407,57 @@ function buildLocalInterpretations(input = {}) {
   return items;
 }
 
-function normalizeTimezone(value) {
-  const timezone = String(value || 'UTC').trim() || 'UTC';
+// One Intl.DateTimeFormat per distinct timezone string, kept for the life of
+// the process: aggregationBuckets and zoneDateStartIso call normalizeTimezone/
+// localDateKey/startOfLocalDayMs once per bucket, and a fresh formatter per
+// call was most of the cost of a multi-hundred-bucket weather request (final
+// review I3). The cache is a pure function of the timezone string, so keeping
+// it past one call chain only saves more repeats; it never observes rows.
+const ZONE_FORMATTER_CACHE = new Map();
+function zoneFormatterEntry(value) {
+  const raw = String(value || 'UTC').trim() || 'UTC';
+  const cached = ZONE_FORMATTER_CACHE.get(raw);
+  if (cached) return cached;
+  const dateTimeOptions = {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  };
+  const dateOptions = { year: 'numeric', month: '2-digit', day: '2-digit' };
+  let entry;
   try {
-    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date(0));
-    return timezone;
+    entry = {
+      timezone: raw,
+      dateTimeFormat: new Intl.DateTimeFormat('en-US', { ...dateTimeOptions, timeZone: raw }),
+      dateFormat: new Intl.DateTimeFormat('en-US', { ...dateOptions, timeZone: raw }),
+    };
   } catch (_) {
-    return 'UTC';
+    entry = {
+      timezone: 'UTC',
+      dateTimeFormat: new Intl.DateTimeFormat('en-US', { ...dateTimeOptions, timeZone: 'UTC' }),
+      dateFormat: new Intl.DateTimeFormat('en-US', { ...dateOptions, timeZone: 'UTC' }),
+    };
   }
+  ZONE_FORMATTER_CACHE.set(raw, entry);
+  return entry;
+}
+
+function partsOf(formatter, ms) {
+  const acc = {};
+  for (const part of formatter.formatToParts(new Date(ms))) {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+  }
+  return acc;
+}
+
+function normalizeTimezone(value) {
+  return zoneFormatterEntry(value).timezone;
 }
 
 function startOfLocalDayMs(nowMs, timezone) {
   const instantMs = typeof nowMs === 'number' ? nowMs : parseTime(nowMs);
   if (instantMs === null) throw new Error('startOfLocalDayMs requires a valid instant');
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: normalizeTimezone(timezone),
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(instantMs)).reduce((acc, part) => {
-    if (part.type !== 'literal') acc[part.type] = part.value;
-    return acc;
-  }, {});
+  const { dateTimeFormat } = zoneFormatterEntry(timezone);
+  const parts = partsOf(dateTimeFormat, instantMs);
   const targetWallClockMs = Date.UTC(
     Number(parts.year),
     Number(parts.month) - 1,
@@ -2380,19 +2468,7 @@ function startOfLocalDayMs(nowMs, timezone) {
   );
   let candidateMs = targetWallClockMs;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const candidateParts = new Intl.DateTimeFormat('en-US', {
-      timeZone: normalizeTimezone(timezone),
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(new Date(candidateMs)).reduce((acc, part) => {
-      if (part.type !== 'literal') acc[part.type] = part.value;
-      return acc;
-    }, {});
+    const candidateParts = partsOf(dateTimeFormat, candidateMs);
     const candidateWallClockMs = Date.UTC(
       Number(candidateParts.year),
       Number(candidateParts.month) - 1,
@@ -2411,16 +2487,8 @@ function startOfLocalDayMs(nowMs, timezone) {
 function localDateKey(value, timezone) {
   const ms = typeof value === 'number' ? value : parseTime(value);
   if (ms === null) return null;
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: normalizeTimezone(timezone),
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(ms));
-  const values = {};
-  for (const part of parts) {
-    if (part.type !== 'literal') values[part.type] = part.value;
-  }
+  const { dateFormat } = zoneFormatterEntry(timezone);
+  const values = partsOf(dateFormat, ms);
   return values.year && values.month && values.day ? `${values.year}-${values.month}-${values.day}` : null;
 }
 
@@ -2741,11 +2809,15 @@ const analysis = createAnalysis({
   dbAll,
   deriveCardsForZone,
   displayDeviceName,
+  localDateKey,
   normalizeDeveui,
+  normalizeTimezone,
   resolveAggregation,
   soilDepthCm,
   sourceDevicesForCard,
   sourceKeyForCsv,
+  zoneDateStartIso,
+  zoneLocations,
 });
 
 module.exports = {

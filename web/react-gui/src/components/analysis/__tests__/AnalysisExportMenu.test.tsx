@@ -24,7 +24,7 @@ const series: AnalysisSeries[] = [{
   unit: 'kPa',
   coveragePct: 100,
   points: [{ t: 't0', value: 1, count: 1, quality: 'ok' }],
-  truncated: false,
+  truncated: false, cadence: 'hourly', timezone: null,
 }];
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

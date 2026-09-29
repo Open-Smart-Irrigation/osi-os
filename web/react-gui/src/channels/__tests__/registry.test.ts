@@ -60,4 +60,20 @@ describe('channel registry', () => {
     expect(() => registry.canonicalize('synthetic_channel')).not.toThrow();
     expect(registry.cardChannels('environment')).toEqual(['synthetic_channel']);
   });
+
+  it('leaves a channel with neither an edge nor a server column out of card channel lists', () => {
+    for (const key of ['global_radiation_wm2', 'et0_mm', 'etc_mm']) {
+      expect(cardChannels('environment')).not.toContain(key);
+      expect(cardChannelsForSource('environment', { deviceType: 'SENSECAP_S2120' })).not.toContain(key);
+    }
+    // vwc has no edge column but a server one, so it stays.
+    expect(cardChannels('soil')).toContain('vwc');
+    const registry = createChannelRegistry([
+      { key: 'stored', unit: 'mm', label: 'Stored', cardType: 'environment', edgeField: 'stored', serverField: 'stored' },
+      { key: 'server_only', unit: 'mm', label: 'Server only', cardType: 'environment', edgeField: null, serverField: 'server_only' },
+      { key: 'weather_only', unit: 'mm', label: 'Weather only', cardType: 'environment', edgeField: null, serverField: null },
+    ]);
+    expect(registry.cardChannels('environment')).toEqual(['stored', 'server_only']);
+    expect(registry.cardChannelsForSource('environment', { deviceType: 'SENSECAP_S2120' })).toEqual(['stored', 'server_only']);
+  });
 });

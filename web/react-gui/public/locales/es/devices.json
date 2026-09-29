@@ -246,7 +246,9 @@
         "forecast_rain_covers_demand": "La lluvia prevista cubre el déficit de hoy",
         "demand_exceeds_supply": "La demanda supera la lluvia y el riego de hoy",
         "balance_neutral": "El balance hídrico está casi equilibrado",
-        "default": "Esperando más datos"
+        "default": "Esperando más datos",
+        "rain_unknown": "Sin medición de lluvia para hoy",
+        "demand_unknown": "Sin estimación de la demanda para hoy"
       },
       "action": {
         "delay_irrigation": "Retrasar el riego",
@@ -286,7 +288,11 @@
         "noReadingYet": "Todavía sin lecturas",
         "invalidReading": "Lectura no válida",
         "lastValid": "Última válida {{value}} · {{time}}"
-      }
+      },
+      "rainFromStation": "Medida en la estación MeteoSwiss {{station}} (a {{distance}} km)",
+      "rainFromWeather": "De los datos meteorológicos (no medida)",
+      "drivenByWaterBalanceFromWeather": "Basado en el balance hídrico · lluvia según los datos meteorológicos",
+      "drivenByWaterBalanceFromStation": "Basado en el balance hídrico · lluvia medida en la estación MeteoSwiss {{station}}"
     },
     "deviceCount_one": "{{count}} dispositivo",
     "deviceCount_other": "{{count}} dispositivos",
@@ -383,7 +389,6 @@
       "waterNeededToday": "Necesidad hídrica hoy",
       "balance": "Balance",
       "setupRequired": "Introduzca la superficie de la zona y la eficiencia de riego en los ajustes de la zona para calcular el riego efectivo y el balance hídrico.",
-      "weeklyTrend": "Tendencia hídrica de 7 días",
       "trendNote": "Compare la lluvia con el riego efectivo medido y estimado de la última semana.",
       "nextRain": "Lluvia en 24 h",
       "effective": "{{value}} efectivo",
@@ -391,7 +396,59 @@
       "flowMeterReporting": "Caudalímetro activo",
       "tooltipRain": "Lluvia",
       "tooltipMeasuredEffective": "Medido efectivo",
-      "tooltipEstimatedEffective": "Estimado efectivo"
+      "tooltipEstimatedEffective": "Estimado efectivo",
+      "kcSource": {
+        "fao56_crop": "{{crop}}, {{stage}}",
+        "fao56_crop_stage_unset": "{{crop}}, etapa sin definir",
+        "heuristic_phenology": "ningún cultivo de la lista FAO-56, {{stage}}",
+        "server": "OSI Cloud",
+        "local": "este gateway",
+        "fao56_curve": "{{crop}}, {{stage}} (curva FAO-56)"
+      },
+      "stageNotSet": "etapa sin definir",
+      "lastSevenDays": "Últimos 7 días",
+      "tooltipDemand": "Demanda del cultivo",
+      "stationCredit": "Fuente: MeteoSwiss",
+      "today": "Hoy",
+      "legendDemand": "Demanda del cultivo (calculada)",
+      "legendDemandTodayForecast": "Demanda del cultivo hoy (previsión)",
+      "demandCalculated": "{{value}} mm (calculada)",
+      "demandForecast": "{{value}} mm (previsión)",
+      "demandNoData": "sin datos (registro meteorológico incompleto)",
+      "demandNoLocation": "sin datos (zona sin ubicación)",
+      "demandPending": "pendiente",
+      "tooltipTodayNote": "Lluvia y riego hasta ahora; la demanda es la previsión para todo el día",
+      "kcLine": "Kc {{kc}} ({{source}})",
+      "et0Tier": {
+        "station_fao56": "Estación {{station}} · FAO-56",
+        "hargreaves_station": "Estación {{station}} · Hargreaves",
+        "provider_open_meteo": "Modelo Open-Meteo",
+        "provider_meteoswiss": "MeteoSwiss {{station}}",
+        "forecast": "Previsión meteorológica",
+        "open_meteo_daily": "Modelo meteorológico Open-Meteo, FAO-56 diario"
+      },
+      "attribution": {
+        "open_meteo": "Datos meteorológicos de Open-Meteo.com, CC BY 4.0"
+      },
+      "attributionHelpLabel": "Acerca de los datos meteorológicos",
+      "neededTodayHelpLabel": "Acerca del agua necesaria hoy",
+      "neededTodayHelp": "Previsión para todo el día · {{source}}",
+      "lastSevenDaysHelpLabel": "Acerca de los últimos 7 días",
+      "setupRequiredHelpLabel": "Por qué falta el riego efectivo",
+      "rainSourceHelpLabel": "De dónde procede este valor de lluvia",
+      "demandNoSource": "ninguna fuente meteorológica para este día",
+      "demandMixedStation": "horas de dos estaciones de MeteoSwiss",
+      "demandUnknownStation": "estación de MeteoSwiss desconocida para estas horas",
+      "demandUnknownToday": "sin estimación para hoy",
+      "et0Line": "ET0 {{et0}} mm",
+      "kcSourceByCrop": "{{source}}, {{crop}}",
+      "stageOverrun": "Supera la duración típica de esta etapa ({{days}} días, tabla 11 de FAO-56): la etapa puede estar desactualizada; elija la etapa siguiente cuando el cultivo llegue a ella.",
+      "computedBy": {
+        "edge": "Calculado en el gateway",
+        "cloud": "ET0 del modelo meteorológico Open-Meteo (no medida en esta finca); OSI Cloud aplica el coeficiente de cultivo"
+      },
+      "modelAccuracyNote": "La ET0 de un modelo puede diferir un 10-20 % de una estación local en un solo día, sobre todo en días nublados o ventosos y en montaña; los totales semanales coinciden mejor.",
+      "meteoswissCloudNote": "Esta zona usa MeteoSwiss en el gateway; el historial propio de OSI Cloud usa Open-Meteo hasta que el historial de MeteoSwiss esté disponible en la nube."
     },
     "generatedAt": "Generado {{time}}",
     "sectionTitle": "Entorno y previsión meteorológica",
@@ -445,7 +502,9 @@
       "kc": "Coef. cultivo Kc",
       "etc": "ET cultivo",
       "noData": "No hay datos agronómicos disponibles",
-      "fromSource": "de {{source}}"
+      "fromSource": "de {{source}}",
+      "kcHelpLabel": "Acerca del coeficiente de cultivo",
+      "kcHelp": "Kc FAO-56 para {{crop}}: inicial {{ini}}, mediados de temporada {{mid}}, final {{end}}. Etapa actual: {{stage}}."
     },
     "forecast": {
       "dayToday": "Hoy",
@@ -481,7 +540,7 @@
   "zoneConfig": {
     "title": "Configurar la zona — {{zone}}",
     "crop": "Cultivo",
-    "selectCrop": "— Seleccione el cultivo de predicción —",
+    "selectCrop": "— Seleccione el cultivo —",
     "variety": "Variedad",
     "varietyPlaceholder": "Variedad (opcional)",
     "soilType": "Tipo de suelo",
@@ -540,12 +599,50 @@
       "olive": "Olivo"
     },
     "stage": {
-      "default": "Predeterminado",
-      "dormancy": "Reposo",
-      "budbreak": "Brotación / floración",
-      "fruitset": "Cuajado",
-      "veraison": "Envero / maduración",
-      "harvest": "Cosecha / poscosecha"
+      "unset": "Sin definir",
+      "initial": "Etapa inicial",
+      "development": "Desarrollo del cultivo",
+      "mid_season": "Mediados de temporada",
+      "late_season": "Final de temporada",
+      "dormancy": "Reposo"
+    },
+    "stageLabel": {
+      "woody": {
+        "initial": "Etapa inicial (brotación)",
+        "development": "Desarrollo (floración, cuajado)",
+        "mid_season": "Mediados de temporada (crecimiento del fruto, maduración)",
+        "late_season": "Final de temporada (tras la cosecha, hasta la caída de las hojas)",
+        "dormancy": "Reposo (reposo invernal)"
+      },
+      "annual": {
+        "initial": "Etapa inicial (siembra, emergencia)",
+        "development": "Desarrollo (cierre del dosel)",
+        "mid_season": "Mediados de temporada (cobertura completa, floración)",
+        "late_season": "Final de temporada (maduración, cosecha)",
+        "dormancy": "Reposo (sin cultivo)"
+      }
+    },
+    "stageHelpLabel": "Acerca de las etapas de crecimiento",
+    "stageHelp": "Las etapas de crecimiento FAO-56 fijan el coeficiente de cultivo Kc: inicial hasta cerca del 10 % de cobertura del suelo, desarrollo hasta la cobertura completa, mediados de temporada hasta el inicio de la madurez, final de temporada hasta la cosecha o la caída de las hojas. En reposo se usa Kc 0,25. El reposo está pensado para cultivos caducifolios y periodos de descanso anuales; los perennifolios como cítricos, olivo, café y banano mantienen en su lugar el Kc del final de temporada.",
+    "cropHelpLabel": "Acerca de la lista de cultivos",
+    "cropHelp": "Los coeficientes de cultivo siguen la tabla 12 de FAO-56. El asesor de predicción solo admite {{crops}}.",
+    "cropOther": "Otro cultivo",
+    "cropGroup": {
+      "small_vegetables": "Hortalizas pequeñas",
+      "vegetables_solanum": "Solanáceas",
+      "vegetables_cucumber": "Cucurbitáceas",
+      "roots_tubers": "Raíces y tubérculos",
+      "legumes": "Leguminosas",
+      "perennial_vegetables": "Hortalizas perennes",
+      "fibre": "Cultivos de fibra",
+      "oil_crops": "Oleaginosas",
+      "cereals": "Cereales",
+      "forages": "Forrajes",
+      "sugar_cane": "Caña de azúcar",
+      "tropical_fruits": "Frutas y árboles tropicales",
+      "grapes_berries": "Vid y bayas",
+      "fruit_trees": "Frutales",
+      "wetlands": "Humedales"
     },
     "gps": {
       "available": "Disponible",
@@ -560,7 +657,21 @@
       "flowRateRequired": "El caudal (L/min) es necesario para guardar la calibración del riego.",
       "flowRatePositive": "El caudal (L/min) debe ser mayor que 0.",
       "saveFailed": "No se pudo guardar"
-    }
+    },
+    "weatherProvider": "Proveedor meteorológico",
+    "weatherProviderHelpLabel": "Acerca del proveedor meteorológico",
+    "weatherProviderHelp": "Define de dónde procede el historial meteorológico horario de esta zona y, con él, su ET0 diaria, salvo que una estación meteorológica asignada tenga un día completo, que entonces tiene prioridad. MeteoSwiss cubre Suiza. Con «Solo estación meteorológica local», el gateway no descarga ningún historial meteorológico para esta zona; sin una estación asignada, no obtiene ninguna ET0. El pronóstico del tiempo no cambia.",
+    "weatherProviderOption": {
+      "auto": "Predeterminado del gateway ({{provider}})",
+      "open_meteo": "Open-Meteo",
+      "meteoswiss": "MeteoSwiss",
+      "local": "Solo estación meteorológica local"
+    },
+    "weatherProviderCloud": "{{value}} (proveedor en la nube)",
+    "stageStartedOn": "Inicio de la etapa",
+    "stageStartedOnHelpLabel": "Acerca de la fecha de inicio de la etapa",
+    "stageStartedOnHelp": "La fecha en que comenzó la etapa actual (día 1). En las etapas de desarrollo y final de temporada, el Kc sigue la curva FAO-56 a partir de esta fecha; en las demás etapas se mantiene en el valor de la etapa. La etapa nunca avanza por sí sola: tras la duración típica para este cultivo ({{days}} días), el Kc se queda en el valor final de la etapa hasta que elija la etapa siguiente. Tras la caída de las hojas o la cosecha, elija Reposo (Kc 0,25, suelo desnudo); en primavera, elija Etapa inicial con la fecha de brotación. Los cambios de cultivo, etapa o fecha de inicio se aplican a los días calculados después del cambio. Déjelo vacío para usar el valor de tabla de la etapa.",
+    "stageStartedOnHelpNoLength": "La fecha en que comenzó la etapa actual (día 1). En las etapas de desarrollo y final de temporada, el Kc sigue la curva FAO-56 a partir de esta fecha; en las demás etapas se mantiene en el valor de la etapa. La etapa nunca avanza por sí sola: tras la duración típica para este cultivo, el Kc se queda en el valor final de la etapa hasta que elija la etapa siguiente. Tras la caída de las hojas o la cosecha, elija Reposo (Kc 0,25, suelo desnudo); en primavera, elija Etapa inicial con la fecha de brotación. Los cambios de cultivo, etapa o fecha de inicio se aplican a los días calculados después del cambio. Déjelo vacío para usar el valor de tabla de la etapa."
   },
   "irrigationOutcomes": {
     "title": "Riegos recientes",

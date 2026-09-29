@@ -289,20 +289,38 @@ MDS/TWD already work this way.
 
 ## ET0 (reference evapotranspiration)
 
-**Concept, not implemented on the edge as of 2026-07-06.** ET0 exists only in
-`osi-server` (cloud), in `backend/src/main/java/org/osi/server/analytics/{WeatherMath.java,Et0Resolver.java}`,
-merged via osi-server PR #46 ("per-zone weather source (cloud Phases 1-2)").
-It is resolved per irrigation zone through a tiered `Et0Resolver`:
-1. **Native ET0** from a weather source that already supplies one
-   (Open-Meteo's own FAO-56 value) — used as-is.
-2. **FAO-56 Penman-Monteith**, computed locally (`WeatherMath.fao56Et0`) when
-   the source instead supplies humidity + wind + solar radiation.
-3. **Hargreaves-Samani** (`WeatherMath.hargreavesEt0`, needs only Tmin/Tmax +
-   latitude + day-of-year) as the final fallback.
+**The edge computes ET0, as of the daily agronomy record (2026-09-26).**
+`osi-agronomy-daily` (`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily`)
+writes one row per zone per completed local day into `zone_daily_agronomy`,
+resolving ET0 through three tiers, the first complete one winning for that
+day:
+1. **`station_fao56`** — daily FAO-56 Penman-Monteith (`et0.js`'s
+   `fao56Et0`, ported from the cloud's `WeatherMath.fao56Et0`) from a
+   SenseCAP S2120 assigned to the zone (`weather_station_zones`), whose
+   uplinks `osi-station-hours` aggregates into `weather_station_hours`
+   (radiation from `light_lux / luxPerWm2`). A day whose radiation sum is
+   below 0.15 × Ra, or that reads 0 in an hour whose extraterrestrial
+   radiation exceeds 1 MJ/m², falls to the next tier (covered or failing
+   light sensor).
+2. **`<provider>_hourly_sum`** — the sum of the zone's stored
+   `weather_provider_hours` (Open-Meteo or MeteoSwiss, fetched by
+   `osi-weather-provider`) over the local day, only when every hour is
+   present.
+3. **`hargreaves_station`** — Hargreaves-Samani (`et0.js`'s
+   `hargreavesEt0`) from the station's own daily minimum and maximum
+   temperature, needing no radiation or humidity.
 
-There is no ET0 field in the edge `device_data`/`zone_daily_environment`
-schema and no edge computation of it — this is a cloud/`osi-server`-owned
-capability. If asked "does the edge compute ET0", the answer is no.
+A day with none of the three complete gets a null `et0_mm` and a stated
+`null_reason` (`no_source`, `partial_day`, `mixed_station`,
+`unknown_station`, `pending` or `no_location`), never a scaled or guessed
+value. The crop coefficient (Kc) and the FAO-56 growth-stage vocabulary come
+from `osi-crop-kc`, reading the shared catalogue in
+`docs/contracts/agronomy/` (`crop-kc.json`, `kc-vectors.json`,
+`et0-vectors.json`; every copy checked byte-identical by
+`scripts/verify-agronomy-contract.js`). The cloud adopts the same catalogue
+and tiers in a later sub-project; until then a linked gateway's Water tab
+may still show the drift banner for a zone whose crop or stage the cloud
+does not yet resolve the same way.
 
 ## Rain semantics
 
@@ -550,8 +568,8 @@ on Gen2" for a payload that cannot carry it.
 - Assuming `TEKTELIC_CLOVER` reports VWC today — it's typed for a future
   channel but has no populated edge field (`edgeField: null` in the channel
   manifest).
-- Assuming ET0 is computed on the edge — it is cloud-only
-  (`osi-server` `Et0Resolver`/`WeatherMath`).
+- Assuming ET0 is still cloud-only — the edge now computes it itself
+  (`osi-agronomy-daily`, three tiers); see the "ET0" section above.
 - Treating a day with zero rain samples as "0.0 mm" — that conflates
   "no data" with "confirmed dry"; only ingest that actually observed zero
   should write zero.
@@ -599,7 +617,9 @@ grep -n "trigger_metric" database/seed-blank.sql
 grep -n "Dendrometer Analytics v5" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
 sed -n '1,40p' docs/architecture/dendrometer-analytics-v6.md
 
-# ET0 cloud-only implementation
+# ET0 on the edge (three tiers, FAO-56 math) and the cloud's Java reference it was ported from
+sed -n '1,80p' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/et0.js
+grep -n "stationDayInputs\|radiationImplausible\|resolveDay" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/index.js
 grep -n "et0\|Et0" ../osi-server/backend/src/main/java/org/osi/server/analytics/WeatherMath.java  # sister-repo checkout required, path relative to this repo root
 
 # Rain aggregation (S2120 cumulative-delta status machine; LoRain interval decoder)

@@ -13,10 +13,113 @@ const REPO = path.resolve(__dirname, '..');
 const SEED = path.join(REPO, 'database/seed-blank.sql');
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const CONTRACT_ROOT = path.join(REPO, 'docs/contracts/zone-env');
-const CASES = ['local-openmeteo-water', 'provider-unavailable'];
+const CASES = ['local-openmeteo-water', 'provider-unavailable', 'crop-table-kc', 'crop-curve-kc', 'shared-server', 'shared-server-stale'];
 const FIXED_NOW_ISO = '2026-07-11T10:00:00.000Z';
 const FIXED_NOW_MS = Date.parse(FIXED_NOW_ISO);
 const AUTH_SECRET = 'zone-env-vector-secret';
+
+// Per-case database rows on top of the base seed. Each case's input.json
+// carries its seed rows, and --verify replays the committed input.
+const SEEDED_AT = '2026-07-11T08:00:00.000Z';
+const AGRONOMY_SNAPSHOT_NULL = {
+  et0_mm: null, et0_source: null, et0_tier: null, et0_station_id: null, location_key: null,
+  kc: null, kc_source: null, crop_type: null, phenological_stage: null, etc_mm: null,
+};
+const MAIZE_MID = { kc: 1.2, kc_source: 'fao56_crop', crop_type: 'maize', phenological_stage: 'mid_season' };
+function agronomyRow(date, fields) {
+  return { zone_id: 1, date, ...AGRONOMY_SNAPSHOT_NULL, hours_present: 24, expected_hours: 24, null_reason: null, ...fields, computed_at: SEEDED_AT };
+}
+const STATION_DAY_ROW = agronomyRow('2026-07-08', {
+  et0_mm: 5.0, et0_source: 'station_fao56', et0_tier: 'station_fao56', et0_station_id: 'S2120VECTOR0001', ...MAIZE_MID, etc_mm: 6.0,
+});
+// The 24 station hours behind the 2026-07-08 station_fao56 day.
+const STATION_DAY_HOURS = Array.from({ length: 24 }, (_, hour) => ({
+  deveui: 'S2120VECTOR0001',
+  hour_start: `2026-07-08T${String(hour).padStart(2, '0')}:00:00Z`,
+  air_temperature_c: 20,
+  air_temperature_min_c: 14,
+  air_temperature_max_c: 26,
+  relative_humidity_pct: 60,
+  wind_speed_mps: 1.5,
+  global_radiation_wm2: hour >= 6 && hour <= 17 ? 600 : 0,
+  sample_count: 4,
+  computed_at: SEEDED_AT,
+}));
+function cloudBundle(lastDate, waterExtra = {}) {
+  const daily = Array.from({ length: 7 }, (_, i) => ({
+    date: new Date(Date.parse(`${lastDate}T00:00:00Z`) - (6 - i) * 86400000).toISOString().slice(0, 10),
+    rainMm: 0.4,
+    irrigationLiters: 0,
+    irrigationNetMm: 0,
+    totalWaterMm: 0.4,
+  }));
+  return {
+    zoneId: 1,
+    zoneName: 'Vector Zone',
+    water: { available: true, waterNeededTodayMm: 3.1, rainTodayMm: 0.8, rainSource: 'gauge', ...waterExtra, daily },
+  };
+}
+function sharedServerSeed(lastDate, waterExtra) {
+  const bundle = cloudBundle(lastDate, waterExtra);
+  return {
+    userUpdate: { auth_mode: 'server', server_url: 'https://cloud.example.test', server_sync_token: 'vector-token' },
+    rows: {
+      zone_daily_agronomy: [STATION_DAY_ROW],
+      // Two minutes old, so the node uses it without an HTTP fetch.
+      zone_shared_environment: [{
+        zone_uuid: 'zone-env-vector-zone',
+        zone_id: 1,
+        gateway_device_eui: '0016C001F1000001',
+        summary_json: JSON.stringify(bundle),
+        shared_generated_at: '2026-07-11T09:57:00.000Z',
+        shared_observed_at: '2026-07-11T09:57:00.000Z',
+        last_received_at: '2026-07-11T09:58:00.000Z',
+      }],
+    },
+    cloudBundle: bundle,
+  };
+}
+const CASE_SEEDS = {
+  'local-openmeteo-water': { rows: {} },
+  'provider-unavailable': { rows: {} },
+  'crop-table-kc': {
+    zoneUpdate: { crop_type: 'maize', phenological_stage: 'mid_season' },
+    rows: {
+      weather_station_hours: STATION_DAY_HOURS,
+      zone_daily_agronomy: [
+        agronomyRow('2026-07-05', { et0_mm: 4.6, et0_source: 'open_meteo_hourly_sum', et0_tier: 'provider_hourly_sum', location_key: 'open_meteo:46.80:8.20', ...MAIZE_MID, etc_mm: 5.52 }),
+        agronomyRow('2026-07-06', { et0_mm: 4.2, et0_source: 'open_meteo_hourly_sum', et0_tier: 'provider_hourly_sum', location_key: 'open_meteo:46.80:8.20', ...MAIZE_MID, etc_mm: 5.04 }),
+        agronomyRow('2026-07-07', { hours_present: 20, null_reason: 'partial_day' }),
+        STATION_DAY_ROW,
+        agronomyRow('2026-07-09', { et0_mm: 3.9, et0_source: 'meteoswiss_hourly_sum', et0_tier: 'provider_hourly_sum', et0_station_id: 'PAY', location_key: 'meteoswiss:46.80:8.20', kc: 0.75, kc_source: 'fao56_crop', crop_type: 'maize', phenological_stage: 'development', etc_mm: 2.93 }),
+        agronomyRow('2026-07-10', { hours_present: 22, null_reason: 'pending' }),
+      ],
+    },
+  },
+  // Contract v2: a maize zone in development since 2026-06-21, so today (2026-07-11)
+  // is day 21 of 40 on the FAO-56 curve (Kc 0.77) and the stored 2026-07-09 row
+  // keeps the Kc it froze with (day 19, 0.73).
+  'crop-curve-kc': {
+    zoneUpdate: { crop_type: 'maize', phenological_stage: 'development', stage_started_on: '2026-06-21' },
+    rows: {
+      zone_daily_agronomy: [
+        agronomyRow('2026-07-09', { et0_mm: 4.1, et0_source: 'open_meteo_hourly_sum', et0_tier: 'provider_hourly_sum', location_key: 'open_meteo:46.80:8.20', kc: 0.73, kc_source: 'fao56_curve', crop_type: 'maize', phenological_stage: 'development', stage_started_on: '2026-06-21', kc_stage_day: 19, stage_overrun: 0, etc_mm: 2.99 }),
+      ],
+    },
+  },
+  'shared-server': sharedServerSeed('2026-07-11'),
+  // Yesterday's bundle carries its own rain, balance, forecast and verdict; the
+  // expected output shows the gateway's values for every one of them (one day).
+  'shared-server-stale': sharedServerSeed('2026-07-10', {
+    rainTodayMm: 7.4,
+    rainSource: 'meteoswiss_station',
+    balanceTodayMm: 4.3,
+    next24hRainMm: 12.5,
+    action: { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'supply_covers_demand', recommendationDate: '2026-07-10' },
+  }),
+};
+const SEED_TABLE_ORDER = ['weather_station_hours', 'zone_daily_agronomy', 'zone_shared_environment'];
+let currentBundle = null;
 
 function sqlString(value) {
   return value == null ? 'NULL' : `'${String(value).replace(/'/g, "''")}'`;
@@ -78,7 +181,7 @@ function makeFacadeShim(dbPath) {
   };
 }
 
-function seedDb(dbPath) {
+function seedDb(dbPath, seedRows) {
   const db = new DatabaseSync(dbPath);
   db.exec(fs.readFileSync(SEED, 'utf8'));
   db.exec(`
@@ -128,10 +231,28 @@ function seedDb(dbPath) {
       12,'fixture','OBSERVED_RUNNING','2026-07-11T08:00:00.000Z'
     );
   `);
+  const seed = seedRows || { rows: {} };
+  const setClause = (update) => Object.keys(update).map((column) => `${column}=${sqlString(update[column])}`).join(',');
+  if (seed.userUpdate) db.exec(`UPDATE users SET ${setClause(seed.userUpdate)} WHERE id = 1`);
+  if (seed.zoneUpdate) db.exec(`UPDATE irrigation_zones SET ${setClause(seed.zoneUpdate)} WHERE id = 1`);
+  const rows = seed.rows || {};
+  for (const table of Object.keys(rows)) {
+    if (!SEED_TABLE_ORDER.includes(table)) throw new Error(`unsupported seed table ${table}`);
+  }
+  for (const table of SEED_TABLE_ORDER) {
+    for (const row of rows[table] || []) {
+      const keys = Object.keys(row);
+      db.exec(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map((key) => sqlString(row[key])).join(',')})`);
+    }
+  }
   db.close();
 }
 
 function responseFor(url) {
+  if (url.includes('/environment-bundles')) {
+    if (!currentBundle) throw new Error(`unexpected HTTP URL in zone-env vector harness: ${url}`);
+    return [{ zoneUuid: 'zone-env-vector-zone', summary: currentBundle }];
+  }
   if (url.includes('current=')) {
     return {
       current: {
@@ -214,10 +335,11 @@ function fixedDateClass(RealDate) {
   };
 }
 
-async function runCase(caseName) {
+async function runCase(caseName, seedRows) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zone-env-vector-'));
   const dbPath = path.join(dir, 'farming.db');
-  seedDb(dbPath);
+  seedDb(dbPath, seedRows);
+  currentBundle = seedRows && seedRows.cloudBundle ? seedRows.cloudBundle : null;
 
   const errors = [];
   const statuses = [];
@@ -267,6 +389,7 @@ async function runCase(caseName) {
     return { payload: response.payload, errors, statuses, logs };
   } finally {
     global.Date = RealDate;
+    currentBundle = null;
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
   }
 }
@@ -294,6 +417,7 @@ function inputFixture(caseName) {
       forecastHours: ['2026-07-11T10:00', '2026-07-11T13:00', '2026-07-11T16:00'],
     };
   }
+  base.seedRows = CASE_SEEDS[caseName];
   return base;
 }
 
@@ -312,7 +436,7 @@ async function capture() {
     cases: CASES,
   });
   for (const caseName of CASES) {
-    const result = await runCase(caseName);
+    const result = await runCase(caseName, CASE_SEEDS[caseName]);
     writeJson(path.join(CONTRACT_ROOT, 'cases', `${caseName}.input.json`), inputFixture(caseName));
     writeJson(path.join(CONTRACT_ROOT, 'cases', `${caseName}.expected.json`), result.payload);
     console.log(`Captured zone-env vector ${caseName}`);
@@ -321,7 +445,8 @@ async function capture() {
 
 async function verify() {
   for (const caseName of CASES) {
-    const result = await runCase(caseName);
+    const input = readJson(path.join(CONTRACT_ROOT, 'cases', `${caseName}.input.json`));
+    const result = await runCase(caseName, input.seedRows);
     const expected = readJson(path.join(CONTRACT_ROOT, 'cases', `${caseName}.expected.json`));
     assert.deepEqual(result.payload, expected);
     console.log(`Verified zone-env vector ${caseName}`);

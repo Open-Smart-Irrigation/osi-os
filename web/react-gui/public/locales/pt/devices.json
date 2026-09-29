@@ -246,7 +246,9 @@
         "forecast_rain_covers_demand": "A chuva prevista cobre o défice de hoje",
         "demand_exceeds_supply": "A procura excede a chuva e a rega de hoje",
         "balance_neutral": "O balanço hídrico está quase equilibrado",
-        "default": "A aguardar mais dados"
+        "default": "A aguardar mais dados",
+        "rain_unknown": "Sem medição de chuva para hoje",
+        "demand_unknown": "Sem estimativa da procura para hoje"
       },
       "action": {
         "delay_irrigation": "Adiar a rega",
@@ -286,7 +288,11 @@
         "noReadingYet": "Ainda sem leituras",
         "invalidReading": "Leitura inválida",
         "lastValid": "Última válida {{value}} · {{time}}"
-      }
+      },
+      "rainFromStation": "Medida na estação MeteoSwiss {{station}} (a {{distance}} km)",
+      "rainFromWeather": "Dos dados meteorológicos (não medida)",
+      "drivenByWaterBalanceFromWeather": "Baseado no balanço hídrico · chuva dos dados meteorológicos",
+      "drivenByWaterBalanceFromStation": "Baseado no balanço hídrico · chuva medida na estação MeteoSwiss {{station}}"
     },
     "deviceCount_one": "{{count}} dispositivo",
     "deviceCount_other": "{{count}} dispositivos",
@@ -383,7 +389,6 @@
       "waterNeededToday": "Necessidade hídrica hoje",
       "balance": "Balanço",
       "setupRequired": "Indique a área da zona e a eficiência de rega nas definições da zona para calcular a rega efetiva e o balanço hídrico.",
-      "weeklyTrend": "Tendência hídrica de 7 dias",
       "trendNote": "Compare a chuva com a rega efetiva medida e estimada da última semana.",
       "nextRain": "Chuva nas 24 h",
       "effective": "{{value}} efetivo",
@@ -391,7 +396,59 @@
       "flowMeterReporting": "Medidor de caudal ativo",
       "tooltipRain": "Chuva",
       "tooltipMeasuredEffective": "Medido efetivo",
-      "tooltipEstimatedEffective": "Estimado efetivo"
+      "tooltipEstimatedEffective": "Estimado efetivo",
+      "kcSource": {
+        "fao56_crop": "{{crop}}, {{stage}}",
+        "fao56_crop_stage_unset": "{{crop}}, fase não definida",
+        "heuristic_phenology": "nenhuma cultura da lista FAO-56, {{stage}}",
+        "server": "OSI Cloud",
+        "local": "este gateway",
+        "fao56_curve": "{{crop}}, {{stage}} (curva FAO-56)"
+      },
+      "stageNotSet": "fase não definida",
+      "lastSevenDays": "Últimos 7 dias",
+      "tooltipDemand": "Necessidade da cultura",
+      "stationCredit": "Fonte: MeteoSwiss",
+      "today": "Hoje",
+      "legendDemand": "Necessidade da cultura (calculada)",
+      "legendDemandTodayForecast": "Necessidade da cultura hoje (previsão)",
+      "demandCalculated": "{{value}} mm (calculada)",
+      "demandForecast": "{{value}} mm (previsão)",
+      "demandNoData": "sem dados (registo meteorológico incompleto)",
+      "demandNoLocation": "sem dados (zona sem localização)",
+      "demandPending": "pendente",
+      "tooltipTodayNote": "Chuva e rega até agora; a necessidade é a previsão para o dia inteiro",
+      "kcLine": "Kc {{kc}} ({{source}})",
+      "et0Tier": {
+        "station_fao56": "Estação {{station}} · FAO-56",
+        "hargreaves_station": "Estação {{station}} · Hargreaves",
+        "provider_open_meteo": "Modelo Open-Meteo",
+        "provider_meteoswiss": "MeteoSwiss {{station}}",
+        "forecast": "Previsão meteorológica",
+        "open_meteo_daily": "Modelo meteorológico Open-Meteo, FAO-56 diário"
+      },
+      "attribution": {
+        "open_meteo": "Dados meteorológicos de Open-Meteo.com, CC BY 4.0"
+      },
+      "attributionHelpLabel": "Sobre os dados meteorológicos",
+      "neededTodayHelpLabel": "Sobre a água necessária hoje",
+      "neededTodayHelp": "Previsão para o dia inteiro · {{source}}",
+      "lastSevenDaysHelpLabel": "Sobre os últimos 7 dias",
+      "setupRequiredHelpLabel": "Porque falta a rega efetiva",
+      "rainSourceHelpLabel": "De onde vem este valor de chuva",
+      "demandNoSource": "nenhuma fonte meteorológica para este dia",
+      "demandMixedStation": "horas de duas estações da MeteoSwiss",
+      "demandUnknownStation": "estação da MeteoSwiss desconhecida para estas horas",
+      "demandUnknownToday": "sem estimativa para hoje",
+      "et0Line": "ET0 {{et0}} mm",
+      "kcSourceByCrop": "{{source}}, {{crop}}",
+      "stageOverrun": "Além da duração típica desta fase ({{days}} dias, quadro 11 da FAO-56): a fase pode estar desatualizada; escolha a fase seguinte quando a cultura lá chegar.",
+      "computedBy": {
+        "edge": "Calculado no gateway",
+        "cloud": "ET0 do modelo meteorológico Open-Meteo (não medida nesta exploração); o OSI Cloud aplica o coeficiente cultural"
+      },
+      "modelAccuracyNote": "A ET0 de um modelo pode diferir 10-20 % de uma estação local num único dia, sobretudo em dias nublados ou ventosos e na montanha; os totais semanais coincidem melhor.",
+      "meteoswissCloudNote": "Esta zona usa a MeteoSwiss no gateway; o histórico próprio do OSI Cloud usa a Open-Meteo até o histórico da MeteoSwiss estar disponível na nuvem."
     },
     "generatedAt": "Gerado {{time}}",
     "sectionTitle": "Ambiente e previsão do tempo",
@@ -445,7 +502,9 @@
       "kc": "Coef. cultura Kc",
       "etc": "ET cultura",
       "noData": "Nenhum dado agronómico disponível",
-      "fromSource": "de {{source}}"
+      "fromSource": "de {{source}}",
+      "kcHelpLabel": "Sobre o coeficiente cultural",
+      "kcHelp": "Kc FAO-56 para {{crop}}: inicial {{ini}}, fase intermédia {{mid}}, final {{end}}. Fase atual: {{stage}}."
     },
     "forecast": {
       "dayToday": "Hoje",
@@ -481,7 +540,7 @@
   "zoneConfig": {
     "title": "Configurar a zona — {{zone}}",
     "crop": "Cultura",
-    "selectCrop": "— Selecione a cultura de previsão —",
+    "selectCrop": "— Selecione a cultura —",
     "variety": "Variedade",
     "varietyPlaceholder": "Variedade (opcional)",
     "soilType": "Tipo de solo",
@@ -540,12 +599,50 @@
       "olive": "Oliveira"
     },
     "stage": {
-      "default": "Predefinido",
-      "dormancy": "Dormência",
-      "budbreak": "Abrolhamento / floração",
-      "fruitset": "Vingamento",
-      "veraison": "Pintor / maturação",
-      "harvest": "Colheita / pós-colheita"
+      "unset": "Não definida",
+      "initial": "Fase inicial",
+      "development": "Desenvolvimento",
+      "mid_season": "Fase intermédia",
+      "late_season": "Fase final",
+      "dormancy": "Dormência"
+    },
+    "stageLabel": {
+      "woody": {
+        "initial": "Fase inicial (abrolhamento)",
+        "development": "Desenvolvimento (floração, vingamento)",
+        "mid_season": "Fase intermédia (crescimento do fruto, maturação)",
+        "late_season": "Fase final (após a colheita, até à queda das folhas)",
+        "dormancy": "Dormência (repouso invernal)"
+      },
+      "annual": {
+        "initial": "Fase inicial (sementeira, emergência)",
+        "development": "Desenvolvimento (fecho do coberto)",
+        "mid_season": "Fase intermédia (cobertura total, floração)",
+        "late_season": "Fase final (maturação, colheita)",
+        "dormancy": "Dormência (sem cultura)"
+      }
+    },
+    "stageHelpLabel": "Sobre as fases de crescimento",
+    "stageHelp": "As fases de crescimento FAO-56 definem o coeficiente cultural Kc: inicial até cerca de 10 % de cobertura do solo, desenvolvimento até à cobertura total, fase intermédia até ao início da maturação, fase final até à colheita ou à queda das folhas. Na dormência usa-se Kc 0,25. A dormência destina-se a culturas de folha caduca e a períodos de repouso anuais; as perenifólias como citrinos, oliveira, café e bananeira mantêm antes o Kc da fase final.",
+    "cropHelpLabel": "Sobre a lista de culturas",
+    "cropHelp": "Os coeficientes culturais seguem o quadro 12 da FAO-56. O assistente de previsão só suporta {{crops}}.",
+    "cropOther": "Outra cultura",
+    "cropGroup": {
+      "small_vegetables": "Hortícolas pequenas",
+      "vegetables_solanum": "Solanáceas",
+      "vegetables_cucumber": "Cucurbitáceas",
+      "roots_tubers": "Raízes e tubérculos",
+      "legumes": "Leguminosas",
+      "perennial_vegetables": "Hortícolas perenes",
+      "fibre": "Culturas de fibra",
+      "oil_crops": "Oleaginosas",
+      "cereals": "Cereais",
+      "forages": "Forragens",
+      "sugar_cane": "Cana-de-açúcar",
+      "tropical_fruits": "Frutos e árvores tropicais",
+      "grapes_berries": "Videira e pequenos frutos",
+      "fruit_trees": "Árvores de fruto",
+      "wetlands": "Zonas húmidas"
     },
     "gps": {
       "available": "Disponível",
@@ -560,7 +657,21 @@
       "flowRateRequired": "O caudal (L/min) é necessário para guardar a calibração da rega.",
       "flowRatePositive": "O caudal (L/min) deve ser maior que 0.",
       "saveFailed": "Não foi possível guardar"
-    }
+    },
+    "weatherProvider": "Fornecedor meteorológico",
+    "weatherProviderHelpLabel": "Sobre o fornecedor meteorológico",
+    "weatherProviderHelp": "Define de onde vem o histórico meteorológico horário desta zona e, com ele, a sua ET0 diária, exceto se uma estação meteorológica atribuída tiver um dia completo, que passa então a ter prioridade. A MeteoSwiss cobre a Suíça. Com «Apenas estação meteorológica local», o gateway não descarrega nenhum histórico meteorológico para esta zona; sem uma estação atribuída, não obtém nenhuma ET0. A previsão do tempo não muda.",
+    "weatherProviderOption": {
+      "auto": "Predefinição do gateway ({{provider}})",
+      "open_meteo": "Open-Meteo",
+      "meteoswiss": "MeteoSwiss",
+      "local": "Apenas estação meteorológica local"
+    },
+    "weatherProviderCloud": "{{value}} (fornecedor na nuvem)",
+    "stageStartedOn": "Início da fase",
+    "stageStartedOnHelpLabel": "Sobre a data de início da fase",
+    "stageStartedOnHelp": "A data em que a fase atual começou (dia 1). Nas fases de desenvolvimento e final, o Kc segue a curva FAO-56 a partir desta data; nas outras fases mantém o valor da fase. A fase nunca avança sozinha: após a duração típica para esta cultura ({{days}} dias), o Kc fica no valor final da fase até escolher a fase seguinte. Após a queda das folhas ou a colheita, escolha Dormência (Kc 0,25, solo nu); na primavera, escolha Fase inicial com a data do abrolhamento. As alterações de cultura, fase ou data de início aplicam-se aos dias calculados depois da alteração. Deixe vazio para usar o valor da tabela para a fase.",
+    "stageStartedOnHelpNoLength": "A data em que a fase atual começou (dia 1). Nas fases de desenvolvimento e final, o Kc segue a curva FAO-56 a partir desta data; nas outras fases mantém o valor da fase. A fase nunca avança sozinha: após a duração típica para esta cultura, o Kc fica no valor final da fase até escolher a fase seguinte. Após a queda das folhas ou a colheita, escolha Dormência (Kc 0,25, solo nu); na primavera, escolha Fase inicial com a data do abrolhamento. As alterações de cultura, fase ou data de início aplicam-se aos dias calculados depois da alteração. Deixe vazio para usar o valor da tabela para a fase."
   },
   "irrigationOutcomes": {
     "title": "Regas recentes",

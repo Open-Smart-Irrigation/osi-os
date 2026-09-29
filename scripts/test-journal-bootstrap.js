@@ -33,6 +33,8 @@ const EXPECTED_CAPABILITIES = [
   'installation_recovery_v1',
   'installation_locations_v1',
   'entity_name_commands_v1',
+  'zone_config_weather_source_v1',
+  'zone_config_stage_started_on_v1',
   'field_journal_v1',
 ];
 const JOURNAL_FIELDS = [
@@ -464,7 +466,7 @@ function assertReadyAdvertisement(payload) {
 
 function assertSuppressedAdvertisement(payload) {
   assert.ok(payload, 'ordinary core bootstrap must continue');
-  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 5));
+  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 7));
   for (const field of JOURNAL_FIELDS) {
     assert.equal(Object.prototype.hasOwnProperty.call(payload.gatewayIdentity, field), false, field);
   }

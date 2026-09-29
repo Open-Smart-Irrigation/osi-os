@@ -135,8 +135,12 @@ summary in `lastError`; only an `APPLIED`/`DUPLICATE` result counts as accepted.
 When the total-row cap is exceeded, the job evicts only oldest telemetry-class
 rows, delivered rows first and then undelivered rows by `occurred_at`.
 Evictable telemetry aggregates are `DEVICE_DATA`, `CHAMELEON_READING`,
-`DENDRO_READING`, `DENDRO_DAILY`, `ZONE_ENVIRONMENT`, and
-`ZONE_RECOMMENDATION`.
+`DENDRO_READING`, `DENDRO_DAILY`, `ZONE_ENVIRONMENT`, `ZONE_RECOMMENDATION`,
+and `ZONE_AGRONOMY`. The writer emits nothing for an unchanged row, so an
+evicted daily agronomy event is not re-derived by the next computation tick;
+it reaches the cloud again only with the next change of that day, or through
+the six-hourly bootstrap, which carries the last 30 days of each zone (at
+most 1,000 rows).
 
 Protected aggregates are never evicted by the cap: `IRRIGATION_EVENT`,
 `SCHEDULE`, `ZONE`, `DEVICE`, and `GATEWAY_LOCATION`. If protected rows alone
@@ -253,3 +257,28 @@ the next 02:10 tick. The Node-RED editor is closed by default
 triggering `Gateway Health Rollup Tick` from it for a routine post-deploy
 check — wait for the scheduled tick, or re-enable the editor through the
 field-repair path first.
+
+## Daily agronomy record and weather station hours
+
+`zone_daily_agronomy` (`database/migrations/ordered/0063__daily_agronomy.sql`)
+holds one row per zone and local calendar day, keyed on `(zone_id, date)`. A
+zone with a full year of ET0/Kc computation writes 365 rows. No prune job
+runs against the table and no `OSI_*_RETENTION_DAYS` knob exists for it, so
+row count grows without bound for the life of the gateway. A day filled after an outage freezes the crop, stage and stage start date current at fill time: the table keeps no stage history. Since daily agronomy
+parity (migration `0067__zone_daily_agronomy_sync.sql`) the table replicates to
+OSI Server: the migration-owned triggers `trg_dp_zone_agronomy_outbox_ai` and
+`_au` emit `ZONE_AGRONOMY_UPSERTED` for a row insert and for every change of
+its `sync_version`, while the gateway is linked and the zone has a UUID, and
+the scheduled bootstrap carries the last 30 days of each zone (at most 1,000
+rows). The writer never deletes a row: a row its clock wrote ahead of time is
+retracted in place (values null, `null_reason = 'retracted'`, next version),
+so the row count still grows by one row per zone and day.
+`weather_station_hours` has no outbox trigger and stays on the gateway.
+
+`weather_station_hours` holds one row per assigned station device and closed
+UTC hour, keyed on `(deveui, hour_start)`. One station produces 8,760 rows
+per year (24 hours × 365 days); a gateway with several SenseCAP S2120
+stations, each assigned to a zone, accumulates that count per device.
+Retention is unbounded in the same way as `zone_daily_agronomy` — no prune
+job, no retention knob — and the table stays edge-only, with no sync
+trigger touching it.

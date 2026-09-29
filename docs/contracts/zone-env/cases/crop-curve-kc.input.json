@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "case": "crop-curve-kc",
+  "fixedNow": "2026-07-11T10:00:00.000Z",
+  "request": {
+    "zone_id": 1,
+    "userId": 1
+  },
+  "seed": {
+    "user": "fixture-user",
+    "zone": "Vector Zone",
+    "devices": [
+      "S2120VECTOR0001",
+      "KIWIVECTOR00001"
+    ],
+    "waterDates": [
+      "2026-07-09",
+      "2026-07-10",
+      "2026-07-11"
+    ],
+    "estimatedValveLiters": 12
+  },
+  "httpStubs": {
+    "provider": "open-meteo",
+    "currentTime": "2026-07-11T10:00",
+    "forecastHours": [
+      "2026-07-11T10:00",
+      "2026-07-11T13:00",
+      "2026-07-11T16:00"
+    ]
+  },
+  "seedRows": {
+    "zoneUpdate": {
+      "crop_type": "maize",
+      "phenological_stage": "development",
+      "stage_started_on": "2026-06-21"
+    },
+    "rows": {
+      "zone_daily_agronomy": [
+        {
+          "zone_id": 1,
+          "date": "2026-07-09",
+          "et0_mm": 4.1,
+          "et0_source": "open_meteo_hourly_sum",
+          "et0_tier": "provider_hourly_sum",
+          "et0_station_id": null,
+          "location_key": "open_meteo:46.80:8.20",
+          "kc": 0.73,
+          "kc_source": "fao56_curve",
+          "crop_type": "maize",
+          "phenological_stage": "development",
+          "etc_mm": 2.99,
+          "hours_present": 24,
+          "expected_hours": 24,
+          "null_reason": null,
+          "stage_started_on": "2026-06-21",
+          "kc_stage_day": 19,
+          "stage_overrun": 0,
+          "computed_at": "2026-07-11T08:00:00.000Z"
+        }
+      ]
+    }
+  }
+}

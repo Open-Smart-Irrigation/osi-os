@@ -246,7 +246,9 @@
         "forecast_rain_covers_demand": "Der erwartete Regen deckt das heutige Defizit",
         "demand_exceeds_supply": "Der Bedarf übersteigt Regen und Bewässerung von heute",
         "balance_neutral": "Die Wasserbilanz ist nahezu ausgeglichen",
-        "default": "Warten auf weitere Daten"
+        "default": "Warten auf weitere Daten",
+        "rain_unknown": "Keine Regenmessung für heute",
+        "demand_unknown": "Keine Bedarfsschätzung für heute"
       },
       "action": {
         "delay_irrigation": "Bewässerung verschieben",
@@ -286,7 +288,11 @@
         "noReadingYet": "Noch keine Messung",
         "invalidReading": "Ungültige Messung",
         "lastValid": "Letzte gültige {{value}} · {{time}}"
-      }
+      },
+      "rainFromStation": "Gemessen an der MeteoSchweiz-Station {{station}} ({{distance}} km entfernt)",
+      "rainFromWeather": "Aus Wetterdaten (nicht gemessen)",
+      "drivenByWaterBalanceFromWeather": "Basierend auf Wasserbilanz · Regen aus Wetterdaten",
+      "drivenByWaterBalanceFromStation": "Basierend auf Wasserbilanz · Regen gemessen an der MeteoSchweiz-Station {{station}}"
     },
     "deviceCount_one": "{{count}} Gerät",
     "deviceCount_other": "{{count}} Geräte",
@@ -383,7 +389,6 @@
       "waterNeededToday": "Wasserbedarf heute",
       "balance": "Bilanz",
       "setupRequired": "Erfassen Sie Zonenfläche und Bewässerungseffizienz in den Zoneneinstellungen, um die effektive Bewässerung und die Wasserbilanz zu berechnen.",
-      "weeklyTrend": "Wassertrend über 7 Tage",
       "trendNote": "Vergleicht den Regen mit der gemessenen und der geschätzten effektiven Bewässerung der letzten Woche.",
       "nextRain": "Regen nächste 24 h",
       "effective": "{{value}} effektiv",
@@ -391,7 +396,59 @@
       "flowMeterReporting": "Durchflussmesser meldet",
       "tooltipRain": "Regen",
       "tooltipMeasuredEffective": "Gemessen effektiv",
-      "tooltipEstimatedEffective": "Geschätzt effektiv"
+      "tooltipEstimatedEffective": "Geschätzt effektiv",
+      "kcSource": {
+        "fao56_crop": "{{crop}}, {{stage}}",
+        "fao56_crop_stage_unset": "{{crop}}, Phase nicht festgelegt",
+        "heuristic_phenology": "keine Kultur aus der FAO-56-Liste, {{stage}}",
+        "server": "OSI Cloud",
+        "local": "dieses Gateway",
+        "fao56_curve": "{{crop}}, {{stage}} (FAO-56-Kurve)"
+      },
+      "stageNotSet": "Phase nicht festgelegt",
+      "lastSevenDays": "Letzte 7 Tage",
+      "tooltipDemand": "Wasserbedarf der Kultur",
+      "stationCredit": "Quelle: MeteoSchweiz",
+      "today": "Heute",
+      "legendDemand": "Wasserbedarf der Kultur (berechnet)",
+      "legendDemandTodayForecast": "Wasserbedarf der Kultur heute (Prognose)",
+      "demandCalculated": "{{value}} mm (berechnet)",
+      "demandForecast": "{{value}} mm (Prognose)",
+      "demandNoData": "keine Daten (Wetterdaten unvollständig)",
+      "demandNoLocation": "keine Daten (Zone ohne Standort)",
+      "demandPending": "ausstehend",
+      "tooltipTodayNote": "Regen und Bewässerung bisher; der Bedarf ist die Prognose für den ganzen Tag",
+      "kcLine": "Kc {{kc}} ({{source}})",
+      "et0Tier": {
+        "station_fao56": "Station {{station}} · FAO-56",
+        "hargreaves_station": "Station {{station}} · Hargreaves",
+        "provider_open_meteo": "Open-Meteo-Modell",
+        "provider_meteoswiss": "MeteoSchweiz {{station}}",
+        "forecast": "Wetterprognose",
+        "open_meteo_daily": "Open-Meteo-Wettermodell, tägliche FAO-56"
+      },
+      "attribution": {
+        "open_meteo": "Wetterdaten von Open-Meteo.com, CC BY 4.0"
+      },
+      "attributionHelpLabel": "Über die Wetterdaten",
+      "neededTodayHelpLabel": "Über den heutigen Wasserbedarf",
+      "neededTodayHelp": "Prognose für den ganzen Tag · {{source}}",
+      "lastSevenDaysHelpLabel": "Über die letzten 7 Tage",
+      "setupRequiredHelpLabel": "Warum die effektive Bewässerung fehlt",
+      "rainSourceHelpLabel": "Woher dieser Regenwert stammt",
+      "demandNoSource": "keine Wetterquelle für diesen Tag",
+      "demandMixedStation": "Stunden von zwei MeteoSchweiz-Stationen",
+      "demandUnknownStation": "MeteoSchweiz-Station für diese Stunden unbekannt",
+      "demandUnknownToday": "keine Schätzung für heute",
+      "et0Line": "ET0 {{et0}} mm",
+      "kcSourceByCrop": "{{source}}, {{crop}}",
+      "stageOverrun": "Über der typischen Dauer dieser Phase ({{days}} Tage, FAO-56, Tabelle 11): Die Phase ist möglicherweise veraltet; wählen Sie die nächste Phase, sobald die Kultur sie erreicht.",
+      "computedBy": {
+        "edge": "Auf dem Gateway berechnet",
+        "cloud": "ET0 aus dem Open-Meteo-Wettermodell (nicht auf diesem Betrieb gemessen); OSI Cloud wendet den Kulturkoeffizienten an"
+      },
+      "modelAccuracyNote": "Modellbasierte ET0 kann an einem einzelnen Tag um 10-20 % von einer lokalen Station abweichen, am stärksten an bewölkten und windigen Tagen oder in den Bergen; Wochensummen stimmen besser überein.",
+      "meteoswissCloudNote": "Diese Zone nutzt auf dem Gateway MeteoSchweiz; die eigene Historie von OSI Cloud nutzt Open-Meteo, bis die MeteoSchweiz-Historie in der Cloud verfügbar ist."
     },
     "generatedAt": "Erstellt {{time}}",
     "sectionTitle": "Umgebung & Wettervorhersage",
@@ -445,7 +502,9 @@
       "kc": "Erntekoeff. Kc",
       "etc": "Ernte-ET",
       "noData": "Keine agronomischen Daten verfügbar",
-      "fromSource": "von {{source}}"
+      "fromSource": "von {{source}}",
+      "kcHelpLabel": "Info zum Kulturkoeffizienten",
+      "kcHelp": "FAO-56-Kc für {{crop}}: Anfang {{ini}}, Hauptphase {{mid}}, Ende {{end}}. Aktuelle Phase: {{stage}}."
     },
     "forecast": {
       "dayToday": "Heute",
@@ -481,7 +540,7 @@
   "zoneConfig": {
     "title": "Zone konfigurieren — {{zone}}",
     "crop": "Kultur",
-    "selectCrop": "— Kultur für die Prognose wählen —",
+    "selectCrop": "— Kultur wählen —",
     "variety": "Sorte",
     "varietyPlaceholder": "Sorte (optional)",
     "soilType": "Bodenart",
@@ -540,12 +599,50 @@
       "olive": "Olive"
     },
     "stage": {
-      "default": "Standard",
-      "dormancy": "Ruhephase",
-      "budbreak": "Austrieb / Blüte",
-      "fruitset": "Fruchtansatz",
-      "veraison": "Reifebeginn / Reifung",
-      "harvest": "Ernte / Nachernte"
+      "unset": "Nicht festgelegt",
+      "initial": "Anfangsphase",
+      "development": "Entwicklungsphase",
+      "mid_season": "Hauptphase",
+      "late_season": "Spätphase",
+      "dormancy": "Ruhephase"
+    },
+    "stageLabel": {
+      "woody": {
+        "initial": "Anfangsphase (Austrieb)",
+        "development": "Entwicklungsphase (Blüte, Fruchtansatz)",
+        "mid_season": "Hauptphase (Fruchtwachstum, Reife)",
+        "late_season": "Spätphase (nach der Ernte bis zum Laubfall)",
+        "dormancy": "Ruhephase (Winterruhe)"
+      },
+      "annual": {
+        "initial": "Anfangsphase (Aussaat, Auflaufen)",
+        "development": "Entwicklungsphase (Bestandesschluss)",
+        "mid_season": "Hauptphase (volle Bodenbedeckung, Blüte)",
+        "late_season": "Spätphase (Reife, Ernte)",
+        "dormancy": "Ruhephase (keine Kultur)"
+      }
+    },
+    "stageHelpLabel": "Info zu den Wachstumsphasen",
+    "stageHelp": "Die FAO-56-Wachstumsphasen bestimmen den Kulturkoeffizienten Kc: Anfangsphase bis etwa 10 % Bodenbedeckung, Entwicklungsphase bis zur vollen Bodenbedeckung, Hauptphase bis zum Beginn der Reife, Spätphase bis zur Ernte oder zum Laubfall. In der Ruhephase gilt Kc 0,25. Die Ruhephase ist für laubabwerfende Kulturen und jährliche Ruhezeiten gedacht; immergrüne Kulturen wie Zitrus, Olive, Kaffee und Banane behalten stattdessen den Kc der Spätphase.",
+    "cropHelpLabel": "Info zur Kulturliste",
+    "cropHelp": "Die Kulturkoeffizienten folgen FAO-56, Tabelle 12. Der Prognoseberater unterstützt nur {{crops}}.",
+    "cropOther": "Andere Kultur",
+    "cropGroup": {
+      "small_vegetables": "Kleingemüse",
+      "vegetables_solanum": "Nachtschattengewächse",
+      "vegetables_cucumber": "Kürbisgewächse",
+      "roots_tubers": "Wurzeln und Knollen",
+      "legumes": "Hülsenfrüchte",
+      "perennial_vegetables": "Mehrjähriges Gemüse",
+      "fibre": "Faserpflanzen",
+      "oil_crops": "Ölpflanzen",
+      "cereals": "Getreide",
+      "forages": "Futterpflanzen",
+      "sugar_cane": "Zuckerrohr",
+      "tropical_fruits": "Tropische Früchte und Bäume",
+      "grapes_berries": "Reben und Beeren",
+      "fruit_trees": "Obstbäume",
+      "wetlands": "Feuchtgebiete"
     },
     "gps": {
       "available": "Verfügbar",
@@ -560,7 +657,21 @@
       "flowRateRequired": "Für die Bewässerungskalibrierung ist der Durchfluss (l/min) erforderlich.",
       "flowRatePositive": "Der Durchfluss (l/min) muss grösser als 0 sein.",
       "saveFailed": "Speichern fehlgeschlagen"
-    }
+    },
+    "weatherProvider": "Wetteranbieter",
+    "weatherProviderHelpLabel": "Über den Wetteranbieter",
+    "weatherProviderHelp": "Legt fest, woher der stündliche Wetterverlauf dieser Zone kommt und damit ihre tägliche ET0, es sei denn, eine zugewiesene Wetterstation hat einen vollständigen Tag; dieser hat Vorrang. MeteoSchweiz deckt die Schweiz ab. Mit «Nur lokale Wetterstation» lädt das Gateway für diese Zone keinen Wetterverlauf herunter; ohne zugewiesene Station erhält sie dann keine ET0. Die Wetterprognose ändert sich nicht.",
+    "weatherProviderOption": {
+      "auto": "Gateway-Standard ({{provider}})",
+      "open_meteo": "Open-Meteo",
+      "meteoswiss": "MeteoSchweiz",
+      "local": "Nur lokale Wetterstation"
+    },
+    "weatherProviderCloud": "{{value}} (Cloud-Anbieter)",
+    "stageStartedOn": "Phase begonnen am",
+    "stageStartedOnHelpLabel": "Info zum Startdatum der Phase",
+    "stageStartedOnHelp": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur ({{days}} Tage) bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden.",
+    "stageStartedOnHelpNoLength": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden."
   },
   "irrigationOutcomes": {
     "title": "Letzte Bewässerungen",

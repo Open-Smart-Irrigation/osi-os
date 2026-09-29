@@ -533,14 +533,14 @@ test('both command types are in the registry and in the fallback table, on both 
   }
 });
 
-test('all three capability builders advertise entity_name_commands_v1, on both profiles', () => {
+test('all three capability builders advertise entity_name_commands_v1 and both zone capabilities, on both profiles', () => {
   for (const profile of PROFILES) {
     const flows = loadFlows(profile);
     for (const id of ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build']) {
       const node = flows.find((n) => n.id === id);
       assert.match(
         node.func,
-        /const syncCapabilities = \['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1'\];/,
+        /const syncCapabilities = \['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1'\];/,
         profile + ' ' + id
       );
     }

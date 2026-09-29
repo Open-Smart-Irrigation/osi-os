@@ -14,6 +14,7 @@ import { FieldTesterCard } from './FieldTesterCard';
 import { ScheduleSection, normalizeTriggerMetric } from './ScheduleSection';
 import { ZoneDeviceModal } from './ZoneDeviceModal';
 import { EditableName } from './shared/EditableName';
+import { HelpTip } from './shared/HelpTip';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
@@ -82,6 +83,8 @@ const WATER_REASON_LABELS: Record<string, string> = {
   balance_neutral: 'Water balance is close to neutral',
   balance_unknown: 'Set zone area and irrigation efficiency',
   forecast_unknown: 'No rain forecast available',
+  rain_unknown: 'No rain measurement for today',
+  demand_unknown: 'No water demand estimate for today',
 };
 
 // Tailwind needs the class as a literal, so the column count is a lookup
@@ -301,8 +304,32 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const hasFlowMeter = zoneHasFlowMeter(devices);
   const hasRainGauge = zoneHasRainGauge(devices) || (environmentSummary?.water.sensorHealth.rainGaugePresent ?? false);
   const hasForecastRain = environmentSummary?.water.next24hRainMm != null;
+  // A linked gateway can carry rain for a zone without a gauge: measured at the
+  // nearest MeteoSwiss station, or the weather service's rain for the hours of
+  // today that have passed. The zone's own gauge always wins the label, and a
+  // source with no value shows no number.
+  const rainSource = environmentSummary?.water.rainSource ?? null;
+  const rainStation = environmentSummary?.water.rainStation ?? null;
+  const rainStationName = rainStation ? rainStation.name ?? rainStation.id : null;
+  const rainSourceHelp = hasRainGauge
+    ? null
+    : rainSource === 'meteoswiss_station' && rainStation
+      ? t('zone.water.rainFromStation', {
+          station: rainStationName,
+          distance: rainStation.distanceKm != null && Number.isFinite(rainStation.distanceKm) ? rainStation.distanceKm.toFixed(1) : '—',
+          defaultValue: 'Measured at MeteoSwiss {{station}} ({{distance}} km away)',
+        })
+      : rainSource === 'weather_service'
+        ? t('zone.water.rainFromWeather', { defaultValue: 'From weather data (not measured)' })
+        : null;
+  const hasRainTile = hasRainGauge || (rainSourceHelp != null && environmentSummary?.water.rainTodayMm != null);
+  const drivenByBalanceText = !hasRainGauge && rainSource === 'meteoswiss_station' && rainStationName
+    ? t('zone.water.drivenByWaterBalanceFromStation', { station: rainStationName, defaultValue: 'Driven by water balance · rain measured at MeteoSwiss {{station}}' })
+    : !hasRainGauge && rainSource === 'weather_service'
+      ? t('zone.water.drivenByWaterBalanceFromWeather', { defaultValue: 'Driven by water balance · rain from weather data' })
+      : t('zone.water.drivenByBalance', { defaultValue: 'Driven by water balance' });
   // The action tile always renders; it has its own insufficient-data state.
-  const waterTileCount = 1 + (hasRainGauge ? 1 : 0) + (hasFlowMeter ? 1 : 0) + (hasForecastRain ? 1 : 0);
+  const waterTileCount = 1 + (hasRainTile ? 1 : 0) + (hasFlowMeter ? 1 : 0) + (hasForecastRain ? 1 : 0);
   // Entry points to gateway-level modules follow the gateway's module flags, exactly as the
   // header does. `null` while the settings load: hidden rather than flashed and withdrawn.
   const gatewayModules = useGatewayModules();
@@ -560,13 +587,20 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           )}
           <div className={`mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 ${WATER_TILE_GRID[waterTileCount]}`}>
             {/* The daily aggregation writes 0 mm for a day with no sample, so
-                this tile needs a gauge behind it before it can call anything a
-                measurement. */}
-            {hasRainGauge && (
+                this tile needs a gauge, or a station or weather source the
+                linked cloud names, behind it before it shows a number. */}
+            {hasRainTile && (
               <div data-testid="water-rain-tile" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                  {t('zone.water.rainToday', { defaultValue: 'Rain today' })}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                    {t('zone.water.rainToday', { defaultValue: 'Rain today' })}
+                  </p>
+                  {rainSourceHelp && (
+                    <HelpTip label={t('environment.water.rainSourceHelpLabel', { defaultValue: 'Where this rain value comes from' })}>
+                      {rainSourceHelp}
+                    </HelpTip>
+                  )}
+                </div>
                 <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
               </div>
             )}
@@ -619,7 +653,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                   <p className="mt-1 text-xs text-[var(--text-secondary)]">
                     {environmentSummary.water.action.source === 'dendro'
                       ? t('zone.water.drivenByDendro', { defaultValue: 'Driven by dendrometer recommendation' })
-                      : t('zone.water.drivenByBalance', { defaultValue: 'Driven by water balance' })}
+                      : drivenByBalanceText}
                   </p>
                 </>
               ) : (

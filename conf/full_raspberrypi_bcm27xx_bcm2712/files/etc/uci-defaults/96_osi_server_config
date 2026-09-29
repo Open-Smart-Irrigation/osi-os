@@ -49,4 +49,10 @@ uci -q get osi-server.cloud.journal_media_root >/dev/null 2>&1 || \
 uci commit osi-server
 # journal-v2-media-defaults end
 
+# Absent-only, like the journal keys above: a rerun must not reset a gateway
+# an operator switched to meteoswiss.
+uci -q get osi-server.cloud.weather_provider_default >/dev/null 2>&1 || \
+  uci set osi-server.cloud.weather_provider_default=open_meteo
+uci commit osi-server
+
 exit 0
