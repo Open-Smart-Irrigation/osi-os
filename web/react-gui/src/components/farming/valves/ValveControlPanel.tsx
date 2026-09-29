@@ -65,7 +65,8 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
     revalidateOnFocus: true,
   });
 
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [, refreshClock] = useState(0);
+  const nowMs = Date.now();
   const [dialogEui, setDialogEui] = useState<string | null>(null);
   const [dialogKind, setDialogKind] = useState<DialogKind>(null);
   const [actionBusyEui, setActionBusyEui] = useState<string | null>(null);
@@ -81,7 +82,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
 
   useEffect(() => {
     if (!hasLiveValve) return;
-    const id = setInterval(() => setNowMs(Date.now()), 1_000);
+    const id = setInterval(() => refreshClock(tick => tick + 1), 1_000);
     return () => clearInterval(id);
   }, [hasLiveValve]);
 

@@ -140,3 +140,53 @@ wrapper, setting `min-w-0` on the valve Schedule button beside More, and checkin
 root/document scroll widths as well as text bounds. These were incorporated.
 The wrapping regression failed first on the long Luganda device-footer text;
 the implemented fix passed all seven languages across cards and valve dialogs.
+
+## External UX review repairs
+
+The review reproduced a zero-width STREGA heading, collapsed-zone Delete hiding
+its confirmation, cramped translated action buttons, a logout dead end, stale
+accelerated countdown text, incomplete dialog keyboard handling and weak enlargement.
+The author independently reproduced these against commit 7b7163caf.
+
+1. Add browser regressions for expanded device headers, full-word button labels,
+   collapsed deletion, demo account actions, accelerated countdown, chart focus and
+   Escape, language-menu keyboard controls, and useful enlargement at 720p.
+2. Give the STREGA header a stacked mobile layout; preserve a full title row. Let
+   valve actions use their available width rather than reserving half for Open.
+   Add horizontal padding and wrapping rows to create/assign dialog actions.
+3. Move the zone deletion confirmation and its error outside collapsed content.
+   Keep duplicate-name rules and measured-flow/actuation distinctions unchanged.
+4. Reuse a focused modal hook for initial focus, Escape, Tab containment, outside
+   focus containment and restoring the opener in SensorMonitor, ValveOpenDialog
+   and the shared Modal. Make LanguageSwitcher a keyboard-operable menu.
+5. Refresh valve display time on data transitions before using it for countdowns;
+   continue periodic updates only while needed. Keep pause and closure semantics.
+6. Use a demo-scoped datetime adapter for consistent Africa/Kampala timestamps;
+   make SensorMonitor use the shared formatter and include configured probe depth
+   in its Kiwi title. Keep production date defaults unchanged.
+7. Keep logout/account linking inside the simulator by intercepting semantic menu
+   action identifiers at the demo boundary, with explicit feedback. Production
+   menu actions retain their behavior. Consolidate demo notices outside the phone,
+   make them dismissible and clear them during navigation.
+8. Put presenter controls beside the enlarged app. Resize its scrollable viewport
+   instead of shrinking its text to fit the full 844px height. Preserve the iframe
+   and state; retain the normal 390x844 viewport. Show a clear paused indicator and
+   focus the reveal example at startup.
+9. Improve new-zone feedback by scrolling/focusing the created zone, enlarge its
+   toggle target, and clarify the demo's empty recent-actuation wording. Do not
+   invent a measured-volume-to-valve-log relationship or certify Luganda wording.
+10. Run targeted regressions, the full demo browser/model suites, production unit
+    tests, both typechecks/builds and independent review. Update screenshots,
+    rehearsal notes and verification limits. Teams sharing remains a manual check.
+
+The plan reviewer required an explicit topmost-dialog stack, an alias that leaves
+explicit timezones intact, semantic account action markers, and a direct-app
+notice fallback. These are implemented. The initial nine browser regressions
+failed against the previous build; the repaired flows pass, with a tenth case
+covering direct app.html use. Independent implementation review found no blocker.
+
+Final independent verification passed all 25 browser tests, 213 Node-runner tests
+and 2,138 Vitest tests across 207 files. The author also passed 18 simulator tests,
+both typechecks and both builds. The two reviewers found no blocking issue;
+720p enlargement and French actions were inspected visually. The verification
+record and screenshots are updated in `web/react-gui/demo/`.

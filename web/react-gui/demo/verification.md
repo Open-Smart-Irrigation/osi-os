@@ -31,8 +31,9 @@ The browser suite exercises the built artifact:
   environment panel and no forecast; charts/tooltips, depths and wet/moist/dry colours.
 - Complete 30-day and 90-day charts at both 20 cm and 40 cm depths.
 - Valve acknowledgement, early close, timed close and reset during an opening.
-- 1920 × 1080 and 1280 × 720 layouts, exact 390 × 844 application viewport,
+- 1920 × 1080 and 1280 × 720 layouts, normal 390 × 844 application viewport,
   enlargement/restoration and inner scrolling without moving the outer page.
+  Enlargement renders at 1.25× at 720p using a shorter internal viewport and side controls.
 - Offline language change and water-card rendering after the app has loaded.
 - Memory-storage isolation, blocked fetch/XHR/WebSocket/EventSource/beacon and
   unavailable geolocation, plus rejection of a message from the wrong window.
@@ -41,34 +42,50 @@ The browser suite exercises the built artifact:
 - Existing device registration and SWT trigger save/reload, including retaining an
   unsaved threshold while changing languages.
 
-Every browser case checks for uncaught page errors and requests outside localhost.
+The original rehearsal cases also check for uncaught page errors and requests
+outside localhost. Ten additional polish cases cover expanded valve headings,
+French action labels, padded create buttons, new-zone focus, collapsed deletion,
+logout/account-link interception, dismissible notices, accelerated countdowns,
+paused feedback, dialog focus and Escape, language-menu arrow keys, enlargement
+without replacing the iframe, farm timezone rendering from two browser timezones,
+and notices when opening app.html directly.
 The localhost server has no API backend/proxy and serves restrictive CSP and
 permissions policies. No running gateway or cloud service was accessed.
 
 ## Evidence and limits
 
-The production suite passed 213 Node-runner tests and 2,136 Vitest tests across
-206 files. Production and demo builds passed;
-Vite emitted its existing large-chunk and browser-database-age warnings.
+The production suite passed 213 Node-runner tests and 2,138 Vitest tests across
+207 files. Production and demo builds passed. Vite emitted its existing
+large-chunk and browser-database-age warnings.
 
-The current revision adds wrapping for long translations and extends sensor
-histories to 90 days. Simulator and production checks passed for this revision.
+This revision repairs the external review’s presentation and interaction findings.
+Expanded STREGA names have their own row; translated actions have enough width;
+create/assign buttons are padded; collapsed zones show deletion confirmation.
+Demo account actions preserve the session and give dismissible feedback.
+The countdown reads the current simulated time when valve data changes, and date
+formatting defaults to the farm timezone only in the demo build. Dialogs trap
+keyboard focus, Escape closes them, and focus returns to their opener. The native
+language menu supports arrow keys and Escape. Enlarging preserves the frame and
+session while increasing text size. Soil history titles include configured depths.
 
-A separate verifier reran all 17 simulator tests, the demo typecheck and build,
-all 15 browser cases and 48 focused UI tests. Code review found no blocking issue.
-The Luganda wrapping and longer soil-chart screenshots were also inspected visually.
+The author reproduced nine failing browser regressions before implementation.
+Independent implementation review found no blocker. A separate verifier then ran
+all 25 browser cases and the full production unit suite against the final changes;
+all passed. The verifier and author also inspected the enlarged 720p and French
+action screenshots. Luganda create buttons fit without horizontal overflow, with
+16px horizontal padding and separate rows in the narrow viewport.
 
 | Check | Result |
 | --- | --- |
-| `npm run demo:test` | 17 passed |
+| `npm run demo:test` | 18 passed |
 | `npx tsc -p demo/tsconfig.json --noEmit` | Passed |
 | `npm run demo:build` | Passed |
-| `npm run demo:test:browser` | 15 passed in Chromium |
-| `npm run test:unit` | 213 Node tests passed; 2,136 Vitest tests passed |
+| `npm run demo:test:browser` | 25 passed in Chromium |
+| `npm run test:unit` | 213 Node tests passed; 2,138 Vitest tests passed |
 | `npm run typecheck` | Passed |
 | `npm run build` | Passed |
 
-The verifier also checked that the host returns 200, API and path-traversal
+The earlier verifier also checked that the host returns 200, API and path-traversal
 requests return 404, and the server sends the restrictive CSP and permissions
 headers. Normal production sources have no demo imports. DashboardHeader mounts the native
 language selector, ValveControlPanel uses compact help, ValveTile moves last-seen
@@ -76,7 +93,8 @@ above the name, and Settings marks experimental module rows; the normal producti
 
 Screenshots: `overview.png`, `populated-zone.png`, `french.png`, `open-valve.png`,
 `layout-1920.png`, `layout-1280.png`, `soil-history-7-days.png`, `settings.png`,
-`luganda-wrapping.png`, and 30-/90-day charts at both depths under `screenshots/`.
+`luganda-wrapping.png`, `enlarged-720p.png`, `french-valve-actions.png`, and
+30-/90-day charts at both depths under `screenshots/`.
 
 A separate agronomy agent extended the event sequence, depth delays,
 climate cycles and meter totals. The reviewer found no substantive inconsistency;

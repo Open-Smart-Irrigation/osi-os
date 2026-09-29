@@ -402,7 +402,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   }, [hasDendroDevices, zone.id]);
 
   return (
-    <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
+    <div id={`irrigation-zone-${zone.id}`} className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
       {/* Zone Header — stacks vertically on mobile */}
       <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-3">
         {/* The pencil is a button, so the heading can no longer sit inside the
@@ -420,7 +420,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             headingClassName="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text break-words"
           />
           <button
-            className="text-left flex items-center gap-2 group"
+            className="min-h-[44px] px-2 text-left flex items-center gap-2 group"
             aria-expanded={!zoneCollapsed}
             // T13-M2: the heading moved out of this button (above), so its own visible
             // content -- the chevron glyph plus the device-count text -- no longer names
@@ -518,6 +518,44 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           </span>
         )}
       </div>
+
+      {error && (
+        <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
+          {error}
+        </div>
+      )}
+
+      {canWrite && showDeleteConfirm && (
+        <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
+          <p className="font-bold mb-2">{t('zone.deleteConfirm')}</p>
+          <p className="text-sm mb-3">
+            {t('zone.deleteSubtitle')}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleDeleteZone}
+              disabled={isDeleting}
+              className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center gap-2 disabled:text-[var(--text-disabled)]"
+            >
+              {isDeleting ? (
+                <>
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                  {t('zone.deleting')}
+                </>
+              ) : (
+                t('zone.yesDelete')
+              )}
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeleting}
+              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            >
+              {tc('cancel')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {!zoneCollapsed && (
       <>
@@ -679,44 +717,6 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 </p>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
-          {error}
-        </div>
-      )}
-
-      {canWrite && showDeleteConfirm && (
-        <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
-          <p className="font-bold mb-2">{t('zone.deleteConfirm')}</p>
-          <p className="text-sm mb-3">
-            {t('zone.deleteSubtitle')}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={handleDeleteZone}
-              disabled={isDeleting}
-              className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center gap-2 disabled:text-[var(--text-disabled)]"
-            >
-              {isDeleting ? (
-                <>
-                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                  {t('zone.deleting')}
-                </>
-              ) : (
-                t('zone.yesDelete')
-              )}
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(false)}
-              disabled={isDeleting}
-              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
-            >
-              {tc('cancel')}
-            </button>
           </div>
         </div>
       )}

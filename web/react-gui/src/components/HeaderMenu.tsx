@@ -111,6 +111,7 @@ export const HeaderMenu: React.FC<HeaderMenuProps> = ({
             item.to ? (
               <Link
                 key={item.key}
+                data-action={item.key}
                 to={item.to}
                 role="menuitem"
                 tabIndex={-1}
@@ -123,14 +124,15 @@ export const HeaderMenu: React.FC<HeaderMenuProps> = ({
             ) : (
               <button
                 key={item.key}
+                data-action={item.key}
                 type="button"
                 role="menuitem"
                 tabIndex={-1}
                 ref={(element) => { itemRefs.current[index] = element; }}
                 className={ITEM_CLASS}
                 onClick={() => {
+                  close();
                   item.onSelect?.();
-                  close(false);
                 }}
               >
                 {item.label}

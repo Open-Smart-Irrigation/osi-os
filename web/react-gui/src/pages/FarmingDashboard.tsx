@@ -122,8 +122,13 @@ export const FarmingDashboard: React.FC = () => {
     mutateDevices();
   };
 
-  const handleZoneCreated = () => {
-    mutateZones();
+  const handleZoneCreated = async (zone: IrrigationZone) => {
+    await mutateZones();
+    requestAnimationFrame(() => {
+      const card = document.getElementById(`irrigation-zone-${zone?.id}`);
+      card?.scrollIntoView({ block: 'center' });
+      card?.querySelector<HTMLButtonElement>('button[aria-expanded]')?.focus({ preventScroll: true });
+    });
   };
 
   // Group devices by zone

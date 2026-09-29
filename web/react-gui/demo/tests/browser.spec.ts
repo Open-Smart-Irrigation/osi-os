@@ -20,7 +20,7 @@ test('real app starts with fictional farm, two zones, offline translations', asy
   await expect(app.getByRole('button', {name: /Demonstration bed.*device/})).toBeVisible();
   await page.screenshot({path: 'demo/screenshots/overview.png'});
   await app.getByRole('button', {name: 'English'}).click();
-  await app.getByRole('button', {name: 'Français', exact: true}).click();
+  await app.getByRole('menuitem',{name: 'Français', exact: true}).click();
   await expect(app.getByRole('button', {name: 'Français'})).toBeVisible();
   await page.screenshot({path: 'demo/screenshots/french.png'});
   expect(errors).toEqual([]); expect(external).toEqual([]);
@@ -43,9 +43,9 @@ test('zone creation, assignment, removal and language preserve existing farm', a
   await expect(app.getByRole('button', {name: /Temporary bed.*1 device/})).toBeVisible();
   await app.getByRole('button', {name: /Temporary bed.*1 device/}).click();
   await app.getByRole('button', {name:'English'}).click();
-  await app.getByRole('button', {name:'Français', exact:true}).click();
+  await app.getByRole('menuitem',{name:'Français', exact:true}).click();
   await expect(app.getByRole('button', {name:/Temporary bed/})).toHaveAttribute('aria-expanded','true');
-  await app.getByRole('button', {name:'Français'}).click();await app.getByRole('button', {name:'English', exact:true}).click();
+  await app.getByRole('button', {name:'Français'}).click();await app.getByRole('menuitem',{name:'English', exact:true}).click();
   await card.getByRole('button', {name:'Delete', exact:true}).click();
   await app.getByRole('button', {name: /Yes, Delete/}).click();
   await expect(app.getByRole('button', {name:/Temporary bed/})).toHaveCount(0);
@@ -132,7 +132,7 @@ test('valve acknowledgement, early cancel, timed close and active reset', async 
   await page.getByRole('button', {name:'Reset demo'}).click();
   await expect(app.getByRole('button', {name:'English'})).toBeVisible();
   await expect(app.getByText('Closed', {exact:true}).first()).toBeVisible();
-  await expect(app.getByText('No recent irrigations recorded yet.')).toBeVisible();
+  await expect(app.getByText('No valve runs recorded in this demo session. Water balance shows simulated flow-meter readings.')).toBeVisible();
 });
 
 for (const size of [{width:1920,height:1080},{width:1280,height:720}]) {
@@ -148,7 +148,7 @@ for (const size of [{width:1920,height:1080},{width:1280,height:720}]) {
     await expect(app.getByRole('button',{name:/Tomato plot/})).toHaveAttribute('aria-expanded','true');
     await page.getByRole('button',{name:'Return to slide'}).click();
     await context.setOffline(true);
-    await app.getByRole('button',{name:'English'}).click();await app.getByRole('button',{name:'Français',exact:true}).click();
+    await app.getByRole('button',{name:'English'}).click();await app.getByRole('menuitem',{name:'Français',exact:true}).click();
     await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
     await app.getByRole('button',{name:/Tomato plot/}).hover();await page.mouse.wheel(0,400);
     await expect.poll(()=>frame.evaluate(()=>scrollY)).toBeGreaterThan(0);
@@ -207,12 +207,12 @@ test('existing device registration and SWT trigger configuration', async ({page}
   await app.getByRole('button',{name:/Tomato plot.*devices/}).click();
   await app.getByRole('button',{name:/Trigger-based irrigation/i}).click();
   await app.getByLabel('Threshold (kPa)').fill('70');
-  await app.getByRole('button',{name:'English'}).click();await app.getByRole('button',{name:'Français',exact:true}).click();
+  await app.getByRole('button',{name:'English'}).click();await app.getByRole('menuitem',{name:'Français',exact:true}).click();
   await expect(app.locator('#swt-threshold-1')).toHaveValue('70');
-  await app.getByRole('button',{name:'Français'}).click();await app.getByRole('button',{name:'English',exact:true}).click();
+  await app.getByRole('button',{name:'Français'}).click();await app.getByRole('menuitem',{name:'English',exact:true}).click();
   await app.getByRole('button',{name:'Save schedule',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('Automatic trigger execution is not simulated');
-  await app.locator('#demo-notice').click();
+  await page.getByRole('button',{name:'Dismiss notice'}).click();
   await app.getByRole('button',{name:'Reload',exact:true}).click();await expect(app.getByLabel('Threshold (kPa)')).toHaveValue('70');
 });
 
@@ -225,8 +225,8 @@ test('all shipped languages work offline and preserve the open zone', async ({pa
   let current='English';
   for(const label of ['Deutsch','Français','Italiano','Español','Português','Luganda','English']) {
     await app.getByRole('button',{name:current,exact:true}).click();
-    await expect(app.getByRole('banner').getByRole('button')).toHaveCount(10);
-    await app.getByRole('button',{name:label,exact:true}).click();
+    await expect(app.getByRole('menuitem')).toHaveCount(7);
+    await app.getByRole('menuitem',{name:label,exact:true}).click();
     await expect(app.getByRole('button',{name:label,exact:true})).toBeVisible();
     await expect(app.getByRole('button',{name:/Tomato plot/})).toHaveAttribute('aria-expanded','true');
     await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
@@ -260,7 +260,7 @@ test('valve text and compact tooltip work in every language, with unclipped iden
   let current='English';
   for(let index=0;index<labels.length;index++) {
     const label=labels[index];
-    if(label!==current){await app.getByRole('button',{name:current,exact:true}).click();await app.getByRole('button',{name:label,exact:true}).click();}
+    if(label!==current){await app.getByRole('button',{name:current,exact:true}).click();await app.getByRole('menuitem',{name:label,exact:true}).click();}
     const heading=app.getByRole('heading',{name:titles[index],exact:true});
     await expect(heading).toBeVisible();
     const panel=heading.locator('xpath=../..');
@@ -277,7 +277,7 @@ test('valve text and compact tooltip work in every language, with unclipped iden
     expect(seenBox!.y+seenBox!.height).toBeLessThanOrEqual(nameBox!.y);
     expect(await name.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
     // The first button in the tile is the rename pencil, so use its primary-action grid.
-    const open=panel.locator('.grid.grid-cols-2 > button').first();
+    const open=panel.locator('[data-testid="valve-actions"] > button').first();
     await open.click();
     await expect(app.getByRole('dialog').getByRole('spinbutton')).toBeVisible();
     if(index>0)await expect(app.getByRole('dialog')).not.toContainText('Duration (min)');
@@ -328,18 +328,18 @@ test('long translations wrap across all languages, including Luganda settings', 
   };
   for(const label of labels) {
     await app.getByRole('button',{name:current,exact:true}).click();
-    await app.getByRole('button',{name:label,exact:true}).click();
+    await app.getByRole('menuitem',{name:label,exact:true}).click();
     await expectTextToFit();
     // The native zone accordion retains its label and state when the language changes.
     const toggle=app.getByRole('button',{name:/^Tomato plot/});
     if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
     await expectTextToFit();
     const valve=app.getByTestId('valve-last-seen').locator('..');
-    await valve.locator('.grid.grid-cols-2 > button').click();
+    await valve.locator('[data-testid="valve-actions"] > button').click();
     await expect(app.getByRole('dialog').getByRole('spinbutton')).toBeVisible();
     await expectTextToFit();
     await app.getByRole('dialog').getByRole('button').first().click();
-    await valve.locator('.grid.grid-cols-2 > div > button').click();
+    await valve.locator('[data-testid="valve-actions"] > div > button').click();
     await expect(app.getByRole('dialog')).toBeVisible();
     await expectTextToFit();
     await app.getByRole('dialog').getByRole('button').first().click();
@@ -357,6 +357,6 @@ test('long translations wrap across all languages, including Luganda settings', 
   }
   await app.getByRole('link',{name:'Settings',exact:true}).click();
   await app.getByRole('button',{name:'English',exact:true}).click();
-  await app.getByRole('button',{name:'Luganda',exact:true}).click();
+  await app.getByRole('menuitem',{name:'Luganda',exact:true}).click();
   await expectTextToFit();
 });

@@ -211,17 +211,17 @@ export const ValveTile: React.FC<ValveTileProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div data-testid="valve-actions" className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={primaryAction.onClick}
           disabled={busy}
-          className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex flex-1 basis-[100px] min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy && <Spinner />}
           {primaryAction.label}
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-1 basis-[180px] items-center gap-2">
           <button
             type="button"
             onClick={onSchedule}

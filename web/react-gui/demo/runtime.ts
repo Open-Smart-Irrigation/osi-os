@@ -42,7 +42,7 @@ const strings = {
 };
 function notice(message: string) {
   const el = document.getElementById('demo-notice');
-  if (el) {el.textContent = message; el.hidden = false;}
+  if (el && parent === window) {el.textContent = message; el.hidden = !message;}
   parent.postMessage({channel: CHANNEL, type: 'notice', message}, location.origin);
 }
 function block(): never { const message = strings[i18n.language === 'fr' ? 'fr' : 'en'].blocked; notice(message); throw new Error(message); }
@@ -63,11 +63,18 @@ Object.defineProperty(window, 'webkit', {value: undefined});
 
 // Guard link/form navigation too: sandbox + CSP are a second independent boundary.
 document.addEventListener('click', e => {
+  const action = (e.target as Element)?.closest?.('[data-action]')?.getAttribute('data-action');
+  if (action === 'logout' || action === 'osi-server') {
+    e.preventDefault(); e.stopPropagation();
+    notice(strings[i18n.language === 'fr' ? 'fr' : 'en'].unsupported);
+    return;
+  }
   const anchor = (e.target as Element)?.closest?.('a');
   if (!anchor) return;
   const next = new URL(anchor.href, location.href);
   if (next.origin !== location.origin || next.pathname !== location.pathname) {e.preventDefault(); notice(strings[i18n.language === 'fr' ? 'fr' : 'en'].unsupported);}
 }, true);
+window.addEventListener('hashchange', () => notice(''));
 document.addEventListener('submit', e => e.preventDefault(), true);
 axios.defaults.adapter = async config => {
   try {

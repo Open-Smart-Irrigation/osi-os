@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   Area,
   AreaChart,
@@ -8,6 +8,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useModalFocus } from '../../hooks/useModalFocus';
+import { useDateFormat, type DateFormatter } from '../../utils/datetime';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
 
 interface Props {
@@ -37,19 +39,18 @@ const TIME_WINDOWS = [
   { label: '90 d', hours: 2160 },
 ];
 
-function fmtTick(iso: string, hours: number): string {
-  const d = new Date(iso);
-  if (hours <= 24) return d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
-  if (hours <= 168) return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric' });
+function fmtTick(iso: string, hours: number, format: DateFormatter): string {
+  if (hours <= 24) return format.time(iso) ?? '—';
+  if (hours <= 168) return format.date(iso, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—';
+  return format.date(iso) ?? '—';
 }
 
-const ChartTooltip = ({ active, payload, label, unit, decimals, hours }: any) => {
+const ChartTooltip = ({ active, payload, label, unit, decimals, hours, format }: any) => {
   if (!active || !payload?.length) return null;
   const value: number = payload[0].value;
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
-      <p className="text-[var(--text-tertiary)] mb-1">{fmtTick(label, hours)}</p>
+      <p className="text-[var(--text-tertiary)] mb-1">{fmtTick(label, hours, format)}</p>
       <p className="font-bold text-[var(--text)]">{value?.toFixed(decimals ?? 1)} {unit}</p>
     </div>
   );
@@ -67,6 +68,9 @@ export const SensorMonitor: React.FC<Props> = ({
   initialField,
   onClose,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, true, onClose);
+  const format = useDateFormat();
   const effectiveSeriesOptions = seriesOptions?.length
     ? seriesOptions
     : [{ field, label, unit, color, decimals }];
@@ -122,7 +126,7 @@ export const SensorMonitor: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-end" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="w-full max-w-2xl bg-[var(--bg)] flex flex-col h-full overflow-y-auto shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={activeLabel} tabIndex={-1} className="w-full max-w-2xl bg-[var(--bg)] flex flex-col h-full overflow-y-auto shadow-2xl">
         <div className="bg-[var(--header-bg)] px-6 py-4 flex items-center justify-between shrink-0">
           <div>
             <h2 className="text-2xl font-bold text-[var(--header-text)] high-contrast-text">{activeLabel}</h2>
@@ -214,7 +218,7 @@ export const SensorMonitor: React.FC<Props> = ({
                     <XAxis
                       dataKey="t"
                       ticks={ticks}
-                      tickFormatter={(value) => fmtTick(value, hours)}
+                      tickFormatter={(value) => fmtTick(value, hours, format)}
                       tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
                       axisLine={{ stroke: 'var(--border)' }}
                       tickLine={false}
@@ -227,7 +231,7 @@ export const SensorMonitor: React.FC<Props> = ({
                       tickLine={false}
                       width={52}
                     />
-                    <Tooltip content={<ChartTooltip unit={activeUnit} decimals={activeDecimals} hours={hours} />} />
+                    <Tooltip content={<ChartTooltip format={format} unit={activeUnit} decimals={activeDecimals} hours={hours} />} />
                     <Area
                       type="monotone"
                       dataKey="value"

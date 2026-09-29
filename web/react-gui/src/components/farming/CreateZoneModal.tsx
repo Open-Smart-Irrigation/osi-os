@@ -4,10 +4,12 @@ import { useTranslation } from 'react-i18next';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
 import { normalizeEntityName } from '../../utils/entityName';
 
+import type { IrrigationZone } from '../../types/farming';
+
 interface CreateZoneModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onZoneCreated: () => void;
+  onZoneCreated: (zone: IrrigationZone) => void;
 }
 
 export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
@@ -37,9 +39,9 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
 
     setLoading(true);
     try {
-      await irrigationZonesAPI.create({ name: normalized.name });
+      const zone = await irrigationZonesAPI.create({ name: normalized.name });
       setName('');
-      onZoneCreated();
+      onZoneCreated(zone);
       onClose();
     } catch (err: any) {
       setError(err.response?.data?.message || t('createZoneModal.failed'));
@@ -69,11 +71,11 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
           />
         </FormField>
 
-        <div className="flex gap-4 pt-4">
-          <Button variant="secondary" onClick={onClose} className="flex-1 text-lg py-4">
+        <div className="flex flex-wrap gap-4 pt-4">
+          <Button variant="secondary" onClick={onClose} className="flex-1 basis-40 text-lg px-4 py-3">
             {tc('cancel')}
           </Button>
-          <Button type="submit" disabled={loading} className="flex-1 text-lg py-4 shadow-lg">
+          <Button type="submit" disabled={loading} className="flex-1 basis-40 text-lg px-4 py-3 shadow-lg">
             {loading ? t('createZoneModal.creating') : t('createZoneModal.submit')}
           </Button>
         </div>

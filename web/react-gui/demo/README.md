@@ -69,7 +69,12 @@ Use Node 22 or newer, as used during verification. Set `DEMO_PORT` if 4173 is bu
 
 Reset demo restores the exact dataset, route, English, light theme, clock and
 closed valve, including during an active countdown. Enlarge demo and Return to
-slide retain the same iframe and application state. Pause freezes simulated time.
+slide retain the same iframe and application state. Enlargement gives the app a
+shorter, scrollable viewport and places presenter controls beside it on desktop.
+At 1280 × 720, the enlarged phone renders at 1.25× rather than shrinking the
+entire tall screen. Pause freezes simulated time and displays a waiting message.
+All demo timestamps use the farm’s Africa/Kampala timezone. Dialogs support Escape,
+keep keyboard focus inside, and return focus to their opener when closed.
 **Slide focus**, or **Shift + Escape** inside the phone, returns keyboard focus to
 reveal. Normal arrows, typing, space and scrolling remain inside the phone.
 
@@ -166,8 +171,9 @@ accelerated sessions can make fixed sensor samples stale, which the real UI show
 Unknown operations return a translated failure and a visible notice. Account
 linking, radio/service configuration, weekly valve-plan mutation, device removal,
 zone configuration changes, data export, system administration and live location
-are outside this simulator. Dismiss an in-phone notice by clicking it; its text
-also remains outside the phone. Settings still exposes the real app's controls,
+are outside this simulator. Logout is also intercepted so the session stays usable.
+Notices appear beside the phone and have a Dismiss notice button. Navigation clears
+them. When opening app.html directly, notices appear inside the app and dismiss on click. Settings still exposes the real app's controls,
 so attempts at unsupported actions are rejected rather than represented as saved.
 
 Transport isolation is installed before App imports its API module. The Axios
