@@ -128,7 +128,19 @@ export class Simulator {
         const current = d.latest_data[field as keyof Device['latest_data']];
         if (typeof current !== 'number') return [];
         const hours = Math.min(168, Math.max(1, Number(url.searchParams.get('hours')) || 24));
-        return Array.from({length: hours * 4 + 1}, (_, i) => ({t: iso(DEMO_EPOCH - (hours * 4 - i) * 900000), value: Number((current - (hours * 4 - i) * 0.055 + Math.sin(i / 7) * 0.4 - Math.sin(hours * 4 / 7) * 0.4).toFixed(2))}));
+        return Array.from({length: hours * 4 + 1}, (_, i) => {
+          const t = DEMO_EPOCH - (hours * 4 - i) * 900000;
+          if (d.type_id === 'DRAGINO_LSN50' && /^(rain_mm|flow_liters)_/.test(field)) {
+            // One historical sample two hours before the fixed snapshot, on the same local day.
+            const total = (field.startsWith('rain_') ? d.latest_data.rain_mm_today : d.latest_data.flow_liters_today) ?? 0;
+            const eventAt = DEMO_EPOCH - 7200000;
+            const amount = t === eventAt ? total : 0;
+            const value = field.endsWith('_today') ? (t >= eventAt ? total : 0)
+              : field.endsWith('_per_10min') ? amount * 10 / 15 : amount;
+            return {t: iso(t), value};
+          }
+          return {t: iso(t), value: Number((current - (hours * 4 - i) * 0.055 + Math.sin(i / 7) * 0.4 - Math.sin(hours * 4 / 7) * 0.4).toFixed(2))};
+        });
       }
     }
     if (path === `/api/valves/${VALVE_EUI}/settings` && method === 'PUT') {

@@ -63,3 +63,20 @@ otherwise require leaving the current screen. Production components are unchange
 The independent code review found and closed a geolocation gap and corrected the
 environment sensor count to exclude valves. Reset uses a changing session query
 to force a new document even when the current hash route is already the dashboard.
+
+
+## Offline sensor revision
+
+The presenter requested OSI OS branding, all currently supported languages, and
+an offline sensor scenario. Hide the full environment module by default with its
+existing preference. Seed one MOD9 rain/flow node per zone, keep measurements
+fixed and consistent across history and daily summaries, and remove forecast,
+demand and computed advice. Limit the existing water card to rain and measured
+litres with demo-only styles and translation overrides. Bundle all seven existing
+locales, preserving their fallback policy. Test every language offline and refresh
+the screenshots and rehearsal notes.
+
+Independent plan review required matching device/summary values, an explicit
+false environment preference, removal of demand-oriented copy, and browser checks
+for the hidden advice, estimate and soil-summary tiles. The implementation adopts
+these requirements. Soil cards and history remain available through device cards.

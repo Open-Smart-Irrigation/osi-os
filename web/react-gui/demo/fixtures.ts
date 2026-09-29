@@ -16,35 +16,48 @@ export function sensorFixture(deveui: string, name: string, zoneId: number | nul
     latest_data: { swt_1: swt1, swt_2: swt2, ambient_temperature: 26.4,
       relative_humidity: 68, light_lux: 12500, bat_pct: 92 } };
 }
+function waterSensorFixture(id: number): Device {
+  return {deveui: `00000000000000E${id}`, name: `${id === 1 ? 'Tomato' : 'Bed'} rain and flow meter`,
+    type_id: 'DRAGINO_LSN50', irrigation_zone_id: id, last_seen: iso(DEMO_EPOCH),
+    rain_gauge_enabled: 1, flow_meter_enabled: 1, temp_enabled: 0, dendro_enabled: 0,
+    latest_data: {lsn50_mode_code: 9, lsn50_mode_label: 'MOD9', lsn50_mode_observed_at: iso(DEMO_EPOCH),
+      rain_mm_today: id === 1 ? 0 : 6, rain_mm_delta: 0, rain_mm_per_10min: 0,
+      flow_liters_today: id === 1 ? 120 : 80, flow_liters_delta: 0, flow_liters_per_10min: 0,
+      counter_interval_seconds: 900, rain_delta_status: 'ok', flow_delta_status: 'ok', bat_pct: 90}};
+}
 export function seedDevices(): Device[] {
   return [sensorFixture('00000000000000A1', 'Tomato soil probe', 1, 68, 56),
     sensorFixture('00000000000000A2', 'Bed soil probe', 2, 12, 35),
     sensorFixture(SPARE_EUI, 'Spare demonstration probe', null),
+    waterSensorFixture(1), waterSensorFixture(2),
     { deveui: VALVE_EUI, name: 'Tomato valve', type_id: 'STREGA_VALVE', irrigation_zone_id: 1,
       strega_model: 'STANDARD', current_state: 'CLOSED', target_state: 'CLOSED',
       last_seen: iso(DEMO_EPOCH), latest_data: { bat_pct: 94 } }];
 }
-// Simulated backend output, matching resolveWaterAction in osi-zone-env/index.js.
-// No live weather service, ET0 calculation or crop prediction runs here.
+// Fixed sensor snapshots: no weather service, forecast, ET0 or demand calculation.
 export function environmentFixture(zone: IrrigationZone, devices: Device[]): ZoneEnvironmentSummary {
-  const sensorCount = devices.filter(d => d.type_id === 'KIWI_SENSOR').length;
+  const sensorCount = devices.filter(d => d.type_id !== 'STREGA_VALVE').length;
+  const rainGauge = devices.find(d => d.rain_gauge_enabled === 1);
+  const flowMeter = devices.find(d => d.flow_meter_enabled === 1);
+  const rain = rainGauge?.latest_data.rain_mm_today ?? null;
+  const liters = flowMeter?.latest_data.flow_liters_today ?? null;
+  const netMm = liters == null ? null : liters / 100 * 0.85;
   const populated = sensorCount > 0;
-  const dry = zone.id === 1;
   const at = populated ? iso(DEMO_EPOCH) : null;
   return { zoneId: zone.id, zoneName: zone.name, generatedAt: iso(DEMO_EPOCH),
     location: { latitude: null, longitude: null, timezone: 'Africa/Kampala', source: 'unavailable' },
     display: { mode: 'unlinked_local', schedulingMode: 'local', sourceLabel: 'Demo', sharedGeneratedAt: null, sharedObservedAt: null, lastReceivedAt: null, fallbackReason: null },
     water: { available: populated, observedAt: at, areaM2: 100, irrigationEfficiencyPct: 85,
-      rainTodayMm: dry ? 0 : 6, irrigationTodayLiters: 0, irrigationTodayNetMm: 0,
-      irrigationTodayMeasuredLiters: null, irrigationTodayEstimatedLiters: null,
-      waterNeededTodayMm: 4, balanceTodayMm: dry ? -4 : 2, next24hRainMm: dry ? 0.5 : 5,
-      action: populated ? { code: dry ? 'irrigate_today' : 'delay_irrigation', source: 'heuristic',
-        reasonCode: dry ? 'demand_exceeds_supply' : 'supply_covers_demand', recommendationDate: '2026-09-29' } : null,
-      daily: Array.from({length: 7}, (_, i) => ({ date: iso(DEMO_EPOCH - (6 - i) * 86400000).slice(0, 10),
-        rainMm: dry ? [2, 0, 1, 0, 0, 0, 0][i] : [1, 0, 3, 0, 2, 4, 6][i], irrigationLiters: 0, irrigationNetMm: 0, totalWaterMm: dry ? [2, 0, 1, 0, 0, 0, 0][i] : [1, 0, 3, 0, 2, 4, 6][i] })),
-      sensorHealth: {sensorCount, freshSensorCount: sensorCount, staleSensorCount: 0, rainGaugePresent: false, flowMeterPresent: false, warnings: []} },
+      rainTodayMm: rain, irrigationTodayLiters: liters, irrigationTodayNetMm: netMm,
+      irrigationTodayMeasuredLiters: liters, measuredIrrigationNetMm: netMm, irrigationTodayEstimatedLiters: null,
+      waterNeededTodayMm: null, balanceTodayMm: null, next24hRainMm: null, action: null,
+      daily: [{date: iso(DEMO_EPOCH).slice(0, 10), rainMm: rain, irrigationLiters: liters,
+        irrigationNetMm: netMm, measuredIrrigationLiters: liters, measuredIrrigationNetMm: netMm,
+        totalWaterMm: rain == null || netMm == null ? null : rain + netMm}],
+      sensorHealth: {sensorCount, freshSensorCount: sensorCount, staleSensorCount: 0,
+        rainGaugePresent: !!rainGauge, flowMeterPresent: !!flowMeter, warnings: []} },
     local: {available: populated, observedAt: at, sensorCount, freshSensorCount: sensorCount, staleSensorCount: 0, metrics: [], devices: []},
     online: {available: false, source: 'unavailable', cacheStatus: 'miss', observedAt: null, expiresAt: null, current: null},
     agronomic: {preferredSource: 'unavailable', current: null},
-    forecast: {available: populated, source: 'open_meteo', cacheStatus: 'stale', observedAt: at, expiresAt: at, rainFocus: populated ? {totalNext24hMm: dry ? 0.5 : 5, totalNext72hMm: dry ? 2 : 9, maxHourlyRainMm: dry ? 0.5 : 5, maxHourlyRainAt: iso(DEMO_EPOCH + 3600000), nextRainEta: iso(DEMO_EPOCH + 3600000), rainHoursNext24h: 1, daily: [], hourly: [{time: iso(DEMO_EPOCH + 3600000), rainMm: dry ? 0.5 : 5, rainProbabilityPct: 70, tempC: 26, windSpeedMps: 1.2}]} : null} };
+    forecast: {available: false, source: 'unavailable', cacheStatus: 'miss', observedAt: null, expiresAt: null, rainFocus: null} };
 }

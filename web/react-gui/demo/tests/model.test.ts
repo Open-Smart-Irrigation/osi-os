@@ -78,7 +78,7 @@ test('manual override closes an observed valve; settings never silently accept u
 test('trigger configuration and synthetic device registration remain local and validate inputs', () => {
   const sim = new Simulator();
   sim.request('POST','/api/devices',{deveui:'00000000000000B0',name:'Practice',type_id:'KIWI_SENSOR'});
-  assert.equal(sim.devices.length,5);
+  assert.equal(sim.devices.length,7);
   assert.throws(()=>sim.request('POST','/api/devices',{deveui:'1234567890123456',name:'Not a fixture',type_id:'KIWI_SENSOR'}));
   const schedule=sim.request('PUT','/api/irrigation-zones/1/schedule',{trigger_metric:'SWT_1',threshold_kpa:70,enabled:true,duration_minutes:5});
   assert.deepEqual(sim.zones[0].schedule,schedule);

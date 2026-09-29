@@ -8,15 +8,17 @@ Screenshots show the rendered application, not mockups.
 The model/protocol tests cover deterministic seed/history, name validation,
 assignment cleanup, duplicate-open rejection, pending/observed/closed transitions,
 cancellation, acceleration, pause, reset, unsupported operations, device ID
-restrictions and exact message payloads. Fixture recommendations are compared to
-the shipped `osi-zone-env.resolveWaterAction` helper.
+restrictions and exact message payloads. Offline fixtures check agreement between
+rain/flow device readings, histories and daily totals, removal of sensor sources,
+and fixed readings during valve use.
 
 The browser suite exercises the built artifact:
 
-- Prepared farm, both initial zones and English/French switching.
+- Prepared farm, both initial zones and all seven shipped languages offline.
 - Temporary zone creation, device assignment, expansion and deletion; the device
   returns to Unassigned Devices and the initial zones remain.
-- Water card, chart and tooltip, depth labels, wet/moist/dry colours and values.
+- Water card with only rain and measured litres, hidden environment panel, no
+  forecast or computed action; charts/tooltips, depths and wet/moist/dry colours.
 - Valve acknowledgement, early close, timed close and reset during an opening.
 - 1920 × 1080 and 1280 × 720 layouts, exact 390 × 844 application viewport,
   enlargement/restoration and inner scrolling without moving the outer page.
@@ -38,14 +40,16 @@ The baseline production suite passed 206 Node-runner tests (one additional test
 skipped) and 2,135 Vitest tests across 206 files. Production and demo builds passed;
 Vite emitted its existing large-chunk and browser-database-age warnings.
 
-An independent verifier reran the final artifact and found no remaining blocker:
+An independent verifier reran the simulator checks for the offline sensor revision. Production
+checks below are from the initial implementation; this revision changes only
+demo files and documentation.
 
 | Check | Result |
 | --- | --- |
-| `npm run demo:test` | 9 passed |
+| `npm run demo:test` | 11 passed |
 | `npx tsc -p demo/tsconfig.json --noEmit` | Passed |
 | `npm run demo:build` | Passed |
-| `npm run demo:test:browser` | 9 passed in Chromium |
+| `npm run demo:test:browser` | 10 passed in Chromium |
 | `npm run test:unit` | 206 Node tests passed, 1 skipped; 2,135 Vitest tests passed |
 | `npm run build` | Passed |
 

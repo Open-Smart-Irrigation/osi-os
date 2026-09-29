@@ -21,6 +21,7 @@ Object.defineProperty(window, 'sessionStorage', {value: new MemoryStorage()});
 localStorage.setItem('auth_token', 'inert-demo-session-not-a-jwt');
 localStorage.setItem('username', 'MUARIK · Demo');
 localStorage.setItem('osi.display.theme', 'light');
+localStorage.setItem('osi.modules.environment', 'false');
 localStorage.setItem('osi.defaults.timezone', 'Africa/Kampala');
 
 const NativeDate = Date;

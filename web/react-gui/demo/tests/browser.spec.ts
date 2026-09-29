@@ -50,13 +50,20 @@ test('zone creation, assignment, removal and language preserve existing farm', a
   await app.getByRole('button', {name: /Yes, Delete/}).click();
   await expect(app.getByRole('button', {name:/Temporary bed/})).toHaveCount(0);
   await expect(app.getByText('Spare demonstration probe', {exact:true})).toBeVisible();
-  await expect(app.getByRole('button', {name:/Tomato plot.*2 devices/})).toBeVisible();
+  await expect(app.getByRole('button', {name:/Tomato plot.*3 devices/})).toBeVisible();
 });
 
 test('water card, real sensor charts and three status categories', async ({page}) => {
   await page.goto('/'); const app=page.frameLocator('#app');
   await app.getByRole('button', {name:/Tomato plot.*devices/}).click();
-  await expect(app.getByText('Irrigate today', {exact:true})).toBeVisible();
+  await expect(app.getByTestId('water-rain-tile')).toContainText('0.0 mm');
+  await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
+  await expect(app.getByTestId('water-forecast-tile')).toHaveCount(0);
+  await expect(app.getByTestId('water-action-tile')).toBeHidden();
+  await expect(app.getByTestId('water-flow-meter-tile').getByText(/Estimated/)).toBeHidden();
+  await expect(app.getByTestId('water-today-card')).not.toContainText('crop demand');
+  await expect(app.getByTestId('water-soil-tile')).toBeHidden();
+  await expect(app.getByRole('button', {name:/Environment & weather forecast/})).toHaveCount(0);
   await app.getByTestId('water-today-card').scrollIntoViewIfNeeded();
   await page.screenshot({path:'demo/screenshots/populated-zone.png'});
   await app.getByRole('button', {name:/Devices in this zone/}).click();
@@ -68,11 +75,12 @@ test('water card, real sensor charts and three status categories', async ({page}
   await app.getByRole('button',{name:'×',exact:true}).click();
   await app.getByRole('button',{name:/Demonstration bed.*device/}).click();
   await app.getByRole('button',{name:/Devices in this zone/}).last().click();
-  await expect(app.getByText('Delay irrigation',{exact:true})).toBeVisible();
+  await expect(app.getByTestId('water-rain-tile').last()).toContainText('6.0 mm');
   await expect(app.getByRole('button',{name:'12.0 kPa',exact:true})).toBeVisible();
   for (const [status,color] of [['wet','rgb(59, 130, 246)'],['moist','rgb(21, 128, 61)'],['dry','rgb(239, 68, 68)']]) {
-    await expect(app.locator(`[data-swt-status="${status}"]`).first()).toBeVisible();
-    await expect(app.locator(`[data-swt-status="${status}"] > span`).first()).toHaveCSS('background-color',color);
+    const indicator=app.locator(`[data-swt-status="${status}"]`).filter({visible:true}).first();
+    await expect(indicator).toBeVisible();
+    await expect(indicator.locator(':scope > span').first()).toHaveCSS('background-color',color);
   }
   await expect(page.locator('#host-notice')).toBeEmpty();
 });
@@ -118,7 +126,7 @@ for (const size of [{width:1920,height:1080},{width:1280,height:720}]) {
     await page.getByRole('button',{name:'Return to slide'}).click();
     await context.setOffline(true);
     await app.getByRole('button',{name:'English'}).click();await app.getByRole('button',{name:'Français',exact:true}).click();
-    await expect(app.getByText("Irriguer aujourd'hui",{exact:true})).toBeVisible();
+    await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
     await app.getByRole('button',{name:/Tomato plot/}).hover();await page.mouse.wheel(0,400);
     await expect.poll(()=>frame.evaluate(()=>scrollY)).toBeGreaterThan(0);
     expect(await page.evaluate(()=>scrollY)).toBe(0);
@@ -183,4 +191,23 @@ test('existing device registration and SWT trigger configuration', async ({page}
   await expect(page.getByRole('status')).toContainText('Automatic trigger execution is not simulated');
   await app.locator('#demo-notice').click();
   await app.getByRole('button',{name:'Reload',exact:true}).click();await expect(app.getByLabel('Threshold (kPa)')).toHaveValue('70');
+});
+
+
+test('all shipped languages work offline and preserve the open zone', async ({page,context}) => {
+  await page.goto('/');const app=page.frameLocator('#app');
+  await expect(app.getByRole('heading',{name:'OSI OS Dashboard',exact:true})).toBeVisible();
+  await app.getByRole('button',{name:/Tomato plot.*devices/}).click();
+  await context.setOffline(true);
+  let current='English';
+  for(const label of ['Deutsch','Français','Italiano','Español','Português','Luganda','English']) {
+    await app.getByRole('button',{name:current,exact:true}).click();
+    await expect(app.locator('.demo-language').getByRole('button')).toHaveCount(8);
+    await app.getByRole('button',{name:label,exact:true}).click();
+    await expect(app.getByRole('button',{name:label,exact:true})).toBeVisible();
+    await expect(app.getByRole('button',{name:/Tomato plot/})).toHaveAttribute('aria-expanded','true');
+    await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
+    await expect(app.getByTestId('water-forecast-tile')).toHaveCount(0);
+    current=label;
+  }
 });

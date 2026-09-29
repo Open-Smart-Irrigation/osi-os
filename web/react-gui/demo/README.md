@@ -3,7 +3,9 @@
 This runs the real edge React application inside a 390 × 844 iframe, with an
 in-memory REST adapter and a fictional MUARIK demonstration farm. It contains no
 MUARIK field records. The supplied standalone slide uses English presentation
-copy; the phone uses the existing English and French translations.
+copy; the phone bundles all seven supported languages: English, Deutsch (de-CH),
+Français, Italiano, Español, Português and Luganda. Existing English fallbacks
+remain where human Luganda translations are pending.
 
 No existing reveal.js deck was found in the available repositories or Downloads.
 `reveal.html` is a three-slide integration example, not the full WASAG talk.
@@ -47,7 +49,8 @@ Use Node 22 or newer, as used during verification. Set `DEMO_PORT` if 4173 is bu
    to assign “Spare demonstration probe”. Expand and collapse the zone, then
    Delete → Yes, Delete. The probe returns to Unassigned Devices. Starting zones
    are protected from deletion so the demonstration can continue.
-3. **1:30–2:35:** Expand Tomato plot. Its water card says **Irrigate today**.
+3. **1:30–2:35:** Expand Tomato plot. Its water card shows **Rain today: 0.0 mm** and
+   **Measured (flow meter): 120 L**. These are fixed simulated sensor readings.
    Expand **Devices in this zone** and select **68.0 kPa** to open the real history
    chart. Show 20 cm and 40 cm readings. In Demonstration bed, the 12 kPa wet
    reading is blue and 35 kPa moist reading is green. Tomato readings are red.
@@ -109,19 +112,26 @@ any different version used by the eventual presentation.
 | App, HashRouter, dashboard and zone components | Two fictional zones; records only in iframe memory |
 | Authentication and scope consumers | Inert demo session string, never a valid gateway token |
 | Existing forms, name validation, assignment and confirmation flows | Local CRUD; the two starting zones cannot be deleted |
-| LanguageSwitcher and i18next | Only bundled en/fr; no claim about Luganda review status |
-| Water card, translated reasons and environment panels | Fixed backend response, including a cached forecast sample |
+| LanguageSwitcher and i18next | All seven shipped locales, including existing English fallbacks in Luganda |
+| Water card and rain/flow device cards | Fixed local gauge and flow-meter samples; environment panel hidden by default |
 | Soil cards, thresholds, depths and interactive charts | Deterministic samples, up to seven days; irrigation does not rewrite them |
 | Valve dialog, pending/observed states and countdown | Two simulated seconds to acknowledge, local close/expiry |
 | SWT trigger editor | Saves/reloads configuration; no scheduler execution |
 
-Tomato's sample balance is −4 mm with 0.5 mm forecast rain; the demonstration bed
-has +2 mm. These match the existing `resolveWaterAction` branches in
-`osi-zone-env/index.js`. The simulator does not calculate ET0, crop demand or
-predictions. The real water card's action is a water-balance verdict; the soil
-reading is displayed alongside it, not secretly fed into a new combined model.
-No cloud or live weather service is called. Forecast values are fixtures, even
-where the existing environment UI names their source format.
+The dashboard title is **OSI OS Dashboard**. Full environment and weather panels
+start disabled through the existing display preference. Each zone has a simulated
+LSN50 MOD9 node with a rain gauge and flow meter: Tomato has 0 mm and 120 L today;
+Demonstration bed has 6 mm and 80 L. Readings and device history share the same
+fixed snapshot. Valve demonstrations do not alter these historical measurements.
+The water card displays only rain and measured irrigation volume; soil readings
+remain in the device cards. Demo-only styles hide the action, soil-summary and
+uncalibrated valve-estimate tiles, and demo translation overrides remove the
+crop-demand subtitle. Production components are unchanged.
+
+No forecast, ET0, crop demand or computed irrigation recommendation is supplied.
+Forecast data stays unavailable even if the presenter enables the full environment
+panel in Settings. The normal English fallbacks and untranslated text already in
+the shipped UI remain; enabling a language does not certify translation coverage.
 
 The demo runs a single monotonic clock. Speed multiplies simulated elapsed time,
 including acknowledgement and countdown. Pausing consumes no simulated elapsed
