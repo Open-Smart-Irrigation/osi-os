@@ -70,8 +70,8 @@ The presenter requested OSI OS branding, all currently supported languages, and
 an offline sensor scenario. Hide the full environment module by default with its
 existing preference. Seed one MOD9 rain/flow node per zone, keep measurements
 fixed and consistent across history and daily summaries, and remove forecast,
-demand and computed advice. Limit the existing water card to rain and measured
-litres with demo-only styles and translation overrides. Bundle all seven existing
+demand and computed advice. Show measured rain and irrigation litres, Soil now and explicitly simulated
+sensor advice in the existing water card. Bundle all seven existing
 locales, preserving their fallback policy. Test every language offline and refresh
 the screenshots and rehearsal notes.
 
@@ -96,3 +96,22 @@ alignment tests, and verified the demo retains the local i18n alias after moving
 the native selector into DashboardHeader. Header geometry is checked inside the
 390px iframe; production headers with additional modules retain their wrapping
 layout. The agronomy reviewer also inspects the implemented event sequence.
+
+
+## Valve localization and compact layout revision
+
+Complete the valve namespace’s English placeholders in Italian, Spanish and
+Portuguese and the dispatch-state gaps in German and French. Replace the panel
+subtitle with localized compact help, available on hover, focus or tap and
+dismissible by Escape or another tap. Keep weekly/on-valve wording distinct from
+one-time/gateway execution. Move last-seen into a full-width row above valve names.
+
+The user permits machine Luganda for this simulation only. Keep those overrides
+separate from production locale resources, preserve placeholders and test the
+rendered panel/dialog in all seven languages. Document the unreviewed status.
+
+Restore Soil now and Action in the water card. Label the action as simulated
+sensor advice, use the existing soil-status categories, and keep forecasts and
+crop-demand calculations absent. Rename the volume to Irrigation (measured, flow
+meter). Hide the five Settings module controls explicitly marked experimental
+using a demo-only rule; do not hide supported controls or change production defaults.

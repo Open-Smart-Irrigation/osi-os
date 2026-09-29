@@ -4,8 +4,10 @@ This runs the real edge React application inside a 390 × 844 iframe, with an
 in-memory REST adapter and a fictional MUARIK demonstration farm. It contains no
 MUARIK field records. The supplied standalone slide uses English presentation
 copy; the phone bundles all seven supported languages: English, Deutsch (de-CH),
-Français, Italiano, Español, Português and Luganda. Existing English fallbacks
-remain where human Luganda translations are pending.
+Français, Italiano, Español, Português and Luganda. The presenter authorized
+machine-translated Luganda valve controls for this simulator. Those unreviewed
+strings live only in `demo/locales/lg-valves.json`; production Luganda retains its
+human-review policy. Other pending Luganda strings may still fall back to English.
 
 No existing reveal.js deck was found in the available repositories or Downloads.
 `reveal.html` is a three-slide integration example, not the full WASAG talk.
@@ -50,7 +52,8 @@ Use Node 22 or newer, as used during verification. Set `DEMO_PORT` if 4173 is bu
    Delete → Yes, Delete. The probe returns to Unassigned Devices. Starting zones
    are protected from deletion so the demonstration can continue.
 3. **1:30–2:35:** Expand Tomato plot. Its water card shows **Rain today: 6.0 mm** and
-   **Measured (flow meter): 120 L**. These are fixed simulated sensor readings.
+   **Irrigation (measured, flow meter): 120 L**. These are fixed simulated sensor readings. **Soil now** shows the shallow
+   reading; **Action** gives explicitly simulated advice for this scenario.
    Expand **Devices in this zone** and select **56.0 kPa** to open the real history
    chart. Select **7 d** to show drying between rain and irrigation events, then
    switch between the 20 cm and 40 cm channels to show their delayed responses. In Demonstration bed, the 12 kPa wet
@@ -124,11 +127,14 @@ start disabled through the existing display preference. Each zone has a simulate
 LSN50 MOD9 node with a rain gauge and flow meter: Tomato has 6 mm and 120 L today;
 Demonstration bed has 6 mm and 80 L. Readings and device history share the same
 fixed snapshot. Valve demonstrations do not alter these historical measurements.
-The water card displays only rain and measured irrigation volume; soil readings
-remain in the device cards. Demo-only styles hide the action, soil-summary and
-uncalibrated valve-estimate tiles, and demo translation overrides remove the
-crop-demand subtitle. The dashboard header now mounts its native language
-selector; the other production components are unchanged.
+The water card displays rain, measured irrigation volume, Soil now and Action.
+Advice is labelled **Simulated sensor advice**: dry shallow readings suggest
+irrigation, wet readings suggest delaying, and moist readings suggest monitoring.
+This is a demo fixture using the existing soil-status categories, not a deployed
+agronomic recommendation algorithm. The uncalibrated valve estimate stays hidden.
+The dashboard header mounts its native language selector. Valve tiles place
+last-seen information above the name, and the panel’s compact info tooltip replaces
+its subtitle. The tooltip works with hover, focus or tap; Escape dismisses it.
 
 The [agronomy scenario](agronomy.md) records the seven-day event timeline and
 review assumptions. Rain and flow histories, local-day totals and current readings
@@ -137,10 +143,14 @@ not calculated irrigation advice. Temperature, humidity and light histories foll
 day/night cycles and shared rain events. Requests for 30 or 90 days return the
 available seven-day record, without inventing older samples.
 
-No forecast, ET0, crop demand or computed irrigation recommendation is supplied.
+No forecast, ET0 or crop-demand calculation is supplied.
 Forecast data stays unavailable even if the presenter enables the full environment
 panel in Settings. The normal English fallbacks and untranslated text already in
 the shipped UI remain; enabling a language does not certify translation coverage.
+
+Settings hides all five controls marked experimental: Prediction advisory, Data
+view, Network, Gateway and Field journal. Supported module controls remain visible.
+This hiding is scoped to the demo stylesheet; production Settings keeps its controls.
 
 The demo runs a single monotonic clock. Speed multiplies simulated elapsed time,
 including acknowledgement and countdown. Pausing consumes no simulated elapsed

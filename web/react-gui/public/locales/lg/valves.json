@@ -1,6 +1,6 @@
-{ "overview": {"title": "Enteekateeka y’okufukirira — amabbomba gonna", "loading": "Kitikkibwa…", "off": "kizikiziddwa"},
+{ "helpLabel": "About valve control", "overview": {"title": "Enteekateeka y’okufukirira — amabbomba gonna", "loading": "Kitikkibwa…", "off": "kizikiziddwa"},
   "title": "Valve control",
-  "subtitle": "All valves, all zones. Weekly plans run on the valve itself.",
+  "help": "All zones. Weekly schedules run on each valve.",
   "empty": "No STREGA valves registered yet.",
   "unassignedZone": "Unassigned",
   "open": "Open",

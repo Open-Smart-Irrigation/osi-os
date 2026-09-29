@@ -1,10 +1,7 @@
 html,body{overscroll-behavior:none}body{margin:0}#demo-notice:not([hidden]){position:fixed;left:12px;right:12px;bottom:12px;z-index:1000;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:13px;box-shadow:0 4px 24px #0002;cursor:pointer}#demo-notice[hidden]{display:none}
 
-/* The offline presentation shows measured rain and volume only. Soil remains in
-   the real device cards; no computed advice or uncalibrated valve estimate. */
-[data-testid="water-action-tile"],
-[data-testid="water-soil-tile"],
+/* The simulator has no valve-time calibration or experimental modules. */
 [data-testid="water-flow-meter-tile"] > p:last-child,
-[data-testid="water-today-card"] > div:has(> [data-testid="water-soil-tile"]) {
+[data-experimental-module="true"] {
   display: none;
 }

@@ -41,7 +41,9 @@ The current Tomato channels are 56 and 46 kPa; the bed channels are 12 and 35 kP
 The bed’s recent irrigation explains its wetter profile. The small final irrigation
 runs do not cause an immediate deep response. The GUI’s existing colours classify
 less than 20 kPa as wet, 20–50 as moist, and above 50 as dry. These are display
-categories, not crop-specific watering prescriptions.
+categories, not crop-specific watering prescriptions. The restored Action tile maps these
+fictional categories to irrigate, delay or monitor and labels the result as
+simulated sensor advice. It does not call a production prediction service.
 
 Temperature and humidity have opposing day/night cycles. Light falls to zero at
 night, and rain intervals reduce light and temperature while increasing humidity.

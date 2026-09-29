@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {environmentFixture, seedDevices, zoneFixture} from '../fixtures';
 import {Simulator, VALVE_EUI} from '../model';
 import {zoneHasFlowMeter, zoneHasRainGauge} from '../../src/utils/zoneSoil';
-test('offline water summaries contain only local rain and measured irrigation, with real sensor sources',()=>{
+test('offline water summaries retain local rain, measured irrigation and simulated soil advice',()=>{
   for(const id of [1,2]) {
     const devices=seedDevices().filter(d=>d.irrigation_zone_id===id);
     const summary=environmentFixture(zoneFixture(id,'Demo zone'),devices);
@@ -16,7 +16,8 @@ test('offline water summaries contain only local rain and measured irrigation, w
     assert.equal(summary.water.next24hRainMm,null);
     assert.equal(summary.water.waterNeededTodayMm,null);
     assert.equal(summary.water.balanceTodayMm,null);
-    assert.equal(summary.water.action,null);
+    assert.equal(summary.water.action?.code,id===1?'irrigate_today':'delay_irrigation');
+    assert.equal(summary.water.action?.source,'simulated_sensor');
     assert.equal(summary.forecast.available,false);
     assert.equal(summary.forecast.rainFocus,null);
     assert.equal(summary.online.available,false);

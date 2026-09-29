@@ -18,10 +18,12 @@ The browser suite exercises the built artifact:
 
 - Prepared farm, both initial zones and all seven shipped languages offline.
 - Native header language button below Add and beside Account with matching size.
+- All valve locales, tooltip interaction, unclipped names/last-seen and experimental
+  Settings controls hidden while supported controls remain reachable.
 - Temporary zone creation, device assignment, expansion and deletion; the device
   returns to Unassigned Devices and the initial zones remain.
-- Water card with only rain and measured litres, hidden environment panel, no
-  forecast or computed action; charts/tooltips, depths and wet/moist/dry colours.
+- Water card with rain, measured litres, Soil now and simulated Action, hidden
+  environment panel and no forecast; charts/tooltips, depths and wet/moist/dry colours.
 - Valve acknowledgement, early close, timed close and reset during an opening.
 - 1920 × 1080 and 1280 × 720 layouts, exact 390 × 844 application viewport,
   enlargement/restoration and inner scrolling without moving the outer page.
@@ -39,30 +41,37 @@ permissions policies. No running gateway or cloud service was accessed.
 
 ## Evidence and limits
 
-The production suite passed 207 Node-runner tests and 2,135 Vitest tests across
+The production suite passed 213 Node-runner tests and 2,136 Vitest tests across
 206 files. Production and demo builds passed;
 Vite emitted its existing large-chunk and browser-database-age warnings.
 
-The native-header/history revision adds a production header change and demo
-histories. Simulator and production checks are rerun for this revision.
+The valve/settings revision adds translations, an accessible tooltip, last-seen
+placement and demo-only visibility rules. Simulator and production checks passed
+for this revision.
+
+A separate verifier reran all 16 simulator tests, the demo typecheck and build,
+all 13 browser cases, six locale-contract tests and 43 valve/settings UI tests.
+Code review found no blocking issue. The refreshed water, valve and Settings
+screenshots were also inspected visually.
 
 | Check | Result |
 | --- | --- |
-| `npm run demo:test` | 15 passed |
+| `npm run demo:test` | 16 passed |
 | `npx tsc -p demo/tsconfig.json --noEmit` | Passed |
 | `npm run demo:build` | Passed |
-| `npm run demo:test:browser` | 11 passed in Chromium |
-| `npm run test:unit` | 207 Node tests passed; 2,135 Vitest tests passed |
+| `npm run demo:test:browser` | 13 passed in Chromium |
+| `npm run test:unit` | 213 Node tests passed; 2,136 Vitest tests passed |
 | `npm run typecheck` | Passed |
 | `npm run build` | Passed |
 
 The verifier also checked that the host returns 200, API and path-traversal
 requests return 404, and the server sends the restrictive CSP and permissions
 headers. Normal production sources have no demo imports. DashboardHeader mounts the native
-language selector; the normal production build contains no simulator markers.
+language selector, ValveControlPanel uses compact help, ValveTile moves last-seen
+above the name, and Settings marks experimental module rows; the normal production build contains no simulator markers.
 
 Screenshots: `overview.png`, `populated-zone.png`, `french.png`, `open-valve.png`,
-`layout-1920.png`, `layout-1280.png` and `soil-history-7-days.png` under `screenshots/`.
+`layout-1920.png`, `layout-1280.png`, `soil-history-7-days.png` and `settings.png` under `screenshots/`.
 
 A separate agronomy reviewer checked the final event sequence, depth delays,
 climate cycles and meter totals. The reviewer found no substantive inconsistency;

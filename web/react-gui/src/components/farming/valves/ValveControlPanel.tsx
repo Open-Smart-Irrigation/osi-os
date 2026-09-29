@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
+import {useDismissOnPointerDown} from '../../../hooks/useDismissOnPointerDown';
 import { devicesAPI, valvesAPI } from '../../../services/api';
 import type { ValveSummary } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
@@ -10,6 +11,31 @@ import { ValveScheduleDialog } from './ValveScheduleDialog';
 import { ValveScheduleOverview } from './ValveScheduleOverview';
 import { ValveSettingsDialog } from './ValveSettingsDialog';
 import { ValveServiceDialog } from './ValveServiceDialog';
+
+function ValveControlHelp() {
+  const {t}=useTranslation('valves');
+  const id=useId(), ref=useRef<HTMLDivElement>(null);
+  const [state,setState]=useState({hover:false,focus:false,pinned:false,dismissed:false});
+  const update=(patch:Partial<typeof state>)=>setState(current=>({...current,...patch}));
+  const close=()=>update({pinned:false,dismissed:true});
+  useDismissOnPointerDown(ref,close);
+  const open=!state.dismissed&&(state.hover||state.focus||state.pinned);
+  return <div ref={ref} className="relative shrink-0"
+    onMouseEnter={()=>update({hover:true,dismissed:false})}
+    onMouseLeave={()=>update({hover:false})}>
+    <button type="button" aria-label={t('helpLabel')} aria-expanded={open}
+      aria-controls={id} aria-describedby={open?id:undefined}
+      onFocus={()=>update({focus:true,dismissed:false})} onBlur={()=>update({focus:false,pinned:false})}
+      onClick={()=>state.pinned?close():update({pinned:true,dismissed:false})}
+      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();close();}}}
+      className="flex h-8 w-8 items-center justify-center rounded-full text-sm text-[var(--text-secondary)] hover:bg-[var(--card)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--primary)]">
+      <span aria-hidden="true">ⓘ</span>
+    </button>
+    {open&&<div id={id} role="tooltip" className="absolute right-0 top-full z-30 w-56 max-w-[70vw] rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-xs text-[var(--text)] shadow-lg">
+      {t('help')}
+    </div>}
+  </div>;
+}
 
 export interface ValveControlPanelProps {
   onUpdate: () => void;
@@ -150,11 +176,9 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
 
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-[var(--text)]">{t('title')}</h2>
-          <p className="text-xs text-[var(--text-tertiary)]">{t('subtitle')}</p>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-[var(--text)]">{t('title')}</h2>
+        <ValveControlHelp />
       </div>
 
       {actionError && (

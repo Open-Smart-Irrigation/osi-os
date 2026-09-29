@@ -1,3 +1,4 @@
+import {classifySwtWaterStatus} from '../src/utils/swt';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../src/types/farming';
 import {DEMO_EPOCH, sensorSnapshot, waterReading, waterDays} from './history';
 export {DEMO_EPOCH};
@@ -42,6 +43,11 @@ export function environmentFixture(zone: IrrigationZone, devices: Device[]): Zon
   const rain = rainGauge?.latest_data.rain_mm_today ?? null;
   const liters = flowMeter?.latest_data.flow_liters_today ?? null;
   const netMm = liters == null ? null : liters / 100 * 0.85;
+  const soil = devices.find(d => d.type_id === 'KIWI_SENSOR')?.latest_data.swt_1;
+  const status = classifySwtWaterStatus(soil);
+  // Explicitly simulated narrative advice, not an edge water-demand calculation.
+  const action = status ? {code: status === 'dry' ? 'irrigate_today' : status === 'wet' ? 'delay_irrigation' : 'monitor_today',
+    source: 'simulated_sensor', recommendationDate: iso(DEMO_EPOCH).slice(0, 10)} : null;
   const populated = sensorCount > 0;
   const at = populated ? iso(DEMO_EPOCH) : null;
   return { zoneId: zone.id, zoneName: zone.name, generatedAt: iso(DEMO_EPOCH),
@@ -50,7 +56,7 @@ export function environmentFixture(zone: IrrigationZone, devices: Device[]): Zon
     water: { available: populated, observedAt: at, areaM2: 100, irrigationEfficiencyPct: 85,
       rainTodayMm: rain, irrigationTodayLiters: liters, irrigationTodayNetMm: netMm,
       irrigationTodayMeasuredLiters: liters, measuredIrrigationNetMm: netMm, irrigationTodayEstimatedLiters: null,
-      waterNeededTodayMm: null, balanceTodayMm: null, next24hRainMm: null, action: null,
+      waterNeededTodayMm: null, balanceTodayMm: null, next24hRainMm: null, action,
       daily: waterDays(rainGauge ? Number(rainGauge.deveui.slice(-1)) : null, flowMeter ? Number(flowMeter.deveui.slice(-1)) : null),
       sensorHealth: {sensorCount, freshSensorCount: sensorCount, staleSensorCount: 0,
         rainGaugePresent: !!rainGauge, flowMeterPresent: !!flowMeter, warnings: []} },

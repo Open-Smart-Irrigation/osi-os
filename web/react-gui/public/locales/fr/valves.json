@@ -1,6 +1,6 @@
-{ "overview": {"title": "Programme d’irrigation — toutes les vannes", "loading": "Chargement…", "off": "désactivé"},
+{ "helpLabel": "À propos de la commande des vannes", "overview": {"title": "Programme d’irrigation — toutes les vannes", "loading": "Chargement…", "off": "désactivé"},
   "title": "Commande des vannes",
-  "subtitle": "Toutes les vannes, toutes les zones. Les programmes hebdomadaires tournent sur la vanne elle-même.",
+  "help": "Toutes les zones. Chaque vanne exécute ses programmes hebdomadaires.",
   "empty": "Aucune vanne STREGA enregistrée pour l'instant.",
   "unassignedZone": "Sans zone",
   "open": "Ouvrir",
@@ -40,7 +40,7 @@
     "list": "Programmes", "addWeekly": "+ Hebdomadaire", "addOnce": "+ Ponctuel",
     "label": "Nom (facultatif)", "weekdays": "Jours", "startTime": "Début", "duration": "Durée (min)", "date": "Date", "time": "Heure",
     "preview": "{{days}} {{start}}–{{end}} · {{minutes}} min", "previewLiters": "≈ {{liters}} L",
-    "onceNote": "La passerelle envoie cette ouverture à l'heure choisie : elle doit donc être en ligne à ce moment-là.", "dispatchStatus": "Dispatch: {{state}}", "dispatchStates": { "PENDING": "Pending", "ATTEMPTED": "Attempted", "SENT": "Sent to the radio network", "UNKNOWN": "Unknown", "SKIPPED": "Skipped" },
+    "onceNote": "La passerelle envoie cette ouverture à l'heure choisie : elle doit donc être en ligne à ce moment-là.", "dispatchStatus": "Envoi : {{state}}", "dispatchStates": { "PENDING": "En attente", "ATTEMPTED": "Tenté", "SENT": "Envoyé au réseau radio", "UNKNOWN": "Inconnu", "SKIPPED": "Ignoré" },
     "save": "Enregistrer", "saving": "Enregistrement…", "delete": "Supprimer", "enabled": "Actif",
     "conflictTooMany": "{{weekday}} aurait plus de 4 plages horaires.", "conflictOverlap": "Cette plage en chevauche une autre le {{weekday}}.", "conflictGeneric": "Ce programme entre en conflit avec les plages déjà réglées sur la vanne.", "conflictInvalidStart": "Un programme a une heure de début non valable.", "invalidStartTime": "Cette heure de début n'est pas valable.", "saveFailed": "Impossible d'enregistrer le programme.", "updateFailed": "Impossible de modifier le programme.", "deleteFailed": "Impossible de supprimer le programme.",
     "push": { "QUEUED": "en attente de la vanne", "ACKED": "confirmé {{when}}", "FAILED": "non confirmé" }

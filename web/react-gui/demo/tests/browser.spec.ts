@@ -59,10 +59,12 @@ test('water card, real sensor charts and three status categories', async ({page}
   await expect(app.getByTestId('water-rain-tile')).toContainText('6.0 mm');
   await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
   await expect(app.getByTestId('water-forecast-tile')).toHaveCount(0);
-  await expect(app.getByTestId('water-action-tile')).toBeHidden();
+  await expect(app.getByTestId('water-action-tile')).toContainText('Irrigate today');
+  await expect(app.getByTestId('water-action-tile')).toContainText('Simulated sensor advice');
   await expect(app.getByTestId('water-flow-meter-tile').getByText(/Estimated/)).toBeHidden();
   await expect(app.getByTestId('water-today-card')).not.toContainText('crop demand');
-  await expect(app.getByTestId('water-soil-tile')).toBeHidden();
+  await expect(app.getByTestId('water-soil-tile')).toContainText('56.0 kPa');
+  await expect(app.getByTestId('water-flow-meter-tile')).toContainText('Irrigation (measured, flow meter)');
   await expect(app.getByRole('button', {name:/Environment & weather forecast/})).toHaveCount(0);
   await app.getByTestId('water-today-card').scrollIntoViewIfNeeded();
   await page.screenshot({path:'demo/screenshots/populated-zone.png'});
@@ -231,4 +233,52 @@ test('native language button fills the dashboard slot below Add beside Account',
   expect(language!.width).toBeCloseTo(account!.width,0);
   expect(language!.height).toBeCloseTo(account!.height,0);
   expect(language!.x+language!.width).toBeLessThan(account!.x);
+});
+
+
+test('valve text and compact tooltip work in every language, with unclipped identity', async ({page}) => {
+  await page.goto('/');const app=page.frameLocator('#app');
+  const labels=['English','Deutsch','Français','Italiano','Español','Português','Luganda'];
+  const titles=['Valve control','Ventilsteuerung','Commande des vannes','Controllo valvole','Control de válvulas','Controlo de válvulas','Okufuga amabbomba'];
+  let current='English';
+  for(let index=0;index<labels.length;index++) {
+    const label=labels[index];
+    if(label!==current){await app.getByRole('button',{name:current,exact:true}).click();await app.getByRole('button',{name:label,exact:true}).click();}
+    const heading=app.getByRole('heading',{name:titles[index],exact:true});
+    await expect(heading).toBeVisible();
+    const panel=heading.locator('xpath=../..');
+    await expect(panel.locator('> div').first().locator('p')).toHaveCount(0);
+    const info=heading.locator('..').getByRole('button');
+    await info.click();await expect(app.getByRole('tooltip')).toBeVisible();
+    await expect(app.getByRole('tooltip')).not.toContainText('All valves, all zones.');
+    await info.click();await expect(app.getByRole('tooltip')).toHaveCount(0);
+    await info.focus();await info.press('Escape');await expect(app.getByRole('tooltip')).toHaveCount(0);
+    const seen=panel.getByTestId('valve-last-seen');
+    const name=panel.getByRole('heading',{name:'Tomato valve',exact:true});
+    await expect(seen).toBeVisible();await expect(name).toBeVisible();
+    const seenBox=await seen.boundingBox(),nameBox=await name.boundingBox();
+    expect(seenBox!.y+seenBox!.height).toBeLessThanOrEqual(nameBox!.y);
+    expect(await name.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+    // The first button in the tile is the rename pencil, so use its primary-action grid.
+    const open=panel.locator('.grid.grid-cols-2 > button').first();
+    await open.click();
+    await expect(app.getByRole('dialog').getByRole('spinbutton')).toBeVisible();
+    if(index>0)await expect(app.getByRole('dialog')).not.toContainText('Duration (min)');
+    await app.getByRole('dialog').getByRole('button').first().click();
+    current=label;
+  }
+});
+
+test('settings hides all explicitly experimental module controls', async ({page}) => {
+  await page.goto('/');const app=page.frameLocator('#app');
+  await app.getByRole('link',{name:'Settings',exact:true}).click();
+  await expect(app.locator('[data-experimental-module="true"]')).toHaveCount(5);
+  for(const label of ['Prediction advisory','Data view','Network','Gateway','Field journal']) {
+    await expect(app.getByRole('group',{name:label,exact:true})).toHaveCount(0);
+  }
+  for(const label of ['Water balance','Trigger-based irrigation','Valve control','Environment & weather forecast']) {
+    await expect(app.getByRole('group',{name:label,exact:true})).toBeVisible();
+  }
+  await app.getByRole('group',{name:'Water balance',exact:true}).scrollIntoViewIfNeeded();
+  await page.screenshot({path:'demo/screenshots/settings.png'});
 });

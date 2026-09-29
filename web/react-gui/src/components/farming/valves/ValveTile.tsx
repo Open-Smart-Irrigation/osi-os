@@ -166,6 +166,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <p data-testid="valve-last-seen" className="text-right text-xs text-[var(--text-tertiary)]">{lastSeenLabel}</p>
       <div className="flex items-start gap-3">
         <ValveGlyph state={glyph.state} size={48} />
         <div className="min-w-0 flex-1">
@@ -208,8 +209,6 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             </p>
           )}
         </div>
-        {/* I6: top-right, subtle -- shared by every ValveTile placement automatically. */}
-        <span className="shrink-0 whitespace-nowrap text-xs text-[var(--text-tertiary)]">{lastSeenLabel}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
