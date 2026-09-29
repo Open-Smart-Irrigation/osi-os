@@ -1,4 +1,4 @@
-export const CHANNEL = 'osi-wasag-demo-v1';
+export const CHANNEL = 'osi-mobile-simulator-v1';
 export type HostCommand = {channel: typeof CHANNEL; type: 'active'; value: boolean} | {channel: typeof CHANNEL; type: 'speed'; value: 1 | 10 | 60};
 export function isHostCommand(value: unknown): value is HostCommand {
   if (!value || typeof value !== 'object') return false;

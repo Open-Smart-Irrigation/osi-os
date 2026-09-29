@@ -1,6 +1,6 @@
 // Call once after creating your Reveal instance. The iframe stays mounted.
 export function connectOsiDemo(deck, frame) {
-  const channel = 'osi-wasag-demo-v1';
+  const channel = 'osi-mobile-simulator-v1';
   const origin = new URL(frame.src, location.href).origin;
   if (origin !== location.origin) throw new Error('Serve the OSI demo and slides from the same origin');
   const update = () => frame.contentWindow?.postMessage({channel, type: 'active', value: deck.getCurrentSlide()?.contains(frame) === true}, origin);

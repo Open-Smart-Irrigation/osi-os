@@ -1,4 +1,4 @@
-# WASAG local simulator
+# mobile-simulator
 
 Build the actual edge React App from main in a separate Vite entry, embedded in a
 390 × 844 iframe on a standalone presentation host. No deck source was found.

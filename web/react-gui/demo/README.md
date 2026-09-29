@@ -1,4 +1,4 @@
-# OSI OS presentation simulator
+# mobile-simulator
 
 This runs the real edge React application inside a 390 × 844 iframe, with an
 in-memory REST adapter and a fictional MUARIK demonstration farm. It contains no
@@ -10,7 +10,7 @@ strings live only in `demo/locales/lg-valves.json`; production Luganda retains i
 human-review policy. Other pending Luganda strings may still fall back to English.
 
 No existing reveal.js deck was found in the available repositories or Downloads.
-`reveal.html` is a three-slide integration example, not the full WASAG talk.
+`reveal.html` is a three-slide integration example, not a complete presentation deck.
 
 ## Run locally
 

@@ -166,7 +166,7 @@ test('pause, spoofed messages and storage/transport boundaries', async ({page}) 
   await page.getByRole('button',{name:'Pause',exact:true}).click();
   await expect.poll(async()=>{const a=await frame.evaluate(()=>Date.now());await page.waitForTimeout(120);return (await frame.evaluate(()=>Date.now()))-a;}).toBe(0);
   const frozen=await frame.evaluate(()=>Date.now());
-  await frame.evaluate(()=>window.postMessage({channel:'osi-wasag-demo-v1',type:'active',value:true},location.origin));
+  await frame.evaluate(()=>window.postMessage({channel:'osi-mobile-simulator-v1',type:'active',value:true},location.origin));
   await page.waitForTimeout(200);expect(await frame.evaluate(()=>Date.now())).toBe(frozen);
   expect(await frame.evaluate(()=>+new Date())).toBe(frozen);
   const blocked=await frame.evaluate(async()=>{
