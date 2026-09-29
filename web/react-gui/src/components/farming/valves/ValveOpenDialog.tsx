@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useModalFocus } from '../../../hooks/useModalFocus';
 import { useTranslation } from 'react-i18next';
 import type { ValveSummary } from '../../../types/farming';
 import { estimateLiters } from './valveState';
@@ -42,17 +43,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, valve.deviceEui]);
 
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
+  useModalFocus(dialogRef, open, onClose, 'input[type="number"]');
 
   if (!open) return null;
 
@@ -80,6 +71,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
         ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

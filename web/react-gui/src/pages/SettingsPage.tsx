@@ -142,6 +142,7 @@ function Section({
 function ModuleRow({
   label,
   warning,
+  experimental = false,
   enabled,
   disabled,
   onChange,
@@ -150,6 +151,7 @@ function ModuleRow({
 }: {
   label: string;
   warning?: string;
+  experimental?: boolean;
   enabled: boolean;
   disabled?: boolean;
   onChange: (enabled: boolean) => void;
@@ -160,6 +162,7 @@ function ModuleRow({
     <div
       role="group"
       aria-label={label}
+      data-experimental-module={experimental || undefined}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -411,6 +414,7 @@ export function SettingsPage() {
       label={t(labelKey)}
       // Phil, 2026-09-17: all four carry an experimental marker for now.
       warning={t('experimentalOnly')}
+      experimental
       enabled={gatewayModuleEnabled(field)}
       disabled={gatewayModuleBusy || !systemSettingsWritable}
       onChange={(enabled) => {
@@ -629,6 +633,7 @@ export function SettingsPage() {
             <ModuleRow
               label={t('predictionAdvisory')}
               warning={t('predictionAdvisoryWarning')}
+              experimental
               enabled={preferences.modules.predictionAdvisory}
               onChange={(enabled) => updateModule('predictionAdvisory', enabled)}
               onLabel={t('on')}

@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 import { useGatewayModules } from '../hooks/useGatewayModules';
 
@@ -106,6 +107,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             >
               {t('settings:entryPoint')}
             </Link>
+
+            <div className="w-[calc(50%-4px)] sm:w-auto">
+              <LanguageSwitcher
+                menuAlign="left"
+                triggerClassName="w-full justify-center text-lg px-6 py-3 shadow-lg"
+              />
+            </div>
 
             <HeaderMenu
               label={t('account')}

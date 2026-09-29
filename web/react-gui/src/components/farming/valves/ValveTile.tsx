@@ -166,6 +166,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <p data-testid="valve-last-seen" className="text-right text-xs text-[var(--text-tertiary)]">{lastSeenLabel}</p>
       <div className="flex items-start gap-3">
         <ValveGlyph state={glyph.state} size={48} />
         <div className="min-w-0 flex-1">
@@ -208,26 +209,24 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             </p>
           )}
         </div>
-        {/* I6: top-right, subtle -- shared by every ValveTile placement automatically. */}
-        <span className="shrink-0 whitespace-nowrap text-xs text-[var(--text-tertiary)]">{lastSeenLabel}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div data-testid="valve-actions" className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={primaryAction.onClick}
           disabled={busy}
-          className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex flex-1 basis-[100px] min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy && <Spinner />}
           {primaryAction.label}
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-1 basis-[180px] items-center gap-2">
           <button
             type="button"
             onClick={onSchedule}
             disabled={busy}
-            className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-[44px] min-w-0 flex-1 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {t('schedule')}
           </button>

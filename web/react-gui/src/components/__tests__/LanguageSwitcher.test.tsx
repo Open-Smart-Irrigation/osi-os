@@ -40,7 +40,7 @@ describe('LanguageSwitcher', () => {
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole('button', { name: 'Deutsch' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Deutsch' }));
 
     expect(i18nMock.changeLanguage).toHaveBeenCalledWith('de-CH');
   });

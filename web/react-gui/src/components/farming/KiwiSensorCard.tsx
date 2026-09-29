@@ -483,7 +483,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
           deveui={device.deveui}
           deviceName={device.name}
           field={monitor.field}
-          label={monitor.label}
+          label={monitor.field === 'swt_1' || monitor.field === 'swt_2' ? sensorLabel(device, monitor.field, monitor.label) : monitor.label}
           unit={monitor.unit}
           color={monitor.color}
           decimals={monitor.decimals}

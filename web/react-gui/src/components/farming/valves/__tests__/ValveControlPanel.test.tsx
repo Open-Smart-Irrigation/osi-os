@@ -12,7 +12,8 @@ import type { ValveSummary } from '../../../../types/farming';
 const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
     title: 'Valve control',
-    subtitle: 'All valves, all zones. Weekly plans run on the valve itself.',
+    help: 'All zones. Weekly schedules run on each valve.',
+    helpLabel: 'About valve control',
     empty: 'No STREGA valves registered yet.',
     actionFailed: 'The action could not be completed.',
     loadFailed: 'Could not load valves.',
@@ -126,6 +127,28 @@ describe('ValveControlPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     renameOutcomes.length = 0;
+  });
+
+  it('replaces the subtitle with help available by pointer, keyboard and tap', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    expect(screen.queryByText('All valves, all zones. Weekly plans run on the valve itself.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    const help=screen.getByRole('button',{name:'About valve control'});
+    fireEvent.mouseEnter(help.parentElement!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('All zones. Weekly schedules run on each valve.');
+    fireEvent.mouseLeave(help.parentElement!);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.focus(help);
+    expect(help).toHaveAttribute('aria-describedby',screen.getByRole('tooltip').id);
+    fireEvent.keyDown(help,{key:'Escape'});
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.click(help);
+    expect(screen.getByRole('tooltip')).toBeVisible();
+    fireEvent.click(help);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.blur(help);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
   it('labels a failed non-open action (cancel/skip/pause/resume/resend) with actionFailed, not the open error', async () => {

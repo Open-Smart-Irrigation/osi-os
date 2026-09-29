@@ -842,14 +842,14 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
 
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--focus)] rounded-xl p-4 shadow-sm transition-colors">
-      <div className="flex items-center justify-between gap-2 mb-0.5">
+      <div className="flex flex-col items-stretch gap-2 mb-0.5">
         <EditableName
           name={device.name}
           canEdit={!readOnly}
           onSave={handleRename}
           renameLabel={t('rename.device')}
           inputLabel={t('rename.deviceInputLabel')}
-          headingClassName="text-base font-semibold text-[var(--text)] truncate leading-tight"
+          headingClassName="text-base font-semibold text-[var(--text)] break-words leading-tight"
         />
         <div className="flex items-center gap-1.5 shrink-0 relative">
           <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">

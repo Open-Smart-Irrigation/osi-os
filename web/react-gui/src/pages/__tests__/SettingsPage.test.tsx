@@ -252,7 +252,7 @@ describe('SettingsPage', () => {
     renderSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'English' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Deutsch' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Deutsch' }));
 
     expect(i18nMock.changeLanguage).toHaveBeenCalledWith('de-CH');
     expect(window.localStorage.getItem('i18n_language')).toBe('de-CH');

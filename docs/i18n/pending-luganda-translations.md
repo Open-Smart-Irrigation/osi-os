@@ -177,3 +177,12 @@ Tracked in code at `web/react-gui/tests/fieldTesterLocales.test.ts`
 byte-identical to `en`, the same mechanism the sections above use. A human
 Luganda pass must drop the key from that set and from the table above in the
 same change; the test fails otherwise, so the two cannot drift apart.
+
+
+## `valves.json` panel help
+
+`help` and `helpLabel` replace the visible valve-control subtitle with compact
+help. Production Luganda keeps the English wording until human review. The
+presenter explicitly authorized machine-translated Luganda for the isolated
+presentation simulator only; its overrides are under
+`web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.

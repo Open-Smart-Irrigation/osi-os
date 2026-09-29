@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -9,10 +10,14 @@ export interface ModalProps {
 }
 
 export function Modal({ isOpen, title, onClose, closeLabel = 'Close', children }: ModalProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  useModalFocus(ref, isOpen, onClose, 'input:not(:disabled),select:not(:disabled),textarea:not(:disabled)');
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-[color-mix(in_srgb,var(--overlay)_70%,transparent)] flex items-center justify-center z-50 p-4">
       <div
+        ref={ref}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}

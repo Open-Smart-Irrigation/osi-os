@@ -124,6 +124,15 @@ describe('KiwiSensorCard SWT unit preference', () => {
     expect(await screen.findByText('No soil water tension 1 data in the last 24 hours.')).toBeInTheDocument();
   });
 
+  it('names the configured depth in the soil history dialog', async () => {
+    render(<KiwiSensorCard removeContext="farm" device={{
+      ...kiwiDevice, soilMoistureProbeDepths: {swt_1: 20}, last_seen: FRESH,
+    }} />);
+    fireEvent.click(screen.getByTitle('View history'));
+    expect(screen.getByRole('dialog', {name: 'Soil Water Tension 1 (20 cm)'})).toBeInTheDocument();
+    expect(await screen.findByText('No soil water tension 1 (20 cm) data in the last 24 hours.')).toBeInTheDocument();
+  });
+
   it('opens the second channel history when only that channel is invalid', async () => {
     render(<KiwiSensorCard removeContext="farm" device={{
       ...kiwiDevice, last_seen: FRESH, latest_data: { swt_1: 30, swt_2: 301 },

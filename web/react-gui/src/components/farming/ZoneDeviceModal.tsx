@@ -219,11 +219,11 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
                 ))}
               </select>
             </FormField>
-            <div className="flex gap-4 pt-4">
-              <Button variant="secondary" onClick={onClose} className="flex-1 text-lg py-4">
+            <div className="flex flex-wrap gap-4 pt-4">
+              <Button variant="secondary" onClick={onClose} className="flex-1 basis-40 text-lg px-4 py-3">
                 {tc('cancel')}
               </Button>
-              <Button type="submit" disabled={loading} className="flex-1 text-lg py-4 shadow-lg">
+              <Button type="submit" disabled={loading} className="flex-1 basis-40 text-lg px-4 py-3 shadow-lg">
                 {loading ? t('assignModal.assigning') : t('assignModal.submit')}
               </Button>
             </div>
@@ -284,14 +284,14 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
               className={`${INPUT_CLASS} font-mono`}
             />
           </FormField>
-          <div className="flex gap-4 pt-4">
-            <Button variant="secondary" onClick={onClose} className="flex-1 text-lg py-4">
+          <div className="flex flex-wrap gap-4 pt-4">
+            <Button variant="secondary" onClick={onClose} className="flex-1 basis-40 text-lg px-4 py-3">
               {tc('cancel')}
             </Button>
             <Button
               type="submit"
               disabled={loading || catalog.length === 0 || !selectedType}
-              className="flex-1 text-lg py-4 shadow-lg"
+              className="flex-1 basis-40 text-lg px-4 py-3 shadow-lg"
             >
               {loading ? t('zoneDeviceModal.registering') : t('zoneDeviceModal.registerSubmit')}
             </Button>
