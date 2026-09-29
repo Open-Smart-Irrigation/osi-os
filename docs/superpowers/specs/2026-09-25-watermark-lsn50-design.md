@@ -294,21 +294,20 @@ as the Chameleon section does today.
 **Contract** (osi-os `docs/contracts/sync-schema/`, mirrored byte-for-byte):
 
 - events `WATERMARK_CALIBRATION_UPSERTED` and `WATERMARK_CALIBRATION_DELETED`;
-- commands `SET_WATERMARK_CALIBRATION` (values + `expected_sync_version`) and
+- commands `SET_WATERMARK_CALIBRATION` (values + `base_sync_version`) and
   `DELETE_WATERMARK_CALIBRATION`; phase 3 adds `SET_WATERMARK_CONFIG {enabled}`;
-- the device resource gains the cloud's WATERMARK indicator (phase 2 chooses:
-  calibration existence or a synced flag) and `watermark_enabled` in phase 3;
+- the cloud derives its phase 2 WATERMARK indicator from calibration existence;
+  phase 3 adds a separate calibration-bound scheduler-admission resource;
 - golden vectors for each.
 
 **Edge.**
 
 - Outbox triggers are migration-owned and gated on a linked gateway (precedent:
   `zone_irrigation_calibration`).
-- The DEVICE event gains the new fields through the Sentek-style `sync_outbox`
-  augmentation trigger. The frozen `sync-init-fn` is not edited. Flag writes
-  always bump `sync_version`.
+- The DEVICE event does not change in phase 2. The frozen `sync-init-fn` is not
+  edited.
 - Command appliers call the phase 1 writer: `stale_sync_version` on a mismatch,
-  dedup via `sync_inbox`.
+  dedup by delivery `commandId` through `applied_commands`.
 - `sync-bootstrap-build` and `sync-force-build` include `watermark_calibrations`,
   so a calibration made before linking is not stranded.
 
@@ -338,23 +337,50 @@ as the Chameleon section does today.
 
 ## 8. Phase 3 — scheduler admission and raw-reading sync
 
-**Enable flag.**
+**Calibration-bound scheduler admission.**
 
-- `devices.watermark_enabled`. Its writer (edge API and command applier) refuses
+- `watermark_scheduler_admissions` is a device-keyed resource with `enabled`,
+  the accepted `calibration_sync_version`, its own `sync_version`, and
+  `updated_at`. It is not a `devices` column. Its writer (edge API and command
+  applier) refuses enable
   unless:
   - a live calibration exists;
   - `chameleon_enabled = 0`;
-  - at least one channel had status `ok` or `saturated` in the last 24 h.
-- The Chameleon flag writer refuses while `watermark_enabled = 1` (D7).
-- Deleting a calibration clears the flag in the same transaction. Updating a
-  calibration keeps it: the person entering the values is the one accepting them.
+  - at least one channel had status `ok` or `saturated` in the last 24 h under
+    the live calibration version.
+- Enable quotes both the admission's base version and the calibration version
+  the person accepted. Its command effect key is
+  `watermark_scheduler_admission:<EUI>:<base>` and is contract-bound to the
+  same device and admission base. The Chameleon flag writer refuses while
+  WATERMARK admission is enabled (D7).
+- Deleting a calibration disables admission in the same transaction. Updating
+  a calibration keeps admission enabled and atomically advances its accepted
+  calibration version: the person entering the values is the one accepting
+  them. Old readings remain excluded until a new uplink uses that version.
+- Sync uses `WATERMARK_SCHEDULER_ADMISSION_UPSERTED` and a dedicated cloud
+  mirror. The cloud queues `SET_WATERMARK_CONFIG` against this resource and
+  never mutates the mirror directly.
+- Cloud ingest tolerates admission arriving before its calibration. It retains
+  the edge observation but treats admission as ineffective until the live
+  calibration version matches; delivery order alone is never a terminal
+  rejection.
+- Every newly accepted command advances the admission version and emits its
+  mirror event, including a same-value request. This gives the desired-state
+  ledger the post-base mirror version it requires to reach APPLIED. Redelivery
+  of the same command ID replays its stored result without another write.
 
-**Scheduler.** Add `OR (ds.type_id = 'DRAGINO_LSN50' AND
-COALESCE(ds.watermark_enabled,0) = 1)`. The existing `trigger_metric` values
-`SWT_1` / `SWT_2` / `SWT_AVG` cover it, so no schedule schema change is needed.
+**Scheduler.** Add a DRAGINO_LSN50 WATERMARK branch that requires enabled
+admission, the admission's calibration version equal to the live calibration,
+and the reading's calibration version equal to that same live version. It lifts
+the phase 1 interlock (§6) for admitted rows only; every other WATERMARK row
+stays excluded. The
+existing `trigger_metric` values `SWT_1` / `SWT_2` / `SWT_AVG` cover it, so no
+schedule schema change is needed.
 
 **Raw sync.** A `WATERMARK_READING_APPENDED` event mirrors
-`CHAMELEON_READING_APPENDED`, with a cloud mirror table and retention.
+`CHAMELEON_READING_APPENDED`, with a cloud mirror table and retention. Until
+then `watermark_readings` is edge-local: migration `0061` creates it without
+outbox triggers, and no flow emits an event for it.
 
 **Bench gate before any field use.** A real-probe dry-down through 2–15 kΩ sets
 the unsettled acceptance envelope and confirms forward/reverse agreement.
@@ -378,6 +404,11 @@ cloud Chameleon toggle never applies on the gateway.
 
 A small paired PR fixes the name. It also adds a test that every command type a
 cloud controller issues is in the contract enum. It lands before phase 2.
+
+Status on main at `ca08dcc13`: not implemented. Route Command
+(`934bf2bc19a8ce22`) still has no `SET_CHAMELEON_CONFIG` branch. The plan
+`docs/superpowers/plans/2026-09-26-chameleon-enabled-command-fix.md` is marked
+NOT EXECUTABLE until its tasks are rewritten around the desired-state ledger.
 
 ## 11. Tests
 
@@ -424,3 +455,52 @@ ch2 Pu 42 530 / Pd 42 070 / sf 46 / sr 27; VDDA 3300):
 - **Ops note:** the Pi 4 test gateway will hold misread rows from the bench node
   until phase 1 is deployed there. It is unlinked, so they stay local; they are
   cleaned after deployment with a backup first.
+
+## 13. Phase 2 decisions (confirmed 2026-09-27)
+
+The phase 2 plan (`docs/superpowers/plans/2026-09-26-watermark-lsn50-phase2.md`)
+settles §7's choices as follows. The project owner accepted P2-1 through P2-7
+on 2026-09-27; these decisions are binding on the implementation plan. The plan
+itself is marked REWRITE BEFORE EXECUTION.
+
+- **Cloud indicator (P2-1).** The cloud derives `devices.watermark_calibrated`
+  from a live calibration mirror row. The DEVICE event does not change in phase
+  2, and the edge gains no `devices` column. As a result the cloud offers the
+  calibration form on every LSN50 whose gateway reports `watermark_v1`, and a
+  board reflashed back to Chameleon stays WATERMARK on the cloud until its
+  calibration is deleted. Phase 3 uses a separate calibration-bound
+  scheduler-admission resource; it does not add a phase 2 observation marker.
+- **Names (P2-2).**
+  - Events are `WATERMARK_CALIBRATION_UPSERTED` / `_DELETED`, with
+    aggregateType `WATERMARK_CALIBRATION` and key = device EUI. The payload is
+    the whole row, tombstone included.
+  - The two commands carry `base_sync_version` (an existing contract property,
+    and the desired-state ledger's field) instead of `expected_sync_version`.
+  - A stale version is acked `CONFLICT` / `stale_sync_version`.
+  - Replays are deduplicated by delivery `commandId` in `applied_commands`;
+    §7's "dedup via `sync_inbox`" does not apply to commands.
+- **Metadata (P2-3).** All four metadata fields sync. In a command, an omitted
+  key keeps the stored value and `null` clears it, as in the edge PUT. The cloud
+  form sends all four keys, and desired-state convergence includes all four;
+  otherwise a metadata-only edit could be reported applied before the edge
+  mirror changed.
+- **History before phase 3 (P2-4).** Classification is per device: a calibrated
+  LSN50's `swt_1`/`swt_2` are "WATERMARK 1/2", with generic depths. No field is
+  added to `DEVICE_DATA`, because that would change v1/v2 history hashes.
+  Status, resistance and supply stay on the gateway.
+- **Bootstrap (P2-5).** A `watermark_calibrations` bootstrap array, applied on
+  the cloud through the same event applier.
+- **DEVICE event augmentation.** §7's Sentek-style augmentation is not needed in
+  phase 2 because no device field is added. Phase 3 syncs scheduler admission as
+  its own resource instead of decorating DEVICE events.
+- **Liveness (P2-7).** `watermark-ingest-fn` publishes WATERMARK MQTT telemetry
+  (stored values, or a liveness-only message for unknown and rejected frames).
+  This restores the cloud `last_seen` refresh and auto-create that phase 1 gave
+  up when `Build Telemetry` began dropping FPort 11 uplinks. For a
+  gateway-forwarded non-STREGA sensor, `MqttMessageRouter` returns after that
+  heartbeat upsert; this path does not refresh `current_state` or persist
+  canonical values.
+- **Migration numbers.** Phase 1 shipped as `0061__watermark_lsn50.sql`,
+  because `0060` went to the RAK10701 field-tester migration first. Phase 2
+  and phase 3 take the next free numbers when they are rebased onto main: on
+  main at `ca08dcc13` those are `0062` (phase 2) and `0063` (phase 3).
