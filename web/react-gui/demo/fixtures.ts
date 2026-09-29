@@ -1,5 +1,6 @@
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../src/types/farming';
-export const DEMO_EPOCH = Date.parse('2026-09-29T09:00:00Z');
+import {DEMO_EPOCH, sensorSnapshot, waterReading, waterDays} from './history';
+export {DEMO_EPOCH};
 export const VALVE_EUI = '00000000000000D1';
 export const SPARE_EUI = '00000000000000A3';
 export const iso = (time: number) => new Date(time).toISOString();
@@ -9,25 +10,24 @@ export function zoneFixture(id: number, name: string): IrrigationZone {
     schedule: null, timezone: 'Africa/Kampala', area_m2: 100, irrigation_efficiency_pct: 85,
     crop_type: 'Tomato', soil_type: 'Loam', irrigation_method: 'Drip', prediction_card_enabled: false };
 }
-export function sensorFixture(deveui: string, name: string, zoneId: number | null, swt1 = 35, swt2 = 32): Device {
+export function sensorFixture(deveui: string, name: string, zoneId: number | null): Device {
   return { deveui, name, type_id: 'KIWI_SENSOR', irrigation_zone_id: zoneId,
     last_seen: iso(DEMO_EPOCH), soil_moisture_probe_depths_configured: true,
     soil_moisture_probe_depths_json: { swt_1: 20, swt_2: 40 },
-    latest_data: { swt_1: swt1, swt_2: swt2, ambient_temperature: 26.4,
-      relative_humidity: 68, light_lux: 12500, bat_pct: 92 } };
+    latest_data: sensorSnapshot(deveui) };
 }
 function waterSensorFixture(id: number): Device {
   return {deveui: `00000000000000E${id}`, name: `${id === 1 ? 'Tomato' : 'Bed'} rain and flow meter`,
     type_id: 'DRAGINO_LSN50', irrigation_zone_id: id, last_seen: iso(DEMO_EPOCH),
     rain_gauge_enabled: 1, flow_meter_enabled: 1, temp_enabled: 0, dendro_enabled: 0,
     latest_data: {lsn50_mode_code: 9, lsn50_mode_label: 'MOD9', lsn50_mode_observed_at: iso(DEMO_EPOCH),
-      rain_mm_today: id === 1 ? 0 : 6, rain_mm_delta: 0, rain_mm_per_10min: 0,
-      flow_liters_today: id === 1 ? 120 : 80, flow_liters_delta: 0, flow_liters_per_10min: 0,
+      rain_mm_today: waterReading(id, 'rain_mm_today', DEMO_EPOCH), rain_mm_delta: 0, rain_mm_per_10min: 0,
+      flow_liters_today: waterReading(id, 'flow_liters_today', DEMO_EPOCH), flow_liters_delta: 0, flow_liters_per_10min: 0,
       counter_interval_seconds: 900, rain_delta_status: 'ok', flow_delta_status: 'ok', bat_pct: 90}};
 }
 export function seedDevices(): Device[] {
-  return [sensorFixture('00000000000000A1', 'Tomato soil probe', 1, 68, 56),
-    sensorFixture('00000000000000A2', 'Bed soil probe', 2, 12, 35),
+  return [sensorFixture('00000000000000A1', 'Tomato soil probe', 1),
+    sensorFixture('00000000000000A2', 'Bed soil probe', 2),
     sensorFixture(SPARE_EUI, 'Spare demonstration probe', null),
     waterSensorFixture(1), waterSensorFixture(2),
     { deveui: VALVE_EUI, name: 'Tomato valve', type_id: 'STREGA_VALVE', irrigation_zone_id: 1,
@@ -51,9 +51,7 @@ export function environmentFixture(zone: IrrigationZone, devices: Device[]): Zon
       rainTodayMm: rain, irrigationTodayLiters: liters, irrigationTodayNetMm: netMm,
       irrigationTodayMeasuredLiters: liters, measuredIrrigationNetMm: netMm, irrigationTodayEstimatedLiters: null,
       waterNeededTodayMm: null, balanceTodayMm: null, next24hRainMm: null, action: null,
-      daily: [{date: iso(DEMO_EPOCH).slice(0, 10), rainMm: rain, irrigationLiters: liters,
-        irrigationNetMm: netMm, measuredIrrigationLiters: liters, measuredIrrigationNetMm: netMm,
-        totalWaterMm: rain == null || netMm == null ? null : rain + netMm}],
+      daily: waterDays(rainGauge ? Number(rainGauge.deveui.slice(-1)) : null, flowMeter ? Number(flowMeter.deveui.slice(-1)) : null),
       sensorHealth: {sensorCount, freshSensorCount: sensorCount, staleSensorCount: 0,
         rainGaugePresent: !!rainGauge, flowMeterPresent: !!flowMeter, warnings: []} },
     local: {available: populated, observedAt: at, sensorCount, freshSensorCount: sensorCount, staleSensorCount: 0, metrics: [], devices: []},

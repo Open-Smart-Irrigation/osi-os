@@ -41,10 +41,11 @@ test('historical rain and volume agree with daily totals and stay fixed during v
   const initial=sim.request('GET','/api/irrigation-zones/1/environment-summary');
   for(const id of [1,2]) {
     for(const field of ['rain_mm','flow_liters']) {
-      const history=sim.request('GET',`/api/devices/00000000000000E${id}/sensor-history?field=${field}_delta`) as {value:number}[];
+      const history=sim.request('GET',`/api/devices/00000000000000E${id}/sensor-history?field=${field}_delta`) as {t:string;value:number}[];
       const meter=sim.devices.find(d=>d.deveui===`00000000000000E${id}`)!;
       const total=field==='rain_mm'?meter.latest_data.rain_mm_today:meter.latest_data.flow_liters_today;
-      assert.equal(history.reduce((sum,row)=>sum+row.value,0),total);
+      const today=history.filter(row=>new Date(Date.parse(row.t)+3*3600000).toISOString().slice(0,10)==='2026-09-29');
+      assert.ok(Math.abs(today.reduce((sum,row)=>sum+row.value,0)-total!)<0.0001);
       assert.ok(history.every(row=>row.value>=0));
     }
   }

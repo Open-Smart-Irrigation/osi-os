@@ -31,7 +31,8 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../LanguageSwitcher', () => ({
-  LanguageSwitcher: () => <button title="Change language">Lang EN</button>,
+  LanguageSwitcher: ({menuAlign, triggerClassName}: {menuAlign: string; triggerClassName: string}) =>
+    <button title="Change language" data-align={menuAlign} className={triggerClassName}>Lang EN</button>,
 }));
 
 vi.mock('../../utils/isDesktopBrowser', () => ({
@@ -75,12 +76,13 @@ afterEach(() => {
 });
 
 describe('DashboardHeader (osi-os)', () => {
-  it('renders the OSI OS title, welcome text, and Settings entry without a standalone language switcher', () => {
+  it('renders the title, welcome text, Settings and native language selector', () => {
     renderHeader();
     expect(screen.getByRole('heading', { name: 'Open Smart Irrigation Dashboard' })).toBeInTheDocument();
     expect(screen.getByText('Welcome farmer')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Lang/i })).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Change language')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Lang/i })).toBeInTheDocument();
+    expect(screen.getByTitle('Change language')).toHaveAttribute('data-align', 'left');
+    expect(screen.getByTitle('Change language')).toHaveClass('w-full', 'justify-center', 'text-lg', 'px-6', 'py-3');
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
   });
 

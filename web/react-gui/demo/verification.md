@@ -10,11 +10,14 @@ assignment cleanup, duplicate-open rejection, pending/observed/closed transition
 cancellation, acceleration, pause, reset, unsupported operations, device ID
 restrictions and exact message payloads. Offline fixtures check agreement between
 rain/flow device readings, histories and daily totals, removal of sensor sources,
-and fixed readings during valve use.
+and fixed readings during valve use. History tests cover drying/wetting, delayed
+depth response, day/night cycles, shared rainfall, local-day sums and identical
+overlapping chart windows.
 
 The browser suite exercises the built artifact:
 
 - Prepared farm, both initial zones and all seven shipped languages offline.
+- Native header language button below Add and beside Account with matching size.
 - Temporary zone creation, device assignment, expansion and deletion; the device
   returns to Unassigned Devices and the initial zones remain.
 - Water card with only rain and measured litres, hidden environment panel, no
@@ -36,32 +39,36 @@ permissions policies. No running gateway or cloud service was accessed.
 
 ## Evidence and limits
 
-The baseline production suite passed 206 Node-runner tests (one additional test
-skipped) and 2,135 Vitest tests across 206 files. Production and demo builds passed;
+The production suite passed 207 Node-runner tests and 2,135 Vitest tests across
+206 files. Production and demo builds passed;
 Vite emitted its existing large-chunk and browser-database-age warnings.
 
-An independent verifier reran the simulator checks for the offline sensor revision. Production
-checks below are from the initial implementation; this revision changes only
-demo files and documentation.
+The native-header/history revision adds a production header change and demo
+histories. Simulator and production checks are rerun for this revision.
 
 | Check | Result |
 | --- | --- |
-| `npm run demo:test` | 11 passed |
+| `npm run demo:test` | 15 passed |
 | `npx tsc -p demo/tsconfig.json --noEmit` | Passed |
 | `npm run demo:build` | Passed |
-| `npm run demo:test:browser` | 10 passed in Chromium |
-| `npm run test:unit` | 206 Node tests passed, 1 skipped; 2,135 Vitest tests passed |
+| `npm run demo:test:browser` | 11 passed in Chromium |
+| `npm run test:unit` | 207 Node tests passed; 2,135 Vitest tests passed |
+| `npm run typecheck` | Passed |
 | `npm run build` | Passed |
 
 The verifier also checked that the host returns 200, API and path-traversal
 requests return 404, and the server sends the restrictive CSP and permissions
-headers. Normal production sources have no demo imports or edits; the normal
-production build contains no simulator markers.
+headers. Normal production sources have no demo imports. DashboardHeader mounts the native
+language selector; the normal production build contains no simulator markers.
 
 Screenshots: `overview.png`, `populated-zone.png`, `french.png`, `open-valve.png`,
-`layout-1920.png` and `layout-1280.png` under `screenshots/`.
+`layout-1920.png`, `layout-1280.png` and `soil-history-7-days.png` under `screenshots/`.
 
-The independent review found two defects that were fixed before final checks:
+A separate agronomy reviewer checked the final event sequence, depth delays,
+climate cycles and meter totals. The reviewer found no substantive inconsistency;
+the scenario remains fictional, as documented in `agronomy.md`.
+
+The initial independent review found two defects that were fixed before final checks:
 real geolocation remained reachable through Zone Configure, and the environment
 fixture counted a valve as a sensor. Browser failures also caught iframe form
 permissions, a missing liters endpoint, reset navigation that did not create a

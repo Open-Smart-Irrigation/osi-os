@@ -56,7 +56,7 @@ test('zone creation, assignment, removal and language preserve existing farm', a
 test('water card, real sensor charts and three status categories', async ({page}) => {
   await page.goto('/'); const app=page.frameLocator('#app');
   await app.getByRole('button', {name:/Tomato plot.*devices/}).click();
-  await expect(app.getByTestId('water-rain-tile')).toContainText('0.0 mm');
+  await expect(app.getByTestId('water-rain-tile')).toContainText('6.0 mm');
   await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
   await expect(app.getByTestId('water-forecast-tile')).toHaveCount(0);
   await expect(app.getByTestId('water-action-tile')).toBeHidden();
@@ -67,11 +67,15 @@ test('water card, real sensor charts and three status categories', async ({page}
   await app.getByTestId('water-today-card').scrollIntoViewIfNeeded();
   await page.screenshot({path:'demo/screenshots/populated-zone.png'});
   await app.getByRole('button', {name:/Devices in this zone/}).click();
-  await app.getByRole('button', {name:'68.0 kPa', exact:true}).click();
+  await app.getByRole('button', {name:'56.0 kPa', exact:true}).click();
   await expect(app.locator('.recharts-surface').first()).toBeVisible();
   await expect(app.getByText('97 readings · last 24 h')).toBeVisible();
   await app.locator('.recharts-surface').first().hover();
   await expect(app.locator('.recharts-tooltip-wrapper').first()).toBeVisible();
+  await app.getByRole('button',{name:'7 d',exact:true}).click();
+  await expect(app.getByText('673 readings · last 168 h')).toBeVisible();
+  await page.waitForTimeout(1700); // Let the real chart's series transition finish before capture.
+  await page.screenshot({path:'demo/screenshots/soil-history-7-days.png'});
   await app.getByRole('button',{name:'×',exact:true}).click();
   await app.getByRole('button',{name:/Demonstration bed.*device/}).click();
   await app.getByRole('button',{name:/Devices in this zone/}).last().click();
@@ -202,7 +206,7 @@ test('all shipped languages work offline and preserve the open zone', async ({pa
   let current='English';
   for(const label of ['Deutsch','Français','Italiano','Español','Português','Luganda','English']) {
     await app.getByRole('button',{name:current,exact:true}).click();
-    await expect(app.locator('.demo-language').getByRole('button')).toHaveCount(8);
+    await expect(app.getByRole('banner').getByRole('button')).toHaveCount(10);
     await app.getByRole('button',{name:label,exact:true}).click();
     await expect(app.getByRole('button',{name:label,exact:true})).toBeVisible();
     await expect(app.getByRole('button',{name:/Tomato plot/})).toHaveAttribute('aria-expanded','true');
@@ -210,4 +214,21 @@ test('all shipped languages work offline and preserve the open zone', async ({pa
     await expect(app.getByTestId('water-forecast-tile')).toHaveCount(0);
     current=label;
   }
+});
+
+
+test('native language button fills the dashboard slot below Add beside Account', async ({page}) => {
+  await page.goto('/');const app=page.frameLocator('#app');
+  await expect(app.locator('.demo-language')).toHaveCount(0);
+  await expect(app.getByText('MUARIK · Simulated farm',{exact:true})).toHaveCount(0);
+  const header=app.getByRole('banner');
+  const add=await header.getByRole('button',{name:'Add',exact:true}).boundingBox();
+  const language=await header.getByRole('button',{name:'English',exact:true}).boundingBox();
+  const account=await header.getByRole('button',{name:'Account',exact:true}).boundingBox();
+  expect(language!.x).toBeCloseTo(add!.x,0);
+  expect(language!.y).toBeGreaterThan(add!.y+add!.height);
+  expect(language!.y).toBeCloseTo(account!.y,0);
+  expect(language!.width).toBeCloseTo(account!.width,0);
+  expect(language!.height).toBeCloseTo(account!.height,0);
+  expect(language!.x+language!.width).toBeLessThan(account!.x);
 });

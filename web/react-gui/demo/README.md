@@ -42,18 +42,19 @@ Use Node 22 or newer, as used during verification. Set `DEMO_PORT` if 4173 is bu
 ## Four-minute rehearsal
 
 1. **0:00–0:35:** Explain the simulated MUARIK scenario. Use the language control
-   above the dashboard to select Français, then English. This is the real
-   LanguageSwitcher, also available through Settings; the demo strip keeps it
-   available without navigating away.
+   below **Add**, beside **Account**, to select Français, then English. This
+   is the native LanguageSwitcher in the dashboard header, also available through
+   Settings. There is no separate demo strip.
 2. **0:35–1:30:** Add → Add Zone → name it “Trial bed”. Use its **+ Device** button
    to assign “Spare demonstration probe”. Expand and collapse the zone, then
    Delete → Yes, Delete. The probe returns to Unassigned Devices. Starting zones
    are protected from deletion so the demonstration can continue.
-3. **1:30–2:35:** Expand Tomato plot. Its water card shows **Rain today: 0.0 mm** and
+3. **1:30–2:35:** Expand Tomato plot. Its water card shows **Rain today: 6.0 mm** and
    **Measured (flow meter): 120 L**. These are fixed simulated sensor readings.
-   Expand **Devices in this zone** and select **68.0 kPa** to open the real history
-   chart. Show 20 cm and 40 cm readings. In Demonstration bed, the 12 kPa wet
-   reading is blue and 35 kPa moist reading is green. Tomato readings are red.
+   Expand **Devices in this zone** and select **56.0 kPa** to open the real history
+   chart. Select **7 d** to show drying between rain and irrigation events, then
+   switch between the 20 cm and 40 cm channels to show their delayed responses. In Demonstration bed, the 12 kPa wet
+   reading is blue and 35 kPa moist reading is green. Tomato’s 56 kPa shallow reading is red; its 46 kPa deeper reading is green.
    Higher positive tension means drier soil. Collapse the zones when finished.
 4. **2:35–4:00:** Scroll to **Valve control**, choose **Open**, enter **1 minute**,
    and confirm. The simulated command waits two simulated seconds before the
@@ -120,13 +121,21 @@ any different version used by the eventual presentation.
 
 The dashboard title is **OSI OS Dashboard**. Full environment and weather panels
 start disabled through the existing display preference. Each zone has a simulated
-LSN50 MOD9 node with a rain gauge and flow meter: Tomato has 0 mm and 120 L today;
+LSN50 MOD9 node with a rain gauge and flow meter: Tomato has 6 mm and 120 L today;
 Demonstration bed has 6 mm and 80 L. Readings and device history share the same
 fixed snapshot. Valve demonstrations do not alter these historical measurements.
 The water card displays only rain and measured irrigation volume; soil readings
 remain in the device cards. Demo-only styles hide the action, soil-summary and
 uncalibrated valve-estimate tiles, and demo translation overrides remove the
-crop-demand subtitle. Production components are unchanged.
+crop-demand subtitle. The dashboard header now mounts its native language
+selector; the other production components are unchanged.
+
+The [agronomy scenario](agronomy.md) records the seven-day event timeline and
+review assumptions. Rain and flow histories, local-day totals and current readings
+come from one event ledger. Soil channels use separate reviewed curves; they are
+not calculated irrigation advice. Temperature, humidity and light histories follow
+day/night cycles and shared rain events. Requests for 30 or 90 days return the
+available seven-day record, without inventing older samples.
 
 No forecast, ET0, crop demand or computed irrigation recommendation is supplied.
 Forecast data stays unavailable even if the presenter enables the full environment
@@ -150,7 +159,7 @@ Transport isolation is installed before App imports its API module. The Axios
 adapter has no fallback. Fetch, XHR, WebSocket, EventSource and beacons are blocked;
 CSP separately denies connections, workers and external assets. Geolocation is
 disabled. Local/session storage are separate in-memory objects in the iframe;
-normal app/browser storage is neither read nor overwritten. Production source,
+normal app/browser storage is neither read nor overwritten. Production
 authentication, API implementation and build entry are unchanged.
 
 ## Verify

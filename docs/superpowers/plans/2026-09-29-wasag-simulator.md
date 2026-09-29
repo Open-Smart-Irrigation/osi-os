@@ -11,9 +11,9 @@ Production entry, auth provider, API services and deployment remain unchanged.
    cancelled/completed transitions, pause/speed/reset and unsupported requests.
    Reuse frontend name rules and sensor units. Serve backend water summaries as
    explicitly simulated outputs; do not claim a new calculation.
-2. Add `demo/runtime.ts` before dynamically importing the real `src/main.jsx`.
+2. Add `demo/runtime.ts` before dynamically importing `demo/mount.tsx`, which mounts the real App.
    Install an Axios default adapter (inherited by the existing API instance),
-   block fetch/XHR/WebSocket/EventSource/beacon except bundled locale fetches,
+   block fetch/XHR/WebSocket/EventSource/beacon,
    and use in-memory Storage objects for the independent entry. Seed an inert
    demo-only session, English, light theme and fictional MUARIK farm.
    A single clock controls Date.now and valve transitions. SWR refreshes visible
@@ -28,7 +28,7 @@ Production entry, auth provider, API services and deployment remain unchanged.
    restrictive CSP, no proxy, and no backend routes. Copy only local app assets.
    Keep all demo imports out of the production entry/build.
 5. Exercise the built host with browser tests at 1080p and 720p: overview,
-   English/French, temporary zone and assignment cleanup, water/soil charts,
+   all seven shipped languages, temporary zone and assignment cleanup, water/soil charts,
    valve command/cancel/expiry, reset, pause/resume, enlargement, transport
    isolation and unknown actions. Capture four screenshots. Run the existing
    frontend suite and production build. Document any pre-existing failures.
@@ -41,8 +41,8 @@ Production entry, auth provider, API services and deployment remain unchanged.
 - Reset clears SWR/component state and storage without touching ordinary app data.
 - Pause/speed control the UI countdown and simulator through the same clock.
 - Synthetic identifiers only; never read live data or use a production token.
-- Real language selector uses bundled translations; exclude unreviewed Luganda
-  from the demo build without changing the production language list.
+- Real language selector uses all seven bundled translations, preserving existing
+  English fallbacks where human Luganda translation is pending.
 - Existing UI has expandable zones, not a separate zone route. Preserve that.
 
 ## Independent review amendments
@@ -51,15 +51,14 @@ The reviewer required a complete iframe Date replacement (both constructor and
 `now`, retaining parse/UTC/prototype), elapsed time from performance.now, and a
 single state transition tick. Reset reloads the app iframe; enlargement never
 replaces it. Override Storage only in the iframe window. Install the Axios adapter
-before importing main and return AxiosError responses. Enumerate dashboard reads
+before importing App and return AxiosError responses. Enumerate dashboard reads
 in the model and prove the inherited adapter through the real rendered UI.
-Replace i18n configuration only in the demo build with eagerly bundled English
-and French resources, removing HttpBackend/detection. CSP blocks every network
+Replace i18n configuration only in the demo build with all seven eagerly bundled locale resources, removing HttpBackend/detection. CSP blocks every network
 connection. Both messaging directions validate origin, source and exact payload.
 
-The final demo mount reuses App and the real LanguageSwitcher in a small demo
-strip, instead of importing main directly: Settings-only language access would
-otherwise require leaving the current screen. Production components are unchanged.
+The demo mount reuses App directly. At the presenter’s request the production
+DashboardHeader now mounts the real LanguageSwitcher below Add and beside Account
+in the mobile layout. The former demo-only language strip is removed.
 The independent code review found and closed a geolocation gap and corrected the
 environment sensor count to exclude valves. Reset uses a changing session query
 to force a new document even when the current hash route is already the dashboard.
@@ -80,3 +79,20 @@ Independent plan review required matching device/summary values, an explicit
 false environment preference, removal of demand-oriented copy, and browser checks
 for the hidden advice, estimate and soil-summary tiles. The implementation adopts
 these requirements. Soil cards and history remain available through device cards.
+
+
+## Natural histories and native header revision
+
+A separate agent acting as agronomy reviewer proposed a coherent fictional week:
+shared rain, separate measured irrigation events, shallow wetting followed by a
+delayed deeper response, and slower drying overnight. `demo/history.ts` holds the
+event ledger and per-depth anchors. Interval rain/flow readings sum to local-day
+totals; rates derive from the interval amounts. Latest values and chart windows
+share the same fixed snapshot. There are seven days of samples; longer chart
+windows return that available record. Presenter valve actions never rewrite it.
+
+The independent plan reviewer required those consistency checks and header size/
+alignment tests, and verified the demo retains the local i18n alias after moving
+the native selector into DashboardHeader. Header geometry is checked inside the
+390px iframe; production headers with additional modules retain their wrapping
+layout. The agronomy reviewer also inspects the implemented event sequence.
