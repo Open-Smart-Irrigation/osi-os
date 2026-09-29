@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OSI OS — interactive demonstration</title><link rel="icon" href="data:,"><link rel="stylesheet" href="./host.css"></head>
+<body><main class="slide">
+<section class="copy"><p class="eyebrow">Open Smart Irrigation</p><h1>OSI OS <span>from measurements<br>to irrigation</span></h1>
+<ul><li>Choose a language.</li><li>Organise the farm into zones.</li><li>Understand soil conditions.</li><li>Open a valve for a chosen duration.</li></ul>
+<p class="scenario">MUARIK demonstration scenario<br><span>Fictional farm and measurements.</span></p></section>
+<section class="demo" aria-label="Interactive OSI OS demonstration"><div class="phone-space"><div class="phone"><iframe id="app" title="OSI OS simulated mobile interface" src="./app.html#/dashboard" sandbox="allow-scripts allow-same-origin allow-forms"></iframe></div></div>
+<p class="label">Demo · Simulated data and controls.</p>
+<div class="controls"><button id="reset">Reset demo</button><button id="enlarge">Enlarge demo</button><label>Time <select id="speed" aria-label="Simulation speed"><option value="1">1×</option><option value="10">10×</option><option value="60">60×</option></select></label><button id="pause">Pause</button><button id="focus">Slide focus</button></div>
+<p class="timing">Simulated acknowledgement after 2 simulated seconds.<br>Shift + Esc returns focus to the slide.</p><p id="host-notice" role="status"></p></section>
+</main><script type="module" src="./host.ts"></script></body></html>

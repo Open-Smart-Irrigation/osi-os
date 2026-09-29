@@ -1,0 +1,1 @@
+{"extends":"../tsconfig.json","compilerOptions":{"allowJs":true,"types":["vite/client"]},"include":["./*.ts","./*.tsx","../src"],"exclude":["../src/**/__tests__","./tests","./playwright.config.ts","./reveal-example.ts"]}
