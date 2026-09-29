@@ -91,6 +91,23 @@ test('water card, real sensor charts and three status categories', async ({page}
   await expect(page.locator('#host-notice')).toBeEmpty();
 });
 
+test('30 and 90 day soil charts show the complete simulated history at both depths', async ({page}) => {
+  await page.goto('/');const app=page.frameLocator('#app');
+  await app.getByRole('button',{name:/Tomato plot.*devices/}).click();
+  await app.getByRole('button',{name:/Devices in this zone/}).click();
+  for(const [reading,depth] of [['56.0 kPa',20],['46.0 kPa',40]]) {
+    await app.getByRole('button',{name:String(reading),exact:true}).click();
+    for(const [days,count] of [[30,2881],[90,8641]]) {
+      await app.getByRole('button',{name:`${days} d`,exact:true}).click();
+      await expect(app.getByText(`${count} readings · last ${days*24} h`)).toBeVisible();
+      await expect(app.locator('.recharts-area-curve').first()).toBeVisible();
+      await page.waitForTimeout(1700); // Capture after the chart's series transition.
+      await page.screenshot({path:`demo/screenshots/soil-history-${days}-days-${depth}cm.png`});
+    }
+    await app.getByRole('button',{name:'×',exact:true}).click();
+  }
+});
+
 test('valve acknowledgement, early cancel, timed close and active reset', async ({page}) => {
   await page.goto('/'); const app=page.frameLocator('#app');
   await app.getByRole('button', {name:'Open', exact:true}).click();
@@ -281,4 +298,65 @@ test('settings hides all explicitly experimental module controls', async ({page}
   }
   await app.getByRole('group',{name:'Water balance',exact:true}).scrollIntoViewIfNeeded();
   await page.screenshot({path:'demo/screenshots/settings.png'});
+});
+
+test('long translations wrap across all languages, including Luganda settings', async ({page}) => {
+  await page.goto('/');const app=page.frameLocator('#app');
+  const labels=['Luganda','Deutsch','Français','Italiano','Español','Português','English'];
+  let current='English';
+  const expectTextToFit=async()=>{
+    const overflow=await app.locator('body').evaluate(body=>{
+      const issues:string[]=[];
+      const root=document.getElementById('root')!;
+      if(root.scrollWidth>root.clientWidth+1||document.documentElement.scrollWidth>innerWidth+1)issues.push('Horizontal page overflow');
+      const walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);
+      while(walker.nextNode()) {
+        const node=walker.currentNode,element=node.parentElement;
+        // SVG chart labels and native select popups have their own layout rules.
+        if(!element||!/[\p{L}]{3}/u.test(node.textContent??'')||element.closest('script,style,svg,option'))continue;
+        const range=document.createRange();range.selectNodeContents(node);
+        let container:HTMLElement|null=element;
+        while(container&&parseFloat(getComputedStyle(container).paddingLeft)<8)container=container.parentElement;
+        if(!container)continue;
+        const bounds=container.getBoundingClientRect(),style=getComputedStyle(container);
+        const left=bounds.left+parseFloat(style.paddingLeft),right=bounds.right-parseFloat(style.paddingRight);
+        if([...range.getClientRects()].some(rect=>rect.width&&rect.height&&(rect.left<left-2||rect.right>right+2)))issues.push(node.textContent!.trim());
+      }
+      return issues;
+    });
+    expect(overflow).toEqual([]);
+  };
+  for(const label of labels) {
+    await app.getByRole('button',{name:current,exact:true}).click();
+    await app.getByRole('button',{name:label,exact:true}).click();
+    await expectTextToFit();
+    // The native zone accordion retains its label and state when the language changes.
+    const toggle=app.getByRole('button',{name:/^Tomato plot/});
+    if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
+    await expectTextToFit();
+    const valve=app.getByTestId('valve-last-seen').locator('..');
+    await valve.locator('.grid.grid-cols-2 > button').click();
+    await expect(app.getByRole('dialog').getByRole('spinbutton')).toBeVisible();
+    await expectTextToFit();
+    await app.getByRole('dialog').getByRole('button').first().click();
+    await valve.locator('.grid.grid-cols-2 > div > button').click();
+    await expect(app.getByRole('dialog')).toBeVisible();
+    await expectTextToFit();
+    await app.getByRole('dialog').getByRole('button').first().click();
+    if(label==='Luganda') {
+      await valve.getByRole('button',{name:'Ebirala',exact:true}).click();
+      await expectTextToFit();
+      await app.getByRole('menuitem',{name:'Enteekateeka za bbomba',exact:true}).click();
+      await expect(app.getByRole('dialog')).toBeVisible();
+      await expectTextToFit();
+      await app.getByRole('dialog').getByRole('button').first().click();
+      await app.getByText(/Bwagulibwa omulundi gw'omuliko/).last().scrollIntoViewIfNeeded();
+      await page.screenshot({path:'demo/screenshots/luganda-wrapping.png'});
+    }
+    current=label;
+  }
+  await app.getByRole('link',{name:'Settings',exact:true}).click();
+  await app.getByRole('button',{name:'English',exact:true}).click();
+  await app.getByRole('button',{name:'Luganda',exact:true}).click();
+  await expectTextToFit();
 });

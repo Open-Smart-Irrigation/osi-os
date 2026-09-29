@@ -115,3 +115,28 @@ sensor advice, use the existing soil-status categories, and keep forecasts and
 crop-demand calculations absent. Rename the volume to Irrigation (measured, flow
 meter). Hide the five Settings module controls explicitly marked experimental
 using a demo-only rule; do not hide supported controls or change production defaults.
+
+## Long translations and extended soil history
+
+Reproduced Luganda overflow at the 390px application width: the device footer’s
+non-shrinking metadata row pushes dashboard content to 410px, and the valve
+schedule button exceeds its grid cell. Add inherited `overflow-wrap: anywhere`
+to the demo root and allow demo text using `truncate`/`whitespace-nowrap` to wrap
+with visible full text. Preserve numeric chart rendering and minimum touch sizes.
+Allow the shared device-footer metadata flex item to shrink with `min-w-0` instead
+of `shrink-0`. Verify actual text bounds inside padded containers for Luganda on
+the dashboard, expanded zone, valve dialogs and Settings; run all seven locales
+through the same check. Capture a Luganda screenshot and rerun demo browser gates.
+
+Extend the fictional sensor record to 90 days with shared rain, separate zone
+irrigation and delayed deeper-soil responses. Preserve the current seven-day
+anchors, current readings and today’s measured totals. The 30-day and seven-day
+views must be exact subsets of the 90-day data. Add history tests and browser
+checks for both longer views, update scenario documentation, and obtain separate
+agronomy review and final verification.
+
+The separate reviewer required preserving footer action widths in a nonshrinking
+wrapper, setting `min-w-0` on the valve Schedule button beside More, and checking
+root/document scroll widths as well as text bounds. These were incorporated.
+The wrapping regression failed first on the long Luganda device-footer text;
+the implemented fix passed all seven languages across cards and valve dialogs.

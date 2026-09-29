@@ -47,12 +47,31 @@ test('history windows overlap exactly and latest samples agree with device cards
       if(typeof latest!=='number')continue;
       const week=history(sim,device.deveui,field),day=history(sim,device.deveui,field,24);
       assert.deepEqual(week.slice(-97),day);
-      assert.deepEqual(history(sim,device.deveui,field,2160),week);
+      const month=history(sim,device.deveui,field,720),season=history(sim,device.deveui,field,2160);
+      assert.equal(month.length,2881);
+      assert.equal(season.length,8641);
+      assert.deepEqual(month.slice(-673),week);
+      assert.deepEqual(season.slice(-2881),month);
       assert.equal(day.at(-1)!.t,new Date(DEMO_EPOCH).toISOString());
       assert.equal(day.at(-1)!.value,latest);
       assert.ok(week.every(row=>Number.isFinite(row.value)&&row.value>=0));
     }
   }
+});
+
+test('the 30 and 90 day records retain earlier measured wetting events and delayed deep responses',()=>{
+  const sim=new Simulator();
+  const tomatoShallow=history(sim,'00000000000000A1','swt_1',2160);
+  const tomatoDeep=history(sim,'00000000000000A1','swt_2',2160);
+  const bedShallow=history(sim,'00000000000000A2','swt_1',2160);
+  const tomatoRain=history(sim,'00000000000000E1','rain_mm_delta',2160);
+  const bedFlow=history(sim,'00000000000000E2','flow_liters_delta',2160);
+  assert.equal(value(tomatoShallow,'2026-07-04T20:00Z'),24);
+  assert.equal(value(tomatoDeep,'2026-07-04T20:00Z'),44);
+  assert.equal(value(tomatoDeep,'2026-07-05T06:00Z'),34);
+  assert.equal(value(bedShallow,'2026-09-14T20:00Z'),21);
+  assert.equal(tomatoRain.filter(row=>row.value>0).reduce((sum,row)=>sum+row.value,0),96);
+  assert.equal(bedFlow.filter(row=>row.value>0).reduce((sum,row)=>sum+row.value,0),3730);
 });
 
 test('local environmental histories have night/day cycles and rain intervals cool and humidify',()=>{

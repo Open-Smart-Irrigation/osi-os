@@ -5,3 +5,13 @@ html,body{overscroll-behavior:none}body{margin:0}#demo-notice:not([hidden]){posi
 [data-experimental-module="true"] {
   display: none;
 }
+
+/* Keep full translations readable in the presentation's narrow app viewport. */
+#root {
+  overflow-wrap: anywhere;
+}
+#root :is(p, h1, h2, h3, h4, button, label, a, span):is(.truncate, .whitespace-nowrap) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}

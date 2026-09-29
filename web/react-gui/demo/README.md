@@ -55,8 +55,9 @@ Use Node 22 or newer, as used during verification. Set `DEMO_PORT` if 4173 is bu
    **Irrigation (measured, flow meter): 120 L**. These are fixed simulated sensor readings. **Soil now** shows the shallow
    reading; **Action** gives explicitly simulated advice for this scenario.
    Expand **Devices in this zone** and select **56.0 kPa** to open the real history
-   chart. Select **7 d** to show drying between rain and irrigation events, then
-   switch between the 20 cm and 40 cm channels to show their delayed responses. In Demonstration bed, the 12 kPa wet
+   chart. Select **7 d**, **30 d** or **90 d** to show drying between rain and irrigation events.
+   Close the chart and select the 40 cm reading to compare its delayed response.
+   In Demonstration bed, the 12 kPa wet
    reading is blue and 35 kPa moist reading is green. Tomato’s 56 kPa shallow reading is red; its 46 kPa deeper reading is green.
    Higher positive tension means drier soil. Collapse the zones when finished.
 4. **2:35–4:00:** Scroll to **Valve control**, choose **Open**, enter **1 minute**,
@@ -118,7 +119,7 @@ any different version used by the eventual presentation.
 | Existing forms, name validation, assignment and confirmation flows | Local CRUD; the two starting zones cannot be deleted |
 | LanguageSwitcher and i18next | All seven shipped locales, including existing English fallbacks in Luganda |
 | Water card and rain/flow device cards | Fixed local gauge and flow-meter samples; environment panel hidden by default |
-| Soil cards, thresholds, depths and interactive charts | Deterministic samples, up to seven days; irrigation does not rewrite them |
+| Soil cards, thresholds, depths and interactive charts | Deterministic samples, up to 90 days; presenter valve commands do not rewrite them |
 | Valve dialog, pending/observed states and countdown | Two simulated seconds to acknowledge, local close/expiry |
 | SWT trigger editor | Saves/reloads configuration; no scheduler execution |
 
@@ -136,12 +137,16 @@ The dashboard header mounts its native language selector. Valve tiles place
 last-seen information above the name, and the panel’s compact info tooltip replaces
 its subtitle. The tooltip works with hover, focus or tap; Escape dismisses it.
 
-The [agronomy scenario](agronomy.md) records the seven-day event timeline and
+The [agronomy scenario](agronomy.md) records the 90-day event timeline and
 review assumptions. Rain and flow histories, local-day totals and current readings
 come from one event ledger. Soil channels use separate reviewed curves; they are
 not calculated irrigation advice. Temperature, humidity and light histories follow
-day/night cycles and shared rain events. Requests for 30 or 90 days return the
-available seven-day record, without inventing older samples.
+day/night cycles and shared rain events. The 30-day and seven-day windows are
+exact subsets of the same 90-day fictional sensor record.
+
+Long labels wrap inside the phone viewport, including Luganda. Demo styles show
+full text instead of single-line truncation; device footer metadata can shrink
+and wrap while action buttons retain their size.
 
 No forecast, ET0 or crop-demand calculation is supplied.
 Forecast data stays unavailable even if the presenter enables the full environment

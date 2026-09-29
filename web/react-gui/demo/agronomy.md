@@ -1,9 +1,10 @@
-# Fictional sensor week
+# Fictional sensor record
 
-The demo uses a fixed seven-day record ending 29 September 2026 at 09:00 UTC
+The demo uses a fixed 90-day record ending 29 September 2026 at 09:00 UTC
 (12:00 in Kampala). A separate agent acting as a senior agronomy reviewer proposed
 and reviewed the sequence. It is a demonstration scenario, not measured MUARIK
-field data or a calibrated soil model.
+field data or a calibrated soil model. The last seven days retain the detailed
+sequence below; the preceding record provides coherent 30- and 90-day chart views.
 
 Higher positive soil water tension means drier soil. Sensors at different depths
 help distinguish shallow wetting from deeper changes; interpretation depends on
@@ -24,6 +25,27 @@ represent their separate meters, never estimates from valve duration.
 | 29 Sep, 02:00–03:30 | 6 mm | 0 L | 0 L |
 | 29 Sep, 05:45–06:15 | 0 mm | 0 L | 80 L |
 | 29 Sep, 06:30–07:00 | 0 mm | 120 L | 0 L |
+
+### Earlier chart record
+
+The older record uses the same rules: rain is shared by both nearby gauges, while
+flow is measured separately at each zone. Each wetting event has a shallow response
+first and a later 40 cm response; dry periods rise more during daylight. These are
+the additional event totals used by the 30- and 90-day chart views.
+
+| Date | Shared rain | Tomato flow | Bed flow |
+| --- | ---: | ---: | ---: |
+| 4 Jul | 11 mm | 0 L | 0 L |
+| 10 Jul | 0 mm | 650 L | 600 L |
+| 17 Jul | 18 mm | 0 L | 0 L |
+| 25 Jul | 0 mm | 750 L | 700 L |
+| 3 Aug | 9 mm | 0 L | 0 L |
+| 12 Aug | 0 mm | 0 L | 850 L |
+| 19 Aug | 16 mm | 0 L | 0 L |
+| 28 Aug | 0 mm | 750 L | 0 L |
+| 6 Sep | 12 mm | 0 L | 0 L |
+| 14 Sep | 0 mm | 0 L | 700 L |
+| 20 Sep | 10 mm | 0 L | 0 L |
 
 Each event is split into sampled 15-minute intervals. Confirmed dry intervals have
 zero rain; this does not change the production rule that missing data stays
@@ -50,7 +72,7 @@ night, and rain intervals reduce light and temperature while increasing humidity
 These are local sensor histories. The demo supplies no forecast, ET0 or crop-demand
 calculation.
 
-Use the soil chart’s **7 d** button to show the complete sequence, and switch depth
-to compare responses. Shorter windows are exact subsets of the same samples; longer
-windows contain only the available seven-day record. Presenter valve commands do
-not rewrite historical readings. Reset restores the same record every time.
+Use the soil chart’s **7 d**, **30 d**, and **90 d** buttons to show exact subsets of
+the same 15-minute samples, and switch depth to compare responses. Presenter valve
+commands do not rewrite historical readings. Reset restores the same record every
+time.

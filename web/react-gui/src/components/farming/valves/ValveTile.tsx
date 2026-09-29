@@ -226,7 +226,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             type="button"
             onClick={onSchedule}
             disabled={busy}
-            className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-[44px] min-w-0 flex-1 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {t('schedule')}
           </button>

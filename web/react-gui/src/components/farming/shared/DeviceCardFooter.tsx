@@ -26,10 +26,10 @@ export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({
         <div className="min-w-0 flex-1 text-xs text-[var(--text-tertiary)]">
           {leftContent ?? null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {actions ?? null}
+        <div className="flex min-w-0 items-center gap-2">
+          {actions != null && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
           <p
-            className="text-xs text-[var(--text-tertiary)]"
+            className="min-w-0 break-words text-xs text-[var(--text-tertiary)]"
             title={derived ? t('common.batteryEstimated', { defaultValue: 'Estimated from battery voltage' }) : undefined}
           >
             {buildDeviceFooterMeta({ batPct: batteryPercent, batV: batteryVoltage, lastSeenLabel })}
