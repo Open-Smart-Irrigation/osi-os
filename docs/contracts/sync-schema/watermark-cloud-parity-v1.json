@@ -69,6 +69,12 @@
       "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"a84041a171000002","gateway_device_eui":"a84041a171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789ABC","base_sync_version":7,"operation":"set","measured_at":"2026-08-08T10:11:12+02:00","normalized_intent":{"method":"2026-08-08T10:11:12+02:00","notes":"calibration 2026-08-08T10:11:12.123Z"}},
       "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"measured_at\":\"2026-08-08T08:11:12.000Z\",\"normalized_intent\":{\"method\":\"2026-08-08T10:11:12+02:00\",\"notes\":\"calibration 2026-08-08T10:11:12.123Z\"},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
       "sha256": "f1319b3c0914de421d26c82c98a136dc50e3d4c5c7360a1a7421b762c0202069"
+    },
+    {
+      "name": "string-escaping-and-unicode",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","key\u001b":"key-control","normalized_intent":{"control":"start\u001bend","quote_backslash":"\"\\\\\n","unicode":"café 😀","surrogate":"\ud800"}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"key\\u001b\":\"key-control\",\"normalized_intent\":{\"control\":\"start\\u001bend\",\"quote_backslash\":\"\\\"\\\\\\\\\\n\",\"surrogate\":\"\\ud800\",\"unicode\":\"café 😀\"},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef8c7d3cf133a21566a73d39f5d5280c57a83ccf7b088037d8d5aba3bf87678f"
     }
   ],
   "conflictCases": {

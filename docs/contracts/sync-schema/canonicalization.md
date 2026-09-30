@@ -79,6 +79,12 @@ typed EUI, UUID, and instant fields are normalized; free-text fields such as
 `method` and `notes` are opaque, even when their contents look like timestamps.
 The WATERMARK parity vectors include exponent/fraction inputs such as `1e-7`
 and `0.0000001`, which must produce identical protected bytes and hashes.
+Protected string/key escaping is explicit: quote and backslash use `\\\"` and
+`\\\\`; backspace, tab, newline, formfeed, and carriage return use `\\b`,
+`\\t`, `\\n`, `\\f`, and `\\r`; remaining U+0000..U+001F code units use
+lowercase four-hex `\\u00xx`. Valid surrogate pairs remain UTF-8 Unicode, while
+lone surrogates use lowercase four-hex escapes. This spelling is shared by both
+scoped seams and is independent of global canonicalizer behavior.
 
 ## Test Vectors
 

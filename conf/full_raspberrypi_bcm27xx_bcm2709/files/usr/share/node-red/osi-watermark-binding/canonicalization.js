@@ -8,6 +8,7 @@ const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]
 const EUI_FIELDS = new Set(['device_eui', 'gateway_device_eui']);
 const UUID_FIELDS = new Set(['actor_user_uuid', 'command_id', 'user_uuid']);
 const INSTANT_FIELDS = new Set(['created_at', 'deleted_at', 'measured_at', 'recorded_at', 'requested_at', 'updated_at']);
+const HEX = '0123456789abcdef';
 
 function fixedNumber(value) {
   if (!Number.isFinite(value)) throw new TypeError('protected binding forbids non-finite numbers');
@@ -58,16 +59,39 @@ function typedString(value, field) {
   return value;
 }
 
+function jsonString(value) {
+  let result = '"';
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0x08) result += '\\b';
+    else if (code === 0x09) result += '\\t';
+    else if (code === 0x0a) result += '\\n';
+    else if (code === 0x0c) result += '\\f';
+    else if (code === 0x0d) result += '\\r';
+    else if (code === 0x22) result += '\\"';
+    else if (code === 0x5c) result += '\\\\';
+    else if (code <= 0x1f) result += `\\u00${HEX[(code >>> 4) & 0xf]}${HEX[code & 0xf]}`;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) result += value[index++] + value[index];
+      else result += `\\u${HEX[(code >>> 12) & 0xf]}${HEX[(code >>> 8) & 0xf]}${HEX[(code >>> 4) & 0xf]}${HEX[code & 0xf]}`;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      result += `\\u${HEX[(code >>> 12) & 0xf]}${HEX[(code >>> 8) & 0xf]}${HEX[(code >>> 4) & 0xf]}${HEX[code & 0xf]}`;
+    } else result += value[index];
+  }
+  return result + '"';
+}
+
 function canonicalize(value, field = null) {
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return fixedNumber(value);
-  if (typeof value === 'string') return JSON.stringify(typedString(value, field));
+  if (typeof value === 'string') return jsonString(typedString(value, field));
   if (Array.isArray(value)) return '[' + value.map((item) => canonicalize(item)).join(',') + ']';
   if (!value || typeof value !== 'object') throw new TypeError(`protected binding cannot encode ${typeof value}`);
   return '{' + Object.keys(value).sort().map((key) => {
     if (value[key] === undefined) throw new TypeError(`protected binding forbids undefined at ${key}`);
-    return JSON.stringify(key) + ':' + canonicalize(value[key], key);
+    return jsonString(key) + ':' + canonicalize(value[key], key);
   }).join(',') + '}';
 }
 
