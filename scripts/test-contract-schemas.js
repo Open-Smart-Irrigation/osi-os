@@ -973,7 +973,7 @@ reportCheck(
     watermarkVector.fixtures.gateway_device_eui === WATERMARK_GATEWAY_EUI &&
     Array.isArray(watermarkVector.bindingVectors) && watermarkVector.bindingVectors.length >= 4 &&
     watermarkVector.bindingVectors.every((vector) => {
-        const actual = bindingHash(vector.input);
+    const actual = bindingHash(vector.input);
         return actual.body === vector.canonical_body && actual.sha256 === vector.sha256;
     }) &&
     watermarkVector.bindingVectors.find((vector) => vector.name === 'numeric-one').sha256 ===
@@ -981,6 +981,9 @@ reportCheck(
     watermarkVector.bindingVectors.find((vector) => vector.name === 'omitted-metadata').sha256 !==
         watermarkVector.bindingVectors.find((vector) => vector.name === 'explicit-null-metadata').sha256 &&
     watermarkVector.conflictCases.sameKeyDifferentIntent === 'conflict' &&
+    bindingHash({...watermarkVector.bindingVectors[0].input,
+        effect_key: 'watermark_calibration:set:A84041A171000001:A84041A171000002:8'}).sha256 ===
+        watermarkVector.conflictCases.changedEffect &&
     watermarkVector.conflictCases.changedBase !== watermarkVector.bindingVectors[0].sha256 &&
     watermarkVector.conflictCases.changedBinding !== watermarkVector.bindingVectors[0].sha256 &&
     watermarkVector.conflictCases.changedIntent !== watermarkVector.bindingVectors[0].sha256,

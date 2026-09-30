@@ -55,6 +55,7 @@
   ],
   "conflictCases": {
     "sameKeyDifferentIntent": "conflict",
+    "changedEffect": "65f373736f428238a9fc9f610cef88532d8cf57e4ccdc4b0b20c96aeb2a5a91d",
     "changedBase": "8f7f1f37c05c8cc0ff1acfc24962af81338539f6dddcc8c4e0bac80070bfd205",
     "changedBinding": "784f2141882aa2003b527acc983ac072576cddb88155fb61e2be019d3c38716b",
     "changedIntent": "a8011218963f67a5dd0a0d6612bced69a932d27dc056d8524057df210512c481"
