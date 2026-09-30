@@ -25,6 +25,7 @@ var CALIBRATION_LIMITS = {
   pull: { min: 25000, max: 65000 },
   series: { min: 0, max: 500 }
 };
+var MIN_NORMAL = 2.2250738585072014e-308;
 
 function tensionFromResistance(ohm, soilTempC) {
   if (typeof ohm !== 'number' || !isFinite(ohm)) return { kpa: null, status: 'invalid_sample' };
@@ -114,7 +115,10 @@ function channelCalibration(row, channel) {
   return validChannelCalibration(cal) ? cal : null;
 }
 
-function inRange(v, lim) { return typeof v === 'number' && isFinite(v) && v >= lim.min && v <= lim.max; }
+function inRange(v, lim) {
+  return typeof v === 'number' && isFinite(v) && (v === 0 || Math.abs(v) >= MIN_NORMAL) &&
+    v >= lim.min && v <= lim.max;
+}
 
 function validChannelCalibration(cal) {
   return inRange(cal.pullup, CALIBRATION_LIMITS.pull) && inRange(cal.pulldown, CALIBRATION_LIMITS.pull) &&
@@ -205,6 +209,7 @@ function convertFrame(frame, calibrationRow) {
 module.exports = {
   CONVERSION_VERSION: CONVERSION_VERSION,
   CALIBRATION_LIMITS: CALIBRATION_LIMITS,
+  MIN_NORMAL: MIN_NORMAL,
   tensionFromResistance: tensionFromResistance,
   tensionUpperBound: tensionUpperBound,
   parseProfile3: parseProfile3,

@@ -187,15 +187,15 @@
                         "properties": {
                             "pullup_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
                             "pulldown_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
-                            "series_fwd_1_ohm": {"type": "number", "minimum": 0, "maximum": 500},
-                            "series_rev_1_ohm": {"type": "number", "minimum": 0, "maximum": 500},
+                            "series_fwd_1_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
+                            "series_rev_1_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
                             "pullup_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
                             "pulldown_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
-                            "series_fwd_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
-                            "series_rev_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
+                            "series_fwd_2_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
+                            "series_rev_2_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
                             "measured_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"},
                             "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
-                            "worst_residual_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                            "worst_residual_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100, "x-positive-minimum": 2.2250738585072014e-308},
                             "notes": {"type": ["string", "null"], "maxLength": 500}
                         }
                     }

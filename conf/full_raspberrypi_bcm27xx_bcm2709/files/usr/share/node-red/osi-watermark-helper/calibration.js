@@ -50,7 +50,7 @@ function validateCalibrationBody(body) {
   for (const field of VALUE_FIELDS) {
     const n = toNumber(body[field]);
     const lim = limitFor(field);
-    if (!Number.isFinite(n) || n < lim.min || n > lim.max) {
+    if (!Number.isFinite(n) || (n !== 0 && Math.abs(n) < conversion.MIN_NORMAL) || n < lim.min || n > lim.max) {
       throw httpError(400, 'invalid_calibration', field + ' must be between ' + lim.min + ' and ' + lim.max + ' ohm', { field });
     }
     values[field] = n;
@@ -74,7 +74,7 @@ function validateCalibrationBody(body) {
     if (blank('worst_residual_pct')) meta.worst_residual_pct = null;
     else {
       const r = toNumber(body.worst_residual_pct);
-      if (!Number.isFinite(r) || r < 0 || r > 100) {
+      if (!Number.isFinite(r) || (r !== 0 && Math.abs(r) < conversion.MIN_NORMAL) || r < 0 || r > 100) {
         throw httpError(400, 'invalid_calibration', 'worst_residual_pct must be between 0 and 100', { field: 'worst_residual_pct' });
       }
       meta.worst_residual_pct = r;

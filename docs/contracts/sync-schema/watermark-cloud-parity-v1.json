@@ -84,6 +84,13 @@
     "changedBinding": "784f2141882aa2003b527acc983ac072576cddb88155fb61e2be019d3c38716b",
     "changedIntent": "a8011218963f67a5dd0a0d6612bced69a932d27dc056d8524057df210512c481"
   },
+  "calibrationNumericDomain": [
+    {"name":"zero-series","field":"series_fwd_1_ohm","value":0,"accepted":true},
+    {"name":"minimum-normal-series","field":"series_fwd_1_ohm","value":2.2250738585072014e-308,"accepted":true},
+    {"name":"representative-fraction","field":"series_fwd_1_ohm","value":0.6,"accepted":true},
+    {"name":"subnormal-series","field":"series_fwd_1_ohm","value":5e-324,"accepted":false},
+    {"name":"subnormal-residual","field":"worst_residual_pct","value":5e-324,"accepted":false}
+  ],
   "depthVectors": [
     {"name":"watermark-set","raw":{"swt_1":20,"swt_2":null,"probe-1":7,"Probe Key/with.any.symbols-and-a-very-long-name-that-exceeds-sixty-four-characters":8,"zero_probe":0},"normalized":{"swt_1":20,"probe-1":7,"probe key/with.any.symbols-and-a-very-long-name-that-exceeds-sixty-four-characters":8},"configured":true},
     {"name":"watermark-clear","raw":{"swt_1":0,"swt_2":null},"normalized":{},"configured":true},

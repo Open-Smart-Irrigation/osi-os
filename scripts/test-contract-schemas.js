@@ -8,6 +8,7 @@ const SCHEMA_DIR = path.resolve(__dirname, '../docs/contracts/sync-schema');
 const STAGING_MANIFEST = path.resolve(__dirname, 'fixtures/sync-contract-staging.json');
 const JOURNAL_AGGREGATE = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate');
 const BINDING_CANONICALIZER = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization');
+const WATERMARK_CALIBRATION = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/calibration');
 const UUID = '12345678-1234-4234-8234-123456789abc';
 const WATERMARK_GATEWAY_EUI = 'A84041A171000001';
 const WATERMARK_DEVICE_EUI = 'A84041A171000002';
@@ -1002,6 +1003,29 @@ reportCheck(
         jsonValuesEqual(normalizeDepthsLikeWriters(vector.raw), vector.normalized) && vector.configured === true),
     'WATERMARK shared vector pins normalized replay semantics',
     'WATERMARK shared vector does not pin numeric, omission/null, or conflict semantics'
+);
+const watermarkCalibrationBase = {
+    pullup_1_ohm: 30000, pulldown_1_ohm: 30000,
+    series_fwd_1_ohm: 10, series_rev_1_ohm: 10,
+    pullup_2_ohm: 30000, pulldown_2_ohm: 30000,
+    series_fwd_2_ohm: 10, series_rev_2_ohm: 10,
+    expected_sync_version: 0
+};
+const calibrationDomainVectors = watermarkVector.calibrationNumericDomain;
+const calibrationDomainValid = Array.isArray(calibrationDomainVectors) && calibrationDomainVectors.length >= 5 &&
+    calibrationDomainVectors.every((vector) => {
+        const body = {...watermarkCalibrationBase, [vector.field]: vector.value};
+        try {
+            WATERMARK_CALIBRATION.validateCalibrationBody(body);
+            return vector.accepted === true;
+        } catch (error) {
+            return vector.accepted === false;
+        }
+    });
+reportCheck(
+    calibrationDomainValid,
+    'WATERMARK calibration numeric domain rejects positive subnormals',
+    'WATERMARK calibration numeric domain vectors are not enforced by the edge writer'
 );
 const journalV2Schema = loadSchema('journal-v2.schema.json');
 for (const [name, schema] of [

@@ -77,6 +77,11 @@ sorted compact JSON, fixed-point finite number rendering (including `-0` as
 `0`), deterministic arrays/nulls, and SHA-256 over UTF-8 bytes. Only explicitly
 typed EUI, UUID, and instant fields are normalized; free-text fields such as
 `method` and `notes` are opaque, even when their contents look like timestamps.
+For WATERMARK calibration numeric fields whose contract minimum is zero,
+positive values must be IEEE-754 normal numbers (at least
+`2.2250738585072014e-308`); zero remains valid and positive subnormals are
+rejected before canonicalization. The shared parity fixture's
+`calibrationNumericDomain` vectors are executable on both runtimes.
 The WATERMARK parity vectors include exponent/fraction inputs such as `1e-7`
 and `0.0000001`, which must produce identical protected bytes and hashes.
 Protected string/key escaping is explicit: quote and backslash use `\\\"` and
