@@ -100,8 +100,6 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
-  'WATERMARK_CALIBRATION_DELETED',
-  'WATERMARK_CALIBRATION_UPSERTED',
 ];
 // The axes are intentionally independent. This fixture is the transition that
 // cloud-first rollout permits: the edge still defers production while cloud has
