@@ -7,7 +7,7 @@ const { isDeepStrictEqual } = require('node:util');
 const SCHEMA_DIR = path.resolve(__dirname, '../docs/contracts/sync-schema');
 const STAGING_MANIFEST = path.resolve(__dirname, 'fixtures/sync-contract-staging.json');
 const JOURNAL_AGGREGATE = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate');
-const BINDING_CANONICALIZER = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization');
+const BINDING_CANONICALIZER = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization');
 const UUID = '12345678-1234-4234-8234-123456789abc';
 const WATERMARK_GATEWAY_EUI = 'A84041A171000001';
 const WATERMARK_DEVICE_EUI = 'A84041A171000002';
@@ -989,7 +989,7 @@ reportCheck(
     watermarkVector.bindingVectors.find((vector) => vector.name === 'omitted-metadata').sha256 !==
         watermarkVector.bindingVectors.find((vector) => vector.name === 'explicit-null-metadata').sha256 &&
     watermarkVector.bindingVectors.find((vector) => vector.name === 'decimal-exponent').canonical_body ===
-        watermarkVector.bindingVectors.find((vector) => vector.name === 'decimal-fixed-equivalent').canonical_body &&
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'decimal-fixed-equivalent').canonical_body &&
     watermarkVector.conflictCases.sameKeyDifferentIntent === 'conflict' &&
     replayBindingOutcome(sameKeyBinding, differentIntentBinding) === 'conflict' &&
     bindingHash({...watermarkVector.bindingVectors[0].input,
@@ -1735,7 +1735,7 @@ for (const [type, operation, prefix, base] of [
     expectInvalid(`${type} rejects unexpected normalized intent`, cmdSchema, {...command, values: {...values, unexpected: true}}, /property/);
     if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {
         for (const [label, depths] of [
-            ['malformed normalized key', {'Bad Key': 10}],
+            ['empty normalized key', {'': 10}],
             ['string depth', {vwc_1: '10'}],
             ['nested depth', {vwc_1: {cm: 10}}],
             ['fractional depth', {vwc_1: 10.5}],

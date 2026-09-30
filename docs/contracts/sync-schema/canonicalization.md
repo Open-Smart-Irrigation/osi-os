@@ -70,15 +70,15 @@ Calibration `method` is at most 64 characters and `notes` is at most 500
 characters, matching the phase-1 edge writer. A missing metadata member means
 keep; a present `null` means clear.
 
-The protected binding implementation uses the existing journal canonicalizers:
-edge `osi-journal-replication/canonicalization.js` and cloud
-`JournalV2Canonicalizer`. Both provide sorted compact JSON, fixed-point finite
-number rendering (including `-0` as `0`), and SHA-256 over UTF-8 bytes. The
-WATERMARK parity vectors therefore include exponent/fraction inputs such as
-`1e-7` and `0.0000001`, which must produce identical protected bytes and hashes.
-This does not change the cloud `SyncPayloadCanonicalizer` or claim that every
-v1/v2 string-normalization rule is interchangeable; protected binding values
-use canonical EUIs, UUIDs, and timestamps before hashing.
+Protected bindings use the scoped edge
+`osi-watermark-binding/canonicalization.js` seam and cloud
+`ProtectedBindingCanonicalizer`, not a global sync/journal hash. Both provide
+sorted compact JSON, fixed-point finite number rendering (including `-0` as
+`0`), deterministic arrays/nulls, and SHA-256 over UTF-8 bytes. Only explicitly
+typed EUI, UUID, and instant fields are normalized; free-text fields such as
+`method` and `notes` are opaque, even when their contents look like timestamps.
+The WATERMARK parity vectors include exponent/fraction inputs such as `1e-7`
+and `0.0000001`, which must produce identical protected bytes and hashes.
 
 ## Test Vectors
 

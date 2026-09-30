@@ -63,6 +63,12 @@
       "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"fraction":1.25,"small":0.0000001,"negative_zero":0}},
       "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"fraction\":1.25,\"negative_zero\":0,\"small\":0.0000001},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
       "sha256": "aae640451c35b771b86c678337ce194c04ce2901626a0f9e70dc3e4c50da2ea0"
+    },
+    {
+      "name": "typed-instant-and-opaque-text",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"a84041a171000002","gateway_device_eui":"a84041a171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789ABC","base_sync_version":7,"operation":"set","measured_at":"2026-08-08T10:11:12+02:00","normalized_intent":{"method":"2026-08-08T10:11:12+02:00","notes":"calibration 2026-08-08T10:11:12.123Z"}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"measured_at\":\"2026-08-08T08:11:12.000Z\",\"normalized_intent\":{\"method\":\"2026-08-08T10:11:12+02:00\",\"notes\":\"calibration 2026-08-08T10:11:12.123Z\"},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "f1319b3c0914de421d26c82c98a136dc50e3d4c5c7360a1a7421b762c0202069"
     }
   ],
   "conflictCases": {
@@ -73,7 +79,7 @@
     "changedIntent": "a8011218963f67a5dd0a0d6612bced69a932d27dc056d8524057df210512c481"
   },
   "depthVectors": [
-    {"name":"watermark-set","raw":{"swt_1":20,"swt_2":null,"zero_probe":0},"normalized":{"swt_1":20},"configured":true},
+    {"name":"watermark-set","raw":{"swt_1":20,"swt_2":null,"probe-1":7,"Probe Key/with.any.symbols-and-a-very-long-name-that-exceeds-sixty-four-characters":8,"zero_probe":0},"normalized":{"swt_1":20,"probe-1":7,"probe key/with.any.symbols-and-a-very-long-name-that-exceeds-sixty-four-characters":8},"configured":true},
     {"name":"watermark-clear","raw":{"swt_1":0,"swt_2":null},"normalized":{},"configured":true},
     {"name":"kiwi-and-generic","raw":{"SWT_1":"25","vwc_45cm":"45","some_other_probe":"5"},"normalized":{"swt_1":25,"vwc_45cm":45,"some_other_probe":5},"configured":true},
     {"name":"generic-sdi12","raw":{"soil_temp_1":1000,"soil_ec_1":"1"},"normalized":{"soil_temp_1":1000,"soil_ec_1":1},"configured":true}
