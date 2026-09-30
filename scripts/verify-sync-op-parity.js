@@ -111,10 +111,41 @@ const EVENT_STAGE_TRANSITION_FIXTURE = {
   cloudDeferred: [],
 };
 
+function validateEventStageTransition({ edgeDeferred, cloudDeferred, edgeHandlers, cloudHandlers }) {
+  const allOps = new Set([...edgeDeferred, ...cloudDeferred, ...edgeHandlers, ...cloudHandlers]);
+  for (const op of allOps) {
+    const edgeActive = !edgeDeferred.includes(op);
+    const cloudActive = !cloudDeferred.includes(op);
+    if (edgeActive && !edgeHandlers.includes(op)) {
+      throw new Error(`missing edge producer for active event op ${op}`);
+    }
+    if (cloudActive && !cloudHandlers.includes(op)) {
+      throw new Error(`missing cloud handler for active event op ${op}`);
+    }
+  }
+  return true;
+}
+
 function assertEventStageAxesAreIndependent() {
   const op = EVENT_STAGE_TRANSITION_FIXTURE.edgeDeferred[0];
-  if (!EXACT_EDGE_DEFERRED_OPS.includes(op) || EVENT_STAGE_TRANSITION_FIXTURE.cloudDeferred.includes(op)) {
-    throw new Error('event staging transition fixture does not prove independent edge/cloud deferred axes');
+  // Cloud-first rollout: cloud may activate its handler while edge emission is
+  // still deferred. A later both-active state is also valid. These executable
+  // cases deliberately use synthetic handler sets rather than production code.
+  validateEventStageTransition({
+    edgeDeferred: [op], cloudDeferred: [], edgeHandlers: [], cloudHandlers: [op],
+  });
+  validateEventStageTransition({
+    edgeDeferred: [], cloudDeferred: [], edgeHandlers: [op], cloudHandlers: [op],
+  });
+  for (const [name, state, message] of [
+    ['missing cloud handler', {edgeDeferred: [op], cloudDeferred: [], edgeHandlers: [], cloudHandlers: []}, 'missing cloud handler'],
+    ['missing edge producer', {edgeDeferred: [], cloudDeferred: [], edgeHandlers: [], cloudHandlers: [op]}, 'missing edge producer'],
+  ]) {
+    let failed = false;
+    try { validateEventStageTransition(state); } catch (error) {
+      failed = String(error.message).includes(message);
+    }
+    if (!failed) throw new Error(`event stage transition harness did not reject ${name}`);
   }
 }
 // Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
@@ -1703,4 +1734,5 @@ module.exports = {
   payloadHasTopLevelContractVersion,
   resolveDefaultServerSource,
   verifyV2ContractFiles,
+  validateEventStageTransition,
 };

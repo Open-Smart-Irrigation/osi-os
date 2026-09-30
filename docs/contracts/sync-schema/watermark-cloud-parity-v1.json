@@ -27,12 +27,36 @@
     "order": ["command_id", "effect_key"],
     "mismatch": "conflict"
   },
-  "normalizedVectors": {
-    "numericOne": 1,
-    "numericOnePointZero": 1.0,
-    "canonicalNumber": 1,
-    "omittedMetadata": "keep",
-    "explicitNullMetadata": null,
-    "sameKeyDifferentIntent": "conflict"
+  "bindingVectors": [
+    {
+      "name": "omitted-metadata",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef21440c01de6de05f14c41385a3e702eea7d1947d55e6f8d8553886221357a4"
+    },
+    {
+      "name": "explicit-null-metadata",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1,"notes":null}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"notes\":null,\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "023ba8f288496b4c6fa5d4bf4a855fa5f83193b73d6f95b6ac82937f454b4ae0"
+    },
+    {
+      "name": "numeric-one",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef21440c01de6de05f14c41385a3e702eea7d1947d55e6f8d8553886221357a4"
+    },
+    {
+      "name": "numeric-one-point-zero",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1.0}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef21440c01de6de05f14c41385a3e702eea7d1947d55e6f8d8553886221357a4"
+    }
+  ],
+  "conflictCases": {
+    "sameKeyDifferentIntent": "conflict",
+    "changedBase": "8f7f1f37c05c8cc0ff1acfc24962af81338539f6dddcc8c4e0bac80070bfd205",
+    "changedBinding": "784f2141882aa2003b527acc983ac072576cddb88155fb61e2be019d3c38716b",
+    "changedIntent": "a8011218963f67a5dd0a0d6612bced69a932d27dc056d8524057df210512c481"
   }
 }

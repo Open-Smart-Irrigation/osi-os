@@ -2,6 +2,7 @@
 // Validates contract schema correctness for known edge cases.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 
 const SCHEMA_DIR = path.resolve(__dirname, '../docs/contracts/sync-schema');
@@ -951,14 +952,38 @@ reportCheck(
 // Contract resources must match edge runtime device and schedule enums.
 const resourcesSchema = loadSchema('resources.schema.json');
 const watermarkVector = JSON.parse(fs.readFileSync(path.join(SCHEMA_DIR, 'watermark-cloud-parity-v1.json'), 'utf8'));
+function canonicalBinding(value) {
+    if (value === null) return 'null';
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) throw new Error('binding numbers must be finite');
+        return Object.is(value, -0) || value === 0 ? '0' : Number(value).toString();
+    }
+    if (typeof value === 'string') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(canonicalBinding).join(',')}]`;
+    if (isPlainObject(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalBinding(value[key])}`).join(',')}}`;
+    throw new Error('binding values must be JSON values');
+}
+function bindingHash(value) {
+    const body = canonicalBinding(value);
+    return {body, sha256: crypto.createHash('sha256').update(body).digest('hex')};
+}
 reportCheck(
     watermarkVector.fixtures.device_eui === WATERMARK_DEVICE_EUI &&
     watermarkVector.fixtures.gateway_device_eui === WATERMARK_GATEWAY_EUI &&
-    watermarkVector.normalizedVectors.numericOne === watermarkVector.normalizedVectors.numericOnePointZero &&
-    watermarkVector.normalizedVectors.canonicalNumber === 1 &&
-    watermarkVector.normalizedVectors.omittedMetadata === 'keep' &&
-    watermarkVector.normalizedVectors.explicitNullMetadata === null &&
-    watermarkVector.normalizedVectors.sameKeyDifferentIntent === 'conflict',
+    Array.isArray(watermarkVector.bindingVectors) && watermarkVector.bindingVectors.length >= 4 &&
+    watermarkVector.bindingVectors.every((vector) => {
+        const actual = bindingHash(vector.input);
+        return actual.body === vector.canonical_body && actual.sha256 === vector.sha256;
+    }) &&
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'numeric-one').sha256 ===
+        watermarkVector.bindingVectors.find((vector) => vector.name === 'numeric-one-point-zero').sha256 &&
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'omitted-metadata').sha256 !==
+        watermarkVector.bindingVectors.find((vector) => vector.name === 'explicit-null-metadata').sha256 &&
+    watermarkVector.conflictCases.sameKeyDifferentIntent === 'conflict' &&
+    watermarkVector.conflictCases.changedBase !== watermarkVector.bindingVectors[0].sha256 &&
+    watermarkVector.conflictCases.changedBinding !== watermarkVector.bindingVectors[0].sha256 &&
+    watermarkVector.conflictCases.changedIntent !== watermarkVector.bindingVectors[0].sha256,
     'WATERMARK shared vector pins normalized replay semantics',
     'WATERMARK shared vector does not pin numeric, omission/null, or conflict semantics'
 );
@@ -1676,7 +1701,7 @@ for (const [type, operation, prefix, base] of [
     ['SET_CHAMELEON_CONFIG', 'set', 'chameleon_config:set', 3],
 ]) {
     const values = type === 'UPSERT_DEVICE_SOIL_DEPTHS'
-        ? {soil_moisture_probe_depths_json: {swt_1: 15, swt_2: 30}, soil_moisture_probe_depths_configured: true}
+        ? {soil_moisture_probe_depths_json: {vwc_1: 0, vwc_2: 30, soil_vic_2: null}, soil_moisture_probe_depths_configured: true}
         : {chameleon_enabled: true};
     const command = {
         command_id: UUID,
@@ -1692,6 +1717,18 @@ for (const [type, operation, prefix, base] of [
     expectValid(`${type} exact-base synthetic vector`, cmdSchema, command, cmdSchema);
     expectInvalid(`${type} rejects empty normalized intent`, cmdSchema, {...command, values: {}}, /required/);
     expectInvalid(`${type} rejects unexpected normalized intent`, cmdSchema, {...command, values: {...values, unexpected: true}}, /property/);
+    if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {
+        for (const [label, depths] of [
+            ['unsupported channel', {swt_1: 10}],
+            ['string depth', {vwc_1: '10'}],
+            ['nested depth', {vwc_1: {cm: 10}}],
+            ['negative depth', {vwc_1: -1}],
+            ['depth above range', {vwc_1: 1001}],
+        ]) {
+            expectInvalid(`UPSERT_DEVICE_SOIL_DEPTHS rejects ${label}`, cmdSchema,
+                {...command, values: {...values, soil_moisture_probe_depths_json: depths}}, /soil_moisture_probe_depths_json|number|minimum|maximum|property/);
+        }
+    }
 }
 expectInvalid('WATERMARK method over writer limit is rejected', cmdSchema,
     {...watermarkSetCommand, values: {...watermarkValues, method: 'm'.repeat(65)}}, /method.*(?:longer|maxLength)/);
