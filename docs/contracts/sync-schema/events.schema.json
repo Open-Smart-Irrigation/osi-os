@@ -94,12 +94,32 @@
     },
     "allOf": [
         {
-            "if": {"properties": {"op": {"enum": ["WATERMARK_CALIBRATION_UPSERTED", "WATERMARK_CALIBRATION_DELETED"]}}, "required": ["op"]},
+            "if": {"properties": {"op": {"const": "WATERMARK_CALIBRATION_UPSERTED"}}, "required": ["op"]},
             "then": {
                 "properties": {
                     "aggregateType": {"const": "WATERMARK_CALIBRATION"},
                     "aggregateKey": {"$ref": "resources.schema.json#/definitions/Eui64"},
-                    "payload": {"$ref": "resources.schema.json#/definitions/WatermarkCalibration"}
+                    "payload": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/WatermarkCalibration"},
+                            {"required": ["deleted_at"], "properties": {"deleted_at": {"const": null}}}
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"op": {"const": "WATERMARK_CALIBRATION_DELETED"}}, "required": ["op"]},
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "WATERMARK_CALIBRATION"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Eui64"},
+                    "payload": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/WatermarkCalibration"},
+                            {"required": ["deleted_at"], "properties": {"deleted_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"}}}
+                        ]
+                    }
                 }
             }
         },

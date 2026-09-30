@@ -98,11 +98,25 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
 // sync_version/last_applied_at for weather zones) verified against the
 // exact field names this repo's triggers emit. No longer cloudDeferred.
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
-  ...EXACT_JOURNAL_EVENT_OPS,
+  ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
   'WATERMARK_CALIBRATION_DELETED',
   'WATERMARK_CALIBRATION_UPSERTED',
 ];
+// The axes are intentionally independent. This fixture is the transition that
+// cloud-first rollout permits: the edge still defers production while cloud has
+// already activated its applier, so an edge-deferred op need not be cloud-deferred.
+const EVENT_STAGE_TRANSITION_FIXTURE = {
+  edgeDeferred: ['WATERMARK_CALIBRATION_UPSERTED'],
+  cloudDeferred: [],
+};
+
+function assertEventStageAxesAreIndependent() {
+  const op = EVENT_STAGE_TRANSITION_FIXTURE.edgeDeferred[0];
+  if (!EXACT_EDGE_DEFERRED_OPS.includes(op) || EVENT_STAGE_TRANSITION_FIXTURE.cloudDeferred.includes(op)) {
+    throw new Error('event staging transition fixture does not prove independent edge/cloud deferred axes');
+  }
+}
 // Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
 // order is cloud-before-edge: osi-server lands the landing applier for a journal event op
 // before the edge activates real emission of that op. Before this allowance existed, the
@@ -1459,6 +1473,7 @@ function formatDiff(name, baselineName, diff) {
 }
 
 function checkSyncOpParity(options = {}) {
+  assertEventStageAxesAreIndependent();
   const root = path.resolve(options.root || REPO_ROOT);
   const schemaPath = options.schemaPath || path.join(root, 'docs/contracts/sync-schema/events.schema.json');
   const serverSource = options.serverSource || resolveDefaultServerSource(root);

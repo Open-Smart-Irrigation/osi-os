@@ -66,6 +66,10 @@ is distinct from explicit `null`. The trusted binding hash includes the
 command type, resource, device EUI, gateway EUI, local actor UUID, exact base
 version, operation, and this normalized intent.
 
+Calibration `method` is at most 64 characters and `notes` is at most 500
+characters, matching the phase-1 edge writer. A missing metadata member means
+keep; a present `null` means clear.
+
 ## Test Vectors
 
 The following pairs are normative. A runtime is conformant if its hash matches the expected value for every input.

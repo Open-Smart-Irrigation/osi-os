@@ -142,9 +142,9 @@
                 "series_fwd_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
                 "series_rev_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
                 "measured_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
-                "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 120},
+                "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
                 "worst_residual_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-                "notes": {"type": ["string", "null"], "maxLength": 4000},
+                "notes": {"type": ["string", "null"], "maxLength": 500},
                 "sync_version": {"type": "integer", "minimum": 0},
                 "updated_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
                 "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}

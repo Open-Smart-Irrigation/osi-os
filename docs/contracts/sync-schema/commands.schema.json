@@ -194,9 +194,9 @@
                             "series_fwd_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
                             "series_rev_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
                             "measured_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"},
-                            "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 120},
+                            "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
                             "worst_residual_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-                            "notes": {"type": ["string", "null"], "maxLength": 4000}
+                            "notes": {"type": ["string", "null"], "maxLength": 500}
                         }
                     }
                 }
@@ -214,13 +214,35 @@
             }
         },
         {
-            "if": {"properties": {"command_type": {"enum": ["UPSERT_DEVICE_SOIL_DEPTHS", "SET_CHAMELEON_CONFIG"]}}, "required": ["command_type"]},
+            "if": {"properties": {"command_type": {"const": "UPSERT_DEVICE_SOIL_DEPTHS"}}, "required": ["command_type"]},
             "then": {
                 "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key", "values"],
                 "properties": {
                     "operation": {"const": "set"},
-                    "effect_key": {"type": "string", "pattern": "^(?:device_soil_depths|chameleon_config):set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
-                    "values": {"type": "object", "additionalProperties": false}
+                    "effect_key": {"type": "string", "pattern": "^device_soil_depths:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
+                    "values": {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["soil_moisture_probe_depths_json", "soil_moisture_probe_depths_configured"],
+                        "properties": {
+                            "soil_moisture_probe_depths_json": {"type": "object"},
+                            "soil_moisture_probe_depths_configured": {"type": "boolean"}
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "SET_CHAMELEON_CONFIG"}}, "required": ["command_type"]},
+            "then": {
+                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key", "values"],
+                "properties": {
+                    "operation": {"const": "set"},
+                    "effect_key": {"type": "string", "pattern": "^chameleon_config:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
+                    "values": {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["chameleon_enabled"],
+                        "properties": {"chameleon_enabled": {"type": "boolean"}}
+                    }
                 }
             }
         },

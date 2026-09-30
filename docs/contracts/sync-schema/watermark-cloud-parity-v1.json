@@ -26,5 +26,13 @@
     "trustedBindingFields": ["command_type", "resource", "device_eui", "gateway_device_eui", "actor_user_uuid", "base_sync_version", "operation", "normalized_intent"],
     "order": ["command_id", "effect_key"],
     "mismatch": "conflict"
+  },
+  "normalizedVectors": {
+    "numericOne": 1,
+    "numericOnePointZero": 1.0,
+    "canonicalNumber": 1,
+    "omittedMetadata": "keep",
+    "explicitNullMetadata": null,
+    "sameKeyDifferentIntent": "conflict"
   }
 }
