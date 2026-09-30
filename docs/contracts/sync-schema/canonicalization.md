@@ -70,6 +70,16 @@ Calibration `method` is at most 64 characters and `notes` is at most 500
 characters, matching the phase-1 edge writer. A missing metadata member means
 keep; a present `null` means clear.
 
+The protected binding implementation uses the existing journal canonicalizers:
+edge `osi-journal-replication/canonicalization.js` and cloud
+`JournalV2Canonicalizer`. Both provide sorted compact JSON, fixed-point finite
+number rendering (including `-0` as `0`), and SHA-256 over UTF-8 bytes. The
+WATERMARK parity vectors therefore include exponent/fraction inputs such as
+`1e-7` and `0.0000001`, which must produce identical protected bytes and hashes.
+This does not change the cloud `SyncPayloadCanonicalizer` or claim that every
+v1/v2 string-normalization rule is interchangeable; protected binding values
+use canonical EUIs, UUIDs, and timestamps before hashing.
+
 ## Test Vectors
 
 The following pairs are normative. A runtime is conformant if its hash matches the expected value for every input.

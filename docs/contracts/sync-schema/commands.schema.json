@@ -225,31 +225,11 @@
                         "required": ["soil_moisture_probe_depths_json", "soil_moisture_probe_depths_configured"],
                         "properties": {
                             "soil_moisture_probe_depths_json": {
-                                "type": "object", "additionalProperties": false,
-                                "properties": {
-                                    "vwc_1": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_2": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_3": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_4": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_5": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_6": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_7": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_8": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_9": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "vwc_10": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_1": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_2": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_3": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_4": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_5": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_6": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_7": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_8": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_9": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]},
-                                    "soil_vic_10": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 1000}, {"type": "null"}]}
-                                }
+                                "type": "object",
+                                "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,63}$"},
+                                "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 1000}
                             },
-                            "soil_moisture_probe_depths_configured": {"type": "boolean"}
+                            "soil_moisture_probe_depths_configured": {"const": true}
                         }
                     }
                 }
