@@ -968,6 +968,14 @@ function bindingHash(value) {
     const body = canonicalBinding(value);
     return {body, sha256: crypto.createHash('sha256').update(body).digest('hex')};
 }
+function replayBindingOutcome(existing, incoming) {
+    if (existing.effect_key !== incoming.effect_key) return 'new-effect';
+    return bindingHash(existing).sha256 === bindingHash(incoming).sha256 ? 'replay' : 'conflict';
+}
+const sameKeyBinding = {...watermarkVector.bindingVectors[0].input,
+    effect_key: 'watermark_calibration:set:A84041A171000001:A84041A171000002:7'};
+const differentIntentBinding = {...sameKeyBinding,
+    normalized_intent: {worst_residual_pct: 2}};
 reportCheck(
     watermarkVector.fixtures.device_eui === WATERMARK_DEVICE_EUI &&
     watermarkVector.fixtures.gateway_device_eui === WATERMARK_GATEWAY_EUI &&
@@ -981,6 +989,7 @@ reportCheck(
     watermarkVector.bindingVectors.find((vector) => vector.name === 'omitted-metadata').sha256 !==
         watermarkVector.bindingVectors.find((vector) => vector.name === 'explicit-null-metadata').sha256 &&
     watermarkVector.conflictCases.sameKeyDifferentIntent === 'conflict' &&
+    replayBindingOutcome(sameKeyBinding, differentIntentBinding) === 'conflict' &&
     bindingHash({...watermarkVector.bindingVectors[0].input,
         effect_key: 'watermark_calibration:set:A84041A171000001:A84041A171000002:8'}).sha256 ===
         watermarkVector.conflictCases.changedEffect &&
