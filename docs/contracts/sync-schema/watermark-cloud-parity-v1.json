@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "fixtures": {
+    "gateway_device_eui": "A84041A171000001",
+    "device_eui": "A84041A171000002",
+    "foreign_device_eui": "A84041A171000003",
+    "actor_user_uuid": "12345678-1234-4234-8234-123456789abc"
+  },
+  "effectKeys": {
+    "set": "watermark_calibration:set:{gateway_eui}:{device_eui}:{base_sync_version}",
+    "delete": "watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}",
+    "soilDepths": "device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}",
+    "chameleon": "chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}"
+  },
+  "commands": [
+    "SET_WATERMARK_CALIBRATION",
+    "DELETE_WATERMARK_CALIBRATION",
+    "UPSERT_DEVICE_SOIL_DEPTHS",
+    "SET_CHAMELEON_CONFIG"
+  ],
+  "events": [
+    "WATERMARK_CALIBRATION_UPSERTED",
+    "WATERMARK_CALIBRATION_DELETED"
+  ],
+  "replay": {
+    "trustedBindingFields": ["command_type", "resource", "device_eui", "gateway_device_eui", "actor_user_uuid", "base_sync_version", "operation", "normalized_intent"],
+    "order": ["command_id", "effect_key"],
+    "mismatch": "conflict"
+  }
+}

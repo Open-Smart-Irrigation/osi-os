@@ -39,10 +39,17 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 // these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_COMMANDS below:
 // osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of this
 // port, so the cloud side is not required to issue them yet.
-const EXACT_EDGE_DEFERRED_COMMANDS = [];
+const EXACT_EDGE_DEFERRED_COMMANDS = [
+  'DELETE_WATERMARK_CALIBRATION',
+  'SET_WATERMARK_CALIBRATION',
+];
 const EXACT_CLOUD_DEFERRED_COMMANDS = [
   ...EXACT_STAGED_COMMANDS,
   ...EXACT_SCOPED_ACCESS_COMMANDS,
+  'DELETE_WATERMARK_CALIBRATION',
+  'SET_CHAMELEON_CONFIG',
+  'SET_WATERMARK_CALIBRATION',
+  'UPSERT_DEVICE_SOIL_DEPTHS',
 ];
 const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_ENTRY_UPSERTED',
@@ -51,7 +58,10 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
-const EXACT_EDGE_DEFERRED_OPS = [];
+const EXACT_EDGE_DEFERRED_OPS = [
+  'WATERMARK_CALIBRATION_DELETED',
+  'WATERMARK_CALIBRATION_UPSERTED',
+];
 const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
@@ -90,6 +100,8 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
   ...EXACT_JOURNAL_EVENT_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
+  'WATERMARK_CALIBRATION_DELETED',
+  'WATERMARK_CALIBRATION_UPSERTED',
 ];
 // Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
 // order is cloud-before-edge: osi-server lands the landing applier for a journal event op

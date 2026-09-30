@@ -8,6 +8,9 @@ const SCHEMA_DIR = path.resolve(__dirname, '../docs/contracts/sync-schema');
 const STAGING_MANIFEST = path.resolve(__dirname, 'fixtures/sync-contract-staging.json');
 const JOURNAL_AGGREGATE = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate');
 const UUID = '12345678-1234-4234-8234-123456789abc';
+const WATERMARK_GATEWAY_EUI = 'A84041A171000001';
+const WATERMARK_DEVICE_EUI = 'A84041A171000002';
+const WATERMARK_FOREIGN_DEVICE_EUI = 'A84041A171000003';
 const COMPACT_UUID = '12345678123442348234123456789abc';
 const JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_ENTRY',
@@ -77,6 +80,18 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     DELETE_USER_PLOT_ASSIGNMENT: {
         effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
     },
+    SET_WATERMARK_CALIBRATION: {
+        effect_key: { prefix: 'watermark_calibration:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    DELETE_WATERMARK_CALIBRATION: {
+        effect_key: { prefix: 'watermark_calibration:delete', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    UPSERT_DEVICE_SOIL_DEPTHS: {
+        effect_key: { prefix: 'device_soil_depths:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    SET_CHAMELEON_CONFIG: {
+        effect_key: { prefix: 'chameleon_config:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
 };
 const SCOPED_ACCESS_EVENT_KEY_FIELDS = {
     USER_UPSERTED: 'user_uuid',
@@ -113,6 +128,8 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     // The key is the composite zone_uuid|date, which no single payload path
     // holds, so only the version is bound (spec 2026-09-27-daily-agronomy-parity B6).
     ZONE_AGRONOMY_UPSERTED: {sync_version_path: 'payload.sync_version'},
+    WATERMARK_CALIBRATION_UPSERTED: {aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version'},
+    WATERMARK_CALIBRATION_DELETED: {aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version'},
 };
 
 function loadSchema(name) {
@@ -463,9 +480,15 @@ function semanticBindingErrors(schema, value) {
     const binding = bindings && bindings[discriminator];
     if (!binding) return errors;
     if (binding.effect_key) {
+        const gateway = binding.effect_key.gateway_path === undefined
+            ? undefined : valueAtPath(value, binding.effect_key.gateway_path);
+        const device = binding.effect_key.device_path === undefined
+            ? undefined : valueAtPath(value, binding.effect_key.device_path);
         const uuid = valueAtPath(value, binding.effect_key.uuid_path);
         const version = valueAtPath(value, binding.effect_key.version_path);
-        const expected = `${binding.effect_key.prefix}:${uuid}:${version}`;
+        const expected = gateway !== undefined && device !== undefined
+            ? `${binding.effect_key.prefix}:${gateway}:${device}:${version}`
+            : `${binding.effect_key.prefix}:${uuid}:${version}`;
         if (value.effect_key !== expected) {
             errors.push(`$.effect_key: must equal ${expected}`);
         }
@@ -989,8 +1012,8 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify(['DELETE_WATERMARK_CALIBRATION', 'SET_WATERMARK_CALIBRATION']) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort(), ['DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG', 'SET_WATERMARK_CALIBRATION', 'UPSERT_DEVICE_SOIL_DEPTHS'])) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -998,8 +1021,8 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify(['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED']) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS, ['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED']));
     reportCheck(exactStaging, 'staging manifest pins the exact journal sets', 'staging manifest drifted from the exact journal sets');
 }
 
@@ -1563,6 +1586,107 @@ for (const [fixtureIndex, payloadKey, identityPaths] of [
         }
     }
 }
+
+// WATERMARK cloud-parity contract vectors. These intentionally use synthetic EUIs
+// and exercise the trusted mutation binding independently of any runtime applier.
+const watermarkValues = {
+    pullup_1_ohm: 41670,
+    pulldown_1_ohm: 41260,
+    series_fwd_1_ohm: 130,
+    series_rev_1_ohm: 112,
+    pullup_2_ohm: 42530,
+    pulldown_2_ohm: 42070,
+    series_fwd_2_ohm: 46,
+    series_rev_2_ohm: 27,
+    measured_at: '2026-09-30T10:00:00.000Z',
+    method: 'bench-fit',
+    worst_residual_pct: 1.25,
+    notes: null,
+};
+const watermarkSetCommand = {
+    command_id: UUID,
+    command_type: 'SET_WATERMARK_CALIBRATION',
+    gateway_device_eui: WATERMARK_GATEWAY_EUI,
+    device_eui: WATERMARK_DEVICE_EUI,
+    actor_user_uuid: UUID,
+    base_sync_version: 7,
+    operation: 'set',
+    effect_key: `watermark_calibration:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:7`,
+    values: watermarkValues,
+};
+const watermarkDeleteCommand = {
+    command_id: UUID,
+    command_type: 'DELETE_WATERMARK_CALIBRATION',
+    gateway_device_eui: WATERMARK_GATEWAY_EUI,
+    device_eui: WATERMARK_DEVICE_EUI,
+    actor_user_uuid: UUID,
+    base_sync_version: 8,
+    operation: 'delete',
+    effect_key: `watermark_calibration:delete:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:8`,
+};
+expectValid('SET_WATERMARK_CALIBRATION synthetic vector', cmdSchema, watermarkSetCommand, cmdSchema);
+expectValid('DELETE_WATERMARK_CALIBRATION synthetic vector', cmdSchema, watermarkDeleteCommand, cmdSchema);
+expectValid('WATERMARK metadata null explicitly clears', cmdSchema, watermarkSetCommand, cmdSchema);
+expectInvalid(
+    'WATERMARK rejects lowercase device EUI',
+    cmdSchema,
+    {...watermarkSetCommand, device_eui: WATERMARK_DEVICE_EUI.toLowerCase()},
+    /device_eui.*pattern|effect_key.*equal/
+);
+expectInvalid(
+    'WATERMARK set rejects missing actor',
+    cmdSchema,
+    (() => { const copy = jsonClone(watermarkSetCommand); delete copy.actor_user_uuid; return copy; })(),
+    /actor_user_uuid.*required/
+);
+expectInvalid(
+    'WATERMARK delete rejects normalized intent values',
+    cmdSchema,
+    {...watermarkDeleteCommand, values: {}},
+    /forbidden|values.*required|property/
+);
+for (const [label, field, replacement] of [
+    ['wrong gateway in key', 'effect_key', `watermark_calibration:set:${WATERMARK_FOREIGN_DEVICE_EUI}:${WATERMARK_DEVICE_EUI}:7`],
+    ['wrong device in key', 'effect_key', `watermark_calibration:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_FOREIGN_DEVICE_EUI}:7`],
+    ['wrong base in key', 'effect_key', `watermark_calibration:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:8`],
+    ['malformed effect key', 'effect_key', 'watermark_calibration:set:bad'],
+]) {
+    expectInvalid(`WATERMARK rejects ${label}`, cmdSchema, {...watermarkSetCommand, [field]: replacement}, /effect_key.*(?:equal|match)/);
+}
+expectInvalid(
+    'WATERMARK rejects numeric strings instead of canonical numbers',
+    cmdSchema,
+    {...watermarkSetCommand, values: {...watermarkValues, pullup_1_ohm: '41670'}},
+    /pullup_1_ohm.*number/
+);
+for (const [type, operation, prefix, base] of [
+    ['UPSERT_DEVICE_SOIL_DEPTHS', 'set', 'device_soil_depths:set', 2],
+    ['SET_CHAMELEON_CONFIG', 'set', 'chameleon_config:set', 3],
+]) {
+    const command = {
+        command_id: UUID,
+        command_type: type,
+        gateway_device_eui: WATERMARK_GATEWAY_EUI,
+        device_eui: WATERMARK_DEVICE_EUI,
+        actor_user_uuid: UUID,
+        base_sync_version: base,
+        operation,
+        effect_key: `${prefix}:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:${base}`,
+        values: {},
+    };
+    expectValid(`${type} exact-base synthetic vector`, cmdSchema, command, cmdSchema);
+}
+const watermarkEvent = {
+    eventUuid: 'watermark-fixture-1',
+    aggregateType: 'WATERMARK_CALIBRATION',
+    aggregateKey: WATERMARK_DEVICE_EUI,
+    op: 'WATERMARK_CALIBRATION_UPSERTED',
+    syncVersion: 7,
+    occurredAt: '2026-09-30T10:01:00.000Z',
+    payload: {contract_version: 1, ...watermarkValues, gateway_device_eui: WATERMARK_GATEWAY_EUI, device_eui: WATERMARK_DEVICE_EUI, sync_version: 7, updated_at: '2026-09-30T10:01:00.000Z', deleted_at: null},
+};
+expectValid('WATERMARK_CALIBRATION_UPSERTED synthetic event', eventsSchema, watermarkEvent, eventsSchema);
+expectInvalid('WATERMARK event rejects foreign aggregate key', eventsSchema, {...watermarkEvent, aggregateKey: WATERMARK_FOREIGN_DEVICE_EUI}, /aggregateKey.*equal/);
 reportCheck(
     JSON.stringify(cmdSchema['x-semantic-bindings']) === JSON.stringify(EXPECTED_COMMAND_SEMANTIC_BINDINGS),
     'command schema pins exact effect-key semantic bindings',

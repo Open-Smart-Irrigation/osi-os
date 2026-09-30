@@ -42,13 +42,20 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
     ...EXACT_STAGED_JOURNAL_COMMANDS,
     ...EXACT_SCOPED_ACCESS_COMMANDS,
+    'DELETE_WATERMARK_CALIBRATION',
+    'SET_CHAMELEON_CONFIG',
+    'SET_WATERMARK_CALIBRATION',
+    'UPSERT_DEVICE_SOIL_DEPTHS',
 ];
 // Edge implementation landed (real appliers wired into cmd-type-registry / the new
 // osi-scoped-access-commands module -- port commit "apply scoped access commands"), so
 // these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS
 // below: osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of
 // this port, so the cloud side is not required to issue them yet.
-const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [];
+const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [
+    'DELETE_WATERMARK_CALIBRATION',
+    'SET_WATERMARK_CALIBRATION',
+];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -83,6 +90,18 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     DELETE_USER_PLOT_ASSIGNMENT: {
         effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
     },
+    SET_WATERMARK_CALIBRATION: {
+        effect_key: { prefix: 'watermark_calibration:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    DELETE_WATERMARK_CALIBRATION: {
+        effect_key: { prefix: 'watermark_calibration:delete', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    UPSERT_DEVICE_SOIL_DEPTHS: {
+        effect_key: { prefix: 'device_soil_depths:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    SET_CHAMELEON_CONFIG: {
+        effect_key: { prefix: 'chameleon_config:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
     DEVICE_INSTALLATION_LOCATION_REVISED: {aggregate_key_path: 'payload.revision_uuid', sync_version_path: 'payload.sync_version'},
@@ -101,6 +120,8 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     WEATHER_STATION_ZONES_REPLACED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version' },
     // The key is the composite zone_uuid|date: only the version is bound (spec B6).
     ZONE_AGRONOMY_UPSERTED: { sync_version_path: 'payload.sync_version' },
+    WATERMARK_CALIBRATION_UPSERTED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version' },
+    WATERMARK_CALIBRATION_DELETED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version' },
 };
 
 function loadSchema(name) {

@@ -56,6 +56,16 @@ Uppercase, no separators. Example: `0016C001F11715E2`. EUI-48 input is expanded 
 ### Booleans
 `true` and `false` lowercase, as standard JSON.
 
+### Protected device mutations
+
+`WATERMARK_CALIBRATION`, `DEVICE` soil-depth, and `DEVICE` Chameleon intents
+are normalized before hashing and effect-key generation. EUIs are uppercase,
+numeric coefficients and versions are finite JSON numbers/integers (never
+numeric strings or padded integers), and absent optional calibration metadata
+is distinct from explicit `null`. The trusted binding hash includes the
+command type, resource, device EUI, gateway EUI, local actor UUID, exact base
+version, operation, and this normalized intent.
+
 ## Test Vectors
 
 The following pairs are normative. A runtime is conformant if its hash matches the expected value for every input.

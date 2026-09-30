@@ -35,6 +35,18 @@
         },
         "DELETE_USER_PLOT_ASSIGNMENT": {
             "effect_key": {"prefix": "scoped_plot_assignment", "uuid_path": "assignment_uuid", "version_path": "base_sync_version"}
+        },
+        "SET_WATERMARK_CALIBRATION": {
+            "effect_key": {"prefix": "watermark_calibration:set", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
+        },
+        "DELETE_WATERMARK_CALIBRATION": {
+            "effect_key": {"prefix": "watermark_calibration:delete", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
+        },
+        "UPSERT_DEVICE_SOIL_DEPTHS": {
+            "effect_key": {"prefix": "device_soil_depths:set", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
+        },
+        "SET_CHAMELEON_CONFIG": {
+            "effect_key": {"prefix": "chameleon_config:set", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
         }
     },
     "type": "object",
@@ -67,6 +79,8 @@
                 "SET_KIWI_INTERVAL",
                 "ENABLE_KIWI_TEMP_HUMIDITY",
                 "SET_CHAMELEON_CONFIG",
+                "SET_WATERMARK_CALIBRATION",
+                "DELETE_WATERMARK_CALIBRATION",
                 "SET_SDI12_IDENTIFY",
                 "REGISTER_DEVICE",
                 "REBOOT",
@@ -124,6 +138,7 @@
         "unit": {"type": ["string", "null"], "enum": ["SECONDS", "MINUTES", "HOURS", null]},
         "action": {"type": ["string", "null"], "enum": ["OPEN", "CLOSE", null]},
         "effect_key": {"type": ["string", "null"]},
+        "operation": {"type": "string", "enum": ["set", "delete"]},
         "issued_at": {"type": "string", "format": "date-time"},
         "expires_at": {"type": ["string", "null"], "format": "date-time"},
         "config": {"type": ["object", "null"]},
@@ -159,6 +174,56 @@
         "password_hash": {"type": "string", "pattern": "^\\$2[aby]\\$[0-9]{2}\\$.{53}$"}
     },
     "allOf": [
+        {
+            "if": {"properties": {"command_type": {"const": "SET_WATERMARK_CALIBRATION"}}, "required": ["command_type"]},
+            "then": {
+                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key", "values"],
+                "properties": {
+                    "operation": {"const": "set"},
+                    "effect_key": {"type": "string", "pattern": "^watermark_calibration:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
+                    "values": {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["pullup_1_ohm", "pulldown_1_ohm", "series_fwd_1_ohm", "series_rev_1_ohm", "pullup_2_ohm", "pulldown_2_ohm", "series_fwd_2_ohm", "series_rev_2_ohm"],
+                        "properties": {
+                            "pullup_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                            "pulldown_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                            "series_fwd_1_ohm": {"type": "number", "minimum": 0, "maximum": 500},
+                            "series_rev_1_ohm": {"type": "number", "minimum": 0, "maximum": 500},
+                            "pullup_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                            "pulldown_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                            "series_fwd_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
+                            "series_rev_2_ohm": {"type": "number", "minimum": 0, "maximum": 500},
+                            "measured_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"},
+                            "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 120},
+                            "worst_residual_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                            "notes": {"type": ["string", "null"], "maxLength": 4000}
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "DELETE_WATERMARK_CALIBRATION"}}, "required": ["command_type"]},
+            "then": {
+                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key"],
+                "not": {"required": ["values"]},
+                "properties": {
+                    "operation": {"const": "delete"},
+                    "effect_key": {"type": "string", "pattern": "^watermark_calibration:delete:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"enum": ["UPSERT_DEVICE_SOIL_DEPTHS", "SET_CHAMELEON_CONFIG"]}}, "required": ["command_type"]},
+            "then": {
+                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key", "values"],
+                "properties": {
+                    "operation": {"const": "set"},
+                    "effect_key": {"type": "string", "pattern": "^(?:device_soil_depths|chameleon_config):set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
+                    "values": {"type": "object", "additionalProperties": false}
+                }
+            }
+        },
         {
             "if": {
                 "properties": {

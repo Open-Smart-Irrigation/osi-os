@@ -1,7 +1,10 @@
 {
   "version": 1,
   "commands": {
-    "edgeDeferred": [],
+    "edgeDeferred": [
+      "DELETE_WATERMARK_CALIBRATION",
+      "SET_WATERMARK_CALIBRATION"
+    ],
     "cloudDeferred": [
       "UPSERT_JOURNAL_ENTRY",
       "VOID_JOURNAL_ENTRY",
@@ -13,7 +16,11 @@
       "RESET_SCOPED_USER_PASSWORD",
       "UPSERT_SCOPED_USER",
       "UPSERT_USER_PLOT_ASSIGNMENT",
-      "UPSERT_USER_ZONE_ASSIGNMENT"
+      "UPSERT_USER_ZONE_ASSIGNMENT",
+      "DELETE_WATERMARK_CALIBRATION",
+      "SET_CHAMELEON_CONFIG",
+      "SET_WATERMARK_CALIBRATION",
+      "UPSERT_DEVICE_SOIL_DEPTHS"
     ]
   },
   "eventOps": {
@@ -24,7 +31,10 @@
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
-    "edgeDeferred": [],
+    "edgeDeferred": [
+      "WATERMARK_CALIBRATION_DELETED",
+      "WATERMARK_CALIBRATION_UPSERTED"
+    ],
     "edgeStaged": [
       "JOURNAL_ENTRY_UPSERTED",
       "JOURNAL_ENTRY_VOIDED",
@@ -42,7 +52,9 @@
       "USER_PLOT_ASSIGNMENT_UPSERTED",
       "USER_UPSERTED",
       "USER_ZONE_ASSIGNMENT_DELETED",
-      "USER_ZONE_ASSIGNMENT_UPSERTED"
+      "USER_ZONE_ASSIGNMENT_UPSERTED",
+      "WATERMARK_CALIBRATION_DELETED",
+      "WATERMARK_CALIBRATION_UPSERTED"
     ]
   }
 }

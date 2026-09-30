@@ -64,6 +64,27 @@ Plot-grant upserts and revocations. The stable assignment UUID identifies the
 grant, and the base version identifies the edge-confirmed state being replaced.
 Creates use `0`.
 
+### WATERMARK and device configuration keys
+
+The edge-authoritative WATERMARK calibration and the two existing device
+configuration mutations use exact-base keys:
+
+- `watermark_calibration:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+
+All EUI segments are uppercase 16-hex strings and the base is an unpadded
+non-negative decimal integer. The command carries `gateway_device_eui`,
+`device_eui`, `actor_user_uuid`, `base_sync_version`, an operation (`set` or
+`delete`), and normalized `values` intent. Omitted optional metadata means
+keep the current value; explicit `null` means clear it.
+
+The trusted binding hash covers command type, resource, device, gateway, local
+actor UUID, base version, operation, and normalized intent. Command-ID replay
+is checked before effect-key replay; either replay requires the stored trusted
+binding to match, and a reused key with different intent is a conflict.
+
 ## Normalization
 
 - `device_eui` is uppercase EUI-64 with no separators.

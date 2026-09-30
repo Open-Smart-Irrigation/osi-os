@@ -11,6 +11,7 @@ Cross-repo contract surface between `osi-os` (edge) and `osi-server` (cloud). Fi
 | `commands.schema.json` | JSON Schema for command payloads |
 | `events.schema.json` | JSON Schema for event payloads |
 | `resources.schema.json` | JSON Schema for sync resources |
+| `watermark-cloud-parity-v1.json` | Synthetic WATERMARK/cloud parity vectors and staged mutation contract |
 
 ## Resource phasing
 
@@ -21,6 +22,7 @@ plans merged in lockstep:
 | Resource | Op | Status |
 |------|------|------|
 | `VALVE_SCHEDULE` | `VALVE_SCHEDULE_UPSERTED` | Phase A: edge tables (`valve_schedules`) and REST API (`/api/valves*`) live, edge-only. Sync triggers and the cloud mirror ship with Phase B (lockstep merge). |
+| `WATERMARK_CALIBRATION` | `WATERMARK_CALIBRATION_UPSERTED` / `WATERMARK_CALIBRATION_DELETED` | Contract staged: edge and cloud event appliers land in later parity tasks; commands remain exact-base deferred. |
 
 ## Entity name commands (`UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`)
 
