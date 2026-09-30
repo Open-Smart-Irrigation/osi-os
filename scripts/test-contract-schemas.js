@@ -1722,6 +1722,7 @@ for (const [type, operation, prefix, base] of [
             ['unsupported channel', {swt_1: 10}],
             ['string depth', {vwc_1: '10'}],
             ['nested depth', {vwc_1: {cm: 10}}],
+            ['fractional depth', {vwc_1: 10.5}],
             ['negative depth', {vwc_1: -1}],
             ['depth above range', {vwc_1: 1001}],
         ]) {
