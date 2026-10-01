@@ -465,7 +465,7 @@ if (!entityNameApply || !requireOsiLibContract(
     'entity name commands: applier',
     'Entity name command helpers unavailable:'
 ) || JSON.stringify(entityNameApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
+    ['watermark-config-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyNameCommand/.test(entityNameApply.func || '') ||
     !/updateDeviceName\(client, devEui,/.test(entityNameApply.func || '') ||

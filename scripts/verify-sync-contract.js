@@ -49,8 +49,6 @@ const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
 // below: osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of
 // this port, so the cloud side is not required to issue them yet.
 const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [
-    'DELETE_WATERMARK_CALIBRATION',
-    'SET_WATERMARK_CALIBRATION',
 ];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {

@@ -1168,9 +1168,10 @@ if (sizeAllowances) {
     // fix wave (item B1, final-review-fable.md finding I1) -- the same change as
     // sync-bootstrap-build. The 3265 is baked into origin/main, 68992 chars. Re-measured
     // fresh: origin/main 68992 -> HEAD 69142 = +150.
-    // Daily agronomy parity (plan E2a Task 2): re-pinned from 150 to +252, the same three
-    // additions as sync-bootstrap-build. Re-measured fresh: origin/main 68992 -> HEAD 69244 = +252.
-    'sync-force-build': 252,
+    // WATERMARK parity commands and retained calibration snapshot: the force-sync builder
+    // gains the three protected capabilities plus the retained calibration projection.
+    // Re-measured fresh against origin/main: 68992 -> HEAD 69554 = +562.
+    'sync-force-build': 562,
     'command-ack-build-batch': 975,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
     // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded
@@ -1181,9 +1182,9 @@ if (sizeAllowances) {
     // Weather data view: re-pinned from 2511 to +33 (the 2511 is baked into origin/main,
     // 6709 chars); syncCapabilities gains zone_config_weather_source_v1. Re-measured fresh:
     // origin/main 6709 -> HEAD 6742 = +33.
-    // Daily agronomy parity (plan E2a Task 2): re-pinned from 33 to +68; syncCapabilities gains
-    // zone_config_stage_started_on_v1. Re-measured fresh: origin/main 6709 -> HEAD 6777 = +68.
-    'al-link-build-req': 68,
+    // WATERMARK parity capabilities on the account-link request. Re-measured fresh against
+    // origin/main: 6709 -> HEAD 6790 = +81.
+    'al-link-build-req': 81,
     'al-link-restart-node-red': 1761,
     'al-unlink-restart-node-red': 1773,
   };

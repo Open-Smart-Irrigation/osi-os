@@ -1089,7 +1089,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify(['DELETE_WATERMARK_CALIBRATION', 'SET_WATERMARK_CALIBRATION']) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort(), ['DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG', 'SET_WATERMARK_CALIBRATION', 'UPSERT_DEVICE_SOIL_DEPTHS'])) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',

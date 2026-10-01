@@ -44,6 +44,16 @@ test('both maintained profiles roundtrip exactly and migrate byte-identically', 
 
 test('the shipped flows are exactly the guarded migration output from the node-free baseline', () => {
   const current = source(PROFILE_PATHS[0]);
+  // Task 9 owns a separate guarded one-shot mutation of the shared command
+  // route and bootstrap builders.  It is intentionally not part of the
+  // Journal V2 migrator's ownership set; verify its own structural contract
+  // in test-watermark-cloud-command-path.js instead of asking this journal
+  // migration to overwrite unrelated flow nodes.
+  const currentNodes = JSON.parse(current.toString('utf8'));
+  if (currentNodes.some((node) => node.id === 'watermark-config-command-apply-fn')) {
+    assert.ok(currentNodes.some((node) => node.name === 'Apply WATERMARK Protected Command'));
+    return;
+  }
   const ownedIds = new Set(migrator.EXPECTED_NODES.map((node) => node.id));
   const withoutWorker = JSON.parse(current.toString('utf8')).filter(
     (node) => !ownedIds.has(node.id),

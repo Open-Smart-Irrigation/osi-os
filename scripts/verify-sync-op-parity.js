@@ -40,8 +40,6 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 // osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of this
 // port, so the cloud side is not required to issue them yet.
 const EXACT_EDGE_DEFERRED_COMMANDS = [
-  'DELETE_WATERMARK_CALIBRATION',
-  'SET_WATERMARK_CALIBRATION',
 ];
 const EXACT_CLOUD_DEFERRED_COMMANDS = [
   ...EXACT_STAGED_COMMANDS,
