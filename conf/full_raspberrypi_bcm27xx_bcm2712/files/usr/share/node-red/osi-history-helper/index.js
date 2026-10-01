@@ -1595,7 +1595,7 @@ async function resolveDeviceFieldRollupKey(db, deveui, field, options = {}) {
   const cards = deriveCardsForZone(zone, devices);
   for (const card of cards) {
     const sourceDevices = sourceDevicesForCard(card, devices);
-    const channel = channelsForCard(card, sourceDevices).find((candidate) =>
+    const channel = channelsForCard(card, [device]).find((candidate) =>
       candidate.id === rollupField || candidate.field === rollupField
     );
     if (!channel) continue;
@@ -2023,20 +2023,27 @@ function exportChannelsForCard(card, scope) {
     : channels;
 }
 
+function exportChannelsForDevice(card, device, scope) {
+  const channels = channelsForCard(card, [device]);
+  return scope && scope.requestedChannelKeys
+    ? channels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
+    : channels;
+}
+
 async function rawZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
   for (const card of scope.cards) {
-    const channels = exportChannelsForCard(card, scope);
+    const cardChannels = exportChannelsForCard(card, scope);
     const sourceDevices = sourceDevicesForCard(card, scope.devices)
       .slice()
       .sort((left, right) =>
         String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
       );
     const deveuis = uniqueDeveuis(sourceDevices);
-    if (!channels.length || !deveuis.length) continue;
+    if (!cardChannels.length || !deveuis.length) continue;
 
-    const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
+    const selectedFields = Array.from(new Set(cardChannels.flatMap(channelFieldNames)));
     const placeholders = deveuis.map(() => '?').join(',');
     const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
     const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
@@ -2050,6 +2057,8 @@ async function rawZoneExportRows(db, scope) {
     }
 
     sourceDevices.forEach((device, index) => {
+      const channels = exportChannelsForDevice(card, device, scope);
+      if (!channels.length) return;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       const sourceRows = rowsByDeveui[deveui] || [];
       const sourceName = displayDeviceName(device, index);
@@ -2091,17 +2100,19 @@ async function aggregateZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
   for (const card of scope.cards) {
-    const channels = exportChannelsForCard(card, scope);
+    const cardChannels = exportChannelsForCard(card, scope);
     const sourceDevices = sourceDevicesForCard(card, scope.devices)
       .slice()
       .sort((left, right) =>
         String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
       );
-    if (!channels.length || !sourceDevices.length) continue;
+    if (!cardChannels.length || !sourceDevices.length) continue;
 
     const arrayIdByDeveui = await resolveDeviceArrayIds(db, uniqueDeveuis(sourceDevices), scope.start, scope.end);
     let index = 0;
     for (const device of sourceDevices) {
+      const channels = exportChannelsForDevice(card, device, scope);
+      if (!channels.length) continue;
       const sourceName = displayDeviceName(device, index);
       index += 1;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
