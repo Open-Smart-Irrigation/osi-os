@@ -132,7 +132,7 @@ function exactJournalStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: [],
+      edgeDeferred: ['DELETE_WATERMARK_CALIBRATION', 'SET_WATERMARK_CALIBRATION'],
       cloudDeferred: [
         'UPSERT_JOURNAL_ENTRY',
         'VOID_JOURNAL_ENTRY',
@@ -150,7 +150,7 @@ function exactJournalStaging() {
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
-      edgeDeferred: [],
+      edgeDeferred: ['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED'],
       // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
       // applier for each of these ops before the edge activates real emission of it.
       edgeStaged: JOURNAL_EVENT_OPS.slice(),
@@ -174,7 +174,9 @@ function createStagedParityFixture(overrides) {
   fs.writeFileSync(schemaPath, JSON.stringify({
     type: 'object',
     properties: {
-      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS) },
+      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS, [
+        'WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED',
+      ]) },
       payload: {
         type: 'object',
         required: ['contract_version'],
@@ -216,6 +218,8 @@ class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
     switch (event.op()) {
       case "DEVICE_DATA_APPENDED" -> { return true; }
+      case "WATERMARK_CALIBRATION_DELETED" -> { return true; }
+      case "WATERMARK_CALIBRATION_UPSERTED" -> { return true; }
       default -> { return false; }
     }
   }
@@ -813,7 +817,8 @@ test('parity accepts a cloud-deferred journal op the server implements early whe
 class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
     switch (event.op()) {
-      case "DEVICE_DATA_APPENDED", "JOURNAL_ENTRY_UPSERTED" -> { return true; }
+      case "DEVICE_DATA_APPENDED", "JOURNAL_ENTRY_UPSERTED",
+           "WATERMARK_CALIBRATION_DELETED", "WATERMARK_CALIBRATION_UPSERTED" -> { return true; }
       default -> { return false; }
     }
   }
