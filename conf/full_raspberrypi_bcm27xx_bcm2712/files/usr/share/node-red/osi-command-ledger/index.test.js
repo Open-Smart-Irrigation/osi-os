@@ -493,6 +493,27 @@ test('protected command ID replay rejects a non-protected stored row', async () 
   );
 });
 
+test('protected terminal ACK rejects a non-protected stored row', async () => {
+  const db = new TestDb();
+  insertAppliedCommand(db, {
+    commandId: '812', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'REBOOT', effectKey: 'reboot:002',
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 812, status: 'ACKED', result: 'APPLIED', duplicate: false },
+  });
+  const context = watermarkBinding();
+  await assert.rejects(
+    ledger.queueCommandAck(db, {
+      commandId: 812, commandType: 'SET_WATERMARK_CALIBRATION', result: 'APPLIED',
+      effectKey: WATERMARK_EFFECT_KEY, deviceEui: WATERMARK_DEVICE_EUI,
+      gatewayDeviceEui: GATEWAY_EUI, actorUserUuid: context.actor_user_uuid,
+      baseSyncVersion: context.base_sync_version, operation: context.operation,
+      payload: watermarkEnvelope(812).payload,
+    }, watermarkRuntime(context)),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
 test('effect-key replay persists the new command ID as a trusted terminal row', async () => {
   const db = new TestDb();
   const context = watermarkBinding();
