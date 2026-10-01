@@ -4079,8 +4079,8 @@
     "type": "function",
     "z": "lsn50-tab",
     "name": "WATERMARK Ingest",
-    "func": "return (async () => {\nconst d = msg.formattedData;\nif (!d || d.isWatermark !== true) return null;\nconst helperRes = osiLib.require('watermark-helper');\nif (!helperRes.ok) { node.warn('watermark-helper quarantined: ' + helperRes.error); return null; }\nconst writerRes = osiLib.require('device-writer');\nif (!writerRes.ok) { node.warn('device-writer quarantined: ' + writerRes.error); return null; }\nlet manifest;\ntry { manifest = JSON.parse(global.get('fs').readFileSync('/srv/node-red/edge-channels.json', 'utf8')); }\ncatch (e) { node.error('edge-channels.json load failed: ' + e.message); return null; }\nconst db = new osiDb.Database('/data/db/farming.db');\ntry {\n  const res = await helperRes.value.ingestProfile3(db, {\n    deveui: d.devEui, recordedAt: d.timestamp, payloadB64: d.rawPayloadB64, fCnt: d.fCnt\n  }, {\n    clampRecordedAt: writerRes.value.clampRecordedAt,\n    writeDeviceData: async (tx, normalizeResult) =>\n      await writerRes.value.writeDeviceData(tx, manifest, normalizeResult, { deveui: d.devEui }, { node })\n  });\n  node.status(res.accepted\n    ? { fill: 'green', shape: 'dot', text: d.devEui + ' ' + res.statuses.join('/') }\n    : { fill: 'yellow', shape: 'ring', text: d.devEui + ' skipped: ' + res.reason });\n  if (!res.accepted) node.warn('WATERMARK frame from ' + d.devEui + ' not stored: ' + res.reason);\n} catch (e) {\n  node.error('WATERMARK ingest failed for ' + d.devEui + ': ' + e.message);\n} finally {\n  await new Promise((resolve) => db.close(() => resolve()));\n}\nreturn null;\n})();",
-    "outputs": 0,
+    "func": "return (async () => {\nconst d = msg.formattedData;\nif (!d || d.isWatermark !== true) return null;\nconst trustedGatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\nconst hasTrustedGateway = /^[0-9A-F]{16}$/.test(trustedGatewayEui);\n\nconst helperRes = osiLib.require('watermark-helper');\nlet contactMessage = null;\nif (hasTrustedGateway) {\n  let contact;\n  try {\n    contact = helperRes.ok && typeof helperRes.value.buildContactPayload === 'function'\n      ? helperRes.value.buildContactPayload({ gatewayDeviceEui: trustedGatewayEui, deveui: d.devEui, observedAt: d.timestamp })\n      : {\n        deviceEui: String(d.devEui || '').trim().toUpperCase(), gatewayDeviceEui: trustedGatewayEui,\n        deviceType: 'DRAGINO_LSN50', fPort: 11, timestamp: d.timestamp || new Date().toISOString()\n      };\n    contactMessage = {\n      topic: 'devices/' + trustedGatewayEui + '/telemetry',\n      payload: JSON.stringify(contact),\n      qos: 1\n    };\n  } catch (e) {\n    node.warn('WATERMARK contact attribution failed: ' + e.message);\n  }\n}\nif (!helperRes.ok) {\n  node.warn('watermark-helper quarantined: ' + helperRes.error);\n  return contactMessage;\n}\nconst writerRes = osiLib.require('device-writer');\nif (!writerRes.ok) {\n  node.warn('device-writer quarantined: ' + writerRes.error);\n  return contactMessage;\n}\nlet manifest;\ntry { manifest = JSON.parse(global.get('fs').readFileSync('/srv/node-red/edge-channels.json', 'utf8')); }\ncatch (e) { node.error('edge-channels.json load failed: ' + e.message); return contactMessage; }\nlet db = null;\ntry {\n  db = new osiDb.Database('/data/db/farming.db');\n  const res = await helperRes.value.ingestProfile3(db, {\n    deveui: d.devEui, recordedAt: d.timestamp, payloadB64: d.rawPayloadB64, fCnt: d.fCnt\n  }, {\n    clampRecordedAt: writerRes.value.clampRecordedAt,\n    writeDeviceData: async (tx, normalizeResult) =>\n      await writerRes.value.writeDeviceData(tx, manifest, normalizeResult, { deveui: d.devEui }, { node })\n  });\n  node.status(res.accepted\n    ? { fill: 'green', shape: 'dot', text: d.devEui + ' ' + res.statuses.join('/') }\n    : { fill: 'yellow', shape: 'ring', text: d.devEui + ' skipped: ' + res.reason });\n  if (!res.accepted) node.warn('WATERMARK frame from ' + d.devEui + ' not stored: ' + res.reason);\n} catch (e) {\n  node.error('WATERMARK ingest failed for ' + d.devEui + ': ' + e.message);\n} finally {\n  if (db) await new Promise((resolve) => db.close(() => resolve()));\n}\nreturn contactMessage;\n})();",
+    "outputs": 1,
     "timeout": "",
     "noerr": 0,
     "initialize": "",
@@ -4097,7 +4097,11 @@
     ],
     "x": 560,
     "y": 280,
-    "wires": []
+    "wires": [
+      [
+        "9b38464d56b05ae0"
+      ]
+    ]
   },
   {
     "id": "lsn50-debug",

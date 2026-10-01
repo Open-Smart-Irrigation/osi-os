@@ -80,4 +80,23 @@ async function ingestProfile3(db, input, deps) {
   });
 }
 
-module.exports = { ingestProfile3 };
+// Contact-only MQTT payload: this is intentionally not a measurement mirror.
+// The cloud uses the authenticated topic gateway plus these five attribution
+// facts to advance contact/last_seen while edge sync remains authoritative for
+// watermark measurements and diagnostics.
+function buildContactPayload({ gatewayDeviceEui, deveui, observedAt }) {
+  const gateway = String(gatewayDeviceEui || '').trim().toUpperCase();
+  const device = String(deveui || '').trim().toUpperCase();
+  if (!/^[0-9A-F]{16}$/.test(gateway) || !/^[0-9A-F]{16}$/.test(device)) {
+    throw new Error('WATERMARK contact identity must be a canonical 16-hex EUI');
+  }
+  return {
+    deviceEui: device,
+    gatewayDeviceEui: gateway,
+    deviceType: 'DRAGINO_LSN50',
+    fPort: 11,
+    timestamp: observedAt || new Date().toISOString()
+  };
+}
+
+module.exports = { ingestProfile3, buildContactPayload };
