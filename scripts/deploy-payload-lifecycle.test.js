@@ -79,6 +79,48 @@ printf '%s\\n' missing-command-aborted
   }
 });
 
+test('complete required receiver fetch reaches the real payload activation marker', () => {
+  const root = fakeRoot();
+  const source = path.join(root, 'source');
+  const sourceGui = path.join(root, 'source-gui');
+  const guiRoot = path.join(root, 'gui');
+  const helperSource = path.join(source, 'commands.js');
+  const helperTarget = path.join(root, 'osi-watermark-helper', 'commands.js');
+  fs.mkdirSync(source, { recursive: true });
+  fs.mkdirSync(sourceGui, { recursive: true });
+  fs.writeFileSync(helperSource, 'required receiver bytes\n');
+  fs.writeFileSync(path.join(root, 'source-flows.json'), JSON.stringify([{ id: 'watermark-activation-marker' }]) + '\n');
+  fs.writeFileSync(path.join(sourceGui, 'index.html'), '<title>activated</title>\n');
+  const fetchStart = DEPLOY.indexOf('fetch() {');
+  const fetchEnd = DEPLOY.indexOf('\n}\n\nfetch_required', fetchStart) + 3;
+  const requiredStart = DEPLOY.indexOf('fetch_required() {');
+  const requiredEnd = DEPLOY.indexOf('\n}\n\nsame_fs_or_die', requiredStart) + 3;
+  const fetchFunctions = DEPLOY.slice(fetchStart, fetchEnd) + '\n' + DEPLOY.slice(requiredStart, requiredEnd);
+  const script = `set -eu
+BASE=file://${source}
+SWAP_ROOT=${JSON.stringify(root)}
+SWAP_JS=${JSON.stringify(SWAP_JS)}
+export BASE SWAP_ROOT SWAP_JS
+${fetchFunctions}
+${swapCallFunction()}
+fetch_required "osi-watermark-helper commands.js" "commands.js" ${JSON.stringify(helperTarget)}
+cmp ${JSON.stringify(helperSource)} ${JSON.stringify(helperTarget)}
+swap_call stagePayload complete ${JSON.stringify(path.join(root, 'source-flows.json'))} ${JSON.stringify(sourceGui)} >/dev/null
+swap_call flipTo complete ${JSON.stringify(guiRoot)} >/dev/null
+test "$(node -e 'console.log(require(process.argv[1])[0].id)' ${JSON.stringify(path.join(root, 'flows.json'))})" = watermark-activation-marker
+test "$(cat ${JSON.stringify(path.join(guiRoot, 'index.html'))})" = '<title>activated</title>'
+printf '%s\\n' activation-marker-reached
+`;
+  try {
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /activation-marker-reached/);
+    assert.equal(fs.readFileSync(helperTarget, 'utf8'), 'required receiver bytes\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function runSwap(root, command) {
   const script = `set -eu\nSWAP_ROOT=${JSON.stringify(root)}\nSWAP_JS=${JSON.stringify(SWAP_JS)}\nexport SWAP_ROOT SWAP_JS\n${swapCallFunction()}\n${command}\n`;
   return spawnSync('sh', ['-c', script], { encoding: 'utf8' });

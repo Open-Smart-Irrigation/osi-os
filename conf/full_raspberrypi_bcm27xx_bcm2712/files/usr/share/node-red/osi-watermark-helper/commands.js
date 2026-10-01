@@ -151,6 +151,26 @@ function normalizeDepths(value) {
   return Object.keys(out).sort().reduce((o, k) => { o[k] = out[k]; return o; }, {});
 }
 
+function normalizeCommandValues(type, payload) {
+  const values = payload && payload.values;
+  if (type === 'SET_WATERMARK_CALIBRATION') {
+    const input = calibration.validateCalibrationBody(Object.assign({}, values || {}, {
+      expected_sync_version: payload.base_sync_version,
+    }));
+    return Object.assign({}, input.values, input.meta);
+  }
+  if (type === 'SET_CHAMELEON_CONFIG') {
+    return { chameleon_enabled: normalizeBoolean(values && values.chameleon_enabled) };
+  }
+  if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {
+    return {
+      soil_moisture_probe_depths_json: normalizeDepths(values && values.soil_moisture_probe_depths_json),
+      soil_moisture_probe_depths_configured: 1,
+    };
+  }
+  return undefined;
+}
+
 async function applyMutation(scoped, envelope, runtime, type, identity) {
   const tx = scoped.tx;
   const access = await authorizeDevice(tx, identity, type, runtime);
@@ -185,6 +205,29 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
   const type = String(envelope && envelope.commandType || '').toUpperCase();
   if (!COMMAND_TYPES.includes(type)) return { handled: false };
   const payload = envelope.payload || {};
+  let normalizedValues;
+  try {
+    normalizedValues = normalizeCommandValues(type, payload);
+  } catch (cause) {
+    const reason = cause && (cause.reason || cause.code);
+    if (cause && ['invalid_calibration', 'invalid_body', 'invalid_values'].includes(reason)) {
+      return {
+        handled: true,
+        ack: {
+          commandId: envelope.commandId,
+          commandType: type,
+          status: 'NACKED',
+          result: 'REJECTED_PERMANENT',
+          reason,
+          duplicate: false,
+        },
+      };
+    }
+    throw cause;
+  }
+  const normalizedEnvelope = normalizedValues === undefined ? envelope : Object.assign({}, envelope, {
+    payload: Object.assign({}, payload, { values: normalizedValues }),
+  });
   // Immutable runtime/envelope identity is checked before the ledger's exact
   // command-id/effect replay path. A changed trusted actor or device must not
   // replay an otherwise valid terminal row.
@@ -203,10 +246,10 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
   const commandRuntime = Object.assign({}, runtime, { command_type: type, command_type_recognized: true, protected_context: trusted });
   let result;
   try {
-    result = await ledger.withProtectedCommandTransaction(db, Object.assign({}, envelope, { commandType: type }), commandRuntime, async (scoped) => {
+    result = await ledger.withProtectedCommandTransaction(db, Object.assign({}, normalizedEnvelope, { commandType: type }), commandRuntime, async (scoped) => {
     let identity = preflightIdentity;
     try {
-      const result = await applyMutation(scoped, envelope, runtime, type, identity);
+      const result = await applyMutation(scoped, normalizedEnvelope, runtime, type, identity);
       const ack = await scoped.terminalAck({
         commandId: envelope.commandId,
         result: 'APPLIED', status: 'ACKED', reason: null,

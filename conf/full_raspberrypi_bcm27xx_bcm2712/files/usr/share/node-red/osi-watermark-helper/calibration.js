@@ -34,6 +34,18 @@ function toNumber(value) {
   return NaN;
 }
 
+function parseIsoInstant(value) {
+  const text = String(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(text);
+  if (!match) return NaN;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) return NaN;
+  return Date.parse(text);
+}
+
 function parseExpectedVersion(value) {
   const n = toNumber(value);
   if (!Number.isInteger(n) || n < 0) {
@@ -63,9 +75,9 @@ function validateCalibrationBody(body) {
   const blank = (field) => body[field] === null || body[field] === '';
   if (has('measured_at')) {
     if (blank('measured_at')) meta.measured_at = null;
-    else if (!Number.isFinite(Date.parse(String(body.measured_at)))) {
+    else if (!Number.isFinite(parseIsoInstant(body.measured_at))) {
       throw httpError(400, 'invalid_calibration', 'measured_at must be an ISO date', { field: 'measured_at' });
-    } else meta.measured_at = new Date(Date.parse(String(body.measured_at))).toISOString();
+    } else meta.measured_at = new Date(parseIsoInstant(body.measured_at)).toISOString();
   }
   if (has('method')) {
     meta.method = blank('method') ? null : String(body.method).slice(0, 64);

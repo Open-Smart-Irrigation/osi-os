@@ -11,6 +11,7 @@ const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 
 const commands = require('./commands');
+const bindingCanonicalization = require('../osi-watermark-binding/canonicalization');
 
 const ROOT = path.resolve(__dirname, '../../../../../../..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
@@ -26,6 +27,7 @@ const CAL = {
   pullup_1_ohm: 41670, pulldown_1_ohm: 41260, series_fwd_1_ohm: 130, series_rev_1_ohm: 112,
   pullup_2_ohm: 42530, pulldown_2_ohm: 42070, series_fwd_2_ohm: 46, series_rev_2_ohm: 27
 };
+const PAYLOAD_HEX = 'a2030ce407c408620220032003200cdb0cdb20004700470fda0fda';
 
 function fixture(t) {
   const raw = new DatabaseSync(':memory:');
@@ -73,6 +75,19 @@ function envelope(id, type, values, extra = {}) {
   return { commandId: id, commandType: type, payload };
 }
 
+function seedWaiting(raw, count) {
+  const data = raw.prepare('INSERT INTO device_data(deveui,recorded_at) VALUES(?,?)');
+  const reading = raw.prepare(
+    "INSERT INTO watermark_readings(deveui,recorded_at,device_data_id,payload_hex,frame_status,profile,supply_mv,ch1_status,ch2_status,conversion_version) VALUES(?,?,?,?,?,?,?,?,?,?)"
+  );
+  for (let index = 0; index < count; index += 1) {
+    const recordedAt = new Date(Date.UTC(2026, 8, 1, 0, index, 0)).toISOString();
+    const deviceData = data.run(DEVICE, recordedAt);
+    reading.run(DEVICE, recordedAt, Number(deviceData.lastInsertRowid), PAYLOAD_HEX, 'accepted', 3, 3300,
+      'calibration_required', 'calibration_required', 'wm-lsn50-p3-v1');
+  }
+}
+
 test('all four protected operation names are handled', async (t) => {
   const { db } = fixture(t);
   for (const type of ['SET_WATERMARK_CALIBRATION', 'DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG', 'UPSERT_DEVICE_SOIL_DEPTHS']) {
@@ -116,6 +131,106 @@ test('valid calibration set uses exact base and terminal ACK atomically', async 
     commands.applyWatermarkCommand(db, envelope(1, 'SET_WATERMARK_CALIBRATION', CAL), runtime({ local_actor_user_uuid: WRITER })),
     (e) => e.code === 'watermark_command_conflict' && e.commandResult === 'CONFLICT'
   );
+});
+
+test('semantic values are normalized before binding and malformed input is terminal', async (t) => {
+  const { raw, db } = fixture(t);
+  const normalized = await commands.applyWatermarkCommand(db, envelope(7, 'SET_CHAMELEON_CONFIG', {
+    chameleon_enabled: true,
+  }, { payload: { base_sync_version: 1, effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:1` } }), runtime());
+  assert.equal(normalized.ack.result, 'APPLIED');
+  const row = raw.prepare('SELECT * FROM applied_commands WHERE command_id=?').get('7');
+  const intent = { chameleon_enabled: 1 };
+  const binding = {
+    command_type: 'SET_CHAMELEON_CONFIG', resource: 'DEVICE', device_eui: DEVICE,
+    gateway_device_eui: GATEWAY, actor_user_uuid: OWNER, base_sync_version: 1,
+    operation: 'set', normalized_intent: intent,
+  };
+  assert.equal(row.intent_hash, bindingCanonicalization.sha256(intent));
+  assert.equal(row.binding_hash, bindingCanonicalization.sha256(binding));
+
+  for (const [id, type, values, effect] of [
+    [8, 'SET_WATERMARK_CALIBRATION', Object.assign({}, CAL, { measured_at: 'yesterday-ish' }), `watermark_calibration:set:${GATEWAY}:${DEVICE}:0`],
+    [9, 'SET_WATERMARK_CALIBRATION', Object.assign({}, CAL, { pullup_1_ohm: 'not-a-number' }), `watermark_calibration:set:${GATEWAY}:${DEVICE}:0`],
+    [10, 'SET_CHAMELEON_CONFIG', { chameleon_enabled: 'maybe' }, `chameleon_config:set:${GATEWAY}:${DEVICE}:0`],
+    [11, 'UPSERT_DEVICE_SOIL_DEPTHS', { soil_moisture_probe_depths_json: { swt_1: '20' }, soil_moisture_probe_depths_configured: true }, `device_soil_depths:set:${GATEWAY}:${DEVICE}:0`],
+  ]) {
+    const result = await commands.applyWatermarkCommand(db, envelope(id, type, values, { payload: { effect_key: effect } }), runtime());
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', type);
+    assert.equal(result.ack.reason, type === 'SET_CHAMELEON_CONFIG' || type === 'UPSERT_DEVICE_SOIL_DEPTHS' ? 'invalid_values' : 'invalid_calibration');
+  }
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1, 'malformed commands are not bound or persisted');
+});
+
+test('cloud calibration command commits first 500 atomically and continues later batches', async (t) => {
+  const { raw, db } = fixture(t);
+  seedWaiting(raw, 1201);
+  const result = await commands.applyWatermarkCommand(db, envelope(12, 'SET_WATERMARK_CALIBRATION', CAL), runtime());
+  assert.equal(result.ack.result, 'APPLIED');
+  assert.equal(result.backfilled, 1201);
+  assert.equal(raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version, 1);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM watermark_readings WHERE ch1_status='calibration_required' OR ch2_status='calibration_required'").get().n, 0);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 1);
+});
+
+test('cloud command later-batch failure retains calibration and reports incomplete backfill', async (t) => {
+  const { raw, db } = fixture(t);
+  seedWaiting(raw, 1201);
+  let transactions = 0;
+  const flaky = Object.assign({}, db, {
+    transaction: async (fn) => {
+      transactions += 1;
+      if (transactions === 3) throw new Error('disk I/O error');
+      return db.transaction(fn);
+    },
+  });
+  const result = await commands.applyWatermarkCommand(flaky, envelope(13, 'SET_WATERMARK_CALIBRATION', CAL), runtime());
+  assert.equal(result.ack.result, 'APPLIED');
+  assert.equal(result.backfill_incomplete, true);
+  assert.equal(result.backfilled, 1000);
+  assert.equal(raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version, 1);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM watermark_readings WHERE ch1_status='calibration_required'").get().n, 201);
+});
+
+test('mutation and ACK/outbox failures roll back the command transaction', async (t) => {
+  const makeFailingDb = (mode) => {
+    const state = fixture(t);
+    const wrapped = Object.assign({}, state.db, {
+      transaction: async (fn) => {
+        state.raw.exec('BEGIN IMMEDIATE');
+        const scope = Object.assign({}, state.db, {
+          run: async (sql, params = []) => {
+            if (mode === 'ack' && /command_ack_outbox/i.test(sql)) throw new Error('ack outbox unavailable');
+            state.raw.prepare(sql).run(...params);
+          },
+          get: async (sql, params = []) => state.raw.prepare(sql).get(...params),
+          all: async (sql, params = []) => state.raw.prepare(sql).all(...params),
+          exec: async (sql) => state.raw.exec(sql),
+        });
+        try {
+          const value = await fn(scope);
+          if (mode === 'mutation') throw new Error('ledger unavailable');
+          state.raw.exec('COMMIT');
+          return value;
+        } catch (cause) {
+          state.raw.exec('ROLLBACK');
+          throw cause;
+        }
+      },
+    });
+    return { state, wrapped };
+  };
+  for (const mode of ['mutation', 'ack']) {
+    const { state, wrapped } = makeFailingDb(mode);
+    await assert.rejects(commands.applyWatermarkCommand(wrapped, envelope(14 + mode.length, 'SET_CHAMELEON_CONFIG', {
+      chameleon_enabled: true,
+    }, { payload: { base_sync_version: 1, effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:1` } }), runtime()));
+    const row = state.raw.prepare('SELECT chameleon_enabled,sync_version FROM devices WHERE deveui=?').get(DEVICE);
+    assert.deepEqual({ chameleon_enabled: row.chameleon_enabled, sync_version: row.sync_version }, { chameleon_enabled: 0, sync_version: 1 }, mode);
+    assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0, mode);
+    assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 0, mode);
+  }
 });
 
 test('calibration delete, Chameleon, and soil-depth set share terminal path', async (t) => {
