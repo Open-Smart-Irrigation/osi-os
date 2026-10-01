@@ -132,9 +132,9 @@ async function authorizeDevice(tx, identity, type, runtime) {
   return { device, actor };
 }
 
-function normalizeBoolean(value) {
-  if (value === true || value === 1 || value === '1' || value === 'true') return 1;
-  if (value === false || value === 0 || value === '0' || value === 'false') return 0;
+function parseBoolean(value) {
+  if (value === true || value === 1 || value === '1' || value === 'true') return true;
+  if (value === false || value === 0 || value === '0' || value === 'false') return false;
   throw error('invalid_values', 'chameleon_enabled must be boolean');
 }
 
@@ -160,12 +160,15 @@ function normalizeCommandValues(type, payload) {
     return Object.assign({}, input.values, input.meta);
   }
   if (type === 'SET_CHAMELEON_CONFIG') {
-    return { chameleon_enabled: normalizeBoolean(values && values.chameleon_enabled) };
+    return { chameleon_enabled: parseBoolean(values && values.chameleon_enabled) };
   }
   if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {
+    if (!values || values.soil_moisture_probe_depths_configured !== true) {
+      throw error('invalid_values', 'soil_moisture_probe_depths_configured must be true');
+    }
     return {
       soil_moisture_probe_depths_json: normalizeDepths(values && values.soil_moisture_probe_depths_json),
-      soil_moisture_probe_depths_configured: 1,
+      soil_moisture_probe_depths_configured: true,
     };
   }
   return undefined;
@@ -188,12 +191,12 @@ async function applyMutation(scoped, envelope, runtime, type, identity) {
   const current = Number(row.sync_version || 0);
   if (identity.base !== current) throw error('stale_sync_version', 'Device changed since the command was issued', 'CONFLICT');
   if (type === 'SET_CHAMELEON_CONFIG') {
-    const enabled = normalizeBoolean(envelope.payload.values && envelope.payload.values.chameleon_enabled);
+    const enabled = parseBoolean(envelope.payload.values && envelope.payload.values.chameleon_enabled) ? 1 : 0;
     await tx.run("UPDATE devices SET chameleon_enabled=?, sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE deveui=? AND sync_version=?", [enabled, identity.device, identity.base]);
   } else {
     const values = envelope.payload.values || {};
     const depths = normalizeDepths(values.soil_moisture_probe_depths_json);
-    if (values.soil_moisture_probe_depths_configured !== true && values.soil_moisture_probe_depths_configured !== 1) throw error('invalid_values', 'soil_moisture_probe_depths_configured must be true');
+    if (values.soil_moisture_probe_depths_configured !== true) throw error('invalid_values', 'soil_moisture_probe_depths_configured must be true');
     await tx.run("UPDATE devices SET soil_moisture_probe_depths_json=?, soil_moisture_probe_depths_configured=1, sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE deveui=? AND sync_version=?", [JSON.stringify(depths), identity.device, identity.base]);
   }
   const updated = await tx.get('SELECT sync_version FROM devices WHERE deveui=?', [identity.device]);

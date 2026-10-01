@@ -33,29 +33,30 @@ function nodePathForShell() {
   return process.execPath.replace(/'/g, "'\\''");
 }
 
-test('WATERMARK command receiver is verified before staged flows can activate', () => {
-  const helper = DEPLOY.indexOf('fetch_required "osi-watermark-helper commands.js"');
-  const staged = DEPLOY.indexOf('STAGED_FLOWS="$TMP_DIR/flows.json"');
-  const activation = DEPLOY.lastIndexOf('swap_call flipTo "$DEPLOY_STAMP"');
-  assert.ok(helper >= 0 && staged > helper && activation > helper, 'command receiver must precede staged-flow activation');
-  assert.ok(DEPLOY.indexOf('osi-watermark-helper/commands.js', helper) > helper);
-});
-
-test('missing WATERMARK command receiver aborts before activation and preserves prior payload', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-watermark-fetch-'));
+test('missing WATERMARK command receiver fails before flip and preserves the active pair byte-for-byte', () => {
+  const root = fakeRoot();
+  const source = path.join(root, 'source');
+  const previousGui = path.join(root, 'previous-gui');
+  const guiRoot = path.join(root, 'gui');
+  fs.mkdirSync(source, { recursive: true });
+  fs.mkdirSync(previousGui, { recursive: true });
+  fs.writeFileSync(path.join(root, 'previous-flows.json'), JSON.stringify([{ id: 'previous-active' }]) + '\n');
+  fs.writeFileSync(path.join(previousGui, 'index.html'), '<title>previous-active</title>\n');
   const fetchStart = DEPLOY.indexOf('fetch() {');
   const fetchEnd = DEPLOY.indexOf('\n}\n\nfetch_required', fetchStart) + 3;
   const requiredStart = DEPLOY.indexOf('fetch_required() {');
   const requiredEnd = DEPLOY.indexOf('\n}\n\nsame_fs_or_die', requiredStart) + 3;
-  assert.ok(fetchStart >= 0 && fetchEnd > fetchStart);
-  assert.ok(requiredStart >= 0 && requiredEnd > requiredStart);
   const fetchFunctions = DEPLOY.slice(fetchStart, fetchEnd) + '\n' + DEPLOY.slice(requiredStart, requiredEnd);
-  const previous = path.join(root, 'active', 'commands.js');
-  const activated = path.join(root, 'activated');
-  fs.mkdirSync(path.dirname(previous), { recursive: true });
-  fs.writeFileSync(previous, 'previous-command-receiver\n');
   const script = `set -eu
-BASE=file://${root}/source
+SWAP_ROOT=${JSON.stringify(root)}
+SWAP_JS=${JSON.stringify(SWAP_JS)}
+export SWAP_ROOT SWAP_JS
+${swapCallFunction()}
+swap_call stagePayload previous ${JSON.stringify(path.join(root, 'previous-flows.json'))} ${JSON.stringify(previousGui)} >/dev/null
+swap_call flipTo previous ${JSON.stringify(guiRoot)} >/dev/null
+cp ${JSON.stringify(path.join(root, 'flows.json'))} ${JSON.stringify(path.join(root, 'previous-flows.copy'))}
+cp ${JSON.stringify(path.join(guiRoot, 'index.html'))} ${JSON.stringify(path.join(root, 'previous-gui.copy'))}
+BASE=file://${source}
 export BASE
 set +e
 sh -c 'set -eu
@@ -64,16 +65,15 @@ fetch_required "osi-watermark-helper commands.js" "missing/commands.js" "${root}
 rc=$?
 set -e
 test "$rc" -ne 0
-test "$(cat "${previous}")" = "previous-command-receiver"
-test ! -e "${activated}"
+cmp ${JSON.stringify(path.join(root, 'flows.json'))} ${JSON.stringify(path.join(root, 'previous-flows.copy'))}
+cmp ${JSON.stringify(path.join(guiRoot, 'index.html'))} ${JSON.stringify(path.join(root, 'previous-gui.copy'))}
+test ! -e ${JSON.stringify(path.join(root, 'activation-marker'))}
 printf '%s\\n' missing-command-aborted
 `;
   try {
     const result = spawnSync('sh', ['-c', script], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /missing-command-aborted/);
-    assert.equal(fs.readFileSync(previous, 'utf8'), 'previous-command-receiver\n');
-    assert.equal(fs.existsSync(activated), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

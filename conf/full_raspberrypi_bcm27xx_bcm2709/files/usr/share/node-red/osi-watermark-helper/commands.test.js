@@ -140,7 +140,7 @@ test('semantic values are normalized before binding and malformed input is termi
   }, { payload: { base_sync_version: 1, effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:1` } }), runtime());
   assert.equal(normalized.ack.result, 'APPLIED');
   const row = raw.prepare('SELECT * FROM applied_commands WHERE command_id=?').get('7');
-  const intent = { chameleon_enabled: 1 };
+  const intent = { chameleon_enabled: true };
   const binding = {
     command_type: 'SET_CHAMELEON_CONFIG', resource: 'DEVICE', device_eui: DEVICE,
     gateway_device_eui: GATEWAY, actor_user_uuid: OWNER, base_sync_version: 1,
@@ -154,6 +154,7 @@ test('semantic values are normalized before binding and malformed input is termi
     [9, 'SET_WATERMARK_CALIBRATION', Object.assign({}, CAL, { pullup_1_ohm: 'not-a-number' }), `watermark_calibration:set:${GATEWAY}:${DEVICE}:0`],
     [10, 'SET_CHAMELEON_CONFIG', { chameleon_enabled: 'maybe' }, `chameleon_config:set:${GATEWAY}:${DEVICE}:0`],
     [11, 'UPSERT_DEVICE_SOIL_DEPTHS', { soil_moisture_probe_depths_json: { swt_1: '20' }, soil_moisture_probe_depths_configured: true }, `device_soil_depths:set:${GATEWAY}:${DEVICE}:0`],
+    [15, 'UPSERT_DEVICE_SOIL_DEPTHS', { soil_moisture_probe_depths_json: {}, soil_moisture_probe_depths_configured: false }, `device_soil_depths:set:${GATEWAY}:${DEVICE}:0`],
   ]) {
     const result = await commands.applyWatermarkCommand(db, envelope(id, type, values, { payload: { effect_key: effect } }), runtime());
     assert.equal(result.ack.result, 'REJECTED_PERMANENT', type);
@@ -231,6 +232,38 @@ test('mutation and ACK/outbox failures roll back the command transaction', async
     assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0, mode);
     assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 0, mode);
   }
+});
+
+test('calibration ACK failure rolls back the saved row and all first-batch conversions', async (t) => {
+  const state = fixture(t);
+  seedWaiting(state.raw, 500);
+  const failing = Object.assign({}, state.db, {
+    transaction: async (fn) => {
+      state.raw.exec('BEGIN IMMEDIATE');
+      const scope = Object.assign({}, state.db, {
+        run: async (sql, params = []) => {
+          if (/command_ack_outbox/i.test(sql)) throw new Error('ack outbox unavailable');
+          state.raw.prepare(sql).run(...params);
+        },
+        get: async (sql, params = []) => state.raw.prepare(sql).get(...params),
+        all: async (sql, params = []) => state.raw.prepare(sql).all(...params),
+        exec: async (sql) => state.raw.exec(sql),
+      });
+      try {
+        const value = await fn(scope);
+        state.raw.exec('COMMIT');
+        return value;
+      } catch (cause) {
+        state.raw.exec('ROLLBACK');
+        throw cause;
+      }
+    },
+  });
+  await assert.rejects(commands.applyWatermarkCommand(failing, envelope(16, 'SET_WATERMARK_CALIBRATION', CAL), runtime()));
+  assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM watermark_calibrations').get().n, 0);
+  assert.equal(state.raw.prepare("SELECT COUNT(*) AS n FROM watermark_readings WHERE ch1_status='calibration_required'").get().n, 500);
+  assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0);
+  assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 0);
 });
 
 test('calibration delete, Chameleon, and soil-depth set share terminal path', async (t) => {
@@ -372,6 +405,61 @@ test('assigned authorization validates zone existence, deletion, gateway, owner,
     'INSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at,updated_at,sync_version) VALUES(?,?,?,?,?,1)'
   ).run('66666666-6666-4666-8666-666666666666', WRITER, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', NOW, NOW);
   await command(granted, 74, WRITER, 'APPLIED');
+});
+
+test('every protected operation traverses the independent scoped denial matrix', async (t) => {
+  const operations = [
+    ['SET_WATERMARK_CALIBRATION', CAL],
+    ['DELETE_WATERMARK_CALIBRATION', undefined],
+    ['SET_CHAMELEON_CONFIG', { chameleon_enabled: true }],
+    ['UPSERT_DEVICE_SOIL_DEPTHS', { soil_moisture_probe_depths_json: { swt_1: 20 }, soil_moisture_probe_depths_configured: true }],
+  ];
+  const scenarios = [
+    { name: 'missing actor', actor: '99999999-9999-4999-8999-999999999999' },
+    { name: 'viewer', actor: VIEWER },
+    { name: 'disabled account', actor: WRITER, prepare: (s) => s.raw.prepare('UPDATE users SET disabled_at=? WHERE user_uuid=?').run(NOW, WRITER) },
+    { name: 'missing capability', actor: OWNER, runtime: () => runtime({ capabilities: [] }) },
+    { name: 'wrong device type', actor: OWNER, prepare: (s) => s.raw.prepare('UPDATE devices SET type_id=? WHERE deveui=?').run('DRAGINO_SDI12', DEVICE) },
+    { name: 'dangling assignment', actor: OWNER, prepare: (s) => {
+      s.raw.exec('PRAGMA foreign_keys=OFF');
+      s.raw.prepare('UPDATE devices SET irrigation_zone_id=999 WHERE deveui=?').run(DEVICE);
+      s.raw.exec('PRAGMA foreign_keys=ON');
+    } },
+    {
+      name: 'deleted assignment', actor: OWNER, prepare: (s) => {
+        s.raw.prepare('INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,deleted_at,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?,?)').run('Deleted', 2, '11111111-1111-4111-8111-111111111111', GATEWAY, NOW, NOW, NOW);
+        s.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+      },
+    },
+    {
+      name: 'foreign assignment', actor: OWNER, prepare: (s) => {
+        s.raw.prepare('INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?)').run('Foreign', 2, '22222222-2222-4222-8222-222222222223', OTHER_GATEWAY, NOW, NOW);
+        s.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+      },
+    },
+    {
+      name: 'assigned admin without grant', actor: OWNER, prepare: (s) => {
+        s.raw.prepare('INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?)').run('Owned elsewhere', 2, '33333333-3333-4333-8333-333333333334', GATEWAY, NOW, NOW);
+        s.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+      },
+    },
+    { name: 'unassigned researcher', actor: WRITER },
+  ];
+  let id = 100;
+  for (const scenario of scenarios) {
+    for (const [type, values] of operations) {
+      const state = fixture(t);
+      if (scenario.prepare) scenario.prepare(state);
+      const operationRuntime = scenario.runtime ? scenario.runtime() : runtime();
+      const result = await commands.applyWatermarkCommand(state.db, envelope(id++, type, values, {
+        payload: {
+          actor_user_uuid: scenario.actor,
+          effect_key: commands.expectedEffect(type, GATEWAY, DEVICE, 0),
+        },
+      }), operationRuntime);
+      assert.equal(result.ack.result, 'REJECTED_PERMANENT', `${scenario.name}/${type}`);
+    }
+  }
 });
 
 test('device type gates admit only the approved WATERMARK families', async (t) => {
