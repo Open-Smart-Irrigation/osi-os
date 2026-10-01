@@ -636,6 +636,10 @@
     "scoped-device-config-guard": {
       "delta": 127,
       "reason": "WATERMARK phase 1 (spec 2026-09-25), calibration HTTP route: routeTable gains {PUT /watermark/calibration, index 25} and {DELETE /watermark/calibration, index 26}, both wired to watermark-cal-fn; the error output moves from 25 to 27 (outputs 28, wires 28). Measured with verify-flows-size-ratchet nodeSizes per profile; bcm2712 and bcm2709 are byte-identical and each measures the same: origin/main 4358 -> HEAD 4485 = +127. Replaces this node's new_node_ceilings entry (max_chars 4358, Wave 3 scoped-access guard extension to 25 routes), removed in the same commit: new_node_ceilings only governs a node absent at --base-ref, and this node already exists at origin/main at exactly 4358, so rule 1 (node_allowances delta) is the mechanism that gates it (the scoped-zone-create-router / scoped-weather-zone-assign-router precedent; keeping both would also trip the duplicate-key check in verify-live-gateway-identity.js)."
+    },
+    "watermark-ingest-fn": {
+      "delta": 1386,
+      "reason": "WATERMARK Task 10 contact publication (commits 6ec405735 and 61044f89), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 1517 -> HEAD 2903 = +1386. Adds the minimal FPort 11 contact-only envelope plus strict attributable timestamp, gateway, and device validation; raw calibration diagnostics remain excluded."
     }
   },
   "total_allowance": {
