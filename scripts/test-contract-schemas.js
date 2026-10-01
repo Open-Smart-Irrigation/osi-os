@@ -1088,9 +1088,11 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     ok = false;
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
+    // WATERMARK parity is active now; only the still-deferred journal and
+    // scoped-access sets belong in this staging oracle.
     const exactStaging = staging && staging.version === 1 &&
         JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort(), ['DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG', 'SET_WATERMARK_CALIBRATION', 'UPSERT_DEVICE_SOIL_DEPTHS'])) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -1098,9 +1100,9 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify(['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED']) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS, ['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED']));
-    reportCheck(exactStaging, 'staging manifest pins the exact journal sets', 'staging manifest drifted from the exact journal sets');
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
+    reportCheck(exactStaging, 'staging manifest pins the exact deferred journal and scoped-access sets', 'staging manifest drifted from the exact deferred journal and scoped-access sets');
 }
 
 const scopedUserCommand = {
