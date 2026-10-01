@@ -96,10 +96,10 @@ const manifestFs = Object.freeze({
   },
 });
 
-async function runReal(native, payloadB64, label) {
+async function runReal(native, payloadB64, label, observedAt = '2026-09-25T10:00:00Z') {
   const result = await executeFunction(node, {
     msg: { formattedData: {
-      isWatermark: true, devEui: DEVICE, timestamp: '2026-09-25T10:00:00Z',
+      isWatermark: true, devEui: DEVICE, timestamp: observedAt,
       rawPayloadB64: payloadB64, fCnt: 7,
     } },
     env: { DEVICE_EUI: GATEWAY },
@@ -108,6 +108,10 @@ async function runReal(native, payloadB64, label) {
     libOverrides: { osiDb: realOsiDb(native) },
   });
   assert.deepEqual(result.errors, [], label + ': flow errors');
+  if (observedAt === 'September 25, 2026 10:00 UTC') {
+    assert.equal(result.result, null, label + ': non-ISO timestamp published contact');
+    return;
+  }
   assert.ok(result.result, label + ': no contact message');
   assert.equal(result.result.topic, 'devices/' + GATEWAY + '/telemetry');
   assert.equal(result.result.qos, 1);
@@ -166,6 +170,11 @@ async function runFallbackRejected(formattedData, label) {
   await runReal(native, frameB64(undefined, undefined, { flags1: 0x21 }), 'accepted invalid channel');
   row = native.prepare('SELECT frame_status, ch1_status FROM watermark_readings').get();
   assert.deepEqual({ ...row }, { frame_status: 'accepted', ch1_status: 'invalid_sample' });
+  native.close();
+
+  native = freshDb();
+  await runReal(native, frameB64(), 'helper strict timestamp', 'September 25, 2026 10:00 UTC');
+  assert.equal(native.prepare('SELECT COUNT(*) AS n FROM watermark_readings').get().n, 1);
   native.close();
 
   native = freshDb();
