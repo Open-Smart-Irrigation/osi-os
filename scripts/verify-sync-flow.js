@@ -3537,6 +3537,14 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
     `${relativeSeedPath} includes applied_commands.expires_at for WS3 expiry`,
     `${relativeSeedPath} is missing applied_commands.expires_at`
   );
+  for (const column of ['binding_hash', 'intent_hash', 'resource_type', 'resource_id',
+    'gateway_device_eui', 'actor_user_uuid', 'base_sync_version', 'operation']) {
+    expectCondition(
+      appliedCommandsColumns.has(column),
+      `${relativeSeedPath} includes applied_commands.${column} for trusted configuration binding`,
+      `${relativeSeedPath} is missing applied_commands.${column} for trusted configuration binding`
+    );
+  }
   const ackOutboxColumns = new Set(readTableColumns(seedDatabasePath, 'command_ack_outbox'));
   expectCondition(
     ackOutboxColumns.has('command_id'),

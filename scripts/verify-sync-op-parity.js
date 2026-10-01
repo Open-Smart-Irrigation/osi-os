@@ -55,8 +55,6 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
 const EXACT_EDGE_DEFERRED_OPS = [
-  'WATERMARK_CALIBRATION_DELETED',
-  'WATERMARK_CALIBRATION_UPSERTED',
 ];
 const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
@@ -101,7 +99,7 @@ const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
 // cloud-first rollout permits: the edge still defers production while cloud has
 // already activated its applier, so an edge-deferred op need not be cloud-deferred.
 const EVENT_STAGE_TRANSITION_FIXTURE = {
-  edgeDeferred: ['WATERMARK_CALIBRATION_UPSERTED'],
+  edgeDeferred: ['JOURNAL_ENTRY_UPSERTED'],
   cloudDeferred: [],
 };
 
@@ -241,6 +239,10 @@ const SQL_OWNED_EVENT_OPS = new Set([
   'DEVICE_RADIO_CONFIGURATION_REVISED',
   // Emitted by 0065__zone_daily_agronomy_sync.sql's trg_dp_zone_agronomy_outbox_* triggers, not by flows.json.
   'ZONE_AGRONOMY_UPSERTED',
+  // Emitted by 0068__watermark_cloud_parity.sql's retained-calibration triggers,
+  // never by raw watermark_readings.
+  'WATERMARK_CALIBRATION_UPSERTED',
+  'WATERMARK_CALIBRATION_DELETED',
 ]);
 // Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
 // "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living

@@ -27,10 +27,7 @@
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
-    "edgeDeferred": [
-      "WATERMARK_CALIBRATION_DELETED",
-      "WATERMARK_CALIBRATION_UPSERTED"
-    ],
+    "edgeDeferred": [],
     "edgeStaged": [
       "JOURNAL_ENTRY_UPSERTED",
       "JOURNAL_ENTRY_VOIDED",

@@ -91,6 +91,8 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
   // migration runner delivery, not the frozen sync-init-fn boot DDL.
   ['trg_dp_zone_agronomy_outbox_ai', '0067__zone_daily_agronomy_sync.sql'],
   ['trg_dp_zone_agronomy_outbox_au', '0067__zone_daily_agronomy_sync.sql'],
+  ['trg_watermark_calibrations_outbox_ai', '0068__watermark_cloud_parity.sql'],
+  ['trg_watermark_calibrations_outbox_au', '0068__watermark_cloud_parity.sql'],
 ]);
 
 function q(db, sql) {

@@ -69,6 +69,15 @@ function isZoneCommandType(type) {
   ].includes(type);
 }
 
+const PROTECTED_CONFIGURATION_COMMANDS = new Set([
+  'SET_WATERMARK_CALIBRATION',
+  'DELETE_WATERMARK_CALIBRATION',
+]);
+
+function isProtectedConfigurationCommand(type) {
+  return PROTECTED_CONFIGURATION_COMMANDS.has(type);
+}
+
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -158,11 +167,83 @@ function canonicalIntentHash(value) {
     .digest('hex');
 }
 
+function protectedContext(envelope, runtime, type) {
+  if (!isProtectedConfigurationCommand(type)) return null;
+  const payload = envelope && envelope.payload;
+  const suppliedContext = (runtime && (runtime.protected_context || runtime.protectedContext)) ||
+    (envelope && (envelope.protected_context || envelope.protectedContext));
+  const context = suppliedContext && typeof suppliedContext === 'object' && !Array.isArray(suppliedContext)
+    ? suppliedContext : {};
+  const payloadIntent = payload && payload.values && typeof payload.values === 'object'
+    ? payload.values : null;
+  const values = {
+    // The signed pending-command envelope is the trusted source when a caller
+    // has not supplied precomputed hashes.  Keep the hashes in the ledger so
+    // later deliveries compare the exact normalized intent, not just a key.
+    binding_hash: context.binding_hash || context.bindingHash || canonicalIntentHash(payloadIntent || {}),
+    intent_hash: context.intent_hash || context.intentHash || canonicalIntentHash({
+      operation: payload && payload.operation, values: payloadIntent,
+    }),
+    resource_type: context.resource_type || context.resourceType || 'WATERMARK_CALIBRATION',
+    resource_id: context.resource_id || context.resourceId || (payload && (payload.device_eui || payload.deviceEui)),
+    gateway_device_eui: context.gateway_device_eui || context.gatewayDeviceEui || (payload && (payload.gateway_device_eui || payload.gatewayDeviceEui)),
+    actor_user_uuid: context.actor_user_uuid || context.actorUserUuid || (payload && (payload.actor_user_uuid || payload.actorUserUuid)),
+    base_sync_version: context.base_sync_version == null
+      ? (context.baseSyncVersion == null ? payload && payload.base_sync_version : context.baseSyncVersion)
+      : context.base_sync_version,
+    operation: context.operation || (payload && payload.operation),
+  };
+  if (!/^[0-9a-f]{64}$/i.test(String(values.binding_hash || '')) ||
+      !/^[0-9a-f]{64}$/i.test(String(values.intent_hash || '')) ||
+      values.resource_type !== 'WATERMARK_CALIBRATION' ||
+      !/^[0-9A-F]{16}$/.test(String(values.resource_id || '')) ||
+      !/^[0-9A-F]{16}$/.test(String(values.gateway_device_eui || '')) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(values.actor_user_uuid || '')) ||
+      !Number.isSafeInteger(values.base_sync_version) || values.base_sync_version < 0 ||
+      !['set', 'delete'].includes(values.operation) ||
+      (type === 'SET_WATERMARK_CALIBRATION' && values.operation !== 'set') ||
+      (type === 'DELETE_WATERMARK_CALIBRATION' && values.operation !== 'delete')) {
+    throw commandError('protected_command_conflict', 'trusted WATERMARK command binding is invalid');
+  }
+  const effectKey = String((payload && (payload.effect_key || payload.effectKey)) || envelope.effectKey || '').trim();
+  const expectedEffect = `watermark_calibration:${values.operation}:${values.gateway_device_eui}:${values.resource_id}:${values.base_sync_version}`;
+  if (effectKey !== expectedEffect || !payload ||
+      String(payload.device_eui || payload.deviceEui || '').trim() !== values.resource_id ||
+      String(payload.gateway_device_eui || payload.gatewayDeviceEui || '').trim() !== values.gateway_device_eui ||
+      String(payload.actor_user_uuid || payload.actorUserUuid || '').trim() !== values.actor_user_uuid ||
+      payload.base_sync_version !== values.base_sync_version ||
+      payload.operation !== values.operation) {
+    throw commandError('protected_command_conflict', 'WATERMARK command semantic key does not match trusted binding');
+  }
+  return values;
+}
+
+function protectedBindingMatches(row, context) {
+  return row && context &&
+    row.binding_hash === context.binding_hash &&
+    row.intent_hash === context.intent_hash &&
+    row.resource_type === context.resource_type &&
+    row.resource_id === context.resource_id &&
+    row.gateway_device_eui === context.gateway_device_eui &&
+    row.actor_user_uuid === context.actor_user_uuid &&
+    Number(row.base_sync_version) === context.base_sync_version &&
+    row.operation === context.operation;
+}
+
 function validNonJournalEffectBinding(envelope, runtime) {
   if (!runtime || runtime.command_type_recognized !== true) return false;
   const payload = envelope.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
   const effectKey = String(payload.effect_key || payload.effectKey || envelope.effectKey || '').trim();
+  const type = commandType(envelope);
+  if (isProtectedConfigurationCommand(type)) {
+    try {
+      protectedContext(envelope, runtime, type);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
   let match = /^irrigation:scheduler:(0|[1-9]\d*):(0|[1-9]\d*):(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/.exec(effectKey);
   if (match) {
     const zoneId = payload.zone_id == null ? payload.zoneId : payload.zone_id;
@@ -182,7 +263,6 @@ function validNonJournalEffectBinding(envelope, runtime) {
       .trim().toUpperCase();
     return deviceEui === match[1];
   }
-  const type = commandType(envelope);
   if (isZoneCommandType(type)) {
     const zoneUuid = String(payload.zone_uuid || '').trim().toLowerCase();
     const base = payload.base_sync_version;
@@ -273,14 +353,19 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
   const deliveryId = deliveryCommandId(envelope);
   const opts = runtime || {};
   return db.transaction(async function(tx) {
+    const type = commandType(envelope);
+    const protectedType = isProtectedConfigurationCommand(type);
+    const trusted = protectedType ? protectedContext(envelope, opts, type) : null;
     let row = await tx.get(
       'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
       [String(deliveryId)]
     );
     if (row) {
+      if (protectedType && !protectedBindingMatches(row, trusted)) {
+        throw commandError('protected_command_conflict', 'WATERMARK command replay binding conflicts with the terminal ledger');
+      }
       return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
     }
-    const type = commandType(envelope);
     const journalType = isJournalCommandType(type);
     const zoneType = isZoneCommandType(type);
     const validEffect = await validEffectBinding(envelope, Object.assign({}, opts, { db: tx }));
@@ -318,6 +403,17 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
         const facts = parsedResultDetail(candidate);
         return facts && facts.payloadHash === intentHash;
       });
+    } else if (protectedType) {
+      const candidates = await tx.all(
+        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ORDER BY applied_at,command_id',
+        [effectKey, type]
+      );
+      if (candidates.length) {
+        row = candidates.find((candidate) => protectedBindingMatches(candidate, trusted));
+        if (!row) {
+          throw commandError('protected_command_conflict', 'WATERMARK command effect binding conflicts with the terminal ledger');
+        }
+      }
     } else {
       row = await tx.get(
         'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ' +
@@ -397,6 +493,25 @@ async function queueCommandAck(db, rawAck, runtime) {
   const requestedSyncVersion = Number.isSafeInteger(requestedSyncVersionNumber) && requestedSyncVersionNumber >= 0
     ? requestedSyncVersionNumber
     : appliedSyncVersion;
+  const ackType = String(ack.commandType || '').trim().toUpperCase();
+  let trusted = null;
+  if (terminal && isProtectedConfigurationCommand(ackType)) {
+    const payload = ack.payload && typeof ack.payload === 'object' ? ack.payload : {
+      effect_key: ack.effectKey || ack.effect_key,
+      device_eui: ack.deviceEui || ack.devEui,
+      gateway_device_eui: ack.gatewayDeviceEui || ack.gateway_device_eui,
+      actor_user_uuid: ack.actorUserUuid || ack.actor_user_uuid,
+      base_sync_version: ack.baseSyncVersion == null ? ack.base_sync_version : ack.baseSyncVersion,
+      operation: ack.operation,
+    };
+    trusted = protectedContext({
+      commandId: commandId.ack,
+      commandType: ackType,
+      effectKey: payload.effect_key,
+      payload,
+      protected_context: (runtime && (runtime.protected_context || runtime.protectedContext)) || ack.protected_context,
+    }, runtime || {}, ackType);
+  }
   const initial = {
     commandId: commandId.ack,
     eventUuid: ack.eventUuid == null ? null : ack.eventUuid,
@@ -419,6 +534,9 @@ async function queueCommandAck(db, rawAck, runtime) {
         [commandId.stored]
       );
       if (existing) {
+        if (trusted && !protectedBindingMatches(existing, trusted)) {
+          throw commandError('protected_command_conflict', 'WATERMARK terminal ACK binding conflicts with the terminal ledger');
+        }
         // A local commandId never queues a cloud ack (see isCloudOriginatedCommandId
         // above) -- not even on replay. replayAck() is the pure, DB-write-free half of
         // persistReplayAck() and reproduces the exact same returned shape.
@@ -427,12 +545,16 @@ async function queueCommandAck(db, rawAck, runtime) {
       }
       await tx.run(
         'INSERT INTO applied_commands (' +
-          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator' +
-        ') VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,' +
+          'binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation' +
+        ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
         [commandId.stored, String(ack.effectKey || ack.effect_key || '').trim() || null,
           String(ack.deviceEui || ack.devEui || '').trim().toUpperCase() || 'UNKNOWN',
           String(ack.commandType || '').trim().toUpperCase() || 'UNKNOWN', result, appliedAt,
-          JSON.stringify(initial), 'edge']
+          JSON.stringify(initial), 'edge', trusted && trusted.binding_hash, trusted && trusted.intent_hash,
+          trusted && trusted.resource_type, trusted && trusted.resource_id,
+          trusted && trusted.gateway_device_eui, trusted && trusted.actor_user_uuid,
+          trusted && trusted.base_sync_version, trusted && trusted.operation]
       );
       const hooks = runtime && runtime.lifecycle_hooks;
       if (hooks && typeof hooks.afterCommandLedger === 'function') {
