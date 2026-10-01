@@ -540,7 +540,7 @@ test('all three capability builders advertise entity_name_commands_v1 and both z
       const node = flows.find((n) => n.id === id);
       assert.match(
         node.func,
-        /const syncCapabilities = \['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1'\];/,
+        /const syncCapabilities = \['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1'\];/,
         profile + ' ' + id
       );
     }
@@ -553,7 +553,9 @@ test('the applier is wired between installation revisions and Route Command, on 
     const upstream = flows.find((n) => n.id === 'installation-revision-command-apply-fn');
     const applier = flows.find((n) => n.id === 'entity-name-command-apply-fn');
     assert.deepEqual(upstream.wires, [['entity-name-command-apply-fn'], ['9d5e3035c3d069c4']], profile);
-    assert.deepEqual(applier.wires, [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']], profile);
+    const protectedApplier = flows.find((n) => n.id === 'watermark-config-command-apply-fn');
+    assert.deepEqual(applier.wires, [['watermark-config-command-apply-fn'], ['9d5e3035c3d069c4']], profile);
+    assert.deepEqual(protectedApplier.wires, [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']], profile);
     assert.deepEqual(applier.libs, [{ var: 'osiLib', module: 'osi-lib' }], profile);
     assert.equal(applier.name, 'Apply Entity Name Command', profile);
   }

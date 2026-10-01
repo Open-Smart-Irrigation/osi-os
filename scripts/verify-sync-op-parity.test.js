@@ -132,7 +132,7 @@ function exactJournalStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: ['DELETE_WATERMARK_CALIBRATION', 'SET_WATERMARK_CALIBRATION'],
+      edgeDeferred: [],
       cloudDeferred: [
         'UPSERT_JOURNAL_ENTRY',
         'VOID_JOURNAL_ENTRY',
