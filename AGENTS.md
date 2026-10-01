@@ -52,6 +52,12 @@ Per-module system map (both repos, every module described with location): [docs/
 **Cloud → edge command types** (via pending-commands):
 `UPSERT_ZONE`, `DELETE_ZONE`, `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE`, `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION`, `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE`, `UPSERT_DEVICE_FLAGS`, `UNCLAIM_DEVICE`, `SYNC_LINKED_AUTH`, `FORCE_EDGE_SYNC`, `VALVE_COMMAND`, `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*`, `SET_FAN`, `REBOOT`, `REGISTER_DEVICE`, `UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`.
 
+WATERMARK cloud parity adds four protected exact-base commands:
+`SET_WATERMARK_CALIBRATION`, `DELETE_WATERMARK_CALIBRATION`,
+`SET_CHAMELEON_CONFIG`, and `UPSERT_DEVICE_SOIL_DEPTHS`. The cloud keeps these
+writes pending until edge acknowledgement and mirror convergence; it never
+updates the confirmed edge-owned value when it queues the command.
+
 `UPSERT_ZONE_NAME` and `UPSERT_DEVICE_NAME` are applied by
 `entity-name-command-apply-fn` and are only sent to a gateway that reported the
 `entity_name_commands_v1` sync capability.
@@ -73,8 +79,12 @@ per call.
 `al-link-build-req` and `sync-force-build`): `linked_auth_sync_v1`,
 `force_edge_sync_v1`, `installation_recovery_v1`, `installation_locations_v1`,
 `entity_name_commands_v1`, `zone_config_weather_source_v1`,
-`zone_config_stage_started_on_v1`, and `field_journal_v1` when the journal is
-enabled. The cloud reads the list as `gatewayIdentity.syncCapabilities()` and sends
+`zone_config_stage_started_on_v1`, `watermark_v1`,
+`chameleon_config_commands_v1`, `device_soil_depth_commands_v1`, and
+`field_journal_v1` when the journal is enabled. `watermark_v1` covers the
+calibration resource, its set/delete commands, snapshots, and events. The other
+two tokens independently gate their named exact-base device commands. The cloud
+reads the list as `gatewayIdentity.syncCapabilities()` and sends
 a name command only to a gateway that reported `entity_name_commands_v1`. From
 sub-project 4 on it will put each zone field into `UPSERT_ZONE` and
 `UPSERT_ZONE_CONFIG` only for a gateway that reported that field's capability:
@@ -159,6 +169,43 @@ rehearsal.
 - **Release script:** `OSI_ADMIN_TOKEN=… node scripts/refresh-chameleon-calibrations.js` before cutting a release.
 - Apply the generated release seed with `node scripts/apply-chameleon-calibration-seed.js`; it updates every bundled DB copy and fails on an empty calibration snapshot.
 
+### WATERMARK cloud parity
+
+`WATERMARK_CALIBRATION` is an edge-authoritative resource keyed by uppercase
+device EUI. Migration `0068__watermark_cloud_parity.sql` emits
+`WATERMARK_CALIBRATION_UPSERTED` and `WATERMARK_CALIBRATION_DELETED`; bootstrap
+and force sync carry the retained live row or tombstone. The cloud mirror changes
+only after an event or snapshot arrives.
+
+The four protected command effect keys are exact:
+
+- `watermark_calibration:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+
+Deploy the cloud contract, appliers, pending-command support, and read-only UI
+before an edge that advertises the three WATERMARK-related capabilities. After
+the edge deploy, write controls remain capability-gated, and a pre-existing
+calibration must reach the cloud through bootstrap before its first cloud edit.
+
+FPort 11 MQTT reports contact only. It advances cloud `lastSeen`; an accepted
+canonical snapshot advances `currentStateRecordedAt`, even when a channel value
+is null. Both timestamps are monotonic. `watermark_readings`, payload bytes, ADC
+codes, channel flags, resistance, offset, supply, die temperature, and conversion
+diagnostics stay on the edge. Canonical `device_data` history continues through
+the ordinary history contract.
+
+The scheduler interlock still rejects every `device_data` row linked to
+`watermark_readings`, regardless of legacy device flags. Cloud parity and field
+qualification records do not lift it.
+
+In the edge Data view, a `DRAGINO_LSN50` becomes a soil source only after it is
+assigned to a zone. A plain LSN50 then exposes SWT1 and SWT2 before its first
+sample. Chameleon-enabled LSN50 and `DRAGINO_SDI12` sources retain SWT3; mixed
+zones filter SWT3 per device so a plain LSN50 cannot inherit another source's
+third channel.
+
 ### Live gateway identity convergence
 
 `osi-identityd` is the procd-supervised owner of live gateway identity after
@@ -226,7 +273,7 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 |--------|----------------|---------|---------|
 | KIWI_SENSOR | Sensors | Kiwi | SWT, light, temp, humidity |
 | TEKTELIC_CLOVER | Sensors | (same as Kiwi) | VWC, temp, humidity |
-| DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow) |
+| DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow), WATERMARK or Chameleon SWT |
 | DRAGINO_SDI12 | Sensors | OSI SDI-12 Soil Node | Probe-profile VWC, soil temp, soil EC, battery |
 | SENSECAP_S2120 | Sensors | S2120 | Wind, rain, pressure, UV, temp/humidity |
 | AQUASCOPE_LORAIN | Sensors | LoRain | Interval rain, ambient temp, battery |

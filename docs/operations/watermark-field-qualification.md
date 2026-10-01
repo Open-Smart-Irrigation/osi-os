@@ -68,6 +68,33 @@ Record these facts before installation:
 | Electrical envelope | planned VDDA, board-temperature, cable, grounding, channel, and polarity conditions |
 | Agronomic context | observed salinity or EC method and value when available; do not invent a compensation rule |
 
+## Cloud parity evidence
+
+Record cloud parity after the cloud-first rollout and after the edge reports
+`watermark_v1`, `chameleon_config_commands_v1`, and
+`device_soil_depth_commands_v1`. Use UTC timestamps and stable evidence IDs;
+do not copy credentials or raw database files into the record.
+
+- Record the confirmed edge calibration `sync_version` shown by the cloud and
+  the matching version on the edge. A pending desired value is not confirmed.
+- For each calibration, Chameleon, or depth edit, record command type, command
+  ID, base version, effect-key pattern, and state. Distinguish `PENDING` or
+  `ACKNOWLEDGED` work from `APPLIED`; application requires both a terminal ACK
+  and the matching authoritative mirror state.
+- Record `lastSeen` as contact time and `currentStateRecordedAt` as canonical
+  measurement time. Preserve both values when they differ. A rejected FPort 11
+  frame may advance contact without advancing measurement time.
+- Record evidence that calibration events and snapshots, FPort 11 contact, and
+  cloud device responses contain no `watermark_readings`, payload bytes, ADC
+  codes, channel flags, resistance, offset, supply, die temperature, or
+  conversion diagnostics.
+- Record the edge and cloud release identifiers used for the check and whether
+  bootstrap reconciled any calibration that predated account linking.
+
+This checklist verifies replication and presentation only. It does not qualify
+any sample for scheduler use, establish measurement accuracy, or lift the
+scheduler interlock.
+
 ## Installation and conditioning
 
 1. Record the probe conditioning and rewetting procedure. If the probes were
