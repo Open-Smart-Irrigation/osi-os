@@ -81,20 +81,24 @@ const protectedChainProbe = spawnSync(process.execPath, ['-e', `
       exec: async (sql) => raw.exec(sql),
     };
   }
+  let sharedRaw;
   class Database {
     constructor() {
-      this.raw = new DatabaseSync(':memory:');
-      this.raw.exec(seed);
-      this.raw.prepare('INSERT INTO users(id,username,password_hash,created_at,updated_at,user_uuid,role) VALUES(?,?,?,?,?,?,?)').run(1, 'owner', 'hash', now, now, owner, 'admin');
-      this.raw.prepare('INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES(?,?,?,?)').run('cloud', 1, gateway, now);
-      this.raw.prepare('INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,gateway_device_eui,sync_version,created_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?)').run(device, 'Watermark', 'DRAGINO_LSN50', 1, null, gateway, now, now);
+      if (!sharedRaw) {
+        sharedRaw = new DatabaseSync(':memory:');
+        sharedRaw.exec(seed);
+        sharedRaw.prepare('INSERT INTO users(id,username,password_hash,created_at,updated_at,user_uuid,role) VALUES(?,?,?,?,?,?,?)').run(1, 'owner', 'hash', now, now, owner, 'admin');
+        sharedRaw.prepare('INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES(?,?,?,?)').run('cloud', 1, gateway, now);
+        sharedRaw.prepare('INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,gateway_device_eui,sync_version,created_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?)').run(device, 'Watermark', 'DRAGINO_LSN50', 1, null, gateway, now, now);
+      }
+      this.raw = sharedRaw;
     }
     async transaction(fn) {
       this.raw.exec('BEGIN IMMEDIATE');
       try { const result = await fn(scope(this.raw)); this.raw.exec('COMMIT'); return result; }
       catch (error) { try { this.raw.exec('ROLLBACK'); } catch (_) {} throw error; }
     }
-    close(callback) { try { this.raw.close(); callback(); } catch (error) { callback(error); } }
+    close(callback) { callback(); }
   }
   const osiLib = { require(name) {
     if (name === 'osi-db-helper') return { ok: true, value: { Database } };
@@ -103,25 +107,77 @@ const protectedChainProbe = spawnSync(process.execPath, ['-e', `
     return { ok: false, error: 'unexpected helper ' + name };
   } };
   const env = { get: (key) => ({ DEVICE_EUI: gateway, OSI_SCOPED_ACCESS: '1' }[key] || '') };
-  const node = { error: (...args) => { throw new Error(args.join(' ')); }, warn: () => {}, status: () => {} };
+  const node = { error: (...args) => { console.error(args.join(' ')); }, warn: () => {}, status: () => {} };
   const flow = {};
-  const payload = {
-    command_type: 'SET_WATERMARK_CALIBRATION', command_id: '11111111-1111-4111-8111-000000000001',
-    effect_key: 'watermark_calibration:set:' + gateway + ':' + device + ':0', device_eui: device,
-    gateway_device_eui: gateway, actor_user_uuid: owner, base_sync_version: 0, operation: 'set', values: calibration
-  };
-  const msg = { payload: { _pendingCommandEnvelope: { commandId: 9124, commandType: 'SET_WATERMARK_CALIBRATION', effectKey: payload.effect_key, payload } }, _commandTypeRecognized: true };
   const dedupeRun = new Function('msg', 'node', 'env', 'flow', 'osiLib', ${JSON.stringify(dedupe.func)});
   const helperRun = new Function('msg', 'node', 'env', 'flow', 'osiLib', ${JSON.stringify(helper.func)});
-  (async () => {
+  function makeEnvelope(commandId, commandType = 'SET_WATERMARK_CALIBRATION', changes = {}) {
+    const operation = commandType === 'DELETE_WATERMARK_CALIBRATION' ? 'delete' : 'set';
+    const payload = {
+      command_type: commandType, command_id: '11111111-1111-4111-8111-' + String(commandId).padStart(12, '0'),
+      effect_key: 'watermark_calibration:' + operation + ':' + gateway + ':' + device + ':0', device_eui: device,
+      gateway_device_eui: gateway, actor_user_uuid: owner, base_sync_version: 0, operation,
+      values: operation === 'delete' ? undefined : Object.assign({}, calibration)
+    };
+    Object.assign(payload, changes);
+    return { commandId, commandType, effectKey: payload.effect_key, payload };
+  }
+  async function invoke(envelope) {
+    const msg = { payload: { _pendingCommandEnvelope: envelope }, _commandTypeRecognized: true };
     const deduped = await dedupeRun(msg, node, env, flow, osiLib);
-    assert.deepEqual(deduped, [null, null, msg]);
-    const applied = await helperRun(deduped[2], node, env, flow, osiLib);
+    assert.deepEqual(deduped[2] || deduped[0], msg);
+    const applied = await helperRun(msg, node, env, flow, osiLib);
     assert.equal(applied[0], null);
-    assert.equal(JSON.parse(applied[1].payload).result, 'APPLIED');
+    if (!applied[1]) return undefined;
+    return JSON.parse(applied[1].payload);
+  }
+  (async () => {
+    const first = await invoke(makeEnvelope(9124));
+    assert.equal(first.result, 'APPLIED');
+    const baseline = sharedRaw.prepare('SELECT command_type,binding_hash,intent_hash,gateway_device_eui,actor_user_uuid,base_sync_version,operation FROM applied_commands WHERE command_id=?').get('9124');
+    const calibrationBefore = sharedRaw.prepare('SELECT sync_version,pullup_1_ohm FROM watermark_calibrations WHERE deveui=?').get(device);
+    const exact = await invoke(makeEnvelope(9124));
+    assert.equal(exact.result, 'APPLIED');
+    assert.equal(exact.duplicate, false);
+    const effect = await invoke(makeEnvelope(9125));
+    assert.equal(effect.result, 'APPLIED');
+    assert.equal(effect.duplicate, true);
+    assert.equal(sharedRaw.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE effect_key=?').get('watermark_calibration:set:' + gateway + ':' + device + ':0').n, 2);
+    assert.deepEqual(JSON.parse(sharedRaw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get('9125').payload_json), effect);
+    const conflictCases = [
+      { label: 'actor', changes: { actor_user_uuid: '44444444-4444-4444-8444-444444444444' } },
+      { label: 'gateway', changes: { gateway_device_eui: '0011223344556688' } },
+      { label: 'device', changes: { device_eui: 'AABBCCDDEEFF0022' } },
+      { label: 'base', changes: { base_sync_version: 1 } },
+      { label: 'type', commandType: 'DELETE_WATERMARK_CALIBRATION' },
+      { label: 'intent', changes: { values: Object.assign({}, calibration, { pullup_1_ohm: 41671 }) } },
+    ];
+    for (const item of conflictCases) {
+      const conflict = await invoke(makeEnvelope(9124, item.commandType, item.changes));
+      assert.equal(conflict.result, 'CONFLICT', item.label);
+      assert.equal(conflict.commandId, 9124, item.label);
+      const row = sharedRaw.prepare('SELECT command_type,binding_hash,intent_hash,gateway_device_eui,actor_user_uuid,base_sync_version,operation FROM applied_commands WHERE command_id=?').get('9124');
+      assert.deepEqual(row, baseline, item.label + ' rewrote terminal ledger');
+      assert.deepEqual(sharedRaw.prepare('SELECT sync_version,pullup_1_ohm FROM watermark_calibrations WHERE deveui=?').get(device), calibrationBefore, item.label + ' mutated calibration');
+      assert.deepEqual(JSON.parse(sharedRaw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get('9124').payload_json), conflict, item.label + ' lacked durable ACK');
+    }
+    sharedRaw.prepare('INSERT INTO applied_commands(command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator) VALUES(?,?,?,?,?,?,?,?)').run('9130', 'watermark_calibration:set:' + gateway + ':' + device + ':0', device, 'SET_WATERMARK_CALIBRATION', 'APPLIED', now, JSON.stringify({ commandId: 9130, result: 'APPLIED', status: 'ACKED', duplicate: false }), 'edge');
+    const legacy = await invoke(makeEnvelope(9130));
+    assert.equal(legacy.result, 'CONFLICT');
+    assert.equal(sharedRaw.prepare('SELECT binding_hash FROM applied_commands WHERE command_id=?').get('9130').binding_hash, null);
+    const originalApply = watermark.applyWatermarkCommand;
+    watermark.applyWatermarkCommand = (db, envelope, runtime) => originalApply(db, envelope, Object.assign({}, runtime, { lifecycle_hooks: { afterCommandLedger() { throw new Error('injected ACK failure'); } } }));
+    const failed = await invoke(makeEnvelope(9131, 'SET_WATERMARK_CALIBRATION', { base_sync_version: 1, effect_key: 'watermark_calibration:set:' + gateway + ':' + device + ':1', values: Object.assign({}, calibration, { pullup_1_ohm: 41672 }) }));
+    assert.equal(failed, undefined);
+    watermark.applyWatermarkCommand = originalApply;
+    assert.deepEqual(sharedRaw.prepare('SELECT sync_version,pullup_1_ohm FROM watermark_calibrations WHERE deveui=?').get(device), calibrationBefore);
+    assert.equal(sharedRaw.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?').get('9131').n, 0);
+    assert.equal(sharedRaw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get('9131').n, 0);
+    console.log('STATEFUL_PROTECTED_MATRIX_OK');
   })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
 `], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
 assert.equal(protectedChainProbe.status, 0, protectedChainProbe.stderr || protectedChainProbe.stdout);
+assert.match(protectedChainProbe.stdout, /STATEFUL_PROTECTED_MATRIX_OK/);
 
 assert.match(helper.func, /withProtectedCommandTransaction|applyWatermarkCommand/);
 assert.match(helper.func, /command_type_recognized/);
