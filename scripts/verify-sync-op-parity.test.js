@@ -150,7 +150,10 @@ function exactJournalStaging() {
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
-      edgeDeferred: ['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED'],
+      // WATERMARK calibration events are SQL-owned in the active contract; only
+      // their cloud applier is staged here while edge trigger emission remains
+      // deliberately outside this journal fixture.
+      edgeDeferred: [],
       // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
       // applier for each of these ops before the edge activates real emission of it.
       edgeStaged: JOURNAL_EVENT_OPS.slice(),
@@ -233,7 +236,7 @@ class EdgeSyncService {
     flowSources: [{ name: 'fixture', path: flowPath }],
     sqlSources: [],
     databaseSources: [],
-    sqlOwnedEventOps: [],
+    sqlOwnedEventOps: ['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED'],
     jsModuleOwnedEventOps: [],
     moduleSources: [
       { name: 'journal-lifecycle', path: modulePath },
