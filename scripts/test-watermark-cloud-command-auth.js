@@ -13,10 +13,8 @@ assert.deepEqual(commands.COMMAND_TYPES, [
   'SET_CHAMELEON_CONFIG',
   'UPSERT_DEVICE_SOIL_DEPTHS',
 ]);
-assert.equal(commands.authorizationMatrix.length >= 12, true);
-assert.ok(commands.authorizationMatrix.every((row) => row.id && row.outcome));
 const suite = spawnSync(process.execPath, ['--test', path.join(
   __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.test.js'
 )], { encoding: 'utf8' });
 assert.equal(suite.status, 0, suite.stderr || suite.stdout);
-console.log('OK: WATERMARK cloud command authorization matrix is executable');
+console.log('OK: WATERMARK cloud command authorization cases are executable');

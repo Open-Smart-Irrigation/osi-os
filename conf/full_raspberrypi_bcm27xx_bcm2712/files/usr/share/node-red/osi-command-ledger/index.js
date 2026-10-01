@@ -80,8 +80,8 @@ const PROTECTED_CONFIGURATION_COMMANDS = new Set([
 const PROTECTED_CONFIGURATION_SPECS = {
   SET_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'set', prefix: 'watermark_calibration:set' },
   DELETE_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'delete', prefix: 'watermark_calibration:delete' },
-  SET_CHAMELEON_CONFIG: { resourceType: 'CHAMELEON_CONFIG', operation: 'set', prefix: 'chameleon_config:set' },
-  UPSERT_DEVICE_SOIL_DEPTHS: { resourceType: 'DEVICE_SOIL_DEPTHS', operation: 'set', prefix: 'device_soil_depths:set' },
+  SET_CHAMELEON_CONFIG: { resourceType: 'DEVICE', operation: 'set', prefix: 'chameleon_config:set' },
+  UPSERT_DEVICE_SOIL_DEPTHS: { resourceType: 'DEVICE', operation: 'set', prefix: 'device_soil_depths:set' },
 };
 
 function isProtectedConfigurationCommand(type) {

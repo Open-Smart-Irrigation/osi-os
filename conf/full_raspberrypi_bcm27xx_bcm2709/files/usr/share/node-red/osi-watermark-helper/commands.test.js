@@ -53,7 +53,8 @@ function fixture(t) {
 }
 
 function runtime(extra = {}) {
-  return Object.assign({ gateway_device_eui: GATEWAY, scopedMode: true, command_type_recognized: true }, extra);
+  return Object.assign({ gateway_device_eui: GATEWAY, scopedMode: true, command_type_recognized: true,
+    capabilities: ['watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1'] }, extra);
 }
 
 function envelope(id, type, values, extra = {}) {
@@ -80,6 +81,30 @@ test('all four protected operation names are handled', async (t) => {
   }
 });
 
+test('each protected operation executes its authorization decision independently', async (t) => {
+  const cases = [
+    ['SET_WATERMARK_CALIBRATION', CAL, `watermark_calibration:set:${GATEWAY}:${DEVICE}:0`],
+    ['DELETE_WATERMARK_CALIBRATION', undefined, `watermark_calibration:delete:${GATEWAY}:${DEVICE}:0`],
+    ['SET_CHAMELEON_CONFIG', { chameleon_enabled: true }, `chameleon_config:set:${GATEWAY}:${DEVICE}:0`],
+    ['UPSERT_DEVICE_SOIL_DEPTHS', {
+      soil_moisture_probe_depths_json: { swt_1: 20 },
+      soil_moisture_probe_depths_configured: true,
+    }, `device_soil_depths:set:${GATEWAY}:${DEVICE}:0`],
+  ];
+  for (let index = 0; index < cases.length; index += 1) {
+    const [type, values, effect] = cases[index];
+    const { raw, db } = fixture(t);
+    const result = await commands.applyWatermarkCommand(db, envelope(60 + index, type, values, {
+      payload: {
+        actor_user_uuid: VIEWER,
+        effect_key: effect,
+      },
+    }), runtime());
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', type);
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1, type);
+  }
+});
+
 test('valid calibration set uses exact base and terminal ACK atomically', async (t) => {
   const { raw, db } = fixture(t);
   const result = await commands.applyWatermarkCommand(db, envelope(1, 'SET_WATERMARK_CALIBRATION', CAL), runtime());
@@ -87,6 +112,10 @@ test('valid calibration set uses exact base and terminal ACK atomically', async 
   assert.equal(raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version, 1);
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 1);
+  await assert.rejects(
+    commands.applyWatermarkCommand(db, envelope(1, 'SET_WATERMARK_CALIBRATION', CAL), runtime({ local_actor_user_uuid: WRITER })),
+    (e) => e.code === 'watermark_command_conflict' && e.commandResult === 'CONFLICT'
+  );
 });
 
 test('calibration delete, Chameleon, and soil-depth set share terminal path', async (t) => {
@@ -132,13 +161,33 @@ test('stale base and all listed identity/auth denials are terminal without mutat
   }
 });
 
+test('foreign identity and missing device are classified before any local write', async (t) => {
+  const foreign = fixture(t);
+  const foreignResult = await commands.applyWatermarkCommand(foreign.db, envelope(27, 'SET_WATERMARK_CALIBRATION', CAL, {
+    payload: {
+      device_eui: OTHER_DEVICE,
+      effect_key: `watermark_calibration:set:${GATEWAY}:${OTHER_DEVICE}:0`,
+    },
+  }), runtime());
+  assert.equal(foreignResult.ack.result, 'CONFLICT');
+  const missing = fixture(t);
+  const result = await commands.applyWatermarkCommand(missing.db, envelope(28, 'SET_WATERMARK_CALIBRATION', CAL, {
+    payload: {
+      device_eui: 'AABBCCDDEEFF0033',
+      effect_key: `watermark_calibration:set:${GATEWAY}:AABBCCDDEEFF0033:0`,
+    },
+  }), runtime());
+  assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+  assert.equal(missing.raw.prepare('SELECT COUNT(*) AS n FROM watermark_calibrations').get().n, 0);
+});
+
 test('flag-off retains local owner path and rejects numeric cloud identity', async (t) => {
   const { db } = fixture(t);
   const result = await commands.applyWatermarkCommand(db, envelope(30, 'SET_WATERMARK_CALIBRATION', CAL), runtime({ scopedMode: false }));
   assert.equal(result.ack.result, 'APPLIED');
   await assert.rejects(
     commands.applyWatermarkCommand(db, envelope(31, 'SET_WATERMARK_CALIBRATION', CAL, { payload: { actor_user_uuid: '1' } }), runtime({ scopedMode: true })),
-    (e) => e.code === 'protected_command_conflict'
+    (e) => e.code === 'watermark_command_rejected' && e.reason === 'malformed_command'
   );
 });
 
@@ -171,4 +220,57 @@ test('scoped assignment and account matrix is enforced for DEVICE commands', asy
     soil_moisture_probe_depths_json: { swt_1: 20 }, soil_moisture_probe_depths_configured: true
   }, { payload: { actor_user_uuid: WRITER, base_sync_version: 1, effect_key: `device_soil_depths:set:${GATEWAY}:${DEVICE}:1` } }), runtime());
   assert.equal(applied.ack.result, 'APPLIED');
+
+  const unsupported = fixture(t);
+  const missingCapability = await commands.applyWatermarkCommand(unsupported.db, envelope(43, 'SET_CHAMELEON_CONFIG', { chameleon_enabled: true }, {
+    payload: { base_sync_version: 1, effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:1` }
+  }), runtime({ capabilities: ['watermark_v1', 'device_soil_depth_commands_v1'] }));
+  assert.equal(missingCapability.ack.result, 'REJECTED_PERMANENT');
+});
+
+test('assigned authorization validates zone existence, deletion, gateway, owner, and grant', async (t) => {
+  const setup = (zone) => {
+    const state = fixture(t);
+    state.raw.prepare(
+      'INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,deleted_at,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?,?)'
+    ).run('Block', zone.userId, zone.uuid, zone.gateway, zone.deletedAt, NOW, NOW);
+    state.raw.prepare('UPDATE devices SET user_id=?, irrigation_zone_id=1, sync_version=1 WHERE deveui=?')
+      .run(zone.deviceUserId || 1, DEVICE);
+    return state;
+  };
+  const command = (state, id, actor, expected) => commands.applyWatermarkCommand(state.db, envelope(id, 'UPSERT_DEVICE_SOIL_DEPTHS', {
+    soil_moisture_probe_depths_json: { swt_1: 20 }, soil_moisture_probe_depths_configured: true,
+  }, { payload: {
+    actor_user_uuid: actor, base_sync_version: 1,
+    effect_key: `device_soil_depths:set:${GATEWAY}:${DEVICE}:1`,
+  } }), runtime()).then((result) => assert.equal(result.ack.result, expected));
+
+  await command(setup({ userId: 2, uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', gateway: GATEWAY, deletedAt: null }), 70, OWNER, 'REJECTED_PERMANENT');
+  const deleted = setup({ userId: 2, uuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', gateway: GATEWAY, deletedAt: NOW });
+  await command(deleted, 71, OWNER, 'REJECTED_PERMANENT');
+  const foreign = setup({ userId: 2, uuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', gateway: OTHER_GATEWAY, deletedAt: null });
+  await command(foreign, 72, OWNER, 'REJECTED_PERMANENT');
+  const owner = setup({ userId: 2, uuid: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', gateway: GATEWAY, deletedAt: null });
+  await command(owner, 73, WRITER, 'APPLIED');
+  const granted = setup({ userId: 1, uuid: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', gateway: GATEWAY, deletedAt: null });
+  granted.raw.prepare(
+    'INSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at,updated_at,sync_version) VALUES(?,?,?,?,?,1)'
+  ).run('66666666-6666-4666-8666-666666666666', WRITER, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', NOW, NOW);
+  await command(granted, 74, WRITER, 'APPLIED');
+});
+
+test('device type gates admit only the approved WATERMARK families', async (t) => {
+  const chameleon = fixture(t);
+  chameleon.raw.prepare('UPDATE devices SET type_id=? WHERE deveui=?').run('KIWI_SENSOR', DEVICE);
+  const chameleonResult = await commands.applyWatermarkCommand(chameleon.db, envelope(80, 'SET_CHAMELEON_CONFIG', {
+    chameleon_enabled: true,
+  }, { payload: { effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:0` } }), runtime());
+  assert.equal(chameleonResult.ack.result, 'REJECTED_PERMANENT');
+
+  const depth = fixture(t);
+  depth.raw.prepare('UPDATE devices SET type_id=? WHERE deveui=?').run('DRAGINO_SDI12', DEVICE);
+  const depthResult = await commands.applyWatermarkCommand(depth.db, envelope(81, 'UPSERT_DEVICE_SOIL_DEPTHS', {
+    soil_moisture_probe_depths_json: { swt_1: 20 }, soil_moisture_probe_depths_configured: true,
+  }, { payload: { effect_key: `device_soil_depths:set:${GATEWAY}:${DEVICE}:0` } }), runtime());
+  assert.equal(depthResult.ack.result, 'REJECTED_PERMANENT');
 });

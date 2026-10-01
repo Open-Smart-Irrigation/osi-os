@@ -15,13 +15,13 @@ const COMMAND_TYPES = [
 ];
 const EUI = /^[0-9A-F]{16}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const TYPES = new Set(['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12', 'DRAGINO_LSN50']);
+const TYPES = new Set(['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_LSN50']);
 const CAL_TYPES = new Set(['SET_WATERMARK_CALIBRATION', 'DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG']);
 const CAPABILITY = {
-  SET_WATERMARK_CALIBRATION: 'watermark_calibration',
-  DELETE_WATERMARK_CALIBRATION: 'watermark_calibration',
-  SET_CHAMELEON_CONFIG: 'chameleon_config',
-  UPSERT_DEVICE_SOIL_DEPTHS: 'soil_moisture_depths',
+  SET_WATERMARK_CALIBRATION: 'watermark_v1',
+  DELETE_WATERMARK_CALIBRATION: 'watermark_v1',
+  SET_CHAMELEON_CONFIG: 'chameleon_config_commands_v1',
+  UPSERT_DEVICE_SOIL_DEPTHS: 'device_soil_depth_commands_v1',
 };
 
 function error(code, message, result = 'REJECTED_PERMANENT') {
@@ -29,6 +29,14 @@ function error(code, message, result = 'REJECTED_PERMANENT') {
   e.code = 'watermark_command_rejected';
   e.reason = code;
   e.commandResult = result;
+  return e;
+}
+
+function bindingConflict(cause) {
+  const e = new Error(cause && cause.message ? cause.message : 'protected command binding conflict');
+  e.code = 'watermark_command_conflict';
+  e.reason = 'binding_conflict';
+  e.commandResult = 'CONFLICT';
   return e;
 }
 
@@ -55,6 +63,8 @@ function validateIdentity(type, payload, runtime) {
   const gateway = str(payload.gateway_device_eui);
   const device = str(payload.device_eui);
   const trusted = upperEui(runtime && runtime.gateway_device_eui);
+  if (!EUI.test(trusted) || trusted !== upperEui(trusted)) throw error('binding_mismatch', 'trusted gateway identity is unavailable', 'CONFLICT');
+  if (runtime && runtime.command_type && String(runtime.command_type).toUpperCase() !== type) throw error('binding_mismatch', 'trusted command type differs', 'CONFLICT');
   if (!EUI.test(gateway) || gateway !== upperEui(gateway)) throw error('binding_mismatch', 'gateway_device_eui must be upper-case canonical EUI', 'CONFLICT');
   if (!EUI.test(device) || device !== upperEui(device)) throw error('binding_mismatch', 'device_eui must be upper-case canonical EUI', 'CONFLICT');
   if (gateway !== trusted) throw error('binding_mismatch', 'command belongs to another gateway', 'CONFLICT');
@@ -62,6 +72,8 @@ function validateIdentity(type, payload, runtime) {
   if (localActor && canonicalUuid(localActor) !== canonicalUuid(payload.actor_user_uuid)) {
     throw error('binding_mismatch', 'actor is not the gateway-local actor', 'CONFLICT');
   }
+  const trustedDevice = runtime && (runtime.device_eui || runtime.deviceEui);
+  if (trustedDevice && upperEui(trustedDevice) !== device) throw error('binding_mismatch', 'trusted device identity differs', 'CONFLICT');
   if (!Number.isSafeInteger(payload.base_sync_version) || payload.base_sync_version < 0) throw error('malformed_command', 'base_sync_version must be a non-negative integer');
   const expectedOperation = type === 'DELETE_WATERMARK_CALIBRATION' ? 'delete' : 'set';
   if (payload.operation !== expectedOperation) throw error('binding_mismatch', 'operation does not match command type', 'CONFLICT');
@@ -72,13 +84,14 @@ function validateIdentity(type, payload, runtime) {
 
 async function authorizeDevice(tx, identity, type, runtime) {
   const device = await tx.get(
-    'SELECT d.*, iz.zone_uuid, iz.gateway_device_eui AS zone_gateway, iz.deleted_at AS zone_deleted ' +
+    'SELECT d.*, iz.id AS zone_id, iz.zone_uuid, iz.user_id AS zone_user_id, ' +
+    'iz.gateway_device_eui AS zone_gateway, iz.deleted_at AS zone_deleted ' +
     'FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id ' +
     'WHERE UPPER(d.deveui)=? AND d.deleted_at IS NULL', [identity.device]
   );
   if (!device) throw error('device_not_found', 'Device not found');
   if (upperEui(device.gateway_device_eui) !== identity.gateway) throw error('binding_mismatch', 'device belongs to another gateway', 'CONFLICT');
-  if (type === 'SET_CHAMELEON_CONFIG' && device.type_id !== 'DRAGINO_LSN50') throw error('unsupported_device_type', 'Chameleon is only supported on DRAGINO_LSN50');
+  if ((type === 'SET_WATERMARK_CALIBRATION' || type === 'DELETE_WATERMARK_CALIBRATION' || type === 'SET_CHAMELEON_CONFIG') && device.type_id !== 'DRAGINO_LSN50') throw error('unsupported_device_type', 'WATERMARK configuration is only supported on DRAGINO_LSN50');
   if (type === 'UPSERT_DEVICE_SOIL_DEPTHS' && !TYPES.has(device.type_id)) throw error('unsupported_device_type', 'soil moisture depths are not supported on this device');
   const actor = await tx.get('SELECT id,user_uuid,role,disabled_at FROM users WHERE user_uuid=? LIMIT 1', [identity.actorUuid]);
   if (!actor || actor.disabled_at) throw error('actor_missing_or_disabled', 'actor account is missing or disabled');
@@ -99,19 +112,21 @@ async function authorizeDevice(tx, identity, type, runtime) {
   }
   const capability = runtime && runtime.capabilities;
   const advertised = Array.isArray(capability) ? capability.includes(CAPABILITY[type]) :
-    (capability && typeof capability === 'object' ? capability[CAPABILITY[type]] === true : true);
+    (capability && typeof capability === 'object' ? capability[CAPABILITY[type]] === true : false);
   if (!advertised || (account && account.capabilities && account.capabilities[CAPABILITY[type]] === false)) {
     throw error('capability_missing', 'gateway does not advertise this configuration capability');
   }
-  if (device.irrigation_zone_id != null && !device.zone_deleted) {
-    const zoneOwned = Number(device.user_id) === Number(actor.id);
+  if (device.irrigation_zone_id != null) {
+    if (!device.zone_id || device.zone_deleted || upperEui(device.zone_gateway) !== identity.gateway) {
+      throw error('device_not_found', 'assigned device zone is missing or belongs to another gateway');
+    }
+    const zoneOwned = Number(device.zone_user_id) === Number(actor.id);
     const grant = await tx.get(
       'SELECT 1 AS ok FROM user_zone_assignments WHERE user_uuid=? AND zone_uuid=? AND deleted_at IS NULL LIMIT 1',
       [identity.actorUuid, device.zone_uuid]
     );
     if (!zoneOwned && !grant) throw error('forbidden', 'actor has no active grant for the assigned zone');
-    if (upperEui(device.zone_gateway || '') !== identity.gateway) throw error('binding_mismatch', 'assigned zone belongs to another gateway', 'CONFLICT');
-  } else if (device.user_id == null || Number(device.user_id) !== Number(actor.id)) {
+  } else if (device.irrigation_zone_id === null && (device.user_id == null || Number(device.user_id) !== Number(actor.id))) {
     if (actor.role !== 'admin') throw error('forbidden', 'unassigned devices require owner or admin access');
   }
   return { device, actor };
@@ -170,16 +185,27 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
   const type = String(envelope && envelope.commandType || '').toUpperCase();
   if (!COMMAND_TYPES.includes(type)) return { handled: false };
   const payload = envelope.payload || {};
+  // Immutable runtime/envelope identity is checked before the ledger's exact
+  // command-id/effect replay path. A changed trusted actor or device must not
+  // replay an otherwise valid terminal row.
+  let preflightIdentity;
+  try {
+    preflightIdentity = validateIdentity(type, payload, runtime);
+  } catch (cause) {
+    if (cause && cause.commandResult === 'CONFLICT') throw bindingConflict(cause);
+    throw cause;
+  }
   const trusted = Object.assign({}, runtime.protected_context || runtime.protectedContext || {}, {
-    resource_type: type === 'SET_CHAMELEON_CONFIG' ? 'CHAMELEON_CONFIG' : type === 'UPSERT_DEVICE_SOIL_DEPTHS' ? 'DEVICE_SOIL_DEPTHS' : 'WATERMARK_CALIBRATION',
+    resource_type: type === 'SET_WATERMARK_CALIBRATION' || type === 'DELETE_WATERMARK_CALIBRATION' ? 'WATERMARK_CALIBRATION' : 'DEVICE',
     operation: type === 'DELETE_WATERMARK_CALIBRATION' ? 'delete' : 'set',
     command_type: type,
   });
-  const commandRuntime = Object.assign({}, runtime, { command_type_recognized: true, protected_context: trusted });
-  const result = await ledger.withProtectedCommandTransaction(db, Object.assign({}, envelope, { commandType: type }), commandRuntime, async (scoped) => {
-    let identity;
+  const commandRuntime = Object.assign({}, runtime, { command_type: type, command_type_recognized: true, protected_context: trusted });
+  let result;
+  try {
+    result = await ledger.withProtectedCommandTransaction(db, Object.assign({}, envelope, { commandType: type }), commandRuntime, async (scoped) => {
+    let identity = preflightIdentity;
     try {
-      identity = validateIdentity(type, payload, runtime);
       const result = await applyMutation(scoped, envelope, runtime, type, identity);
       const ack = await scoped.terminalAck({
         commandId: envelope.commandId,
@@ -189,7 +215,8 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
       return { handled: true, ack, backfill: result.backfill, calibrationRow: result.calibrationRow };
     } catch (cause) {
       if (cause && cause.code && /SQLITE/.test(cause.code)) throw cause;
-      if (cause && ['stale_sync_version', 'calibration_not_found', 'invalid_calibration', 'invalid_body'].includes(cause.code)) {
+      if (cause && (['stale_sync_version', 'calibration_not_found', 'invalid_calibration', 'invalid_body', 'device_not_found', 'unsupported_device_type', 'invalid_values'].includes(cause.code) ||
+          (Number(cause.statusCode) >= 400 && Number(cause.statusCode) < 500))) {
         cause = error(cause.code, cause.message, cause.statusCode === 409 ? 'CONFLICT' : 'REJECTED_PERMANENT');
       }
       if (!cause || cause.code !== 'watermark_command_rejected') throw cause;
@@ -201,7 +228,11 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
       });
       return { handled: true, ack };
     }
-  });
+    });
+  } catch (cause) {
+    if (cause && cause.code === 'protected_command_conflict') throw bindingConflict(cause);
+    throw cause;
+  }
   if (result && result.calibrationRow && result.backfill && result.backfill.more) {
     const rest = await calibration.backfillRemaining(db, upperEui(payload.device_eui), result.calibrationRow, result.backfill);
     if (rest.error) result.backfill_incomplete = true;
@@ -210,19 +241,4 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
   return result;
 }
 
-const authorizationMatrix = [
-  { id: 'missing_actor', outcome: 'REJECTED_PERMANENT' },
-  { id: 'disabled_account', outcome: 'REJECTED_PERMANENT' },
-  { id: 'viewer', outcome: 'REJECTED_PERMANENT' },
-  { id: 'absent_grant', outcome: 'REJECTED_PERMANENT' },
-  { id: 'dangling_assignment', outcome: 'REJECTED_PERMANENT' },
-  { id: 'deleted_assignment', outcome: 'REJECTED_PERMANENT' },
-  { id: 'foreign_assignment', outcome: 'REJECTED_PERMANENT' },
-  { id: 'assigned_admin_without_grant', outcome: 'REJECTED_PERMANENT' },
-  { id: 'valid_assigned_writer', outcome: 'APPLIED' },
-  { id: 'valid_unassigned_owner', outcome: 'APPLIED' },
-  { id: 'valid_unassigned_admin', outcome: 'APPLIED' },
-  { id: 'stale_base', outcome: 'CONFLICT' },
-];
-
-module.exports = { COMMAND_TYPES, authorizationMatrix, applyWatermarkCommand, normalizeDepths, expectedEffect };
+module.exports = { COMMAND_TYPES, applyWatermarkCommand, normalizeDepths, expectedEffect };

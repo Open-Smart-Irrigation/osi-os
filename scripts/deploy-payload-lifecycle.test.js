@@ -41,6 +41,44 @@ test('WATERMARK command receiver is verified before staged flows can activate', 
   assert.ok(DEPLOY.indexOf('osi-watermark-helper/commands.js', helper) > helper);
 });
 
+test('missing WATERMARK command receiver aborts before activation and preserves prior payload', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-watermark-fetch-'));
+  const fetchStart = DEPLOY.indexOf('fetch() {');
+  const fetchEnd = DEPLOY.indexOf('\n}\n\nfetch_required', fetchStart) + 3;
+  const requiredStart = DEPLOY.indexOf('fetch_required() {');
+  const requiredEnd = DEPLOY.indexOf('\n}\n\nsame_fs_or_die', requiredStart) + 3;
+  assert.ok(fetchStart >= 0 && fetchEnd > fetchStart);
+  assert.ok(requiredStart >= 0 && requiredEnd > requiredStart);
+  const fetchFunctions = DEPLOY.slice(fetchStart, fetchEnd) + '\n' + DEPLOY.slice(requiredStart, requiredEnd);
+  const previous = path.join(root, 'active', 'commands.js');
+  const activated = path.join(root, 'activated');
+  fs.mkdirSync(path.dirname(previous), { recursive: true });
+  fs.writeFileSync(previous, 'previous-command-receiver\n');
+  const script = `set -eu
+BASE=file://${root}/source
+export BASE
+set +e
+sh -c 'set -eu
+${fetchFunctions}
+fetch_required "osi-watermark-helper commands.js" "missing/commands.js" "${root}/staged/commands.js"' >"${root}/fetch.log" 2>&1
+rc=$?
+set -e
+test "$rc" -ne 0
+test "$(cat "${previous}")" = "previous-command-receiver"
+test ! -e "${activated}"
+printf '%s\\n' missing-command-aborted
+`;
+  try {
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /missing-command-aborted/);
+    assert.equal(fs.readFileSync(previous, 'utf8'), 'previous-command-receiver\n');
+    assert.equal(fs.existsSync(activated), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function runSwap(root, command) {
   const script = `set -eu\nSWAP_ROOT=${JSON.stringify(root)}\nSWAP_JS=${JSON.stringify(SWAP_JS)}\nexport SWAP_ROOT SWAP_JS\n${swapCallFunction()}\n${command}\n`;
   return spawnSync('sh', ['-c', script], { encoding: 'utf8' });
