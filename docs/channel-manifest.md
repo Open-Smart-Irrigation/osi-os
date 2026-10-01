@@ -59,4 +59,4 @@ The canonical `vwc` entry uses `edgeField: null` and `serverField: "vwc"`. This 
 
 ## Recorded SHA-256
 
-`7c3e70e64c9c79f95eb3f5eff96dd06c3810acc5ed9897af13edfd87c837f105  web/react-gui/src/channels/channels.json`
+`dfd9a47ff8983afec16d4ceef11b6fb15b54b19bcea2a34fc53748d2679d8cfe  web/react-gui/src/channels/channels.json`

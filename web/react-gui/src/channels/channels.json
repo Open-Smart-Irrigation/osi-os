@@ -2,8 +2,8 @@
   {
     "key": "swt_1",
     "unit": "kPa",
-    "label": "Soil tension (S1)",
-    "displayName": "Soil water tension – sensor 1",
+    "label": "Soil tension 1",
+    "displayName": "Soil tension 1",
     "cardType": "soil",
     "category": "soil",
     "edgeField": "swt_1",
@@ -17,8 +17,8 @@
   {
     "key": "swt_2",
     "unit": "kPa",
-    "label": "Soil tension (S2)",
-    "displayName": "Soil water tension – sensor 2",
+    "label": "Soil tension 2",
+    "displayName": "Soil tension 2",
     "cardType": "soil",
     "category": "soil",
     "edgeField": "swt_2",

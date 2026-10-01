@@ -4,8 +4,8 @@ const crypto = require('crypto');
 const { SOURCE_KINDS, providerSourceName, createWeatherSources } = require('./analysis-sources');
 
 const CHANNELS = [
-  { key: 'swt_1', unit: 'kPa', label: 'Soil tension (S1)', cardType: 'soil', edgeField: 'swt_1', exportable: true, deprecated: false },
-  { key: 'swt_2', unit: 'kPa', label: 'Soil tension (S2)', cardType: 'soil', edgeField: 'swt_2', exportable: true, deprecated: false },
+  { key: 'swt_1', unit: 'kPa', label: 'Soil tension 1', cardType: 'soil', edgeField: 'swt_1', exportable: true, deprecated: false },
+  { key: 'swt_2', unit: 'kPa', label: 'Soil tension 2', cardType: 'soil', edgeField: 'swt_2', exportable: true, deprecated: false },
   { key: 'swt_3', unit: 'kPa', label: 'Soil tension (S3)', cardType: 'soil', edgeField: 'swt_3', exportable: true, deprecated: false },
   { key: 'vwc_1', unit: '%', label: 'VWC 1', cardType: 'soil', edgeField: 'vwc_1', exportable: true, deprecated: false },
   { key: 'vwc_2', unit: '%', label: 'VWC 2', cardType: 'soil', edgeField: 'vwc_2', exportable: true, deprecated: false },
