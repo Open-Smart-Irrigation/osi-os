@@ -11,6 +11,7 @@ const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 
 const commands = require('./commands');
+const calibration = require('./calibration');
 const bindingCanonicalization = require('../osi-watermark-binding/canonicalization');
 
 const ROOT = path.resolve(__dirname, '../../../../../../..');
@@ -86,6 +87,15 @@ function seedWaiting(raw, count) {
     reading.run(DEVICE, recordedAt, Number(deviceData.lastInsertRowid), PAYLOAD_HEX, 'accepted', 3, 3300,
       'calibration_required', 'calibration_required', 'wm-lsn50-p3-v1');
   }
+}
+
+async function seedCalibration(state) {
+  await calibration.saveCalibration(state.db, {
+    deveui: DEVICE,
+    userId: 1,
+    scoped: true,
+    body: Object.assign({}, CAL, { expected_sync_version: 0 }),
+  });
 }
 
 test('all four protected operation names are handled', async (t) => {
@@ -451,15 +461,78 @@ test('every protected operation traverses the independent scoped denial matrix',
       const state = fixture(t);
       if (scenario.prepare) scenario.prepare(state);
       const operationRuntime = scenario.runtime ? scenario.runtime() : runtime();
+      const deviceBase = state.raw.prepare('SELECT sync_version FROM devices WHERE deveui=?').get(DEVICE).sync_version;
       const result = await commands.applyWatermarkCommand(state.db, envelope(id++, type, values, {
         payload: {
           actor_user_uuid: scenario.actor,
-          effect_key: commands.expectedEffect(type, GATEWAY, DEVICE, 0),
+          base_sync_version: deviceBase,
+          effect_key: commands.expectedEffect(type, GATEWAY, DEVICE, deviceBase),
         },
       }), operationRuntime);
       assert.equal(result.ack.result, 'REJECTED_PERMANENT', `${scenario.name}/${type}`);
     }
   }
+});
+
+test('DELETE auth uses the live calibration version, reports specific denials, and preserves state', async (t) => {
+  const scenarios = [
+    { name: 'missing actor', actor: '99999999-9999-4999-8999-999999999999', reason: 'actor_missing_or_disabled' },
+    { name: 'viewer', actor: VIEWER, reason: 'forbidden' },
+    { name: 'disabled account', actor: WRITER, reason: 'actor_missing_or_disabled', prepare: (s) => s.raw.prepare('UPDATE users SET disabled_at=? WHERE user_uuid=?').run(NOW, WRITER) },
+    { name: 'missing capability', actor: OWNER, reason: 'capability_missing', runtime: () => runtime({ capabilities: [] }) },
+    { name: 'wrong type', actor: OWNER, reason: 'unsupported_device_type', prepare: (s) => s.raw.prepare('UPDATE devices SET type_id=? WHERE deveui=?').run('KIWI_SENSOR', DEVICE) },
+    { name: 'dangling assignment', actor: OWNER, reason: 'device_not_found', prepare: (s) => {
+      s.raw.exec('PRAGMA foreign_keys=OFF');
+      s.raw.prepare('UPDATE devices SET irrigation_zone_id=999 WHERE deveui=?').run(DEVICE);
+      s.raw.exec('PRAGMA foreign_keys=ON');
+    } },
+    { name: 'deleted assignment', actor: OWNER, reason: 'device_not_found', prepare: (s) => {
+      s.raw.prepare('INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,deleted_at,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?,?)').run('Deleted zone', 2, '55555555-5555-4555-8555-555555555556', GATEWAY, NOW, NOW, NOW);
+      s.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+    } },
+    { name: 'foreign assignment', actor: OWNER, reason: 'device_not_found', prepare: (s) => {
+      s.raw.prepare('INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?)').run('Foreign zone', 2, '66666666-6666-4666-8666-666666666667', OTHER_GATEWAY, NOW, NOW);
+      s.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+    } },
+    { name: 'assigned admin without grant', actor: OWNER, reason: 'forbidden', prepare: (s) => {
+      s.raw.prepare('INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?)').run('Other zone', 2, '44444444-4444-4444-8444-444444444445', GATEWAY, NOW, NOW);
+      s.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+    } },
+    { name: 'unassigned researcher', actor: WRITER, reason: 'forbidden' },
+  ];
+  let id = 180;
+  for (const scenario of scenarios) {
+    const state = fixture(t);
+    await seedCalibration(state);
+    if (scenario.prepare) scenario.prepare(state);
+    const calibrationVersion = state.raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version;
+    const result = await commands.applyWatermarkCommand(state.db, envelope(id++, 'DELETE_WATERMARK_CALIBRATION', undefined, {
+      payload: {
+        actor_user_uuid: scenario.actor,
+        base_sync_version: calibrationVersion,
+        effect_key: `watermark_calibration:delete:${GATEWAY}:${DEVICE}:${calibrationVersion}`,
+      },
+    }), scenario.runtime ? scenario.runtime() : runtime());
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', scenario.name);
+    assert.equal(result.ack.reason, scenario.reason, scenario.name);
+    const row = state.raw.prepare('SELECT sync_version,deleted_at FROM watermark_calibrations WHERE deveui=?').get(DEVICE);
+    assert.equal(row.sync_version, calibrationVersion, scenario.name);
+    assert.equal(row.deleted_at, null, scenario.name);
+  }
+
+  const authorized = fixture(t);
+  await seedCalibration(authorized);
+  const version = authorized.raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version;
+  const deleted = await commands.applyWatermarkCommand(authorized.db, envelope(id, 'DELETE_WATERMARK_CALIBRATION', undefined, {
+    payload: {
+      base_sync_version: version,
+      effect_key: `watermark_calibration:delete:${GATEWAY}:${DEVICE}:${version}`,
+    },
+  }), runtime());
+  assert.equal(deleted.ack.result, 'APPLIED');
+  const tombstone = authorized.raw.prepare('SELECT sync_version,deleted_at FROM watermark_calibrations WHERE deveui=?').get(DEVICE);
+  assert.equal(tombstone.sync_version, version + 1);
+  assert.ok(tombstone.deleted_at);
 });
 
 test('device type gates admit only the approved WATERMARK families', async (t) => {
