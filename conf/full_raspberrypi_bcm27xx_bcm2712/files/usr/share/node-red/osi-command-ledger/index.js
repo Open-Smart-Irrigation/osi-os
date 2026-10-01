@@ -179,15 +179,21 @@ function protectedContext(envelope, runtime, type) {
     (envelope && (envelope.protected_context || envelope.protectedContext));
   const context = suppliedContext && typeof suppliedContext === 'object' && !Array.isArray(suppliedContext)
     ? suppliedContext : {};
-  const payloadIntent = payload && payload.normalized_intent && typeof payload.normalized_intent === 'object'
-    ? payload.normalized_intent
-    : (payload && payload.values && typeof payload.values === 'object' ? payload.values : {});
-  const trustedIntent = context.normalized_intent && typeof context.normalized_intent === 'object'
-    ? context.normalized_intent : payloadIntent;
-  if (protectedBindingCanonicalization.canonicalize(payloadIntent) !==
-      protectedBindingCanonicalization.canonicalize(trustedIntent)) {
+  const payloadIntent = payload && payload.values && typeof payload.values === 'object' && !Array.isArray(payload.values)
+    ? payload.values : {};
+  const payloadClaim = payload && payload.normalized_intent && typeof payload.normalized_intent === 'object' &&
+    !Array.isArray(payload.normalized_intent) ? payload.normalized_intent : null;
+  const contextClaim = context.normalized_intent && typeof context.normalized_intent === 'object' &&
+    !Array.isArray(context.normalized_intent) ? context.normalized_intent
+    : (context.normalizedIntent && typeof context.normalizedIntent === 'object' &&
+      !Array.isArray(context.normalizedIntent) ? context.normalizedIntent : null);
+  if ((payloadClaim && protectedBindingCanonicalization.canonicalize(payloadIntent) !==
+      protectedBindingCanonicalization.canonicalize(payloadClaim)) ||
+      (contextClaim && protectedBindingCanonicalization.canonicalize(payloadIntent) !==
+      protectedBindingCanonicalization.canonicalize(contextClaim))) {
     throw commandError('protected_command_conflict', 'WATERMARK command intent differs from trusted runtime context');
   }
+  const trustedIntent = payloadIntent;
   const values = {
     resource_type: context.resource_type || context.resourceType || 'WATERMARK_CALIBRATION',
     resource_id: context.resource_id || context.resourceId || (payload && (payload.device_eui || payload.deviceEui)),
@@ -582,9 +588,6 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
       base_sync_version: ack.baseSyncVersion == null ? ack.base_sync_version : ack.baseSyncVersion,
       operation: ack.operation,
     };
-    if (!payload.normalized_intent && suppliedContext.normalized_intent) {
-      payload.normalized_intent = suppliedContext.normalized_intent;
-    }
     trusted = protectedContext({
       commandId: commandId.ack,
       commandType: ackType,
