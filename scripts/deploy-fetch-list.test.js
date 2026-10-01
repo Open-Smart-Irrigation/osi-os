@@ -77,6 +77,13 @@ test('computeFetchList includes the WATERMARK binding dependency', () => {
   ));
 });
 
+test('computeFetchList includes the WATERMARK command receiver', () => {
+  const list = computeFetchList(REPO_ROOT);
+  assert.ok(list.includes(
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js'
+  ));
+});
+
 test('deployed Node-RED layout loads the command ledger with its binding dependency', () => {
   const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-deployed-layout-'));
   try {

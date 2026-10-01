@@ -143,6 +143,51 @@ function convertStored(payloadHex, calibrationRow) {
   return parsed.ok ? conversion.convertFrame(parsed.frame, calibrationRow) : null;
 }
 
+// Transaction-scoped writer shared by local HTTP and cloud command paths.
+// The calibration row and the first bounded backfill batch share one commit.
+async function saveCalibrationTx(tx, { deveui, userId, scoped, input }) {
+  const key = normalizeDeveui(deveui);
+  if (!input || input.dryRun) throw httpError(400, 'invalid_calibration', 'A non-dry-run calibration input is required');
+  await assertAccessibleLsn50(tx, key, { userId, scoped });
+  const current = await readRow(tx, key);
+  const currentVersion = current ? current.sync_version : 0;
+  if (input.expectedSyncVersion !== currentVersion) {
+    throw httpError(409, 'stale_sync_version', 'Calibration changed since it was loaded', { currentSyncVersion: currentVersion });
+  }
+  const live = current && !current.deleted_at ? current : null;
+  const cols = VALUE_FIELDS.concat(META_FIELDS);
+  const vals = cols.map((c) => {
+    if (c in input.values) return input.values[c];
+    if (c in input.meta) return input.meta[c];
+    return live && live[c] != null ? live[c] : null;
+  });
+  await tx.run(
+    'INSERT INTO watermark_calibrations (deveui, ' + cols.join(', ') + ', sync_version, updated_at, deleted_at) ' +
+    'VALUES (?, ' + cols.map(() => '?').join(', ') + ', ?, ' + NOW_SQL + ', NULL) ' +
+    'ON CONFLICT(deveui) DO UPDATE SET ' + cols.map((c) => c + ' = excluded.' + c).join(', ') +
+    ', sync_version = excluded.sync_version, updated_at = excluded.updated_at, deleted_at = NULL',
+    [key].concat(vals, [currentVersion + 1])
+  );
+  const row = await readRow(tx, key);
+  return { row, first: await backfillBatch(tx, key, row, null) };
+}
+
+async function deleteCalibrationTx(tx, { deveui, userId, scoped, expectedSyncVersion }) {
+  const key = normalizeDeveui(deveui);
+  const expected = parseExpectedVersion(expectedSyncVersion);
+  await assertAccessibleLsn50(tx, key, { userId, scoped });
+  const current = await readRow(tx, key);
+  if (!current || current.deleted_at) throw httpError(404, 'calibration_not_found', 'No calibration to delete');
+  if (current.sync_version !== expected) {
+    throw httpError(409, 'stale_sync_version', 'Calibration changed since it was loaded', { currentSyncVersion: current.sync_version });
+  }
+  await tx.run(
+    'UPDATE watermark_calibrations SET deleted_at = ' + NOW_SQL + ', updated_at = ' + NOW_SQL +
+    ', sync_version = sync_version + 1 WHERE deveui = ?', [key]
+  );
+  return { deveui: key, sync_version: current.sync_version + 1, calibration: null };
+}
+
 async function saveCalibration(db, { deveui, userId, scoped, body }) {
   const key = normalizeDeveui(deveui);
   const input = validateCalibrationBody(body);
@@ -152,35 +197,7 @@ async function saveCalibration(db, { deveui, userId, scoped, body }) {
     const converted = latest ? convertStored(latest.payload_hex, Object.assign({ sync_version: null }, input.values)) : null;
     return { deveui: key, dry_run: true, preview: converted ? { recorded_at: latest.recorded_at, channels: converted.channels } : null };
   }
-  const saved = await db.transaction(async (tx) => {
-    await assertAccessibleLsn50(tx, key, { userId, scoped });
-    const current = await readRow(tx, key);
-    const currentVersion = current ? current.sync_version : 0;
-    if (input.expectedSyncVersion !== currentVersion) {
-      throw httpError(409, 'stale_sync_version', 'Calibration changed since it was loaded', { currentSyncVersion: currentVersion });
-    }
-    // An omitted metadata field keeps the live row's value; there is none to
-    // keep on a first save or after a delete (the tombstone's metadata went
-    // with it), so it is null there.
-    const live = current && !current.deleted_at ? current : null;
-    const cols = VALUE_FIELDS.concat(META_FIELDS);
-    const vals = cols.map((c) => {
-      if (c in input.values) return input.values[c];
-      if (c in input.meta) return input.meta[c];
-      return live && live[c] != null ? live[c] : null;
-    });
-    await tx.run(
-      'INSERT INTO watermark_calibrations (deveui, ' + cols.join(', ') + ', sync_version, updated_at, deleted_at) ' +
-      'VALUES (?, ' + cols.map(() => '?').join(', ') + ', ?, ' + NOW_SQL + ', NULL) ' +
-      'ON CONFLICT(deveui) DO UPDATE SET ' + cols.map((c) => c + ' = excluded.' + c).join(', ') +
-      ', sync_version = excluded.sync_version, updated_at = excluded.updated_at, deleted_at = NULL',
-      [key].concat(vals, [currentVersion + 1])
-    );
-    const row = await readRow(tx, key);
-    // The first batch commits atomically with the calibration itself.
-    const first = await backfillBatch(tx, key, row, null);
-    return { row, first };
-  });
+  const saved = await db.transaction((tx) => saveCalibrationTx(tx, { deveui: key, userId, scoped, input }));
   const rest = await backfillRemaining(db, key, saved.row, saved.first);
   const result = {
     deveui: key, sync_version: saved.row.sync_version, calibration: publicCalibration(saved.row),
@@ -194,21 +211,7 @@ async function saveCalibration(db, { deveui, userId, scoped, body }) {
 
 async function deleteCalibration(db, { deveui, userId, scoped, expectedSyncVersion }) {
   const key = normalizeDeveui(deveui);
-  const expected = parseExpectedVersion(expectedSyncVersion);
-  return db.transaction(async (tx) => {
-    await assertAccessibleLsn50(tx, key, { userId, scoped });
-    const current = await readRow(tx, key);
-    if (!current || current.deleted_at) throw httpError(404, 'calibration_not_found', 'No calibration to delete');
-    if (current.sync_version !== expected) {
-      throw httpError(409, 'stale_sync_version', 'Calibration changed since it was loaded', { currentSyncVersion: current.sync_version });
-    }
-    await tx.run(
-      'UPDATE watermark_calibrations SET deleted_at = ' + NOW_SQL + ', updated_at = ' + NOW_SQL +
-      ', sync_version = sync_version + 1 WHERE deveui = ?',
-      [key]
-    );
-    return { deveui: key, sync_version: current.sync_version + 1, calibration: null };
-  });
+  return db.transaction((tx) => deleteCalibrationTx(tx, { deveui: key, userId, scoped, expectedSyncVersion }));
 }
 
 const CHANNEL_RESULT_COLUMNS = ['r_fwd', 'r_rev', 'r_solved', 'offset_mv', 'r_upper_bound', 'kpa_upper_bound', 'status', 'kpa'];
@@ -312,6 +315,9 @@ module.exports = {
   deleteCalibration,
   backfillPending,
   backfillBatch,
+  saveCalibrationTx,
+  deleteCalibrationTx,
+  backfillRemaining,
   BACKFILL_BATCH_SIZE,
   CHANNEL_RESULT_COLUMNS
 };

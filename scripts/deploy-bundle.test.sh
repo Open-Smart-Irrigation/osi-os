@@ -79,6 +79,11 @@ grep -qx 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-wat
   echo "bundle missing the WATERMARK binding canonicalizer" >&2
   exit 1
 }
+grep -qx './conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js' "$listing" || \
+grep -qx 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js' "$listing" || {
+  echo "bundle missing the WATERMARK command receiver" >&2
+  exit 1
+}
 
 echo "verify bundle is drift-proof against deploy-fetch-list.js..."
 fetch_list="$work/fetch-list.txt"

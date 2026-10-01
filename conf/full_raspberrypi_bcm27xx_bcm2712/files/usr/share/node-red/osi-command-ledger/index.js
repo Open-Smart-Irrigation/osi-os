@@ -73,7 +73,16 @@ function isZoneCommandType(type) {
 const PROTECTED_CONFIGURATION_COMMANDS = new Set([
   'SET_WATERMARK_CALIBRATION',
   'DELETE_WATERMARK_CALIBRATION',
+  'SET_CHAMELEON_CONFIG',
+  'UPSERT_DEVICE_SOIL_DEPTHS',
 ]);
+
+const PROTECTED_CONFIGURATION_SPECS = {
+  SET_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'set', prefix: 'watermark_calibration:set' },
+  DELETE_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'delete', prefix: 'watermark_calibration:delete' },
+  SET_CHAMELEON_CONFIG: { resourceType: 'CHAMELEON_CONFIG', operation: 'set', prefix: 'chameleon_config:set' },
+  UPSERT_DEVICE_SOIL_DEPTHS: { resourceType: 'DEVICE_SOIL_DEPTHS', operation: 'set', prefix: 'device_soil_depths:set' },
+};
 
 function isProtectedConfigurationCommand(type) {
   return PROTECTED_CONFIGURATION_COMMANDS.has(type);
@@ -85,6 +94,7 @@ function hasOwn(value, key) {
 
 function replayStatus(result) {
   if (result === 'APPLIED') return 'ACKED';
+  if (result === 'CONFLICT') return 'CONFLICT';
   if (result === 'FAILED_RETRYABLE') return 'FAILED_RETRYABLE';
   return 'NACKED';
 }
@@ -194,29 +204,29 @@ function protectedContext(envelope, runtime, type) {
     throw commandError('protected_command_conflict', 'WATERMARK command intent differs from trusted runtime context');
   }
   const trustedIntent = payloadIntent;
+  const spec = PROTECTED_CONFIGURATION_SPECS[type];
   const values = {
-    resource_type: context.resource_type || context.resourceType || 'WATERMARK_CALIBRATION',
+    resource_type: context.resource_type || context.resourceType || spec.resourceType,
     resource_id: context.resource_id || context.resourceId || (payload && (payload.device_eui || payload.deviceEui)),
     gateway_device_eui: context.gateway_device_eui || context.gatewayDeviceEui || (payload && (payload.gateway_device_eui || payload.gatewayDeviceEui)),
     actor_user_uuid: context.actor_user_uuid || context.actorUserUuid || (payload && (payload.actor_user_uuid || payload.actorUserUuid)),
     base_sync_version: context.base_sync_version == null
       ? (context.baseSyncVersion == null ? payload && payload.base_sync_version : context.baseSyncVersion)
       : context.base_sync_version,
-    operation: context.operation || (payload && payload.operation),
+    operation: context.operation || (payload && payload.operation) || spec.operation,
   };
-  if (values.resource_type !== 'WATERMARK_CALIBRATION' ||
+  if (values.resource_type !== spec.resourceType ||
       !/^[0-9A-F]{16}$/.test(String(values.resource_id || '')) ||
       !/^[0-9A-F]{16}$/.test(String(values.gateway_device_eui || '')) ||
       values.gateway_device_eui !== runtimeGateway ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(values.actor_user_uuid || '')) ||
       !Number.isSafeInteger(values.base_sync_version) || values.base_sync_version < 0 ||
       !['set', 'delete'].includes(values.operation) ||
-      (type === 'SET_WATERMARK_CALIBRATION' && values.operation !== 'set') ||
-      (type === 'DELETE_WATERMARK_CALIBRATION' && values.operation !== 'delete')) {
+      values.operation !== spec.operation) {
     throw commandError('protected_command_conflict', 'trusted WATERMARK command binding is invalid');
   }
   const effectKey = String((payload && (payload.effect_key || payload.effectKey)) || envelope.effectKey || '').trim();
-  const expectedEffect = `watermark_calibration:${values.operation}:${values.gateway_device_eui}:${values.resource_id}:${values.base_sync_version}`;
+  const expectedEffect = `${spec.prefix}:${values.gateway_device_eui}:${values.resource_id}:${values.base_sync_version}`;
   if (effectKey !== expectedEffect || !payload ||
       String(payload.device_eui || payload.deviceEui || '').trim() !== values.resource_id ||
       String(payload.gateway_device_eui || payload.gatewayDeviceEui || '').trim() !== values.gateway_device_eui ||
@@ -513,7 +523,7 @@ function classifyAckResult(result, errorText) {
   if (['SUCCESS', 'APPLIED', 'ACKED'].includes(result)) return 'APPLIED';
   if (result === 'EXPIRED') return 'EXPIRED';
   if (['FAILED_RETRYABLE', 'RETRYABLE_ERROR'].includes(result)) return 'FAILED_RETRYABLE';
-  if (['REJECTED_PERMANENT', 'NACKED'].includes(result)) return result;
+  if (['REJECTED_PERMANENT', 'NACKED', 'CONFLICT'].includes(result)) return result;
   if (result === 'FAILED') {
     const detail = String(errorText || '').toLowerCase();
     if (detail.includes('invalid') || detail.includes('unsupported') ||
@@ -560,7 +570,7 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
   const incomingResult = String(ack.result || ack.status || '').trim().toUpperCase();
   const errorText = ack.error == null ? '' : String(ack.error);
   const result = classifyAckResult(incomingResult, errorText);
-  const terminal = ['APPLIED', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result);
+  const terminal = ['APPLIED', 'CONFLICT', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result);
   const appliedAt = String(ack.timestamp || ack.appliedAt || new Date().toISOString());
   const duplicate = ack.duplicate === true || String(ack.duplicate || '').toLowerCase() === 'true';
   const syncVersionCandidate = ack.appliedSyncVersion == null

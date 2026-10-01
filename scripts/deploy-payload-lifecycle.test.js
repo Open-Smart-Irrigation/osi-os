@@ -33,6 +33,14 @@ function nodePathForShell() {
   return process.execPath.replace(/'/g, "'\\''");
 }
 
+test('WATERMARK command receiver is verified before staged flows can activate', () => {
+  const helper = DEPLOY.indexOf('fetch_required "osi-watermark-helper commands.js"');
+  const staged = DEPLOY.indexOf('STAGED_FLOWS="$TMP_DIR/flows.json"');
+  const activation = DEPLOY.lastIndexOf('swap_call flipTo "$DEPLOY_STAMP"');
+  assert.ok(helper >= 0 && staged > helper && activation > helper, 'command receiver must precede staged-flow activation');
+  assert.ok(DEPLOY.indexOf('osi-watermark-helper/commands.js', helper) > helper);
+});
+
 function runSwap(root, command) {
   const script = `set -eu\nSWAP_ROOT=${JSON.stringify(root)}\nSWAP_JS=${JSON.stringify(SWAP_JS)}\nexport SWAP_ROOT SWAP_JS\n${swapCallFunction()}\n${command}\n`;
   return spawnSync('sh', ['-c', script], { encoding: 'utf8' });

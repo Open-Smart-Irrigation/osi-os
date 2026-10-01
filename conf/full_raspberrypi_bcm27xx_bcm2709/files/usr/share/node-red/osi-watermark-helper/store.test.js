@@ -169,6 +169,17 @@ describe('calibration store', () => {
   let ctx;
   beforeEach(() => { ctx = freshDb(); });
 
+  it('transaction-scoped save seam commits calibration and first backfill batch together', async () => {
+    await ingestAt(ctx.db, T1, frameB64([800, 3291], [276, 4095]));
+    const input = wm.validateCalibrationBody({ ...CAL, expected_sync_version: 0 });
+    const saved = await ctx.db.transaction((tx) => wm.saveCalibrationTx(tx, {
+      deveui: DEVEUI, userId: USER_ID, scoped: false, input
+    }));
+    assert.equal(saved.row.sync_version, 1);
+    assert.equal(saved.first.converted, 1);
+    assert.equal(ctx.native.prepare('SELECT swt_1 FROM device_data WHERE deveui=?').get(DEVEUI).swt_1, 56.4);
+  });
+
   it('first save backfills waiting readings only', async () => {
     await ingestAt(ctx.db, T1, frameB64([800, 3291], [276, 4095]));
     const saved = await wm.saveCalibration(ctx.db, { deveui: DEVEUI, userId: USER_ID, body: { ...CAL, expected_sync_version: 0 } });
