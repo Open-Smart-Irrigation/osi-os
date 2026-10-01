@@ -154,6 +154,7 @@ export interface HistoryCardSourceDevice {
   typeId: string | null;
   role: HistoryCardType | string | null;
   sourceKey?: string | null;
+  chameleonEnabled?: boolean | null;
 }
 
 export interface HistoryCardSummary<TCardType extends HistoryCardType = HistoryCardType> {

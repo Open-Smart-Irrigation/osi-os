@@ -209,9 +209,10 @@ test('deriveCardsForZone derives soil/dendro/environment/irrigation cards for a 
   const srcKey = (prefix, deveui) => `${prefix}-src-${crypto.createHash('sha256').update(deveui).digest('hex').slice(0, 12)}`;
 
   assert.equal(byType.soil.id, 'zone-1:soil:root-zone');
-  assert.equal(byType.soil.sourceDeviceCount, 1);
+  assert.equal(byType.soil.sourceDeviceCount, 2);
   assert.deepEqual(byType.soil.sourceDevices, [
     { name: 'Generic', typeId: 'GENERIC', role: 'soil', sourceKey: srcKey('soil', soilDevice.deveui) },
+    { name: 'Dragino Lsn50', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: srcKey('soil', dendroDevice.deveui) },
   ]);
 
   assert.equal(byType.environment.id, 'zone-1:environment:microclimate');
@@ -236,6 +237,33 @@ test('deriveCardsForZone derives soil/dendro/environment/irrigation cards for a 
 test('deriveCardsForZone returns no cards for a zone with no matching devices', () => {
   assert.deepEqual(hh.deriveCardsForZone({ id: 1, zone_uuid: 'zone-1' }, []), []);
   assert.deepEqual(hh.deriveCardsForZone({ zone_uuid: '' }, []), []);
+});
+
+test('deriveCardsForZone treats every assigned LSN50 as a soil source', () => {
+  const watermark = {
+    deveui: '6666666666666666',
+    type_id: 'DRAGINO_LSN50',
+    chameleon_enabled: 0,
+    irrigation_zone_id: 1,
+  };
+
+  const cards = hh.deriveCardsForZone({ id: 1, zone_uuid: 'zone-1' }, [watermark]);
+
+  assert.deepEqual(cards.map((card) => card.cardType), ['soil']);
+  assert.equal(cards[0].sourceDeviceCount, 1);
+});
+
+test('soilDepthCm uses generic SWT depths and only exposes LSN50 SWT3 for Chameleon', () => {
+  const nonChameleon = {
+    type_id: 'DRAGINO_LSN50',
+    chameleon_enabled: 0,
+    chameleon_swt3_depth_cm: 99,
+    soil_moisture_probe_depths_json: JSON.stringify({ swt_1: 12, swt_2: 34, swt_3: 56 }),
+  };
+  assert.equal(hh.soilDepthCm(nonChameleon, 'swt_1'), 12);
+  assert.equal(hh.soilDepthCm(nonChameleon, 'swt_2'), 34);
+  assert.equal(hh.soilDepthCm(nonChameleon, 'swt_3'), null);
+  assert.equal(hh.soilDepthCm({ ...nonChameleon, chameleon_enabled: 1 }, 'swt_3'), 99);
 });
 
 test('aggregateRows raw mode returns per-channel series of points', () => {

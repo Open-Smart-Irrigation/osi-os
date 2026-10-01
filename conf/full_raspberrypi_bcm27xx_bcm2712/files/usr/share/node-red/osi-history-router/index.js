@@ -243,7 +243,7 @@ function validateAggregation(value) {
 
 function isSoilSource(device) {
   const typeId = String(device && device.type_id || '').toUpperCase();
-  return typeId === 'KIWI_SENSOR' || typeId === 'TEKTELIC_CLOVER' || typeId === 'DRAGINO_SDI12' || Number(device && device.chameleon_enabled || 0) === 1;
+  return typeId === 'KIWI_SENSOR' || typeId === 'TEKTELIC_CLOVER' || typeId === 'DRAGINO_SDI12' || typeId === 'DRAGINO_LSN50' || Number(device && device.chameleon_enabled || 0) === 1;
 }
 
 function isEnvironmentSource(device) {
@@ -269,10 +269,39 @@ function pointQuality(coveragePct) {
 
 function soilChannelDepths(sourceDevices) {
   const primaryDevice = (sourceDevices || [])[0] || {};
+  let configured = null;
+  let configuredArray = null;
+  const rawConfigured = primaryDevice.soil_moisture_probe_depths_json;
+  if (Array.isArray(rawConfigured)) {
+    configuredArray = rawConfigured;
+  } else if (rawConfigured && typeof rawConfigured === 'object') {
+    configured = rawConfigured;
+  } else if (typeof rawConfigured === 'string' && rawConfigured.trim()) {
+    try {
+      const parsed = JSON.parse(rawConfigured);
+      if (Array.isArray(parsed)) configuredArray = parsed;
+      else if (parsed && typeof parsed === 'object') configured = parsed;
+    } catch (_) {
+      configured = null;
+    }
+  }
+  const configuredDepth = (channelId) => {
+    if (configuredArray) {
+      const index = { swt_1: 0, swt_2: 1, swt_3: 2, swt_wm1: 0, swt_wm2: 1 }[channelId];
+      return index === undefined ? null : numberOrNull(configuredArray[index]);
+    }
+    return configured
+      ? numberOrNull(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()])
+      : null;
+  };
+  const primaryType = String(primaryDevice.type_id || '').toUpperCase();
+  const chameleonEnabled = primaryType !== 'DRAGINO_LSN50' || Number(primaryDevice.chameleon_enabled || 0) === 1;
   return {
-    swt_1: numberOrNull(primaryDevice.chameleon_swt1_depth_cm),
-    swt_2: numberOrNull(primaryDevice.chameleon_swt2_depth_cm),
-    swt_3: numberOrNull(primaryDevice.chameleon_swt3_depth_cm)
+    swt_1: numberOrNull(primaryDevice.chameleon_swt1_depth_cm) ?? configuredDepth('swt_1'),
+    swt_2: numberOrNull(primaryDevice.chameleon_swt2_depth_cm) ?? configuredDepth('swt_2'),
+    swt_3: chameleonEnabled
+      ? numberOrNull(primaryDevice.chameleon_swt3_depth_cm) ?? configuredDepth('swt_3')
+      : null
   };
 }
 
@@ -283,7 +312,15 @@ function seriesWithDepth(series, depths, channelId) {
 
 function buildSeriesFromAggregate(card, aggregate, sourceDevices, opts) {
   var _statusForCardValue = opts && opts.statusForCardValue || function() { return null; };
-  const channels = CARD_CONFIG[card.cardType].channels;
+  const configuredChannels = CARD_CONFIG[card.cardType].channels;
+  const lsn50WithoutChameleon = Array.isArray(sourceDevices) && sourceDevices.length > 0
+    && sourceDevices.every(function(device) {
+      return String(device && device.type_id || '').toUpperCase() === 'DRAGINO_LSN50'
+        && Number(device && device.chameleon_enabled || 0) !== 1;
+    });
+  const channels = card.cardType === 'soil' && lsn50WithoutChameleon
+    ? configuredChannels.filter(function(channel) { return channel.id !== 'swt_3'; })
+    : configuredChannels;
   const soilDepths = card.cardType === 'soil' ? soilChannelDepths(sourceDevices) : null;
   if (!channels.length) return [];
   const result = [];

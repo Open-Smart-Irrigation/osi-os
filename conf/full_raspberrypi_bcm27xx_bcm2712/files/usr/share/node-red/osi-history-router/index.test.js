@@ -111,6 +111,7 @@ test('validateAggregation invalid throws', function() {
 
 test('isSoilSource', function() {
   assert.strictEqual(HR.isSoilSource({ type_id: 'KIWI_SENSOR' }), true);
+  assert.strictEqual(HR.isSoilSource({ type_id: 'DRAGINO_LSN50', chameleon_enabled: 0 }), true);
   assert.strictEqual(HR.isSoilSource({ type_id: 'STREGA_VALVE' }), false);
   assert.strictEqual(HR.isSoilSource(null), false);
 });
@@ -143,11 +144,65 @@ test('pointQuality', function() {
   assert.strictEqual(HR.pointQuality(undefined), 'unknown');
 });
 
-test('soilChannelDepths from device', function() {
-  const depths = HR.soilChannelDepths([{ chameleon_swt1_depth_cm: 15, chameleon_swt2_depth_cm: 30, chameleon_swt3_depth_cm: 45 }]);
+test('soilChannelDepths from Chameleon device', function() {
+  const depths = HR.soilChannelDepths([{ chameleon_enabled: 1, chameleon_swt1_depth_cm: 15, chameleon_swt2_depth_cm: 30, chameleon_swt3_depth_cm: 45 }]);
   assert.strictEqual(depths.swt_1, 15);
   assert.strictEqual(depths.swt_2, 30);
   assert.strictEqual(depths.swt_3, 45);
+});
+
+test('soilChannelDepths reads generic LSN50 depths and omits non-Chameleon SWT3', function() {
+  const depths = HR.soilChannelDepths([{
+    type_id: 'DRAGINO_LSN50',
+    chameleon_enabled: 0,
+    soil_moisture_probe_depths_json: JSON.stringify({ swt_1: 12, swt_2: 34, swt_3: 56 }),
+  }]);
+
+  assert.deepStrictEqual(depths, { swt_1: 12, swt_2: 34, swt_3: null });
+});
+
+test('soilChannelDepths preserves SWT3 depth for non-LSN50 soil devices', function() {
+  const depths = HR.soilChannelDepths([{
+    type_id: 'DRAGINO_SDI12',
+    chameleon_swt3_depth_cm: 56,
+  }]);
+
+  assert.equal(depths.swt_3, 56);
+});
+
+test('buildSeriesFromAggregate keeps SWT3 only for Chameleon soil sources', function() {
+  const aggregate = {
+    aggregation: 'raw',
+    series: {
+      swt_1: { points: [{ recordedAt: '2026-01-01T00:00:00.000Z', value: 10 }] },
+      swt_2: { points: [{ recordedAt: '2026-01-01T00:00:00.000Z', value: 20 }] },
+      swt_3: { points: [{ recordedAt: '2026-01-01T00:00:00.000Z', value: 30 }] },
+    },
+  };
+
+  const nonChameleon = HR.buildSeriesFromAggregate(
+    { cardType: 'soil' },
+    aggregate,
+    [{ type_id: 'DRAGINO_LSN50', chameleon_enabled: 0 }],
+    {}
+  );
+  const chameleon = HR.buildSeriesFromAggregate(
+    { cardType: 'soil' },
+    aggregate,
+    [{ type_id: 'DRAGINO_LSN50', chameleon_enabled: 1 }],
+    {}
+  );
+
+  assert.deepStrictEqual(nonChameleon.map((series) => series.id), ['swt_1', 'swt_2']);
+  assert.deepStrictEqual(chameleon.map((series) => series.id), ['swt_1', 'swt_2', 'swt_3']);
+
+  const sdi12 = HR.buildSeriesFromAggregate(
+    { cardType: 'soil' },
+    aggregate,
+    [{ type_id: 'DRAGINO_SDI12', chameleon_enabled: 0 }],
+    {}
+  );
+  assert.deepStrictEqual(sdi12.map((series) => series.id), ['swt_1', 'swt_2', 'swt_3']);
 });
 
 test('soilChannelDepths empty', function() {

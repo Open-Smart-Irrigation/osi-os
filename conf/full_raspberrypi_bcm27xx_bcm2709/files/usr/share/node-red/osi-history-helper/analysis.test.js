@@ -315,6 +315,33 @@ test('buildAnalysisCatalog uses the two canonical Kiwi SWT channels without stat
   assert.deepEqual(catalog.channels.map((entry) => entry.channelKey), ['swt_1', 'swt_2', 'et0_mm', 'etc_mm']);
 });
 
+test('buildAnalysisCatalog exposes assigned non-Chameleon LSN50 as canonical SWT1/SWT2 with generic depths', async () => {
+  const watermark = {
+    deveui: '1020304050607081',
+    type_id: 'DRAGINO_LSN50',
+    chameleon_enabled: 0,
+    soil_moisture_probe_depths_json: JSON.stringify({ swt_1: 12, swt_2: 34, swt_3: 56 }),
+  };
+  const analysis = analysisModule.createAnalysis({
+    aggregateRows: () => ({ series: {}, buckets: [] }),
+    dbAll: sentekLikeDbAll({ id: 5, zone_uuid: 'zone-5', name: 'Watermark block' }, watermark),
+    deriveCardsForZone: () => [{ cardType: 'soil' }],
+    displayDeviceName: () => 'Watermark',
+    normalizeDeveui: (value) => value,
+    resolveAggregation: () => ({ requested: 'raw', level: 'raw', bucketSizeSeconds: null }),
+    soilDepthCm: hh.soilDepthCm,
+    sourceDevicesForCard: () => [watermark],
+    sourceKeyForCsv: () => 'watermark',
+    ...utcDeps(),
+  });
+
+  const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
+  const deviceChannels = catalog.channels.filter((entry) => entry.sourceKind === 'device');
+
+  assert.deepEqual(deviceChannels.map((entry) => entry.channelKey), ['swt_1', 'swt_2']);
+  assert.deepEqual(deviceChannels.map((entry) => entry.depthCm), [12, 34]);
+});
+
 test('device entries keep their pre-weather catalogue and never list a weather-only channel', async () => {
   const raw = weatherDb();
   try {
