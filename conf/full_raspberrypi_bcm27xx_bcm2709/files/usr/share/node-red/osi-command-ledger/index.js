@@ -384,7 +384,8 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
     if (row) {
       const storedProtected = isProtectedConfigurationCommand(String(row.command_type || '').toUpperCase()) ||
         row.binding_hash != null || row.intent_hash != null;
-      if (storedProtected && (!protectedType || row.command_type !== type || !trusted ||
+      if ((storedProtected || protectedType) && (!storedProtected || !protectedType ||
+          row.command_type !== type || !trusted ||
           !protectedBindingMatches(row, trusted))) {
         throw commandError('protected_command_conflict', 'WATERMARK command replay binding conflicts with the terminal ledger');
       }
@@ -615,7 +616,8 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
       if (existing) {
         const storedProtected = isProtectedConfigurationCommand(String(existing.command_type || '').toUpperCase()) ||
           existing.binding_hash != null || existing.intent_hash != null;
-        if (storedProtected && (!trusted || ackType !== String(existing.command_type || '').toUpperCase() ||
+        if ((storedProtected || trusted) && (!storedProtected || !trusted ||
+            ackType !== String(existing.command_type || '').toUpperCase() ||
             !protectedBindingMatches(existing, trusted))) {
           throw commandError('protected_command_conflict', 'WATERMARK terminal ACK binding conflicts with the terminal ledger');
         }

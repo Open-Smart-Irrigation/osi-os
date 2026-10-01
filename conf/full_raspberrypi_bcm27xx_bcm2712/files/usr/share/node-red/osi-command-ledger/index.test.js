@@ -479,6 +479,20 @@ test('protected command ID replay rejects a protected row delivered as another c
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
 });
 
+test('protected command ID replay rejects a non-protected stored row', async () => {
+  const db = new TestDb();
+  insertAppliedCommand(db, {
+    commandId: '811', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'REBOOT', effectKey: 'reboot:001',
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 811, status: 'ACKED', result: 'APPLIED', duplicate: false },
+  });
+  await assert.rejects(
+    ledger.deduplicatePendingCommand(db, watermarkEnvelope(811), watermarkRuntime(watermarkBinding())),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
 test('effect-key replay persists the new command ID as a trusted terminal row', async () => {
   const db = new TestDb();
   const context = watermarkBinding();
