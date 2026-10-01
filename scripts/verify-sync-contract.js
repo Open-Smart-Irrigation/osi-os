@@ -42,8 +42,6 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
     ...EXACT_STAGED_JOURNAL_COMMANDS,
     ...EXACT_SCOPED_ACCESS_COMMANDS,
-    'DELETE_WATERMARK_CALIBRATION',
-    'SET_WATERMARK_CALIBRATION',
 ];
 // Edge implementation landed (real appliers wired into cmd-type-registry / the new
 // osi-scoped-access-commands module -- port commit "apply scoped access commands"), so
