@@ -16,6 +16,9 @@ for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
   assert.match(node.func, /watermark_calibrations/);
   assert.match(node.func, /deleted_at/);
   assert.match(node.func, /effective_op/);
+  assert.match(node.func, /gateway_device_eui/);
+  assert.match(node.func, /NULLIF\(trim\(\(SELECT gateway_device_eui FROM devices/);
+  assert.match(node.func, /NULLIF\(trim\(\(SELECT gateway_device_eui FROM sync_link_state/);
   assert.ok(node.func.indexOf('devices') < node.func.indexOf('watermark_calibrations'), `${id} emits calibration after devices`);
   assert.doesNotMatch(node.func, /watermark_readings/, `${id} does not ship raw watermark readings`);
   for (const cap of expectedCaps) assert.match(node.func, new RegExp(cap), `${id} advertises ${cap}`);

@@ -137,10 +137,12 @@ test('valid calibration set uses exact base and terminal ACK atomically', async 
   assert.equal(raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version, 1);
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 1);
-  await assert.rejects(
-    commands.applyWatermarkCommand(db, envelope(1, 'SET_WATERMARK_CALIBRATION', CAL), runtime({ local_actor_user_uuid: WRITER })),
-    (e) => e.code === 'watermark_command_conflict' && e.commandResult === 'CONFLICT'
+  const conflict = await commands.applyWatermarkCommand(
+    db, envelope(1, 'SET_WATERMARK_CALIBRATION', CAL), runtime({ local_actor_user_uuid: WRITER })
   );
+  assert.equal(conflict.ack.result, 'CONFLICT');
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 1);
 });
 
 test('semantic values are normalized before binding and malformed input is terminal', async (t) => {
@@ -170,7 +172,7 @@ test('semantic values are normalized before binding and malformed input is termi
     assert.equal(result.ack.result, 'REJECTED_PERMANENT', type);
     assert.equal(result.ack.reason, type === 'SET_CHAMELEON_CONFIG' || type === 'UPSERT_DEVICE_SOIL_DEPTHS' ? 'invalid_values' : 'invalid_calibration');
   }
-  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1, 'malformed commands are not bound or persisted');
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 6, 'malformed commands receive durable terminal decisions');
 });
 
 test('cloud calibration command commits first 500 atomically and continues later batches', async (t) => {
@@ -343,10 +345,11 @@ test('flag-off retains local owner path and rejects numeric cloud identity', asy
   const { db } = fixture(t);
   const result = await commands.applyWatermarkCommand(db, envelope(30, 'SET_WATERMARK_CALIBRATION', CAL), runtime({ scopedMode: false }));
   assert.equal(result.ack.result, 'APPLIED');
-  await assert.rejects(
-    commands.applyWatermarkCommand(db, envelope(31, 'SET_WATERMARK_CALIBRATION', CAL, { payload: { actor_user_uuid: '1' } }), runtime({ scopedMode: true })),
-    (e) => e.code === 'watermark_command_rejected' && e.reason === 'malformed_command'
+  const malformed = await commands.applyWatermarkCommand(
+    db, envelope(31, 'SET_WATERMARK_CALIBRATION', CAL, { payload: { actor_user_uuid: '1' } }), runtime({ scopedMode: true })
   );
+  assert.equal(malformed.ack.result, 'REJECTED_PERMANENT');
+  assert.equal(malformed.ack.reason, 'malformed_command');
 });
 
 test('scoped assignment and account matrix is enforced for DEVICE commands', async (t) => {

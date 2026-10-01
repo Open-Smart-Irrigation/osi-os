@@ -678,10 +678,61 @@ async function queueCommandAck(db, rawAck, runtime) {
   return db.transaction((tx) => queueCommandAckInTransaction(tx, rawAck, runtime));
 }
 
+// Protected semantic validation can fail before protectedContext() has enough
+// trusted material to build a binding hash. Persist that terminal conflict or
+// permanent rejection without rewriting an existing command row. The durable
+// outbox record is still required so the cloud receives the decision.
+async function recordProtectedDecision(db, envelope, result, reason) {
+  return db.transaction(async (tx) => {
+    const type = commandType(envelope);
+    if (!isProtectedConfigurationCommand(type)) {
+      throw commandError('malformed_command', 'protected decision requires a WATERMARK command');
+    }
+    const delivery = deliveryCommandId(envelope);
+    const payload = envelope && envelope.payload && typeof envelope.payload === 'object'
+      ? envelope.payload : {};
+    const commandId = delivery;
+    const storedId = String(commandId);
+    const existing = await tx.get(
+      'SELECT command_id FROM applied_commands WHERE command_id=? LIMIT 1',
+      [storedId]
+    );
+    const ack = {
+      commandId,
+      commandType: type,
+      status: result === 'CONFLICT' ? 'CONFLICT' : 'NACKED',
+      result,
+      reason: reason || (result === 'CONFLICT' ? 'binding_conflict' : 'rejected'),
+      detail: reason || (result === 'CONFLICT' ? 'binding_conflict' : 'rejected'),
+      appliedSyncVersion: null,
+      duplicate: false,
+    };
+    if (!existing) {
+      await tx.run(
+        'INSERT INTO applied_commands (' +
+          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,' +
+          'binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation' +
+        ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+        [storedId, String(envelope.effectKey || payload.effect_key || payload.effectKey || '').trim() || null,
+          String(payload.device_eui || payload.deviceEui || '').trim().toUpperCase() || 'UNKNOWN',
+          type, result, new Date().toISOString(), JSON.stringify(ack), 'edge',
+          null, null, null, null, null, null, null, null]
+      );
+    }
+    await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [storedId]);
+    await tx.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+      [storedId, JSON.stringify(ack), new Date().toISOString()]
+    );
+    return { handled: true, ack };
+  });
+}
+
 module.exports = {
   deduplicatePendingCommand,
   withProtectedCommandTransaction,
   queueCommandAck,
+  recordProtectedDecision,
   classifyAckResult,
   validEffectBinding,
 };

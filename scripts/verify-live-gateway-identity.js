@@ -1170,8 +1170,10 @@ if (sizeAllowances) {
     // fresh: origin/main 68992 -> HEAD 69142 = +150.
     // WATERMARK parity commands and retained calibration snapshot: the force-sync builder
     // gains the three protected capabilities plus the retained calibration projection.
-    // Re-measured fresh against origin/main: 68992 -> HEAD 69554 = +562.
-    'sync-force-build': 562,
+    // Task 9 review correction adds protected semantic dispatch and the
+    // gateway-bound live/tombstone calibration projection. Re-measured
+    // against the same origin/main cut: 69244 -> HEAD 70063 = +819.
+    'sync-force-build': 819,
     'command-ack-build-batch': 975,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
     // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded

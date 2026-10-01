@@ -209,28 +209,6 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
   if (!COMMAND_TYPES.includes(type)) return { handled: false };
   const payload = envelope.payload || {};
   let normalizedValues;
-  try {
-    normalizedValues = normalizeCommandValues(type, payload);
-  } catch (cause) {
-    const reason = cause && (cause.reason || cause.code);
-    if (cause && ['invalid_calibration', 'invalid_body', 'invalid_values'].includes(reason)) {
-      return {
-        handled: true,
-        ack: {
-          commandId: envelope.commandId,
-          commandType: type,
-          status: 'NACKED',
-          result: 'REJECTED_PERMANENT',
-          reason,
-          duplicate: false,
-        },
-      };
-    }
-    throw cause;
-  }
-  const normalizedEnvelope = normalizedValues === undefined ? envelope : Object.assign({}, envelope, {
-    payload: Object.assign({}, payload, { values: normalizedValues }),
-  });
   // Immutable runtime/envelope identity is checked before the ledger's exact
   // command-id/effect replay path. A changed trusted actor or device must not
   // replay an otherwise valid terminal row.
@@ -238,9 +216,26 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
   try {
     preflightIdentity = validateIdentity(type, payload, runtime);
   } catch (cause) {
-    if (cause && cause.commandResult === 'CONFLICT') throw bindingConflict(cause);
+    if (cause && cause.commandResult === 'CONFLICT') {
+      return ledger.recordProtectedDecision(db, envelope, 'CONFLICT', cause.reason || 'binding_conflict');
+    }
+    if (cause && ['malformed_command', 'invalid_body', 'invalid_calibration', 'invalid_values'].includes(cause.reason)) {
+      return ledger.recordProtectedDecision(db, envelope, 'REJECTED_PERMANENT', cause.reason);
+    }
     throw cause;
   }
+  try {
+    normalizedValues = normalizeCommandValues(type, payload);
+  } catch (cause) {
+    const reason = cause && (cause.reason || cause.code);
+    if (cause && ['invalid_calibration', 'invalid_body', 'invalid_values'].includes(reason)) {
+      return ledger.recordProtectedDecision(db, envelope, 'REJECTED_PERMANENT', reason);
+    }
+    throw cause;
+  }
+  const normalizedEnvelope = normalizedValues === undefined ? envelope : Object.assign({}, envelope, {
+    payload: Object.assign({}, payload, { values: normalizedValues }),
+  });
   const trusted = Object.assign({}, runtime.protected_context || runtime.protectedContext || {}, {
     resource_type: type === 'SET_WATERMARK_CALIBRATION' || type === 'DELETE_WATERMARK_CALIBRATION' ? 'WATERMARK_CALIBRATION' : 'DEVICE',
     operation: type === 'DELETE_WATERMARK_CALIBRATION' ? 'delete' : 'set',
@@ -276,7 +271,9 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
     }
     });
   } catch (cause) {
-    if (cause && cause.code === 'protected_command_conflict') throw bindingConflict(cause);
+    if (cause && cause.code === 'protected_command_conflict') {
+      return ledger.recordProtectedDecision(db, envelope, 'CONFLICT', 'binding_conflict');
+    }
     throw cause;
   }
   if (result && result.calibrationRow && result.backfill && result.backfill.more) {

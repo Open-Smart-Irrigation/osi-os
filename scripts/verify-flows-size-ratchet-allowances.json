@@ -42,8 +42,8 @@
       "reason": "Daily agronomy parity (spec docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md), measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles, pinned against this stack's own fixed cut point c5bc18314 (origin/main has moved past it): c5bc18314 44956 -> HEAD 46212 = +1256. Supersedes the prior entry, whose growth this delta includes. The bootstrap carries zoneAgronomy (plan E4): the last 30 days of zone_daily_agronomy per live zone with a UUID, newest days first, at most 1,000 rows. The live identity restart sentinel (Option C Slice 1) provenance that verify-live-gateway-identity.js pins for this node id is carried forward."
     },
     "sync-force-build": {
-      "delta": 562,
-      "reason": "Daily agronomy parity (spec docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md), measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: origin/main 68992 -> HEAD 69244 = +252. Supersedes the prior entry, whose growth this delta includes. The force-sync zone snapshot carries stage_started_on and syncCapabilities gains zone_config_stage_started_on_v1. The live identity restart sentinel (Option C Slice 1) provenance that verify-live-gateway-identity.js pins for this node id is carried forward."
+      "delta": 819,
+      "reason": "WATERMARK Task 9 review correction (protected semantic dispatch and gateway-bound live/tombstone calibration projection), measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: origin/main 68992 -> HEAD 70063 = +1071. The standing +562 allowance is superseded by the additional +257 review-correction bytes; the force-sync snapshot remains covered by the prior WATERMARK and live identity restart sentinel (Option C Slice 1) provenance."
     },
     "strega-reconciliation-monitor": {
       "delta": 5528,

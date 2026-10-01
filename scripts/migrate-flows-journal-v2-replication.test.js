@@ -36,6 +36,33 @@ function nodesById(buffer) {
   return new Map(JSON.parse(buffer.toString('utf8')).map((node) => [node.id, node]));
 }
 
+// Task 9 owns these exact flow fields. Keep the Journal V2 migration proof
+// active for every other node and field; only the separately guarded
+// WATERMARK command/snapshot fields are removed before comparison.
+const WATERMARK_OWNED_FIELDS = {
+  'watermark-config-command-apply-fn': ['__node'],
+  'command-dedupe-dispatch': ['func', 'outputs', 'wires'],
+  'cmd-type-registry': ['func'],
+  'reject-indefinite-open': ['func'],
+  'sync-bootstrap-build': ['func'],
+  'sync-force-build': ['func'],
+  'al-link-build-req': ['func'],
+  '934bf2bc19a8ce22': ['func'],
+  '4f4a765f36cee6f3': ['func'],
+  'entity-name-command-apply-fn': ['wires'],
+};
+
+function withoutWatermarkOwnedFields(buffer) {
+  const nodes = JSON.parse(buffer.toString('utf8'))
+    .filter((node) => !WATERMARK_OWNED_FIELDS[node.id]?.includes('__node'))
+    .map((node) => {
+      const copy = { ...node };
+      for (const field of WATERMARK_OWNED_FIELDS[node.id] || []) delete copy[field];
+      return copy;
+    });
+  return serialize(nodes);
+}
+
 test('both maintained profiles roundtrip exactly and migrate byte-identically', () => {
   const outputs = PROFILE_PATHS.map(migrated);
   assert.equal(outputs[0].equals(outputs[1]), true);
@@ -44,21 +71,12 @@ test('both maintained profiles roundtrip exactly and migrate byte-identically', 
 
 test('the shipped flows are exactly the guarded migration output from the node-free baseline', () => {
   const current = source(PROFILE_PATHS[0]);
-  // Task 9 owns a separate guarded one-shot mutation of the shared command
-  // route and bootstrap builders.  It is intentionally not part of the
-  // Journal V2 migrator's ownership set; verify its own structural contract
-  // in test-watermark-cloud-command-path.js instead of asking this journal
-  // migration to overwrite unrelated flow nodes.
-  const currentNodes = JSON.parse(current.toString('utf8'));
-  if (currentNodes.some((node) => node.id === 'watermark-config-command-apply-fn')) {
-    assert.ok(currentNodes.some((node) => node.name === 'Apply WATERMARK Protected Command'));
-    return;
-  }
   const ownedIds = new Set(migrator.EXPECTED_NODES.map((node) => node.id));
   const withoutWorker = JSON.parse(current.toString('utf8')).filter(
     (node) => !ownedIds.has(node.id),
   );
-  assert.equal(migrator.migrate(serialize(withoutWorker)).equals(current), true);
+  const migratedBaseline = migrator.migrate(serialize(withoutWorker));
+  assert.equal(withoutWatermarkOwnedFields(migratedBaseline).equals(withoutWatermarkOwnedFields(current)), true);
 });
 
 test('migration adds one isolated Journal V2 worker cluster', () => {

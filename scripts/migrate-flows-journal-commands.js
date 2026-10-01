@@ -151,6 +151,13 @@ const dedupeSource = `return (async () => {
     node.error('Pending command has no protected delivery command type', msg);
     return [null, null];
   }
+  const protectedTypes = new Set([
+    'SET_WATERMARK_CALIBRATION',
+    'DELETE_WATERMARK_CALIBRATION',
+    'SET_CHAMELEON_CONFIG',
+    'UPSERT_DEVICE_SOIL_DEPTHS'
+  ]);
+  if (protectedTypes.has(commandType)) return [null, null, msg];
   const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);
   const dbLoad = osiLib.require('osi-db-helper');
   const commandLedgerLoad = osiLib.require('osi-command-ledger');
@@ -473,7 +480,7 @@ const PRIOR_CURRENT_COMMAND_SURFACES = Object.freeze({
   'command-ack-queue-rest': Object.freeze({ func: queueAckSource, libs: osiLibOnly }),
 });
 const expectedCommandShapeHashes = {
-  'command-dedupe-dispatch': 'cac813cf50ef6a3527e5e205ceb4330d4cf18cca15c79c89a86c4f63d867c609',
+  'command-dedupe-dispatch': '6767ddd47edb37a533a22a875c31911df6c28084ff74a504640cc4dcba8ec705',
   'journal-command-apply-fn': '85f1bd8bdae89241b92a609f60b3c28b6a4cf316477367a579df9ade5d6002e1',
   'command-ack-queue-rest': '28368a33749674b0bc1036143c42f98dea5ea10535c437735175e83cc670650e',
 };

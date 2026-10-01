@@ -375,7 +375,10 @@ if (!dedupe || !requireOsiLibContract(
 ) || JSON.stringify(dedupe.wires) !== JSON.stringify([
     ['journal-command-apply-fn'],
     ['9d5e3035c3d069c4'],
+    ['watermark-config-command-apply-fn'],
 ]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
+    !/protectedTypes/.test(dedupe.func || '') ||
+    !/return \[null, null, msg\]/.test(dedupe.func || '') ||
     !/const journalType = \/\(\?:\^\|_\)JOURNAL\(\?:_\|\$\)\//.test(dedupe.func || '') ||
     !/if \(journalType\) \{[\s\S]*osiLib\.require\('osi-journal'\)/.test(dedupe.func || '') ||
     !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
