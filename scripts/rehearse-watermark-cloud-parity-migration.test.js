@@ -22,9 +22,9 @@ function dbWithMigration() {
 
 function setup(db) {
   db.prepare("INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES ('cloud',1,?,?)")
-    .run('0016C001F11715E2', '2026-10-01T10:00:00.000Z');
+    .run('0016C001F1000003', '2026-10-01T10:00:00.000Z');
   db.prepare("INSERT INTO devices(deveui,name,type_id,created_at,updated_at,gateway_device_eui) VALUES (?,?,?,?,?,?)")
-    .run('A84041A171000002', 'Watermark fixture', 'DRAGINO_LSN50', '2026-10-01T10:00:00.000Z', '2026-10-01T10:00:00.000Z', '0016C001F11715E2');
+    .run('A84041A171000002', 'Watermark fixture', 'DRAGINO_LSN50', '2026-10-01T10:00:00.000Z', '2026-10-01T10:00:00.000Z', '0016C001F1000003');
 }
 
 function insertCalibration(db, deletedAt = null, version = 1) {
@@ -59,10 +59,10 @@ test('0068 emits one uppercase gateway-bound live calibration event and leaves r
   assert.equal(event.op, 'WATERMARK_CALIBRATION_UPSERTED');
   assert.equal(event.aggregate_type, 'WATERMARK_CALIBRATION');
   assert.equal(event.aggregate_key, 'A84041A171000002');
-  assert.equal(event.gateway_device_eui, '0016C001F11715E2');
+  assert.equal(event.gateway_device_eui, '0016C001F1000003');
   const payload = JSON.parse(event.payload_json);
   assert.equal(payload.device_eui, 'A84041A171000002');
-  assert.equal(payload.gateway_device_eui, '0016C001F11715E2');
+  assert.equal(payload.gateway_device_eui, '0016C001F1000003');
   assert.equal(payload.deleted_at, null);
   assert.equal(payload.sync_version, 1);
   const before = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;

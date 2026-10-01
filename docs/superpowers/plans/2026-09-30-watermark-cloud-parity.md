@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Work only in `/home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity` and `/home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity`. Do not deploy, access production, or connect to a gateway.
+- Work only in `<osi-os>/.worktrees/watermark-cloud-parity` and `<osi-server>/.worktrees/watermark-cloud-parity`. Do not deploy, access production, or connect to a gateway.
 - Rebase both feature branches onto their current `origin/main` before implementation. At planning time, edge `origin/main` is `1939a04a6d9c`; cloud `origin/main` is `2cbe5e2e6cbd`. Re-run all base-sensitive verifiers after any rebase.
 - The canonical contract lives in `osi-os/docs/contracts/sync-schema/`. Stage cloud acceptance first, but do not let the cloud copy become an independent contract.
 - Cloud must be deployed before an edge build advertises any new capability or emits a WATERMARK calibration event.
@@ -54,7 +54,7 @@
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend
+cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 ./gradlew test --tests org.osi.server.desiredstate.DesiredStateServiceTest
 ```
 
@@ -119,7 +119,7 @@ chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}
 - [ ] Run RED in edge:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node scripts/test-contract-schemas.js
 node scripts/verify-sync-contract.js
 node scripts/verify-sync-op-parity.js
@@ -133,7 +133,7 @@ Expected: new vectors fail because calibration resource/events, staging entries,
 - [ ] Run cloud RED before implementation acceptance:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend
+cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 ./gradlew test --tests org.osi.server.sync.SyncContractVendorTest
 ```
 
@@ -142,8 +142,8 @@ Expected before the cloud fixture/schema changes: missing command/resource defin
 - [ ] Run GREEN: the three edge commands above, the two cloud tests above, and:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity
-EDGE_CONTRACT_ROOT=/home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity sh scripts/verify-edge-sync-contract-vendor.sh
+cd <osi-server>/.worktrees/watermark-cloud-parity
+EDGE_CONTRACT_ROOT=<osi-os>/.worktrees/watermark-cloud-parity sh scripts/verify-edge-sync-contract-vendor.sh
 ```
 
 Expected: all pass; every file covered by the vendor parity script compares byte-for-byte, while command/event staging remains explicit in each runtime's schema and golden fixture.
@@ -181,7 +181,7 @@ protected_command_delivery_fenced
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend
+cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 ./gradlew test --tests org.osi.server.watermark.WatermarkCloudParityMigrationIT --tests org.osi.server.user.LinkedGatewayAccountServiceTest --tests org.osi.server.user.LinkedGatewaySyncServiceTest
 ```
 
@@ -194,7 +194,7 @@ Expected: schema objects and summary fields are absent.
 - [ ] Run GREEN with the RED command, then:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity
+cd <osi-server>/.worktrees/watermark-cloud-parity
 sh scripts/verify-flyway-ordering.sh
 ```
 
@@ -228,7 +228,7 @@ Expected: tests and ordering pass.
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend
+cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 ./gradlew test --tests org.osi.server.sync.WatermarkCalibrationApplierTest --tests org.osi.server.sync.WatermarkCalibrationConvergenceTest --tests org.osi.server.sync.EdgeSyncServiceBootstrapTest --tests org.osi.server.sync.EdgeBootstrapRequestDeserializationTest --tests org.osi.server.sync.SyncApplierRegistryTest --tests org.osi.server.sync.SyncOpCoverageTest
 ```
 
@@ -267,7 +267,7 @@ Expected: no applier/dispatch/bootstrap field exists.
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend
+cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 ./gradlew test --tests org.osi.server.device.DeviceConfigurationCommandAuthorizerTest --tests org.osi.server.watermark.WatermarkCalibrationCommandServiceTest --tests org.osi.server.watermark.WatermarkCalibrationControllerTest
 ```
 
@@ -321,7 +321,7 @@ Expected: classes/endpoints do not exist.
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend
+cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 ./gradlew test --tests org.osi.server.device.DeviceConfigurationCommandServiceTest --tests org.osi.server.device.DeviceControllerTest --tests org.osi.server.device.DeviceServiceTest --tests org.osi.server.command.CommandLeaseServiceTest --tests org.osi.server.command.CommandLeaseServiceIT --tests org.osi.server.command.CommandLeaseServicePostgresTest --tests org.osi.server.command.CommandServiceTest --tests org.osi.server.command.GatewayCommandDeliveryFenceServiceTest --tests org.osi.server.command.GatewayCommandDeliveryFenceControllerTest --tests org.osi.server.user.LinkedGatewayAccountServiceTest
 ```
 
@@ -364,7 +364,7 @@ Expected: current endpoints mutate the cloud `Device` immediately and return 200
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node --test scripts/rehearse-watermark-cloud-parity-migration.test.js
 node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.test.js
 ```
@@ -420,7 +420,7 @@ Expected: all pass.
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.test.js
 node scripts/test-watermark-cloud-command-auth.js
 ```
@@ -479,7 +479,7 @@ Advertising means the corresponding exact-base applier and route are installed, 
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node scripts/test-watermark-cloud-command-path.js
 node scripts/test-protected-config-command-dispatch.js
 node scripts/test-watermark-calibration-bootstrap.js
@@ -535,7 +535,7 @@ Expected: all pass.
 - [ ] Run cloud RED first:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend
+cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 ./gradlew test --tests org.osi.server.mqtt.MqttMessageRouterTest --tests org.osi.server.device.DeviceServiceTest --tests org.osi.server.device.DeviceControllerTest
 ```
 
@@ -549,7 +549,7 @@ Expected: the forwarded branch uses the three-argument writer and LSN50 response
 - [ ] Run edge RED:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node scripts/test-watermark-ingest-flow.js
 node scripts/test-watermark-contact-payload.js
 ```
@@ -594,7 +594,7 @@ Expected: edge emits no FPort 11 contact.
 - [ ] Run RED:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/frontend
+cd <osi-server>/.worktrees/watermark-cloud-parity/frontend
 npx vitest run --environment jsdom src/components/farming/__tests__/WatermarkCalibrationPanel.test.tsx src/components/farming/__tests__/DraginoCard.watermark.test.tsx src/contexts/__tests__/gatewayCapabilities.watermark.test.ts src/channels/__tests__/registry.test.ts
 cd ../backend
 ./gradlew test --tests org.osi.server.history.HistoryCardServiceTest --tests org.osi.server.analysis.AnalysisCatalogServiceTest
@@ -610,7 +610,7 @@ Expected: API types/components/capability helpers are absent or current labels a
 - [ ] Run GREEN with the RED commands, then:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/frontend
+cd <osi-server>/.worktrees/watermark-cloud-parity/frontend
 npx tsc --noEmit
 npm run test:unit
 npm run build
@@ -640,18 +640,18 @@ Expected: all pass; only one frontend build runs.
 - [ ] Re-run the sanctioned seed builder used first in Task 7 so the final rebased migration set, not an earlier intermediate tree, stamps every bundled database:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node scripts/build-seed-db.js
 ```
 
 Expected: seven images written from one verified ledger-bearing image.
 
 - [ ] Document the three capability tokens, two events, four commands, exact effect keys, cloud-first rollout order, contact/measurement timestamp split, raw-data exclusion, and scheduler interlock. Add a “Cloud parity evidence” checklist to `watermark-field-qualification.md` that records the confirmed calibration version, pending/applied command state, contact and measurement times, and absence of raw diagnostics; it must state that these records do not qualify samples for scheduler use. Mark the old Phase 2/3 plans historical; do not restate them as executable alternatives.
-- [ ] Create `WatermarkCloudParityReconciliationIT` as the deployment-free cross-slice test. Prove: calibration saved before link arrives by bootstrap; a retained tombstone supplies the next base; ACK without mirror stays pending; mirror without ACK stays pending; later replay plus mirror applies; and a downgraded gateway cannot receive new work. Run `cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity/backend && ./gradlew test --tests org.osi.server.sync.WatermarkCloudParityReconciliationIT`; expected: PASS before the full suites below.
+- [ ] Create `WatermarkCloudParityReconciliationIT` as the deployment-free cross-slice test. Prove: calibration saved before link arrives by bootstrap; a retained tombstone supplies the next base; ACK without mirror stays pending; mirror without ACK stays pending; later replay plus mirror applies; and a downgraded gateway cannot receive new work. Run `cd <osi-server>/.worktrees/watermark-cloud-parity/backend && ./gradlew test --tests org.osi.server.sync.WatermarkCloudParityReconciliationIT`; expected: PASS before the full suites below.
 - [ ] Run complete edge verification:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node scripts/verify-sync-contract.js
 node scripts/test-contract-schemas.js
 node scripts/verify-sync-op-parity.js
@@ -694,9 +694,9 @@ Expected: every command exits zero; both profile payloads and all seven seeds ag
 - [ ] Run complete cloud verification:
 
 ```bash
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity
+cd <osi-server>/.worktrees/watermark-cloud-parity
 sh scripts/verify-flyway-ordering.sh
-EDGE_CONTRACT_ROOT=/home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity sh scripts/verify-edge-sync-contract-vendor.sh
+EDGE_CONTRACT_ROOT=<osi-os>/.worktrees/watermark-cloud-parity sh scripts/verify-edge-sync-contract-vendor.sh
 cd backend
 ./gradlew test
 ./gradlew build
@@ -711,10 +711,10 @@ Expected: every command exits zero. If `origin/main` acquired a newer migration,
 - [ ] Run documentation and whitespace checks:
 
 ```bash
-cd /home/phil/Repos/osi-os/.worktrees/watermark-cloud-parity
+cd <osi-os>/.worktrees/watermark-cloud-parity
 node .claude/skills/anti-slop-writing/slop-check.js docs/superpowers/plans/2026-09-30-watermark-cloud-parity.md docs/superpowers/specs/2026-09-30-watermark-cloud-parity-design.md docs/contracts/sync-schema/README.md docs/superpowers/plans/2026-09-29-watermark-deferred-work.md docs/operations/watermark-field-qualification.md AGENTS.md
 git diff --check origin/main --
-cd /home/phil/Repos/osi-server/.worktrees/watermark-cloud-parity
+cd <osi-server>/.worktrees/watermark-cloud-parity
 git diff --check origin/main --
 ```
 

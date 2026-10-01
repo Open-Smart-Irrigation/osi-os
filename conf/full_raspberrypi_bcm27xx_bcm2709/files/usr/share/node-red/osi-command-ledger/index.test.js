@@ -449,7 +449,7 @@ test('protected configuration rejects a runtime gateway mismatch and accepts a n
   const runtime = watermarkRuntime({
     ...watermarkBinding(),
     actor_user_uuid: envelope.payload.actor_user_uuid,
-    gateway_device_eui: '0016C001F11715E3',
+    gateway_device_eui: '0016C001F1000004',
   });
   await assert.rejects(
     ledger.deduplicatePendingCommand(db, envelope, runtime),
@@ -643,7 +643,7 @@ test('protected configuration accepts a changed command ID only for the same bin
 test('protected configuration rejects every changed binding or intent without mutation', async (t) => {
   for (const [name, change] of [
     ['actor', { actor_user_uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }],
-    ['gateway', { gateway_device_eui: '0016C001F11715E3' }],
+    ['gateway', { gateway_device_eui: '0016C001F1000004' }],
     ['device', { resource_id: 'A84041A171000003' }],
     ['base', { base_sync_version: 5 }],
     ['operation', { operation: 'delete' }],
