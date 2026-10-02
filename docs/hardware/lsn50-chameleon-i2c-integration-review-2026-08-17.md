@@ -4,7 +4,7 @@
 **Status:** Analysis only. No firmware or hardware changes are authorized by this document.
 **Scope:** Root-cause the three fielded topologies, audit every exposed LSN50 v2.3(a) pin/net, evaluate candidate architectures, and define the recommended design, firmware contract, test plan, and go/no-go gates.
 **Supersedes:** `docs/hardware/lsn50-chameleon-i2c-architecture-analysis.md` (untracked draft from 2026-08-15; contains unsourced claims and wrong document numbers — do not cite it).
-**Extends:** `docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md` (field data used here as evidence).
+**Extends:** the field incident analysis in `docs/hardware/chameleon-reference.md` (field data used here as evidence).
 
 Every statement is tagged: **[F]** fact verified against a primary source or repo code, **[I]** inference from tagged facts, **[U]** unknown / not yet measured. Citations use the short names in the source table.
 

@@ -146,6 +146,19 @@ sentinels above are present. Better to publish a "device error" telemetry
 event than to publish `10000 kΩ` and let the server convert it to a wildly
 negative tension.
 
+### Field incident: reader powered from a different rail than the bus
+
+On one field gateway, a Chameleon reader wired to the LSN50 I2C pins and
+powered from the +5 V rail returned `i2c_missing` on 44.2% of uplinks between
+17 and 28 June 2026, in blocks rather than at random; the longest block ran
+48.41 h. LoRaWAN delivery was complete the whole time, so the gap was in
+acquisition, not in transport. After the reader supply moved to LSN50 `VDD`,
+the same rail as the bus pull-ups, all 31 uplinks in the next 30 minutes
+carried valid readings with no `i2c_missing`.
+
+The rule that follows: with SDA and SCL on the STM32 pins, power the reader
+from `VDD`. A 5 V supply needs isolation or level shifting on both bus lines.
+
 ---
 
 ## 5. Resistance → soil-water tension conversion

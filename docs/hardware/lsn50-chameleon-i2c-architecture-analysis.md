@@ -38,7 +38,7 @@ Every load-bearing claim below is labeled **F** (fact, with citation), **I** (in
 | EVE ER18505 cell datasheet; EVE SPC1520 battery-capacitor | 2015; ed. 2 | `scratchpad/er18505.pdf`, `spc1520.pdf` |
 | VIA vendor reference library | as shipped | `/home/phil/kDrive/OSI OS/Hardware/Chameleon/VIAChameleonI2CMaster/` |
 | OSI firmware branches | `feature/chameleon-i2c-reader`, `feature/chameleon-v1.5`, `feature/chameleon-v1.6-switched-i2c2` | `Project-OSI/LoRa_STM32` |
-| Field data | 2026-06-28 outage analysis | `docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md` |
+| Field data | Field incident analysis | `docs/hardware/chameleon-reference.md` (section "Field incident: reader powered from a different rail than the bus") |
 
 All scratchpad-referenced documents are archived durably at `/home/phil/kDrive/OSI OS/Hardware/Chameleon/datasheets-2026-08-15/` (schematic, silkscreen, manual v1.7.4, DS10689, RM0376, ES0292, UM10204, ER18505, SPC1520, v2 pin drawing).
 
