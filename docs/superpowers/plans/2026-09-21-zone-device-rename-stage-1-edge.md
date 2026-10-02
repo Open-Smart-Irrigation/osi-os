@@ -2703,7 +2703,7 @@ function token(identity) {
 
 function linkCloud(db) {
   db.exec("INSERT OR REPLACE INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) "
-    + "VALUES ('cloud', 1, '0016C001F11715E2', datetime('now'))");
+    + "VALUES ('cloud', 1, '0016C001F1000001', datetime('now'))");
 }
 
 async function callRoute(db, env, options) {
@@ -3450,7 +3450,7 @@ function token(identity) {
 
 function linkCloud(db) {
   db.exec("INSERT OR REPLACE INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) "
-    + "VALUES ('cloud', 1, '0016C001F11715E2', datetime('now'))");
+    + "VALUES ('cloud', 1, '0016C001F1000001', datetime('now'))");
 }
 
 async function callRoute(db, env, options, chirpstack) {
@@ -4114,7 +4114,7 @@ const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROFILES = ['bcm2712', 'bcm2709'];
-const GATEWAY_EUI = '0016C001F11715E2';
+const GATEWAY_EUI = '0016C001F1000001';
 const DEVICE_EUI = 'AABBCCDDEEFF0011';
 const ZONE_UUID = '11111111-1111-4111-8111-111111111111';
 
@@ -4983,7 +4983,7 @@ Then, immediately before the final `if (!ok) process.exit(1);` block, add:
 
 ```js
 const NAME_ACTOR = '12345678-1234-4234-8234-123456789abc';
-const NAME_GATEWAY = '0016C001F11715E2';
+const NAME_GATEWAY = '0016C001F1000001';
 const NAME_REQUESTED_AT = '2026-09-21T10:00:00.000Z';
 const validDeviceName = {
     command_type: 'UPSERT_DEVICE_NAME',
@@ -5058,7 +5058,7 @@ expectValid(
 expectValid(
     'a Device resource with a 101-character name stays valid',
     resourcesSchema.definitions.Device,
-    { deveui: '0016C001F11715E2', type_id: 'DRAGINO_LSN50', name: 'a'.repeat(101) },
+    { deveui: '0016C001F1000001', type_id: 'DRAGINO_LSN50', name: 'a'.repeat(101) },
     resourcesSchema
 );
 ```
@@ -5301,7 +5301,7 @@ const {
 
 const AUTH_SECRET = 'entity-name-create-paths-test-secret';
 const FLAG_OFF = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' };
-const FLAG_ON = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '1', DEVICE_EUI: '0016C001F11715E2' };
+const FLAG_ON = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '1', DEVICE_EUI: '0016C001F1000001' };
 const OWNER = { userId: 2, username: 'res1' };
 const BAD_NAMES = [
   ['empty', '', 'name_empty'],
@@ -5847,7 +5847,7 @@ const { executeFunction, loadNode } = require('./lib/scoped-access-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
-const GATEWAY = '0016C001F11715E2';
+const GATEWAY = '0016C001F1000001';
 const ZONE_UUID = '44444444-4444-4444-8444-444444444444';
 const USER_UUID = '55555555-5555-4555-8555-555555555555';
 

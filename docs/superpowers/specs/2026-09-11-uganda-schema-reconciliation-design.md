@@ -488,7 +488,7 @@ audit numbers in §2 are accurate.
   requires a SEPARATE, explicit go-ahead after this design's adversarial
   review clears.
 - It does not decide the sync-outbox trigger literal issue (the hardcoded
-  Silvan EUI fallback `'0016C001F11715E2'` visible in the generated artifact's
+  the customer test gateway EUI fallback `'0016C001F11715E2'` visible in the generated artifact's
   `trg_sync_devices_defaults_ai`/`trg_dp_device_data_outbox_ai` bodies above) -
   that is pre-existing, sourced verbatim from reference(1) exactly as the
   catch-up artifact already does, and already analyzed in the original

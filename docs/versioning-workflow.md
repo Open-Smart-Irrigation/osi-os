@@ -160,7 +160,7 @@ Cloud environments:
 | Role | Host |
 |------|------|
 | Production | `osicloud.ch` |
-| Test | `server.opensmartirrigation.org` (`57.129.7.196`) |
+| Test | `server.opensmartirrigation.org` (`<test-host-address>`) |
 
 Do not store production SSH credentials, private keys, or host aliases in this repo or local agent memory. Use an ephemeral SSH key supplied for the specific rollout.
 
@@ -169,10 +169,10 @@ Run the deploy through SSH with the rollout key. Replace the host with the selec
 ```bash
 # Test host shown. Production (osicloud.ch) needs explicit consent in the current
 # conversation; see AGENTS.md "Production cloud access".
-ssh -i /path/to/ephemeral-key rocky@server.opensmartirrigation.org <<'REMOTE'
+ssh -i /path/to/ephemeral-key <user>@server.opensmartirrigation.org <<'REMOTE'
 set -e
-git -C /home/rocky/docker/osi-server pull --ff-only origin main
-cd /home/rocky/docker/osi-server/docker
+git -C /home/<user>/docker/osi-server pull --ff-only origin main
+cd /home/<user>/docker/osi-server/docker
 docker compose build backend
 docker compose up -d backend
 docker logs osi-backend 2>&1 | grep -E "Started|ERROR" | tail -5

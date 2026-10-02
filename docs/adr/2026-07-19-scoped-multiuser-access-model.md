@@ -10,7 +10,7 @@
 
 OSI OS was designed as a single-farm appliance: one gateway, one farm, a handful of trusted local accounts. The `users` table has no role column, and HTTP handlers authenticate the Bearer token but do not authorize per resource.
 
-The Agroscope deployment (AgroLink) changes the shape: one shared Pi 5 hub serves 20–30 researcher accounts that must each see and operate only their own trials. Researchers get direct control of valves and schedules inside their scope, plus device provisioning and zone creation. Shared environmental data (weather-class devices) stays readable by all; the gateway itself is admin-only. The same scoped model must hold on osi-server, because researchers also get cloud access.
+The partner institute's deployment (a customer deployment) changes the shape: one shared Pi 5 hub serves 20–30 researcher accounts that must each see and operate only their own trials. Researchers get direct control of valves and schedules inside their scope, plus device provisioning and zone creation. Shared environmental data (weather-class devices) stays readable by all; the gateway itself is admin-only. The same scoped model must hold on osi-server, because researchers also get cloud access.
 
 A capacity analysis ruled out the database as a constraint: sensor write load sits far inside SQLite's WAL envelope, and swapping databases would break `osi-migrate` and the single-file backup model. The real database constraint is topological — all access serializes through one facade queue (see the hub-hardening spec) — and the real functional gap is authorization.
 
@@ -24,7 +24,7 @@ Adopt scoped multi-user access as an opt-in edge capability:
 2. **Access is the union of ownership and grants.** Shipped single-owner columns (`irrigation_zones.user_id`, `journal_plots.owner_user_uuid`, …) keep their meaning; grants widen access without migrating ownership. Three roles (`admin`, `researcher`, `viewer`) decide action class; scope decides which resources.
 3. **Enforcement is server-side and split by risk.** Read paths use a short-lived scope cache; physical-effect and privilege paths (valves, schedules, provisioning, account/grant management, database download) use uncached membership checks and read `disabled_at` synchronously, so revocation is immediate where it matters. Out-of-scope resources answer 404 (anti-enumeration), wrong-role actions 403. Scheduler-originated actuation is an internal, unforgeable execution path whose schedules are disabled when the owning account loses scope.
 4. **Everything propagates through new migration-owned triggers.** New aggregates (`USER`, `USER_ZONE_ASSIGNMENT`, `USER_PLOT_ASSIGNMENT`) get triggers delivered by migration + seed + the `MIGRATION_OWNED_TRIGGERS` allowlist, never the boot node. No existing trigger body changes; that route would force the frozen-boot-node merge gate and is treated as design failure.
-5. **Edge-authoritative, contract-first.** The cloud deploys acceptance for the new aggregates before any edge producer emits ("schema installed" split from "events emitted"). Grants are edge-admin-originated in v1. On the cloud, AgroLink role and enabled state are **per-gateway membership** on the `LinkedGatewayAccount` axis (cloud user ↔ gateway EUI ↔ local user_uuid); the global `User.role` is untouched, so privilege never leaks across gateways.
+5. **Edge-authoritative, contract-first.** The cloud deploys acceptance for the new aggregates before any edge producer emits ("schema installed" split from "events emitted"). Grants are edge-admin-originated in v1. On the cloud, customer-instance role and enabled state are **per-gateway membership** on the `LinkedGatewayAccount` axis (cloud user ↔ gateway EUI ↔ local user_uuid); the global `User.role` is untouched, so privilege never leaks across gateways.
 6. **Feature-flagged, default off** (`OSI_SCOPED_ACCESS`). Existing deployments keep their current authorization behavior. Bootstrap is a registration-time rule: the first registration on a scoped hub with zero admins becomes admin in one transaction, after which public registration closes and account creation is admin-only. Deploy-time backfill covers only the in-place upgrade path.
 
 ## Consequences
@@ -38,10 +38,10 @@ Adopt scoped multi-user access as an opt-in edge capability:
 
 ## Alternatives considered
 
-- **Cloud-only user model (hub stays single-account).** Rejected: AgroLink requires on-LAN operation with offline tolerance, and edge-authoritative actuation means cloud-issued permissions would be unenforceable during outages.
+- **Cloud-only user model (hub stays single-account).** Rejected: the research-institute deployment requires on-LAN operation with offline tolerance, and edge-authoritative actuation means cloud-issued permissions would be unenforceable during outages.
 - **DB-level enforcement (views, per-connection context).** Rejected: SQLite has no session user, and all access funnels through one facade queue with no per-request context to key on.
 - **External authorization proxy in front of Node-RED.** Rejected: duplicates knowledge of the whole API surface in a second service and breaks the single-embedded-service model.
-- **Multi-farm tenancy on one gateway.** Rejected: farm/zone/sync aggregates assume one tenant; that is a rewrite, and AgroLink needs scoped users, not scoped farms.
+- **Multi-farm tenancy on one gateway.** Rejected: farm/zone/sync aggregates assume one tenant; that is a rewrite, and that deployment needs scoped users, not scoped farms.
 - **Editing existing sync triggers in migrations (v1 approach).** Rejected by repo invariant: the frozen boot node recreates trigger bodies every restart, silently reverting migration edits.
 
 ## Flip conditions

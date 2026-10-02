@@ -17,12 +17,12 @@ Do not re-derive the findings — evidence trails are linked. Verify claims only
 
 | Plan | Scope | State |
 |---|---|---|
-| `docs/superpowers/plans/2026-07-11-mobile-history-review-fixes.md` | 13 tasks fixing the 2026-07-11 live mobile review findings: 12 frontend (react-gui only), Task 5 backend (helper + router call site, both profiles), Task 13 live kaba100 verification | Written, not executed |
+| `docs/superpowers/plans/2026-07-11-mobile-history-review-fixes.md` | 13 tasks fixing the 2026-07-11 live mobile review findings: 12 frontend (react-gui only), Task 5 backend (helper + router call site, both profiles), Task 13 live demo-gateway verification | Written, not executed |
 | `docs/superpowers/plans/2026-07-11-rollup-hardening.md` | 5 tasks: `rollupRowsToResult` invariant guard + contract docs, multi-device merged-scope golden tests, coverage-denominator clamp at `now`, expose `aggregation.source` on the card-data payload, draft P1/P2 decision entries | Written, not executed |
 
-Supporting evidence: review findings + verification history in a field test's issue list (archived privately) (pre-existing) and the analysis summarized in the hardening plan's header; screenshots `/home/phil/playwright-osi/screenshots-mobile-gesture-review-2026-07-11/`; reusable CDP gesture driver `/home/phil/playwright-osi/mobile-gesture-suite/`.
+Supporting evidence: review findings + verification history in a field test's issue list (archived privately, pre-existing) and the analysis summarized in the hardening plan's header; screenshots `/home/phil/playwright-osi/screenshots-mobile-gesture-review-2026-07-11/`; reusable CDP gesture driver `/home/phil/playwright-osi/mobile-gesture-suite/`.
 
-Facts you can rely on without re-checking (verified 2026-07-11): `osi-history-helper/index.js` is byte-identical on `main`, `feat/refactor-and-forge-handoff`, and across both profile mirrors; the suspected rollup overwrite bug does **not** exist (merged cards store union aggregates under one `logical_source_key`; confirmed live on kaba100); rollup write/read paths are tested in `scripts/test-history-helper.js` but only with single-device scopes.
+Facts you can rely on without re-checking (verified 2026-07-11): `osi-history-helper/index.js` is byte-identical on `main`, `feat/refactor-and-forge-handoff`, and across both profile mirrors; the suspected rollup overwrite bug does **not** exist (merged cards store union aggregates under one `logical_source_key`; confirmed live on the demo gateway); rollup write/read paths are tested in `scripts/test-history-helper.js` but only with single-device scopes.
 
 ## Hard sequencing constraint (the reason this intake exists)
 
@@ -34,7 +34,7 @@ Facts you can rely on without re-checking (verified 2026-07-11): `osi-history-he
 
 DD4 requires vectors captured **before** extraction; captured too early they enshrine the buggy interpretation output, the future-inflated coverage denominators, and the pre-`source` payload shape — 4.2 would then freeze bugs as the contract. 2.2 and 2.4 are done and 4.2 is next in the DD4 order with spec+plan ready, so this is a live constraint, not theoretical. Inside that boundary the natural order is: **mobile plan → hardening plan → 4.2** (hardening Task 3 assumes mobile Task 5 landed; both plans document the alternative order if you choose it).
 
-Secondary interaction: mobile plan Tasks 1–4 and 6–12 are react-gui-only and conflict with nothing in the program; they can precede everything else whenever a deploy window to kaba100 exists (Task 13 rides the runbook deploy flow).
+Secondary interaction: mobile plan Tasks 1–4 and 6–12 are react-gui-only and conflict with nothing in the program; they can precede everything else whenever a deploy window to the demo gateway exists (Task 13 rides the runbook deploy flow).
 
 ## Decision points needing adjudication
 

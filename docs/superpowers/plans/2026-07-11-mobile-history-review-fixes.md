@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix the 7 bugs and visual-polish issues found in the 2026-07-11 live mobile review of the kaba100 History UI (calendar touch hijack, stuck tooltips, missing i18n keys, dendro line-chart scales, calendar future handling, invisible reboot button, chart label collisions).
+**Goal:** Fix the 7 bugs and visual-polish issues found in the 2026-07-11 live mobile review of the demo gateway History UI (calendar touch hijack, stuck tooltips, missing i18n keys, dendro line-chart scales, calendar future handling, invisible reboot button, chart label collisions).
 
-**Architecture:** Almost entirely frontend (`web/react-gui`), one small backend slice (the `data-coverage-gap` interpretation rule in `osi-history-helper` + its `flows.json` caller, mirrored across both Pi profiles). Each fix is an independent task with its own tests. The final task is a live re-verification pass on kaba100 using the same Playwright CDP-touch driver as the review.
+**Architecture:** Almost entirely frontend (`web/react-gui`), one small backend slice (the `data-coverage-gap` interpretation rule in `osi-history-helper` + its `flows.json` caller, mirrored across both Pi profiles). Each fix is an independent task with its own tests. The final task is a live re-verification pass on the demo gateway using the same Playwright CDP-touch driver as the review.
 
 **Tech Stack:** React 18 + TypeScript + Recharts + Tailwind (vite build), vitest + @testing-library/react, Node-RED function nodes calling `osi-history-helper` (plain Node, tested via `scripts/test-history-helper.js`).
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **NEVER overwrite or reseed `/data/db/farming.db` on kaba100** (AGENTS.md live-deploy safety rules). Task 13's deploy uses the guarded `deploy.sh` flow / static GUI tar only.
+- **NEVER overwrite or reseed `/data/db/farming.db` on the demo gateway** (AGENTS.md live-deploy safety rules). Task 13's deploy uses the guarded `deploy.sh` flow / static GUI tar only.
 - Any edit to `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json` or `.../osi-history-helper/index.js` **must be mirrored** to `conf/full_raspberrypi_bcm2709/files/usr/share/...`, followed by `node scripts/verify-profile-parity.js` (22 checks must pass).
 - Before editing `flows.json`, load the `osi-flows-json-editing` skill. Before Task 13 (live Pi work), load the `osi-live-ops-runbook` skill.
 - Frontend tests: `cd web/react-gui && npx vitest run <path>`. Full suite before the final commit of each frontend task: `cd web/react-gui && npm run test:unit:vitest`.
@@ -1248,11 +1248,11 @@ git commit -m "fix(gui): reboot button uses danger foreground token, was white-o
 
 ---
 
-### Task 13: Live verification on kaba100
+### Task 13: Live verification on the demo gateway
 
 **Prerequisite: load the `osi-live-ops-runbook` skill and follow it exactly (backup, deploy flow, BusyBox traps, post-checks). Never touch `/data/db/farming.db`.**
 
-**Files:** none in-repo (live verification). Driver scripts: `/home/phil/playwright-osi/mobile-gesture-suite/{lib.js,step2-gestures.js,step4-remaining.js}` (CDP touch-synthesis suite from the 2026-07-11 review — `lib.js` exposes `login/pinch/drag/swipe/twoFingerSwipe/longPress/doubleTap` against `http://100.93.68.86:1880`).
+**Files:** none in-repo (live verification). Driver scripts: `/home/phil/playwright-osi/mobile-gesture-suite/{lib.js,step2-gestures.js,step4-remaining.js}` (CDP touch-synthesis suite from the 2026-07-11 review — `lib.js` exposes `login/pinch/drag/swipe/twoFingerSwipe/longPress/doubleTap` against `http://100.x.y.z:1880`).
 
 - [ ] **Step 1: Full test + build gate**
 
@@ -1262,17 +1262,17 @@ node scripts/verify-profile-parity.js && node scripts/test-history-helper.js && 
 ```
 Expected: everything passes.
 
-- [ ] **Step 2: Deploy to kaba100**
+- [ ] **Step 2: Deploy to the demo gateway**
 
 - If Task 5 (flows/helper) is included in this deploy: use the full runbook reverse-tunnel `deploy.sh` flow (download-then-run form), then `/etc/init.d/node-red restart`.
 - If deploying GUI-only: `tar czf react_gui.tar.gz -C web/react-gui/build .` and extract into `/usr/lib/node-red/gui/` per the runbook's static-deploy pattern.
 - Post-checks per runbook: GUI bundle hash changed, `farming.db` row count not decreased, `:1880/gui` → 301, `export.csv` → 401.
 
-- [ ] **Step 3: Create the temporary review user (established kaba100 pattern)**
+- [ ] **Step 3: Create the temporary review user (established demo-gateway pattern)**
 
 ```bash
-curl -s -X POST http://100.93.68.86:1880/auth/register -H 'Content-Type: application/json' -d '{"username":"playwright","password":"osireview2026"}'
-ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes root@100.93.68.86 '
+curl -s -X POST http://100.x.y.z:1880/auth/register -H 'Content-Type: application/json' -d '{"username":"playwright","password":"<review-account password>"}'
+ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes root@100.x.y.z '
 PID=$(sqlite3 /data/db/farming.db "SELECT id FROM users WHERE username='"'"'playwright'"'"';")
 sqlite3 /data/db/farming.db "UPDATE irrigation_zones SET user_id=$PID WHERE id IN (3,12);"
 sqlite3 /data/db/farming.db "UPDATE devices SET user_id=$PID WHERE irrigation_zone_id IN (3,12);"'
@@ -1300,7 +1300,7 @@ sqlite3 /data/db/farming.db "UPDATE devices SET user_id=$PID WHERE irrigation_zo
 - [ ] **Step 5: Restore and clean up (mandatory)**
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes root@100.93.68.86 '
+ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes root@100.x.y.z '
 sqlite3 /data/db/farming.db "UPDATE irrigation_zones SET user_id=2 WHERE id IN (3,12);"
 sqlite3 /data/db/farming.db "UPDATE devices SET user_id=2 WHERE irrigation_zone_id IN (3,12);"
 sqlite3 /data/db/farming.db "DELETE FROM users WHERE username='"'"'playwright'"'"';"
@@ -1310,18 +1310,18 @@ Expected: final count `0`; zones/devices back on `user_id=2`.
 
 - [ ] **Step 6: Record results + commit any doc updates**
 
-Append a dated verification section to `docs/ux/history-data-visualization-kaba100-issues.md` (pass/fail per checklist row, screenshot paths, served bundle hash), then:
+Append a dated verification section to the field test's issue list (archived privately), with pass/fail per checklist row, screenshot paths and served bundle hash, then:
 
 ```bash
-git add docs/ux/history-data-visualization-kaba100-issues.md
-git commit -m "docs: record 2026-07 mobile gesture fix verification on kaba100"
+git add <the field test's issue list (archived privately)>
+git commit -m "docs: record 2026-07 mobile gesture fix verification on the demo gateway"
 ```
 
 ---
 
 ## Explicitly deferred (needs its own spec/plan — do NOT bundle into this one)
 
-1. **Environment "All sources" per-source series split.** The merged single `ext_temperature_c` series interleaves Temp1 (~22 °C) and Dendro1 (~24.5 °C) into a false sawtooth. Splitting per source touches the raw aggregation path, the rollup read path, CSV expectations, and both profiles. **Analysis 2026-07-11 (follow-up):** the suspected "rollup overwrite bug" in `rollupRowsToResult` does **not** exist in current behavior — merged cards write ONE combined-aggregate row per bucket/channel under a single `logical_source_key` (`microclimate`/`root-zone`), verified live on kaba100 (2026-07-09 daily env bucket: mean 24.028 = union mean of both devices, sample_count 144 = 72+72). However `rollupRowsToResult` keys `bucket.series` by `channel_id` only, so it *silently drops data if ever fed rows spanning multiple source keys* — an unguarded invariant that becomes a real bug the moment this per-source split adds per-source rollup rows. The spec for this item must extend the read path (and add a guard/test for the invariant) as part of the design, and note the rollup functions currently have zero coverage in the co-located `index.test.js` (refactor item 1.A3).
+1. **Environment "All sources" per-source series split.** The merged single `ext_temperature_c` series interleaves Temp1 (~22 °C) and Dendro1 (~24.5 °C) into a false sawtooth. Splitting per source touches the raw aggregation path, the rollup read path, CSV expectations, and both profiles. **Analysis 2026-07-11 (follow-up):** the suspected "rollup overwrite bug" in `rollupRowsToResult` does **not** exist in current behavior — merged cards write ONE combined-aggregate row per bucket/channel under a single `logical_source_key` (`microclimate`/`root-zone`), verified live on the demo gateway (2026-07-09 daily env bucket: mean 24.028 = union mean of both devices, sample_count 144 = 72+72). However `rollupRowsToResult` keys `bucket.series` by `channel_id` only, so it *silently drops data if ever fed rows spanning multiple source keys* — an unguarded invariant that becomes a real bug the moment this per-source split adds per-source rollup rows. The spec for this item must extend the read path (and add a guard/test for the invariant) as part of the design, and note the rollup functions currently have zero coverage in the co-located `index.test.js` (refactor item 1.A3).
 2. **Dashboard header layout** (Account button beside an empty grid slot) — plausibly intentional; needs a product call before touching.
 3. **Zone selector ordering** on `/history` (Zone B listed/selected before Zone A) — ordering comes from the zones API; decide sort-by-name vs meaningful order first.
 4. **Inspector value display** — the long-press inspector shows timestamp/source/coverage but not the measured value at that timestamp; a nice-to-have needing UX input.

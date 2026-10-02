@@ -2,164 +2,98 @@
   "entries": [
     {
       "path": ".claude/skills/osi-agronomy-sensors-reference/SKILL.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
+      "max": 2,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": ".claude/skills/osi-config-and-flags/SKILL.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     },
     {
       "path": ".claude/skills/osi-flows-json-editing/SKILL.md",
       "max": 8,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     },
     {
       "path": ".claude/skills/osi-live-ops-runbook/SKILL.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
+      "max": 1,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": ".claude/skills/osi-schema-change-control/SKILL.md",
-      "max": 8,
-      "reason": "baseline, removed by the documentation run",
+      "max": 2,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": ".github/workflows/field-journal.yml",
       "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": ".github/workflows/verify-sync-flow.yml",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "AGENTS.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "analysis/farming-db/README.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "analysis/farming-db/gateways.example.tsv",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "analysis/refactor-program-2026/expert-iot-edge.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/adr/2026-07-19-scoped-multiuser-access-model.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/architecture/closed-loop-rdi-controller-design.md",
-      "max": 7,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/architecture/per-zone-weather-source-design.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/architecture/per-zone-weather-source-plan-cloud.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/architecture/refactor-program-2026-intake-2026-07-11.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/architecture/refactor-program-2026-open-decisions.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "docs/architecture/refactor-program-2026.md",
-      "max": 8,
-      "reason": "baseline, removed by the documentation run",
+      "max": 3,
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     },
     {
       "path": "docs/architecture/system-map-technical/02-edge-gateway.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     },
     {
       "path": "docs/architecture/system-map-technical/03-edge-backend-flows.md",
       "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/architecture/system-map-technical/04-edge-database.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "docs/architecture/system-map-technical/07-cloud-server.md",
-      "max": 6,
-      "reason": "baseline, removed by the documentation run",
+      "max": 5,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "docs/architecture/system-map-technical/08-operations.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "docs/architecture/system-map/03-edge-backend-flows.md",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
+      "max": 2,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "docs/architecture/system-map/07-cloud-server.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
+      "max": 4,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "docs/architecture/system-map/08-operations.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
+      "max": 1,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 380
     },
     {
       "path": "docs/chameleon-integration.md",
-      "max": 15,
-      "reason": "baseline, removed by the documentation run",
+      "max": 5,
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     },
     {
@@ -193,75 +127,9 @@
       "issue": 380
     },
     {
-      "path": "docs/devices/dragino-sdi12.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/hardware/chameleon-reference.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/hardware/lsn50-chameleon-i2c-architecture-analysis.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/hardware/lsn50-chameleon-i2c-integration-review-2026-08-17.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/deploy-canary-gate-runbook.md",
-      "max": 6,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/deploying-over-a-flaky-link.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/edge-history-retention.md",
-      "max": 6,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/lsn50-writer-cutover-runbook.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/node-red-log-capture-verification.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/sentek-dragino-sdi12-commissioning-2026-08-31.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/uganda-catchup-rehearsal-20260911-report.md",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/operations/uganda-catchup-runbook.md",
-      "max": 16,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     },
     {
@@ -291,12 +159,6 @@
     {
       "path": "docs/superpowers/plans/2026-07-05-gateway-health-persistence.md",
       "max": 31,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-05-option-b-boot-path-cutover.md",
-      "max": 7,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -397,18 +259,6 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/plans/2026-07-11-mobile-history-review-fixes.md",
-      "max": 14,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-11-rollup-hardening.md",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/plans/2026-07-12-narrow-waist-uc512-plan.md",
       "max": 3,
       "reason": "baseline, removed by the documentation run",
@@ -446,7 +296,7 @@
     },
     {
       "path": "docs/superpowers/plans/2026-07-21-journal-capture-followups-plan.md",
-      "max": 13,
+      "max": 1,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -536,7 +386,7 @@
     },
     {
       "path": "docs/superpowers/plans/2026-09-12-boot-node-schema-safety.md",
-      "max": 36,
+      "max": 12,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -548,7 +398,7 @@
     },
     {
       "path": "docs/superpowers/plans/2026-09-21-zone-device-rename-stage-1-edge.md",
-      "max": 85,
+      "max": 78,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -650,19 +500,13 @@
     },
     {
       "path": "docs/superpowers/specs/2026-07-07-deploy-canary-gate-design.md",
-      "max": 6,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-07-option-b-stage0-canonicalization-design.md",
-      "max": 12,
+      "max": 2,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
     {
       "path": "docs/superpowers/specs/2026-07-07-osi-lib-loader-design.md",
-      "max": 20,
+      "max": 16,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -679,20 +523,8 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/specs/2026-07-08-field-to-pr-design.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/specs/2026-07-08-incremental-bootstrap-snapshots-design.md",
       "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-08-option-b-stage1-deploy-runner-design.md",
-      "max": 13,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -740,7 +572,7 @@
     },
     {
       "path": "docs/superpowers/specs/2026-08-19-valve-control-design.md",
-      "max": 8,
+      "max": 3,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -758,7 +590,7 @@
     },
     {
       "path": "docs/superpowers/specs/2026-09-11-uganda-schema-reconciliation-design.md",
-      "max": 2,
+      "max": 1,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -805,45 +637,15 @@
       "issue": 380
     },
     {
-      "path": "docs/twatch-ultra/01-independent-use-case-analysis.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/twatch-ultra/03-review-of-previous-suggestions.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/twatch-ultra/04-product-roadmap.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/twatch-ultra/05-mvp-design.md",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/twatch-ultra/06-implementation-backlog-and-tests.md",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     },
     {
       "path": "docs/ux/timed-valve-control-research-brief.md",
-      "max": 9,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/versioning-workflow.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
+      "max": 6,
+      "reason": "hex value that is part of a worked example; not an identifier",
       "issue": 380
     }
   ]

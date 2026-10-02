@@ -26,7 +26,7 @@ Every statement is tagged: **[F]** fact verified against a primary source or rep
 | FW-v1 | `LoRa_STM32-claude` branch `feature/chameleon-i2c-reader` | n/a |
 | FW-v1.5 | same repo, `feature/chameleon-v1.5` | — |
 | FW-v1.6 | same repo, `feature/chameleon-v1.6-switched-i2c2` incl. `README-chameleon-v1.6-switched-power.md` and `docs/superpowers/specs/2026-08-09-lsn50-chameleon-dual-power-design.md` | — |
-| FIELD | Kaba100 outage analysis + its underlying DB extracts (2026-06-28) | n/a |
+| FIELD | the field incident analysis (summarised in `docs/hardware/chameleon-reference.md`, section 'Field incident: reader powered from a different rail than the bus') (2026-06-28) | n/a |
 
 ---
 

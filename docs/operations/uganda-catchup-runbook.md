@@ -100,7 +100,7 @@ five of them are merged on edge `main` as of `df5fcabe9`:
 | #221 (characterise whether the schema comparator's residual `table\|devices` diff shape is real) | PR #239 — closed; the comparator never emitted that diff shape, and #173/#219 were the real components of Uganda's refusal | `df5fcabe9` |
 
 **Not yet done.** The Wave 1 boot node (PR #237, and PRs #235/#236/#239)
-has **not been deployed to any gateway**. Uganda, kaba100, and Silvan are
+has **not been deployed to any gateway**. Uganda, the demo gateway, and the customer test gateway are
 all still running the boot node that produced this incident; only the
 merge to edge `main` is done. The next fleet redeploy of any gateway should
 be built from current `main`, not from the pre-incident payload described
@@ -130,14 +130,14 @@ gateway needs to re-satisfy from scratch — its evidence will differ.
 
 | # | Gate | Status | Evidence |
 |---|---|---|---|
-| G1 | The cloud host Uganda's outbox will replay against is reachable and has an account for Uganda's operator. | **OPEN.** | Uganda syncs to `server.opensmartirrigation.org` (test host), user `Kaweza`. That host's database was reset; `Kaweza` does not currently exist there. Recreate the user before Phase 5, since backlog replay begins the moment `sync_link_state.linked=1`, and a replay against a host with no matching account fails every event, not just the first one. |
-| G2 | Stage-1 deploy runner (`migrate-cli.js` + `baseline-existing-db.js`) proven on a real gateway, not just fixtures. | **Satisfied for the runner mechanics.** | kaba100 main deploy 2026-09-11, payload `20260911T071921Z`, migrations 31→53 applied live. Uganda's own rehearsal (G4 below) additionally proves the runner against a byte-copy of Uganda's actual, far-more-drifted schema, a harder case than kaba100's. |
+| G1 | The cloud host Uganda's outbox will replay against is reachable and has an account for Uganda's operator. | **OPEN.** | Uganda syncs to `server.opensmartirrigation.org` (test host), the Uganda operator user. That host's database was reset; that user does not currently exist there. Recreate the user before Phase 5, since backlog replay begins the moment `sync_link_state.linked=1`, and a replay against a host with no matching account fails every event, not just the first one. |
+| G2 | Stage-1 deploy runner (`migrate-cli.js` + `baseline-existing-db.js`) proven on a real gateway, not just fixtures. | **Satisfied for the runner mechanics.** | Demo-gateway main deploy 2026-09-11, payload `20260911T071921Z`, migrations 31→53 applied live. Uganda's own rehearsal (G4 below) additionally proves the runner against a byte-copy of Uganda's actual, far-more-drifted schema, a harder case than the demo gateway's. |
 | G3 | Heartbeats (issue #100) arriving from Uganda with `schema_sig` present. | **Satisfied (done since issue #100).** | Uganda has no `sync_outbox`-based telemetry path independent of this (see G1), so the heartbeat stays the only remote window onto the migration result during and after the window. |
 | G4 | Schema catch-up + rebuild + migrate-to-head rehearsed GREEN on a byte-copy of Uganda's CURRENT database. | **GREEN.** | sha256 `0f131395c6dfb02d16ea770c7ab20e4b23615c6ea3311c9e1802b398abee4460` (compressed), decompressed copy sha256 `04b75d9688c093ebf3bbab52765d72a1ad21938bc94c06f763b0cf14ecb2136d`. Full pipeline reaches `baseline` N=1 and `migrate-cli` head=53 with `verify-head-cli.js` returning `{"ok":true}`, `PRAGMA integrity_check` `ok`, `PRAGMA foreign_key_check` 0 rows, every history-bearing row count identical before/after (`uganda-schema-rebuild-20260911-report.md` §6, §12). Re-run after the adversarial-review fixes (PR #211) with fresh timings: rebuild artifact 5.9 s, baseline scan 6m25s, migrate-cli 2m28s, full on-device window script 9m2s end-to-end, exit 0. |
 | G5 | Connectivity window confirmed; on-device disk headroom checked. | **Disk headroom satisfied; connectivity window OPEN.** | Disk: the design doc's worst case is about 108 MB (2x the 54 MB DB) against Uganda's 3.3 GB free, more than 30x margin, and the window script's own preflight (`uganda-catchup-window.sh`, added in the PR #211 review) hard-refuses before stopping Node-RED unless free space is at least 3x current DB size + 64 MB, so the check runs live regardless of this table. Connectivity: no window confirmed yet; this is one of the three gates in the banner above. |
 
 If any gate above reads OPEN, STOP. Do not proceed to Phase 3/4. The two
-gates that are genuinely still open (G1's `Kaweza` user, G5's connectivity
+gates that are genuinely still open (G1's operator user, G5's connectivity
 window) plus Phil's go-ahead are the three items in the banner.
 
 ## Accepted residual: `applyBootstrap` single-transaction hazard (Fable review 2026-07-10)
@@ -160,7 +160,7 @@ window) plus Phil's go-ahead are the three items in the banner.
 
 - **Uganda predates the migration ledger by more than the missing-tables framing suggested.** The 2026-09-11 rehearsal found `sync_outbox` itself IS present on Uganda; the earlier assumption that it was entirely absent was stale (see "Runbook history" below). It was only missing its 3 v2 columns (`rejected_at`, `rejection_reason`, `last_retryable_failure_at`). 6 whole tables are genuinely missing: `sync_link_state`, `sync_history_cursors`, `sync_history_dirty_keys`, `sync_history_segments`, `sync_history_quarantine`, `history_channel_rollups`. On top of that, 6 further tables that DO exist (`devices`, `device_data`, `irrigation_events`, `valve_actuation_expectations`, `zone_irrigation_calibration`, `zone_weather_cache`) have diverged from every point on the migration timeline: years of ad-hoc, pre-ledger DDL, not something any migration ever produced. Both problems needed their own artifact (see below).
 - **No cloud backup of Uganda's history until this window runs.** Every other gateway mirrors to the cloud via `sync_outbox`; Uganda's outbox has been accumulating locally (15,732 rows as of the 2026-09-10 byte-copy) with nowhere to deliver to until `sync_link_state` exists and the account on the receiving host is live. The byte-copy taken in Phase 1 is the only backup until then.
-- **Production farm.** `Kaweza`, `osi-uganda-01.tail77bd41.ts.net` / `100.69.51.98`, EUI `0016C001F151B1D6`. Irreplaceable irrigation + sensor history.
+- **Production farm.** Operator user, `osi-uganda-01.<tailnet>.ts.net` / `100.x.y.z`, EUI `0016C001F1000001`. Irreplaceable irrigation + sensor history.
 
 ## The catch-up + rebuild artifacts (authored, rehearsed, and reviewed within this runbook's scope)
 
@@ -182,8 +182,8 @@ All three steps are additive-or-guarded: no unconditional `DROP`, no unguarded `
 ### Phase 0 — Prereqs confirmed
 
 - [ ] PR #213 (network migrations 0054–0056) merged to `main` (see precondition above).
-- [ ] G1 (`Kaweza` user exists on `server.opensmartirrigation.org`), G5's connectivity window, and Phil's go-ahead are all confirmed (the three banner items). G2–G4 are already evidenced above.
-- [ ] `ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes root@osi-uganda-01.tail77bd41.ts.net` reachable; `df -Pk /data` shows room for a second DB copy (the on-device script's own preflight re-checks this before stopping Node-RED, but confirm by eye first).
+- [ ] G1 (the Uganda operator user exists on `server.opensmartirrigation.org`), G5's connectivity window, and Phil's go-ahead are all confirmed (the three banner items). G2–G4 are already evidenced above.
+- [ ] `ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes root@osi-uganda-01.<tailnet>.ts.net` reachable; `df -Pk /data` shows room for a second DB copy (the on-device script's own preflight re-checks this before stopping Node-RED, but confirm by eye first).
 - [ ] Current flows deployed to Uganda AND Node-RED restarted, so the boot node converged the current trigger set before baselining starts. If not, do a flows-only deploy + restart first and let it settle.
 - [ ] **This precondition is now enforced by the script, not just this checklist (issue #222 / F4 — see below).** Have the sha256 of the flows.json you just deployed ready to pass as `--expected-flows-sha` in Phase 4; the window refuses to start if it doesn't match what's actually live.
 
@@ -229,8 +229,8 @@ On the exfiltrated copy (never the live file):
 ### Post-window note: no manual restamp needed on the next deploy
 
 Uganda's `0001__baseline.sql`-sourced trigger bodies carry a hardcoded
-fallback gateway EUI literal that is Silvan's, not Uganda's
-(`COALESCE(NEW.gateway_device_eui, '0016C001F11715E2')`). `sync-init-fn`
+fallback gateway EUI literal that is a customer test gateway's, not Uganda's
+(`COALESCE(NEW.gateway_device_eui, '0016C001F1000002')`) (literal replaced by an example value). `sync-init-fn`
 rewrites it to the real `DEVICE_EUI` on every Node-RED start, so it is
 transient. On prior gateways, though, that transient rewrite showed up as a
 `schema_object_fingerprints` drift that needed a manual
@@ -265,7 +265,7 @@ real closure of the defects it exposed.
   (see outcome section); every other history-bearing table held.
 - Heartbeat `schema_sig` before → after: pre-window drifted signature →
   56 (head), confirmed live post-repair.
-- `Kaweza` user recreated on `server.opensmartirrigation.org`: yes, ahead
+- Uganda operator user recreated on `server.opensmartirrigation.org`: yes, ahead
   of this window; the subsequent re-link surfaced its own sync issues
   (stale seed-image EUI in `sync_link_state`, bootstrap-abort on an
   unrecognized previous-gateway EUI) tracked separately from this runbook.

@@ -94,7 +94,7 @@ already decoded by ChirpStack. **Process Data** normalizes the reading, **Build
 SQL INSERT** writes it to `device_data`. This tab also hosts **Process STREGA**
 / **Persist STREGA Uplink** (valve status messages ride the same uplink stream)
 and **Forward Agroscope Dendro**, which — when enabled — republishes dendrometer
-uplinks to the Agroscope research institute's IoT broker
+uplinks to the partner research institute's IoT broker
 (see the private IoT forwarding design record).
 
 ### Actuator_STREGA (5 function nodes)
@@ -365,5 +365,5 @@ giant text blobs inside flow nodes.
 | `osi-health-helper` | Gateway health sampling and rollup logic. |
 | `osi-db-integrity` | Boot-time database integrity check (also run by the `osi-db-integrity` init service). |
 | `osi-chirpstack-helper` | Talks to the local ChirpStack API (device registration, downlink queueing, queue flush). |
-| `codecs/` | The payload translators, one per device family: `dragino_lsn50_decoder.js`, `sensecap_s2120_decoder.js`, `aquascope_lorain_decoder.js`, `strega_gen1_decoder.js`, `milesight_uc512_decoder.js`, plus `agroscope_uplink_transform.js` (reshapes dendro uplinks for the Agroscope forward). |
+| `codecs/` | The payload translators, one per device family: `dragino_lsn50_decoder.js`, `sensecap_s2120_decoder.js`, `aquascope_lorain_decoder.js`, `strega_gen1_decoder.js`, `milesight_uc512_decoder.js`, plus `agroscope_uplink_transform.js` (reshapes dendro uplinks for the partner-institute forward). |
 | `edge-channels.json` | The channel manifest: the machine-readable list of every measurement "channel" (soil tension, rain, wind …) with units and which database column feeds it. Mirrored to the GUI and the cloud. |

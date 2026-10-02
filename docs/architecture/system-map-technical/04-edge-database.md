@@ -100,7 +100,7 @@ diff without writing; the default/`--apply` form restamps).
    restarts before the *next* stamp, the live schema no longer matches the
    stamp under *either* normalizer scheme, because the mismatch is a real
    content difference, not a hash-scheme artifact. Root-cause investigation
-   (2026-09-11, live kaba100 evidence) found **no parity gap at `main` HEAD**
+   (2026-09-11, live demo-gateway evidence) found **no parity gap at `main` HEAD**
    between `sync-init-fn`'s literal and the migrations —
    `scripts/verify-trigger-body-parity.js` already canonicalizes both the
    gateway-EUI literal and formatting spacing and passes — the gap was

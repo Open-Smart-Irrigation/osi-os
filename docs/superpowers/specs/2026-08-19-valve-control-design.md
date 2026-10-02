@@ -341,7 +341,7 @@ Request and response shapes are JSON snake_case like the rest of flows.json;
   it is gateway-timed). Save errors from 422 are shown inline on the
   weekday.
 - `StregaValveCard` keeps its gear panel; its "Open" block stays for now
-  (removal is a follow-up once the panel is proven on kaba100).
+  (removal is a follow-up once the panel is proven on the demo gateway).
 - i18n: new namespace `valves.json` in all 7 locales (`de-CH, en, es, fr, it,
   lg, pt`), English + de-CH authored in the plan, the rest machine-drafted
   and flagged for the human pass the i18n programme already runs. Rename:
@@ -360,7 +360,7 @@ Request and response shapes are JSON snake_case like the rest of flows.json;
   `RESEND_VALVE_PLAN`, `SET_VALVE_SCHEDULER_STATUS`; the edge routes them to
   the same handlers as the REST endpoints (`934bf2bc19a8ce22` "Route
   Command" gains the cases) and ACKs via the existing command-ack path.
-- osi-server: Flyway table `valve_schedules` mirror, REST, and the AgroLink
+- osi-server: Flyway table `valve_schedules` mirror, REST, and a customer cloud instance
   panel via `ui-core` (same components, cloud data source). Cloud-authored
   changes arrive as commands; the edge compiles and pushes exactly as for a
   local save, so the valve sees one writer.
@@ -384,7 +384,7 @@ Request and response shapes are JSON snake_case like the rest of flows.json;
 
 ## 10. Hardware verification gates (before "done")
 
-1. On a test STREGA (kaba100 or Silvan): write a weekday plan, observe the
+1. On a test STREGA (the demo gateway or the customer test gateway): write a weekday plan, observe the
    ACK (`Schl_Port`), observe the valve open at the window start without any
    gateway command, observe the `on_valve_schedule` expectation row and the
    Recent-irrigations entry.
@@ -438,7 +438,7 @@ Request and response shapes are JSON snake_case like the rest of flows.json;
 - **Phase A (edge, GEN1):** schema + module + panel + Open dialog + WEEKLY
   compile/push/ACK + clock sync + skip-today + observed runs + rename +
   i18n + ONCE. Hardware gates 1–3.
-- **Phase B (cloud):** contract + osi-server + AgroLink panel; lockstep
+- **Phase B (cloud):** contract + osi-server + a customer cloud instance panel; lockstep
   merge with A.
 - **Phase C:** GEN2 encoder behind the generation setting, bench-verified
   when an SV2 arrives; remove the Open block from `StregaValveCard`.

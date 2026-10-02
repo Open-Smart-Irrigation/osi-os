@@ -274,7 +274,7 @@ Resistance raw/cal (kOhms):
   S3: 10000.0 / 10000.0 kOhm
 ====================
 Triggering fresh reading...
-ID: 286D6ADB0F0000F1                    ← real DS18B20 ROM (family 0x28)
+ID: 286D0000000000F1                    ← valid DS18B20 ROM (example value, family 0x28)
 Temperature: 19.87 C                    ← realistic
 Resistance raw/cal (kOhms):
   S1: 1.1 / 1.1 kOhm                    ← wet soil
