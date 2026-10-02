@@ -22,3 +22,20 @@ for(const locale of ['de-CH','fr','it','es','pt','lg'])test(`valve locale ${loca
   const allowed=new Set([...shared,...extra[locale]]);
   assert.deepEqual(Object.keys(copy).filter(key=>copy[key]===english[key]&&!allowed.has(key)),[]);
 });
+// The panel heading's information button replaced the visible subtitle; the
+// approved English wording is pinned here so a copy edit is a reviewed change.
+const SCHEDULE_HELP={scheduleHelp:'Weekly schedules run on each valve.',scheduleHelpLabel:'About weekly schedules'};
+// Edge lg is human translation work product: a key without a human pass ships
+// the English source text (docs/i18n/pending-luganda-translations.md).
+const PENDING_HUMAN_LUGANDA=['scheduleHelp','scheduleHelpLabel'];
+test('valve panel schedule help: approved English, every locale carries it, retired keys are gone',()=>{
+  const raw=(locale:string)=>JSON.parse(readFileSync(`public/locales/${locale}/valves.json`,'utf8')) as Record<string,unknown>;
+  assert.deepEqual({scheduleHelp:english.scheduleHelp,scheduleHelpLabel:english.scheduleHelpLabel},SCHEDULE_HELP);
+  for(const locale of ['en','de-CH','fr','it','es','pt','lg']) {
+    const copy=raw(locale);
+    for(const key of Object.keys(SCHEDULE_HELP))assert.equal(typeof copy[key],'string',`${locale}:${key}`);
+    for(const retired of ['subtitle','help','helpLabel'])assert.equal(copy[retired],undefined,`${locale}:${retired}`);
+  }
+  const luganda=read('lg');
+  for(const key of PENDING_HUMAN_LUGANDA)assert.equal(luganda[key],english[key],`lg:${key} ships English until a human pass`);
+});
