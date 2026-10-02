@@ -179,10 +179,17 @@ Luganda pass must drop the key from that set and from the table above in the
 same change; the test fails otherwise, so the two cannot drift apart.
 
 
-## `valves.json` panel help
+## `valves.json` — valve panel schedule help
 
-`help` and `helpLabel` replace the visible valve-control subtitle with compact
-help. Production Luganda keeps the English wording until human review. The
-presenter explicitly authorized machine-translated Luganda for the isolated
+| Keys | Reason |
+|---|---|
+| `scheduleHelp`, `scheduleHelpLabel` (2 keys in `valves.json`) | The information button beside the valve panel heading and its tooltip ("Weekly schedules run on each valve."). They replace the retired `help` and `helpLabel`, whose English said "All zones." in front of the same sentence and named the button "About valve control". No human Luganda pass has seen the new wording, so `lg` ships the English source text. de-CH/es/fr/it/pt received human-quality translations in the same change. |
+
+Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change.
+
+The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.

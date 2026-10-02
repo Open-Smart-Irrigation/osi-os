@@ -1,7 +1,7 @@
 {
   "title": "Okufuga amabbomba",
-  "help": "Ebifo byonna. Enteekateeka za buli wiiki zikolera ku buli bbomba.",
-  "helpLabel": "Ebikwata ku kufuga bbomba",
+  "scheduleHelp": "Enteekateeka za buli wiiki zikolera ku buli bbomba.",
+  "scheduleHelpLabel": "Ebikwata ku nteekateeka za buli wiiki",
   "empty": "Tewali bbomba ya STREGA ewandiisiddwa.",
   "open": "Ggulawo",
   "schedule": "Teekateeka",

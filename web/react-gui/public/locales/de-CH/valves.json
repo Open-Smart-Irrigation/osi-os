@@ -1,6 +1,6 @@
-{ "helpLabel": "Über die Ventilsteuerung", "overview": {"title": "Bewässerungsplan — alle Ventile", "loading": "Wird geladen…", "off": "aus"},
+{ "scheduleHelpLabel": "Über Wochenpläne", "overview": {"title": "Bewässerungsplan — alle Ventile", "loading": "Wird geladen…", "off": "aus"},
   "title": "Ventilsteuerung",
-  "help": "Alle Zonen. Wochenpläne laufen auf dem jeweiligen Ventil.",
+  "scheduleHelp": "Wochenpläne laufen auf jedem Ventil.",
   "empty": "Noch keine STREGA-Ventile registriert.",
   "unassignedZone": "Ohne Zone",
   "open": "Öffnen",

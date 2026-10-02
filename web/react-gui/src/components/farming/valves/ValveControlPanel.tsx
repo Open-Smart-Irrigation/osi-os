@@ -12,6 +12,10 @@ import { ValveScheduleOverview } from './ValveScheduleOverview';
 import { ValveSettingsDialog } from './ValveSettingsDialog';
 import { ValveServiceDialog } from './ValveServiceDialog';
 
+// The heading's information button. Hover and keyboard focus show the tip; a tap
+// pins it (focus fires before click on touch, so the first tap opens and a second
+// tap closes). Escape, blur and a pointer-down outside dismiss it. The tooltip is
+// plain text: nothing in it can be focused, and it is no live region.
 function ValveControlHelp() {
   const {t}=useTranslation('valves');
   const id=useId(), ref=useRef<HTMLDivElement>(null);
@@ -20,19 +24,29 @@ function ValveControlHelp() {
   const close=()=>update({pinned:false,dismissed:true});
   useDismissOnPointerDown(ref,close);
   const open=!state.dismissed&&(state.hover||state.focus||state.pinned);
-  return <div ref={ref} className="relative shrink-0"
+  // Document-level so hover-opened help also yields to Escape (WCAG 1.4.13);
+  // focus is left where it is.
+  useEffect(()=>{
+    if(!open)return undefined;
+    const onKeyDown=(event:KeyboardEvent)=>{
+      if(event.key!=='Escape')return;
+      event.preventDefault();
+      setState(current=>({...current,pinned:false,dismissed:true}));
+    };
+    document.addEventListener('keydown',onKeyDown);
+    return ()=>document.removeEventListener('keydown',onKeyDown);
+  },[open]);
+  return <div ref={ref} className="relative -my-2 -mr-2 shrink-0"
     onMouseEnter={()=>update({hover:true,dismissed:false})}
     onMouseLeave={()=>update({hover:false})}>
-    <button type="button" aria-label={t('helpLabel')} aria-expanded={open}
-      aria-controls={id} aria-describedby={open?id:undefined}
+    <button type="button" aria-label={t('scheduleHelpLabel')} aria-describedby={open?id:undefined}
       onFocus={()=>update({focus:true,dismissed:false})} onBlur={()=>update({focus:false,pinned:false})}
       onClick={()=>state.pinned?close():update({pinned:true,dismissed:false})}
-      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();close();}}}
-      className="flex h-8 w-8 items-center justify-center rounded-full text-sm text-[var(--text-secondary)] hover:bg-[var(--card)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--primary)]">
+      className="flex min-h-12 min-w-12 items-center justify-center rounded-full text-base text-[var(--text-secondary)] hover:bg-[var(--card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]">
       <span aria-hidden="true">ⓘ</span>
     </button>
-    {open&&<div id={id} role="tooltip" className="absolute right-0 top-full z-30 w-56 max-w-[70vw] rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-xs text-[var(--text)] shadow-lg">
-      {t('help')}
+    {open&&<div id={id} role="tooltip" className="absolute right-0 top-full z-20 w-56 max-w-[calc(100vw-4rem)] whitespace-normal break-words rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-xs text-[var(--text)] shadow-lg">
+      {t('scheduleHelp')}
     </div>}
   </div>;
 }

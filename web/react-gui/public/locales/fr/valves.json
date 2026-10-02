@@ -1,6 +1,6 @@
-{ "helpLabel": "À propos de la commande des vannes", "overview": {"title": "Programme d’irrigation — toutes les vannes", "loading": "Chargement…", "off": "désactivé"},
+{ "scheduleHelpLabel": "À propos des programmes hebdomadaires", "overview": {"title": "Programme d’irrigation — toutes les vannes", "loading": "Chargement…", "off": "désactivé"},
   "title": "Commande des vannes",
-  "help": "Toutes les zones. Chaque vanne exécute ses programmes hebdomadaires.",
+  "scheduleHelp": "Chaque vanne exécute ses programmes hebdomadaires.",
   "empty": "Aucune vanne STREGA enregistrée pour l'instant.",
   "unassignedZone": "Sans zone",
   "open": "Ouvrir",

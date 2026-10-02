@@ -1,6 +1,6 @@
-{ "helpLabel": "About valve control", "overview": {"title": "Irrigation plan — all valves", "loading": "Loading…", "off": "off"},
+{ "scheduleHelpLabel": "About weekly schedules", "overview": {"title": "Irrigation plan — all valves", "loading": "Loading…", "off": "off"},
   "title": "Valve control",
-  "help": "All zones. Weekly schedules run on each valve.",
+  "scheduleHelp": "Weekly schedules run on each valve.",
   "empty": "No STREGA valves registered yet.",
   "unassignedZone": "Unassigned",
   "open": "Open",

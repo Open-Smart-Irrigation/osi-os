@@ -1,6 +1,6 @@
-{ "helpLabel": "Acerca del control de válvulas", "overview": {"title": "Plan de riego — todas las válvulas", "loading": "Cargando…", "off": "desactivado"},
+{ "scheduleHelpLabel": "Acerca de los programas semanales", "overview": {"title": "Plan de riego — todas las válvulas", "loading": "Cargando…", "off": "desactivado"},
   "title": "Control de válvulas",
-  "help": "Todas las zonas. Los programas semanales se ejecutan en cada válvula.",
+  "scheduleHelp": "Los programas semanales se ejecutan en cada válvula.",
   "empty": "Todavía no hay válvulas STREGA registradas.",
   "unassignedZone": "Sin asignar",
   "open": "Abrir",
