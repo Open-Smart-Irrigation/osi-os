@@ -570,7 +570,9 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
   const incomingResult = String(ack.result || ack.status || '').trim().toUpperCase();
   const errorText = ack.error == null ? '' : String(ack.error);
   const result = classifyAckResult(incomingResult, errorText);
-  const terminal = ['APPLIED', 'CONFLICT', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result);
+  const ackType = String(ack.commandType || '').trim().toUpperCase();
+  const terminal = ['APPLIED', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result) ||
+    (result === 'CONFLICT' && isProtectedConfigurationCommand(ackType));
   const appliedAt = String(ack.timestamp || ack.appliedAt || new Date().toISOString());
   const duplicate = ack.duplicate === true || String(ack.duplicate || '').toLowerCase() === 'true';
   const syncVersionCandidate = ack.appliedSyncVersion == null
@@ -586,7 +588,6 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
   const requestedSyncVersion = Number.isSafeInteger(requestedSyncVersionNumber) && requestedSyncVersionNumber >= 0
     ? requestedSyncVersionNumber
     : appliedSyncVersion;
-  const ackType = String(ack.commandType || '').trim().toUpperCase();
   let trusted = null;
   if (terminal && isProtectedConfigurationCommand(ackType)) {
     const suppliedContext = (runtime && (runtime.protected_context || runtime.protectedContext)) || ack.protected_context || {};

@@ -935,6 +935,50 @@ test('queueCommandAck writes the ledger + outbox atomically and fires the lifecy
   );
 });
 
+test('queueCommandAck treats CONFLICT as terminal only for protected exact-base commands', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  const protectedAck = await ledger.queueCommandAck(db, {
+    commandId: 817,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    result: 'CONFLICT',
+    effectKey: WATERMARK_EFFECT_KEY,
+    deviceEui: WATERMARK_DEVICE_EUI,
+    gatewayDeviceEui: GATEWAY_EUI,
+    actorUserUuid: WATERMARK_ACTOR,
+    baseSyncVersion: context.base_sync_version,
+    operation: context.operation,
+    payload: watermarkEnvelope(817).payload,
+    protected_context: context,
+  }, watermarkRuntime(context));
+  assert.equal(protectedAck.result, 'CONFLICT');
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['817'])).n,
+    1,
+    'protected exact-base conflicts remain terminal ledger evidence'
+  );
+
+  const legacyAck = await ledger.queueCommandAck(db, {
+    commandId: 818,
+    commandType: 'CONFIG_UPDATE',
+    effectKey: 'config:' + GATEWAY_EUI + ':irrigation_interval:1',
+    deviceEui: GATEWAY_EUI,
+    result: 'CONFLICT',
+    reason: 'stale_base',
+  });
+  assert.equal(legacyAck.result, 'CONFLICT');
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['818'])).n,
+    0,
+    'legacy conflicts remain retryable and do not become terminal ledger evidence'
+  );
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['818'])).n,
+    1,
+    'legacy conflicts still queue their ACK for retry'
+  );
+});
+
 test('queueCommandAck durably stores and exactly replays the first normalized terminal ACK', async () => {
   const db = new TestDb();
   let hookAck = null;
