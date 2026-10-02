@@ -133,164 +133,8 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/plans/2026-06-07-history-desktop-live-fixes.md",
-      "max": 19,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-06-28-edge-cloud-history-sync.md",
-      "max": 24,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-06-28-history-sync-review-remediation.md",
-      "max": 13,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-06-29-recent-irrigations-five-entry-cap.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-05-gateway-health-persistence.md",
-      "max": 31,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-05-s2120-weather-history.md",
-      "max": 13,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-05-swt-pf-display-csv.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-07-deploy-canary-gate.md",
-      "max": 27,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-07-option-b-stage0-canonicalization.md",
-      "max": 29,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-07-osi-lib-loader.md",
-      "max": 45,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-07-sync-ingest-hardening.md",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-08-chaos-soak-rig.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-08-field-to-pr-stage0.md",
-      "max": 16,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-08-option-b-stage1-deploy-runner.md",
-      "max": 19,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-08-option-b-stage2-boot-ddl-removal.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-08-ratchet-trio.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-08-time-integrity.md",
-      "max": 33,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-10-forge-controller-stage1.md",
-      "max": 7,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-10-forge-test-suite.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-10-refactor-execution-engine.md",
-      "max": 47,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-11-forge-learning-phase-a.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-12-narrow-waist-uc512-plan.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-13-trigger-body-parity-verifier.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-14-live-gateway-identity-plan.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/plans/2026-07-15-sync-delivery-stop-loss.md",
       "max": 8,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-16-gui-translation-program.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-21-i18n-review-repairs.md",
-      "max": 14,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -301,98 +145,8 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/plans/2026-07-22-journal-detailed-activity-vocabulary-plan.md",
-      "max": 33,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-22-journal-treated-area-optional-plan.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-23-journal-copy-entry-and-polish-plan.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-07-23-journal-operation-level-scoping-plan.md",
-      "max": 12,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-13-dragino-sdi12-execution-report.md",
-      "max": 145,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-13-dragino-sdi12-soil-node-plan.md",
-      "max": 8,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-19-valve-control-edge-execution-report.md",
-      "max": 16,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-19-valve-control-edge.md",
-      "max": 19,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-21-odoo-test-environment.md",
-      "max": 13,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-21-strega-gen2-device-profile.md",
-      "max": 10,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-22-strega-enclosure-climate.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-25-sentek-enviroscan-vwc-vic-execution-report.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-29-sdi12-recipe-deployment-execution-report.md",
-      "max": 5,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-08-29-sdi12-recipe-deployment-plan.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/plans/2026-09-12-boot-node-schema-safety.md",
       "max": 12,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/plans/2026-09-12-zone-unassign-all-device-cards.md",
-      "max": 4,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -475,30 +229,6 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/prompts/swt-pf-settings-spec-review/review-2026-07-05.md",
-      "max": 12,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-06-28-sync-architecture-redesign.md",
-      "max": 6,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-06-29-recent-irrigations-five-entry-cap-design.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-05-option-b-boot-path-cutover-SCOPING.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/specs/2026-07-07-deploy-canary-gate-design.md",
       "max": 2,
       "reason": "baseline, removed by the documentation run",
@@ -511,62 +241,8 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/specs/2026-07-07-sync-ingest-hardening-design.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-08-dendro-cross-repo-golden-vector-contract-design.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-08-incremental-bootstrap-snapshots-design.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-08-option-b-stage2-boot-ddl-removal-design.md",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/specs/2026-07-08-outbox-retention-size-cap-design.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-10-forge-self-learning-loop-design.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-10-forge-test-suite-design.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-10-refactor-execution-engine-design.md",
-      "max": 56,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-12-narrow-waist-uc512-design.md",
-      "max": 3,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-07-14-live-gateway-identity-design.md",
-      "max": 5,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -577,32 +253,8 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/specs/2026-08-29-sdi12-recipe-deployment-design.md",
-      "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-09-08-osi-deployment-planner-design.md",
-      "max": 8,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/specs/2026-09-11-uganda-schema-reconciliation-design.md",
       "max": 1,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-09-12-boot-node-schema-safety-brief.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
-      "path": "docs/superpowers/specs/2026-09-13-boot-node-schema-safety-review.md",
-      "max": 2,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
