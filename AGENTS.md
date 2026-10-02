@@ -256,6 +256,7 @@ node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard
+node scripts/verify-doc-hygiene.js           # no deployment identities in docs, guidance, skills
 
 cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build
@@ -348,6 +349,14 @@ until the stack is rebased onto the current `origin/main`.
 - Empty `catch` blocks in `flows.json`: `scripts/verify-no-new-silent-catch.js` ratchets the maintained-profile baseline. When touching any function node, convert empty `catch(_){}` / `catch(e){}` / `catch {}` blocks in that node to a visible warning such as `catch (e) { node.warn('<node/context>: ' + (e && e.message ? e.message : e)); }`; new function code must not swallow errors silently. Load in-repo helper modules via `osiLib.require('<name>')` with `{"var": "osiLib", "module": "osi-lib"}` declared in the node's `libs` (bare `require()` of a non-builtin fails CI via the ratchet in `scripts/verify-sync-flow.js`); beyond such declared helpers, keep function-node `libs` minimal.
 - Error-counter heartbeat fields: maintained profiles now have catch nodes wired to `Record Error` (`global.error_counts`). Do not add heartbeat `errors_total` / `errors_last_at` fields until the flow has a `Gather Edge Health` node; that node is absent in the current maintained-profile baseline, so heartbeat surfacing is intentionally skipped.
 - `MqttPublisherService` on the cloud is deprecated (kept for potential future use); all cloud→edge commands are REST.
+- **No deployment identities in public text.** Documents, guidance files,
+  skills, commit messages, issues and pull requests do not name customers,
+  farms or individual gateways, and carry no real EUI or tailnet address.
+  Write "the reference gateway", "the demo gateway", "a customer gateway",
+  "a customer cloud instance". Example values: gateway EUI
+  `0016C001F1000001`, device EUI `A840410000000001`, address `100.x.y.z`.
+  `node scripts/verify-doc-hygiene.js` enforces this in CI; maintainers hold
+  the name list.
 
 ---
 

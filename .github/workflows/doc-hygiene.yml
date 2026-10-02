@@ -1,0 +1,41 @@
+name: Doc Hygiene
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  doc-hygiene:
+    # The private repository merges public main and holds the names by
+    # design; the scan only makes sense in the public repository.
+    if: github.repository == 'Open-Smart-Irrigation/osi-os'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # full history: the commit-message scan walks base..HEAD
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Scanner unit tests
+        run: node --test scripts/verify-doc-hygiene.test.js
+      # The name list is a secret. Pull requests from forks do not receive
+      # it; they run the built-in patterns only, and the push to main after
+      # the merge runs the full list.
+      - name: Scan documentation, guidance and skills
+        env:
+          OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}
+        run: node scripts/verify-doc-hygiene.js ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && '--require-terms' || '' }}
+      - name: Scan pull request title, body and commit messages
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          { printf '%s\n\n%s\n\n' "$PR_TITLE" "$PR_BODY"; git log --format=%B "origin/${{ github.base_ref }}..HEAD"; } \
+            | node scripts/verify-doc-hygiene.js --stdin --require-terms
