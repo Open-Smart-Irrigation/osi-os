@@ -175,12 +175,6 @@
       "issue": 380
     },
     {
-      "path": "docs/contracts/radio-observations/fixtures/uplink-v1.json",
-      "max": 4,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/contracts/sync-schema/canonicalization.md",
       "max": 5,
       "reason": "baseline, removed by the documentation run",
@@ -266,7 +260,7 @@
     },
     {
       "path": "docs/operations/uganda-catchup-runbook.md",
-      "max": 14,
+      "max": 16,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -554,7 +548,7 @@
     },
     {
       "path": "docs/superpowers/plans/2026-09-21-zone-device-rename-stage-1-edge.md",
-      "max": 89,
+      "max": 85,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },
@@ -571,14 +565,8 @@
       "issue": 380
     },
     {
-      "path": "docs/superpowers/plans/2026-09-25-weather-provider-store.md",
-      "max": 2,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "docs/superpowers/plans/2026-09-26-chameleon-enabled-command-fix.md",
-      "max": 23,
+      "max": 16,
       "reason": "baseline, removed by the documentation run",
       "issue": 380
     },

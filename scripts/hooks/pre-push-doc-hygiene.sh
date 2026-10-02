@@ -1,10 +1,10 @@
 #!/bin/sh
 # Pre-push guard for the public osi-os repository.
 #
-# Install once per clone:
-#   cp scripts/hooks/pre-push-doc-hygiene.sh .git/hooks/pre-push
-#   chmod +x .git/hooks/pre-push
+# Install once per clone (the command also works in a worktree):
+#   cp scripts/hooks/pre-push-doc-hygiene.sh "$(git rev-parse --git-path hooks/pre-push)" && chmod +x "$(git rev-parse --git-path hooks/pre-push)"
 #   git config osi.docHygieneTermsFile <absolute path of the name list>
+# Reinstall the copy when the script changes.
 #
 # Git runs it as `pre-push <remote name> <remote url>` and writes one line per
 # pushed ref to standard input: <local ref> <local sha> <remote ref> <remote sha>.
@@ -16,9 +16,18 @@
 # commits add to them, and the new commits' messages together with the pushed
 # ref name. Any unexpected failure refuses the push. The name list is passed
 # to the scanner in the environment and is never printed.
+#
+# Not covered: a commit without a scanner while the public main has none (only
+# the private-folder check runs), documents stored as UTF-16 (no content scan),
+# and pushes to forks under other owners.
 
 remote_name=$1
 remote_url=$2
+
+# A local replace ref would make the scans read the replacement while the
+# push sends the real objects.
+GIT_NO_REPLACE_OBJECTS=1
+export GIT_NO_REPLACE_OBJECTS
 
 # The path lists below are expanded unquoted on purpose; no globbing.
 set -f
@@ -317,7 +326,7 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   status=$?
   cat "$work/changes.out" || die "cannot read a temporary file; refusing to push"
   if [ "$status" -eq 1 ]; then
-    printf 'pre-push: a commit in %s adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing\n' "$label" >&2
+    printf 'pre-push: a commit in %s adds a listed term or identifier. If it is still present at the tip, fix or allowlist it; if a later commit removed it, squash those commits, then push again\n' "$label" >&2
     blocked=1
   elif [ "$status" -ne 0 ]; then
     printf 'pre-push: refusing to push %s: the scan of the added lines could not run (exit %s); see the scanner message above\n' "$label" "$status" >&2

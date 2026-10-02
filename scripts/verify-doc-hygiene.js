@@ -13,7 +13,7 @@ const ALLOWLIST_FILE = 'scripts/verify-doc-hygiene-allowlist.json';
 const BASELINE_REASON = 'baseline, removed by the documentation run';
 
 // Example identifiers that public text may use.
-const FAKE_EUIS = new Set(['0011223344556677', '0102030405060708']);
+const FAKE_EUIS = new Set(['0011223344556677', '0102030405060708', 'AABBCCDDEEFF0011']);
 const FAKE_EUI_RANGES = [/^0016C001F10000[0-9A-F]{2}$/, /^A8404100000000[0-9A-F]{2}$/];
 
 function isFakeEui(token) {
@@ -28,7 +28,14 @@ const BUILTIN = [
   { id: 'eui64', re: /(?<![0-9A-Fa-f])[0-9A-Fa-f]{16}(?![0-9A-Fa-f])/g, skip: isFakeEui },
   { id: 'eui64', re: /(?<![0-9A-Fa-f:-])(?:[0-9A-Fa-f]{2}[:-]){7}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:-])/g, skip: (m) => isFakeEui(m.replace(/[:-]/g, '')) },
   { id: 'cgnat-address', re: /\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b/g, skip: () => false },
+  // the default tailnet DNS name; the placeholder <tailnet>.ts.net does not match
+  { id: 'tailnet-host', re: /\btail[0-9a-z]{4,}\.ts\.net\b/gi, skip: () => false },
 ];
+
+const FIX_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or add or raise an entry in scripts/verify-doc-hygiene-allowlist.json with a reason';
+const STDIN_FIX_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or reword the text';
+const FLAGS = new Set(['--require-terms', '--stdin', '--stdin-diff', '--write-baseline']);
+const VALUE_OPTIONS = ['--root=', '--issue='];
 
 function loadTerms(raw) {
   const lines = String(raw || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
@@ -66,7 +73,7 @@ function maskPath(rel, terms) {
 }
 
 function listFiles(root) {
-  const out = execFileSync('git', ['ls-files', '-z', '--', ...SCOPE], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const out = execFileSync('git', ['ls-files', '-z', '--', ...SCOPE], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
   return out.split('\0').filter(Boolean);
 }
 
@@ -221,6 +228,11 @@ function option(argv, name) {
 }
 
 function main(argv, env) {
+  const unknown = argv.find((a) => !FLAGS.has(a) && !VALUE_OPTIONS.some((o) => a.startsWith(o)));
+  if (unknown !== undefined) {
+    console.error(`verify-doc-hygiene: unknown argument ${unknown}`);
+    return 2;
+  }
   const root = path.resolve(option(argv, 'root') || path.join(__dirname, '..'));
   const raw = env.OSI_DOC_HYGIENE_TERMS || '';
   let terms;
@@ -259,6 +271,7 @@ function main(argv, env) {
     }
     if (findings.length) {
       console.error(`verify-doc-hygiene: FAIL (${findings.length} findings in added lines of the supplied commits)`);
+      console.error(FIX_HINT);
       return 1;
     }
     console.log('verify-doc-hygiene: OK (supplied commits)');
@@ -270,18 +283,39 @@ function main(argv, env) {
     for (const f of findings) console.error(`stdin:${f.line}: ${f.id}`);
     if (findings.length) {
       console.error(`verify-doc-hygiene: FAIL (${findings.length} findings in the supplied text)`);
+      console.error(STDIN_FIX_HINT);
       return 1;
     }
     console.log('verify-doc-hygiene: OK (supplied text)');
     return 0;
   }
 
-  const { byFile, scanned } = scanRepo(root, [...BUILTIN, ...terms]);
+  const writeBaseline = argv.includes('--write-baseline');
+  if (writeBaseline && !terms.length) {
+    console.error('verify-doc-hygiene: --write-baseline needs the name list in OSI_DOC_HYGIENE_TERMS');
+    return 2;
+  }
 
-  if (argv.includes('--write-baseline')) {
+  let byFile;
+  let scanned;
+  try {
+    ({ byFile, scanned } = scanRepo(root, [...BUILTIN, ...terms]));
+  } catch {
+    console.error('verify-doc-hygiene: the repository scan failed (is --root a git repository?)');
+    return 2;
+  }
+
+  if (writeBaseline) {
     const issue = Number(option(argv, 'issue'));
     if (!Number.isInteger(issue) || issue < 1) {
       console.error('verify-doc-hygiene: --write-baseline needs --issue=<number>');
+      return 2;
+    }
+    let existing;
+    try {
+      existing = new Map(loadAllowlist(root).map((e) => [e.path, e]));
+    } catch (err) {
+      console.error(`verify-doc-hygiene: ${err.message}`);
       return 2;
     }
     const named = [...byFile.keys()].sort().filter((file) => byFile.get(file).pathFindings.length);
@@ -292,7 +326,11 @@ function main(argv, env) {
       console.error(`verify-doc-hygiene: cannot write a baseline while ${named.length} paths carry a listed term; rename or remove them first`);
       return 1;
     }
-    const entries = [...byFile.keys()].sort().map((file) => ({ path: file, max: byFile.get(file).findings.length, reason: BASELINE_REASON, issue }));
+    // An existing entry keeps its reason and issue; only its count changes.
+    const entries = [...byFile.keys()].sort().map((file) => {
+      const old = existing.get(file);
+      return { path: file, max: byFile.get(file).findings.length, reason: old ? old.reason : BASELINE_REASON, issue: old ? old.issue : issue };
+    });
     fs.mkdirSync(path.dirname(path.join(root, ALLOWLIST_FILE)), { recursive: true });
     fs.writeFileSync(path.join(root, ALLOWLIST_FILE), `${JSON.stringify({ entries }, null, 2)}\n`);
     console.log(`verify-doc-hygiene: baseline written (${entries.length} files)`);
@@ -318,10 +356,11 @@ function main(argv, env) {
     if (v.max) console.error(`${shown}: ${v.findings.length} findings, allowlist max ${v.max}`);
   }
   for (const s of stale) {
-    console.error(`${maskPath(s.file, terms)}: allowlist max ${s.max} but only ${s.actual} found, lower it`);
+    console.error(`${maskPath(s.file, terms)}: allowlist max ${s.max} but only ${s.actual} found, lower it or remove the entry`);
   }
   if (violations.length || stale.length) {
     console.error(`verify-doc-hygiene: FAIL (${violations.length} files over their limit, ${stale.length} stale allowlist entries)`);
+    console.error(FIX_HINT);
     return 1;
   }
   const allowedCount = entries.reduce((sum, e) => sum + e.max, 0);

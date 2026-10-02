@@ -64,7 +64,7 @@ function installHook(work) {
   fs.chmodSync(target, 0o755);
 }
 
-// Builds a public and a customers bare remote, a working repository with the
+// Builds a public and a private bare remote, a working repository with the
 // hook installed, and an initial commit on main that both remotes and the
 // remote-tracking refs know about (pushed with --no-verify).
 function setup(t, { scanner = true, terms = true } = {}) {
@@ -72,18 +72,18 @@ function setup(t, { scanner = true, terms = true } = {}) {
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const org = path.join(tmp, 'Open-Smart-Irrigation');
   const pub = path.join(org, 'osi-os.git');
-  const cust = path.join(org, 'osi-os-customers.git');
+  const priv = path.join(org, 'private.git');
   const work = path.join(tmp, 'work');
   fs.mkdirSync(org, { recursive: true });
   git(tmp, 'init', '-q', '--bare', '-b', 'main', pub);
-  git(tmp, 'init', '-q', '--bare', '-b', 'main', cust);
+  git(tmp, 'init', '-q', '--bare', '-b', 'main', priv);
   git(tmp, 'init', '-q', '-b', 'main', work);
   git(work, 'config', 'user.name', 'Test User');
   git(work, 'config', 'user.email', 'test@example.invalid');
   git(work, 'config', 'commit.gpgsign', 'false');
   git(work, 'config', 'tag.gpgsign', 'false');
   git(work, 'remote', 'add', 'public', pub);
-  git(work, 'remote', 'add', 'customers', cust);
+  git(work, 'remote', 'add', 'private', priv);
   const termsFile = path.join(tmp, 'names.txt');
   fs.writeFileSync(termsFile, `${TERM}\n`);
   if (terms) git(work, 'config', 'osi.docHygieneTermsFile', termsFile);
@@ -93,8 +93,8 @@ function setup(t, { scanner = true, terms = true } = {}) {
   git(work, 'add', '-A');
   git(work, 'commit', '-q', '-m', 'initial commit');
   git(work, 'push', '-q', '--no-verify', 'public', 'main');
-  git(work, 'push', '-q', '--no-verify', 'customers', 'main');
-  return { tmp, org, pub, cust, work, termsFile };
+  git(work, 'push', '-q', '--no-verify', 'private', 'main');
+  return { tmp, org, pub, priv, work, termsFile };
 }
 
 function commit(work, files, message = 'change') {
@@ -166,13 +166,24 @@ test('4b. private document folders are refused with the full configuration too',
   assert.equal(remoteHas(s.pub, 'refs/heads/private'), false);
 });
 
-test('5. the same commit pushes to the customers remote', (t) => {
+test('5. the same commit pushes to the private remote', (t) => {
   const s = setup(t, { scanner: false, terms: false });
   git(s.work, 'checkout', '-q', '-b', 'private');
   const sha = commit(s.work, { 'docs/policy/x.txt': 'private\n', 'docs/b.md': `${TERM}\n` }, `${TERM} notes`);
-  const r = push(s.work, 'customers', 'private');
+  const r = push(s.work, 'private', 'private');
   assert.equal(r.code, 0, r.out);
-  assert.equal(git(s.cust, 'rev-parse', 'refs/heads/private'), sha);
+  assert.equal(git(s.priv, 'rev-parse', 'refs/heads/private'), sha);
+});
+
+test('5b. a repository whose name only starts with the public name is not guarded', (t) => {
+  const s = setup(t, { scanner: false, terms: false });
+  const longer = path.join(s.org, 'osi-os-sandbox.git');
+  git(s.tmp, 'init', '-q', '--bare', '-b', 'main', longer);
+  git(s.work, 'checkout', '-q', '-b', 'private');
+  const sha = commit(s.work, { 'docs/policy/x.txt': 'private\n' });
+  const r = push(s.work, longer, 'private');
+  assert.equal(r.code, 0, r.out);
+  assert.equal(git(longer, 'rev-parse', 'refs/heads/private'), sha);
 });
 
 test('6. without osi.docHygieneTermsFile a clean push to the public remote is rejected', (t) => {
@@ -351,7 +362,7 @@ test('18. export-ignore attributes cannot hide a file from the scan', (t) => {
 
 test('19. a remote named like the public one but pointing elsewhere is not guarded', (t) => {
   const s = setup(t, { terms: false });
-  git(s.work, 'remote', 'set-url', 'public', s.cust);
+  git(s.work, 'remote', 'set-url', 'public', s.priv);
   commit(s.work, { 'docs/policy/x.txt': 'private\n' });
   const r = push(s.work, 'public', 'main');
   assert.equal(r.code, 0, r.out);
@@ -386,7 +397,7 @@ test('20. a malformed ref line refuses the push; other URLs are not inspected', 
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /pre-push: unexpected ref line from git; refusing to push/);
   }
-  assert.equal(runHook(s, ['customers', s.cust], 'garbage\n').code, 0);
+  assert.equal(runHook(s, ['private', s.priv], 'garbage\n').code, 0);
   const noName = runHook(s, ['', s.pub], `refs/heads/main ${sha} refs/heads/main ${zero}\n`);
   assert.equal(noName.code, 1, noName.out);
   assert.match(noName.out, /pre-push: git passed no remote name; refusing to push/);
@@ -420,9 +431,26 @@ test('23. a name added in one new commit and removed in the next is refused (int
   const r = push(s.work, 'public', 'p1');
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /docs\/a\.md: added line: term #1/);
-  assert.match(r.out, new RegExp(`pre-push: a commit in ${L(tip)} adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing`));
+  assert.match(r.out, new RegExp(`pre-push: a commit in ${L(tip)} adds a listed term or identifier\\. If it is still present at the tip, fix or allowlist it; if a later commit removed it, squash those commits, then push again`));
   assertNoTerm(r.out);
   assert.equal(remoteHas(s.pub, 'refs/heads/p1'), false);
+});
+
+test('23b. a local replace ref cannot hide the commit that adds a name', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', 'replaced');
+  const added = commit(s.work, { 'docs/a.md': `visit ${TERM}\n` });
+  commit(s.work, { 'docs/a.md': 'visit the reference farm\n' });
+  // a clean commit with the same parent, used as the local replacement
+  git(s.work, 'checkout', '-q', '-b', 'clean-twin', 'main');
+  const clean = commit(s.work, { 'docs/a.md': 'visit the reference farm\n' });
+  git(s.work, 'checkout', '-q', 'replaced');
+  git(s.work, 'replace', added, clean);
+  const r = push(s.work, 'public', 'replaced');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, new RegExp(`^${added.slice(0, 7)} docs/a\\.md: added line: term #1$`, 'm'));
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/replaced'), false);
 });
 
 test('24. without a scanner in the commit, a push by URL is refused', (t) => {

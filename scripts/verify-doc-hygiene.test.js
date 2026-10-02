@@ -9,8 +9,14 @@ const { loadTerms, scanText, judge, isFakeEui, maskPath } = require('./verify-do
 
 const SCRIPT = path.join(__dirname, 'verify-doc-hygiene.js');
 
+const tempRoots = [];
+process.on('exit', () => {
+  for (const root of tempRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+
 function repo(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-hygiene-'));
+  tempRoots.push(root);
   execFileSync('git', ['init', '-q'], { cwd: root });
   for (const [rel, content] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
@@ -59,6 +65,8 @@ test('isFakeEui accepts the documented example values and rejects real-looking o
   assert.equal(isFakeEui('0016C001F1000001'), true);
   assert.equal(isFakeEui('a840410000000001'), true);
   assert.equal(isFakeEui('0011223344556677'), true);
+  assert.equal(isFakeEui('AABBCCDDEEFF0011'), true);
+  assert.equal(isFakeEui('aabbccddeeff0011'), true);
   assert.equal(isFakeEui('AA00000000000001'), true);
   assert.equal(isFakeEui('1234567890123456'), true);
   assert.equal(isFakeEui('0016C001F1A7B3D9'), false);
@@ -75,6 +83,52 @@ test('built-in patterns flag a real-looking EUI and a tailnet address only', () 
   assert.match(r.out, /docs\/a\.md:3: cgnat-address/);
   assert.doesNotMatch(r.out, /docs\/a\.md:2:/);
   assert.doesNotMatch(r.out, /docs\/a\.md:4:/);
+});
+
+const FAIL_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or add or raise an entry in scripts/verify-doc-hygiene-allowlist.json with a reason';
+const STDIN_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or reword the text';
+
+test('a tailnet host name is a built-in finding; the placeholder form is not', () => {
+  const root = repo({
+    'docs/a.md': 'ssh root@gw.tailab12cd.ts.net\nok <host>.<tailnet>.ts.net\n',
+  });
+  const r = run(root, []);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /docs\/a\.md:1: tailnet-host/);
+  assert.doesNotMatch(r.out, /docs\/a\.md:2:/);
+  assert.doesNotMatch(r.out, /tailab12cd/);
+});
+
+test('a tree-mode failure says what to do', () => {
+  const root = repo({ 'docs/a.md': 'gw 0016C001F1A7B3D9\n' });
+  const r = run(root, []);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /verify-doc-hygiene: FAIL \(1 files over their limit, 0 stale allowlist entries\)\n/);
+  assert.ok(r.out.includes(`${FAIL_HINT}\n`), r.out);
+});
+
+test('unknown arguments are an error that names the argument', () => {
+  const root = repo({ 'README.md': 'clean\n' });
+  const typo = run(root, ['--require-term'], 'zebrafarm');
+  assert.equal(typo.code, 2, typo.out);
+  assert.match(typo.out, /verify-doc-hygiene: unknown argument --require-term/);
+  const env = { ...process.env };
+  delete env.OSI_DOC_HYGIENE_TERMS;
+  const spaced = spawnSync(process.execPath, [SCRIPT, '--root', root], { env, encoding: 'utf8' });
+  assert.equal(spaced.status, 2, spaced.stdout + spaced.stderr);
+  assert.match(spaced.stderr, /verify-doc-hygiene: unknown argument --root/);
+});
+
+test('a --root that is not a git repository exits 2 with one line and no stack trace', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-hygiene-nogit-'));
+  tempRoots.push(root);
+  const env = { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(root) };
+  delete env.OSI_DOC_HYGIENE_TERMS;
+  const r = spawnSync(process.execPath, [SCRIPT, `--root=${root}`], { env, encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stderr.trim().split('\n').length, 1, r.stderr);
+  assert.match(r.stderr, /^verify-doc-hygiene: /);
+  assert.doesNotMatch(r.stderr, /^\s+at /m);
 });
 
 test('never prints the term or the matched text', () => {
@@ -189,8 +243,22 @@ test('--stdin scans supplied text such as commit messages and prints no match', 
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /stdin:3: term #1/);
   assert.doesNotMatch(bad.stdout + bad.stderr, /zebrafarm/i);
+  assert.ok(bad.stderr.includes(`verify-doc-hygiene: FAIL (1 findings in the supplied text)\n${STDIN_HINT}\n`), bad.stderr);
   const good = spawnSync(process.execPath, args, { env, input: 'fix: deploy to the reference gateway\n', encoding: 'utf8' });
   assert.equal(good.status, 0);
+});
+
+test('--stdin flags a tailnet host name and spares the placeholder form', () => {
+  const root = repo({ 'README.md': 'clean\n' });
+  const env = { ...process.env };
+  delete env.OSI_DOC_HYGIENE_TERMS;
+  const args = [SCRIPT, `--root=${root}`, '--stdin'];
+  const bad = spawnSync(process.execPath, args, { env, input: 'tested\non host.tailab12cd.ts.net\n', encoding: 'utf8' });
+  assert.equal(bad.status, 1, bad.stdout + bad.stderr);
+  assert.match(bad.stderr, /stdin:2: tailnet-host/);
+  assert.doesNotMatch(bad.stderr, /tailab12cd/);
+  const good = spawnSync(process.execPath, args, { env, input: 'on <host>.<tailnet>.ts.net\n', encoding: 'utf8' });
+  assert.equal(good.status, 0, good.stdout + good.stderr);
 });
 
 test('judge allows up to max, flags more, reports stale, and never excuses path findings', () => {
@@ -214,7 +282,8 @@ test('fails on a stale allowlist entry', () => {
   });
   const r = run(root, ['--require-terms'], 'zebrafarm');
   assert.equal(r.code, 1);
-  assert.match(r.out, /docs\/a\.md: allowlist max 3 but only 0 found, lower it/);
+  assert.match(r.out, /docs\/a\.md: allowlist max 3 but only 0 found, lower it or remove the entry\n/);
+  assert.ok(r.out.includes(`${FAIL_HINT}\n`), r.out);
 });
 
 test('rejects an allowlist entry without reason or issue', () => {
@@ -231,6 +300,28 @@ test('--write-baseline records every current finding and a second run passes', (
   const written = JSON.parse(fs.readFileSync(path.join(root, 'scripts/verify-doc-hygiene-allowlist.json'), 'utf8'));
   assert.deepEqual(written.entries, [{ path: 'docs/a.md', max: 2, reason: 'baseline, removed by the documentation run', issue: 42 }]);
   assert.equal(run(root, ['--require-terms'], 'zebrafarm').code, 0);
+});
+
+test('--write-baseline refuses without the name list and writes nothing', () => {
+  const root = repo({ 'docs/a.md': 'gw 0016C001F1A7B3D9\n' });
+  const r = run(root, ['--write-baseline', '--issue=42']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /verify-doc-hygiene: --write-baseline needs the name list/);
+  assert.equal(fs.existsSync(path.join(root, 'scripts/verify-doc-hygiene-allowlist.json')), false);
+});
+
+test('--write-baseline keeps the reason and issue of an existing entry and updates only max', () => {
+  const root = repo({
+    'docs/a.md': 'zebrafarm and zebrafarm and zebrafarm\n',
+    'docs/b.md': 'zebrafarm\n',
+    'scripts/verify-doc-hygiene-allowlist.json': JSON.stringify({ entries: [{ path: 'docs/a.md', max: 1, reason: 'kept reason', issue: 7 }] }),
+  });
+  assert.equal(run(root, ['--require-terms', '--write-baseline', '--issue=42'], 'zebrafarm').code, 0);
+  const written = JSON.parse(fs.readFileSync(path.join(root, 'scripts/verify-doc-hygiene-allowlist.json'), 'utf8'));
+  assert.deepEqual(written.entries, [
+    { path: 'docs/a.md', max: 3, reason: 'kept reason', issue: 7 },
+    { path: 'docs/b.md', max: 1, reason: 'baseline, removed by the documentation run', issue: 42 },
+  ]);
 });
 
 test('without the name list, entries counting private matches are not stale', () => {
@@ -334,6 +425,7 @@ test('--stdin-diff reports a name added in one commit and removed in the next, f
   assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/a\\.md: added line: term #1$`, 'm'));
   assert.doesNotMatch(r.out, new RegExp(b.slice(0, 7)));
   assert.match(r.out, /verify-doc-hygiene: FAIL \(1 findings in added lines of the supplied commits\)/);
+  assert.ok(r.out.includes(`verify-doc-hygiene: FAIL (1 findings in added lines of the supplied commits)\n${FAIL_HINT}\n`), r.out);
   assert.doesNotMatch(r.out, /zebra/i);
   assert.doesNotMatch(r.out, /visit/);
 });
@@ -345,6 +437,17 @@ test('--stdin-diff reports built-in identifiers in added lines too', (t) => {
   const r = runDiff(root, diffOf(root, `${base}..HEAD`));
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/a\\.md: added line: eui64$`, 'm'));
+});
+
+test('--stdin-diff reports a tailnet host name and spares the placeholder form', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/a.md': 'ssh root@gw.tailab12cd.ts.net\n' });
+  commitFiles(root, { 'docs/a.md': 'ssh root@<host>.<tailnet>.ts.net\n' });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/a\\.md: added line: tailnet-host$`, 'm'));
+  assert.match(r.out, /FAIL \(1 findings in added lines/);
+  assert.doesNotMatch(r.out, /tailab12cd/);
 });
 
 test('--stdin-diff skips files that have an allowlist entry in --root', (t) => {

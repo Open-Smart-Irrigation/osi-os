@@ -355,13 +355,15 @@ until the stack is rebased onto the current `origin/main`.
   Write "the reference gateway", "the demo gateway", "a customer gateway",
   "a customer cloud instance". Example values: gateway EUI
   `0016C001F1000001`, device EUI `A840410000000001`, address `100.x.y.z`.
-  `node scripts/verify-doc-hygiene.js` enforces this in CI for files, pull-request text and commit messages;
-  maintainers hold the name list.
-  Maintainers install the matching pre-push guard once per clone:
-  `cp scripts/hooks/pre-push-doc-hygiene.sh .git/hooks/pre-push && chmod +x .git/hooks/pre-push`,
-  then `git config osi.docHygieneTermsFile <path to the name list>`. It scans
-  the pushed commits and their messages before anything reaches the public
-  repository.
+  A 16-digit hex value that is not an identifier, such as a Node-RED node
+  id, needs an entry in `scripts/verify-doc-hygiene-allowlist.json` with a
+  reason. `node scripts/verify-doc-hygiene.js` enforces this in CI for
+  files, pull-request text and commit messages; maintainers hold the name
+  list. Maintainers install the matching pre-push guard once per clone:
+  `cp scripts/hooks/pre-push-doc-hygiene.sh "$(git rev-parse --git-path hooks/pre-push)" && chmod +x "$(git rev-parse --git-path hooks/pre-push)"`,
+  then `git config osi.docHygieneTermsFile <path to the name list>`.
+  Reinstall the copy when the script changes. It scans the pushed commits
+  and their messages before anything reaches the public repository.
 
 ---
 
