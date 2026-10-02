@@ -232,3 +232,29 @@ test('--write-baseline records every current finding and a second run passes', (
   assert.deepEqual(written.entries, [{ path: 'docs/a.md', max: 2, reason: 'baseline, removed by the documentation run', issue: 42 }]);
   assert.equal(run(root, ['--require-terms'], 'zebrafarm').code, 0);
 });
+
+test('without the name list, entries counting private matches are not stale', () => {
+  const root = repo({
+    'docs/a.md': 'zebrafarm and zebrafarm, gateway A840410ABCDEF123\n',
+    'scripts/verify-doc-hygiene-allowlist.json': JSON.stringify({ entries: [{ path: 'docs/a.md', max: 3, reason: 'pinned by a test', issue: 1 }] }),
+  });
+  const r = run(root, []);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /OK \(\d+ files scanned, built-in patterns only; allowlist staleness not checked\)/);
+});
+
+test('with the name list the same repo passes', () => {
+  const root = repo({
+    'docs/a.md': 'zebrafarm and zebrafarm, gateway A840410ABCDEF123\n',
+    'scripts/verify-doc-hygiene-allowlist.json': JSON.stringify({ entries: [{ path: 'docs/a.md', max: 3, reason: 'pinned by a test', issue: 1 }] }),
+  });
+  assert.equal(run(root, ['--require-terms'], 'zebrafarm').code, 0);
+});
+
+test('without the name list, an over-limit built-in count still fails', () => {
+  const root = repo({
+    'docs/a.md': 'A840410ABCDEF123 and B1C2D3E4F5061728\n',
+    'scripts/verify-doc-hygiene-allowlist.json': JSON.stringify({ entries: [{ path: 'docs/a.md', max: 1, reason: 'pinned by a test', issue: 1 }] }),
+  });
+  assert.equal(run(root, []).code, 1);
+});

@@ -188,7 +188,11 @@ function main(argv, env) {
     console.error(`verify-doc-hygiene: ${err.message}`);
     return 2;
   }
-  const { violations, stale } = judge(byFile, entries);
+  const judged = judge(byFile, entries);
+  const violations = judged.violations;
+  // Without the name list the private matches are invisible, so a count that
+  // includes them would look stale; staleness is only checked with the list.
+  const stale = terms.length ? judged.stale : [];
   for (const v of violations) {
     const shown = maskPath(v.file, terms);
     for (const f of v.pathFindings) console.error(`${shown}: path: ${f.id}`);
@@ -203,6 +207,10 @@ function main(argv, env) {
     return 1;
   }
   const allowedCount = entries.reduce((sum, e) => sum + e.max, 0);
+  if (!terms.length) {
+    console.log(`verify-doc-hygiene: OK (${scanned} files scanned, built-in patterns only; allowlist staleness not checked)`);
+    return 0;
+  }
   console.log(`verify-doc-hygiene: OK (${scanned} files scanned, ${allowedCount} allowlisted findings in ${entries.length} files)`);
   return 0;
 }

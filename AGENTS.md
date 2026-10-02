@@ -256,7 +256,7 @@ node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard
-node scripts/verify-doc-hygiene.js           # no deployment identities in docs, guidance, skills
+node scripts/verify-doc-hygiene.js            # no deployment identities in docs, guidance, skills
 
 cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build
@@ -355,8 +355,8 @@ until the stack is rebased onto the current `origin/main`.
   Write "the reference gateway", "the demo gateway", "a customer gateway",
   "a customer cloud instance". Example values: gateway EUI
   `0016C001F1000001`, device EUI `A840410000000001`, address `100.x.y.z`.
-  `node scripts/verify-doc-hygiene.js` enforces this in CI; maintainers hold
-  the name list.
+  `node scripts/verify-doc-hygiene.js` enforces this in CI for files, pull-request text and commit messages;
+  maintainers hold the name list.
 
 ---
 

@@ -3,6 +3,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
+    types: [opened, edited, synchronize, reopened]
     branches: [ main ]
 jobs:
   doc-hygiene:
@@ -23,19 +24,23 @@ jobs:
           node-version: '22'
       - name: Scanner unit tests
         run: node --test scripts/verify-doc-hygiene.test.js
-      # The name list is a secret. Pull requests from forks do not receive
-      # it; they run the built-in patterns only, and the push to main after
-      # the merge runs the full list.
+      # The name list is a secret. Fork pull requests do not receive it; they
+      # run the built-in patterns on files, pull-request text and commit
+      # messages. The name list runs on same-repository pull requests and on
+      # pushes to main (files only on a push).
       - name: Scan documentation, guidance and skills
         env:
           OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}
         run: node scripts/verify-doc-hygiene.js ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && '--require-terms' || '' }}
       - name: Scan pull request title, body and commit messages
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'pull_request'
         env:
           OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          REQUIRE_TERMS: ${{ github.event.pull_request.head.repo.full_name == github.repository && '--require-terms' || '' }}
         run: |
-          { printf '%s\n\n%s\n\n' "$PR_TITLE" "$PR_BODY"; git log --format=%B "origin/${{ github.base_ref }}..HEAD"; } \
-            | node scripts/verify-doc-hygiene.js --stdin --require-terms
+          set -euo pipefail
+          # REQUIRE_TERMS is unquoted on purpose: an empty value adds no argument.
+          { printf '%s\n\n%s\n\n' "$PR_TITLE" "$PR_BODY"; git log --format=%B "origin/${GITHUB_BASE_REF}..HEAD"; } \
+            | node scripts/verify-doc-hygiene.js --stdin $REQUIRE_TERMS
