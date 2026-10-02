@@ -357,6 +357,11 @@ until the stack is rebased onto the current `origin/main`.
   `0016C001F1000001`, device EUI `A840410000000001`, address `100.x.y.z`.
   `node scripts/verify-doc-hygiene.js` enforces this in CI for files, pull-request text and commit messages;
   maintainers hold the name list.
+  Maintainers install the matching pre-push guard once per clone:
+  `cp scripts/hooks/pre-push-doc-hygiene.sh .git/hooks/pre-push && chmod +x .git/hooks/pre-push`,
+  then `git config osi.docHygieneTermsFile <path to the name list>`. It scans
+  the pushed commits and their messages before anything reaches the public
+  repository.
 
 ---
 

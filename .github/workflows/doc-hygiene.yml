@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: '22'
       - name: Scanner unit tests
-        run: node --test scripts/verify-doc-hygiene.test.js
+        run: node --test scripts/verify-doc-hygiene.test.js scripts/hooks/pre-push-doc-hygiene.test.js
       # The name list is a secret. Fork pull requests do not receive it; they
       # run the built-in patterns on files, pull-request text and commit
       # messages. The name list runs on same-repository pull requests and on
