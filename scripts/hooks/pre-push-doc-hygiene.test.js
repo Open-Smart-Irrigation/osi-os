@@ -16,6 +16,8 @@ const HOOK = path.join(__dirname, 'pre-push-doc-hygiene.sh');
 const SCANNER = path.join(__dirname, '..', 'verify-doc-hygiene.js');
 const TERM = 'zebrafarm';
 const PRIVATE_MSG = /the commit contains private document folders \(docs\/policy\)/;
+// The hook names a ref by the short id of its commit, never by its name.
+const L = (sha) => `${sha.slice(0, 7)} \\(ref name withheld\\)`;
 const NO_LIST_MSG = /pre-push: osi\.docHygieneTermsFile is not set or not readable; refusing to push to the public repository/;
 
 function cleanEnv() {
@@ -147,10 +149,10 @@ test('3. a commit message with a listed name is rejected', (t) => {
 test('4. private document folders are refused without a name list and without a scanner', (t) => {
   const s = setup(t, { scanner: false, terms: false });
   git(s.work, 'checkout', '-q', '-b', 'private');
-  commit(s.work, { 'docs/policy/x.txt': 'private\n' });
+  const sha = commit(s.work, { 'docs/policy/x.txt': 'private\n' });
   const r = push(s.work, 'public', 'private');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, /pre-push: refusing to push refs\/heads\/private: the commit contains private document folders \(docs\/policy\)/);
+  assert.match(r.out, new RegExp(`pre-push: refusing to push ${L(sha)}: the commit contains private document folders \\(docs/policy\\)`));
   assert.equal(remoteHas(s.pub, 'refs/heads/private'), false);
 });
 
@@ -226,7 +228,7 @@ test('10. without a scanner in the commit or on the remote main the scan is skip
   const sha = commit(s.work, { 'docs/ok.md': 'clean\n' });
   const r = push(s.work, 'public', 'main');
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /pre-push: no hygiene scanner in refs\/heads\/main or on public\/main; file and message scan skipped/);
+  assert.match(r.out, new RegExp(`pre-push: no hygiene scanner in ${L(sha)} or on public/main; file and message scan skipped`));
   assert.equal(git(s.pub, 'rev-parse', 'refs/heads/main'), sha);
 });
 
@@ -234,11 +236,11 @@ test('10b. a commit without a scanner uses the scanner on the remote main', (t) 
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'feature');
   git(s.work, 'rm', '-q', 'scripts/verify-doc-hygiene.js');
-  commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  const sha = commit(s.work, { 'docs/a.md': `${TERM}\n` });
   const r = push(s.work, 'public', 'feature');
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /docs\/a\.md:1: term #1/);
-  assert.match(r.out, /pre-push: refs\/heads\/feature has no hygiene baseline of its own; merge or rebase onto public\/main and push again/);
+  assert.match(r.out, new RegExp(`pre-push: ${L(sha)} has no hygiene baseline of its own; merge or rebase onto public/main and push again`));
   assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
 });
 
@@ -257,13 +259,13 @@ test('11. an allowlisted finding passes', (t) => {
 test('12. several refs in one push: a bad second ref blocks the whole push', (t) => {
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'good');
-  commit(s.work, { 'docs/ok.md': 'clean\n' });
+  const good = commit(s.work, { 'docs/ok.md': 'clean\n' });
   git(s.work, 'checkout', '-q', '-b', 'zz-bad');
-  commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  const bad = commit(s.work, { 'docs/a.md': `${TERM}\n` });
   const r = push(s.work, 'public', 'good', 'zz-bad');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, /refusing to push refs\/heads\/zz-bad: its documents failed the hygiene scan/);
-  assert.doesNotMatch(r.out, /refusing to push refs\/heads\/good/);
+  assert.match(r.out, new RegExp(`refusing to push ${L(bad)}: its documents failed the hygiene scan`));
+  assert.doesNotMatch(r.out, new RegExp(`refusing to push ${L(good)}`));
   assert.equal(remoteHas(s.pub, 'refs/heads/good'), false);
   assert.equal(remoteHas(s.pub, 'refs/heads/zz-bad'), false);
 });
@@ -282,12 +284,12 @@ test('13. pushing by URL without .git or with a trailing slash is guarded', (t) 
 
 test('14. a detached HEAD pushed to a new branch is scanned', (t) => {
   const s = setup(t);
-  commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  const sha = commit(s.work, { 'docs/a.md': `${TERM}\n` });
   git(s.work, 'checkout', '-q', '--detach', 'HEAD');
   const r = push(s.work, 'public', 'HEAD:refs/heads/x');
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /docs\/a\.md:1: term #1/);
-  assert.match(r.out, /refusing to push HEAD: its documents failed the hygiene scan/);
+  assert.match(r.out, new RegExp(`refusing to push ${L(sha)}: its documents failed the hygiene scan`));
   assert.equal(remoteHas(s.pub, 'refs/heads/x'), false);
 });
 
@@ -318,9 +320,10 @@ test('17. a new commit whose own tree holds a private folder is refused, even if
   const added = commit(s.work, { 'docs/policy/x.txt': 'private\n' });
   git(s.work, 'rm', '-q', '-r', 'docs/policy');
   git(s.work, 'commit', '-q', '-m', 'remove the folder again');
+  const tip = git(s.work, 'rev-parse', 'HEAD');
   const r = push(s.work, 'public', 'laundered');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, new RegExp(`pre-push: refusing to push refs/heads/laundered: its history contains private document folders \\(commit ${added}\\)`));
+  assert.match(r.out, new RegExp(`pre-push: refusing to push ${L(tip)}: its history contains private document folders \\(commit ${added}\\)`));
   assert.equal(remoteHas(s.pub, 'refs/heads/laundered'), false);
 });
 
@@ -339,10 +342,10 @@ test('17b. a clean-up commit that only removes a private folder already on the r
 test('18. export-ignore attributes cannot hide a file from the scan', (t) => {
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'hidden');
-  commit(s.work, { '.gitattributes': 'docs/a.md export-ignore\n', 'docs/a.md': `${TERM}\n` });
+  const sha = commit(s.work, { '.gitattributes': 'docs/a.md export-ignore\n', 'docs/a.md': `${TERM}\n` });
   const r = push(s.work, 'public', 'hidden');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, /refusing to push refs\/heads\/hidden: the export has 1 of 2 files/);
+  assert.match(r.out, new RegExp(`refusing to push ${L(sha)}: the export has 1 of 2 files`));
   assert.equal(remoteHas(s.pub, 'refs/heads/hidden'), false);
 });
 
@@ -413,11 +416,11 @@ test('23. a name added in one new commit and removed in the next is refused (int
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'p1');
   commit(s.work, { 'docs/a.md': `visit ${TERM}\n` });
-  commit(s.work, { 'docs/a.md': 'visit the reference farm\n' });
+  const tip = commit(s.work, { 'docs/a.md': 'visit the reference farm\n' });
   const r = push(s.work, 'public', 'p1');
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /docs\/a\.md: added line: term #1/);
-  assert.match(r.out, /pre-push: a commit in refs\/heads\/p1 adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing/);
+  assert.match(r.out, new RegExp(`pre-push: a commit in ${L(tip)} adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing`));
   assertNoTerm(r.out);
   assert.equal(remoteHas(s.pub, 'refs/heads/p1'), false);
 });
@@ -426,10 +429,10 @@ test('24. without a scanner in the commit, a push by URL is refused', (t) => {
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'probe');
   git(s.work, 'rm', '-q', 'scripts/verify-doc-hygiene.js');
-  commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  const sha = commit(s.work, { 'docs/a.md': `${TERM}\n` });
   const r = push(s.work, s.pub, 'HEAD:refs/heads/probe');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, /pre-push: cannot find a hygiene scanner for HEAD; fetch .*osi-os\.git first/);
+  assert.match(r.out, new RegExp(`pre-push: cannot find a hygiene scanner for ${L(sha)}; fetch .*osi-os\\.git first`));
   assertNoTerm(r.out);
   assert.equal(remoteHas(s.pub, 'refs/heads/probe'), false);
 });
@@ -438,11 +441,11 @@ test('25. without a scanner in the commit and without the remote-tracking main, 
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'probe');
   git(s.work, 'rm', '-q', 'scripts/verify-doc-hygiene.js');
-  commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  const sha = commit(s.work, { 'docs/a.md': `${TERM}\n` });
   git(s.work, 'update-ref', '-d', 'refs/remotes/public/main');
   const r = push(s.work, 'public', 'probe');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, /pre-push: cannot find a hygiene scanner for refs\/heads\/probe; fetch public first/);
+  assert.match(r.out, new RegExp(`pre-push: cannot find a hygiene scanner for ${L(sha)}; fetch public first`));
   assert.equal(remoteHas(s.pub, 'refs/heads/probe'), false);
 });
 
@@ -465,10 +468,10 @@ test('26. the fallback scanner uses the allowlist of the remote main as well', (
 test('27. a scanner without the --stdin-diff mode refuses the push', (t) => {
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'old-scanner');
-  commit(s.work, { 'scripts/verify-doc-hygiene.js': "console.log('verify-doc-hygiene: OK (old)');\n", 'docs/ok.md': 'clean\n' });
+  const sha = commit(s.work, { 'scripts/verify-doc-hygiene.js': "console.log('verify-doc-hygiene: OK (old)');\n", 'docs/ok.md': 'clean\n' });
   const r = push(s.work, 'public', 'old-scanner');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, /pre-push: the hygiene scanner for refs\/heads\/old-scanner has no --stdin-diff mode; refusing to push/);
+  assert.match(r.out, new RegExp(`pre-push: the hygiene scanner for ${L(sha)} has no --stdin-diff mode; refusing to push`));
   assert.equal(remoteHas(s.pub, 'refs/heads/old-scanner'), false);
 });
 
@@ -491,4 +494,97 @@ test('29. the hook exports exactly the scanner scope plus the allowlist', () => 
   const allow = text.match(/^ALLOWLIST_PATH=(\S+)$/m);
   assert.ok(allow, 'ALLOWLIST_PATH definition not found');
   assert.equal(allow[1], 'scripts/verify-doc-hygiene-allowlist.json');
+});
+
+test('30. a -diff attribute in the pushed branch cannot hide an intermediate name (E5a)', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', 'e5a');
+  commit(s.work, { '.gitattributes': 'docs/** -diff\n' });
+  commit(s.work, { 'docs/a.md': `visit ${TERM}\n` });
+  commit(s.work, { 'docs/a.md': 'visit the reference farm\n' });
+  const r = push(s.work, 'public', 'e5a');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /docs\/a\.md: added line: term #1/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/e5a'), false);
+});
+
+test('31. a binary attribute in .git/info/attributes cannot hide an intermediate name (E5b)', (t) => {
+  const s = setup(t);
+  fs.mkdirSync(path.join(s.work, '.git', 'info'), { recursive: true });
+  fs.writeFileSync(path.join(s.work, '.git', 'info', 'attributes'), 'docs/** binary\n');
+  git(s.work, 'checkout', '-q', '-b', 'e5b');
+  commit(s.work, { 'docs/a.md': `visit ${TERM}\n` });
+  commit(s.work, { 'docs/a.md': 'visit the reference farm\n' });
+  const r = push(s.work, 'public', 'e5b');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /docs\/a\.md: added line: term #1/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/e5b'), false);
+});
+
+test('32. a name added only while resolving a merge conflict is refused (E4)', (t) => {
+  const s = setup(t);
+  commit(s.work, { 'docs/a.md': 'base line\n' });
+  git(s.work, 'push', '-q', '--no-verify', 'public', 'main');
+  git(s.work, 'checkout', '-q', '-b', 'side');
+  commit(s.work, { 'docs/a.md': 'side line\n' });
+  git(s.work, 'checkout', '-q', '-b', 'e4', 'main');
+  commit(s.work, { 'docs/a.md': 'main line\n' });
+  assert.notEqual(tryGit(s.work, 'merge', '-q', '--no-edit', 'side').code, 0, 'the merge must conflict');
+  write(s.work, 'docs/a.md', `merged line for ${TERM}\n`);
+  git(s.work, 'add', 'docs/a.md');
+  git(s.work, 'commit', '-q', '--no-edit');
+  const merge = git(s.work, 'rev-parse', 'HEAD');
+  commit(s.work, { 'docs/a.md': 'merged line\n' });
+  const r = push(s.work, 'public', 'e4');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, new RegExp(`${merge.slice(0, 7)} docs/a\\.md: added line: term #1`));
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/e4'), false);
+});
+
+test('33. a git without --diff-merges=remerge refuses the push', (t) => {
+  const s = setup(t);
+  const sha = commit(s.work, { 'docs/ok.md': 'clean\n' });
+  const realGit = (process.env.PATH || '').split(path.delimiter).map((d) => path.join(d, 'git'))
+    .find((f) => { try { fs.accessSync(f, fs.constants.X_OK); return true; } catch { return false; } });
+  const bin = path.join(s.tmp, 'oldgit');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'git'), [
+    '#!/bin/sh',
+    'for a in "$@"; do',
+    '  case $a in --diff-merges=remerge) echo "fatal: unknown value for --diff-merges: remerge" >&2; exit 128 ;; esac',
+    'done',
+    `exec '${realGit}' "$@"`,
+    '',
+  ].join('\n'));
+  fs.chmodSync(path.join(bin, 'git'), 0o755);
+  const zero = '0'.repeat(40);
+  const env = { ...ENV, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  const r = runHook(s, ['public', s.pub], `refs/heads/main ${sha} refs/heads/main ${zero}\n`, env);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /pre-push: git 2\.36 or newer is required for the added-lines scan \(--diff-merges=remerge\); refusing to push/);
+});
+
+test('34. a branch whose name carries a name is refused without printing it anywhere', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', `customer/${TERM}`);
+  commit(s.work, { 'docs/ok.md': 'clean\n' });
+  const r = push(s.work, 'public', `customer/${TERM}`);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /stdin:\d+: term #1/);
+  assert.match(r.out, /\(ref name withheld\): a commit message or the pushed ref name failed the hygiene scan/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, `refs/heads/customer/${TERM}`), false);
+});
+
+test('35. a refused tripwire push on a branch whose name carries a name does not print it', (t) => {
+  const s = setup(t, { scanner: false, terms: false });
+  git(s.work, 'checkout', '-q', '-b', `${TERM}-private`);
+  commit(s.work, { 'docs/policy/x.txt': 'private\n' });
+  const r = push(s.work, 'public', `${TERM}-private`);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /private document folders \(docs\/policy\)/);
+  assertNoTerm(r.out);
 });

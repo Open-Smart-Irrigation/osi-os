@@ -305,11 +305,13 @@ function commitFiles(root, files, message = 'change') {
   return g(root, 'rev-parse', 'HEAD');
 }
 
-// The same `git log -p` the pre-push hook runs.
-function diffOf(root, range, gitConfig = ['-c', 'core.quotePath=false']) {
-  return g(root, ...gitConfig, '-c', 'log.showRoot=true', '-c', 'log.showSignature=false', 'log', '-p',
+// The same `git log -p` the pre-push hook runs (pass hook = false for the
+// plain form without --text and remerge diffs).
+function diffOf(root, range, gitConfig = ['-c', 'core.quotePath=false'], hook = true) {
+  const extra = hook ? ['--text', '--diff-merges=remerge'] : [];
+  return g(root, ...gitConfig, '-c', 'log.showRoot=true', '-c', 'log.showSignature=false', 'log', '-p', ...extra,
     '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/',
-    '--format=commit %H', range, '--', ...SCOPE);
+    '--format=commit %H', ...[].concat(range), '--', ...SCOPE);
 }
 
 function runDiff(root, input, terms = 'zebrafarm') {
@@ -409,12 +411,63 @@ test('--stdin-diff copes with binary files and mode-only changes', (t) => {
   g(root, 'update-index', '--chmod=+x', 'docs/x.md');
   g(root, 'commit', '-q', '-m', 'mode only');
   commitFiles(root, { 'docs/blob.bin': Buffer.from([0x00, 0x01, 0x02]) });
-  const input = diffOf(root, `${base}..HEAD`);
+  const input = diffOf(root, `${base}..HEAD`, undefined, false);
   assert.match(input, /Binary files/);
   assert.match(input, /new mode/);
   const r = runDiff(root, input);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /verify-doc-hygiene: OK \(supplied commits\)/);
+  const asText = diffOf(root, `${base}..HEAD`);
+  assert.doesNotMatch(asText, /Binary files/);
+  const t2 = runDiff(root, asText);
+  assert.equal(t2.code, 0, t2.out);
+});
+
+test('--stdin-diff skips an added line with a NUL and still scans the next line of the file', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/mixed.md': Buffer.from('zebrafarm\u0000blob\nsecond zebrafarm\n', 'utf8') });
+  const input = diffOf(root, `${base}..HEAD`);
+  assert.match(input, /\u0000/);
+  const r = runDiff(root, input);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /FAIL \(1 findings in added lines/);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/mixed\\.md: added line: term #1$`, 'm'));
+});
+
+// Two branches change the same line; the merge resolves the conflict.
+function conflictMerge(root, resolution) {
+  commitFiles(root, { 'docs/a.md': 'base line\n' });
+  g(root, 'checkout', '-q', '-b', 'side');
+  commitFiles(root, { 'docs/a.md': 'side zebrafarm line\n' });
+  g(root, 'checkout', '-q', 'main');
+  commitFiles(root, { 'docs/a.md': 'main zebrafarm line\n' });
+  const r = spawnSync('git', ['merge', '-q', '--no-edit', 'side'], { cwd: root, env: HISTORY_ENV, encoding: 'utf8' });
+  assert.notEqual(r.status, 0, 'the merge must conflict');
+  fs.writeFileSync(path.join(root, 'docs/a.md'), resolution);
+  g(root, 'add', 'docs/a.md');
+  g(root, 'commit', '-q', '--no-edit');
+  return g(root, 'rev-parse', 'HEAD');
+}
+
+test('--stdin-diff on a remerge diff scans the resolution, not the conflict markers or the sides', (t) => {
+  const { root } = historyRepo(t);
+  const merge = conflictMerge(root, 'resolved line\n');
+  const input = diffOf(root, ['-1', merge]);
+  assert.match(input, /^-<{7}/m);
+  assert.match(input, /^-.*zebrafarm/m);
+  const r = runDiff(root, input);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /verify-doc-hygiene: OK \(supplied commits\)/);
+});
+
+test('--stdin-diff on a remerge diff reports a name the resolution adds', (t) => {
+  const { root } = historyRepo(t);
+  const merge = conflictMerge(root, 'resolved line for ZebraFarm\n');
+  const r = runDiff(root, diffOf(root, ['-1', merge]));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${merge.slice(0, 7)} docs/a\\.md: added line: term #1$`, 'm'));
+  assert.match(r.out, /FAIL \(1 findings in added lines/);
+  assert.doesNotMatch(r.out, /zebra/i);
 });
 
 test('--stdin-diff with --require-terms and an empty list is a configuration error', (t) => {

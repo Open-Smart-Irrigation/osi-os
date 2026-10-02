@@ -162,7 +162,9 @@ function diffHeaderPath(rest) {
 }
 
 // Scans the lines that commits add, from
-// `git log -p --no-renames --format='commit %H' <range> -- <scope>` output.
+// `git log -p --text --diff-merges=remerge --no-renames --format='commit %H' <range> -- <scope>`
+// output. In a remerge diff the conflict markers and both sides are removed
+// lines; only the resolution's added lines are scanned.
 // Files with an allowlist entry are skipped: the tip scan governs their count.
 function scanDiff(text, patterns, allowed) {
   const findings = [];
@@ -199,7 +201,8 @@ function scanDiff(text, patterns, allowed) {
         finishHeader();
         inHunk = true;
       }
-    } else if (inHunk && line.startsWith('+') && file !== null && !deleted && !allowed.has(file)) {
+    } else if (inHunk && line.startsWith('+') && !line.includes('\u0000') && file !== null && !deleted && !allowed.has(file)) {
+      // A line with a NUL is binary content, which the tip scan skips as well.
       for (const f of scanText(line.slice(1), patterns)) findings.push({ sha, file, kind: 'added line', id: f.id });
     }
   }

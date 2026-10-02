@@ -29,6 +29,12 @@ ALLOWLIST_PATH=scripts/verify-doc-hygiene-allowlist.json
 SCOPE_PATHS='README.md AGENTS.md CLAUDE.md CHANGELOG.md docs .claude/skills .github analysis'
 PRIVATE_PATHS='docs/policy docs/customers docs/gateways docs/customer-operations docs/releases docs/reviews docs/records docs/archive'
 
+# Refs are named in messages by the short id of the pushed commit, never by
+# their name: a branch or tag name may carry a listed term.
+short_label() {
+  printf '%s (ref name withheld)' "${1%"${1#???????}"}"
+}
+
 die() {
   printf 'pre-push: %s\n' "$*" >&2
   exit 1
@@ -144,19 +150,20 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   is_zero "$local_sha" && continue
   pushes=$((pushes + 1))
   commit=$(git rev-parse --verify --quiet "$local_sha^{commit}" </dev/null) ||
-    die "refusing to push $local_ref: $local_sha is not a commit"
+    die "refusing to push $(short_label "$local_sha"): the pushed object is not a commit"
+  label=$(short_label "$commit")
 
-  private_in_tree "$commit" >"$tmp/hits" || die "cannot list the tree of $local_ref; refusing to push"
+  private_in_tree "$commit" >"$tmp/hits" || die "cannot list the tree of $label; refusing to push"
   if [ -s "$tmp/hits" ]; then
     IFS= read -r first <"$tmp/hits"
-    die "refusing to push $local_ref: the commit contains private document folders ($first)"
+    die "refusing to push $label: the commit contains private document folders ($first)"
   fi
 
   exclude=$(known_remote_sha "$remote_sha")
   first=$(private_in_history "$commit" "$exclude") ||
-    die "cannot list the new history of $local_ref; refusing to push"
+    die "cannot list the new history of $label; refusing to push"
   if [ -n "$first" ]; then
-    die "refusing to push $local_ref: its history contains private document folders (commit $first); if that history is already public, fetch the remote and push by remote name"
+    die "refusing to push $label: its history contains private document folders (commit $first); if that history is already public, fetch the remote and push by remote name"
   fi
 done 3<"$tmp/refs"
 
@@ -180,35 +187,36 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   work="$tmp/ref$n"
   mkdir "$work" "$work/tree" || die "cannot create a temporary directory; refusing to push"
   commit=$(git rev-parse --verify --quiet "$local_sha^{commit}" </dev/null) ||
-    die "refusing to push $local_ref: $local_sha is not a commit"
+    die "refusing to push $(short_label "$local_sha"): the pushed object is not a commit"
+  label=$(short_label "$commit")
 
   # Scanner and allowlist come from one source: the pushed commit, or else
   # the remote's main (fallback). Only a remote main that is known and has no
   # scanner itself lets the scans be skipped.
   fallback=0
   found=$(git ls-tree --full-tree "$commit" -- "$SCANNER_PATH" </dev/null) ||
-    die "cannot list the tree of $local_ref; refusing to push"
+    die "cannot list the tree of $label; refusing to push"
   if [ -n "$found" ]; then
     scanner_from=$commit
   else
     scanner_from=$(git rev-parse --verify --quiet "refs/remotes/$remote_name/main^{commit}" </dev/null 2>/dev/null) ||
-      die "cannot find a hygiene scanner for $local_ref; fetch $remote_name first"
+      die "cannot find a hygiene scanner for $label; fetch $remote_name first"
     found=$(git ls-tree --full-tree "$scanner_from" -- "$SCANNER_PATH" </dev/null) ||
       die "cannot list the tree of $remote_name/main; refusing to push"
     if [ -z "$found" ]; then
-      printf 'pre-push: no hygiene scanner in %s or on %s/main; file and message scan skipped\n' "$local_ref" "$remote_name" >&2
+      printf 'pre-push: no hygiene scanner in %s or on %s/main; file and message scan skipped\n' "$label" "$remote_name" >&2
       continue
     fi
     fallback=1
   fi
   command -v node >/dev/null 2>&1 || die "node is not installed; refusing to push to the public repository"
   git cat-file blob "$scanner_from:$SCANNER_PATH" >"$work/scanner.js" </dev/null ||
-    die "cannot read the hygiene scanner for $local_ref; refusing to push"
+    die "cannot read the hygiene scanner for $label; refusing to push"
   grep -q 'stdin-diff' "$work/scanner.js"
   case $? in
     0) ;;
-    1) die "the hygiene scanner for $local_ref has no --stdin-diff mode; refusing to push (the scanner in the pushed commit, or on $remote_name/main without one, must have it)" ;;
-    *) die "cannot read the hygiene scanner for $local_ref; refusing to push" ;;
+    1) die "the hygiene scanner for $label has no --stdin-diff mode; refusing to push (the scanner in the pushed commit, or on $remote_name/main without one, must have it)" ;;
+    *) die "cannot read the hygiene scanner for $label; refusing to push" ;;
   esac
 
   # Export the scanner's scope from the pushed commit; the allowlist comes
@@ -217,17 +225,17 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   for p in $SCOPE_PATHS $ALLOWLIST_PATH; do
     if [ "$p" = "$ALLOWLIST_PATH" ] && [ "$fallback" -eq 1 ]; then continue; fi
     found=$(git ls-tree --full-tree --name-only "$commit" -- "$p" </dev/null) ||
-      die "cannot list the tree of $local_ref; refusing to push"
+      die "cannot list the tree of $label; refusing to push"
     if [ -n "$found" ]; then set -- "$@" "$p"; fi
   done
   : >"$work/expected" || die "cannot write a temporary file; refusing to push"
   if [ "$#" -gt 0 ]; then
     git archive --format=tar "$commit" "$@" >"$work/export.tar" </dev/null ||
-      die "git archive failed for $local_ref; refusing to push"
+      die "git archive failed for $label; refusing to push"
     tar -x -f "$work/export.tar" -C "$work/tree" </dev/null ||
-      die "cannot unpack the export of $local_ref; refusing to push"
+      die "cannot unpack the export of $label; refusing to push"
     git ls-tree -r --full-tree "$commit" -- "$@" >"$work/expected" </dev/null ||
-      die "cannot list the tree of $local_ref; refusing to push"
+      die "cannot list the tree of $label; refusing to push"
   fi
   extra_files=0
   if [ "$fallback" -eq 1 ]; then
@@ -249,56 +257,62 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
       git -c init.defaultBranch=main init -q &&
       git add -A -f &&
       git ls-files >"$work/listed"
-  ) </dev/null || die "cannot prepare the scan of $local_ref; refusing to push"
+  ) </dev/null || die "cannot prepare the scan of $label; refusing to push"
 
   # Every file of the commit must be in the export (export-ignore attributes
   # would otherwise hide files from the scan).
   expected=$(grep -c '^[0-7]* blob ' "$work/expected")
-  [ "$?" -le 1 ] || die "cannot count the files of $local_ref; refusing to push"
+  [ "$?" -le 1 ] || die "cannot count the files of $label; refusing to push"
   expected=$((expected + extra_files))
-  actual=$(wc -l <"$work/listed") || die "cannot count the exported files of $local_ref; refusing to push"
+  actual=$(wc -l <"$work/listed") || die "cannot count the exported files of $label; refusing to push"
   if [ "$expected" -ne "$actual" ]; then
-    die "refusing to push $local_ref: the export has $actual of $expected files (export attributes?), so it cannot be scanned"
+    die "refusing to push $label: the export has $actual of $expected files (export attributes?), so it cannot be scanned"
   fi
 
   # 1. The documents of the pushed commit.
   if ! run_scanner "$work/scanner.js" --root="$work/tree" --require-terms </dev/null; then
-    printf 'pre-push: refusing to push %s: its documents failed the hygiene scan\n' "$local_ref" >&2
+    printf 'pre-push: refusing to push %s: its documents failed the hygiene scan\n' "$label" >&2
     if [ "$fallback" -eq 1 ]; then
-      printf 'pre-push: %s has no hygiene baseline of its own; merge or rebase onto %s/main and push again\n' "$local_ref" "$remote_name" >&2
+      printf 'pre-push: %s has no hygiene baseline of its own; merge or rebase onto %s/main and push again\n' "$label" "$remote_name" >&2
     fi
     blocked=1
   fi
 
   # 2. The lines that the commits new to the remote add to those documents.
+  # --text: diff and binary attributes (from the branch, info/attributes or
+  # core.attributesFile) must not turn a document into "Binary files differ".
+  # --diff-merges=remerge: lines that only a conflict resolution adds.
+  git log -n 0 --diff-merges=remerge "$commit" </dev/null >/dev/null 2>&1 ||
+    die "git 2.36 or newer is required for the added-lines scan (--diff-merges=remerge); refusing to push"
   exclude=$(known_remote_sha "$remote_sha")
   # shellcheck disable=SC2086
   git -c core.quotePath=false -c log.showRoot=true -c log.showSignature=false \
-    log -p --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/ \
+    log -p --text --diff-merges=remerge --no-ext-diff --no-textconv --no-color --no-renames \
+    --src-prefix=a/ --dst-prefix=b/ \
     --format='commit %H' "$commit" --not --remotes="$remote_name" ${exclude:+"$exclude"} -- $SCOPE_PATHS \
     >"$work/changes" </dev/null ||
-    die "cannot list the changes of $local_ref; refusing to push"
+    die "cannot list the changes of $label; refusing to push"
   run_scanner "$work/scanner.js" --root="$work/tree" --stdin-diff --require-terms <"$work/changes" >"$work/changes.out"
   status=$?
   cat "$work/changes.out" || die "cannot read a temporary file; refusing to push"
   if [ "$status" -eq 1 ]; then
-    printf 'pre-push: a commit in %s adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing\n' "$local_ref" >&2
+    printf 'pre-push: a commit in %s adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing\n' "$label" >&2
     blocked=1
   elif [ "$status" -ne 0 ]; then
-    printf 'pre-push: refusing to push %s: the scan of the added lines failed (exit %s)\n' "$local_ref" "$status" >&2
+    printf 'pre-push: refusing to push %s: the scan of the added lines failed (exit %s)\n' "$label" "$status" >&2
     blocked=1
   elif ! grep -q 'OK (supplied commits)' "$work/changes.out"; then
-    printf 'pre-push: refusing to push %s: the hygiene scanner did not run its --stdin-diff mode\n' "$local_ref" >&2
+    printf 'pre-push: refusing to push %s: the hygiene scanner did not run its --stdin-diff mode\n' "$label" >&2
     blocked=1
   fi
 
   # 3. The messages of the commits new to the remote, and the pushed ref name.
   git -c log.showSignature=false log --format=%B "$commit" --not --remotes="$remote_name" ${exclude:+"$exclude"} \
     >"$work/messages" </dev/null ||
-    die "cannot list the commit messages of $local_ref; refusing to push"
+    die "cannot list the commit messages of $label; refusing to push"
   printf 'ref\n%s\n' "$remote_ref" >>"$work/messages" || die "cannot write a temporary file; refusing to push"
   if ! run_scanner "$work/scanner.js" --stdin --require-terms <"$work/messages"; then
-    printf 'pre-push: refusing to push %s: a commit message or the pushed ref name failed the hygiene scan\n' "$local_ref" >&2
+    printf 'pre-push: refusing to push %s: a commit message or the pushed ref name failed the hygiene scan\n' "$label" >&2
     blocked=1
   fi
 done 3<"$tmp/refs"
