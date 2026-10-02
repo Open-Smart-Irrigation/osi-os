@@ -234,7 +234,7 @@ are wired directly to the LSN50 STM32 I2C pins. Do not power it from switched
 5 V without a proper bidirectional I2C level shifter plus power isolation —
 the reader's pull-ups follow VCC and a switched-off 5 V rail can back-power
 the board through SDA/SCL. Full field diagnosis:
-`docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md`; for
+the field incident analysis in `docs/hardware/chameleon-reference.md` (section "Field incident: reader powered from a different rail than the bus"); for
 troubleshooting a live `i2c_missing` symptom, use **osi-debugging-playbook**
 instead of re-deriving this here.
 

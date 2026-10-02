@@ -67,6 +67,7 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | GUI unit tests | `cd web/react-gui && npm run test:unit` | npm exits 0. |
 | GUI build | `cd web/react-gui && npm run build` | npm exits 0. |
 | Whitespace/diff sanity | `git diff --check` | No output, exit 0. |
+| Documentation hygiene | `node scripts/verify-doc-hygiene.js` | Ends `verify-doc-hygiene: OK (...)`, exit 0. Maintainers add `--require-terms` with the name list in `OSI_DOC_HYGIENE_TERMS`. |
 
 ## Surface Selection
 

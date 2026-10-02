@@ -150,7 +150,7 @@ rehearsal.
 - `chameleon_calibrations` — keyed by `array_id` (uppercase 16-char hex). Source via.farm; bundled into firmware seed before release.
 - `chameleon_calibration_misses` — negative cache (24h TTL) for unknown array_ids.
 - `chameleon_readings.calibration_status` — `'calibrated'`, `'pending'`, or `'unknown'`.
-- **LSN50 Chameleon wiring:** when SDA/SCL are connected directly to the LSN50 STM32 I2C pins, power the VIA Chameleon I2C reader from LSN50 `VDD` (same 3.3-3.6 V rail as the bus). Do **not** power it from switched 5 V unless a proper bidirectional I2C level shifter and power isolation are added; the reader pull-ups follow VCC and switched-off 5 V can leave the board back-powered through SDA/SCL. See [docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md](docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md).
+- **LSN50 Chameleon wiring:** when SDA/SCL are connected directly to the LSN50 STM32 I2C pins, power the VIA Chameleon I2C reader from LSN50 `VDD` (same 3.3-3.6 V rail as the bus). Do **not** power it from switched 5 V unless a proper bidirectional I2C level shifter and power isolation are added; the reader pull-ups follow VCC and switched-off 5 V can leave the board back-powered through SDA/SCL. See the field incident analysis in [docs/hardware/chameleon-reference.md](docs/hardware/chameleon-reference.md#field-incident-reader-powered-from-a-different-rail-than-the-bus).
 - **Edge endpoints:** `POST /api/devices/:deveui/chameleon/refresh-calibration` (sync worker fetches from cloud), `PUT /api/devices/:deveui/chameleon/depth` (depth-only save, replaces old chameleon-config).
 - **Node-RED sync worker** queries missing calibrations every 30s alongside pending commands, fetches from `/api/v1/sync/chameleon/calibrations/lookup`, persists locally, and runs local backfill.
 - **Removed:** `PUT /api/devices/:deveui/chameleon-config` endpoint and the 9 per-device coefficient columns (`chameleon_swt[123]_[abc]`). Depth columns (`chameleon_swt[123]_depth_cm`) stay.
@@ -256,6 +256,7 @@ node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard
+node scripts/verify-doc-hygiene.js            # no deployment identities in docs, guidance, skills
 
 cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build
@@ -348,6 +349,21 @@ until the stack is rebased onto the current `origin/main`.
 - Empty `catch` blocks in `flows.json`: `scripts/verify-no-new-silent-catch.js` ratchets the maintained-profile baseline. When touching any function node, convert empty `catch(_){}` / `catch(e){}` / `catch {}` blocks in that node to a visible warning such as `catch (e) { node.warn('<node/context>: ' + (e && e.message ? e.message : e)); }`; new function code must not swallow errors silently. Load in-repo helper modules via `osiLib.require('<name>')` with `{"var": "osiLib", "module": "osi-lib"}` declared in the node's `libs` (bare `require()` of a non-builtin fails CI via the ratchet in `scripts/verify-sync-flow.js`); beyond such declared helpers, keep function-node `libs` minimal.
 - Error-counter heartbeat fields: maintained profiles now have catch nodes wired to `Record Error` (`global.error_counts`). Do not add heartbeat `errors_total` / `errors_last_at` fields until the flow has a `Gather Edge Health` node; that node is absent in the current maintained-profile baseline, so heartbeat surfacing is intentionally skipped.
 - `MqttPublisherService` on the cloud is deprecated (kept for potential future use); all cloud→edge commands are REST.
+- **No deployment identities in public text.** Documents, guidance files,
+  skills, commit messages, issues and pull requests do not name customers,
+  farms or individual gateways, and carry no real EUI or tailnet address.
+  Write "the reference gateway", "the demo gateway", "a customer gateway",
+  "a customer cloud instance". Example values: gateway EUI
+  `0016C001F1000001`, device EUI `A840410000000001`, address `100.x.y.z`.
+  A 16-digit hex value that is not an identifier, such as a Node-RED node
+  id, needs an entry in `scripts/verify-doc-hygiene-allowlist.json` with a
+  reason. `node scripts/verify-doc-hygiene.js` enforces this in CI for
+  files, pull-request text and commit messages; maintainers hold the name
+  list. Maintainers install the matching pre-push guard once per clone:
+  `cp scripts/hooks/pre-push-doc-hygiene.sh "$(git rev-parse --git-path hooks/pre-push)" && chmod +x "$(git rev-parse --git-path hooks/pre-push)"`,
+  then `git config osi.docHygieneTermsFile <path to the name list>`.
+  Reinstall the copy when the script changes. It scans the pushed commits
+  and their messages before anything reaches the public repository.
 
 ---
 
