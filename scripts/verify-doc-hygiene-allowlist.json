@@ -49,12 +49,6 @@
       "issue": 380
     },
     {
-      "path": "analysis/chameleon1_i2c_20260628/chameleon1_server_readings.csv",
-      "max": 5265,
-      "reason": "baseline, removed by the documentation run",
-      "issue": 380
-    },
-    {
       "path": "analysis/farming-db/README.md",
       "max": 2,
       "reason": "baseline, removed by the documentation run",
