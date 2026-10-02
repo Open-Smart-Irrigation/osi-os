@@ -180,6 +180,11 @@ function scanDiff(text, patterns, allowed) {
     inHeader = false;
   };
   for (const line of text.split('\n')) {
+    // git cannot remerge an octopus merge and says so in the stream; its
+    // lines would go unscanned, so the whole input is unusable.
+    if (line.startsWith('diff: warning: Skipping remerge-diff')) {
+      throw new Error('the supplied log skipped a merge diff; cannot scan');
+    }
     if (/^commit [0-9a-f]{40,64}$/.test(line)) {
       finishHeader();
       sha = line.slice(7);
@@ -242,7 +247,13 @@ function main(argv, env) {
       return 2;
     }
     const allowed = new Set(entries.map((e) => e.path));
-    const findings = scanDiff(fs.readFileSync(0, 'utf8'), [...BUILTIN, ...terms], allowed);
+    let findings;
+    try {
+      findings = scanDiff(fs.readFileSync(0, 'utf8'), [...BUILTIN, ...terms], allowed);
+    } catch (err) {
+      console.error(`verify-doc-hygiene: ${err.message}`);
+      return 2;
+    }
     for (const f of findings) {
       console.error(`${(f.sha || '(none)').slice(0, 7)} ${maskPath(f.file, terms)}: ${f.kind}: ${f.id}`);
     }

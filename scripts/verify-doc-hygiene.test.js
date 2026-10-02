@@ -486,3 +486,19 @@ test('--stdin-diff reads a path with spaces (git appends a tab to it) and matche
   assert.doesNotMatch(r.out, /old notes/);
   assert.match(r.out, /FAIL \(2 findings/);
 });
+
+test('--stdin-diff refuses a log in which git skipped a merge diff', (t) => {
+  const { root } = historyRepo(t);
+  g(root, 'checkout', '-q', '-b', 'b1');
+  commitFiles(root, { 'docs/b1.md': 'one\n' });
+  g(root, 'checkout', '-q', '-b', 'b2', 'main');
+  commitFiles(root, { 'docs/b2.md': 'two\n' });
+  g(root, 'checkout', '-q', 'main');
+  commitFiles(root, { 'docs/m.md': 'own commit\n' });
+  g(root, 'merge', '-q', '--no-edit', 'b1', 'b2');
+  const input = diffOf(root, ['-1', 'HEAD']);
+  assert.match(input, /^diff: warning: Skipping remerge-diff/m);
+  const r = runDiff(root, input);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /verify-doc-hygiene: the supplied log skipped a merge diff; cannot scan/);
+});

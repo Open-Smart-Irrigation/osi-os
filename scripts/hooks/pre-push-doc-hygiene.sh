@@ -200,11 +200,11 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
     scanner_from=$commit
   else
     scanner_from=$(git rev-parse --verify --quiet "refs/remotes/$remote_name/main^{commit}" </dev/null 2>/dev/null) ||
-      die "cannot find a hygiene scanner for $label; fetch $remote_name first"
+      die "cannot find a hygiene scanner for $label; fetch the public remote first"
     found=$(git ls-tree --full-tree "$scanner_from" -- "$SCANNER_PATH" </dev/null) ||
-      die "cannot list the tree of $remote_name/main; refusing to push"
+      die "cannot list the tree of the public remote's main; refusing to push"
     if [ -z "$found" ]; then
-      printf 'pre-push: no hygiene scanner in %s or on %s/main; file and message scan skipped\n' "$label" "$remote_name" >&2
+      printf "pre-push: no hygiene scanner in %s or on the public remote's main; file and message scan skipped\n" "$label" >&2
       continue
     fi
     fallback=1
@@ -215,7 +215,7 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   grep -q 'stdin-diff' "$work/scanner.js"
   case $? in
     0) ;;
-    1) die "the hygiene scanner for $label has no --stdin-diff mode; refusing to push (the scanner in the pushed commit, or on $remote_name/main without one, must have it)" ;;
+    1) die "the hygiene scanner for $label has no --stdin-diff mode; refusing to push (the scanner in the pushed commit, or on the public remote's main without one, must have it)" ;;
     *) die "cannot read the hygiene scanner for $label; refusing to push" ;;
   esac
 
@@ -240,12 +240,12 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   extra_files=0
   if [ "$fallback" -eq 1 ]; then
     found=$(git ls-tree --full-tree --name-only "$scanner_from" -- "$ALLOWLIST_PATH" </dev/null) ||
-      die "cannot list the tree of $remote_name/main; refusing to push"
+      die "cannot list the tree of the public remote's main; refusing to push"
     if [ -n "$found" ]; then
       mkdir -p "$work/tree/${ALLOWLIST_PATH%/*}" ||
         die "cannot create a temporary directory; refusing to push"
       git cat-file blob "$scanner_from:$ALLOWLIST_PATH" >"$work/tree/$ALLOWLIST_PATH" </dev/null ||
-        die "cannot read the allowlist of $remote_name/main; refusing to push"
+        die "cannot read the allowlist of the public remote's main; refusing to push"
       extra_files=1
     fi
   fi
@@ -273,7 +273,7 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   if ! run_scanner "$work/scanner.js" --root="$work/tree" --require-terms </dev/null; then
     printf 'pre-push: refusing to push %s: its documents failed the hygiene scan\n' "$label" >&2
     if [ "$fallback" -eq 1 ]; then
-      printf 'pre-push: %s has no hygiene baseline of its own; merge or rebase onto %s/main and push again\n' "$label" "$remote_name" >&2
+      printf "pre-push: %s has no hygiene baseline of its own; merge or rebase onto the public remote's main and push again\n" "$label" >&2
     fi
     blocked=1
   fi
@@ -282,16 +282,37 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   # --text: diff and binary attributes (from the branch, info/attributes or
   # core.attributesFile) must not turn a document into "Binary files differ".
   # --diff-merges=remerge: lines that only a conflict resolution adds.
-  git log -n 0 --diff-merges=remerge "$commit" </dev/null >/dev/null 2>&1 ||
+  # --full-history: walk side branches even when a merge leaves the scope
+  # unchanged. git may omit a remerge diff with only a message on stderr and
+  # exit 0 (for example when it cannot write its temporary objects), so any
+  # stderr output refuses the push as well.
+  git log -n 0 --diff-merges=remerge "$commit" </dev/null >/dev/null 2>"$work/probe.err" ||
     die "git 2.36 or newer is required for the added-lines scan (--diff-merges=remerge); refusing to push"
+  if [ -s "$work/probe.err" ]; then
+    printf 'pre-push: refusing to push %s: the added-lines scan could not read the commits; git reported:\n' "$label" >&2
+    cat "$work/probe.err" >&2
+    exit 1
+  fi
   exclude=$(known_remote_sha "$remote_sha")
+  # git skips the remerge diff of a merge with three or more parents.
+  git rev-list --min-parents=3 "$commit" --not --remotes="$remote_name" ${exclude:+"$exclude"} \
+    >"$work/octopus" </dev/null ||
+    die "cannot list the merges of $label; refusing to push"
+  if [ -s "$work/octopus" ]; then
+    die "$label contains a merge with more than two parents; the guard cannot scan it. Recreate it as two-parent merges and push again"
+  fi
   # shellcheck disable=SC2086
   git -c core.quotePath=false -c log.showRoot=true -c log.showSignature=false \
-    log -p --text --diff-merges=remerge --no-ext-diff --no-textconv --no-color --no-renames \
+    log -p --text --diff-merges=remerge --full-history --no-ext-diff --no-textconv --no-color --no-renames \
     --src-prefix=a/ --dst-prefix=b/ \
     --format='commit %H' "$commit" --not --remotes="$remote_name" ${exclude:+"$exclude"} -- $SCOPE_PATHS \
-    >"$work/changes" </dev/null ||
-    die "cannot list the changes of $label; refusing to push"
+    >"$work/changes" 2>"$work/changes.err" </dev/null
+  status=$?
+  if [ "$status" -ne 0 ] || [ -s "$work/changes.err" ]; then
+    printf 'pre-push: refusing to push %s: the added-lines scan could not read the commits; git reported:\n' "$label" >&2
+    cat "$work/changes.err" >&2
+    exit 1
+  fi
   run_scanner "$work/scanner.js" --root="$work/tree" --stdin-diff --require-terms <"$work/changes" >"$work/changes.out"
   status=$?
   cat "$work/changes.out" || die "cannot read a temporary file; refusing to push"
@@ -299,7 +320,7 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
     printf 'pre-push: a commit in %s adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing\n' "$label" >&2
     blocked=1
   elif [ "$status" -ne 0 ]; then
-    printf 'pre-push: refusing to push %s: the scan of the added lines failed (exit %s)\n' "$label" "$status" >&2
+    printf 'pre-push: refusing to push %s: the scan of the added lines could not run (exit %s); see the scanner message above\n' "$label" "$status" >&2
     blocked=1
   elif ! grep -q 'OK (supplied commits)' "$work/changes.out"; then
     printf 'pre-push: refusing to push %s: the hygiene scanner did not run its --stdin-diff mode\n' "$label" >&2

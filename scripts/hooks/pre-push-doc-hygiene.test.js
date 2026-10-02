@@ -228,7 +228,7 @@ test('10. without a scanner in the commit or on the remote main the scan is skip
   const sha = commit(s.work, { 'docs/ok.md': 'clean\n' });
   const r = push(s.work, 'public', 'main');
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, new RegExp(`pre-push: no hygiene scanner in ${L(sha)} or on public/main; file and message scan skipped`));
+  assert.match(r.out, new RegExp(`pre-push: no hygiene scanner in ${L(sha)} or on the public remote's main; file and message scan skipped`));
   assert.equal(git(s.pub, 'rev-parse', 'refs/heads/main'), sha);
 });
 
@@ -240,7 +240,7 @@ test('10b. a commit without a scanner uses the scanner on the remote main', (t) 
   const r = push(s.work, 'public', 'feature');
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /docs\/a\.md:1: term #1/);
-  assert.match(r.out, new RegExp(`pre-push: ${L(sha)} has no hygiene baseline of its own; merge or rebase onto public/main and push again`));
+  assert.match(r.out, new RegExp(`pre-push: ${L(sha)} has no hygiene baseline of its own; merge or rebase onto the public remote's main and push again`));
   assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
 });
 
@@ -432,7 +432,7 @@ test('24. without a scanner in the commit, a push by URL is refused', (t) => {
   const sha = commit(s.work, { 'docs/a.md': `${TERM}\n` });
   const r = push(s.work, s.pub, 'HEAD:refs/heads/probe');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, new RegExp(`pre-push: cannot find a hygiene scanner for ${L(sha)}; fetch .*osi-os\\.git first`));
+  assert.match(r.out, new RegExp(`pre-push: cannot find a hygiene scanner for ${L(sha)}; fetch the public remote first`));
   assertNoTerm(r.out);
   assert.equal(remoteHas(s.pub, 'refs/heads/probe'), false);
 });
@@ -445,7 +445,7 @@ test('25. without a scanner in the commit and without the remote-tracking main, 
   git(s.work, 'update-ref', '-d', 'refs/remotes/public/main');
   const r = push(s.work, 'public', 'probe');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, new RegExp(`pre-push: cannot find a hygiene scanner for ${L(sha)}; fetch public first`));
+  assert.match(r.out, new RegExp(`pre-push: cannot find a hygiene scanner for ${L(sha)}; fetch the public remote first`));
   assert.equal(remoteHas(s.pub, 'refs/heads/probe'), false);
 });
 
@@ -587,4 +587,100 @@ test('35. a refused tripwire push on a branch whose name carries a name does not
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /private document folders \(docs\/policy\)/);
   assertNoTerm(r.out);
+});
+
+// A merge whose conflict resolution adds a line to docs/a.md; returns the
+// merge commit. The working repository is on branch `name` afterwards.
+function conflictMerge(s, name, resolution) {
+  commit(s.work, { 'docs/a.md': 'base line\n' });
+  git(s.work, 'push', '-q', '--no-verify', 'public', 'main');
+  git(s.work, 'checkout', '-q', '-b', `${name}-side`);
+  commit(s.work, { 'docs/a.md': 'side line\n' });
+  git(s.work, 'checkout', '-q', '-b', name, 'main');
+  commit(s.work, { 'docs/a.md': 'main line\n' });
+  assert.notEqual(tryGit(s.work, 'merge', '-q', '--no-edit', `${name}-side`).code, 0, 'the merge must conflict');
+  write(s.work, 'docs/a.md', resolution);
+  git(s.work, 'add', 'docs/a.md');
+  git(s.work, 'commit', '-q', '--no-edit');
+  return git(s.work, 'rev-parse', 'HEAD');
+}
+
+const IS_ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
+
+test('36. a git log that cannot write its temporary objects refuses the push (RO2)', { skip: IS_ROOT && 'running as root: directory permissions do not bind' }, (t) => {
+  const s = setup(t);
+  conflictMerge(s, 'ro2', `merged line for ${TERM}\n`);
+  commit(s.work, { 'docs/a.md': 'merged line\n' });
+  const objects = path.join(s.work, '.git', 'objects');
+  const mode = fs.statSync(objects).mode & 0o7777;
+  let r;
+  try {
+    fs.chmodSync(objects, 0o555);
+    r = push(s.work, 'public', 'ro2');
+  } finally {
+    fs.chmodSync(objects, mode);
+  }
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /pre-push: refusing to push [0-9a-f]{7} \(ref name withheld\): the added-lines scan could not read the commits; git reported:/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/ro2'), false);
+});
+
+test('37. a merge with more than two parents is refused (S2)', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', 'b1');
+  commit(s.work, { 'docs/b1.md': 'one\n' });
+  git(s.work, 'checkout', '-q', '-b', 'b2', 'main');
+  commit(s.work, { 'docs/b2.md': 'two\n' });
+  git(s.work, 'checkout', '-q', '-b', 's2', 'main');
+  commit(s.work, { 'docs/m.md': 'own commit, so the merge is no fast-forward\n' });
+  git(s.work, 'merge', '-q', '--no-edit', 'b1', 'b2');
+  write(s.work, 'docs/a.md', `octopus ${TERM}\n`);
+  git(s.work, 'add', 'docs/a.md');
+  git(s.work, 'commit', '-q', '--amend', '--no-edit');
+  assert.equal(git(s.work, 'rev-list', '--parents', '-1', 'HEAD').split(' ').length, 4);
+  git(s.work, 'rm', '-q', 'docs/a.md');
+  git(s.work, 'commit', '-q', '-m', 'remove the document again');
+  const tip = git(s.work, 'rev-parse', 'HEAD');
+  const r = push(s.work, 'public', 's2');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, new RegExp(`pre-push: ${L(tip)} contains a merge with more than two parents; the guard cannot scan it\\. Recreate it as two-parent merges and push again`));
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/s2'), false);
+});
+
+test('38. a side branch whose net change is nothing is still walked (S1)', (t) => {
+  const s = setup(t);
+  commit(s.work, { 'docs/a.md': 'base line\n' });
+  git(s.work, 'push', '-q', '--no-verify', 'public', 'main');
+  git(s.work, 'checkout', '-q', '-b', 's1-side');
+  commit(s.work, { 'docs/a.md': `base line\nvisit ${TERM}\n` });
+  commit(s.work, { 'docs/a.md': 'base line\n' });
+  git(s.work, 'checkout', '-q', '-b', 's1', 'main');
+  commit(s.work, { 'docs/b.md': 'clean\n' });
+  git(s.work, 'merge', '-q', '--no-ff', '--no-edit', 's1-side');
+  assert.equal(git(s.work, 'diff', 'HEAD^1', 'HEAD', '--stat'), '', 'the merge must be TREESAME to its first parent');
+  const r = push(s.work, 'public', 's1');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /docs\/a\.md: added line: term #1/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/s1'), false);
+});
+
+test('39. a remote alias that carries a name is never printed', (t) => {
+  const s = setup(t);
+  git(s.work, 'remote', 'rename', 'public', `${TERM}-pub`);
+  git(s.work, 'checkout', '-q', '-b', 'feature');
+  git(s.work, 'rm', '-q', 'scripts/verify-doc-hygiene.js');
+  const sha = commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  const r = push(s.work, `${TERM}-pub`, 'feature');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, new RegExp(`pre-push: ${L(sha)} has no hygiene baseline of its own; merge or rebase onto the public remote's main and push again`));
+  assertNoTerm(r.out);
+  git(s.work, 'update-ref', '-d', `refs/remotes/${TERM}-pub/main`);
+  const r2 = push(s.work, `${TERM}-pub`, 'feature');
+  assert.notEqual(r2.code, 0, r2.out);
+  assert.match(r2.out, /fetch the public remote first/);
+  assertNoTerm(r2.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
 });
