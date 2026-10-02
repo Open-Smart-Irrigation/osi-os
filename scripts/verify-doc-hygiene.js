@@ -25,7 +25,8 @@ function isFakeEui(token) {
 }
 
 const BUILTIN = [
-  { id: 'eui64', re: /\b[0-9A-Fa-f]{16}\b/g, skip: isFakeEui },
+  { id: 'eui64', re: /(?<![0-9A-Fa-f])[0-9A-Fa-f]{16}(?![0-9A-Fa-f])/g, skip: isFakeEui },
+  { id: 'eui64', re: /(?<![0-9A-Fa-f:-])(?:[0-9A-Fa-f]{2}[:-]){7}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:-])/g, skip: (m) => isFakeEui(m.replace(/[:-]/g, '')) },
   { id: 'cgnat-address', re: /\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b/g, skip: () => false },
 ];
 
@@ -57,6 +58,13 @@ function scanText(text, patterns) {
   return findings;
 }
 
+// Printed paths never show text matched by a private term.
+function maskPath(rel, terms) {
+  let out = rel;
+  for (const t of terms) out = out.replace(new RegExp(t.re.source, 'gi'), '***');
+  return out;
+}
+
 function listFiles(root) {
   const out = execFileSync('git', ['ls-files', '-z', '--', ...SCOPE], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return out.split('\0').filter(Boolean);
@@ -67,18 +75,24 @@ function scanRepo(root, patterns) {
   let scanned = 0;
   for (const rel of listFiles(root)) {
     const abs = path.join(root, rel);
+    const pathFindings = scanText(rel, patterns).map((f) => ({ line: 0, id: f.id }));
     let stat;
     try {
       stat = fs.lstatSync(abs);
     } catch {
+      if (pathFindings.length) byFile.set(rel, { pathFindings, findings: [] });
       continue; // tracked but deleted in the working tree
     }
-    if (!stat.isFile()) continue; // symlinks, submodules
-    const findings = scanText(rel, patterns).map((f) => ({ line: 0, id: f.id }));
+    if (!stat.isFile()) {
+      // symlinks, submodules: content is not read, the path still counts
+      if (pathFindings.length) byFile.set(rel, { pathFindings, findings: [] });
+      continue;
+    }
+    const findings = [];
     const buf = fs.readFileSync(abs);
     if (!buf.subarray(0, 8000).includes(0)) findings.push(...scanText(buf.toString('utf8'), patterns));
     scanned += 1;
-    if (findings.length) byFile.set(rel, findings);
+    if (pathFindings.length || findings.length) byFile.set(rel, { pathFindings, findings });
   }
   return { byFile, scanned };
 }
@@ -98,13 +112,13 @@ function loadAllowlist(root) {
 function judge(findingsByFile, entries) {
   const allowed = new Map(entries.map((e) => [e.path, e.max]));
   const violations = [];
-  for (const [file, findings] of findingsByFile) {
+  for (const [file, { pathFindings, findings }] of findingsByFile) {
     const max = allowed.get(file) || 0;
-    if (findings.length > max) violations.push({ file, findings, max });
+    if (pathFindings.length || findings.length > max) violations.push({ file, pathFindings, findings, max });
   }
   const stale = [];
   for (const e of entries) {
-    const actual = (findingsByFile.get(e.path) || []).length;
+    const actual = (findingsByFile.get(e.path) || { findings: [] }).findings.length;
     if (actual < e.max) stale.push({ file: e.path, max: e.max, actual });
   }
   return { violations, stale };
@@ -152,7 +166,15 @@ function main(argv, env) {
       console.error('verify-doc-hygiene: --write-baseline needs --issue=<number>');
       return 2;
     }
-    const entries = [...byFile.keys()].sort().map((file) => ({ path: file, max: byFile.get(file).length, reason: BASELINE_REASON, issue }));
+    const named = [...byFile.keys()].sort().filter((file) => byFile.get(file).pathFindings.length);
+    if (named.length) {
+      for (const file of named) {
+        for (const f of byFile.get(file).pathFindings) console.error(`${maskPath(file, terms)}: path: ${f.id}`);
+      }
+      console.error(`verify-doc-hygiene: cannot write a baseline while ${named.length} paths carry a listed term; rename or remove them first`);
+      return 1;
+    }
+    const entries = [...byFile.keys()].sort().map((file) => ({ path: file, max: byFile.get(file).findings.length, reason: BASELINE_REASON, issue }));
     fs.mkdirSync(path.dirname(path.join(root, ALLOWLIST_FILE)), { recursive: true });
     fs.writeFileSync(path.join(root, ALLOWLIST_FILE), `${JSON.stringify({ entries }, null, 2)}\n`);
     console.log(`verify-doc-hygiene: baseline written (${entries.length} files)`);
@@ -168,13 +190,13 @@ function main(argv, env) {
   }
   const { violations, stale } = judge(byFile, entries);
   for (const v of violations) {
-    for (const f of v.findings) {
-      console.error(f.line === 0 ? `${v.file}: path: ${f.id}` : `${v.file}:${f.line}: ${f.id}`);
-    }
-    if (v.max) console.error(`${v.file}: ${v.findings.length} findings, allowlist max ${v.max}`);
+    const shown = maskPath(v.file, terms);
+    for (const f of v.pathFindings) console.error(`${shown}: path: ${f.id}`);
+    for (const f of v.findings) console.error(`${shown}:${f.line}: ${f.id}`);
+    if (v.max) console.error(`${shown}: ${v.findings.length} findings, allowlist max ${v.max}`);
   }
   for (const s of stale) {
-    console.error(`${s.file}: allowlist max ${s.max} but only ${s.actual} found, lower it`);
+    console.error(`${maskPath(s.file, terms)}: allowlist max ${s.max} but only ${s.actual} found, lower it`);
   }
   if (violations.length || stale.length) {
     console.error(`verify-doc-hygiene: FAIL (${violations.length} files over their limit, ${stale.length} stale allowlist entries)`);
@@ -187,4 +209,4 @@ function main(argv, env) {
 
 if (require.main === module) process.exit(main(process.argv.slice(2), process.env));
 
-module.exports = { loadTerms, scanText, judge, isFakeEui, main };
+module.exports = { loadTerms, scanText, judge, isFakeEui, maskPath, main };

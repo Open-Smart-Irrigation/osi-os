@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { loadTerms, scanText, judge, isFakeEui } = require('./verify-doc-hygiene');
+const { loadTerms, scanText, judge, isFakeEui, maskPath } = require('./verify-doc-hygiene');
 
 const SCRIPT = path.join(__dirname, 'verify-doc-hygiene.js');
 
@@ -102,7 +102,68 @@ test('flags a name in a file path', () => {
   const root = repo({ 'docs/zebrafarm-notes.md': 'clean content\n' });
   const r = run(root, ['--require-terms'], 'zebrafarm');
   assert.equal(r.code, 1);
-  assert.match(r.out, /docs\/zebrafarm-notes\.md: path: term #1/);
+  assert.match(r.out, /docs\/\*\*\*-notes\.md: path: term #1/);
+  assert.doesNotMatch(r.out, /zebrafarm/i);
+});
+
+test('maskPath replaces private term matches only', () => {
+  const terms = loadTerms('zebrafarm');
+  assert.equal(maskPath('docs/ZebraFarm-notes.md', terms), 'docs/***-notes.md');
+});
+
+test('a content finding in a file whose path carries a term prints the masked path only', () => {
+  const root = repo({ 'docs/zebrafarm-notes.md': 'visit zebrafarm\n' });
+  const r = run(root, ['--require-terms'], 'zebrafarm');
+  assert.equal(r.code, 1);
+  assert.match(r.out, /docs\/\*\*\*-notes\.md:1: term #1/);
+  assert.doesNotMatch(r.out, /zebrafarm/i);
+});
+
+test('an allowlist entry cannot excuse a path finding', () => {
+  const root = repo({
+    'docs/zebrafarm-notes.md': 'clean\n',
+    'scripts/verify-doc-hygiene-allowlist.json': JSON.stringify({ entries: [{ path: 'docs/zebrafarm-notes.md', max: 1, reason: 'x', issue: 1 }] }),
+  });
+  const r = run(root, ['--require-terms'], 'zebrafarm');
+  assert.equal(r.code, 1);
+  assert.doesNotMatch(r.out, /zebrafarm/i);
+});
+
+test('--write-baseline refuses while a path carries a term and writes nothing', () => {
+  const root = repo({ 'docs/zebrafarm-notes.md': 'clean\n' });
+  const r = run(root, ['--require-terms', '--write-baseline', '--issue=42'], 'zebrafarm');
+  assert.equal(r.code, 1);
+  assert.match(r.out, /docs\/\*\*\*-notes\.md: path: term #1/);
+  assert.match(r.out, /cannot write a baseline while 1 paths carry a listed term/);
+  assert.doesNotMatch(r.out, /zebrafarm/i);
+  assert.equal(fs.existsSync(path.join(root, 'scripts/verify-doc-hygiene-allowlist.json')), false);
+});
+
+test('a tracked symlink whose name carries a term is reported as a path finding', () => {
+  const root = repo({ 'README.md': 'clean\n' });
+  fs.symlinkSync('../README.md', path.join(root, 'docs-link'));
+  fs.mkdirSync(path.join(root, 'docs'));
+  fs.symlinkSync('../README.md', path.join(root, 'docs/zebrafarm-link.md'));
+  execFileSync('git', ['add', '-A'], { cwd: root });
+  const r = run(root, ['--require-terms'], 'zebrafarm');
+  assert.equal(r.code, 1);
+  assert.match(r.out, /docs\/\*\*\*-link\.md: path: term #1/);
+  assert.doesNotMatch(r.out, /zebrafarm/i);
+});
+
+test('eui64 covers prefixed, 0x, colon, bare and lowercase forms and spares examples and hashes', () => {
+  const root = repo({
+    'docs/bad.md': 'a gw_0016C001F1A7B3D9\nb 0x0016C001F1A7B3D9\nc 00:16:C0:01:F1:A7:B3:D9\nd 0016C001F1A7B3D9\ne 0016c001f1a7b3d9\n',
+    'docs/ok.md': [
+      '0016C001F1000001', 'gw_0016C001F1000001', '00:16:C0:01:F1:00:00:01',
+      'a'.repeat(0) + 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      'da39a3ee5e6b4b0d3255bfef95601890afd80709', '',
+    ].join('\n'),
+  });
+  const r = run(root, []);
+  assert.equal(r.code, 1);
+  for (const n of [1, 2, 3, 4, 5]) assert.match(r.out, new RegExp(`docs/bad\\.md:${n}: eui64`));
+  assert.doesNotMatch(r.out, /docs\/ok\.md/);
 });
 
 test('ignores files outside the scope', () => {
@@ -111,10 +172,10 @@ test('ignores files outside the scope', () => {
 });
 
 test('skips symlinks and binary files', () => {
-  const root = repo({ 'docs/ok.md': 'clean\n', '.claude/skills/s/SKILL.md': 'clean\n' });
+  const root = repo({ 'docs/ok.md': 'clean\n', '.claude/skills/s/SKILL.md': 'clean\n', 'scripts/secret.txt': 'zebrafarm\n' });
   fs.writeFileSync(path.join(root, 'docs/blob.bin'), Buffer.from([0x7a, 0x00, 0x7a, 0x65, 0x62, 0x72, 0x61, 0x66, 0x61, 0x72, 0x6d]));
   fs.mkdirSync(path.join(root, '.github'));
-  fs.symlinkSync('../.claude/skills', path.join(root, '.github/skills'));
+  fs.symlinkSync('../scripts/secret.txt', path.join(root, '.github/link.md'));
   execFileSync('git', ['add', '-A'], { cwd: root });
   const r = run(root, ['--require-terms'], 'zebrafarm');
   assert.equal(r.code, 0, r.out);
@@ -132,11 +193,9 @@ test('--stdin scans supplied text such as commit messages and prints no match', 
   assert.equal(good.status, 0);
 });
 
-test('judge allows up to max, flags more, and reports a stale entry', () => {
-  const findings = new Map([
-    ['docs/a.md', [{ line: 1, id: 'term #1' }, { line: 2, id: 'term #1' }]],
-    ['docs/b.md', [{ line: 1, id: 'term #1' }]],
-  ]);
+test('judge allows up to max, flags more, reports stale, and never excuses path findings', () => {
+  const f = (n, p = 0) => ({ pathFindings: Array.from({ length: p }, () => ({ line: 0, id: 'term #1' })), findings: Array.from({ length: n }, (_, i) => ({ line: i + 1, id: 'term #1' })) });
+  const findings = new Map([['docs/a.md', f(2)], ['docs/b.md', f(1)]]);
   const within = judge(findings, [{ path: 'docs/a.md', max: 2 }, { path: 'docs/b.md', max: 1 }]);
   assert.deepEqual(within, { violations: [], stale: [] });
   const over = judge(findings, [{ path: 'docs/a.md', max: 1 }, { path: 'docs/b.md', max: 1 }]);
@@ -144,6 +203,8 @@ test('judge allows up to max, flags more, and reports a stale entry', () => {
   assert.equal(over.violations[0].file, 'docs/a.md');
   const stale = judge(findings, [{ path: 'docs/a.md', max: 2 }, { path: 'docs/b.md', max: 4 }, { path: 'docs/gone.md', max: 1 }]);
   assert.deepEqual(stale.stale.map((s) => s.file), ['docs/b.md', 'docs/gone.md']);
+  const pathOnly = judge(new Map([['docs/c.md', f(0, 1)]]), [{ path: 'docs/c.md', max: 5 }]);
+  assert.equal(pathOnly.violations.length, 1);
 });
 
 test('fails on a stale allowlist entry', () => {
